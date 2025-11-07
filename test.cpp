@@ -35,6 +35,13 @@ static void signal_handler(int signum) {
     }
 }
 
+// 定时器回调函数：自动停止播放
+static void auto_stop_callback(void* user_data) {
+    bool* running_flag = (bool*)user_data;
+    *running_flag = false;
+    printf("\n⏰ Auto-stop timer triggered: stopping playback...\n");
+}
+
 /**
  * 测试1：4帧循环播放测试
  * 
@@ -117,9 +124,18 @@ static int test_4frame_loop(const char* raw_video_path) {
     printf("🎬 Step 5: Starting 4-frame loop display...\n");
     printf("   Press Ctrl+C to stop\n\n");
     
-    // 启动定时器（每1秒统计一次）
-    monitor.setTimerInterval(1.0);
+    // ========== 定时器配置 ==========
+    // 
+    // 方式1：周期性统计（默认）
+    monitor.setTimerTask(TASK_PRINT_FULL_STATS);  // 选择任务类型
+    monitor.setTimerInterval(1.0,5.0);  // 每1秒统计一次
     monitor.startTimer();
+
+    PerformanceMonitor auto_stop_timer;
+    auto_stop_timer.setOneShotTimer(60.0);  // 60秒后触发
+    auto_stop_timer.setTimerCallback(auto_stop_callback, (void*)&g_running);
+    auto_stop_timer.startTimer();
+    printf("   ⏰ Auto-stop enabled: will stop after 60 seconds\n\n");
     
     // 注册信号处理
     signal(SIGINT, signal_handler);
@@ -129,13 +145,10 @@ static int test_4frame_loop(const char* raw_video_path) {
         for (int buf_idx = 0; buf_idx < 4 && g_running; buf_idx++) {
             // 开始显示计时
             monitor.beginDisplayFrame();
-            
             // 等待垂直同步
             display.waitVerticalSync();
-            
             // 切换显示buffer
             display.displayBuffer(buf_idx);
-            
             // 结束显示计时并记录
             monitor.endDisplayFrame();
         }
