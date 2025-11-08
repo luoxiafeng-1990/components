@@ -28,10 +28,21 @@ PerformanceMonitor::PerformanceMonitor()
     , timer_start_frames_decoded_(0)
     , timer_start_frames_displayed_(0)
     , timer_real_start_time_()  // 默认构造为无效值
+    , auto_stop_timer_(nullptr)  // 初始化为空指针
+    , baseline_time_()  // 默认构造为无效值
+    , baseline_display_frames_(0)
+    , baseline_load_frames_(0)
+    , baseline_decode_frames_(0)
 {
 }
 
 PerformanceMonitor::~PerformanceMonitor() {
+    // 清理自动停止定时器（必须在stopTimer之前，避免使用已删除的对象）
+    if (auto_stop_timer_) {
+        delete auto_stop_timer_;
+        auto_stop_timer_ = nullptr;
+    }
+    
     // 确保定时器停止
     stopTimer();
 }
@@ -94,14 +105,14 @@ void PerformanceMonitor::recordFrameDisplayed() {
 
 // ============ 带计时的事件记录 ============
 
-void PerformanceMonitor::beginLoadFrame() {
+void PerformanceMonitor::beginLoadFrameTiming() {
     if (!is_started_ || is_paused_) {
         return;
     }
     load_start_ = std::chrono::steady_clock::now();
 }
 
-void PerformanceMonitor::endLoadFrame() {
+void PerformanceMonitor::endLoadFrameTiming() {
     if (!is_started_ || is_paused_) {
         return;
     }
@@ -114,14 +125,14 @@ void PerformanceMonitor::endLoadFrame() {
     frames_loaded_++;
 }
 
-void PerformanceMonitor::beginDecodeFrame() {
+void PerformanceMonitor::beginDecodeFrameTiming() {
     if (!is_started_ || is_paused_) {
         return;
     }
     decode_start_ = std::chrono::steady_clock::now();
 }
 
-void PerformanceMonitor::endDecodeFrame() {
+void PerformanceMonitor::endDecodeFrameTiming() {
     if (!is_started_ || is_paused_) {
         return;
     }
@@ -134,14 +145,14 @@ void PerformanceMonitor::endDecodeFrame() {
     frames_decoded_++;
 }
 
-void PerformanceMonitor::beginDisplayFrame() {
+void PerformanceMonitor::beginDisplayFrameTiming() {
     if (!is_started_ || is_paused_) {
         return;
     }
     display_start_ = std::chrono::steady_clock::now();
 }
 
-void PerformanceMonitor::endDisplayFrame() {
+void PerformanceMonitor::endDisplayFrameTiming() {
     if (!is_started_ || is_paused_) {
         return;
     }
@@ -403,6 +414,12 @@ void PerformanceMonitor::startTimer() {
         return;
     }
     
+    // 记录基准值（用于最终统计）
+    baseline_time_ = std::chrono::steady_clock::now();
+    baseline_display_frames_ = frames_displayed_;
+    baseline_load_frames_ = frames_loaded_;
+    baseline_decode_frames_ = frames_decoded_;
+    
     // 初始化增量统计的基准点
     last_frames_loaded_ = frames_loaded_;
     last_frames_decoded_ = frames_decoded_;
@@ -431,14 +448,17 @@ void PerformanceMonitor::startTimer() {
 }
 
 void PerformanceMonitor::stopTimer() {
-    // 如果定时器未运行，直接返回
-    if (!timer_running_) {
-        return;
-    }
-    
     // 设置停止标志
     {
         std::lock_guard<std::mutex> lock(timer_mutex_);
+        if (!timer_running_) {
+            // 定时器已经停止，但可能线程还没被 join
+            // （例如一次性定时器自然退出的情况）
+            if (timer_thread_.joinable()) {
+                timer_thread_.join();
+            }
+            return;
+        }
         timer_running_ = false;
     }
     
@@ -607,17 +627,17 @@ void PerformanceMonitor::executeTaskFullStats(double interval, int load_delta, i
     } else {
         // 显示增量统计
         if (display_delta > 0 || cumulative_displayed > 0) {
-            printf("📺 显示帧数: %d 帧 (%.1f fps) | 累计: %d 帧\n", 
+            printf("📺 显示操作: %d 次 (%.1f ops/s) | 累计: %d 次\n", 
                    display_delta, display_fps, cumulative_displayed);
         }
         
         if (decode_delta > 0 || cumulative_decoded > 0) {
-            printf("🎬 解码帧数: %d 帧 (%.1f fps) | 累计: %d 帧\n", 
+            printf("🎬 解码操作: %d 次 (%.1f ops/s) | 累计: %d 次\n", 
                    decode_delta, decode_fps, cumulative_decoded);
         }
         
         if (load_delta > 0 || cumulative_loaded > 0) {
-            printf("📥 加载帧数: %d 帧 (%.1f fps) | 累计: %d 帧\n", 
+            printf("📥 加载帧: %d 帧 (%.1f fps) | 累计: %d 帧\n", 
                    load_delta, load_fps, cumulative_loaded);
         }
         
@@ -638,7 +658,7 @@ void PerformanceMonitor::executeTaskFpsOnly(double interval, int display_delta) 
     double total_time = elapsed.count();
     
     double display_fps = (interval > 0) ? (display_delta / interval) : 0.0;
-    printf("⏱️  [%.1fs] Display: %.1f fps\n", total_time, display_fps);
+    printf("⏱️  [%.1fs] Display: %.1f ops/s\n", total_time, display_fps);
 }
 
 void PerformanceMonitor::executeTaskSimple(double interval, int display_delta) {
@@ -652,7 +672,7 @@ void PerformanceMonitor::executeTaskSimple(double interval, int display_delta) {
     double total_time = elapsed.count();
     
     double display_fps = (interval > 0) ? (display_delta / interval) : 0.0;
-    printf("📊 [%.1fs] %d frames | %.1f fps\n", 
+    printf("📊 [%.1fs] %d ops | %.1f ops/s\n", 
            total_time, display_delta, display_fps);
 }
 
@@ -662,7 +682,7 @@ void PerformanceMonitor::executeTaskFrameCount(int display_delta) {
     }
     
     int cumulative_displayed = frames_displayed_ - timer_start_frames_displayed_;
-    printf("📺 过去 %.1f 秒: %d 帧 | 累计: %d 帧\n", 
+    printf("📺 过去 %.1f 秒: %d 次操作 | 累计: %d 次\n", 
            timer_interval_seconds_, display_delta, cumulative_displayed);
 }
 
@@ -677,7 +697,95 @@ void PerformanceMonitor::executeTaskElapsedTime() {
     double total_time = elapsed.count();
     
     int cumulative_displayed = frames_displayed_ - timer_start_frames_displayed_;
-    printf("⏱️  运行时间: %.2f 秒 | 显示帧数: %d\n", 
+    printf("⏱️  运行时间: %.2f 秒 | 显示操作: %d 次\n", 
            total_time, cumulative_displayed);
+}
+
+// ============ 最终统计报告 ============
+
+void PerformanceMonitor::printFinalStats() const {
+    printf("═══════════════════════════════════════════════════════\n");
+    printf("  Final Statistics (after warm-up period)\n");
+    printf("═══════════════════════════════════════════════════════\n\n");
+    
+    // 计算总运行时间
+    auto end_time = std::chrono::steady_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(
+        end_time - baseline_time_);
+    double total_time = duration.count() / 1000.0;
+    
+    // 计算延迟后的统计时间
+    double stats_time = total_time - timer_delay_seconds_;
+    if (stats_time < 0) stats_time = 0;
+    
+    // 计算延迟后的操作数
+    int effective_display_ops = frames_displayed_ - baseline_display_frames_;
+    int effective_load_frames = frames_loaded_ - baseline_load_frames_;
+    int effective_decode_frames = frames_decoded_ - baseline_decode_frames_;
+    
+    // 加载统计
+    if (effective_load_frames > 0 || baseline_load_frames_ > 0) {
+        printf("📥 Loaded Unique Frames: %d frames", baseline_load_frames_);
+        if (timer_delay_seconds_ > 0) {
+            printf(" (loaded before stats)");
+        }
+        printf("\n");
+    }
+    
+    // 显示统计
+    if (effective_display_ops > 0) {
+        printf("\n📺 Display Statistics:\n");
+        printf("   Display Operations: %d times (after warm-up)\n", effective_display_ops);
+        
+        if (stats_time > 0) {
+            double display_fps = effective_display_ops / stats_time;
+            printf("   Display FPS: %.2f ops/sec (buffer switches per second)\n", display_fps);
+            printf("   Avg Switch Time: %.2f ms per operation\n", 
+                   (stats_time * 1000.0) / effective_display_ops);
+        }
+    }
+    
+    // 解码统计（如果有）
+    if (effective_decode_frames > 0) {
+        printf("\n🎬 Decode Statistics:\n");
+        printf("   Decoded Frames: %d frames\n", effective_decode_frames);
+        if (stats_time > 0) {
+            printf("   Decode FPS: %.2f fps\n", effective_decode_frames / stats_time);
+        }
+    }
+    
+    // 时间统计
+    printf("\n⏱️  Time Statistics:\n");
+    printf("   Total Runtime: %.2f seconds\n", total_time);
+    if (timer_delay_seconds_ > 0) {
+        printf("   Warm-up Period: %.2f seconds (excluded from stats)\n", timer_delay_seconds_);
+        printf("   Stats Period: %.2f seconds\n", stats_time);
+    }
+    
+    printf("═══════════════════════════════════════════════════════\n");
+}
+
+// ============ 自动停止功能 ============
+
+void PerformanceMonitor::setAutoStopAfterStats(double stats_duration, void (*callback)(void*), void* user_data) {
+    // 清理旧的自动停止定时器
+    if (auto_stop_timer_) {
+        delete auto_stop_timer_;
+        auto_stop_timer_ = nullptr;
+    }
+    
+    // 创建新的自动停止定时器
+    auto_stop_timer_ = new PerformanceMonitor();
+    
+    // 计算实际停止时间 = 延迟 + 统计时长
+    double actual_stop_time = timer_delay_seconds_ + stats_duration;
+    
+    // 配置一次性定时器
+    auto_stop_timer_->setOneShotTimer(actual_stop_time);
+    auto_stop_timer_->setTimerCallback(callback, user_data);
+    auto_stop_timer_->startTimer();
+    
+    printf("   ⏰ Auto-stop: %.0fs stats + %.0fs warm-up = %.0fs total\n",
+           stats_duration, timer_delay_seconds_, actual_stop_time);
 }
 

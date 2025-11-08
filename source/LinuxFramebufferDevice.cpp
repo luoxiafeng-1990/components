@@ -83,6 +83,11 @@ bool LinuxFramebufferDevice::initialize(int device_index) {
     
     is_initialized_ = true;
     current_buffer_index_ = 0;
+    
+    // 打印初始化成功的总结信息
+    printf("✅ Display initialized: %dx%d, %d buffers, %d bytes/pixel\n",
+           width_, height_, static_cast<int>(buffers_.size()), bytes_per_pixel_);
+    
     return true;
 }
 

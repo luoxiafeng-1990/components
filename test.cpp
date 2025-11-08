@@ -43,61 +43,52 @@ static void auto_stop_callback(void* user_data) {
 }
 
 /**
- * 测试1：4帧循环播放测试
+ * 测试1：多缓冲循环播放测试
  * 
  * 功能：
  * - 打开原始视频文件
- * - 加载前4帧到framebuffer的4个buffer
- * - 循环播放这4帧
+ * - 加载帧到framebuffer的所有buffer中（数量由硬件决定）
+ * - 循环播放这些帧
  * - 显示性能统计
  */
 static int test_4frame_loop(const char* raw_video_path) {
-    printf("═══════════════════════════════════════════════════════\n");
-    printf("  Display Framework Test - 4-Frame Loop Display\n");
-    printf("  File: %s\n", raw_video_path);
-    printf("  Mode: Load 4 frames, loop display\n");
+    printf("\n═══════════════════════════════════════════════════════\n");
+    printf("  Test: Multi-Buffer Loop Display\n");
     printf("═══════════════════════════════════════════════════════\n\n");
     
-    // 1. 初始化显示设备
-    printf("📺 Step 1: Initialize display device...\n");
+    // 初始化显示设备
     LinuxFramebufferDevice display;
     if (!display.initialize(0)) {
-        printf("❌ ERROR: Failed to initialize display device\n");
         return -1;
     }
- 
-    // 2. 打开视频文件
-    printf("📂 Step 2: Open video file...\n");
+    
+    int buffer_count = display.getBufferCount();
+    
+    // 打开视频文件
     VideoFile video;
     if (!video.openRaw(raw_video_path, 
                        display.getWidth(), 
                        display.getHeight(), 
                        display.getBytesPerPixel())) {
-        printf("❌ ERROR: Failed to open video file\n");
         return -1;
     }
-    printf("✅ Video file opened\n");
-    printf("   Total frames: %d\n", video.getTotalFrames());
-    printf("   Frame size: %zu bytes\n\n", video.getFrameSize());
     
     // 检查文件是否有足够的帧
-    if (video.getTotalFrames() < 4) {
-        printf("❌ ERROR: File contains only %d frames, need at least 4 frames\n",
-               video.getTotalFrames());
+    if (video.getTotalFrames() < buffer_count) {
+        printf("❌ ERROR: File contains only %d frames, need at least %d frames\n",
+               video.getTotalFrames(), buffer_count);
         return -1;
     }
     
-    // 3. 创建性能监控器
-    printf("📊 Step 3: Initialize performance monitor...\n");
+    // 创建并启动性能监控器
     PerformanceMonitor monitor;
     monitor.start();
-    printf("✅ Performance monitor started\n\n");
     
-    // 4. 加载前4帧到framebuffer的4个buffer中
-    printf("📥 Step 4: Loading 4 frames into framebuffer...\n");
-    for (int i = 0; i < 4; i++) {
+    // 加载帧到 framebuffer
+    printf("\n📥 Loading %d frames into framebuffer...\n", buffer_count);
+    for (int i = 0; i < buffer_count; i++) {
         // 开始计时
-        monitor.beginLoadFrame();
+        monitor.beginLoadFrameTiming();
         
         // 获取buffer引用
         Buffer& buffer = display.getBuffer(i);
@@ -112,45 +103,31 @@ static int test_4frame_loop(const char* raw_video_path) {
             return -1;
         }
         // 结束计时并记录
-        monitor.endLoadFrame();
+        monitor.endLoadFrameTiming();
     }
     
-    printf("✅ All 4 frames loaded\n");
-    printf("   Loaded frames: %d\n", monitor.getLoadedFrames());
-    printf("   Average load FPS: %.2f fps\n", monitor.getAverageLoadFPS());
-    printf("   Total time: %.2f seconds\n\n", monitor.getTotalTime());
-    
-    // 5. 循环播放这4帧
-    printf("🎬 Step 5: Starting 4-frame loop display...\n");
-    printf("   Press Ctrl+C to stop\n\n");
-    
-    // ========== 定时器配置 ==========
-    // 
-    // 方式1：周期性统计（默认）
-    monitor.setTimerTask(TASK_PRINT_FULL_STATS);  // 选择任务类型
-    monitor.setTimerInterval(1.0,5.0);  // 每1秒统计一次
+    // 配置并启动定时器（会自动记录基准值）
+    monitor.setTimerTask(TASK_PRINT_FULL_STATS);
+    monitor.setTimerInterval(1.0, 10.0);  // 每1秒统计，延迟10秒
     monitor.startTimer();
-
-    PerformanceMonitor auto_stop_timer;
-    auto_stop_timer.setOneShotTimer(60.0);  // 60秒后触发
-    auto_stop_timer.setTimerCallback(auto_stop_callback, (void*)&g_running);
-    auto_stop_timer.startTimer();
-    printf("   ⏰ Auto-stop enabled: will stop after 60 seconds\n\n");
+    
+    // 设置自动停止（自动加上预热时间）
+    monitor.setAutoStopAfterStats(30.0, auto_stop_callback, (void*)&g_running);
     
     // 注册信号处理
     signal(SIGINT, signal_handler);
     
     int loop_count = 0;
     while (g_running) {
-        for (int buf_idx = 0; buf_idx < 4 && g_running; buf_idx++) {
+        for (int buf_idx = 0; buf_idx < buffer_count && g_running; buf_idx++) {
             // 开始显示计时
-            monitor.beginDisplayFrame();
+            monitor.beginDisplayFrameTiming();
             // 等待垂直同步
             display.waitVerticalSync();
             // 切换显示buffer
             display.displayBuffer(buf_idx);
             // 结束显示计时并记录
-            monitor.endDisplayFrame();
+            monitor.endDisplayFrameTiming();
         }
         
         loop_count++;
@@ -159,17 +136,12 @@ static int test_4frame_loop(const char* raw_video_path) {
     // 停止定时器
     monitor.stopTimer();
     
-    printf("\n🛑 Playback stopped by user\n\n");
+    printf("\n🛑 Playback stopped\n\n");
     
-    // 6. 打印最终统计
-    printf("═══════════════════════════════════════════════════════\n");
-    printf("  Final Statistics\n");
-    printf("═══════════════════════════════════════════════════════\n");
-    monitor.printStatistics();
+    // 6. 打印最终统计（自动计算延迟后的数据）
+    monitor.printFinalStats();
     
     printf("\n✅ Test completed successfully\n");
-    printf("   Total loops: %d\n", loop_count);
-    printf("   Total frames displayed: %d\n", loop_count * 4);
     
     return 0;
 }
@@ -182,41 +154,31 @@ static int test_4frame_loop(const char* raw_video_path) {
  * - 顺序读取并显示所有帧（只播放一次）
  */
 static int test_sequential_playback(const char* raw_video_path) {
-    printf("═══════════════════════════════════════════════════════\n");
-    printf("  Display Framework Test - Sequential Playback\n");
-    printf("  File: %s\n", raw_video_path);
-    printf("  Mode: Play once, display all frames\n");
+    printf("\n═══════════════════════════════════════════════════════\n");
+    printf("  Test: Sequential Playback\n");
     printf("═══════════════════════════════════════════════════════\n\n");
     
-    // 1. 初始化显示设备
-    printf("📺 Initializing display device...\n");
+    // 初始化显示设备
     LinuxFramebufferDevice display;
     if (!display.initialize(0)) {
-        printf("❌ ERROR: Failed to initialize display device\n");
         return -1;
     }
-    printf("✅ Display initialized: %dx%d, %d buffers\n\n",
-           display.getWidth(), display.getHeight(), display.getBufferCount());
     
-    // 2. 打开视频文件
-    printf("📂 Opening video file...\n");
+    // 打开视频文件
     VideoFile video;
     if (!video.openRaw(raw_video_path, 
                        display.getWidth(), 
                        display.getHeight(), 
                        display.getBytesPerPixel())) {
-        printf("❌ ERROR: Failed to open video file\n");
         return -1;
     }
-    printf("✅ Video opened: %d frames\n\n", video.getTotalFrames());
     
-    // 3. 创建性能监控器
+    // 创建并启动性能监控器
     PerformanceMonitor monitor;
     monitor.start();
     
-    // 4. 顺序播放所有帧
-    printf("🎬 Starting sequential playback...\n");
-    printf("   Press Ctrl+C to stop\n\n");
+    // 开始播放
+    printf("\n🎬 Starting sequential playback (Ctrl+C to stop)...\n\n");
     
     signal(SIGINT, signal_handler);
     
@@ -225,19 +187,19 @@ static int test_sequential_playback(const char* raw_video_path) {
     
     while (g_running && video.hasMoreFrames()) {
         // 加载帧
-        monitor.beginLoadFrame();
+        monitor.beginLoadFrameTiming();
         Buffer& buffer = display.getBuffer(current_buffer);
         if (!video.readFrameTo(buffer)) {
             printf("❌ ERROR: Failed to read frame %d\n", frame_index);
             break;
         }
-        monitor.endLoadFrame();
+        monitor.endLoadFrameTiming();
         
         // 显示帧
-        monitor.beginDisplayFrame();
+        monitor.beginDisplayFrameTiming();
         display.waitVerticalSync();
         display.displayBuffer(current_buffer);
-        monitor.endDisplayFrame();
+        monitor.endDisplayFrameTiming();
         
         // 切换到下一个buffer
         current_buffer = (current_buffer + 1) % display.getBufferCount();

@@ -92,6 +92,15 @@ private:
     // 定时器实际开始统计的时间点（跳过延迟后）
     std::chrono::steady_clock::time_point timer_real_start_time_;
     
+    // 自动停止定时器（独立对象）
+    PerformanceMonitor* auto_stop_timer_;  // 指针，避免循环依赖
+    
+    // 基准值跟踪（用于计算延迟后的统计）
+    std::chrono::steady_clock::time_point baseline_time_;  // 定时器启动时的时间点
+    int baseline_display_frames_;   // 定时器启动时的显示帧数
+    int baseline_load_frames_;      // 定时器启动时的加载帧数
+    int baseline_decode_frames_;    // 定时器启动时的解码帧数
+    
     // ============ 内部辅助方法 ============
     
     /**
@@ -183,32 +192,32 @@ public:
     /**
      * 开始计时：帧加载
      */
-    void beginLoadFrame();
+    void beginLoadFrameTiming();
     
     /**
      * 结束计时：帧加载
      */
-    void endLoadFrame();
+    void endLoadFrameTiming();
     
     /**
      * 开始计时：帧解码
      */
-    void beginDecodeFrame();
+    void beginDecodeFrameTiming();
     
     /**
      * 结束计时：帧解码
      */
-    void endDecodeFrame();
+    void endDecodeFrameTiming();
     
     /**
      * 开始计时：帧显示
      */
-    void beginDisplayFrame();
+    void beginDisplayFrameTiming();
     
     /**
      * 结束计时：帧显示
      */
-    void endDisplayFrame();
+    void endDisplayFrameTiming();
     
     // ============ 统计信息获取 ============
     
@@ -269,6 +278,22 @@ public:
      * 生成统计报告字符串
      */
     void generateReport(char* buffer, size_t buffer_size) const;
+    
+    /**
+     * 打印最终统计信息（只统计延迟后的数据）
+     * 
+     * 自动计算并打印延迟后的性能统计，包括：
+     * - 有效运行时间（总时间 - 延迟时间）
+     * - 延迟后的显示操作次数
+     * - 延迟后的平均FPS
+     * - 等等
+     * 
+     * 注意：
+     * - 必须在 startTimer() 之后调用
+     * - 会自动处理延迟时间的计算
+     * - 只统计延迟结束后的数据
+     */
+    void printFinalStats() const;
     
     // ============ 配置 ============
     
@@ -384,6 +409,29 @@ public:
      * - 调用后可以再次调用 startTimer() 重新启动
      */
     void stopTimer();
+    
+    /**
+     * 设置自动停止（在统计完成后）
+     * 
+     * 在指定的统计时长后自动停止。会自动加上延迟时间。
+     * 例如：如果设置了10秒延迟，stats_duration为60秒，
+     * 则实际会在70秒后触发停止。
+     * 
+     * @param stats_duration 统计时长（秒），不包括延迟
+     * @param callback 停止时的回调函数
+     * @param user_data 传递给回调的用户数据
+     * 
+     * 注意：
+     * - 必须在 startTimer() 之后调用
+     * - 会自动创建内部定时器，无需手动管理
+     * 
+     * 示例：
+     *   monitor.setTimerInterval(1.0, 10.0);  // 10秒延迟
+     *   monitor.startTimer();
+     *   monitor.setAutoStopAfterStats(60.0, stop_callback, &g_running);
+     *   // 实际会在70秒后停止（10秒延迟 + 60秒统计）
+     */
+    void setAutoStopAfterStats(double stats_duration, void (*callback)(void*), void* user_data);
 };
 
 #endif // PERFORMANCE_MONITOR_HPP
