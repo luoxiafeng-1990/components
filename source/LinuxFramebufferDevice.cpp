@@ -23,7 +23,7 @@ LinuxFramebufferDevice::LinuxFramebufferDevice()
     , fb_index_(-1)
     , framebuffer_base_(nullptr)
     , framebuffer_total_size_(0)
-    , buffer_count_(0)
+    , buffers_()  // vector自动初始化为空
     , current_buffer_index_(0)
     , width_(0)
     , height_(0)
@@ -31,7 +31,7 @@ LinuxFramebufferDevice::LinuxFramebufferDevice()
     , buffer_size_(0)
     , is_initialized_(false)
 {
-    // Buffer对象会自动初始化为无效状态
+    // vector会自动管理Buffer对象的生命周期
 }
 
 LinuxFramebufferDevice::~LinuxFramebufferDevice() {
@@ -102,13 +102,10 @@ void LinuxFramebufferDevice::cleanup() {
     
     // 3. 重置状态
     is_initialized_ = false;
-    buffer_count_ = 0;
     current_buffer_index_ = 0;
     
-    // 清空Buffer对象
-    for (int i = 0; i < 4; i++) {
-        buffers_[i] = Buffer();  // 重置为无效Buffer
-    }
+    // 清空Buffer对象（vector自动释放内存）
+    buffers_.clear();
     
     printf("✅ LinuxFramebufferDevice cleaned up\n");
 }
@@ -126,7 +123,7 @@ int LinuxFramebufferDevice::getBytesPerPixel() const {
 }
 
 int LinuxFramebufferDevice::getBufferCount() const {
-    return buffer_count_;
+    return static_cast<int>(buffers_.size());
 }
 
 size_t LinuxFramebufferDevice::getBufferSize() const {
@@ -134,10 +131,10 @@ size_t LinuxFramebufferDevice::getBufferSize() const {
 }
 
 Buffer& LinuxFramebufferDevice::getBuffer(int buffer_index) {
-    if (buffer_index < 0 || buffer_index >= buffer_count_) {
+    if (buffer_index < 0 || buffer_index >= static_cast<int>(buffers_.size())) {
         static Buffer invalid_buffer;
         printf("❌ ERROR: Invalid buffer index %d (valid range: 0-%d)\n", 
-               buffer_index, buffer_count_ - 1);
+               buffer_index, static_cast<int>(buffers_.size()) - 1);
         return invalid_buffer;
     }
     
@@ -145,10 +142,10 @@ Buffer& LinuxFramebufferDevice::getBuffer(int buffer_index) {
 }
 
 const Buffer& LinuxFramebufferDevice::getBuffer(int buffer_index) const {
-    if (buffer_index < 0 || buffer_index >= buffer_count_) {
+    if (buffer_index < 0 || buffer_index >= static_cast<int>(buffers_.size())) {
         static Buffer invalid_buffer;
         printf("❌ ERROR: Invalid buffer index %d (valid range: 0-%d)\n", 
-               buffer_index, buffer_count_ - 1);
+               buffer_index, static_cast<int>(buffers_.size()) - 1);
         return invalid_buffer;
     }
     
@@ -161,7 +158,7 @@ bool LinuxFramebufferDevice::displayBuffer(int buffer_index) {
         return false;
     }
     
-    if (buffer_index < 0 || buffer_index >= buffer_count_) {
+    if (buffer_index < 0 || buffer_index >= static_cast<int>(buffers_.size())) {
         printf("❌ ERROR: Invalid buffer index %d\n", buffer_index);
         return false;
     }
@@ -263,23 +260,24 @@ bool LinuxFramebufferDevice::initializeFramebufferInfo() {
     buffer_size_ = width_ * height_ * bytes_per_pixel_;
     
     // 计算buffer数量（虚拟高度 / 实际高度）
-    buffer_count_ = var_info.yres_virtual / var_info.yres;
-    if (buffer_count_ > 4) {
-        buffer_count_ = 4;  // 最多支持4个buffer
-    }
+    int buffer_count = var_info.yres_virtual / var_info.yres;
     
     printf("📊 Framebuffer info:\n");
     printf("   xres=%d, yres=%d, bits_per_pixel=%d\n", 
            var_info.xres, var_info.yres, var_info.bits_per_pixel);
     printf("   yres_virtual=%d, buffer_count=%d\n", 
-           var_info.yres_virtual, buffer_count_);
+           var_info.yres_virtual, buffer_count);
+    
+    // 根据硬件实际的buffer数量动态分配Buffer对象
+    buffers_.resize(buffer_count);
+    printf("✅ Allocated %d Buffer objects\n", buffer_count);
     
     return true;
 }
 
 bool LinuxFramebufferDevice::mapFramebufferMemory() {
     // 计算需要映射的总大小
-    framebuffer_total_size_ = buffer_size_ * buffer_count_;
+    framebuffer_total_size_ = buffer_size_ * buffers_.size();
     
     printf("🗺️  Mapping framebuffer: size=%zu bytes\n", framebuffer_total_size_);
     
@@ -305,23 +303,28 @@ void LinuxFramebufferDevice::calculateBufferAddresses() {
     unsigned char* base = (unsigned char*)framebuffer_base_;
     
     // 检查并调整到安全的 buffer 数量
-    size_t required_size = buffer_size_ * buffer_count_;
+    size_t required_size = buffer_size_ * buffers_.size();
     if (required_size > framebuffer_total_size_) {
-        buffer_count_ = framebuffer_total_size_ / buffer_size_;
-        printf("⚠️  WARNING: Adjusted buffer_count to %d (max safe value)\n", buffer_count_);
+        int safe_count = framebuffer_total_size_ / buffer_size_;
+        printf("⚠️  WARNING: Adjusted buffer_count from %zu to %d (max safe value)\n", 
+               buffers_.size(), safe_count);
         
-        if (buffer_count_ <= 0) {
+        if (safe_count <= 0) {
             printf("❌ ERROR: Cannot fit even one buffer in mapped memory!\n");
+            buffers_.clear();
             return;
         }
+        
+        // 调整 vector 大小到安全数量
+        buffers_.resize(safe_count);
     }
     
     // 计算每个 buffer 的地址
-    for (int i = 0; i < buffer_count_; i++) {
+    for (size_t i = 0; i < buffers_.size(); i++) {
         void* buffer_addr = (void*)(base + buffer_size_ * i);
         buffers_[i] = Buffer(buffer_addr, buffer_size_);
         
-        printf("   Buffer[%d]: address=%p, size=%zu\n", 
+        printf("   Buffer[%zu]: address=%p, size=%zu\n", 
                i, buffers_[i].data(), buffers_[i].size());
     }
 }

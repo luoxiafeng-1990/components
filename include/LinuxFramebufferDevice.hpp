@@ -3,6 +3,7 @@
 
 #include "IDisplayDevice.hpp"
 #include "Buffer.hpp"
+#include <vector>
 
 /**
  * LinuxFramebufferDevice - Linux Framebuffer 显示设备实现
@@ -27,8 +28,7 @@ private:
     size_t framebuffer_total_size_;   // 映射的总大小
     
     // ============ Buffer管理 ============
-    Buffer buffers_[4];               // Buffer对象数组（最多4个）
-    int buffer_count_;                // 实际buffer数量
+    std::vector<Buffer> buffers_;     // Buffer对象数组（动态分配，根据硬件实际数量）
     int current_buffer_index_;        // 当前显示的buffer索引
     
     // ============ 显示属性 ============
