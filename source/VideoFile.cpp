@@ -4,6 +4,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <sys/stat.h>
+#include <sys/mman.h>  // For mmap/munmap
 #include <string.h>
 #include <errno.h>
 
@@ -11,9 +12,11 @@
 
 VideoFile::VideoFile()
     : fd_(-1)
+    , mapped_file_(nullptr)
+    , mapped_size_(0)
     , width_(0)
     , height_(0)
-    , bytes_per_pixel_(0)
+    , bits_per_pixel_(0)
     , frame_size_(0)
     , file_size_(0)
     , total_frames_(0)
@@ -92,7 +95,7 @@ bool VideoFile::open(const char* path) {
             printf("   This file may be raw format or unsupported encoded format\n");
             printf("   \n");
             printf("   💡 For raw format, please use:\n");
-            printf("      openRaw(path, width, height, bytes_per_pixel)\n");
+            printf("      openRaw(path, width, height, bits_per_pixel)\n");
             ::close(fd_);
             fd_ = -1;
             return false;
@@ -100,6 +103,13 @@ bool VideoFile::open(const char* path) {
     
     // 验证文件
     if (!validateFile()) {
+        ::close(fd_);
+        fd_ = -1;
+        return false;
+    }
+    
+    // mmap映射文件
+    if (!mapFile()) {
         ::close(fd_);
         fd_ = -1;
         return false;
@@ -119,7 +129,7 @@ bool VideoFile::open(const char* path) {
         default: printf("UNKNOWN\n"); break;
     }
     printf("   Resolution: %dx%d\n", width_, height_);
-    printf("   Bytes per pixel: %d\n", bytes_per_pixel_);
+    printf("   Bits per pixel: %d\n", bits_per_pixel_);
     printf("   Frame size: %zu bytes\n", frame_size_);
     printf("   File size: %ld bytes\n", file_size_);
     printf("   Total frames: %d\n", total_frames_);
@@ -127,17 +137,17 @@ bool VideoFile::open(const char* path) {
     return true;
 }
 
-bool VideoFile::openRaw(const char* path, int width, int height, int bytes_per_pixel) {
+bool VideoFile::openRaw(const char* path, int width, int height, int bits_per_pixel) {
     if (is_open_) {
         printf("⚠️  Warning: File already opened, closing previous file\n");
         close();
     }
     
     // 验证参数
-    if (width <= 0 || height <= 0 || bytes_per_pixel <= 0) {
+    if (width <= 0 || height <= 0 || bits_per_pixel <= 0) {
         printf("❌ ERROR: Invalid parameters\n");
-        printf("   width=%d, height=%d, bytes_per_pixel=%d\n", 
-               width, height, bytes_per_pixel);
+        printf("   width=%d, height=%d, bits_per_pixel=%d\n", 
+               width, height, bits_per_pixel);
         return false;
     }
     
@@ -146,13 +156,18 @@ bool VideoFile::openRaw(const char* path, int width, int height, int bytes_per_p
     path_[MAX_PATH_LENGTH - 1] = '\0';
     width_ = width;
     height_ = height;
-    bytes_per_pixel_ = bytes_per_pixel;
-    frame_size_ = width_ * height_ * bytes_per_pixel_;
+    bits_per_pixel_ = bits_per_pixel;
+    
+    // 计算帧大小：总位数 / 8 向上取整
+    // 对于非整数字节的像素格式（如12bit），这样可以确保分配足够的内存
+    size_t total_bits = (size_t)width_ * height_ * bits_per_pixel_;
+    frame_size_ = (total_bits + 7) / 8;  // 向上取整到字节
+    
     detected_format_ = FileFormat::RAW;
     
     printf("📂 Opening raw video file: %s\n", path);
-    printf("   Format: %dx%d, %d bytes per pixel\n", 
-           width_, height_, bytes_per_pixel_);
+    printf("   Format: %dx%d, %d bits per pixel\n", 
+           width_, height_, bits_per_pixel_);
     printf("   Frame size: %zu bytes\n", frame_size_);
     
     // 打开文件
@@ -164,6 +179,13 @@ bool VideoFile::openRaw(const char* path, int width, int height, int bytes_per_p
     
     // 验证文件
     if (!validateFile()) {
+        ::close(fd_);
+        fd_ = -1;
+        return false;
+    }
+    
+    // mmap映射文件
+    if (!mapFile()) {
         ::close(fd_);
         fd_ = -1;
         return false;
@@ -184,6 +206,10 @@ void VideoFile::close() {
         return;
     }
     
+    // 解除内存映射
+    unmapFile();
+    
+    // 关闭文件描述符
     if (fd_ >= 0) {
         ::close(fd_);
         fd_ = -1;
@@ -228,13 +254,12 @@ bool VideoFile::readFrameTo(void* dest_buffer, size_t buffer_size) {
         return false;
     }
     
-    // 读取一帧数据
-    ssize_t bytes_read = read(fd_, dest_buffer, frame_size_);
-    if (bytes_read != (ssize_t)frame_size_) {
-        printf("❌ ERROR: Read failed (expected %zu, got %zd): %s\n",
-               frame_size_, bytes_read, strerror(errno));
-        return false;
-    }
+    // 计算当前帧在映射内存中的地址
+    size_t frame_offset = (size_t)current_frame_index_ * frame_size_;
+    const char* frame_addr = (const char*)mapped_file_ + frame_offset;
+    
+    // 从映射内存拷贝数据（代替read系统调用）
+    memcpy(dest_buffer, frame_addr, frame_size_);
     
     current_frame_index_++;
     return true;
@@ -266,15 +291,7 @@ bool VideoFile::seek(int frame_index) {
         return false;
     }
     
-    // 计算文件偏移
-    off_t offset = (off_t)frame_index * frame_size_;
-    
-    // 执行seek
-    if (lseek(fd_, offset, SEEK_SET) < 0) {
-        printf("❌ ERROR: lseek failed: %s\n", strerror(errno));
-        return false;
-    }
-    
+    // 使用mmap后，seek只需要更新逻辑位置，无需lseek系统调用
     current_frame_index_ = frame_index;
     return true;
 }
@@ -289,11 +306,7 @@ bool VideoFile::seekToEnd() {
         return false;
     }
     
-    if (lseek(fd_, 0, SEEK_END) < 0) {
-        printf("❌ ERROR: lseek to end failed: %s\n", strerror(errno));
-        return false;
-    }
-    
+    // 使用mmap后，只需要更新逻辑位置
     current_frame_index_ = total_frames_;
     return true;
 }
@@ -332,7 +345,10 @@ int VideoFile::getHeight() const {
 }
 
 int VideoFile::getBytesPerPixel() const {
-    return bytes_per_pixel_;
+    // 注意：这里返回的是向上取整的字节数
+    // 例如：12bit -> 2字节，16bit -> 2字节，24bit -> 3字节
+    // 实际使用时可能需要根据具体的像素格式进行处理
+    return (bits_per_pixel_ + 7) / 8;
 }
 
 const char* VideoFile::getPath() const {
@@ -474,5 +490,47 @@ bool VideoFile::parseH264Header() {
     printf("⚠️  H.264 format detected but not yet fully supported\n");
     printf("   Please use a tool to extract raw frames, or provide format info\n");
     return false;
+}
+
+bool VideoFile::mapFile() {
+    if (fd_ < 0) {
+        printf("❌ ERROR: Invalid file descriptor\n");
+        return false;
+    }
+    
+    if (file_size_ <= 0) {
+        printf("❌ ERROR: Invalid file size: %ld\n", file_size_);
+        return false;
+    }
+    
+    // 使用 mmap 映射整个文件到进程地址空间
+    // PROT_READ: 只读访问
+    // MAP_PRIVATE: 私有映射（写时复制，修改不影响原文件）
+    mapped_file_ = mmap(NULL, file_size_, 
+                        PROT_READ, MAP_PRIVATE, 
+                        fd_, 0);
+    
+    if (mapped_file_ == MAP_FAILED) {
+        printf("❌ ERROR: mmap failed: %s\n", strerror(errno));
+        mapped_file_ = nullptr;
+        return false;
+    }
+    
+    mapped_size_ = file_size_;
+    
+    printf("🗺️  File mapped to memory: address=%p, size=%zu bytes\n", 
+           mapped_file_, mapped_size_);
+    
+    return true;
+}
+
+void VideoFile::unmapFile() {
+    if (mapped_file_ != nullptr && mapped_size_ > 0) {
+        if (munmap(mapped_file_, mapped_size_) < 0) {
+            printf("⚠️  Warning: munmap failed: %s\n", strerror(errno));
+        }
+        mapped_file_ = nullptr;
+        mapped_size_ = 0;
+    }
 }
 

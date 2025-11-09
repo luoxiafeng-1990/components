@@ -69,7 +69,7 @@ static int test_4frame_loop(const char* raw_video_path) {
     if (!video.openRaw(raw_video_path, 
                        display.getWidth(), 
                        display.getHeight(), 
-                       display.getBytesPerPixel())) {
+                       display.getBitsPerPixel())) {
         return -1;
     }
     
@@ -156,7 +156,7 @@ static int test_4frame_loop(const char* raw_video_path) {
 static int test_sequential_playback(const char* raw_video_path) {
     printf("\n═══════════════════════════════════════════════════════\n");
     printf("  Test: Sequential Playback\n");
-    printf("═══════════════════════════════════════════════════════\n\n");
+    printf("═══════════════════════════════════════════════════════\n\n");  
     
     // 初始化显示设备
     LinuxFramebufferDevice display;
@@ -169,7 +169,7 @@ static int test_sequential_playback(const char* raw_video_path) {
     if (!video.openRaw(raw_video_path, 
                        display.getWidth(), 
                        display.getHeight(), 
-                       display.getBytesPerPixel())) {
+                       display.getBitsPerPixel())) {
         return -1;
     }
     

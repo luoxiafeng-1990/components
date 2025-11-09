@@ -130,6 +130,10 @@ int LinuxFramebufferDevice::getBytesPerPixel() const {
     return (bits_per_pixel_ + 7) / 8;
 }
 
+int LinuxFramebufferDevice::getBitsPerPixel() const {
+    return bits_per_pixel_;
+}
+
 int LinuxFramebufferDevice::getBufferCount() const {
     return static_cast<int>(buffers_.size());
 }

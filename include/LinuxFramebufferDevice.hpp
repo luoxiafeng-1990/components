@@ -79,6 +79,7 @@ public:
     int getWidth() const override;
     int getHeight() const override;
     int getBytesPerPixel() const override;
+    int getBitsPerPixel() const override;
     int getBufferCount() const override;
     size_t getBufferSize() const override;
     

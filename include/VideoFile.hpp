@@ -21,7 +21,7 @@
  * 文件格式：
  * - 原始像素数据（raw format）
  * - 无头部，直接存储像素
- * - 帧大小 = width × height × bytes_per_pixel
+ * - 帧大小 = (width × height × bits_per_pixel + 7) / 8（向上取整到字节）
  * 
  * RAII机制：
  * - 构造时可以打开文件
@@ -32,11 +32,13 @@ private:
     // ============ 文件资源 ============
     int fd_;                          // 文件描述符
     char path_[MAX_PATH_LENGTH];     // 文件路径
+    void* mapped_file_;               // mmap映射的文件地址
+    size_t mapped_size_;              // 映射的文件大小
     
     // ============ 视频属性 ============
     int width_;                       // 视频宽度（像素）
     int height_;                      // 视频高度（像素）
-    int bytes_per_pixel_;             // 每像素字节数
+    int bits_per_pixel_;              // 每像素位数（可以是非整数字节，如12bit、16bit、24bit等）
     size_t frame_size_;               // 单帧大小（字节）
     
     // ============ 文件信息 ============
@@ -91,6 +93,19 @@ private:
      * @return 成功返回true
      */
     bool parseH264Header();
+    
+    /**
+     * 映射文件到内存
+     * 使用 mmap 将整个文件映射到进程地址空间
+     * @return 成功返回true
+     */
+    bool mapFile();
+    
+    /**
+     * 解除文件映射
+     * 使用 munmap 解除内存映射
+     */
+    void unmapFile();
 
 public:
     // ============ 构造函数 ============
@@ -127,10 +142,10 @@ public:
      * @param path 文件路径
      * @param width 视频宽度（像素）
      * @param height 视频高度（像素）
-     * @param bytes_per_pixel 每像素字节数（如RGB24=3, RGBA32=4）
+     * @param bits_per_pixel 每像素位数（如RGB24=24, RGBA32=32, 12bit=12）
      * @return 成功返回true，失败返回false
      */
-    bool openRaw(const char* path, int width, int height, int bytes_per_pixel);
+    bool openRaw(const char* path, int width, int height, int bits_per_pixel);
     
     /**
      * 关闭视频文件

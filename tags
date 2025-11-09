@@ -67,9 +67,9 @@ beginDecodeFrameTiming	source/PerformanceMonitor.cpp	/^void PerformanceMonitor::
 beginDisplayFrameTiming	source/PerformanceMonitor.cpp	/^void PerformanceMonitor::beginDisplayFrameTiming() {$/;"	f	language:C++	class:PerformanceMonitor	typeref:typename:void	signature:()
 beginLoadFrameTiming	source/PerformanceMonitor.cpp	/^void PerformanceMonitor::beginLoadFrameTiming() {$/;"	f	language:C++	class:PerformanceMonitor	typeref:typename:void	signature:()
 bin_PROGRAMS	Makefile.am	/^bin_PROGRAMS = display_test$/;"	m	language:Make
+bits_per_pixel_	include/LinuxFramebufferDevice.hpp	/^    int bits_per_pixel_;              \/\/ 每像素位数（可以是非整数字节，如12bit/;"	m	language:C++	class:LinuxFramebufferDevice	typeref:typename:int
 buffer_size_	include/LinuxFramebufferDevice.hpp	/^    size_t buffer_size_;              \/\/ 单个buffer大小（字节）$/;"	m	language:C++	class:LinuxFramebufferDevice	typeref:typename:size_t
 buffers_	include/LinuxFramebufferDevice.hpp	/^    std::vector<Buffer> buffers_;     \/\/ Buffer对象数组（动态分配，根据硬件实际/;"	m	language:C++	class:LinuxFramebufferDevice	typeref:typename:std::vector<Buffer>
-bytes_per_pixel_	include/LinuxFramebufferDevice.hpp	/^    int bytes_per_pixel_;             \/\/ 每像素字节数$/;"	m	language:C++	class:LinuxFramebufferDevice	typeref:typename:int
 bytes_per_pixel_	include/VideoFile.hpp	/^    int bytes_per_pixel_;             \/\/ 每像素字节数$/;"	m	language:C++	class:VideoFile	typeref:typename:int
 calculateAverageFPS	source/PerformanceMonitor.cpp	/^double PerformanceMonitor::calculateAverageFPS(int frame_count) const {$/;"	f	language:C++	class:PerformanceMonitor	typeref:typename:double	signature:(int frame_count) const
 calculateBufferAddresses	source/LinuxFramebufferDevice.cpp	/^void LinuxFramebufferDevice::calculateBufferAddresses() {$/;"	f	language:C++	class:LinuxFramebufferDevice	typeref:typename:void	signature:()
@@ -141,7 +141,6 @@ hasMoreFrames	source/VideoFile.cpp	/^bool VideoFile::hasMoreFrames() const {$/;"
 height_	include/LinuxFramebufferDevice.hpp	/^    int height_;                      \/\/ 显示高度（像素）$/;"	m	language:C++	class:LinuxFramebufferDevice	typeref:typename:int
 height_	include/VideoFile.hpp	/^    int height_;                      \/\/ 视频高度（像素）$/;"	m	language:C++	class:VideoFile	typeref:typename:int
 initialize	source/LinuxFramebufferDevice.cpp	/^bool LinuxFramebufferDevice::initialize(int device_index) {$/;"	f	language:C++	class:LinuxFramebufferDevice	typeref:typename:bool	signature:(int device_index)
-initializeFramebufferInfo	source/LinuxFramebufferDevice.cpp	/^bool LinuxFramebufferDevice::initializeFramebufferInfo() {$/;"	f	language:C++	class:LinuxFramebufferDevice	typeref:typename:bool	signature:()
 isAtEnd	source/VideoFile.cpp	/^bool VideoFile::isAtEnd() const {$/;"	f	language:C++	class:VideoFile	typeref:typename:bool	signature:() const
 isOpen	source/VideoFile.cpp	/^bool VideoFile::isOpen() const {$/;"	f	language:C++	class:VideoFile	typeref:typename:bool	signature:() const
 isValid	include/Buffer.hpp	/^    bool isValid() const { $/;"	f	language:C++	class:Buffer	typeref:typename:bool	signature:() const
@@ -157,7 +156,7 @@ last_report_time_	include/PerformanceMonitor.hpp	/^    std::chrono::steady_clock
 last_timer_trigger_time_	include/PerformanceMonitor.hpp	/^    std::chrono::steady_clock::time_point last_timer_trigger_time_; \/\/ 上次触发时间$/;"	m	language:C++	class:PerformanceMonitor	typeref:typename:std::chrono::steady_clock::time_point
 load_start_	include/PerformanceMonitor.hpp	/^    std::chrono::steady_clock::time_point load_start_;$/;"	m	language:C++	class:PerformanceMonitor	typeref:typename:std::chrono::steady_clock::time_point
 main	test.cpp	/^int main(int argc, char* argv[]) {$/;"	f	language:C++	typeref:typename:int	signature:(int argc,char * argv[])
-mapFramebufferMemory	source/LinuxFramebufferDevice.cpp	/^bool LinuxFramebufferDevice::mapFramebufferMemory() {$/;"	f	language:C++	class:LinuxFramebufferDevice	typeref:typename:bool	signature:()
+mapHardwareFramebufferMemory	source/LinuxFramebufferDevice.cpp	/^bool LinuxFramebufferDevice::mapHardwareFramebufferMemory() {$/;"	f	language:C++	class:LinuxFramebufferDevice	typeref:typename:bool	signature:()
 open	source/VideoFile.cpp	/^bool VideoFile::open(const char* path) {$/;"	f	language:C++	class:VideoFile	typeref:typename:bool	signature:(const char * path)
 openRaw	source/VideoFile.cpp	/^bool VideoFile::openRaw(const char* path, int width, int height, int bytes_per_pixel) {$/;"	f	language:C++	class:VideoFile	typeref:typename:bool	signature:(const char * path,int width,int height,int bytes_per_pixel)
 operator []	include/Buffer.hpp	/^    const uint8_t& operator[](size_t index) const {$/;"	f	language:C++	class:Buffer	typeref:typename:const uint8_t &	signature:(size_t index) const
@@ -170,6 +169,7 @@ printFinalStats	source/PerformanceMonitor.cpp	/^void PerformanceMonitor::printFi
 printRealTimeStats	source/PerformanceMonitor.cpp	/^void PerformanceMonitor::printRealTimeStats() {$/;"	f	language:C++	class:PerformanceMonitor	typeref:typename:void	signature:()
 printStatistics	source/PerformanceMonitor.cpp	/^void PerformanceMonitor::printStatistics() const {$/;"	f	language:C++	class:PerformanceMonitor	typeref:typename:void	signature:() const
 print_usage	test.cpp	/^static void print_usage(const char* prog_name) {$/;"	f	language:C++	typeref:typename:void	file:	signature:(const char * prog_name)
+queryHardwareDisplayParameters	source/LinuxFramebufferDevice.cpp	/^bool LinuxFramebufferDevice::queryHardwareDisplayParameters() {$/;"	f	language:C++	class:LinuxFramebufferDevice	typeref:typename:bool	signature:()
 readFileHeader	source/VideoFile.cpp	/^ssize_t VideoFile::readFileHeader(unsigned char* header, size_t size) {$/;"	f	language:C++	class:VideoFile	typeref:typename:ssize_t	signature:(unsigned char * header,size_t size)
 readFrameAt	source/VideoFile.cpp	/^bool VideoFile::readFrameAt(int frame_index, Buffer& dest_buffer) {$/;"	f	language:C++	class:VideoFile	typeref:typename:bool	signature:(int frame_index,Buffer & dest_buffer)
 readFrameAt	source/VideoFile.cpp	/^bool VideoFile::readFrameAt(int frame_index, void* dest_buffer, size_t buffer_size) {$/;"	f	language:C++	class:VideoFile	typeref:typename:bool	signature:(int frame_index,void * dest_buffer,size_t buffer_size)
@@ -216,7 +216,7 @@ total_decode_time_us_	include/PerformanceMonitor.hpp	/^    long long total_decod
 total_display_time_us_	include/PerformanceMonitor.hpp	/^    long long total_display_time_us_; \/\/ 总显示时间（微秒）$/;"	m	language:C++	class:PerformanceMonitor	typeref:typename:long long
 total_frames_	include/VideoFile.hpp	/^    int total_frames_;                \/\/ 总帧数$/;"	m	language:C++	class:VideoFile	typeref:typename:int
 total_load_time_us_	include/PerformanceMonitor.hpp	/^    long long total_load_time_us_;    \/\/ 总加载时间（微秒）$/;"	m	language:C++	class:PerformanceMonitor	typeref:typename:long long
-unmapFramebufferMemory	source/LinuxFramebufferDevice.cpp	/^void LinuxFramebufferDevice::unmapFramebufferMemory() {$/;"	f	language:C++	class:LinuxFramebufferDevice	typeref:typename:void	signature:()
+unmapHardwareFramebufferMemory	source/LinuxFramebufferDevice.cpp	/^void LinuxFramebufferDevice::unmapHardwareFramebufferMemory() {$/;"	f	language:C++	class:LinuxFramebufferDevice	typeref:typename:void	signature:()
 user_callback_	include/PerformanceMonitor.hpp	/^    void (*user_callback_)(void*);    \/\/ 用户回调函数指针$/;"	m	language:C++	class:PerformanceMonitor	typeref:typename:void (*)(void *)
 user_callback_data_	include/PerformanceMonitor.hpp	/^    void* user_callback_data_;        \/\/ 传递给回调的用户数据$/;"	m	language:C++	class:PerformanceMonitor	typeref:typename:void *
 validateFile	source/VideoFile.cpp	/^bool VideoFile::validateFile() {$/;"	f	language:C++	class:VideoFile	typeref:typename:bool	signature:()

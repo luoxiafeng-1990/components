@@ -1,4 +1,4 @@
-#ifndef IDISPLAYDEVICE_HPP
+  #ifndef IDISPLAYDEVICE_HPP
 #define IDISPLAYDEVICE_HPP
 
 #include "Buffer.hpp"
@@ -70,10 +70,17 @@ public:
     virtual int getHeight() const = 0;
     
     /**
-     * 获取每像素字节数
+     * 获取每像素字节数（向上取整）
      * 例如：ARGB888 = 4字节, RGB888 = 3字节
+     * 注意：对于非整数字节的格式（如12bit），返回向上取整的值
      */
     virtual int getBytesPerPixel() const = 0;
+    
+    /**
+     * 获取每像素位数
+     * 例如：ARGB888 = 32位, RGB888 = 24位, 12bit color = 12位
+     */
+    virtual int getBitsPerPixel() const = 0;
     
     /**
      * 获取Buffer数量
