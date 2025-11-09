@@ -268,7 +268,7 @@ static int test_buffermanager_producer(const char* raw_video_path) {
     printf("   Buffer count: %d\n", display.getBufferCount());
     
     // 2. 创建 BufferManager（使用5个buffer）
-    BufferManager manager(20, frame_size, false);
+    BufferManager manager(40, frame_size, true);
     
     printf("\n📦 BufferManager created with 5 buffers\n");
     
@@ -276,18 +276,23 @@ static int test_buffermanager_producer(const char* raw_video_path) {
     PerformanceMonitor monitor;
     monitor.start();
     
-    // 配置定时器
-    monitor.setTimerTask(TASK_PRINT_FULL_STATS);
+    // 配置定时器 - 使用新的任务类型打印 BufferManager 状态
+    monitor.setTimerTask(TASK_PRINT_WITH_BUFFERMANAGER);
+    monitor.setBufferManager(&manager);  // 设置 BufferManager 指针
     monitor.setTimerInterval(1.0, 10.0);  // 每1秒统计，延迟10秒
     monitor.startTimer();
     
     // 设置自动停止
     monitor.setAutoStopAfterStats(30.0, auto_stop_callback, (void*)&g_running);
     
-    // 4. 启动视频生产者线程
-    printf("\n🎬 Starting video producer thread...\n");
+    // 4. 启动视频生产者线程（使用多线程模式）
+    printf("\n🎬 Starting video producer threads...\n");
     
-    bool started = manager.startVideoProducer(
+    int producer_thread_count = 3;  // 使用3个生产者线程
+    printf("   Using %d producer threads for parallel reading\n", producer_thread_count);
+    
+    bool started = manager.startMultipleVideoProducers(
+        producer_thread_count,  // 线程数量
         raw_video_path,
         display.getWidth(),
         display.getHeight(),
@@ -301,11 +306,11 @@ static int test_buffermanager_producer(const char* raw_video_path) {
     );
     
     if (!started) {
-        printf("❌ Failed to start video producer thread\n");
+        printf("❌ Failed to start video producer threads\n");
         return -1;
     }
     
-    printf("✅ Video producer thread started\n");
+    printf("✅ Video producer threads started\n");
     printf("\n🎥 Starting display loop (Ctrl+C to stop)...\n\n");
     
     // 注册信号处理
@@ -328,6 +333,7 @@ static int test_buffermanager_producer(const char* raw_video_path) {
         Buffer* filled_buffer = manager.acquireFilledBuffer(true, 100);
         if (filled_buffer == nullptr) {
             // 超时，继续等待
+            printf("🔄 Producer thread no valid buffer, waiting for 100ms...\n");
             continue;
         }
         

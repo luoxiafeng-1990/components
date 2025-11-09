@@ -3,8 +3,17 @@ config BR2_PACKAGE_DISPLAY
 	help
 	  Display framework provides a cross-platform abstraction layer
 	  for framebuffer display operations. Includes LinuxFramebufferDevice,
-	  VideoFile management, and PerformanceMonitor for video playback testing.
+	  VideoFile management, BufferManager for multi-threaded buffer handling,
+	  and PerformanceMonitor for video playback testing.
+	  
+	  Features:
+	  - Thread-safe buffer pool management with producer-consumer pattern
+	  - Built-in video file producer thread
+	  - Multi-buffer framebuffer display support
+	  - Performance monitoring and statistics
 	  
 	  This package generates a standalone 'display_test' executable for testing
-	  raw video file playback on framebuffer devices.
+	  raw video file playback on framebuffer devices with multiple test modes.
+	  
+	  Requires: pthread (C++17)
 

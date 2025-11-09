@@ -1,4 +1,5 @@
 #include "../include/PerformanceMonitor.hpp"
+#include "../include/BufferManager.hpp"
 #include <stdio.h>
 #include <string.h>
 
@@ -34,6 +35,7 @@ PerformanceMonitor::PerformanceMonitor()
     , baseline_display_frames_(0)
     , baseline_load_frames_(0)
     , baseline_decode_frames_(0)
+    , buffer_manager_(nullptr)  // 初始化为空指针
 {
 }
 
@@ -388,9 +390,17 @@ void PerformanceMonitor::setTimerTask(TimerTaskType task) {
         case TASK_PRINT_ELAPSED_TIME:
             task_name = "只显示运行时间";
             break;
+        case TASK_PRINT_WITH_BUFFERMANAGER:
+            task_name = "完整统计 + BufferManager 状态";
+            break;
     }
     
     printf("📋 Timer task set to: %s\n", task_name);
+}
+
+void PerformanceMonitor::setBufferManager(BufferManager* manager) {
+    buffer_manager_ = manager;
+    printf("📦 BufferManager pointer set for monitoring\n");
 }
 
 void PerformanceMonitor::setTimerInterval(double interval_seconds, double delay_seconds) {
@@ -601,6 +611,10 @@ void PerformanceMonitor::timerThreadFunction() {
                 case TASK_PRINT_ELAPSED_TIME:
                     executeTaskElapsedTime();
                     break;
+                    
+                case TASK_PRINT_WITH_BUFFERMANAGER:
+                    executeTaskWithBufferManager(actual_interval, loaded_delta, decoded_delta, displayed_delta);
+                    break;
             }
             
             // 更新基准点，为下次统计做准备
@@ -721,6 +735,82 @@ void PerformanceMonitor::executeTaskElapsedTime() {
     int cumulative_displayed = frames_displayed_ - timer_start_frames_displayed_;
     printf("⏱️  运行时间: %.2f 秒 | 显示操作: %d 次\n", 
            total_time, cumulative_displayed);
+}
+
+void PerformanceMonitor::executeTaskWithBufferManager(double interval, int load_delta, int decode_delta, int display_delta) {
+    // 首先打印完整的性能统计（复用 executeTaskFullStats 的逻辑）
+    // 计算这个时间间隔内的FPS
+    double load_fps = (interval > 0) ? (load_delta / interval) : 0.0;
+    double decode_fps = (interval > 0) ? (decode_delta / interval) : 0.0;
+    double display_fps = (interval > 0) ? (display_delta / interval) : 0.0;
+    
+    // 计算从定时器启动开始的累计帧数
+    int cumulative_displayed = frames_displayed_ - timer_start_frames_displayed_;
+    int cumulative_decoded = frames_decoded_ - timer_start_frames_decoded_;
+    int cumulative_loaded = frames_loaded_ - timer_start_frames_loaded_;
+    
+    // 计算总运行时间（从定时器实际开始统计的时间点算起，跳过延迟）
+    auto now = std::chrono::steady_clock::now();
+    std::chrono::duration<double> elapsed = now - timer_real_start_time_;
+    double total_time = elapsed.count();
+    
+    // 打印完整统计信息
+    printf("┌─────────────────────────────────────────────────────┐\n");
+    printf("│      ⏱️  过去 %.1f 秒内的性能统计               │\n", interval);
+    printf("└─────────────────────────────────────────────────────┘\n");
+    
+    if (!is_started_) {
+        printf("⚠️  Monitor not started yet\n");
+    } else {
+        // 显示增量统计
+        if (display_delta > 0 || cumulative_displayed > 0) {
+            printf("📺 显示操作: %d 次 (%.1f ops/s) | 累计: %d 次\n", 
+                   display_delta, display_fps, cumulative_displayed);
+        }
+        
+        if (decode_delta > 0 || cumulative_decoded > 0) {
+            printf("🎬 解码操作: %d 次 (%.1f ops/s) | 累计: %d 次\n", 
+                   decode_delta, decode_fps, cumulative_decoded);
+        }
+        
+        if (load_delta > 0 || cumulative_loaded > 0) {
+            printf("📥 加载帧: %d 帧 (%.1f fps) | 累计: %d 帧\n", 
+                   load_delta, load_fps, cumulative_loaded);
+        }
+        
+        printf("⏱️  总运行时间: %.2f 秒\n", total_time);
+    }
+    
+    // 打印 BufferManager 状态
+    if (buffer_manager_ != nullptr) {
+        printf("┌─────────────────────────────────────────────────────┐\n");
+        printf("│      📦 BufferManager 状态                      │\n");
+        printf("└─────────────────────────────────────────────────────┘\n");
+        
+        // 获取生产者状态
+        auto state = buffer_manager_->getProducerState();
+        const char* state_str = "";
+        switch (state) {
+            case BufferManager::ProducerState::STOPPED:
+                state_str = "🛑 STOPPED";
+                break;
+            case BufferManager::ProducerState::RUNNING:
+                state_str = "✅ RUNNING";
+                break;
+            case BufferManager::ProducerState::ERROR:
+                state_str = "❌ ERROR";
+                break;
+        }
+        
+        printf("🎬 生产者状态: %s\n", state_str);
+        printf("📊 已填充buffer: %d 个\n", buffer_manager_->getFilledBufferCount());
+        printf("📦 空闲buffer: %d 个\n", buffer_manager_->getFreeBufferCount());
+        printf("📈 总buffer数: %d 个\n", buffer_manager_->getTotalBufferCount());
+    } else {
+        printf("⚠️  BufferManager pointer not set\n");
+    }
+    
+    printf("\n");
 }
 
 // ============ 最终统计报告 ============

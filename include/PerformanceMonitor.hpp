@@ -8,6 +8,9 @@
 #include <condition_variable>
 #include <atomic>
 
+// 前向声明
+class BufferManager;
+
 /**
  * TimerTaskType - 定时器任务类型枚举
  * 
@@ -20,6 +23,7 @@ enum TimerTaskType {
     TASK_PRINT_SIMPLE,          // 简化统计（单行，包含帧数和FPS）
     TASK_PRINT_FRAME_COUNT,     // 只打印帧数
     TASK_PRINT_ELAPSED_TIME,    // 只打印运行时间
+    TASK_PRINT_WITH_BUFFERMANAGER, // 完整统计 + BufferManager 状态
 };
 
 /**
@@ -103,6 +107,9 @@ private:
     int baseline_load_frames_;      // 定时器启动时的加载帧数
     int baseline_decode_frames_;    // 定时器启动时的解码帧数
     
+    // BufferManager 状态监控
+    BufferManager* buffer_manager_;  // BufferManager 指针（用于 TASK_PRINT_WITH_BUFFERMANAGER）
+    
     // ============ 内部辅助方法 ============
     
     /**
@@ -145,6 +152,11 @@ private:
      * 执行定时器任务：只打印运行时间
      */
     void executeTaskElapsedTime();
+    
+    /**
+     * 执行定时器任务：完整统计 + BufferManager 状态
+     */
+    void executeTaskWithBufferManager(double interval, int load_delta, int decode_delta, int display_delta);
 
 public:
     PerformanceMonitor();
@@ -316,13 +328,24 @@ public:
      * @param task 任务类型枚举值
      * 
      * 可选任务类型：
-     * - TASK_PRINT_FULL_STATS:      完整统计（增量 + 累计，多行）
-     * - TASK_PRINT_FPS_ONLY:        只打印FPS（单行）
-     * - TASK_PRINT_SIMPLE:          简化统计（单行）
-     * - TASK_PRINT_FRAME_COUNT:     只打印帧数
-     * - TASK_PRINT_ELAPSED_TIME:    只打印运行时间
+     * - TASK_PRINT_FULL_STATS:         完整统计（增量 + 累计，多行）
+     * - TASK_PRINT_FPS_ONLY:           只打印FPS（单行）
+     * - TASK_PRINT_SIMPLE:             简化统计（单行）
+     * - TASK_PRINT_FRAME_COUNT:        只打印帧数
+     * - TASK_PRINT_ELAPSED_TIME:       只打印运行时间
+     * - TASK_PRINT_WITH_BUFFERMANAGER: 完整统计 + BufferManager 状态
      */
     void setTimerTask(TimerTaskType task);
+    
+    /**
+     * 设置 BufferManager 指针
+     * 
+     * 用于 TASK_PRINT_WITH_BUFFERMANAGER 任务类型。
+     * 定时器会打印 BufferManager 的状态信息（生产者状态、buffer数量等）。
+     * 
+     * @param manager BufferManager 指针
+     */
+    void setBufferManager(BufferManager* manager);
     
     /**
      * 设置定时器间隔

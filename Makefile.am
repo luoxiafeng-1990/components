@@ -5,14 +5,15 @@ bin_PROGRAMS = display_test
 display_test_SOURCES = test.cpp \
                        source/LinuxFramebufferDevice.cpp \
                        source/VideoFile.cpp \
-                       source/PerformanceMonitor.cpp
+                       source/PerformanceMonitor.cpp \
+                       source/BufferManager.cpp
 
 AM_CPPFLAGS = -I$(top_srcdir)/include
 
 if DEBUG
-AM_CXXFLAGS = -g -O0 -Wall -std=c++11
+AM_CXXFLAGS = -g -O0 -Wall -std=c++17
 else
-AM_CXXFLAGS = -O2 -std=c++11
+AM_CXXFLAGS = -O2 -std=c++17
 endif
 
 LDADD = -lpthread

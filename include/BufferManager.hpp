@@ -125,7 +125,7 @@ public:
     // ============ 生产者线程接口 ============
     
     /**
-     * 启动视频文件生产者线程
+     * 启动视频文件生产者线程（单线程模式）
      * 
      * 自动从视频文件读取帧数据并填充到Buffer中
      * 
@@ -141,6 +141,27 @@ public:
                            int width, int height, int bits_per_pixel,
                            bool loop = false,
                            ErrorCallback error_callback = nullptr);
+    
+    /**
+     * 启动多个视频文件生产者线程（多线程模式）
+     * 
+     * 启动多个生产者线程并行读取视频帧，提高生产效率。
+     * 多个线程会协调读取，确保每帧只被读取一次且按顺序填充。
+     * 
+     * @param thread_count 生产者线程数量（建议2-4个）
+     * @param video_file_path 视频文件路径
+     * @param width 视频宽度（像素）
+     * @param height 视频高度（像素）
+     * @param bits_per_pixel 每像素位数（如RGB24=24, RGBA32=32）
+     * @param loop 是否循环播放（到达文件末尾后重新开始）
+     * @param error_callback 错误回调函数（可选）
+     * @return 成功返回true，失败返回false
+     */
+    bool startMultipleVideoProducers(int thread_count,
+                                    const char* video_file_path, 
+                                    int width, int height, int bits_per_pixel,
+                                    bool loop = false,
+                                    ErrorCallback error_callback = nullptr);
     
     /**
      * 停止生产者线程
@@ -186,9 +207,15 @@ private:
     std::condition_variable filled_cv_;  // 就绪队列条件变量
     
     // ============ 生产者线程管理 ============
-    std::thread producer_thread_;                    // 生产者线程对象
+    std::thread producer_thread_;                    // 生产者线程对象（单线程模式）
+    std::vector<std::thread> producer_threads_;      // 生产者线程数组（多线程模式）
     std::atomic<bool> producer_running_;             // 线程运行标志
     std::atomic<ProducerState> producer_state_;      // 线程状态
+    int producer_thread_count_;                      // 生产者线程数量
+    
+    // 多线程协调（用于多生产者模式）
+    std::atomic<int> next_frame_index_;              // 下一个要读取的帧索引
+    std::mutex video_file_mutex_;                    // VideoFile 互斥锁（如果共享）
     
     // 错误处理
     ErrorCallback error_callback_;                   // 错误回调函数
@@ -227,7 +254,7 @@ private:
     void freeNormalMemory(void* addr);
     
     /**
-     * 视频文件生产者线程函数
+     * 视频文件生产者线程函数（单线程模式）
      * @param video_file_path 视频文件路径
      * @param width 视频宽度
      * @param height 视频高度
@@ -237,6 +264,21 @@ private:
     void videoProducerThread(const char* video_file_path, 
                             int width, int height, int bits_per_pixel,
                             bool loop);
+    
+    /**
+     * 视频文件生产者线程函数（多线程模式）
+     * @param thread_id 线程ID（0, 1, 2...）
+     * @param video_file_path 视频文件路径
+     * @param width 视频宽度
+     * @param height 视频高度
+     * @param bits_per_pixel 每像素位数
+     * @param loop 是否循环播放
+     * @param total_frames 视频总帧数
+     */
+    void multiVideoProducerThread(int thread_id,
+                                 const char* video_file_path, 
+                                 int width, int height, int bits_per_pixel,
+                                 bool loop, int total_frames);
     
     /**
      * 设置错误信息并触发回调
