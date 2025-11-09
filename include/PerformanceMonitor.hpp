@@ -6,6 +6,7 @@
 #include <thread>
 #include <mutex>
 #include <condition_variable>
+#include <atomic>
 
 /**
  * TimerTaskType - 定时器任务类型枚举
@@ -71,6 +72,7 @@ private:
     double timer_interval_seconds_;   // 定时器间隔（秒）
     double timer_delay_seconds_;      // 定时器延迟启动时间（秒）
     bool timer_running_;              // 定时器运行标志
+    std::atomic<bool> timer_in_delay_period_;  // 是否在延迟期间（原子标志，避免竞争条件）
     TimerTaskType timer_task_type_;   // 定时器任务类型
     bool is_oneshot_timer_;           // 是否为一次性定时器
     

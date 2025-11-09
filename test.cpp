@@ -177,6 +177,14 @@ static int test_sequential_playback(const char* raw_video_path) {
     PerformanceMonitor monitor;
     monitor.start();
     
+    // 配置并启动定时器（会自动记录基准值）
+    monitor.setTimerTask(TASK_PRINT_FULL_STATS);
+    monitor.setTimerInterval(1.0, 20.0);  // 每1秒统计，延迟10秒
+    monitor.startTimer();
+    
+    // 设置自动停止（自动加上预热时间）
+    monitor.setAutoStopAfterStats(30.0, auto_stop_callback, (void*)&g_running);
+    
     // 开始播放
     printf("\n🎬 Starting sequential playback (Ctrl+C to stop)...\n\n");
     
@@ -185,7 +193,13 @@ static int test_sequential_playback(const char* raw_video_path) {
     int current_buffer = 0;
     int frame_index = 0;
     
-    while (g_running && video.hasMoreFrames()) {
+    while (g_running) {
+        // 检查视频是否播放完毕，如果是则回到开头继续循环
+        if (!video.hasMoreFrames()) {
+            video.seekToBegin();
+            printf("🔄 Video reached end, looping back to start...\n");
+        }
+        
         // 加载帧
         monitor.beginLoadFrameTiming();
         Buffer& buffer = display.getBuffer(current_buffer);
@@ -204,21 +218,18 @@ static int test_sequential_playback(const char* raw_video_path) {
         // 切换到下一个buffer
         current_buffer = (current_buffer + 1) % display.getBufferCount();
         frame_index++;
-        
-        // 每100帧打印一次进度
-        if (frame_index % 100 == 0) {
-            monitor.printRealTimeStats();
-        }
     }
     
-    printf("\n🎬 Playback finished\n\n");
+    // 停止定时器
+    monitor.stopTimer();
     
-    // 5. 打印最终统计
-    printf("═══════════════════════════════════════════════════════\n");
-    printf("  Final Statistics\n");
-    printf("═══════════════════════════════════════════════════════\n");
-    monitor.printStatistics();
+    printf("\n🛑 Playback stopped\n\n");
+    
+    // 打印最终统计（自动计算延迟后的数据）
+    monitor.printFinalStats();
     printf("   Total frames played: %d / %d\n", frame_index, video.getTotalFrames());
+    
+    printf("\n✅ Test completed successfully\n");
     
     return 0;
 }

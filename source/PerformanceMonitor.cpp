@@ -17,6 +17,7 @@ PerformanceMonitor::PerformanceMonitor()
     , timer_interval_seconds_(1.0)  // 默认1秒触发一次
     , timer_delay_seconds_(0.0)  // 默认无延迟
     , timer_running_(false)
+    , timer_in_delay_period_(false)  // 默认：不在延迟期间
     , timer_task_type_(TASK_PRINT_FULL_STATS)  // 默认任务：完整统计
     , is_oneshot_timer_(false)  // 默认：周期性定时器
     , user_callback_(NULL)  // 默认：无用户回调
@@ -117,6 +118,11 @@ void PerformanceMonitor::endLoadFrameTiming() {
         return;
     }
     
+    // 如果在延迟期间，不记录数据
+    if (timer_in_delay_period_.load()) {
+        return;  // 延迟期间，不统计
+    }
+    
     auto end = std::chrono::steady_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::microseconds>(
         end - load_start_);
@@ -137,6 +143,11 @@ void PerformanceMonitor::endDecodeFrameTiming() {
         return;
     }
     
+    // 如果在延迟期间，不记录数据
+    if (timer_in_delay_period_.load()) {
+        return;  // 延迟期间，不统计
+    }
+    
     auto end = std::chrono::steady_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::microseconds>(
         end - decode_start_);
@@ -155,6 +166,11 @@ void PerformanceMonitor::beginDisplayFrameTiming() {
 void PerformanceMonitor::endDisplayFrameTiming() {
     if (!is_started_ || is_paused_) {
         return;
+    }
+    
+    // 如果在延迟期间，不记录数据
+    if (timer_in_delay_period_.load()) {
+        return;  // 延迟期间，不统计
     }
     
     auto end = std::chrono::steady_clock::now();
@@ -435,6 +451,9 @@ void PerformanceMonitor::startTimer() {
     // 如果没有延迟，就立即设置为当前时间；如果有延迟，等延迟结束后再设置
     if (timer_delay_seconds_ <= 0.0) {
         timer_real_start_time_ = std::chrono::steady_clock::now();
+        timer_in_delay_period_.store(false);  // 没有延迟，不在延迟期间
+    } else {
+        timer_in_delay_period_.store(true);   // 有延迟，标记为在延迟期间
     }
     // 如果有延迟，timer_real_start_time_ 会在延迟结束时设置
     
@@ -535,6 +554,9 @@ void PerformanceMonitor::timerThreadFunction() {
             
             // 3. 设置定时器实际开始统计的时间点（用于计算总运行时间）
             timer_real_start_time_ = now;
+            
+            // 4. 清除延迟期间标志（延迟结束）
+            timer_in_delay_period_.store(false);
             
             first_iteration = false;
             continue;  // 跳过任务执行，进入下一次循环
@@ -726,11 +748,17 @@ void PerformanceMonitor::printFinalStats() const {
     
     // 加载统计
     if (effective_load_frames > 0 || baseline_load_frames_ > 0) {
-        printf("📥 Loaded Unique Frames: %d frames", baseline_load_frames_);
-        if (timer_delay_seconds_ > 0) {
-            printf(" (loaded before stats)");
+        if (baseline_load_frames_ > 0) {
+            // 有预加载的帧（如 test_4frame_loop）
+            printf("📥 Loaded Unique Frames: %d frames", baseline_load_frames_);
+            if (timer_delay_seconds_ > 0) {
+                printf(" (loaded before stats)");
+            }
+            printf("\n");
+        } else if (effective_load_frames > 0) {
+            // 没有预加载，是实时加载（如 test_sequential_playback）
+            printf("📥 Loaded Frames: %d frames (loaded during stats)\n", effective_load_frames);
         }
-        printf("\n");
     }
     
     // 显示统计
