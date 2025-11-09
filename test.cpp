@@ -1,20 +1,22 @@
 /**
  * Display Framework Test Program
  * 
- * 测试 LinuxFramebufferDevice, VideoFile, PerformanceMonitor 三个类的功能
+ * 测试 LinuxFramebufferDevice, VideoFile, PerformanceMonitor, BufferManager 四个类的功能
  * 
  * 编译命令：
  *   g++ -o test test.cpp \
  *       source/LinuxFramebufferDevice.cpp \
  *       source/VideoFile.cpp \
  *       source/PerformanceMonitor.cpp \
- *       -I./include -std=c++11
+ *       source/BufferManager.cpp \
+ *       -I./include -std=c++17 -pthread
  * 
  * 运行命令：
  *   ./test <raw_video_file>
  * 
  * 示例：
  *   ./test /usr/testdata/ids/test_video_argb888.raw
+ *   ./test -m producer /usr/testdata/ids/test_video_argb888.raw
  */
 
 #include <stdio.h>
@@ -23,6 +25,7 @@
 #include "include/LinuxFramebufferDevice.hpp"
 #include "include/VideoFile.hpp"
 #include "include/PerformanceMonitor.hpp"
+#include "include/BufferManager.hpp"
 
 // 全局标志，用于处理 Ctrl+C 退出
 static volatile bool g_running = true;
@@ -235,6 +238,148 @@ static int test_sequential_playback(const char* raw_video_path) {
 }
 
 /**
+ * 测试3：BufferManager 生产者线程测试
+ * 
+ * 功能：
+ * - 使用 BufferManager 管理 buffer 池
+ * - 自动启动生产者线程从视频文件读取数据
+ * - 主线程作为消费者，获取 buffer 并显示到屏幕
+ * - 展示生产者-消费者模式的多线程架构
+ */
+static int test_buffermanager_producer(const char* raw_video_path) {
+    printf("\n═══════════════════════════════════════════════════════\n");
+    printf("  Test: BufferManager Producer Thread\n");
+    printf("═══════════════════════════════════════════════════════\n\n");
+    
+    // 1. 初始化显示设备
+    LinuxFramebufferDevice display;
+    if (!display.initialize(0)) {
+        return -1;
+    }
+    
+    // 计算帧大小
+    size_t frame_size = (size_t)display.getWidth() * display.getHeight() * 
+                        (display.getBitsPerPixel() / 8);
+    
+    printf("📺 Display initialized:\n");
+    printf("   Resolution: %dx%d\n", display.getWidth(), display.getHeight());
+    printf("   Bits per pixel: %d\n", display.getBitsPerPixel());
+    printf("   Frame size: %zu bytes (%.2f MB)\n", frame_size, frame_size / (1024.0 * 1024.0));
+    printf("   Buffer count: %d\n", display.getBufferCount());
+    
+    // 2. 创建 BufferManager（使用5个buffer）
+    BufferManager manager(20, frame_size, false);
+    
+    printf("\n📦 BufferManager created with 5 buffers\n");
+    
+    // 3. 创建性能监控器
+    PerformanceMonitor monitor;
+    monitor.start();
+    
+    // 配置定时器
+    monitor.setTimerTask(TASK_PRINT_FULL_STATS);
+    monitor.setTimerInterval(1.0, 10.0);  // 每1秒统计，延迟10秒
+    monitor.startTimer();
+    
+    // 设置自动停止
+    monitor.setAutoStopAfterStats(30.0, auto_stop_callback, (void*)&g_running);
+    
+    // 4. 启动视频生产者线程
+    printf("\n🎬 Starting video producer thread...\n");
+    
+    bool started = manager.startVideoProducer(
+        raw_video_path,
+        display.getWidth(),
+        display.getHeight(),
+        display.getBitsPerPixel(),
+        true,  // 循环播放
+        [](const std::string& error) {
+            // 错误回调
+            printf("\n❌ Producer Error: %s\n", error.c_str());
+            g_running = false;
+        }
+    );
+    
+    if (!started) {
+        printf("❌ Failed to start video producer thread\n");
+        return -1;
+    }
+    
+    printf("✅ Video producer thread started\n");
+    printf("\n🎥 Starting display loop (Ctrl+C to stop)...\n\n");
+    
+    // 注册信号处理
+    signal(SIGINT, signal_handler);
+    
+    // 5. 消费者循环：从 BufferManager 获取 buffer 并显示
+    int current_display_buffer = 0;
+    int frame_count = 0;
+    
+    while (g_running) {
+        // 检查生产者状态
+        auto state = manager.getProducerState();
+        if (state == BufferManager::ProducerState::ERROR) {
+            printf("❌ Producer encountered an error: %s\n", 
+                   manager.getLastProducerError().c_str());
+            break;
+        }
+        
+        // 获取一个已填充的 buffer（阻塞，100ms超时）
+        Buffer* filled_buffer = manager.acquireFilledBuffer(true, 100);
+        if (filled_buffer == nullptr) {
+            // 超时，继续等待
+            continue;
+        }
+        
+        // 开始加载帧计时（从buffer拷贝到display）
+        monitor.beginLoadFrameTiming();
+        
+        // 获取 display 的 buffer
+        Buffer& display_buffer = display.getBuffer(current_display_buffer);
+        
+        // 将数据从 BufferManager 的 buffer 拷贝到 display 的 buffer
+        if (!display_buffer.copyFrom(filled_buffer->data(), filled_buffer->size())) {
+            printf("⚠️  Warning: Failed to copy buffer data\n");
+        }
+        
+        monitor.endLoadFrameTiming();
+        
+        // 显示帧
+        monitor.beginDisplayFrameTiming();
+        display.waitVerticalSync();
+        display.displayBuffer(current_display_buffer);
+        monitor.endDisplayFrameTiming();
+        
+        // 回收 buffer 到空闲队列
+        manager.recycleBuffer(filled_buffer);
+        
+        // 切换到下一个 display buffer
+        current_display_buffer = (current_display_buffer + 1) % display.getBufferCount();
+        frame_count++;
+    }
+    
+    // 6. 停止生产者线程
+    printf("\n\n🛑 Stopping video producer thread...\n");
+    manager.stopVideoProducer();
+    
+    // 停止性能监控定时器
+    monitor.stopTimer();
+    
+    printf("🛑 Playback stopped\n\n");
+    
+    // 7. 打印最终统计
+    monitor.printFinalStats();
+    printf("   Total frames displayed: %d\n", frame_count);
+    printf("   Final buffer states:\n");
+    printf("     - Free buffers: %d\n", manager.getFreeBufferCount());
+    printf("     - Filled buffers: %d\n", manager.getFilledBufferCount());
+    
+    printf("\n✅ Test completed successfully\n");
+    
+    return 0;
+}
+
+/**
  * 打印使用说明
  */
 static void print_usage(const char* prog_name) {
@@ -244,11 +389,18 @@ static void print_usage(const char* prog_name) {
     printf("  -m, --mode <mode>   Test mode (default: loop)\n");
     printf("                      loop:       4-frame loop display\n");
     printf("                      sequential: Sequential playback (play once)\n");
+    printf("                      producer:   BufferManager producer thread test\n");
     printf("\n");
     printf("Examples:\n");
     printf("  %s video.raw\n", prog_name);
     printf("  %s -m loop video.raw\n", prog_name);
     printf("  %s -m sequential video.raw\n", prog_name);
+    printf("  %s -m producer video.raw\n", prog_name);
+    printf("\n");
+    printf("Test Modes Description:\n");
+    printf("  loop:       Load N frames into framebuffer and loop display them\n");
+    printf("  sequential: Read and display frames sequentially from file\n");
+    printf("  producer:   Use BufferManager with producer thread (multi-threaded)\n");
     printf("\n");
     printf("Note:\n");
     printf("  - Raw video file must match framebuffer resolution\n");
@@ -294,6 +446,8 @@ int main(int argc, char* argv[]) {
         result = test_4frame_loop(raw_video_path);
     } else if (strcmp(mode, "sequential") == 0) {
         result = test_sequential_playback(raw_video_path);
+    } else if (strcmp(mode, "producer") == 0) {
+        result = test_buffermanager_producer(raw_video_path);
     } else {
         printf("Error: Unknown mode '%s'\n\n", mode);
         print_usage(argv[0]);

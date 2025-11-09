@@ -1,0 +1,249 @@
+#ifndef BUFFER_MANAGER_HPP
+#define BUFFER_MANAGER_HPP
+
+#include "Buffer.hpp"
+#include <queue>
+#include <mutex>
+#include <condition_variable>
+#include <vector>
+#include <thread>
+#include <atomic>
+#include <functional>
+#include <string>
+
+/**
+ * BufferManager - 线程安全的 Buffer 池管理器
+ * 
+ * 功能：
+ * - 管理一组物理连续的 Buffer
+ * - 双队列管理（空闲队列 + 就绪队列）
+ * - 线程安全的生产者-消费者模式
+ * - 支持阻塞等待和非阻塞获取
+ * - 内置视频文件生产者线程
+ * 
+ * 使用场景：
+ * - 生产者：从空闲队列获取buffer → 填充数据 → 放入就绪队列
+ * - 消费者：从就绪队列获取buffer → 处理数据 → 回收到空闲队列
+ */
+class BufferManager {
+public:
+    // ============ 类型定义 ============
+    
+    /**
+     * 错误回调函数类型
+     * @param error_msg 错误消息
+     */
+    using ErrorCallback = std::function<void(const std::string& error_msg)>;
+    
+    /**
+     * 生产者线程状态
+     */
+    enum class ProducerState {
+        STOPPED,    // 已停止
+        RUNNING,    // 运行中
+        ERROR       // 错误状态
+    };
+    
+public:
+    /**
+     * 构造函数
+     * @param buffer_count Buffer 数量
+     * @param buffer_size 每个 Buffer 的大小（字节）
+     * @param use_cma 是否使用物理连续内存（CMA）
+     */
+    BufferManager(int buffer_count, size_t buffer_size, bool use_cma = false);
+    
+    /**
+     * 析构函数：释放所有资源
+     */
+    ~BufferManager();
+    
+    // 禁止拷贝
+    BufferManager(const BufferManager&) = delete;
+    BufferManager& operator=(const BufferManager&) = delete;
+    
+    // ============ 生产者接口 ============
+    
+    /**
+     * 获取一个空闲的 Buffer（生产者调用）
+     * 
+     * @param blocking 是否阻塞等待（true: 等待直到有空闲buffer, false: 没有则立即返回nullptr）
+     * @param timeout_ms 超时时间（毫秒），仅在 blocking=true 时有效，0表示无限等待
+     * @return 空闲的 Buffer 指针，如果没有则返回 nullptr
+     */
+    Buffer* acquireFreeBuffer(bool blocking = true, int timeout_ms = 0);
+    
+    /**
+     * 提交一个已填充的 Buffer（生产者调用）
+     * 将 buffer 从空闲状态转移到就绪状态
+     * 
+     * @param buffer Buffer 指针
+     */
+    void submitFilledBuffer(Buffer* buffer);
+    
+    // ============ 消费者接口 ============
+    
+    /**
+     * 获取一个已填充的 Buffer（消费者调用）
+     * 
+     * @param blocking 是否阻塞等待（true: 等待直到有就绪buffer, false: 没有则立即返回nullptr）
+     * @param timeout_ms 超时时间（毫秒），仅在 blocking=true 时有效，0表示无限等待
+     * @return 已填充的 Buffer 指针，如果没有则返回 nullptr
+     */
+    Buffer* acquireFilledBuffer(bool blocking = true, int timeout_ms = 0);
+    
+    /**
+     * 回收一个已处理的 Buffer（消费者调用）
+     * 将 buffer 从就绪状态回收到空闲状态
+     * 
+     * @param buffer Buffer 指针
+     */
+    void recycleBuffer(Buffer* buffer);
+    
+    // ============ 查询接口 ============
+    
+    /**
+     * 获取空闲 Buffer 数量
+     */
+    int getFreeBufferCount() const;
+    
+    /**
+     * 获取就绪 Buffer 数量
+     */
+    int getFilledBufferCount() const;
+    
+    /**
+     * 获取总 Buffer 数量
+     */
+    int getTotalBufferCount() const;
+    
+    /**
+     * 获取每个 Buffer 的大小
+     */
+    size_t getBufferSize() const;
+    
+    // ============ 生产者线程接口 ============
+    
+    /**
+     * 启动视频文件生产者线程
+     * 
+     * 自动从视频文件读取帧数据并填充到Buffer中
+     * 
+     * @param video_file_path 视频文件路径
+     * @param width 视频宽度（像素）
+     * @param height 视频高度（像素）
+     * @param bits_per_pixel 每像素位数（如RGB24=24, RGBA32=32）
+     * @param loop 是否循环播放（到达文件末尾后重新开始）
+     * @param error_callback 错误回调函数（可选）
+     * @return 成功返回true，失败返回false
+     */
+    bool startVideoProducer(const char* video_file_path, 
+                           int width, int height, int bits_per_pixel,
+                           bool loop = false,
+                           ErrorCallback error_callback = nullptr);
+    
+    /**
+     * 停止生产者线程
+     * 
+     * 阻塞等待线程安全退出
+     */
+    void stopVideoProducer();
+    
+    /**
+     * 获取生产者线程状态
+     * @return 当前状态
+     */
+    ProducerState getProducerState() const;
+    
+    /**
+     * 获取最后一次错误信息
+     * @return 错误消息字符串
+     */
+    std::string getLastProducerError() const;
+    
+    /**
+     * 检查生产者线程是否正在运行
+     * @return 运行中返回true
+     */
+    bool isProducerRunning() const;
+    
+private:
+    // ============ Buffer 管理 ============
+    std::vector<Buffer> buffers_;        // Buffer 对象数组
+    std::vector<void*> memory_blocks_;   // 物理内存块指针（用于释放）
+    std::vector<int> dma_fds_;           // DMA buffer 文件描述符（CMA模式）
+    
+    size_t buffer_size_;                 // 每个 Buffer 的大小
+    bool use_cma_;                       // 是否使用 CMA
+    
+    // ============ 队列管理 ============
+    std::queue<Buffer*> free_queue_;     // 空闲队列
+    std::queue<Buffer*> filled_queue_;   // 就绪队列
+    
+    // ============ 线程同步 ============
+    mutable std::mutex mutex_;           // 互斥锁
+    std::condition_variable free_cv_;    // 空闲队列条件变量
+    std::condition_variable filled_cv_;  // 就绪队列条件变量
+    
+    // ============ 生产者线程管理 ============
+    std::thread producer_thread_;                    // 生产者线程对象
+    std::atomic<bool> producer_running_;             // 线程运行标志
+    std::atomic<ProducerState> producer_state_;      // 线程状态
+    
+    // 错误处理
+    ErrorCallback error_callback_;                   // 错误回调函数
+    std::string last_error_;                         // 最后一次错误消息
+    mutable std::mutex error_mutex_;                 // 错误信息互斥锁
+    
+    // ============ 内部方法 ============
+    
+    /**
+     * 分配物理连续内存（CMA）
+     * @param size 内存大小
+     * @param out_fd 输出 DMA buffer 文件描述符
+     * @return 内存地址，失败返回 nullptr
+     */
+    void* allocateCMAMemory(size_t size, int& out_fd);
+    
+    /**
+     * 分配普通内存
+     * @param size 内存大小
+     * @return 内存地址，失败返回 nullptr
+     */
+    void* allocateNormalMemory(size_t size);
+    
+    /**
+     * 释放 CMA 内存
+     * @param addr 内存地址
+     * @param size 内存大小
+     * @param fd DMA buffer 文件描述符
+     */
+    void freeCMAMemory(void* addr, size_t size, int fd);
+    
+    /**
+     * 释放普通内存
+     * @param addr 内存地址
+     */
+    void freeNormalMemory(void* addr);
+    
+    /**
+     * 视频文件生产者线程函数
+     * @param video_file_path 视频文件路径
+     * @param width 视频宽度
+     * @param height 视频高度
+     * @param bits_per_pixel 每像素位数
+     * @param loop 是否循环播放
+     */
+    void videoProducerThread(const char* video_file_path, 
+                            int width, int height, int bits_per_pixel,
+                            bool loop);
+    
+    /**
+     * 设置错误信息并触发回调
+     * @param error_msg 错误消息
+     */
+    void setError(const std::string& error_msg);
+};
+
+#endif // BUFFER_MANAGER_HPP
+

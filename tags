@@ -207,6 +207,7 @@ test_sequential_playback	test.cpp	/^static int test_sequential_playback(const ch
 timerThreadFunction	source/PerformanceMonitor.cpp	/^void PerformanceMonitor::timerThreadFunction() {$/;"	f	language:C++	class:PerformanceMonitor	typeref:typename:void	signature:()
 timer_cv_	include/PerformanceMonitor.hpp	/^    std::condition_variable timer_cv_; \/\/ 定时器条件变量$/;"	m	language:C++	class:PerformanceMonitor	typeref:typename:std::condition_variable
 timer_delay_seconds_	include/PerformanceMonitor.hpp	/^    double timer_delay_seconds_;      \/\/ 定时器延迟启动时间（秒）$/;"	m	language:C++	class:PerformanceMonitor	typeref:typename:double
+timer_in_delay_period_	include/PerformanceMonitor.hpp	/^    std::atomic<bool> timer_in_delay_period_;  \/\/ 是否在延迟期间（原子标志，避免/;"	m	language:C++	class:PerformanceMonitor	typeref:typename:std::atomic<bool>
 timer_interval_seconds_	include/PerformanceMonitor.hpp	/^    double timer_interval_seconds_;   \/\/ 定时器间隔（秒）$/;"	m	language:C++	class:PerformanceMonitor	typeref:typename:double
 timer_mutex_	include/PerformanceMonitor.hpp	/^    std::mutex timer_mutex_;          \/\/ 定时器互斥锁$/;"	m	language:C++	class:PerformanceMonitor	typeref:typename:std::mutex
 timer_real_start_time_	include/PerformanceMonitor.hpp	/^    std::chrono::steady_clock::time_point timer_real_start_time_;$/;"	m	language:C++	class:PerformanceMonitor	typeref:typename:std::chrono::steady_clock::time_point
