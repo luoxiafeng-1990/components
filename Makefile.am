@@ -6,6 +6,7 @@ display_test_SOURCES = test.cpp \
                        source/LinuxFramebufferDevice.cpp \
                        source/VideoFile.cpp \
                        source/PerformanceMonitor.cpp \
+                       source/Timer.cpp \
                        source/BufferManager.cpp \
                        source/IoUringVideoReader.cpp
 

@@ -2,6 +2,7 @@
 #include "../include/VideoFile.hpp"
 #include "../include/IoUringVideoReader.hpp"
 #include "../include/PerformanceMonitor.hpp"
+#include "../include/Timer.hpp"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -533,10 +534,23 @@ namespace {
     // 定时器回调函数（每1秒打印线程统计）
     void threadTimerCallback(void* data) {
         ThreadTimerData* stats = static_cast<ThreadTimerData*>(data);
-        printf("🔄 [Thread #%d] Loaded %d frames (avg FPS: %.2f)\n",
+        
+        int loaded_frames = stats->monitor->getLoadedFrames();
+        double avg_fps = stats->monitor->getAverageLoadFPS();
+        double total_time = stats->monitor->getTotalTime();
+        
+        // 计算平均每帧加载时间
+        double avg_time_per_frame = 0.0;
+        if (loaded_frames > 0 && total_time > 0) {
+            avg_time_per_frame = (total_time * 1000.0) / loaded_frames;
+        }
+        
+        printf("🔄 [Thread #%d] Loaded %d frames (%.1f fps) | Avg: %.2f ms/frame | Time: %.1fs\n",
                stats->thread_id,
-               stats->monitor->getLoadedFrames(),
-               stats->monitor->getAverageLoadFPS());
+               loaded_frames,
+               avg_fps,
+               avg_time_per_frame,
+               total_time);
     }
 }
 
@@ -564,13 +578,17 @@ void BufferManager::multiVideoProducerThread(int thread_id,
     int skipped_frames = 0;  // 读取失败的帧数（仅统计视频文件读取错误）
     int consecutive_failures = 0;  // 连续失败计数
     
-    // 创建性能监控器并配置定时器
+    // 创建性能监控器（只负责统计）
     PerformanceMonitor monitor;
+    monitor.start();
+    
+    // 创建定时器数据
     ThreadTimerData timer_data = { thread_id, &monitor };
     
-    monitor.setTimerCallback(threadTimerCallback, &timer_data);
-    monitor.setTimerInterval(1.0);  // 每1秒触发一次
-    monitor.startTimer();           // 启动定时器（会自动启动监控）
+    // 创建定时器（负责定时触发打印）
+    // 参数：间隔1秒，回调函数，数据，延迟0秒，总时长0秒（永久运行）
+    Timer timer(1.0, threadTimerCallback, &timer_data, 0.0, 0.0);
+    timer.start();
     while (producer_running_) {
         loop_iterations++;
         
@@ -651,7 +669,7 @@ void BufferManager::multiVideoProducerThread(int thread_id,
     }  // end of while loop
     
     // 停止定时器
-    monitor.stopTimer();
+    timer.stop();
     
     video.close();
     
