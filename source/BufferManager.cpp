@@ -352,51 +352,42 @@ bool BufferManager::startVideoProducerInternal(int thread_count,
     // 保存错误回调
     error_callback_ = error_callback;
     
+    // 🆕 创建共享的 VideoFile 对象（所有线程共享，只打开一次文件）
+    shared_video_file_ = std::make_shared<VideoFile>();
+    if (!shared_video_file_->openRaw(video_file_path, width, height, bits_per_pixel)) {
+        printf("❌ ERROR: Failed to open shared video file\n");
+        shared_video_file_.reset();
+        return false;
+    }
+    
+    int total_frames = shared_video_file_->getTotalFrames();
+    size_t frame_size = shared_video_file_->getFrameSize();
+    
+    printf("   Total frames: %d\n", total_frames);
+    printf("   Frame size: %zu bytes\n", frame_size);
+    
+    // 检查帧大小是否匹配
+    if (frame_size != buffer_size_) {
+        printf("❌ ERROR: Frame size mismatch: video=%zu, buffer=%zu\n",
+               frame_size, buffer_size_);
+        shared_video_file_.reset();
+        return false;
+    }
+    
     // 重置状态
     producer_running_ = true;
     producer_state_ = ProducerState::RUNNING;
     producer_thread_count_ = thread_count;
     last_error_.clear();
-    
-    // 如果是多线程模式（thread_count > 1），需要获取总帧数
-    int total_frames = 0;
-    if (thread_count > 1) {
-        VideoFile test_video;
-        if (!test_video.openRaw(video_file_path, width, height, bits_per_pixel)) {
-            printf("❌ ERROR: Failed to open video file for validation\n");
-            producer_running_ = false;
-            producer_state_ = ProducerState::ERROR;
-            return false;
-        }
-        
-        total_frames = test_video.getTotalFrames();
-        size_t frame_size = test_video.getFrameSize();
-        
-        printf("   Total frames: %d\n", total_frames);
-        printf("   Frame size: %zu bytes\n", frame_size);
-        
-        // 检查帧大小是否匹配
-        if (frame_size != buffer_size_) {
-            printf("❌ ERROR: Frame size mismatch: video=%zu, buffer=%zu\n",
-                   frame_size, buffer_size_);
-            producer_running_ = false;
-            producer_state_ = ProducerState::ERROR;
-            return false;
-        }
-        
-        test_video.close();
-        next_frame_index_ = 0;  // 重置帧索引（多线程模式）
-    }
+    next_frame_index_ = 0;  // 重置帧索引
     
     // 启动线程
     producer_threads_.reserve(thread_count);
     for (int i = 0; i < thread_count; i++) {
         try {
-           
-            // 多线程模式：使用协调的 multiVideoProducerThread
+            // 🆕 传递共享的 VideoFile 对象（所有线程使用同一个对象）
             producer_threads_.emplace_back(&BufferManager::multiVideoProducerThread, this,
-                                              i, video_file_path, width, height, 
-                                              bits_per_pixel, loop, total_frames);
+                                              i, shared_video_file_, loop, total_frames);
             
             if (thread_count == 1) {
                 printf("✅ Video producer thread started\n");
@@ -413,6 +404,7 @@ bool BufferManager::startVideoProducerInternal(int thread_count,
                 }
             }
             producer_threads_.clear();
+            shared_video_file_.reset();  // 清理共享VideoFile
             producer_state_ = ProducerState::ERROR;
             std::string error_msg = std::string("Failed to start producer thread: ") + e.what();
             setError(error_msg);
@@ -458,6 +450,12 @@ void BufferManager::stopVideoProducer() {
         }
     }
     producer_threads_.clear();
+    
+    // 清理共享的 VideoFile（如果有）
+    if (shared_video_file_) {
+        printf("🧹 Closing shared video file...\n");
+        shared_video_file_.reset();
+    }
     
     // 清理 io_uring readers（如果有）
     if (!iouring_readers_.empty()) {
@@ -555,14 +553,14 @@ namespace {
 }
 
 void BufferManager::multiVideoProducerThread(int thread_id,
-                                            const char* video_file_path, 
-                                            int width, int height, int bits_per_pixel,
+                                            std::shared_ptr<VideoFile> shared_video,
                                             bool loop, int total_frames) {
-    // 每个线程打开自己的VideoFile实例
-    VideoFile video;
-    if (!video.openRaw(video_file_path, width, height, bits_per_pixel)) {
+    // 🎉 使用共享的 VideoFile 对象，无需每个线程打开一次文件
+    // shared_video 是通过 shared_ptr 传递的，引用计数管理生命周期
+    
+    if (!shared_video || !shared_video->isOpen()) {
         std::string error_msg = std::string("Thread #") + std::to_string(thread_id) + 
-                                ": Failed to open video file";
+                                ": Shared video file is not available";
         setError(error_msg);
         printf("❌ %s\n", error_msg.c_str());
         producer_state_ = ProducerState::ERROR;
@@ -571,7 +569,7 @@ void BufferManager::multiVideoProducerThread(int thread_id,
     
     int frames_produced = 0;
     
-    printf("🚀 Thread #%d: Using single-frame mode\n", thread_id);
+    printf("🚀 Thread #%d: Using shared VideoFile with thread-safe reading\n", thread_id);
     
     // 主循环
     int loop_iterations = 0;
@@ -632,7 +630,8 @@ void BufferManager::multiVideoProducerThread(int thread_id,
         
         // 开始计时
         monitor.beginLoadFrameTiming();
-        bool read_success = video.readFrameAt(frame_index, *buffer);
+        // 🔑 使用线程安全的读取方法（不修改VideoFile内部状态）
+        bool read_success = shared_video->readFrameAtThreadSafe(frame_index, buffer->data(), buffer->size());
         monitor.endLoadFrameTiming();
         
         if (!read_success) {
@@ -671,7 +670,8 @@ void BufferManager::multiVideoProducerThread(int thread_id,
     // 停止定时器
     timer.stop();
     
-    video.close();
+    // 注意：不需要 close()，因为使用的是共享的 VideoFile
+    // shared_video 的生命周期由 shared_ptr 管理，会在所有线程退出后自动清理
     
     // 打印最终统计
     printf("🏁 Thread #%d finished:\n", thread_id);

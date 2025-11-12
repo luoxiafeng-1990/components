@@ -192,6 +192,19 @@ public:
      */
     bool readFrameAt(int frame_index, void* dest_buffer, size_t buffer_size);
     
+    /**
+     * 线程安全地读取指定帧（不修改内部状态）
+     * 
+     * 此方法是const的，不会修改 current_frame_index_ 等内部状态，
+     * 适合多线程并发读取同一个VideoFile对象。
+     * 
+     * @param frame_index 帧索引
+     * @param dest_buffer 目标地址
+     * @param buffer_size 目标缓冲区大小
+     * @return 成功返回true
+     */
+    bool readFrameAtThreadSafe(int frame_index, void* dest_buffer, size_t buffer_size) const;
+    
     // ============ 导航操作 ============
     
     /**

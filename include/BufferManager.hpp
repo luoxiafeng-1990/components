@@ -10,6 +10,10 @@
 #include <atomic>
 #include <functional>
 #include <string>
+#include <memory>
+
+// 前向声明
+class VideoFile;
 
 /**
  * BufferManager - 线程安全的 Buffer 池管理器
@@ -248,6 +252,7 @@ private:
     
     // io_uring readers管理（用于io_uring模式）
     std::vector<void*> iouring_readers_;             // IoUringVideoReader指针数组（避免头文件依赖，使用void*）
+    std::shared_ptr<VideoFile> shared_video_file_;   // 共享的VideoFile对象（多线程共享）
     
     // 错误处理
     ErrorCallback error_callback_;                   // 错误回调函数
@@ -317,16 +322,12 @@ private:
     /**
      * 视频文件生产者线程函数（多线程模式）
      * @param thread_id 线程ID（0, 1, 2...）
-     * @param video_file_path 视频文件路径
-     * @param width 视频宽度
-     * @param height 视频高度
-     * @param bits_per_pixel 每像素位数
+     * @param shared_video 共享的VideoFile对象
      * @param loop 是否循环播放
      * @param total_frames 视频总帧数
      */
     void multiVideoProducerThread(int thread_id,
-                                 const char* video_file_path, 
-                                 int width, int height, int bits_per_pixel,
+                                 std::shared_ptr<VideoFile> shared_video,
                                  bool loop, int total_frames);
     
     /**

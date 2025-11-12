@@ -277,6 +277,31 @@ bool VideoFile::readFrameAt(int frame_index, void* dest_buffer, size_t buffer_si
     return readFrameTo(dest_buffer, buffer_size);
 }
 
+bool VideoFile::readFrameAtThreadSafe(int frame_index, void* dest_buffer, size_t buffer_size) const {
+    // 参数检查
+    if (!is_open_ || mapped_file_ == nullptr) {
+        return false;
+    }
+    
+    if (frame_index < 0 || frame_index >= total_frames_) {
+        return false;
+    }
+    
+    if (buffer_size < frame_size_) {
+        return false;
+    }
+    
+    // 🔑 关键：直接计算偏移量，不修改任何成员变量
+    // 这是线程安全的，因为所有线程都是从只读的mmap内存中读取
+    size_t frame_offset = (size_t)frame_index * frame_size_;
+    const char* frame_addr = (const char*)mapped_file_ + frame_offset;
+    
+    // 从映射内存拷贝数据（线程安全：不同的dest_buffer，不同的偏移量）
+    memcpy(dest_buffer, frame_addr, frame_size_);
+    
+    return true;
+}
+
 // ============ 导航操作 ============
 
 bool VideoFile::seek(int frame_index) {
