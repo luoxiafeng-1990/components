@@ -1,7 +1,8 @@
 #ifndef VIDEOFILE_HPP
 #define VIDEOFILE_HPP
 
-#include "Buffer.hpp"
+#include "../buffer/Buffer.hpp"
+#include "../monitor/PerformanceMonitor.hpp"
 #include <stddef.h>  // For size_t
 #include <sys/types.h>  // For ssize_t
 

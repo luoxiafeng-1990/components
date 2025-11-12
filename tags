@@ -224,7 +224,7 @@ mapped_size_	include/VideoFile.hpp	/^    size_t mapped_size_;              \/\/ 
 memory_blocks_	include/BufferManager.hpp	/^    std::vector<void*> memory_blocks_;   \/\/ 物理内存块指针（用于释放）$/;"	m	language:C++	class:BufferManager	typeref:typename:std::vector<void * >
 monitor	source/BufferManager.cpp	/^        PerformanceMonitor* monitor;$/;"	m	language:C++	struct:__anon6870c90b0510::ThreadTimerData	typeref:typename:PerformanceMonitor *	file:
 monitor	test.cpp	/^    PerformanceMonitor* monitor;$/;"	m	language:C++	struct:BufferManagerStats	typeref:typename:PerformanceMonitor *	file:
-multiVideoProducerThread	source/BufferManager.cpp	/^void BufferManager::multiVideoProducerThread(int thread_id,$/;"	f	language:C++	class:BufferManager	typeref:typename:void	signature:(int thread_id,const char * video_file_path,int width,int height,int bits_per_pixel,bool loop,int total_frames)
+multiVideoProducerThread	source/BufferManager.cpp	/^void BufferManager::multiVideoProducerThread(int thread_id,$/;"	f	language:C++	class:BufferManager	typeref:typename:void	signature:(int thread_id,std::shared_ptr<VideoFile> shared_video,bool loop,int total_frames)
 mutex_	include/BufferManager.hpp	/^    mutable std::mutex mutex_;           \/\/ 互斥锁$/;"	m	language:C++	class:BufferManager	typeref:typename:std::mutex
 mutex_	include/Timer.hpp	/^    std::mutex mutex_;$/;"	m	language:C++	class:Timer	typeref:typename:std::mutex
 next_frame_index_	include/BufferManager.hpp	/^    std::atomic<int> next_frame_index_;              \/\/ 下一个要读取的帧索引$/;"	m	language:C++	class:BufferManager	typeref:typename:std::atomic<int>
@@ -250,6 +250,7 @@ queue_depth_	include/IoUringVideoReader.hpp	/^    int queue_depth_;$/;"	m	langua
 readFileHeader	source/VideoFile.cpp	/^ssize_t VideoFile::readFileHeader(unsigned char* header, size_t size) {$/;"	f	language:C++	class:VideoFile	typeref:typename:ssize_t	signature:(unsigned char * header,size_t size)
 readFrameAt	source/VideoFile.cpp	/^bool VideoFile::readFrameAt(int frame_index, Buffer& dest_buffer) {$/;"	f	language:C++	class:VideoFile	typeref:typename:bool	signature:(int frame_index,Buffer & dest_buffer)
 readFrameAt	source/VideoFile.cpp	/^bool VideoFile::readFrameAt(int frame_index, void* dest_buffer, size_t buffer_size) {$/;"	f	language:C++	class:VideoFile	typeref:typename:bool	signature:(int frame_index,void * dest_buffer,size_t buffer_size)
+readFrameAtThreadSafe	source/VideoFile.cpp	/^bool VideoFile::readFrameAtThreadSafe(int frame_index, void* dest_buffer, size_t buffer_size) co/;"	f	language:C++	class:VideoFile	typeref:typename:bool	signature:(int frame_index,void * dest_buffer,size_t buffer_size) const
 readFrameTo	source/VideoFile.cpp	/^bool VideoFile::readFrameTo(Buffer& dest_buffer) {$/;"	f	language:C++	class:VideoFile	typeref:typename:bool	signature:(Buffer & dest_buffer)
 readFrameTo	source/VideoFile.cpp	/^bool VideoFile::readFrameTo(void* dest_buffer, size_t buffer_size) {$/;"	f	language:C++	class:VideoFile	typeref:typename:bool	signature:(void * dest_buffer,size_t buffer_size)
 recordFrameDecoded	source/PerformanceMonitor.cpp	/^void PerformanceMonitor::recordFrameDecoded() {$/;"	f	language:C++	class:PerformanceMonitor	typeref:typename:void	signature:()
@@ -267,6 +268,7 @@ seekToBegin	source/VideoFile.cpp	/^bool VideoFile::seekToBegin() {$/;"	f	languag
 seekToEnd	source/VideoFile.cpp	/^bool VideoFile::seekToEnd() {$/;"	f	language:C++	class:VideoFile	typeref:typename:bool	signature:()
 setError	source/BufferManager.cpp	/^void BufferManager::setError(const std::string& error_msg) {$/;"	f	language:C++	class:BufferManager	typeref:typename:void	signature:(const std::string & error_msg)
 setReportInterval	source/PerformanceMonitor.cpp	/^void PerformanceMonitor::setReportInterval(int interval_ms) {$/;"	f	language:C++	class:PerformanceMonitor	typeref:typename:void	signature:(int interval_ms)
+shared_video_file_	include/BufferManager.hpp	/^    std::shared_ptr<VideoFile> shared_video_file_;   \/\/ 共享的VideoFile对象（多线程共/;"	m	language:C++	class:BufferManager	typeref:typename:std::shared_ptr<VideoFile>
 signal_handler	test.cpp	/^static void signal_handler(int signum) {$/;"	f	language:C++	typeref:typename:void	file:	signature:(int signum)
 size	include/Buffer.hpp	/^    size_t size() const { return size_; }$/;"	f	language:C++	class:Buffer	typeref:typename:size_t	signature:() const
 size_	include/Buffer.hpp	/^    size_t size_;     \/\/ 内存大小（字节）$/;"	m	language:C++	class:Buffer	typeref:typename:size_t

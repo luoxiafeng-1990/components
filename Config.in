@@ -1,7 +1,7 @@
-config BR2_PACKAGE_DISPLAY
-	bool "display - Display Framework"
+config BR2_PACKAGE_COMPONENTS
+	bool "components - Component Framework"
 	help
-	  Display framework provides a cross-platform abstraction layer
+	  Component framework provides a cross-platform abstraction layer
 	  for framebuffer display operations. Includes LinuxFramebufferDevice,
 	  VideoFile management, BufferManager for multi-threaded buffer handling,
 	  and PerformanceMonitor for video playback testing.

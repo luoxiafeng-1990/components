@@ -22,12 +22,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <signal.h>
-#include <chrono>
-#include "include/LinuxFramebufferDevice.hpp"
-#include "include/VideoFile.hpp"
-#include "include/PerformanceMonitor.hpp"
-#include "include/BufferManager.hpp"
-#include "include/Timer.hpp"
+#include "include/display/LinuxFramebufferDevice.hpp"
+#include "include/videoFile/VideoFile.hpp"
+#include "include/buffer/BufferManager.hpp"
 
 // 全局标志，用于处理 Ctrl+C 退出
 static volatile bool g_running = true;
@@ -39,96 +36,6 @@ static void signal_handler(int signum) {
         g_running = false;
     }
 }
-
-// 定时器回调函数：自动停止播放
-static void auto_stop_callback(void* user_data) {
-    bool* running_flag = (bool*)user_data;
-    *running_flag = false;
-    printf("\n⏰ Auto-stop timer triggered: stopping playback...\n");
-}
-
-// 定时器回调函数：打印性能统计
-static void print_stats_callback(void* user_data) {
-    PerformanceMonitor* monitor = (PerformanceMonitor*)user_data;
-    
-    int loaded = monitor->getLoadedFrames();
-    int displayed = monitor->getDisplayedFrames();
-    double elapsed = monitor->getElapsedTime();
-    double load_fps = monitor->getAverageLoadFPS();
-    double display_fps = monitor->getAverageDisplayFPS();
-    
-    printf("┌─────────────────────────────────────────────────────┐\n");
-    printf("│      ⏱️  性能统计 (%.1fs)                        │\n", elapsed);
-    printf("└─────────────────────────────────────────────────────┘\n");
-    
-    if (loaded > 0) {
-        printf("📥 加载帧: %d 帧 (%.1f fps)\n", loaded, load_fps);
-    }
-    
-    if (displayed > 0) {
-        printf("📺 显示操作: %d 次 (%.1f fps)\n", displayed, display_fps);
-    }
-    
-    printf("\n");
-}
-
-// BufferManager状态数据结构
-struct BufferManagerStats {
-    PerformanceMonitor* monitor;
-    std::shared_ptr<BufferManager>* manager;
-};
-
-// 定时器回调函数：打印性能统计和BufferManager状态
-static void print_buffermanager_stats_callback(void* user_data) {
-    BufferManagerStats* stats = (BufferManagerStats*)user_data;
-    PerformanceMonitor* monitor = stats->monitor;
-    auto manager = stats->manager->get();
-    
-    int loaded = monitor->getLoadedFrames();
-    int displayed = monitor->getDisplayedFrames();
-    double elapsed = monitor->getElapsedTime();
-    double load_fps = monitor->getAverageLoadFPS();
-    double display_fps = monitor->getAverageDisplayFPS();
-    
-    printf("┌─────────────────────────────────────────────────────┐\n");
-    printf("│      ⏱️  性能统计 (%.1fs)                        │\n", elapsed);
-    printf("└─────────────────────────────────────────────────────┘\n");
-    
-    if (loaded > 0) {
-        printf("📥 加载帧: %d 帧 (%.1f fps)\n", loaded, load_fps);
-    }
-    
-    if (displayed > 0) {
-        printf("📺 显示操作: %d 次 (%.1f fps)\n", displayed, display_fps);
-    }
-    
-    // BufferManager 状态
-    printf("┌─────────────────────────────────────────────────────┐\n");
-    printf("│      📦 BufferManager 状态                      │\n");
-    printf("└─────────────────────────────────────────────────────┘\n");
-    
-    auto state = manager->getProducerState();
-    const char* state_str = "";
-    switch (state) {
-        case BufferManager::ProducerState::STOPPED:
-            state_str = "🛑 STOPPED";
-            break;
-        case BufferManager::ProducerState::RUNNING:
-            state_str = "✅ RUNNING";
-            break;
-        case BufferManager::ProducerState::ERROR:
-            state_str = "❌ ERROR";
-            break;
-    }
-    
-    printf("🎬 生产者状态: %s\n", state_str);
-    printf("📊 已填充buffer: %d 个\n", manager->getFilledBufferCount());
-    printf("📦 空闲buffer: %d 个\n", manager->getFreeBufferCount());
-    printf("📈 总buffer数: %d 个\n", manager->getTotalBufferCount());
-    
-    printf("\n");
-}
-
 /**
  * 测试1：多缓冲循环播放测试
  * 
@@ -167,16 +74,9 @@ static int test_4frame_loop(const char* raw_video_path) {
         return -1;
     }
     
-    // 创建并启动性能监控器
-    PerformanceMonitor monitor;
-    monitor.start();
-    
     // 加载帧到 framebuffer
     printf("\n📥 Loading %d frames into framebuffer...\n", buffer_count);
     for (int i = 0; i < buffer_count; i++) {
-        // 开始计时
-        monitor.beginLoadFrameTiming();
-        
         // 获取buffer引用
         Buffer& buffer = display.getBuffer(i);
         if (!buffer.isValid()) {
@@ -189,45 +89,24 @@ static int test_4frame_loop(const char* raw_video_path) {
             printf("❌ ERROR: Failed to load frame %d\n", i);
             return -1;
         }
-        // 结束计时并记录
-        monitor.endLoadFrameTiming();
     }
-    
-    // 创建并启动定时器（每1秒打印统计，延迟10秒开始）
-    Timer stats_timer(1.0, print_stats_callback, &monitor, 10.0, 0.0);
-    stats_timer.start();
-    
-    // 创建自动停止定时器（40秒后停止：10秒延迟 + 30秒统计）
-    Timer stop_timer(40.0, auto_stop_callback, (void*)&g_running, 0.0, 0.0);
-    stop_timer.start();
-    
+
     // 注册信号处理
     signal(SIGINT, signal_handler);
     
     int loop_count = 0;
     while (g_running) {
         for (int buf_idx = 0; buf_idx < buffer_count && g_running; buf_idx++) {
-            // 开始显示计时
-            monitor.beginDisplayFrameTiming();
             // 等待垂直同步
             display.waitVerticalSync();
             // 切换显示buffer
             display.displayBuffer(buf_idx);
-            // 结束显示计时并记录
-            monitor.endDisplayFrameTiming();
         }
         
         loop_count++;
     }
     
-    // 停止定时器
-    stats_timer.stop();
-    stop_timer.stop();
-    
     printf("\n🛑 Playback stopped\n\n");
-    
-    // 打印最终统计
-    monitor.printStatistics();
     
     printf("\n✅ Test completed successfully\n");
     
@@ -260,19 +139,6 @@ static int test_sequential_playback(const char* raw_video_path) {
                        display.getBitsPerPixel())) {
         return -1;
     }
-    
-    // 创建并启动性能监控器
-    PerformanceMonitor monitor;
-    monitor.start();
-    
-    // 创建并启动定时器（每1秒打印统计，延迟20秒开始）
-    Timer stats_timer(1.0, print_stats_callback, &monitor, 20.0, 0.0);
-    stats_timer.start();
-    
-    // 创建自动停止定时器（50秒后停止：20秒延迟 + 30秒统计）
-    Timer stop_timer(50.0, auto_stop_callback, (void*)&g_running, 0.0, 0.0);
-    stop_timer.start();
-    
     // 开始播放
     printf("\n🎬 Starting sequential playback (Ctrl+C to stop)...\n\n");
     
@@ -288,38 +154,21 @@ static int test_sequential_playback(const char* raw_video_path) {
             printf("🔄 Video reached end, looping back to start...\n");
         }
         
-        // 加载帧
-        monitor.beginLoadFrameTiming();
         Buffer& buffer = display.getBuffer(current_buffer);
         if (!video.readFrameTo(buffer)) {
             printf("❌ ERROR: Failed to read frame %d\n", frame_index);
             break;
         }
-        monitor.endLoadFrameTiming();
-        
-        // 显示帧
-        monitor.beginDisplayFrameTiming();
         display.waitVerticalSync();
         display.displayBuffer(current_buffer);
-        monitor.endDisplayFrameTiming();
-        
         // 切换到下一个buffer
         current_buffer = (current_buffer + 1) % display.getBufferCount();
         frame_index++;
     }
-    
-    // 停止定时器
-    stats_timer.stop();
-    stop_timer.stop();
-    
     printf("\n🛑 Playback stopped\n\n");
-    
     // 打印最终统计
-    monitor.printStatistics();
     printf("   Total frames played: %d / %d\n", frame_index, video.getTotalFrames());
-    
     printf("\n✅ Test completed successfully\n");
-    
     return 0;
 }
 
@@ -358,23 +207,10 @@ static int test_buffermanager_producer(const char* raw_video_path) {
     
     printf("\n📦 BufferManager created with 40 buffers\n");
     
-    // 3. 创建性能监控器
-    PerformanceMonitor monitor;
-    monitor.start();
-    
-    // 配置定时器 - 打印性能统计和 BufferManager 状态
-    BufferManagerStats bm_stats = { &monitor, &manager };
-    Timer stats_timer(1.0, print_buffermanager_stats_callback, &bm_stats, 10.0, 0.0);
-    stats_timer.start();
-    
-    // 创建自动停止定时器（40秒后停止：10秒延迟 + 30秒统计）
-    Timer stop_timer(40.0, auto_stop_callback, (void*)&g_running, 0.0, 0.0);
-    stop_timer.start();
-    
     // 4. 启动视频生产者线程（使用多线程模式）
     printf("\n🎬 Starting video producer threads...\n");
     
-    int producer_thread_count = 3;  // 使用3个生产者线程
+    int producer_thread_count = 4;  // 使用3个生产者线程
     printf("   Using %d producer threads for parallel reading\n", producer_thread_count);
     
     bool started = manager->startMultipleVideoProducers(
@@ -419,12 +255,8 @@ static int test_buffermanager_producer(const char* raw_video_path) {
         Buffer* filled_buffer = manager->acquireFilledBuffer(true, 100);
         if (filled_buffer == nullptr) {
             // 超时，继续等待
-            printf("🔄 Consumer got no buffer, waiting for 100ms...\n");
             continue;
         }
-        
-        // 开始加载帧计时（从buffer拷贝到display）
-        monitor.beginLoadFrameTiming();
         
         // 获取 display 的 buffer
         Buffer& display_buffer = display.getBuffer(current_display_buffer);
@@ -434,14 +266,10 @@ static int test_buffermanager_producer(const char* raw_video_path) {
             printf("⚠️  Warning: Failed to copy buffer data\n");
         }
         
-        monitor.endLoadFrameTiming();
-        
         // 显示帧
-        monitor.beginDisplayFrameTiming();
         // 性能分析：测量VSync等待时间
         display.waitVerticalSync();
         display.displayBuffer(current_display_buffer);
-        monitor.endDisplayFrameTiming();
         
         // 回收 buffer 到空闲队列
         manager->recycleBuffer(filled_buffer);
@@ -455,14 +283,9 @@ static int test_buffermanager_producer(const char* raw_video_path) {
     printf("\n\n🛑 Stopping video producer thread...\n");
     manager->stopVideoProducer();
     
-    // 停止定时器
-    stats_timer.stop();
-    stop_timer.stop();
-    
     printf("🛑 Playback stopped\n\n");
     
     // 7. 打印最终统计
-    monitor.printStatistics();
     printf("   Total frames displayed: %d\n", frame_count);
     printf("   Final buffer states:\n");
     printf("     - Free buffers: %d\n", manager->getFreeBufferCount());
@@ -509,18 +332,9 @@ static int test_buffermanager_iouring(const char* raw_video_path) {
     
     printf("\n📦 BufferManager created with 40 buffers\n");
     
-    // 3. 创建性能监控器
-    PerformanceMonitor monitor;
-    monitor.start();
-    
-    // 配置定时器 - 打印性能统计和 BufferManager 状态（延迟10秒开始）
-    BufferManagerStats bm_stats = { &monitor, &manager };
-    Timer stats_timer(1.0, print_buffermanager_stats_callback, &bm_stats, 10.0, 0.0);
-    stats_timer.start();
-    
     // 不设置自动停止，让用户用 Ctrl+C 手动停止（io_uring模式性能测试需要更长时间）
     
-    // 4. 启动 io_uring 视频生产者线程
+    // 3. 启动 io_uring 视频生产者线程
     printf("\n🎬 Starting io_uring video producer threads...\n");
     
     // io_uring的优势在于异步I/O，不需要多线程！
@@ -573,9 +387,6 @@ static int test_buffermanager_iouring(const char* raw_video_path) {
             continue;
         }
         
-        // 开始加载帧计时（从buffer拷贝到display）
-        monitor.beginLoadFrameTiming();
-        
         // 获取 display 的 buffer
         Buffer& display_buffer = display.getBuffer(current_display_buffer);
         
@@ -584,14 +395,10 @@ static int test_buffermanager_iouring(const char* raw_video_path) {
             printf("⚠️  Warning: Failed to copy buffer data\n");
         }
         
-        monitor.endLoadFrameTiming();
-        
         // 显示帧
-        monitor.beginDisplayFrameTiming();
         // 等待垂直同步
         display.waitVerticalSync();
         display.displayBuffer(current_display_buffer);
-        monitor.endDisplayFrameTiming();
         
         // 回收 buffer 到空闲队列
         manager->recycleBuffer(filled_buffer);
@@ -605,13 +412,9 @@ static int test_buffermanager_iouring(const char* raw_video_path) {
     printf("\n\n🛑 Stopping io_uring video producer threads...\n");
     manager->stopVideoProducer();
     
-    // 停止定时器
-    stats_timer.stop();
-    
     printf("🛑 Playback stopped\n\n");
     
     // 7. 打印最终统计
-    monitor.printStatistics();
     printf("   Total frames displayed: %d\n", frame_count);
     printf("   Final buffer states:\n");
     printf("     - Free buffers: %d\n", manager->getFreeBufferCount());

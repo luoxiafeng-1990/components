@@ -1,16 +1,18 @@
-#include "../include/Timer.hpp"
+#include "../../include/monitor/Timer.hpp"
 #include <stdio.h>
 
 Timer::Timer(double interval_seconds, 
              void (*callback)(void*), 
              void* user_data,
              double delay_seconds,
-             double duration_seconds)
+             double duration_seconds,
+             void (*delay_end_callback)(void*))
     : running_(false)
     , interval_seconds_(interval_seconds)
     , delay_seconds_(delay_seconds)
     , duration_seconds_(duration_seconds)
     , callback_(callback)
+    , delay_end_callback_(delay_end_callback)
     , user_data_(user_data)
 {
     if (interval_seconds_ <= 0) {
@@ -96,7 +98,21 @@ void Timer::timerLoop() {
             return;
         }
         
-        printf("▶️  Timer delay period ended, starting periodic callbacks...\n");
+        printf("▶️  Timer delay period ended\n");
+        
+        // 🎯 触发延迟结束回调（如果提供了）
+        if (delay_end_callback_) {
+            printf("🔔 Triggering delay end callback...\n");
+            try {
+                delay_end_callback_(user_data_);
+            } catch (const std::exception& e) {
+                printf("⚠️  Exception in delay end callback: %s\n", e.what());
+            } catch (...) {
+                printf("⚠️  Unknown exception in delay end callback\n");
+            }
+        }
+        
+        printf("▶️  Starting periodic callbacks...\n");
     }
     
     // 记录实际开始时间（跳过延迟后）

@@ -26,23 +26,26 @@ public:
     /**
      * 构造函数
      * 
-     * @param interval_seconds   触发间隔（秒），如 1.0 表示每秒触发一次
-     * @param callback           回调函数指针
-     * @param user_data          传递给回调函数的用户数据
-     * @param delay_seconds      延迟启动时间（秒），0表示立即开始，默认0
-     * @param duration_seconds   总运行时长（秒），0表示永久运行，默认0
+     * @param interval_seconds      触发间隔（秒），如 1.0 表示每秒触发一次
+     * @param callback              回调函数指针（周期性触发）
+     * @param user_data             传递给回调函数的用户数据
+     * @param delay_seconds         延迟启动时间（秒），0表示立即开始，默认0
+     * @param duration_seconds      总运行时长（秒），0表示永久运行，默认0
+     * @param delay_end_callback    延迟结束后的回调函数（可选，默认nullptr）
      * 
      * 示例：
-     *   Timer timer(1.0, callback, data);              // 立即开始，永久运行
-     *   Timer timer(1.0, callback, data, 5.0);         // 5秒后开始，永久运行
-     *   Timer timer(1.0, callback, data, 0.0, 60.0);   // 立即开始，60秒后停止
-     *   Timer timer(1.0, callback, data, 5.0, 60.0);   // 5秒后开始，60秒后停止
+     *   Timer timer(1.0, callback, data);                          // 立即开始，永久运行
+     *   Timer timer(1.0, callback, data, 5.0);                     // 5秒后开始，永久运行
+     *   Timer timer(1.0, callback, data, 0.0, 60.0);               // 立即开始，60秒后停止
+     *   Timer timer(1.0, callback, data, 5.0, 60.0);               // 5秒后开始，60秒后停止
+     *   Timer timer(1.0, callback, data, 5.0, 0.0, delayEndCb);   // 5秒后触发delayEndCb，然后开始周期
      */
     Timer(double interval_seconds, 
           void (*callback)(void*), 
           void* user_data,
           double delay_seconds = 0.0,
-          double duration_seconds = 0.0);
+          double duration_seconds = 0.0,
+          void (*delay_end_callback)(void*) = nullptr);
     
     /**
      * 析构函数
@@ -90,7 +93,8 @@ private:
     double duration_seconds_;   // 总运行时长
     
     // 回调函数
-    void (*callback_)(void*);
+    void (*callback_)(void*);           // 周期性回调
+    void (*delay_end_callback_)(void*); // 延迟结束回调（可选）
     void* user_data_;
     
     /**

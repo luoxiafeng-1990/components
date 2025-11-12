@@ -2,7 +2,7 @@
 #define LINUX_FRAMEBUFFER_DEVICE_HPP
 
 #include "IDisplayDevice.hpp"
-#include "Buffer.hpp"
+#include "../buffer/Buffer.hpp"
 #include <vector>
 
 /**

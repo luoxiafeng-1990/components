@@ -1,8 +1,8 @@
-#include "../include/BufferManager.hpp"
-#include "../include/VideoFile.hpp"
-#include "../include/IoUringVideoReader.hpp"
-#include "../include/PerformanceMonitor.hpp"
-#include "../include/Timer.hpp"
+#include "../../include/buffer/BufferManager.hpp"
+#include "../../include/videoFile/VideoFile.hpp"
+#include "../../include/videoFile/IoUringVideoReader.hpp"
+#include "../../include/monitor/PerformanceMonitor.hpp"
+#include "../../include/monitor/Timer.hpp"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -526,16 +526,17 @@ namespace {
     // 定时器回调数据结构
     struct ThreadTimerData {
         int thread_id;
-        PerformanceMonitor* monitor;
+        PerformanceMonitor* monitor_periodic;  // 周期统计（每1秒重置）
     };
 
-    // 定时器回调函数（每1秒打印线程统计）
+    // 定时器回调函数（每1秒打印线程统计并重置周期monitor）
     void threadTimerCallback(void* data) {
         ThreadTimerData* stats = static_cast<ThreadTimerData*>(data);
         
-        int loaded_frames = stats->monitor->getLoadedFrames();
-        double avg_fps = stats->monitor->getAverageLoadFPS();
-        double total_time = stats->monitor->getTotalTime();
+        // 从周期monitor读取统计数据
+        int loaded_frames = stats->monitor_periodic->getLoadedFrames();
+        double avg_fps = stats->monitor_periodic->getAverageLoadFPS();
+        double total_time = stats->monitor_periodic->getTotalTime();
         
         // 计算平均每帧加载时间
         double avg_time_per_frame = 0.0;
@@ -543,12 +544,15 @@ namespace {
             avg_time_per_frame = (total_time * 1000.0) / loaded_frames;
         }
         
-        printf("🔄 [Thread #%d] Loaded %d frames (%.1f fps) | Avg: %.2f ms/frame | Time: %.1fs\n",
+        // 打印本周期（过去1秒）的统计
+        printf("🔄 [Thread #%d] Last 1s: Loaded %d frames (%.1f fps) | Avg: %.2f ms/frame\n",
                stats->thread_id,
                loaded_frames,
                avg_fps,
-               avg_time_per_frame,
-               total_time);
+               avg_time_per_frame);
+        
+        // 🔑 关键：打印后重置周期monitor，为下一个1秒周期做准备
+        stats->monitor_periodic->reset();
     }
 }
 
@@ -576,16 +580,21 @@ void BufferManager::multiVideoProducerThread(int thread_id,
     int skipped_frames = 0;  // 读取失败的帧数（仅统计视频文件读取错误）
     int consecutive_failures = 0;  // 连续失败计数
     
-    // 创建性能监控器（只负责统计）
-    PerformanceMonitor monitor;
-    monitor.start();
+    // 🎯 创建两个性能监控器
+    // (1) 周期统计monitor：每1秒重置，用于打印每秒的瞬时性能
+    PerformanceMonitor monitor_periodic;
+    monitor_periodic.start();
     
-    // 创建定时器数据
-    ThreadTimerData timer_data = { thread_id, &monitor };
+    // (2) 总体统计monitor：从线程启动到结束，累计所有帧数和时间
+    PerformanceMonitor monitor_total;
+    monitor_total.start();
+    
+    // 创建定时器数据（只传递周期monitor，因为回调只需要打印和重置周期monitor）
+    ThreadTimerData timer_data = { thread_id, &monitor_periodic };
     
     // 创建定时器（负责定时触发打印）
     // 参数：间隔1秒，回调函数，数据，延迟0秒，总时长0秒（永久运行）
-    Timer timer(1.0, threadTimerCallback, &timer_data, 0.0, 0.0);
+    Timer timer(1.0, threadTimerCallback, &timer_data, 0.0, 40);
     timer.start();
     while (producer_running_) {
         loop_iterations++;
@@ -628,11 +637,16 @@ void BufferManager::multiVideoProducerThread(int thread_id,
             break;
         }
         
-        // 开始计时
-        monitor.beginLoadFrameTiming();
+        // 🎯 开始计时（同时记录到两个monitor）
+        monitor_periodic.beginLoadFrameTiming();
+        monitor_total.beginLoadFrameTiming();
+        
         // 🔑 使用线程安全的读取方法（不修改VideoFile内部状态）
         bool read_success = shared_video->readFrameAtThreadSafe(frame_index, buffer->data(), buffer->size());
-        monitor.endLoadFrameTiming();
+        
+        // 🎯 结束计时（同时记录到两个monitor）
+        monitor_periodic.endLoadFrameTiming();
+        monitor_total.endLoadFrameTiming();
         
         if (!read_success) {
             skipped_frames++;
@@ -673,15 +687,15 @@ void BufferManager::multiVideoProducerThread(int thread_id,
     // 注意：不需要 close()，因为使用的是共享的 VideoFile
     // shared_video 的生命周期由 shared_ptr 管理，会在所有线程退出后自动清理
     
-    // 打印最终统计
-    printf("🏁 Thread #%d finished:\n", thread_id);
+    // 🎯 打印最终的总体统计（使用 monitor_total，它累计了从开始到结束的所有数据）
+    printf("\n🏁 Thread #%d finished:\n", thread_id);
     printf("   📊 Produced %d frames, skipped %d frames\n", frames_produced, skipped_frames);
-    printf("   📊 Total loaded frames: %d\n", monitor.getLoadedFrames());
-    printf("   📊 Average load FPS: %.2f\n", monitor.getAverageLoadFPS());
-    printf("   📊 Total time: %.2f seconds\n", monitor.getTotalTime());
-    if (monitor.getLoadedFrames() > 0) {
+    printf("   📊 Total loaded frames: %d\n", monitor_total.getLoadedFrames());
+    printf("   📊 Average load FPS: %.2f\n", monitor_total.getAverageLoadFPS());
+    printf("   📊 Total time: %.2f seconds\n", monitor_total.getTotalTime());
+    if (monitor_total.getLoadedFrames() > 0) {
         printf("   📊 Average time per frame: %.2f ms\n", 
-               (monitor.getTotalTime() * 1000.0) / monitor.getLoadedFrames());
+               (monitor_total.getTotalTime() * 1000.0) / monitor_total.getLoadedFrames());
     }
 }
 

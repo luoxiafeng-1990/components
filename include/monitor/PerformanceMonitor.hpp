@@ -3,6 +3,7 @@
 
 #include <stddef.h>
 #include <chrono>
+#include <mutex>
 
 /**
  * PerformanceMonitor - 性能监控类
@@ -15,7 +16,7 @@
  * 
  * 注意：
  * - 不包含定时器功能（请使用独立的 Timer 类）
- * - 线程安全：适合在单个线程中使用
+ * - 线程安全：所有操作都有互斥锁保护，可在多线程环境中使用
  * 
  * 使用场景：
  * - 视频播放性能测试
@@ -24,6 +25,9 @@
  */
 class PerformanceMonitor {
 private:
+    // ============ 线程安全保护 ============
+    mutable std::mutex mutex_;
+    
     // ============ 时间记录 ============
     std::chrono::steady_clock::time_point start_time_;
     std::chrono::steady_clock::time_point last_report_time_;

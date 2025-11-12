@@ -1,4 +1,4 @@
-#include "../include/PerformanceMonitor.hpp"
+#include "../../include/monitor/PerformanceMonitor.hpp"
 #include <stdio.h>
 #include <string.h>
 
@@ -24,6 +24,7 @@ PerformanceMonitor::~PerformanceMonitor() {
 // ============ 生命周期管理 ============
 
 void PerformanceMonitor::start() {
+    std::lock_guard<std::mutex> lock(mutex_);
     start_time_ = std::chrono::steady_clock::now();
     last_report_time_ = start_time_;
     is_started_ = true;
@@ -33,6 +34,7 @@ void PerformanceMonitor::start() {
 }
 
 void PerformanceMonitor::reset() {
+    std::lock_guard<std::mutex> lock(mutex_);
     frames_loaded_ = 0;
     frames_decoded_ = 0;
     frames_displayed_ = 0;
@@ -42,21 +44,22 @@ void PerformanceMonitor::reset() {
     
     start_time_ = std::chrono::steady_clock::now();
     last_report_time_ = start_time_;
-    
-    printf("📊 PerformanceMonitor reset\n");
 }
 
 void PerformanceMonitor::pause() {
+    std::lock_guard<std::mutex> lock(mutex_);
     is_paused_ = true;
 }
 
 void PerformanceMonitor::resume() {
+    std::lock_guard<std::mutex> lock(mutex_);
     is_paused_ = false;
 }
 
 // ============ 简单事件记录 ============
 
 void PerformanceMonitor::recordFrameLoaded() {
+    std::lock_guard<std::mutex> lock(mutex_);
     if (!is_started_ || is_paused_) {
         return;
     }
@@ -64,6 +67,7 @@ void PerformanceMonitor::recordFrameLoaded() {
 }
 
 void PerformanceMonitor::recordFrameDecoded() {
+    std::lock_guard<std::mutex> lock(mutex_);
     if (!is_started_ || is_paused_) {
         return;
     }
@@ -71,6 +75,7 @@ void PerformanceMonitor::recordFrameDecoded() {
 }
 
 void PerformanceMonitor::recordFrameDisplayed() {
+    std::lock_guard<std::mutex> lock(mutex_);
     if (!is_started_ || is_paused_) {
         return;
     }
@@ -80,6 +85,7 @@ void PerformanceMonitor::recordFrameDisplayed() {
 // ============ 带计时的事件记录 ============
 
 void PerformanceMonitor::beginLoadFrameTiming() {
+    std::lock_guard<std::mutex> lock(mutex_);
     if (!is_started_ || is_paused_) {
         return;
     }
@@ -87,6 +93,7 @@ void PerformanceMonitor::beginLoadFrameTiming() {
 }
 
 void PerformanceMonitor::endLoadFrameTiming() {
+    std::lock_guard<std::mutex> lock(mutex_);
     if (!is_started_ || is_paused_) {
         return;
     }
@@ -100,6 +107,7 @@ void PerformanceMonitor::endLoadFrameTiming() {
 }
 
 void PerformanceMonitor::beginDecodeFrameTiming() {
+    std::lock_guard<std::mutex> lock(mutex_);
     if (!is_started_ || is_paused_) {
         return;
     }
@@ -107,6 +115,7 @@ void PerformanceMonitor::beginDecodeFrameTiming() {
 }
 
 void PerformanceMonitor::endDecodeFrameTiming() {
+    std::lock_guard<std::mutex> lock(mutex_);
     if (!is_started_ || is_paused_) {
         return;
     }
@@ -120,6 +129,7 @@ void PerformanceMonitor::endDecodeFrameTiming() {
 }
 
 void PerformanceMonitor::beginDisplayFrameTiming() {
+    std::lock_guard<std::mutex> lock(mutex_);
     if (!is_started_ || is_paused_) {
         return;
     }
@@ -127,6 +137,7 @@ void PerformanceMonitor::beginDisplayFrameTiming() {
 }
 
 void PerformanceMonitor::endDisplayFrameTiming() {
+    std::lock_guard<std::mutex> lock(mutex_);
     if (!is_started_ || is_paused_) {
         return;
     }
@@ -142,14 +153,17 @@ void PerformanceMonitor::endDisplayFrameTiming() {
 // ============ 统计信息获取 ============
 
 int PerformanceMonitor::getLoadedFrames() const {
+    std::lock_guard<std::mutex> lock(mutex_);
     return frames_loaded_;
 }
 
 int PerformanceMonitor::getDecodedFrames() const {
+    std::lock_guard<std::mutex> lock(mutex_);
     return frames_decoded_;
 }
 
 int PerformanceMonitor::getDisplayedFrames() const {
+    std::lock_guard<std::mutex> lock(mutex_);
     return frames_displayed_;
 }
 
@@ -170,6 +184,7 @@ double PerformanceMonitor::getTotalTime() const {
 }
 
 double PerformanceMonitor::getElapsedTime() const {
+    std::lock_guard<std::mutex> lock(mutex_);
     if (!is_started_) {
         return 0.0;
     }
@@ -184,6 +199,7 @@ double PerformanceMonitor::getElapsedTime() const {
 // ============ 报告输出 ============
 
 void PerformanceMonitor::printStatistics() const {
+    std::lock_guard<std::mutex> lock(mutex_);
     printf("\n");
     printf("═══════════════════════════════════════════════════════\n");
     printf("          Performance Statistics\n");
@@ -224,6 +240,7 @@ void PerformanceMonitor::printStatistics() const {
 }
 
 void PerformanceMonitor::printRealTimeStats() {
+    std::lock_guard<std::mutex> lock(mutex_);
     if (!is_started_) {
         return;
     }
@@ -259,6 +276,7 @@ void PerformanceMonitor::printRealTimeStats() {
 }
 
 void PerformanceMonitor::generateReport(char* buffer, size_t buffer_size) const {
+    std::lock_guard<std::mutex> lock(mutex_);
     if (!buffer || buffer_size == 0) {
         return;
     }
@@ -294,12 +312,14 @@ void PerformanceMonitor::generateReport(char* buffer, size_t buffer_size) const 
 // ============ 配置 ============
 
 void PerformanceMonitor::setReportInterval(int interval_ms) {
+    std::lock_guard<std::mutex> lock(mutex_);
     report_interval_ms_ = interval_ms;
 }
 
 // ============ 内部辅助方法 ============
 
 double PerformanceMonitor::calculateAverageFPS(int frame_count) const {
+    // 注意：这个方法已经在调用者处加锁，不需要再次加锁
     if (!is_started_ || frame_count == 0) {
         return 0.0;
     }
@@ -313,6 +333,7 @@ double PerformanceMonitor::calculateAverageFPS(int frame_count) const {
 }
 
 double PerformanceMonitor::getTotalDuration() const {
+    // 注意：这个方法已经在调用者处加锁，不需要再次加锁
     if (!is_started_) {
         return 0.0;
     }

@@ -1,4 +1,4 @@
-#include "../include/LinuxFramebufferDevice.hpp"
+#include "../../include/display/LinuxFramebufferDevice.hpp"
 #include <stdio.h>
 #include <fcntl.h>
 #include <unistd.h>

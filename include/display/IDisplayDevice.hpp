@@ -1,7 +1,7 @@
   #ifndef IDISPLAYDEVICE_HPP
 #define IDISPLAYDEVICE_HPP
 
-#include "Buffer.hpp"
+#include "../buffer/Buffer.hpp"
 #include <stddef.h>
 
 /**

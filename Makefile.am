@@ -3,12 +3,12 @@ AUTOMAKE_OPTIONS = foreign
 bin_PROGRAMS = display_test
 
 display_test_SOURCES = test.cpp \
-                       source/LinuxFramebufferDevice.cpp \
-                       source/VideoFile.cpp \
-                       source/PerformanceMonitor.cpp \
-                       source/Timer.cpp \
-                       source/BufferManager.cpp \
-                       source/IoUringVideoReader.cpp
+                       source/display/LinuxFramebufferDevice.cpp \
+                       source/videoFile/VideoFile.cpp \
+                       source/monitor/PerformanceMonitor.cpp \
+                       source/monitor/Timer.cpp \
+                       source/buffer/BufferManager.cpp \
+                       source/videoFile/IoUringVideoReader.cpp
 
 AM_CPPFLAGS = -I$(top_srcdir)/include
 

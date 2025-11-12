@@ -1,8 +1,8 @@
 #ifndef IOURING_VIDEO_READER_HPP
 #define IOURING_VIDEO_READER_HPP
 
-#include "Buffer.hpp"
-#include "BufferManager.hpp"
+#include "../buffer/Buffer.hpp"
+#include "../buffer/BufferManager.hpp"
 #include <liburing.h>
 #include <string>
 #include <vector>
