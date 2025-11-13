@@ -13,6 +13,7 @@ display_test_SOURCES = test.cpp \
                        source/buffer/BufferAllocator.cpp \
                        source/buffer/BufferHandle.cpp \
                        source/buffer/BufferPool.cpp \
+                       source/buffer/BufferPoolRegistry.cpp \
                        source/producer/VideoProducer.cpp \
                        source/videoFile/IoUringVideoReader.cpp
 

@@ -6,6 +6,7 @@
 #include <sys/mman.h>
 #include <linux/fb.h>
 #include <string.h>
+#include <string>
 #include <errno.h>
 
 // Framebuffer相关定义（参考原代码）
@@ -378,8 +379,16 @@ void LinuxFramebufferDevice::calculateBufferAddresses() {
     }
     
     // 创建 BufferPool（托管framebuffer）
+    // 生成唯一名称：FramebufferPool_FB0 或 FramebufferPool_FB1
+    std::string pool_name = "FramebufferPool_FB" + std::to_string(fb_index_);
+    std::string pool_category = "Display";
+    
     try {
-        buffer_pool_ = std::make_unique<BufferPool>(fb_infos);
+        buffer_pool_ = std::make_unique<BufferPool>(
+            fb_infos,
+            pool_name,
+            pool_category
+        );
         printf("✅ BufferPool created successfully (managing %d framebuffers)\n", buffer_count_);
         buffer_pool_->printStats();
     } catch (const std::exception& e) {

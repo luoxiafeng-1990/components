@@ -3,6 +3,7 @@
 #include "Buffer.hpp"
 #include "BufferHandle.hpp"
 #include "BufferAllocator.hpp"
+#include <string>
 #include <vector>
 #include <queue>
 #include <unordered_map>
@@ -40,25 +41,37 @@ public:
      * @param count Buffer 数量
      * @param size 每个 Buffer 的大小
      * @param use_cma 是否使用 CMA/DMA 连续物理内存
+     * @param name Pool 名称（用于全局注册和调试）
+     * @param category Pool 分类（如 "Display", "Video", "Network"）
      * @throws std::runtime_error 如果分配失败
      */
-    BufferPool(int count, size_t size, bool use_cma = false);
+    BufferPool(int count, size_t size, bool use_cma = false,
+               const std::string name = "UnnamedPool",
+               const std::string category = "");
     
     // ========== 构造方式 2: 托管外部 buffer（简单版）==========
     /**
      * @brief 创建 BufferPool（托管外部buffer）
      * @param external_buffers 外部 buffer 信息数组
+     * @param name Pool 名称（用于全局注册和调试）
+     * @param category Pool 分类（如 "Display", "Video", "Network"）
      * @note BufferPool 只管理调度，不负责释放这些 buffer
      */
-    BufferPool(const std::vector<ExternalBufferInfo>& external_buffers);
+    BufferPool(const std::vector<ExternalBufferInfo>& external_buffers,
+               const std::string name = "UnnamedPool",
+               const std::string category = "");
     
     // ========== 构造方式 3: 托管外部 buffer（带生命周期检测）==========
     /**
      * @brief 创建 BufferPool（托管外部buffer + 生命周期检测）
      * @param handles BufferHandle 数组（转移所有权）
+     * @param name Pool 名称（用于全局注册和调试）
+     * @param category Pool 分类（如 "Display", "Video", "Network"）
      * @note BufferPool 会保存 weak_ptr 用于检测 buffer 是否失效
      */
-    BufferPool(std::vector<std::unique_ptr<BufferHandle>> handles);
+    BufferPool(std::vector<std::unique_ptr<BufferHandle>> handles,
+               const std::string name = "UnnamedPool",
+               const std::string category = "");
     
     /**
      * @brief 析构函数 - 释放资源
@@ -123,6 +136,26 @@ public:
     Buffer* getBufferById(uint32_t id);
     const Buffer* getBufferById(uint32_t id) const;
     
+    // ========== Registry 相关接口 ==========
+    
+    /**
+     * @brief 获取 Pool 名称
+     * @return const std::string& Pool 名称
+     */
+    const std::string& getName() const { return name_; }
+    
+    /**
+     * @brief 获取 Pool 分类
+     * @return const std::string& Pool 分类
+     */
+    const std::string& getCategory() const { return category_; }
+    
+    /**
+     * @brief 获取注册表 ID
+     * @return uint64_t 在 BufferPoolRegistry 中的唯一 ID
+     */
+    uint64_t getRegistryId() const { return registry_id_; }
+    
     // ========== 校验接口 ==========
     
     /**
@@ -172,6 +205,11 @@ private:
     uint64_t getPhysicalAddress(void* virt_addr);
     
     // ========== 成员变量 ==========
+    
+    // Registry 相关
+    std::string name_;                    // Pool 名称
+    std::string category_;                // Pool 分类
+    uint64_t registry_id_;                // 在 BufferPoolRegistry 中的唯一 ID
     
     // Buffer 池
     size_t buffer_size_;                              // 单个 buffer 大小

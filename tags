@@ -301,7 +301,8 @@ getBuffer	source/display/LinuxFramebufferDevice.cpp	/^const Buffer& LinuxFramebu
 getBufferById	source/buffer/BufferPool.cpp	/^Buffer* BufferPool::getBufferById(uint32_t id) {$/;"	f	language:C++	class:BufferPool	typeref:typename:Buffer *	signature:(uint32_t id)
 getBufferById	source/buffer/BufferPool.cpp	/^const Buffer* BufferPool::getBufferById(uint32_t id) const {$/;"	f	language:C++	class:BufferPool	typeref:typename:const Buffer *	signature:(uint32_t id) const
 getBufferCount	source/display/LinuxFramebufferDevice.cpp	/^int LinuxFramebufferDevice::getBufferCount() const {$/;"	f	language:C++	class:LinuxFramebufferDevice	typeref:typename:int	signature:() const
-getBufferPool	include/display/LinuxFramebufferDevice.hpp	/^    BufferPool* getBufferPool() { return buffer_pool_.get(); }$/;"	f	language:C++	class:LinuxFramebufferDevice	typeref:typename:BufferPool *	signature:()
+getBufferPool	include/display/LinuxFramebufferDevice.hpp	/^    BufferPool& getBufferPool() {$/;"	f	language:C++	class:LinuxFramebufferDevice	typeref:typename:BufferPool &	signature:()
+getBufferPool	include/display/LinuxFramebufferDevice.hpp	/^    const BufferPool& getBufferPool() const {$/;"	f	language:C++	class:LinuxFramebufferDevice	typeref:typename:const BufferPool &	signature:() const
 getBufferSize	source/buffer/BufferPool.cpp	/^size_t BufferPool::getBufferSize() const {$/;"	f	language:C++	class:BufferPool	typeref:typename:size_t	signature:() const
 getBufferSize	source/display/LinuxFramebufferDevice.cpp	/^size_t LinuxFramebufferDevice::getBufferSize() const {$/;"	f	language:C++	class:LinuxFramebufferDevice	typeref:typename:size_t	signature:() const
 getBytesPerPixel	source/display/LinuxFramebufferDevice.cpp	/^int LinuxFramebufferDevice::getBytesPerPixel() const {$/;"	f	language:C++	class:LinuxFramebufferDevice	typeref:typename:int	signature:() const

@@ -6,6 +6,7 @@
 #include "../buffer/BufferPool.hpp"
 #include <vector>
 #include <memory>
+#include <stdexcept>
 
 /**
  * LinuxFramebufferDevice - Linux Framebuffer 显示设备实现

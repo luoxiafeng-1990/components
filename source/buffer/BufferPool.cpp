@@ -1,4 +1,5 @@
 #include "../../include/buffer/BufferPool.hpp"
+#include "../../include/buffer/BufferPoolRegistry.hpp"
 #include <stdio.h>
 #include <string.h>
 #include <stdexcept>
@@ -9,28 +10,39 @@
 // 构造函数实现
 // ============================================================
 
-BufferPool::BufferPool(int count, size_t size, bool use_cma)
-    : buffer_size_(size)
+BufferPool::BufferPool(int count, size_t size, bool use_cma,
+                       const std::string name, const std::string category)
+    : name_(name)
+    , category_(category)
+    , registry_id_(0)
+    , buffer_size_(size)
     , next_buffer_id_(0)
 {
-    printf("\n📦 Initializing BufferPool (owned buffers)...\n");
+    printf("\n📦 Initializing BufferPool '%s' (owned buffers)...\n", name_.c_str());
     printf("   Buffer count: %d\n", count);
     printf("   Buffer size: %zu bytes (%.2f MB)\n", size, size / (1024.0 * 1024.0));
     printf("   Memory type: %s\n", use_cma ? "CMA/DMA (连续物理内存)" : "Normal (普通内存)");
     
     initializeOwnedBuffers(count, size, use_cma);
     
-    printf("✅ BufferPool initialized successfully\n");
+    // 自动注册到全局注册表
+    registry_id_ = BufferPoolRegistry::getInstance().registerPool(this, name_, category_);
+    
+    printf("✅ BufferPool '%s' initialized successfully\n", name_.c_str());
     printf("   Total buffers: %d\n", getTotalCount());
     printf("   Free buffers: %d\n", getFreeCount());
     printf("   Filled buffers: %d\n", getFilledCount());
 }
 
-BufferPool::BufferPool(const std::vector<ExternalBufferInfo>& external_buffers)
-    : buffer_size_(0)
+BufferPool::BufferPool(const std::vector<ExternalBufferInfo>& external_buffers,
+                       const std::string name, const std::string category)
+    : name_(name)
+    , category_(category)
+    , registry_id_(0)
+    , buffer_size_(0)
     , next_buffer_id_(0)
 {
-    printf("\n📦 Initializing BufferPool (external buffers - simple mode)...\n");
+    printf("\n📦 Initializing BufferPool '%s' (external buffers - simple mode)...\n", name_.c_str());
     printf("   External buffer count: %zu\n", external_buffers.size());
     
     if (external_buffers.empty()) {
@@ -39,16 +51,23 @@ BufferPool::BufferPool(const std::vector<ExternalBufferInfo>& external_buffers)
     
     initializeExternalBuffers(external_buffers);
     
-    printf("✅ BufferPool initialized successfully (external mode)\n");
+    // 自动注册到全局注册表
+    registry_id_ = BufferPoolRegistry::getInstance().registerPool(this, name_, category_);
+    
+    printf("✅ BufferPool '%s' initialized successfully (external mode)\n", name_.c_str());
     printf("   Total buffers: %d\n", getTotalCount());
     printf("   Free buffers: %d\n", getFreeCount());
 }
 
-BufferPool::BufferPool(std::vector<std::unique_ptr<BufferHandle>> handles)
-    : buffer_size_(0)
+BufferPool::BufferPool(std::vector<std::unique_ptr<BufferHandle>> handles,
+                       const std::string name, const std::string category)
+    : name_(name)
+    , category_(category)
+    , registry_id_(0)
+    , buffer_size_(0)
     , next_buffer_id_(0)
 {
-    printf("\n📦 Initializing BufferPool (external buffers - lifetime tracking)...\n");
+    printf("\n📦 Initializing BufferPool '%s' (external buffers - lifetime tracking)...\n", name_.c_str());
     printf("   BufferHandle count: %zu\n", handles.size());
     
     if (handles.empty()) {
@@ -57,17 +76,23 @@ BufferPool::BufferPool(std::vector<std::unique_ptr<BufferHandle>> handles)
     
     initializeFromHandles(std::move(handles));
     
-    printf("✅ BufferPool initialized successfully (tracked external mode)\n");
+    // 自动注册到全局注册表
+    registry_id_ = BufferPoolRegistry::getInstance().registerPool(this, name_, category_);
+    
+    printf("✅ BufferPool '%s' initialized successfully (tracked external mode)\n", name_.c_str());
     printf("   Total buffers: %d\n", getTotalCount());
     printf("   Free buffers: %d\n", getFreeCount());
     printf("   Lifetime trackers: %zu\n", lifetime_trackers_.size());
 }
 
 BufferPool::~BufferPool() {
-    printf("\n🧹 Cleaning up BufferPool...\n");
+    printf("\n🧹 Cleaning up BufferPool '%s'...\n", name_.c_str());
     printf("   Total buffers: %d\n", getTotalCount());
     printf("   Free buffers: %d\n", getFreeCount());
     printf("   Filled buffers: %d\n", getFilledCount());
+    
+    // 自动从全局注册表注销
+    BufferPoolRegistry::getInstance().unregisterPool(registry_id_);
     
     // 释放自有内存（通过 allocator）
     if (allocator_ && allocator_->name() != std::string("ExternalAllocator")) {
