@@ -50,7 +50,7 @@ public:
      * 构造函数
      * @param type 读取器类型（默认AUTO，自动选择）
      */
-    VideoFile(VideoReaderFactory::ReaderType type = VideoReaderFactory::ReaderType::MMAP);
+    VideoFile(VideoReaderFactory::ReaderType type = VideoReaderFactory::ReaderType::RTSP);
     
     /**
      * 析构函数
@@ -109,6 +109,17 @@ public:
     const char* getPath() const;
     bool hasMoreFrames() const;
     bool isAtEnd() const;
+    
+    // ============ 可选依赖注入（透传到 Reader）============
+    
+    /**
+     * 设置BufferPool（透传到底层Reader）
+     * 
+     * 用于支持零拷贝优化（如RTSP流解码器）
+     * 
+     * @param pool BufferPool指针
+     */
+    void setBufferPool(void* pool);
 };
 
 #endif // VIDEOFILE_HPP

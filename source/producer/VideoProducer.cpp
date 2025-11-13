@@ -65,6 +65,10 @@ bool VideoProducer::start(const Config& config) {
         return false;
     }
     
+    // ✨ 注入BufferPool（统一处理，所有Reader都调用）
+    // 特殊Reader（如RTSP）会利用此优化，普通Reader会忽略
+    video_file_->setBufferPool(&buffer_pool_);
+    
     total_frames_ = video_file_->getTotalFrames();
     size_t frame_size = video_file_->getFrameSize();
     

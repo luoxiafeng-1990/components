@@ -372,7 +372,20 @@ void BufferPool::releaseFilled(Buffer* buffer) {
         return;
     }
     
-    // 校验
+    // 检查是否是临时注入的buffer
+    bool is_transient = false;
+    {
+        std::lock_guard<std::mutex> lock(transient_mutex_);
+        is_transient = (transient_handles_.find(buffer) != transient_handles_.end());
+    }
+    
+    if (is_transient) {
+        // 临时buffer：触发清理（会调用deleter）
+        ejectBuffer(buffer);
+        return;
+    }
+    
+    // 普通buffer：校验所有权
     if (!verifyBufferOwnership(buffer)) {
         printf("❌ ERROR: Buffer #%u does not belong to this pool\n", buffer->id());
         return;
@@ -586,5 +599,80 @@ uint64_t BufferPool::getPhysicalAddress(void* virt_addr) {
     phys_addr = normal.getPhysicalAddress(virt_addr);
     
     return phys_addr;
+}
+
+// ============================================================
+// 动态注入接口实现（零拷贝支持）
+// ============================================================
+
+Buffer* BufferPool::injectFilledBuffer(std::unique_ptr<BufferHandle> handle) {
+    if (!handle || !handle->isValid()) {
+        printf("❌ ERROR: Invalid BufferHandle for injection\n");
+        return nullptr;
+    }
+    
+    // 1. 创建临时Buffer对象
+    uint32_t buffer_id = next_buffer_id_++;
+    auto temp_buffer = std::make_unique<Buffer>(
+        buffer_id,
+        handle->getVirtualAddress(),
+        handle->getPhysicalAddress(),
+        handle->size(),
+        Buffer::Ownership::EXTERNAL  // 标记为外部所有权
+    );
+    
+    Buffer* buffer_ptr = temp_buffer.get();
+    buffer_ptr->setState(Buffer::State::READY_FOR_CONSUME);
+    
+    // 2. 保存到临时buffer容器（持有所有权）
+    {
+        std::lock_guard<std::mutex> lock(transient_mutex_);
+        transient_buffers_.push_back(std::move(temp_buffer));
+        transient_handles_[buffer_ptr] = std::move(handle);  // 保存handle（含deleter）
+    }
+    
+    // 3. 直接加入filled队列
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        filled_queue_.push(buffer_ptr);
+    }
+    
+    // 4. 通知消费者
+    filled_cv_.notify_one();
+    
+    return buffer_ptr;
+}
+
+bool BufferPool::ejectBuffer(Buffer* buffer) {
+    if (!buffer) {
+        return false;
+    }
+    
+    std::lock_guard<std::mutex> lock(transient_mutex_);
+    
+    // 查找并删除
+    auto handle_it = transient_handles_.find(buffer);
+    if (handle_it == transient_handles_.end()) {
+        return false;  // 不是临时buffer
+    }
+    
+    // 移除handle（会触发deleter）
+    transient_handles_.erase(handle_it);
+    
+    // 移除buffer对象
+    auto buffer_it = std::find_if(
+        transient_buffers_.begin(), 
+        transient_buffers_.end(),
+        [buffer](const std::unique_ptr<Buffer>& b) {
+            return b.get() == buffer;
+        }
+    );
+    
+    if (buffer_it != transient_buffers_.end()) {
+        transient_buffers_.erase(buffer_it);
+        return true;
+    }
+    
+    return false;
 }
 

@@ -364,17 +364,148 @@ static int test_buffermanager_iouring(const char* raw_video_path) {
 }
 
 /**
+ * 测试5：RTSP 视频流播放（智能零拷贝 DMA 模式）
+ * 
+ * 功能演示：
+ * - 连接 RTSP 视频流
+ * - 使用 RtspVideoReader 解码（FFmpeg + 硬件解码器）
+ * - 智能零拷贝 DMA 显示：完全自动，用户无感知
+ * - 展示 RTSP 流的实时处理能力
+ * 
+ * 零拷贝工作流程（完全透明）：
+ * 1. RtspVideoReader 解码 RTSP 流，获得带物理地址的 AVFrame
+ * 2. RtspVideoReader 将 AVFrame 包装为 BufferHandle，注入 BufferPool
+ * 3. 消费者调用 pool.acquireFilled() 获取 Buffer（含物理地址）
+ * 4. 消费者调用 display.displayBuffer(buffer)：
+ *    - Display 自动检测 buffer 有物理地址
+ *    - Display 自动调用 FB_IOCTL_SET_DMA_INFO 设置 DMA
+ *    - Display 自动调用 FBIOPAN_DISPLAY 触发硬件显示
+ *    - 整个过程：0 次 memcpy！
+ * 5. 消费者调用 pool.releaseFilled() 归还 buffer
+ * 6. BufferPool 触发 deleter，RtspVideoReader 回收 AVFrame
+ * 
+ * 关键设计理念：
+ * - 用户代码保持不变：acquireFilled() -> displayBuffer() -> releaseFilled()
+ * - Display 内部智能检测：有物理地址用 DMA，无物理地址用 memcpy
+ * - 完全符合大厂设计：单一职责、开放封闭、用户透明
+ */
+static int test_rtsp_stream(const char* rtsp_url) {
+    printf("\n═══════════════════════════════════════════════════════\n");
+    printf("  Test: RTSP Stream Playback (Smart Zero-Copy DMA)\n");
+    printf("═══════════════════════════════════════════════════════\n\n");
+    
+    printf("ℹ️  Zero-Copy Workflow:\n");
+    printf("   1. RtspVideoReader decodes RTSP → AVFrame with phys_addr\n");
+    printf("   2. RtspVideoReader injects BufferHandle to BufferPool\n");
+    printf("   3. Consumer acquires Buffer (with phys_addr)\n");
+    printf("   4. Display auto-detects phys_addr → uses DMA path\n");
+    printf("   5. DMA reads directly from decoder output (0 memcpy)\n");
+    printf("   6. Consumer releases Buffer → triggers deleter\n\n");
+    
+    // 1. 初始化显示设备
+    printf("🖥️  Initializing display device...\n");
+    LinuxFramebufferDevice display;
+    if (!display.initialize(0)) {
+        return -1;
+    }
+    
+    // 2. 获取 display 的 BufferPool
+    BufferPool& pool = display.getBufferPool();
+    pool.printStats();
+    
+    // 3. 创建 VideoProducer（依赖注入 BufferPool）
+    printf("📹 Creating VideoProducer...\n");
+    VideoProducer producer(pool);
+    
+    // 4. 配置 RTSP 流（注意：推荐单线程）
+    printf("🔗 Configuring RTSP stream: %s\n", rtsp_url);
+    VideoProducer::Config config(
+        rtsp_url,
+        display.getWidth(),
+        display.getHeight(),
+        display.getBitsPerPixel(),
+        false,  // loop（对RTSP无意义）
+        1       // thread_count（RTSP推荐单线程）
+    );
+    
+    // 5. 设置错误回调
+    producer.setErrorCallback([](const std::string& error) {
+        printf("\n❌ RTSP Error: %s\n", error.c_str());
+        g_running = false;
+    });
+    
+    // 6. 启动生产者（内部会创建RTSP Reader并启用零拷贝）
+    printf("🚀 Starting RTSP producer...\n");
+    if (!producer.start(config)) {
+        printf("❌ Failed to start RTSP producer\n");
+        return -1;
+    }
+    
+    printf("\n✅ RTSP stream connected, starting playback...\n");
+    printf("   Press Ctrl+C to stop\n");
+    printf("   Watch for '[DMA Zero-Copy Path]' messages below\n\n");
+    
+    // 注册信号处理
+    signal(SIGINT, signal_handler);
+    
+    // 7. 消费者循环：从 BufferPool 获取并显示（零拷贝 DMA）
+    int frame_count = 0;
+    
+    while (g_running) {
+        // 获取已填充的 buffer（零拷贝：RTSP 直接注入，带物理地址）
+        Buffer* filled_buffer = pool.acquireFilled(true, 100);
+        if (filled_buffer == nullptr) {
+            continue;  // 超时，继续等待
+        }
+        
+        // ✨ 关键调用：display.displayBuffer() 会自动检测物理地址
+        // 如果 buffer 有物理地址（来自 RTSP 解码器）：
+        //   → Display 自动使用 DMA 零拷贝路径（FB_IOCTL_SET_DMA_INFO）
+        // 如果 buffer 无物理地址（传统文件读取）：
+        //   → Display 自动降级到 memcpy 路径
+        // 
+        // 用户完全无需关心内部实现！
+        display.waitVerticalSync();
+        if (!display.displayBuffer(filled_buffer)) {
+            printf("⚠️  Warning: Failed to display buffer\n");
+        }
+        
+        // 归还 buffer（会触发 RtspVideoReader 的 deleter 回收 AVFrame）
+        pool.releaseFilled(filled_buffer);
+        
+        frame_count++;
+        
+        // 每100帧打印一次统计
+        if (frame_count % 100 == 0) {
+            printf("📊 Progress: %d frames displayed (%.1f fps)\n", 
+                   frame_count, producer.getAverageFPS());
+        }
+    }
+    
+    // 8. 停止生产者
+    printf("\n\n🛑 Stopping RTSP producer...\n");
+    producer.stop();
+    
+    printf("\n✅ RTSP test completed\n");
+    printf("   Total frames displayed: %d\n", frame_count);
+    pool.printStats();
+    
+    return 0;
+}
+
+/**
  * 打印使用说明
  */
 static void print_usage(const char* prog_name) {
-    printf("Usage: %s [options] <raw_video_file>\n\n", prog_name);
+    printf("Usage: %s [options] <raw_video_file|rtsp_url>\n\n", prog_name);
     printf("Options:\n");
     printf("  -h, --help          Show this help message\n");
     printf("  -m, --mode <mode>   Test mode (default: loop)\n");
     printf("                      loop:       4-frame loop display\n");
     printf("                      sequential: Sequential playback (play once)\n");
-    printf("                      producer:   BufferPool + VideoProducer test (NEW ARCHITECTURE)\n");
-    printf("                      iouring:    io_uring mode (using VideoProducer temporarily)\n");
+    printf("                      producer:   BufferPool + VideoProducer test\n");
+    printf("                      iouring:    io_uring mode (using VideoProducer)\n");
+    printf("                      rtsp:       RTSP stream playback (zero-copy, NEW)\n");
     printf("\n");
     printf("Examples:\n");
     printf("  %s video.raw\n", prog_name);
@@ -382,18 +513,20 @@ static void print_usage(const char* prog_name) {
     printf("  %s -m sequential video.raw\n", prog_name);
     printf("  %s -m producer video.raw\n", prog_name);
     printf("  %s -m iouring video.raw\n", prog_name);
+    printf("  %s -m rtsp rtsp://192.168.1.100:8554/stream\n", prog_name);
     printf("\n");
     printf("Test Modes Description:\n");
     printf("  loop:       Load N frames into framebuffer and loop display them\n");
     printf("  sequential: Read and display frames sequentially from file\n");
-    printf("  producer:   Use NEW BufferPool + VideoProducer architecture (zero-copy, decoupled)\n");
-    printf("  iouring:    io_uring async I/O mode (TODO: implement IoUringVideoProducer)\n");
+    printf("  producer:   Use BufferPool + VideoProducer architecture (zero-copy)\n");
+    printf("  iouring:    io_uring async I/O mode\n");
+    printf("  rtsp:       RTSP stream decoding and display (zero-copy, FFmpeg)\n");
     printf("\n");
     printf("Note:\n");
     printf("  - Raw video file must match framebuffer resolution\n");
     printf("  - Format: ARGB888 (4 bytes per pixel)\n");
+    printf("  - RTSP mode requires FFmpeg libraries\n");
     printf("  - Press Ctrl+C to stop playback\n");
-    printf("  - NEW: 'producer' mode now uses decoupled architecture with zero-copy display\n");
 }
 
 /**
@@ -438,6 +571,8 @@ int main(int argc, char* argv[]) {
         result = test_buffermanager_producer(raw_video_path);
     } else if (strcmp(mode, "iouring") == 0) {
         result = test_buffermanager_iouring(raw_video_path);
+    } else if (strcmp(mode, "rtsp") == 0) {
+        result = test_rtsp_stream(raw_video_path);  // raw_video_path实际是rtsp_url
     } else {
         printf("Error: Unknown mode '%s'\n\n", mode);
         print_usage(argv[0]);

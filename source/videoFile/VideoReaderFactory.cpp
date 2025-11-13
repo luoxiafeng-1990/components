@@ -1,6 +1,7 @@
 #include "../../include/videoFile/VideoReaderFactory.hpp"
 #include "../../include/videoFile/MmapVideoReader.hpp"
 #include "../../include/videoFile/IoUringVideoReader.hpp"
+#include "../../include/videoFile/RtspVideoReader.hpp"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -39,6 +40,8 @@ std::unique_ptr<IVideoReader> VideoReaderFactory::createByName(const char* name)
         return std::make_unique<MmapVideoReader>();
     } else if (strcmp(name, "iouring") == 0) {
         return std::make_unique<IoUringVideoReader>();
+    } else if (strcmp(name, "rtsp") == 0) {
+        return std::make_unique<RtspVideoReader>();
     } else if (strcmp(name, "auto") == 0) {
         return create(ReaderType::AUTO);
     }
@@ -75,6 +78,7 @@ const char* VideoReaderFactory::typeToString(ReaderType type) {
         case ReaderType::MMAP:        return "MMAP";
         case ReaderType::IOURING:     return "IOURING";
         case ReaderType::DIRECT_READ: return "DIRECT_READ";
+        case ReaderType::RTSP:        return "RTSP";
         default:                      return "UNKNOWN";
     }
 }
@@ -119,6 +123,9 @@ std::unique_ptr<IVideoReader> VideoReaderFactory::createByType(ReaderType type) 
                 return std::make_unique<MmapVideoReader>();
             }
             return std::make_unique<IoUringVideoReader>();
+            
+        case ReaderType::RTSP:
+            return std::make_unique<RtspVideoReader>();
             
         case ReaderType::DIRECT_READ:
             printf("⚠️  Warning: DIRECT_READ not implemented, using mmap\n");

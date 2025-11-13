@@ -7,6 +7,7 @@ display_test_SOURCES = test.cpp \
                        source/videoFile/VideoFile.cpp \
                        source/videoFile/MmapVideoReader.cpp \
                        source/videoFile/VideoReaderFactory.cpp \
+                       source/videoFile/RtspVideoReader.cpp \
                        source/monitor/PerformanceMonitor.cpp \
                        source/monitor/Timer.cpp \
                        source/buffer/Buffer.cpp \
@@ -25,5 +26,5 @@ else
 AM_CXXFLAGS = -O2 -std=c++17
 endif
 
-LDADD = -lpthread -luring
+LDADD = -lpthread -luring -lavformat -lavcodec -lavutil -lswscale
 

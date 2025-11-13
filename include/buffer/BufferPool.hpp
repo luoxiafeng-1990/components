@@ -114,6 +114,41 @@ public:
      */
     void releaseFilled(Buffer* buffer);
     
+    // ========== 动态注入接口（用于零拷贝场景）==========
+    
+    /**
+     * @brief 动态注入外部已填充的 buffer
+     * 
+     * 适用场景：
+     * - 硬件解码器输出buffer
+     * - 网络接收的零拷贝buffer
+     * - RTSP流解码的AVFrame
+     * 
+     * 工作流程：
+     * 1. 将外部buffer包装为临时Buffer对象
+     * 2. 直接放入filled_queue供消费者使用
+     * 3. 消费者调用releaseFilled时，触发deleter回收
+     * 
+     * @param handle 外部buffer（转移所有权，包含deleter）
+     * @return Buffer* 注入后的Buffer指针，失败返回nullptr
+     * 
+     * @note 
+     * - 注入的buffer标记为 Ownership::EXTERNAL
+     * - deleter 中应该回收buffer供生产者重用
+     * - 如果队列满（达到限制），可能拒绝注入
+     */
+    Buffer* injectFilledBuffer(std::unique_ptr<BufferHandle> handle);
+    
+    /**
+     * @brief 弹出并销毁临时buffer（内部清理机制）
+     * 
+     * 用于清理已失效的外部buffer
+     * 
+     * @param buffer 要移除的buffer
+     * @return true 如果成功移除
+     */
+    bool ejectBuffer(Buffer* buffer);
+    
     // ========== 查询接口 ==========
     
     /// 获取空闲 buffer 数量
@@ -226,6 +261,11 @@ private:
     // 队列（生产者-消费者模型）
     std::queue<Buffer*> free_queue_;      // 空闲队列
     std::queue<Buffer*> filled_queue_;    // 就绪队列
+    
+    // 动态注入的临时buffer管理
+    std::vector<std::unique_ptr<Buffer>> transient_buffers_;       // 临时buffer对象
+    std::unordered_map<Buffer*, std::unique_ptr<BufferHandle>> transient_handles_;  // Buffer* -> Handle映射
+    std::mutex transient_mutex_;          // 保护临时buffer列表
     
     // 同步原语
     mutable std::mutex mutex_;            // 保护队列和状态

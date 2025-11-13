@@ -28,7 +28,8 @@ public:
         AUTO,          // 自动检测（默认）
         MMAP,          // 强制使用 mmap 实现
         IOURING,       // 强制使用 io_uring 实现
-        DIRECT_READ    // 强制使用普通 read 实现（暂未实现）
+        DIRECT_READ,   // 强制使用普通 read 实现（暂未实现）
+        RTSP           // RTSP 视频流解码器
     };
     
     /**
@@ -43,7 +44,7 @@ public:
      * @param type 读取器类型（默认AUTO）
      * @return 视频读取器实例（智能指针）
      */
-    static std::unique_ptr<IVideoReader> create(ReaderType type = ReaderType::AUTO);
+    static std::unique_ptr<IVideoReader> create(ReaderType type = ReaderType::RTSP);
     
     /**
      * 从名称创建读取器

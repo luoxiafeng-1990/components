@@ -182,6 +182,28 @@ public:
      * @return 类型名称（如 "MmapReader"、"IoUringReader"）
      */
     virtual const char* getReaderType() const = 0;
+    
+    // ============ 可选依赖注入（用于性能优化）============
+    
+    /**
+     * 设置BufferPool（可选依赖注入）
+     * 
+     * 用途：
+     * - 允许特殊Reader（如RTSP流解码器）直接将数据注入BufferPool
+     * - 实现零拷贝优化
+     * 
+     * 默认实现为空（普通文件Reader不需要）
+     * 特殊Reader可以重写此方法以优化性能
+     * 
+     * @param pool BufferPool指针，nullptr表示取消注入模式
+     * 
+     * 注意：此接口不改变Reader的外部行为，只是内部优化
+     */
+    virtual void setBufferPool(void* pool) {
+        // 默认实现：什么都不做
+        // 普通Reader（Mmap、IoUring）不需要BufferPool
+        (void)pool;
+    }
 };
 
 #endif // IVIDEO_READER_HPP

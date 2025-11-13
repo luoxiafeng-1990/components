@@ -180,3 +180,11 @@ bool VideoFile::isAtEnd() const {
     return reader_ && reader_->isAtEnd();
 }
 
+// ============ 可选依赖注入（转发） ============
+
+void VideoFile::setBufferPool(void* pool) {
+    if (reader_) {
+        reader_->setBufferPool(pool);
+    }
+}
+
