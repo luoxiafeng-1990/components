@@ -23,7 +23,8 @@ LinuxFramebufferDevice::LinuxFramebufferDevice()
     , fb_index_(-1)
     , framebuffer_base_(nullptr)
     , framebuffer_total_size_(0)
-    , buffers_()  // vector自动初始化为空
+    , buffer_pool_(nullptr)
+    , buffer_count_(0)
     , current_buffer_index_(0)
     , width_(0)
     , height_(0)
@@ -31,7 +32,7 @@ LinuxFramebufferDevice::LinuxFramebufferDevice()
     , buffer_size_(0)
     , is_initialized_(false)
 {
-    // vector会自动管理Buffer对象的生命周期
+    // BufferPool 会在 initialize() 中创建
 }
 
 LinuxFramebufferDevice::~LinuxFramebufferDevice() {
@@ -86,7 +87,7 @@ bool LinuxFramebufferDevice::initialize(int device_index) {
     
     // 打印初始化成功的总结信息
     printf("✅ Display initialized: %dx%d, %d buffers, %d bits/pixel\n",
-           width_, height_, static_cast<int>(buffers_.size()), bits_per_pixel_);
+           width_, height_, buffer_count_, bits_per_pixel_);
     
     return true;
 }
@@ -105,12 +106,13 @@ void LinuxFramebufferDevice::cleanup() {
         fd_ = -1;
     }
     
-    // 3. 重置状态
+    // 3. 重置 BufferPool
+    buffer_pool_.reset();
+    
+    // 4. 重置状态
     is_initialized_ = false;
     current_buffer_index_ = 0;
-    
-    // 清空Buffer对象（vector自动释放内存）
-    buffers_.clear();
+    buffer_count_ = 0;
     
     printf("✅ LinuxFramebufferDevice cleaned up\n");
 }
@@ -135,7 +137,10 @@ int LinuxFramebufferDevice::getBitsPerPixel() const {
 }
 
 int LinuxFramebufferDevice::getBufferCount() const {
-    return static_cast<int>(buffers_.size());
+    if (buffer_pool_) {
+        return buffer_pool_->getTotalCount();
+    }
+    return 0;
 }
 
 size_t LinuxFramebufferDevice::getBufferSize() const {
@@ -143,25 +148,39 @@ size_t LinuxFramebufferDevice::getBufferSize() const {
 }
 
 Buffer& LinuxFramebufferDevice::getBuffer(int buffer_index) {
-    if (buffer_index < 0 || buffer_index >= static_cast<int>(buffers_.size())) {
-        static Buffer invalid_buffer;
-        printf("❌ ERROR: Invalid buffer index %d (valid range: 0-%d)\n", 
-               buffer_index, static_cast<int>(buffers_.size()) - 1);
+    if (!buffer_pool_) {
+        static Buffer invalid_buffer(0, nullptr, 0, 0, Buffer::Ownership::EXTERNAL);
+        printf("❌ ERROR: BufferPool not initialized\n");
         return invalid_buffer;
     }
     
-    return buffers_[buffer_index];
+    Buffer* buf = buffer_pool_->getBufferById(buffer_index);
+    if (!buf) {
+        static Buffer invalid_buffer(0, nullptr, 0, 0, Buffer::Ownership::EXTERNAL);
+        printf("❌ ERROR: Invalid buffer index %d (valid range: 0-%d)\n", 
+               buffer_index, getBufferCount() - 1);
+        return invalid_buffer;
+    }
+    
+    return *buf;
 }
 
 const Buffer& LinuxFramebufferDevice::getBuffer(int buffer_index) const {
-    if (buffer_index < 0 || buffer_index >= static_cast<int>(buffers_.size())) {
-        static Buffer invalid_buffer;
-        printf("❌ ERROR: Invalid buffer index %d (valid range: 0-%d)\n", 
-               buffer_index, static_cast<int>(buffers_.size()) - 1);
+    if (!buffer_pool_) {
+        static Buffer invalid_buffer(0, nullptr, 0, 0, Buffer::Ownership::EXTERNAL);
+        printf("❌ ERROR: BufferPool not initialized\n");
         return invalid_buffer;
     }
     
-    return buffers_[buffer_index];
+    const Buffer* buf = buffer_pool_->getBufferById(buffer_index);
+    if (!buf) {
+        static Buffer invalid_buffer(0, nullptr, 0, 0, Buffer::Ownership::EXTERNAL);
+        printf("❌ ERROR: Invalid buffer index %d (valid range: 0-%d)\n", 
+               buffer_index, getBufferCount() - 1);
+        return invalid_buffer;
+    }
+    
+    return *buf;
 }
 
 bool LinuxFramebufferDevice::displayBuffer(int buffer_index) {
@@ -170,7 +189,7 @@ bool LinuxFramebufferDevice::displayBuffer(int buffer_index) {
         return false;
     }
     
-    if (buffer_index < 0 || buffer_index >= static_cast<int>(buffers_.size())) {
+    if (buffer_index < 0 || buffer_index >= buffer_count_) {
         printf("❌ ERROR: Invalid buffer index %d\n", buffer_index);
         return false;
     }
@@ -284,18 +303,19 @@ bool LinuxFramebufferDevice::queryHardwareDisplayParameters() {
     printf("   yres_virtual=%d, buffer_count=%d\n", 
            var_info.yres_virtual, buffer_count);
     
-    // 根据硬件实际的buffer数量动态分配Buffer对象
-    buffers_.resize(buffer_count);
-    printf("✅ Allocated %d Buffer objects\n", buffer_count);
+    // 保存 buffer 数量（稍后创建 BufferPool）
+    buffer_count_ = buffer_count;
+    printf("✅ Will create BufferPool with %d buffers\n", buffer_count_);
     
     return true;
 }
 
 bool LinuxFramebufferDevice::mapHardwareFramebufferMemory() {
     // 计算需要映射的总大小
-    framebuffer_total_size_ = buffer_size_ * buffers_.size();
+    framebuffer_total_size_ = buffer_size_ * buffer_count_;
     
-    printf("🗺️  Mapping framebuffer: size=%zu bytes\n", framebuffer_total_size_);
+    printf("🗺️  Mapping framebuffer: size=%zu bytes (%d buffers × %zu bytes)\n", 
+           framebuffer_total_size_, buffer_count_, buffer_size_);
     
     // 执行mmap映射
     framebuffer_base_ = mmap(0, framebuffer_total_size_,
@@ -319,29 +339,52 @@ void LinuxFramebufferDevice::calculateBufferAddresses() {
     unsigned char* base = (unsigned char*)framebuffer_base_;
     
     // 检查并调整到安全的 buffer 数量
-    size_t required_size = buffer_size_ * buffers_.size();
+    size_t required_size = buffer_size_ * buffer_count_;
     if (required_size > framebuffer_total_size_) {
         int safe_count = framebuffer_total_size_ / buffer_size_;
-        printf("⚠️  WARNING: Adjusted buffer_count from %zu to %d (max safe value)\n", 
-               buffers_.size(), safe_count);
+        printf("⚠️  WARNING: Adjusted buffer_count from %d to %d (max safe value)\n", 
+               buffer_count_, safe_count);
         
         if (safe_count <= 0) {
             printf("❌ ERROR: Cannot fit even one buffer in mapped memory!\n");
-            buffers_.clear();
             return;
         }
         
-        // 调整 vector 大小到安全数量
-        buffers_.resize(safe_count);
+        buffer_count_ = safe_count;
     }
     
-    // 计算每个 buffer 的地址
-    for (size_t i = 0; i < buffers_.size(); i++) {
+    // 计算每个 buffer 的地址并创建 BufferPool
+    std::vector<BufferPool::ExternalBufferInfo> fb_infos;
+    fb_mappings_.clear();
+    fb_mappings_.reserve(buffer_count_);
+    
+    printf("🔧 Creating BufferPool with %d framebuffer buffers:\n", buffer_count_);
+    
+    for (int i = 0; i < buffer_count_; i++) {
         void* buffer_addr = (void*)(base + buffer_size_ * i);
-        buffers_[i] = Buffer(buffer_addr, buffer_size_);
+        fb_mappings_.push_back(buffer_addr);
         
-        printf("   Buffer[%zu]: address=%p, size=%zu\n", 
-               i, buffers_[i].data(), buffers_[i].size());
+        // 尝试获取物理地址（可能失败，取决于权限）
+        uint64_t phys_addr = 0;  // 暂时设为0，BufferPool会尝试自动获取
+        
+        fb_infos.push_back({
+            .virt_addr = buffer_addr,
+            .phys_addr = phys_addr,
+            .size = buffer_size_
+        });
+        
+        printf("   Framebuffer[%d]: virt=%p, size=%zu\n", 
+               i, buffer_addr, buffer_size_);
+    }
+    
+    // 创建 BufferPool（托管framebuffer）
+    try {
+        buffer_pool_ = std::make_unique<BufferPool>(fb_infos);
+        printf("✅ BufferPool created successfully (managing %d framebuffers)\n", buffer_count_);
+        buffer_pool_->printStats();
+    } catch (const std::exception& e) {
+        printf("❌ ERROR: Failed to create BufferPool: %s\n", e.what());
+        buffer_pool_.reset();
     }
 }
 
@@ -353,5 +396,36 @@ void LinuxFramebufferDevice::unmapHardwareFramebufferMemory() {
         framebuffer_base_ = nullptr;
         framebuffer_total_size_ = 0;
     }
+}
+
+// ============ 新接口：displayBuffer(Buffer*) ============
+
+bool LinuxFramebufferDevice::displayBuffer(Buffer* buffer) {
+    if (!is_initialized_) {
+        printf("❌ ERROR: Device not initialized\n");
+        return false;
+    }
+    
+    if (!buffer) {
+        printf("❌ ERROR: Null buffer pointer\n");
+        return false;
+    }
+    
+    if (!buffer_pool_) {
+        printf("❌ ERROR: BufferPool not initialized\n");
+        return false;
+    }
+    
+    // 校验 buffer 是否属于这个 pool
+    if (!buffer_pool_->validateBuffer(buffer)) {
+        printf("❌ ERROR: Buffer validation failed (may not belong to this pool)\n");
+        return false;
+    }
+    
+    // 获取 buffer ID（即索引）
+    uint32_t buffer_id = buffer->id();
+    
+    // 使用原有的 displayBuffer(int) 实现
+    return displayBuffer(static_cast<int>(buffer_id));
 }
 

@@ -3,7 +3,9 @@
 
 #include "IDisplayDevice.hpp"
 #include "../buffer/Buffer.hpp"
+#include "../buffer/BufferPool.hpp"
 #include <vector>
+#include <memory>
 
 /**
  * LinuxFramebufferDevice - Linux Framebuffer 显示设备实现
@@ -27,9 +29,11 @@ private:
     void* framebuffer_base_;          // mmap返回的基地址
     size_t framebuffer_total_size_;   // 映射的总大小
     
-    // ============ Buffer管理 ============
-    std::vector<Buffer> buffers_;     // Buffer对象数组（动态分配，根据硬件实际数量）
-    int current_buffer_index_;        // 当前显示的buffer索引
+    // ============ Buffer管理（使用BufferPool）============
+    std::unique_ptr<BufferPool> buffer_pool_;  // BufferPool 管理 framebuffer
+    std::vector<void*> fb_mappings_;          // framebuffer 映射地址（用于物理地址查询）
+    int buffer_count_;                        // buffer 数量
+    int current_buffer_index_;                // 当前显示的buffer索引
     
     // ============ 显示属性 ============
     int width_;                       // 显示宽度（像素）
@@ -89,6 +93,29 @@ public:
     bool displayBuffer(int buffer_index) override;
     bool waitVerticalSync() override;
     int getCurrentDisplayBuffer() const override;
+    
+    // ============ 新接口：BufferPool 访问 ============
+    
+    /**
+     * @brief 获取 BufferPool 指针
+     * @return BufferPool* 用于与 VideoProducer 配合
+     * 
+     * 使用示例：
+     * @code
+     * LinuxFramebufferDevice display;
+     * display.initialize(0);
+     * BufferPool* pool = display.getBufferPool();
+     * VideoProducer producer(*pool);
+     * @endcode
+     */
+    BufferPool* getBufferPool() { return buffer_pool_.get(); }
+    
+    /**
+     * @brief 显示指定的 buffer（使用新 Buffer 接口）
+     * @param buffer Buffer 指针
+     * @return true 如果显示成功
+     */
+    bool displayBuffer(Buffer* buffer);
 };
 
 #endif // LINUX_FRAMEBUFFER_DEVICE_HPP

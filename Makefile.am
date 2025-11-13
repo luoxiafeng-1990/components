@@ -9,7 +9,11 @@ display_test_SOURCES = test.cpp \
                        source/videoFile/VideoReaderFactory.cpp \
                        source/monitor/PerformanceMonitor.cpp \
                        source/monitor/Timer.cpp \
-                       source/buffer/BufferManager.cpp \
+                       source/buffer/Buffer.cpp \
+                       source/buffer/BufferAllocator.cpp \
+                       source/buffer/BufferHandle.cpp \
+                       source/buffer/BufferPool.cpp \
+                       source/producer/VideoProducer.cpp \
                        source/videoFile/IoUringVideoReader.cpp
 
 AM_CPPFLAGS = -I$(top_srcdir)/include
