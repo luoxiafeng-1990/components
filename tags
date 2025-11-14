@@ -232,7 +232,7 @@ __anonbde1b1730102	source/buffer/BufferPool.cpp	/^            if (!free_cv_.wait
 __anonbde1b1730202	source/buffer/BufferPool.cpp	/^            free_cv_.wait(lock, [this] { return !free_queue_.empty(); });$/;"	f	language:C++	function:BufferPool::acquireFree	file:
 __anonbde1b1730302	source/buffer/BufferPool.cpp	/^            if (!filled_cv_.wait_for(lock, timeout, [this] { return !filled_queue_.empty(); })) /;"	f	language:C++	function:BufferPool::acquireFilled	file:
 __anonbde1b1730402	source/buffer/BufferPool.cpp	/^            filled_cv_.wait(lock, [this] { return !filled_queue_.empty(); });$/;"	f	language:C++	function:BufferPool::acquireFilled	file:
-__anonbde1b1730502	source/buffer/BufferPool.cpp	/^        [buffer](const std::unique_ptr<Buffer>& b) {$/;"	f	language:C++	function:BufferPool::ejectBuffer	file:	signature:(const std::unique_ptr<Buffer>& b) 
+__anonbde1b1730502	source/buffer/BufferPool.cpp	/^            [buffer](const std::unique_ptr<Buffer>& b) {$/;"	f	language:C++	function:BufferPool::ejectBuffer	file:	signature:(const std::unique_ptr<Buffer>& b) 
 __anonfcd100560102	test.cpp	/^    producer.setErrorCallback([](const std::string& error) {$/;"	f	language:C++	function:test_buffermanager_producer	file:	signature:(const std::string& error) 
 __anonfcd100560202	test.cpp	/^    producer.setErrorCallback([](const std::string& error) {$/;"	f	language:C++	function:test_buffermanager_iouring	file:	signature:(const std::string& error) 
 __anonfcd100560302	test.cpp	/^    producer.setErrorCallback([](const std::string& error) {$/;"	f	language:C++	function:test_rtsp_stream	file:	signature:(const std::string& error) 
@@ -640,6 +640,7 @@ seekToEnd	source/videoFile/VideoFile.cpp	/^bool VideoFile::seekToEnd() {$/;"	f	l
 setBufferPool	include/videoFile/IVideoReader.hpp	/^    virtual void setBufferPool(void* pool) {$/;"	f	language:C++	class:IVideoReader	typeref:typename:void	signature:(void * pool)
 setBufferPool	source/videoFile/RtspVideoReader.cpp	/^void RtspVideoReader::setBufferPool(void* pool) {$/;"	f	language:C++	class:RtspVideoReader	typeref:typename:void	signature:(void * pool)
 setBufferPool	source/videoFile/VideoFile.cpp	/^void VideoFile::setBufferPool(void* pool) {$/;"	f	language:C++	class:VideoFile	typeref:typename:void	signature:(void * pool)
+setBufferSize	source/buffer/BufferPool.cpp	/^bool BufferPool::setBufferSize(size_t size) {$/;"	f	language:C++	class:BufferPool	typeref:typename:bool	signature:(size_t size)
 setDmaBufFd	include/buffer/Buffer.hpp	/^    void setDmaBufFd(int fd) { dma_fd_ = fd; }$/;"	f	language:C++	class:Buffer	typeref:typename:void	signature:(int fd)
 setError	source/producer/VideoProducer.cpp	/^void VideoProducer::setError(const std::string& error_msg) {$/;"	f	language:C++	class:VideoProducer	typeref:typename:void	signature:(const std::string & error_msg)
 setError	source/videoFile/RtspVideoReader.cpp	/^void RtspVideoReader::setError(const std::string& error) {$/;"	f	language:C++	class:RtspVideoReader	typeref:typename:void	signature:(const std::string & error)

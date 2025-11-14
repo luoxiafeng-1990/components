@@ -23,18 +23,29 @@
  * - 底层实现可以透明切换
  * - 支持自动和手动选择读取器类型
  * 
- * 使用方式：
+ * 使用方式（统一智能接口）：
+ * 
+ * **编码视频（MP4, AVI, RTSP等）：**
  * ```cpp
- * VideoFile video;  // 自动选择最优实现
- * video.openRaw(path, width, height, bpp);
+ * VideoFile video;
+ * video.setReaderType(VideoReaderFactory::ReaderType::FFMPEG);
+ * video.open("video.mp4");  // 自动检测格式，无需指定宽高
  * video.readFrameTo(buffer);
  * ```
  * 
- * 高级用法：
+ * **Raw视频：**
  * ```cpp
  * VideoFile video;
- * video.setReaderType(VideoReaderFactory::ReaderType::IOURING);  // 手动指定
- * video.openRaw(...);
+ * video.setReaderType(VideoReaderFactory::ReaderType::MMAP);
+ * video.open("video.raw", 1920, 1080, 32);  // 指定格式参数
+ * video.readFrameTo(buffer);
+ * ```
+ * 
+ * **通用方式（推荐）：**
+ * ```cpp
+ * // 调用者无需关心视频类型，只需传入所有可能需要的参数
+ * // 门面类会根据Reader类型自动判断是否使用这些参数
+ * video.open(path, width, height, bpp);
  * ```
  */
 class VideoFile {
@@ -86,8 +97,39 @@ public:
     
     // ============ 文件操作（转发到 reader_） ============
     
-    bool open(const char* path);
+    /**
+     * 打开视频文件（统一智能接口）
+     * @param path 文件路径
+     * @param width 视频宽度（可选，用于raw视频）
+     * @param height 视频高度（可选，用于raw视频）
+     * @param bits_per_pixel 每像素位数（可选，用于raw视频）
+     * @return 成功返回true
+     * 
+     * @note 门面类会根据Reader类型自动判断：
+     *       - 编码视频Reader（FFMPEG, RTSP）：忽略 width/height/bpp，自动检测格式
+     *       - Raw视频Reader（MMAP, IOURING）：使用传入的 width/height/bpp 参数
+     * 
+     * @note 调用者无需关心内部实现细节，只需传入所有可能需要的参数即可
+     * 
+     * 使用示例：
+     * @code
+     * // 编码视频（自动检测格式）
+     * video.setReaderType(VideoReaderFactory::ReaderType::FFMPEG);
+     * video.open("video.mp4");  // width/height/bpp 被忽略
+     * 
+     * // Raw视频（需要格式参数）
+     * video.setReaderType(VideoReaderFactory::ReaderType::MMAP);
+     * video.open("video.raw", 1920, 1080, 32);  // 使用格式参数
+     * @endcode
+     */
+    bool open(const char* path, int width = 0, int height = 0, int bits_per_pixel = 0);
+    
+    /**
+     * 打开raw视频文件（向后兼容接口）
+     * @deprecated 推荐直接使用 open(path, width, height, bpp)
+     */
     bool openRaw(const char* path, int width, int height, int bits_per_pixel);
+    
     void close();
     bool isOpen() const;
     
@@ -118,6 +160,13 @@ public:
     const char* getPath() const;
     bool hasMoreFrames() const;
     bool isAtEnd() const;
+    
+    /**
+     * 查询 Reader 是否需要外部提供 buffer
+     * @return true - 需要外部 buffer（预分配模式）
+     *         false - 不需要外部 buffer（动态注入模式）
+     */
+    bool requiresExternalBuffer() const;
     
     // ============ 可选依赖注入（透传到 Reader）============
     

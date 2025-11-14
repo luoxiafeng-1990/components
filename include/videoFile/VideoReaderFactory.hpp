@@ -29,7 +29,8 @@ public:
         MMAP,          // 强制使用 mmap 实现
         IOURING,       // 强制使用 io_uring 实现
         DIRECT_READ,   // 强制使用普通 read 实现（暂未实现）
-        RTSP           // RTSP 视频流解码器
+        RTSP,          // RTSP 视频流解码器
+        FFMPEG         // FFmpeg 编码视频文件解码器
     };
     
     /**

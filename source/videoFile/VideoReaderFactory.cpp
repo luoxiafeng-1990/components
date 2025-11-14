@@ -2,6 +2,7 @@
 #include "../../include/videoFile/MmapVideoReader.hpp"
 #include "../../include/videoFile/IoUringVideoReader.hpp"
 #include "../../include/videoFile/RtspVideoReader.hpp"
+#include "../../include/videoFile/FfmpegVideoReader.hpp"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -42,6 +43,8 @@ std::unique_ptr<IVideoReader> VideoReaderFactory::createByName(const char* name)
         return std::make_unique<IoUringVideoReader>();
     } else if (strcmp(name, "rtsp") == 0) {
         return std::make_unique<RtspVideoReader>();
+    } else if (strcmp(name, "ffmpeg") == 0) {
+        return std::make_unique<FfmpegVideoReader>();
     } else if (strcmp(name, "auto") == 0) {
         return create(ReaderType::AUTO);
     }
@@ -79,6 +82,7 @@ const char* VideoReaderFactory::typeToString(ReaderType type) {
         case ReaderType::IOURING:     return "IOURING";
         case ReaderType::DIRECT_READ: return "DIRECT_READ";
         case ReaderType::RTSP:        return "RTSP";
+        case ReaderType::FFMPEG:      return "FFMPEG";
         default:                      return "UNKNOWN";
     }
 }
@@ -127,6 +131,9 @@ std::unique_ptr<IVideoReader> VideoReaderFactory::createByType(ReaderType type) 
         case ReaderType::RTSP:
             return std::make_unique<RtspVideoReader>();
             
+        case ReaderType::FFMPEG:
+            return std::make_unique<FfmpegVideoReader>();
+            
         case ReaderType::DIRECT_READ:
             printf("⚠️  Warning: DIRECT_READ not implemented, using mmap\n");
             return std::make_unique<MmapVideoReader>();
@@ -148,6 +155,10 @@ VideoReaderFactory::ReaderType VideoReaderFactory::getTypeFromEnvironment() {
         return ReaderType::IOURING;
     } else if (strcmp(env, "direct") == 0) {
         return ReaderType::DIRECT_READ;
+    } else if (strcmp(env, "rtsp") == 0) {
+        return ReaderType::RTSP;
+    } else if (strcmp(env, "ffmpeg") == 0) {
+        return ReaderType::FFMPEG;
     }
     
     return ReaderType::AUTO;

@@ -48,6 +48,10 @@ public:
     void close() override;
     bool isOpen() const override;
     
+    bool requiresExternalBuffer() const override {
+        return true;  // 需要外部 buffer（异步读取到外部 buffer）
+    }
+    
     bool readFrameTo(Buffer& dest_buffer) override;
     bool readFrameTo(void* dest_buffer, size_t buffer_size) override;
     bool readFrameAt(int frame_index, Buffer& dest_buffer) override;

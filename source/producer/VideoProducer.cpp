@@ -57,14 +57,16 @@ bool VideoProducer::start(const Config& config) {
     config_ = config;
     
     // 创建共享的 VideoFile 对象
-    video_file_ = std::make_shared<VideoFile>();
-    
-    // 设置读取器类型（根据配置显式指定）
-    video_file_->setReaderType(config.reader_type);
+    video_file_ = std::make_shared<VideoFile>(config.reader_type);
     printf("   Reader type: %s\n", video_file_->getReaderType());
     
-    if (!video_file_->openRaw(config.file_path.c_str(), 
-                              config.width, config.height, config.bits_per_pixel)) {
+    // 🎯 统一的open接口（传入所有参数，门面类内部智能判断）
+    // - 对于编码视频（FFMPEG, RTSP）：自动检测格式，width/height/bpp 被忽略
+    // - 对于raw视频（MMAP, IOURING）：使用 width/height/bpp 参数
+    if (!video_file_->open(config.file_path.c_str(), 
+                           config.width, 
+                           config.height, 
+                           config.bits_per_pixel)) {
         setError("Failed to open video file: " + config.file_path);
         video_file_.reset();
         return false;
@@ -217,6 +219,12 @@ void VideoProducer::printStats() const {
 void VideoProducer::producerThreadFunc(int thread_id) {
     printf("🚀 Thread #%d: Starting producer loop\n", thread_id);
     
+    // 🎯 查询 Reader 能力（只查询一次）
+    bool needs_external_buffer = video_file_->requiresExternalBuffer();
+    printf("   Thread #%d: Reader mode: %s\n", thread_id,
+           needs_external_buffer ? "External Buffer (Pre-allocated)" 
+                                 : "Self-Inject (Dynamic)");
+    
     int thread_produced = 0;
     int thread_skipped = 0;
     int consecutive_failures = 0;
@@ -244,25 +252,50 @@ void VideoProducer::producerThreadFunc(int thread_id) {
             }
         }
         
-        // 3. 获取空闲 buffer（循环等待直到成功）
-        Buffer* buffer = nullptr;
-        while (running_ && buffer == nullptr) {
-            buffer = buffer_pool_.acquireFree(true, 100);  // 100ms 超时
-            if (buffer == nullptr && running_) {
-                // 超时但仍在运行，继续等待
-                // printf("   [Thread #%d] Waiting for free buffer...\n", thread_id);
+        // 3. 根据 Reader 能力选择不同的流程
+        bool read_success = false;
+        
+        if (needs_external_buffer) {
+            // ============ 流程 A：预分配模式 ============
+            // 获取空闲 buffer（循环等待直到成功）
+            Buffer* buffer = nullptr;
+            while (running_ && buffer == nullptr) {
+                buffer = buffer_pool_.acquireFree(true, 100);  // 100ms 超时
+                if (buffer == nullptr && running_) {
+                    // 超时但仍在运行，继续等待
+                    // printf("   [Thread #%d] Waiting for free buffer...\n", thread_id);
+                }
             }
+            
+            // 检查是否因为停止信号退出循环
+            if (!running_) {
+                break;
+            }
+            
+            // 读取帧数据到 buffer
+            read_success = video_file_->readFrameAtThreadSafe(
+                frame_index, buffer->getVirtualAddress(), buffer->size());
+            
+            if (read_success) {
+                // 读取成功，提交填充好的 buffer
+                buffer_pool_.submitFilled(buffer);
+            } else {
+                // 读取失败，归还 buffer 到 free 队列
+                // 注意：releaseFilled 会把 buffer 归还到 free 队列（循环利用）
+                buffer_pool_.releaseFilled(buffer);
+            }
+            
+        } else {
+            // ============ 流程 B：动态注入模式 ============
+            // 直接读取，Reader 内部会注入 buffer
+            // 注意：对于动态注入模式，readFrameAtThreadSafe 的后两个参数会被忽略
+            read_success = video_file_->readFrameAtThreadSafe(
+                frame_index, nullptr, 0);
+            
+            // Reader 内部已经 injectFilledBuffer()，无需手动提交
         }
         
-        // 检查是否因为停止信号退出循环
-        if (!running_) {
-            break;
-        }
-        
-        // 4. 读取帧数据（使用线程安全的方法）
-        bool read_success = video_file_->readFrameAtThreadSafe(
-            frame_index, buffer->getVirtualAddress(), buffer->size());
-        
+        // 4. 处理读取结果
         if (!read_success) {
             // 读取失败
             skipped_frames_.fetch_add(1);
@@ -270,9 +303,6 @@ void VideoProducer::producerThreadFunc(int thread_id) {
             
             printf("⚠️  Thread #%d: Failed to read frame %d/%d\n",
                    thread_id, frame_index, total_frames_);
-            
-            // 归还 buffer
-            buffer_pool_.releaseFilled(buffer);
             
             // 连续失败检测
             consecutive_failures++;
@@ -289,9 +319,6 @@ void VideoProducer::producerThreadFunc(int thread_id) {
         
         // 5. 读取成功，重置失败计数
         consecutive_failures = 0;
-        
-        // 6. 提交填充好的 buffer
-        buffer_pool_.submitFilled(buffer);
         
         produced_frames_.fetch_add(1);
         thread_produced++;

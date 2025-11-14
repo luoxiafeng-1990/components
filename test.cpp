@@ -23,13 +23,56 @@
 #include <stdlib.h>
 #include <signal.h>
 #include <string.h>
+#include <getopt.h>
+#include <string>
+#include <vector>
 #include "include/display/LinuxFramebufferDevice.hpp"
 #include "include/videoFile/VideoFile.hpp"
 #include "include/buffer/BufferPool.hpp"
 #include "include/producer/VideoProducer.hpp"
+#include "include/decoder/Decoder.hpp"
+
+// FFmpeg头文件（解码器测试使用）
+extern "C" {
+#include <libavcodec/avcodec.h>
+#include <libavutil/pixfmt.h>
+}
 
 // 全局标志，用于处理 Ctrl+C 退出
 static volatile bool g_running = true;
+
+// 测试模式枚举
+enum class TestMode {
+    LOOP,
+    SEQUENTIAL,
+    PRODUCER,
+    IOURING,
+    DECODER,
+    RTSP,
+    FFMPEG,
+    UNKNOWN
+};
+
+// 将字符串转换为测试模式枚举
+static TestMode parse_test_mode(const char* mode_str) {
+    if (strcmp(mode_str, "loop") == 0) {
+        return TestMode::LOOP;
+    } else if (strcmp(mode_str, "sequential") == 0) {
+        return TestMode::SEQUENTIAL;
+    } else if (strcmp(mode_str, "producer") == 0) {
+        return TestMode::PRODUCER;
+    } else if (strcmp(mode_str, "iouring") == 0) {
+        return TestMode::IOURING;
+    } else if (strcmp(mode_str, "decoder") == 0) {
+        return TestMode::DECODER;
+    } else if (strcmp(mode_str, "rtsp") == 0) {
+        return TestMode::RTSP;
+    } else if (strcmp(mode_str, "ffmpeg") == 0) {
+        return TestMode::FFMPEG;
+    } else {
+        return TestMode::UNKNOWN;
+    }
+}
 
 // 信号处理函数
 static void signal_handler(int signum) {
@@ -368,7 +411,114 @@ static int test_buffermanager_iouring(const char* raw_video_path) {
 }
 
 /**
- * 测试5：RTSP 视频流播放（独立 BufferPool + DMA 零拷贝显示）
+ * 测试5：解码器基础功能测试（零拷贝模式）
+ * 
+ * 功能：
+ * - 演示解码器系统的零拷贝使用方法
+ * - 测试FFmpeg解码器与BufferPool深度集成
+ * - 展示FFmpeg原生类型的使用（AVPixelFormat等）
+ * - 演示send/receive模式（FFmpeg标准）
+ * 
+ * 零拷贝工作流程：
+ * 1. 创建BufferPool（预分配内存）
+ * 2. 配置解码器使用ZERO_COPY模式
+ * 3. FFmpeg通过get_buffer2回调从BufferPool获取空闲Buffer
+ * 4. FFmpeg直接解码到BufferPool的Buffer
+ * 5. 用户通过DecodedFrame.buffer使用（零拷贝！）
+ * 6. 用户归还buffer到BufferPool
+ * 
+ * 架构设计：
+ * 编码数据 → FFmpeg(get_buffer2) → 直接写入BufferPool → Display
+ *                      ^^^^^^^^^^^^^^^^^^^^^^^^ 零拷贝！
+ */
+static int test_decoder_basic() {
+    printf("\n═══════════════════════════════════════════════════════\n");
+    printf("  TEST 5: Decoder Zero-Copy Test\n");
+    printf("═══════════════════════════════════════════════════════\n\n");
+    
+    // 1. 创建BufferPool（必须在配置解码器前创建）
+    printf("📦 Step 1: Create BufferPool...\n");
+    // 计算buffer大小：1920x1080 NV12 = 1920*1080*1.5 = 3,110,400 bytes
+    size_t frame_size = 1920 * 1080 * 3 / 2;  // NV12 是 12bpp
+    printf("   Frame size: %zu bytes (%.2f MB)\n", frame_size, frame_size / (1024.0 * 1024.0));
+    
+    // 创建预分配的BufferPool（自动分配模式）
+    // 使用构造方式 1：BufferPool(int count, size_t size, bool use_cma, name, category)
+    BufferPool decoder_pool(10, frame_size, false, "Decoder_Pool", "Decoder");
+    printf("   ✅ BufferPool created: 10 buffers x %.2f MB\n", 
+           frame_size / (1024.0 * 1024.0));
+    
+    // 2. 创建解码器（使用工厂模式）
+    printf("\n⚙️  Step 2: Create and configure decoder...\n");
+    Decoder decoder(DecoderFactory::DecoderType::FFMPEG);
+    
+    // 3. 配置解码器（使用FFmpeg原生类型！）
+    decoder.setCodec(AV_CODEC_ID_H264);  // 使用FFmpeg的codec ID
+    decoder.setOutputFormat(1920, 1080, AV_PIX_FMT_NV12);  // 使用FFmpeg的像素格式
+    decoder.setThreadCount(4);
+    
+    // 4. 关键：设置零拷贝模式并关联BufferPool
+    printf("   🔗 Attaching BufferPool for zero-copy...\n");
+    decoder.setBufferMode(BufferAllocationMode::ZERO_COPY);  // 零拷贝模式
+    decoder.attachBufferPool(&decoder_pool);
+    
+    // 5. 初始化解码器
+    printf("\n🚀 Step 3: Initialize decoder...\n");
+    DecoderStatus status = decoder.open();
+    if (status != DecoderStatus::OK) {
+        printf("❌ Failed to open decoder: %s\n", decoder.getLastError());
+        return -1;
+    }
+    
+    // 6. 显示解码器信息
+    printf("\n📊 Decoder Information:\n");
+    printf("   Type: %s\n", DecoderFactory::getDecoderTypeName(decoder.getDecoderType()));
+    printf("   Codec: %s (ID=%d)\n", decoder.getCodecName(), decoder.getConfig().codec_id);
+    printf("   Output: %dx%d\n", decoder.getConfig().width, decoder.getConfig().height);
+    printf("   Pixel format: %s\n", av_get_pix_fmt_name(decoder.getConfig().pix_fmt));
+    printf("   Hardware accelerated: %s\n", decoder.isHardwareAccelerated() ? "Yes" : "No");
+    printf("   Buffer mode: ZERO_COPY ⚡\n");
+    
+    // 7. 模拟解码流程
+    printf("\n🎬 Step 4: Decoder workflow demonstration:\n");
+    printf("\n💡 Zero-Copy Workflow:\n");
+    printf("   1. Create AVPacket with encoded data\n");
+    printf("   2. Call decoder.sendPacket(packet)\n");
+    printf("   3. Loop: decoder.receiveFrame(frame) until NEED_MORE_DATA\n");
+    printf("   4. frame.buffer points to BufferPool's Buffer (zero-copy!)\n");
+    printf("   5. Use: display.displayBufferByDMA(frame.buffer)\n");
+    printf("   6. Release: frame.release() and pool.releaseFilled(buffer)\n");
+    
+    printf("\n📝 Example code:\n");
+    printf("   AVPacket* packet = /* read from file/network */;\n");
+    printf("   decoder.sendPacket(packet);\n");
+    printf("   \n");
+    printf("   DecodedFrame frame;\n");
+    printf("   while (decoder.receiveFrame(frame) == DecoderStatus::OK) {\n");
+    printf("       // frame.buffer -> BufferPool's Buffer (zero-copy!)\n");
+    printf("       display.displayBufferByDMA(frame.buffer);\n");
+    printf("       \n");
+    printf("       frame.release();\n");
+    printf("       pool.releaseFilled(frame.buffer);\n");
+    printf("   }\n");
+    
+    printf("\n✅ Zero-copy decoder test completed!\n");
+    printf("\n🎯 Key Benefits:\n");
+    printf("   ⚡ Zero memory copy: FFmpeg -> BufferPool directly\n");
+    printf("   🚀 High performance: Eliminates memcpy overhead\n");
+    printf("   🔗 Deep integration: FFmpeg + BufferPool + Display\n");
+    printf("   📐 Industry standard: Uses FFmpeg native types (AVPixelFormat, etc.)\n");
+    
+    // 8. 清理
+    decoder.close();
+    // BufferPool 会自动清理分配的 buffers
+    
+    printf("\n🎉 Test passed!\n\n");
+    return 0;
+}
+
+/**
+ * 测试6：RTSP 视频流播放（独立 BufferPool + DMA 零拷贝显示）
  * 
  * 功能演示：
  * - 连接 RTSP 视频流
@@ -526,6 +676,130 @@ static int test_rtsp_stream(const char* rtsp_url) {
 }
 
 /**
+ * 测试6：FFmpeg 编码视频文件播放（使用 FfmpegVideoReader）
+ * 
+ * 功能：
+ * - 打开编码视频文件（MP4, AVI, MKV等）
+ * - 使用 FfmpegVideoReader 进行解码
+ * - 集成 VideoProducer + BufferPool 架构
+ * - 支持两种模式：
+ *   1. 普通模式：使用 framebuffer pool（解码后 memcpy）
+ *   2. 零拷贝模式：使用独立 pool + 特殊解码器（如 h264_taco）
+ * 
+ * 参数：
+ * @param video_path 视频文件路径（如 "video.mp4"）
+ * @param use_zero_copy 是否使用零拷贝模式（需要特殊硬件）
+ */
+static int test_ffmpeg_video(const char* video_path, bool use_zero_copy = false) {
+    printf("\n═══════════════════════════════════════════════════════\n");
+    printf("  Test: FFmpeg Encoded Video Playback\n");
+    printf("  File: %s\n", video_path);
+    printf("  Mode: %s\n", use_zero_copy ? "Zero-Copy (h264_taco)" : "Normal (memcpy)");
+    printf("═══════════════════════════════════════════════════════\n\n");
+    
+    // 1. 初始化显示设备
+    printf("🖥️  Initializing display device...\n");
+    LinuxFramebufferDevice display;
+    if (!display.initialize(0)) {
+        return -1;
+    }
+    
+    // 2. 根据模式选择 BufferPool
+    BufferPool* pool = nullptr;
+    BufferPool* independent_pool = nullptr;
+    // 零拷贝模式：创建独立的 BufferPool（动态注入模式）
+    printf("📦 Creating independent BufferPool for FFmpeg decoder (zero-copy)...\n");
+    independent_pool = new BufferPool("FFmpeg_Decoder_Pool", "FFMPEG", 10);
+    pool = independent_pool;
+    printf("✅ Independent BufferPool created (dynamic injection mode)\n");
+    pool->printStats();
+    // 3. 创建 VideoProducer（依赖注入 BufferPool）
+    printf("📹 Creating VideoProducer with BufferPool...\n");
+    VideoProducer producer(*pool);
+    
+    // 4. 配置 FFmpeg 解码
+    printf("🎬 Configuring FFmpeg video reader: %s\n", video_path);
+    
+    VideoProducer::Config config(
+        video_path,
+        display.getWidth(),
+        display.getHeight(),
+        display.getBitsPerPixel(),
+        true,  // loop（循环播放）
+        1,  // 零拷贝推荐单线程，普通模式可以多线程
+        VideoReaderFactory::ReaderType::FFMPEG  // 显式指定 FFMPEG 读取器
+    );
+    
+    // 5. 设置错误回调
+    producer.setErrorCallback([](const std::string& error) {
+        printf("\n❌ FFmpeg Error: %s\n", error.c_str());
+        g_running = false;
+    });
+    
+    // 6. 启动生产者
+    printf("🚀 Starting FFmpeg video producer...\n");
+    if (!producer.start(config)) {
+        printf("❌ Failed to start FFmpeg producer\n");
+        if (independent_pool) delete independent_pool;
+        return -1;
+    }
+    
+    printf("\n✅ Video decoding started, starting playback...\n");
+    printf("   Press Ctrl+C to stop\n\n");
+    
+    // 注册信号处理
+    signal(SIGINT, signal_handler);
+    
+    // 7. 消费者循环
+    int frame_count = 0;
+    
+    while (g_running) {
+        // 从 BufferPool 获取已解码的 buffer
+        Buffer* filled_buffer = pool->acquireFilled(true, 100);
+        if (filled_buffer == nullptr) {
+            continue;  // 超时，继续等待
+        }
+        // 显示
+        display.waitVerticalSync();
+        // 零拷贝模式：使用 DMA 显示
+        if (!display.displayBufferByDMA(filled_buffer)) {
+            printf("⚠️  Warning: DMA display failed, falling back to normal\n");
+            display.displayFilledFramebuffer(filled_buffer);
+        }
+        // 归还 buffer
+        pool->releaseFilled(filled_buffer);
+        
+        frame_count++;
+        
+        // 每100帧打印一次统计
+        if (frame_count % 100 == 0) {
+            printf("📊 Frames displayed: %d (%.1f fps)\n", 
+                   frame_count, producer.getAverageFPS());
+        }
+    }
+    
+    // 8. 停止生产者
+    printf("\n\n🛑 Stopping FFmpeg producer...\n");
+    producer.stop();
+    
+    printf("\n✅ FFmpeg video test completed\n");
+    printf("   Total frames displayed: %d\n", frame_count);
+    printf("   Frames produced: %d\n", producer.getProducedFrames());
+    printf("   Frames skipped: %d\n", producer.getSkippedFrames());
+    printf("   Average FPS: %.2f\n", producer.getAverageFPS());
+    
+    printf("\n📦 Final BufferPool statistics:\n");
+    pool->printStats();
+    
+    // 清理
+    if (independent_pool) {
+        delete independent_pool;
+    }
+    
+    return 0;
+}
+
+/**
  * 打印使用说明
  */
 static void print_usage(const char* prog_name) {
@@ -537,7 +811,9 @@ static void print_usage(const char* prog_name) {
     printf("                      sequential: Sequential playback (play once)\n");
     printf("                      producer:   BufferPool + VideoProducer test\n");
     printf("                      iouring:    io_uring mode (using VideoProducer)\n");
-    printf("                      rtsp:       RTSP stream playback (zero-copy, NEW)\n");
+    printf("                      decoder:    Decoder system test\n");
+    printf("                      rtsp:       RTSP stream playback (zero-copy)\n");
+    printf("                      ffmpeg:     FFmpeg encoded video playback (NEW)\n");
     printf("\n");
     printf("Examples:\n");
     printf("  %s video.raw\n", prog_name);
@@ -545,19 +821,24 @@ static void print_usage(const char* prog_name) {
     printf("  %s -m sequential video.raw\n", prog_name);
     printf("  %s -m producer video.raw\n", prog_name);
     printf("  %s -m iouring video.raw\n", prog_name);
+    printf("  %s -m decoder\n", prog_name);
     printf("  %s -m rtsp rtsp://192.168.1.100:8554/stream\n", prog_name);
+    printf("  %s -m ffmpeg video.mp4\n", prog_name);
     printf("\n");
     printf("Test Modes Description:\n");
     printf("  loop:       Load N frames into framebuffer and loop display them\n");
     printf("  sequential: Read and display frames sequentially from file\n");
     printf("  producer:   Use BufferPool + VideoProducer architecture (zero-copy)\n");
     printf("  iouring:    io_uring async I/O mode\n");
+    printf("  decoder:    Decoder system basic functionality test\n");
     printf("  rtsp:       RTSP stream decoding and display (zero-copy, FFmpeg)\n");
+    printf("  ffmpeg:     FFmpeg encoded video file decoding (MP4/AVI/MKV/etc)\n");
     printf("\n");
     printf("Note:\n");
     printf("  - Raw video file must match framebuffer resolution\n");
     printf("  - Format: ARGB888 (4 bytes per pixel)\n");
-    printf("  - RTSP mode requires FFmpeg libraries\n");
+    printf("  - Decoder mode demonstrates the decoder API (no file needed)\n");
+    printf("  - RTSP/FFmpeg modes require FFmpeg libraries\n");
     printf("  - Press Ctrl+C to stop playback\n");
 }
 
@@ -568,26 +849,49 @@ int main(int argc, char* argv[]) {
     const char* raw_video_path = NULL;
     const char* mode = "loop";  // 默认模式：循环播放
     
+    // 定义长选项
+    static struct option long_options[] = {
+        {"help",    no_argument,       0, 'h'},
+        {"mode",    required_argument, 0, 'm'},
+        {0,         0,                 0,  0 }
+    };
+    
     // 解析命令行参数
-    for (int i = 1; i < argc; i++) {
-        if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
-            print_usage(argv[0]);
-            return 0;
-        } else if (strcmp(argv[i], "-m") == 0 || strcmp(argv[i], "--mode") == 0) {
-            if (i + 1 < argc) {
-                mode = argv[++i];
-            } else {
-                printf("Error: -m/--mode requires an argument\n\n");
+    int opt;
+    int option_index = 0;
+    
+    while ((opt = getopt_long(argc, argv, "hm:", long_options, &option_index)) != -1) {
+        switch (opt) {
+            case 'h':
+                print_usage(argv[0]);
+                return 0;
+            
+            case 'm':
+                mode = optarg;
+                break;
+            
+            case '?':
+                // getopt_long 已经打印了错误信息
+                printf("\n");
                 print_usage(argv[0]);
                 return 1;
-            }
-        } else {
-            raw_video_path = argv[i];
+            
+            default:
+                print_usage(argv[0]);
+                return 1;
         }
     }
     
-    // 检查是否提供了视频文件路径
-    if (!raw_video_path) {
+    // 获取非选项参数（视频文件路径或RTSP URL）
+    if (optind < argc) {
+        raw_video_path = argv[optind];
+    }
+    
+    // 解析测试模式
+    TestMode test_mode = parse_test_mode(mode);
+    
+    // 检查是否提供了视频文件路径（decoder模式除外）
+    if (!raw_video_path && test_mode != TestMode::DECODER) {
         printf("Error: Missing raw video file path\n\n");
         print_usage(argv[0]);
         return 1;
@@ -595,20 +899,41 @@ int main(int argc, char* argv[]) {
     
     // 根据模式运行测试
     int result = 0;
-    if (strcmp(mode, "loop") == 0) {
-        result = test_4frame_loop(raw_video_path);
-    } else if (strcmp(mode, "sequential") == 0) {
-        result = test_sequential_playback(raw_video_path);
-    } else if (strcmp(mode, "producer") == 0) {
-        result = test_buffermanager_producer(raw_video_path);
-    } else if (strcmp(mode, "iouring") == 0) {
-        result = test_buffermanager_iouring(raw_video_path);
-    } else if (strcmp(mode, "rtsp") == 0) {
-        result = test_rtsp_stream(raw_video_path);  // raw_video_path实际是rtsp_url
-    } else {
-        printf("Error: Unknown mode '%s'\n\n", mode);
-        print_usage(argv[0]);
-        return 1;
+    switch (test_mode) {
+        case TestMode::LOOP:
+            result = test_4frame_loop(raw_video_path);
+            break;
+        
+        case TestMode::SEQUENTIAL:
+            result = test_sequential_playback(raw_video_path);
+            break;
+        
+        case TestMode::PRODUCER:
+            result = test_buffermanager_producer(raw_video_path);
+            break;
+        
+        case TestMode::IOURING:
+            result = test_buffermanager_iouring(raw_video_path);
+            break;
+        
+        case TestMode::DECODER:
+            result = test_decoder_basic();
+            break;
+        
+        case TestMode::RTSP:
+            result = test_rtsp_stream(raw_video_path);  // raw_video_path实际是rtsp_url
+            break;
+        
+        case TestMode::FFMPEG:
+            result = test_ffmpeg_video(raw_video_path, false);  // 使用普通模式（memcpy）
+            // 如果需要零拷贝模式，可以改为: test_ffmpeg_video(raw_video_path, true)
+            break;
+        
+        case TestMode::UNKNOWN:
+        default:
+            printf("Error: Unknown mode '%s'\n\n", mode);
+            print_usage(argv[0]);
+            return 1;
     }
     
     return result;

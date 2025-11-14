@@ -169,6 +169,10 @@ public:
     void close() override;
     bool isOpen() const override;
     
+    bool requiresExternalBuffer() const override {
+        return false;  // 不需要外部 buffer（内部解码后动态注入）
+    }
+    
     bool readFrameTo(Buffer& dest_buffer) override;
     bool readFrameTo(void* dest_buffer, size_t buffer_size) override;
     bool readFrameAt(int frame_index, Buffer& dest_buffer) override;
@@ -230,5 +234,7 @@ public:
 };
 
 #endif // RTSP_VIDEO_READER_HPP
+
+
 
 

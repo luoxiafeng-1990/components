@@ -6,8 +6,9 @@
 VideoFile::VideoFile(VideoReaderFactory::ReaderType type)
     : preferred_type_(type)
 {
-    // 延迟创建 reader_，在 open/openRaw 时创建
-    // 这样可以避免未使用时的资源浪费
+    if (!reader_) {
+        reader_ = VideoReaderFactory::create(preferred_type_);
+    }
 }
 
 VideoFile::~VideoFile() {
@@ -28,29 +29,52 @@ void VideoFile::setReaderType(VideoReaderFactory::ReaderType type) {
 
 const char* VideoFile::getReaderType() const {
     if (reader_) {
+        // Reader 已创建：返回实际 Reader 的类型
         return reader_->getReaderType();
     }
-    return "None (not initialized)";
+    // Reader 未创建：返回用户设置的偏好类型
+    return VideoReaderFactory::typeToString(preferred_type_);
 }
 
 // ============ 文件操作（门面转发） ============
 
-bool VideoFile::open(const char* path) {
+bool VideoFile::open(const char* path, int width, int height, int bits_per_pixel) {
     // 创建 reader（如果还没创建）
     if (!reader_) {
         reader_ = VideoReaderFactory::create(preferred_type_);
     }
     
-    return reader_->open(path);
+    // 🎯 智能判断：根据Reader类型选择合适的open方法
+    // - Raw视频Reader（MMAP, IOURING, DIRECT_READ）：需要格式参数，调用 openRaw()
+    // - 编码视频Reader（FFMPEG, RTSP）：自动检测格式，调用 open()
+    
+    bool is_raw_reader = (preferred_type_ == VideoReaderFactory::ReaderType::MMAP ||
+                          preferred_type_ == VideoReaderFactory::ReaderType::IOURING ||
+                          preferred_type_ == VideoReaderFactory::ReaderType::DIRECT_READ);
+    
+    if (is_raw_reader) {
+        // Raw视频Reader：使用传入的格式参数
+        if (width == 0 || height == 0 || bits_per_pixel == 0) {
+            printf("❌ ERROR: Raw video reader requires width, height, and bits_per_pixel!\n");
+            printf("   Usage: video.open(path, width, height, bits_per_pixel)\n");
+            return false;
+        }
+        printf("🎬 VideoFile: Opening raw video with format %dx%d@%dbpp\n",
+               width, height, bits_per_pixel);
+        return reader_->openRaw(path, width, height, bits_per_pixel);
+    } else {
+        // 编码视频Reader：自动检测格式（忽略 width/height/bpp 参数）
+        printf("🎬 VideoFile: Opening encoded video (auto-detect format)\n");
+        if (width != 0 || height != 0 || bits_per_pixel != 0) {
+            printf("   Note: width/height/bpp parameters are ignored for encoded video\n");
+        }
+        return reader_->open(path);
+    }
 }
 
 bool VideoFile::openRaw(const char* path, int width, int height, int bits_per_pixel) {
-    // 创建 reader（如果还没创建）
-    if (!reader_) {
-        reader_ = VideoReaderFactory::create(preferred_type_);
-    }
-    
-    return reader_->openRaw(path, width, height, bits_per_pixel);
+    // 向后兼容接口：直接转发到统一的 open() 方法
+    return open(path, width, height, bits_per_pixel);
 }
 
 void VideoFile::close() {
@@ -178,6 +202,14 @@ bool VideoFile::hasMoreFrames() const {
 
 bool VideoFile::isAtEnd() const {
     return reader_ && reader_->isAtEnd();
+}
+
+bool VideoFile::requiresExternalBuffer() const {
+    if (reader_) {
+        return reader_->requiresExternalBuffer();
+    }
+    // 默认保守：假设需要外部 buffer
+    return true;
 }
 
 // ============ 可选依赖注入（转发） ============

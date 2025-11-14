@@ -54,6 +54,25 @@ public:
      */
     virtual bool isOpen() const = 0;
     
+    // ============ 能力查询 ============
+    
+    /**
+     * 查询此 Reader 是否需要外部提供 buffer
+     * 
+     * @return true - 需要外部提供 buffer（预分配模式）
+     *               示例：MmapVideoReader、IoUringVideoReader、FfmpegVideoReader
+     *               使用场景：从文件读取或解码后需要 memcpy 到外部 buffer
+     * 
+     *         false - 不需要外部 buffer（动态注入模式）
+     *               示例：RtspVideoReader
+     *               使用场景：内部解码后直接注入 buffer 到 BufferPool
+     * 
+     * @note 此方法用于 VideoProducer 判断使用哪种生产流程：
+     *       - true: 获取空闲 buffer → 读取 → 提交填充
+     *       - false: 直接读取（Reader 内部注入 buffer）
+     */
+    virtual bool requiresExternalBuffer() const = 0;
+    
     // ============ 读取操作 ============
     
     /**
