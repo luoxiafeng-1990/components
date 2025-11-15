@@ -16,6 +16,8 @@ display_test_SOURCES = test.cpp \
                        source/buffer/BufferHandle.cpp \
                        source/buffer/BufferPool.cpp \
                        source/buffer/BufferPoolRegistry.cpp \
+                       source/buffer/DMAHeapAllocator.cpp \
+                       source/buffer/TacoSysAllocator.cpp \
                        source/producer/VideoProducer.cpp \
                        source/videoFile/IoUringVideoReader.cpp \
                        source/decoder/Decoder.cpp \

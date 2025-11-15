@@ -12,6 +12,22 @@
 #include <memory>
 
 /**
+ * @brief Buffer 内存分配器类型
+ * 
+ * 定义 BufferPool 支持的内存分配策略，每种类型对应一个具体的分配器子类：
+ * - NORMAL_MALLOC: 普通 malloc 分配器（NormalAllocator）
+ * - CMA: CMA 连续物理内存分配器（CMAAllocator）
+ * - DMA_HEAP: DMA-HEAP 分配器（DMAHeapAllocator）
+ * - TACO_SYS: TACO 系统专用分配器（TacoSysAllocator）
+ */
+enum class BufferMemoryAllocatorType {
+    NORMAL_MALLOC = 0,  // 普通 malloc 分配器
+    CMA = 1,            // CMA 连续物理内存分配器
+    DMA_HEAP = 2,       // DMA-HEAP 分配器
+    TACO_SYS = 3        // TACO 系统专用分配器
+};
+
+/**
  * @brief BufferPool - 核心 Buffer 调度器
  * 
  * 职责：
@@ -40,12 +56,13 @@ public:
      * @brief 创建 BufferPool（自有内存）
      * @param count Buffer 数量
      * @param size 每个 Buffer 的大小
-     * @param use_cma 是否使用 CMA/DMA 连续物理内存
+     * @param allocator_type 内存分配器类型（NORMAL_MALLOC/CMA/DMA_HEAP/TACO_SYS）
      * @param name Pool 名称（用于全局注册和调试）
      * @param category Pool 分类（如 "Display", "Video", "Network"）
      * @throws std::runtime_error 如果分配失败
      */
-    BufferPool(int count, size_t size, bool use_cma = false,
+    BufferPool(int count, size_t size, 
+               BufferMemoryAllocatorType allocator_type = BufferMemoryAllocatorType::NORMAL_MALLOC,
                const std::string name = "UnnamedPool",
                const std::string category = "");
     
@@ -297,7 +314,7 @@ public:
 private:
     // ========== 内部初始化方法 ==========
     
-    void initializeOwnedBuffers(int count, size_t size, bool use_cma);
+    void initializeOwnedBuffers(int count, size_t size, BufferMemoryAllocatorType allocator_type);
     void initializeExternalBuffers(const std::vector<ExternalBufferInfo>& infos);
     void initializeFromHandles(std::vector<std::unique_ptr<BufferHandle>> handles);
     

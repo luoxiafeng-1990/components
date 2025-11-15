@@ -6,9 +6,11 @@
 !_TAG_PROGRAM_URL	https://ctags.io/	/official site/
 !_TAG_PROGRAM_VERSION	0.0.0	//
 1. C++ 类型系统	cpp_compile_error.md	/^### 1. C++ 类型系统$/;"	S	language:Markdown
+1. IDecoder - 解码器接口	include/decoder/README.md	/^### 1. IDecoder - 解码器接口$/;"	S	language:Markdown
 1. `.` 操作符 - 访问 unique_ptr 自己的成员	cpp_compile_error.md	/^#### 1. `.` 操作符 - 访问 unique_ptr 自己的成员$/;"	t	language:Markdown
 1. 命名规范	source/buffer/buffer_design.md	/^#### 1. 命名规范$/;"	t	language:Markdown
 1. 快速定位缺少头文件	cpp_compile_error.md	/^### 1. 快速定位缺少头文件$/;"	S	language:Markdown
+1. 提高代码可读性	cpp_compile_error.md	/^#### 1. 提高代码可读性$/;"	t	language:Markdown
 1. 设计目标	source/buffer/buffer_design.md	/^## 1. 设计目标$/;"	s	language:Markdown
 1. 逐级降级策略	include/display/display_buffer_usage_guide.md	/^### 1. 逐级降级策略$/;"	S	language:Markdown
 1.1 核心诉求	source/buffer/buffer_design.md	/^### 1.1 核心诉求$/;"	S	language:Markdown
@@ -36,20 +38,24 @@
 13.8 最佳实践	source/buffer/buffer_design.md	/^### 13.8 最佳实践$/;"	S	language:Markdown
 13.9 与设计文档其他部分的关联	source/buffer/buffer_design.md	/^### 13.9 与设计文档其他部分的关联$/;"	S	language:Markdown
 1️⃣ displayBufferByDMA - DMA 零拷贝显示	include/display/display_buffer_usage_guide.md	/^## 1️⃣ displayBufferByDMA - DMA 零拷贝显示$/;"	s	language:Markdown
+2. DecoderFactory - 工厂类	include/decoder/README.md	/^### 2. DecoderFactory - 工厂类$/;"	S	language:Markdown
 2. `->` 操作符 - 访问被管理对象的成员	cpp_compile_error.md	/^#### 2. `->` 操作符 - 访问被管理对象的成员$/;"	t	language:Markdown
 2. std::atomic 特殊性	cpp_compile_error.md	/^### 2. std::atomic 特殊性$/;"	S	language:Markdown
 2. 分类规范	source/buffer/buffer_design.md	/^#### 2. 分类规范$/;"	t	language:Markdown
 2. 显式错误检查	include/display/display_buffer_usage_guide.md	/^### 2. 显式错误检查$/;"	S	language:Markdown
 2. 架构概览	source/buffer/buffer_design.md	/^## 2. 架构概览$/;"	s	language:Markdown
 2. 检查是否为聚合类型	cpp_compile_error.md	/^### 2. 检查是否为聚合类型$/;"	S	language:Markdown
+2. 防止意外的类型转换	cpp_compile_error.md	/^#### 2. 防止意外的类型转换$/;"	t	language:Markdown
 2.1 分层架构	source/buffer/buffer_design.md	/^### 2.1 分层架构$/;"	S	language:Markdown
 2.2 核心组件关系	source/buffer/buffer_design.md	/^### 2.2 核心组件关系$/;"	S	language:Markdown
 2️⃣ displayFilledFramebuffer - 显示已填充的 Framebuffer	include/display/display_buffer_usage_guide.md	/^## 2️⃣ displayFilledFramebuffer - 显示已填充的 Framebuffer$/;"	s	language:Markdown
+3. Decoder - 门面类	include/decoder/README.md	/^### 3. Decoder - 门面类$/;"	S	language:Markdown
 3. `*` 操作符 - 解引用，获取对象引用	cpp_compile_error.md	/^#### 3. `*` 操作符 - 解引用，获取对象引用$/;"	t	language:Markdown
 3. 查看模板实例化错误	cpp_compile_error.md	/^### 3. 查看模板实例化错误$/;"	S	language:Markdown
 3. 核心组件设计	source/buffer/buffer_design.md	/^## 3. 核心组件设计$/;"	s	language:Markdown
 3. 监控策略	source/buffer/buffer_design.md	/^#### 3. 监控策略$/;"	t	language:Markdown
 3. 超时保护	include/display/display_buffer_usage_guide.md	/^### 3. 超时保护$/;"	S	language:Markdown
+3. 避免函数重载时的歧义	cpp_compile_error.md	/^#### 3. 避免函数重载时的歧义$/;"	t	language:Markdown
 3. 默认参数限制	cpp_compile_error.md	/^### 3. 默认参数限制$/;"	S	language:Markdown
 3.1 Buffer 类（元数据）	source/buffer/buffer_design.md	/^### 3.1 Buffer 类（元数据）$/;"	S	language:Markdown
 3.2 BufferHandle 类（外部Buffer包装）	source/buffer/buffer_design.md	/^### 3.2 BufferHandle 类（外部Buffer包装）$/;"	S	language:Markdown
@@ -58,6 +64,7 @@
 3.3.2 核心接口	source/buffer/buffer_design.md	/^#### 3.3.2 核心接口$/;"	t	language:Markdown
 3.4 BufferAllocator（策略模式）	source/buffer/buffer_design.md	/^### 3.4 BufferAllocator（策略模式）$/;"	S	language:Markdown
 3️⃣ displayBufferByMemcpyToFramebuffer - 拷贝显示	include/display/display_buffer_usage_guide.md	/^## 3️⃣ displayBufferByMemcpyToFramebuffer - 拷贝显示$/;"	s	language:Markdown
+4. BufferAllocationMode - Buffer分配模式	include/decoder/README.md	/^### 4. BufferAllocationMode - Buffer分配模式$/;"	S	language:Markdown
 4. 头文件依赖	cpp_compile_error.md	/^### 4. 头文件依赖$/;"	S	language:Markdown
 4. 构建系统清理	cpp_compile_error.md	/^### 4. 构建系统清理$/;"	S	language:Markdown
 4. 物理内存管理	source/buffer/buffer_design.md	/^## 4. 物理内存管理$/;"	s	language:Markdown
@@ -69,13 +76,14 @@
 5.1 问题场景	source/buffer/buffer_design.md	/^### 5.1 问题场景$/;"	S	language:Markdown
 5.2 解决方案：weak_ptr 语义	source/buffer/buffer_design.md	/^### 5.2 解决方案：weak_ptr 语义$/;"	S	language:Markdown
 5.3 引用计数辅助	source/buffer/buffer_design.md	/^### 5.3 引用计数辅助$/;"	S	language:Markdown
+6. explicit 关键字与隐式类型转换	cpp_compile_error.md	/^### 6. explicit 关键字与隐式类型转换$/;"	S	language:Markdown
 6. 使用场景与示例	source/buffer/buffer_design.md	/^## 6. 使用场景与示例$/;"	s	language:Markdown
-6. 重构最佳实践	cpp_compile_error.md	/^### 6. 重构最佳实践$/;"	S	language:Markdown
 6.1 场景1：自有Buffer（视频播放）	source/buffer/buffer_design.md	/^### 6.1 场景1：自有Buffer（视频播放）$/;"	S	language:Markdown
 6.2 场景2：托管DRM Framebuffer	source/buffer/buffer_design.md	/^### 6.2 场景2：托管DRM Framebuffer$/;"	S	language:Markdown
 6.3 场景3：GPU共享（CUDA + 显示）	source/buffer/buffer_design.md	/^### 6.3 场景3：GPU共享（CUDA + 显示）$/;"	S	language:Markdown
 6.4 场景4：跨进程共享（DMA-BUF）	source/buffer/buffer_design.md	/^### 6.4 场景4：跨进程共享（DMA-BUF）$/;"	S	language:Markdown
 7. API 参考	source/buffer/buffer_design.md	/^## 7. API 参考$/;"	s	language:Markdown
+7. 重构最佳实践	cpp_compile_error.md	/^### 7. 重构最佳实践$/;"	S	language:Markdown
 7.1 Buffer 类	source/buffer/buffer_design.md	/^### 7.1 Buffer 类$/;"	S	language:Markdown
 7.2 BufferPool 类	source/buffer/buffer_design.md	/^### 7.2 BufferPool 类$/;"	S	language:Markdown
 8. 性能优化策略	source/buffer/buffer_design.md	/^## 8. 性能优化策略$/;"	s	language:Markdown
@@ -89,21 +97,25 @@
 9.3 GPU 互操作（CUDA）	source/buffer/buffer_design.md	/^### 9.3 GPU 互操作（CUDA）$/;"	S	language:Markdown
 A.1 异常类型	source/buffer/buffer_design.md	/^### A.1 异常类型$/;"	S	language:Markdown
 A.2 错误处理示例	source/buffer/buffer_design.md	/^### A.2 错误处理示例$/;"	S	language:Markdown
+ABORTED	include/decoder/IDecoder.hpp	/^    ABORTED,                   \/\/ 操作被中止$/;"	e	language:C++	enum:DecoderStatus
 AM_CPPFLAGS	Makefile.am	/^AM_CPPFLAGS = -I$(top_srcdir)\/include$/;"	m	language:Make
 AM_CXXFLAGS	Makefile.am	/^AM_CXXFLAGS = -O2 -std=c++17$/;"	m	language:Make
 AM_CXXFLAGS	Makefile.am	/^AM_CXXFLAGS = -g -O0 -Wall -std=c++17$/;"	m	language:Make
+AUTO	include/decoder/DecoderFactory.hpp	/^        AUTO,           \/\/ 自动选择（优先硬件，回退软件）$/;"	e	language:C++	enum:DecoderFactory::DecoderType
 AUTO	include/videoFile/VideoReaderFactory.hpp	/^        AUTO,          \/\/ 自动检测（默认）$/;"	e	language:C++	enum:VideoReaderFactory::ReaderType
 AUTOMAKE_OPTIONS	Makefile.am	/^AUTOMAKE_OPTIONS = foreign$/;"	m	language:Make
 AVI	include/videoFile/MmapVideoReader.hpp	/^        AVI           \/\/ AVI容器$/;"	e	language:C++	enum:MmapVideoReader::FileFormat
 Automake 项目	cpp_compile_error.md	/^# Automake 项目$/;"	c	language:Markdown
 B.1 目标性能	source/buffer/buffer_design.md	/^### B.1 目标性能$/;"	S	language:Markdown
 B.2 Benchmark 计划	source/buffer/buffer_design.md	/^### B.2 Benchmark 计划$/;"	S	language:Markdown
+BUFFER_FULL	include/decoder/IDecoder.hpp	/^    BUFFER_FULL,               \/\/ 解码器缓冲区满$/;"	e	language:C++	enum:DecoderStatus
 BUFFER_MANAGER_HPP	include/buffer/BufferManager.hpp	/^#define BUFFER_MANAGER_HPP$/;"	d	language:C++
 Buffer	include/buffer/Buffer.hpp	/^class Buffer {$/;"	c	language:C++
 Buffer	source/buffer/Buffer.cpp	/^Buffer::Buffer(Buffer&& other) noexcept$/;"	f	language:C++	class:Buffer	signature:(Buffer && other)
 Buffer	source/buffer/Buffer.cpp	/^Buffer::Buffer(uint32_t id, $/;"	f	language:C++	class:Buffer	signature:(uint32_t id,void * virt_addr,uint64_t phys_addr,size_t size,Ownership ownership)
 Buffer 状态命名	source/buffer/buffer_design.md	/^#### Buffer 状态命名$/;"	t	language:Markdown
 Buffer 移动语义	source/buffer/buffer_design.md	/^#### Buffer 移动语义$/;"	t	language:Markdown
+BufferAllocationMode	include/decoder/IDecoder.hpp	/^enum class BufferAllocationMode {$/;"	g	language:C++
 BufferAllocator	include/buffer/BufferAllocator.hpp	/^class BufferAllocator {$/;"	c	language:C++
 BufferAllocator 方法可见性	source/buffer/buffer_design.md	/^#### BufferAllocator 方法可见性$/;"	t	language:Markdown
 BufferHandle	include/buffer/BufferHandle.hpp	/^class BufferHandle {$/;"	c	language:C++
@@ -120,7 +132,9 @@ BufferPool 架构设计文档	source/buffer/buffer_design.md	/^# BufferPool 架�
 BufferPoolRegistry	include/buffer/BufferPoolRegistry.hpp	/^class BufferPoolRegistry {$/;"	c	language:C++
 BufferPoolRegistry 类	source/buffer/buffer_design.md	/^#### BufferPoolRegistry 类$/;"	t	language:Markdown
 C++ 标准库文档	cpp_compile_error.md	/^### C++ 标准库文档$/;"	S	language:Markdown
+C++ 标准演进	cpp_compile_error.md	/^### C++ 标准演进$/;"	S	language:Markdown
 C++ 编译错误汇总文档	cpp_compile_error.md	/^# C++ 编译错误汇总文档$/;"	c	language:Markdown
+C++20 的 explicit(bool)	cpp_compile_error.md	/^#### C++20 的 explicit(bool)$/;"	t	language:Markdown
 CMAAllocator	include/buffer/BufferAllocator.hpp	/^class CMAAllocator : public BufferAllocator {$/;"	c	language:C++
 CMAAllocator	source/buffer/BufferAllocator.cpp	/^CMAAllocator::CMAAllocator() {$/;"	f	language:C++	class:CMAAllocator	signature:()
 CMake 项目	cpp_compile_error.md	/^# CMake 项目$/;"	c	language:Markdown
@@ -132,17 +146,35 @@ COMPONENTS_INSTALL_TARGET_CMDS	components.mk	/^define COMPONENTS_INSTALL_TARGET_
 COMPONENTS_SITE	components.mk	/^COMPONENTS_SITE = ..\/packages\/components$/;"	m	language:Make
 COMPONENTS_SITE_METHOD	components.mk	/^COMPONENTS_SITE_METHOD = local$/;"	m	language:Make
 COMPONENTS_VERSION	components.mk	/^COMPONENTS_VERSION = 1.0$/;"	m	language:Make
+CUSTOM	include/decoder/DecoderFactory.hpp	/^        CUSTOM          \/\/ 自定义解码器$/;"	e	language:C++	enum:DecoderFactory::DecoderType
 Config	include/producer/VideoProducer.hpp	/^        Config() $/;"	f	language:C++	struct:VideoProducer::Config	signature:()
 Config	include/producer/VideoProducer.hpp	/^        Config(const std::string& path, int w, int h, int bpp, bool l = false, int tc = 1,$/;"	f	language:C++	struct:VideoProducer::Config	signature:(const std::string & path,int w,int h,int bpp,bool l=false,int tc=1,VideoReaderFactory::ReaderType rt=VideoReaderFactory::ReaderType::AUTO)
 Config	include/producer/VideoProducer.hpp	/^    struct Config {$/;"	s	language:C++	class:VideoProducer
 DEBUG	configure.ac	/^AM_CONDITIONAL([DEBUG], [test "x$enable_debug" = "xyes"])$/;"	c	language:Autoconf
+DECODER	test.cpp	/^    DECODER,$/;"	e	language:C++	enum:TestMode	file:
+DECODER_FACTORY_HPP	include/decoder/DecoderFactory.hpp	/^#define DECODER_FACTORY_HPP$/;"	d	language:C++
+DECODER_HPP	include/decoder/Decoder.hpp	/^#define DECODER_HPP$/;"	d	language:C++
+DECODE_ERROR	include/decoder/IDecoder.hpp	/^    DECODE_ERROR,              \/\/ 解码错误$/;"	e	language:C++	enum:DecoderStatus
 DEV_FB0	source/display/LinuxFramebufferDevice.cpp	/^#define DEV_FB0 /;"	d	language:C++	file:
 DEV_FB1	source/display/LinuxFramebufferDevice.cpp	/^#define DEV_FB1 /;"	d	language:C++	file:
 DEV_FB2	source/display/LinuxFramebufferDevice.cpp	/^#define DEV_FB2 /;"	d	language:C++	file:
 DIRECT_READ	include/videoFile/VideoReaderFactory.hpp	/^        DIRECT_READ,   \/\/ 强制使用普通 read 实现（暂未实现）$/;"	e	language:C++	enum:VideoReaderFactory::ReaderType
 DMA_HEAP_IOCTL_ALLOC	source/buffer/BufferAllocator.cpp	/^#define DMA_HEAP_IOCTL_ALLOC /;"	d	language:C++	file:
+DecodedFrame	include/decoder/IDecoder.hpp	/^    DecodedFrame()$/;"	f	language:C++	struct:DecodedFrame	signature:()
+DecodedFrame	include/decoder/IDecoder.hpp	/^    DecodedFrame(DecodedFrame&& other) noexcept$/;"	f	language:C++	struct:DecodedFrame	signature:(DecodedFrame && other)
+DecodedFrame	include/decoder/IDecoder.hpp	/^struct DecodedFrame {$/;"	s	language:C++
+Decoder	include/decoder/Decoder.hpp	/^class Decoder {$/;"	c	language:C++
+Decoder	source/decoder/Decoder.cpp	/^Decoder::Decoder(Decoder&& other) noexcept$/;"	f	language:C++	class:Decoder	signature:(Decoder && other)
+Decoder	source/decoder/Decoder.cpp	/^Decoder::Decoder(DecoderFactory::DecoderType type)$/;"	f	language:C++	class:Decoder	signature:(DecoderFactory::DecoderType type)
+DecoderConfig	include/decoder/IDecoder.hpp	/^    DecoderConfig()$/;"	f	language:C++	struct:DecoderConfig	signature:()
+DecoderConfig	include/decoder/IDecoder.hpp	/^struct DecoderConfig {$/;"	s	language:C++
+DecoderFactory	include/decoder/DecoderFactory.hpp	/^class DecoderFactory {$/;"	c	language:C++
+DecoderStatus	include/decoder/IDecoder.hpp	/^enum class DecoderStatus {$/;"	g	language:C++
+DecoderStatus 状态码	include/decoder/README.md	/^## DecoderStatus 状态码$/;"	s	language:Markdown
+DecoderType	include/decoder/DecoderFactory.hpp	/^    enum class DecoderType {$/;"	g	language:C++	class:DecoderFactory
 Deleter	include/buffer/BufferHandle.hpp	/^    using Deleter = std::function<void(void*)>;$/;"	t	language:C++	class:BufferHandle
 DmaBufferInfo	include/buffer/BufferAllocator.hpp	/^    struct DmaBufferInfo {$/;"	s	language:C++	class:CMAAllocator
+END_OF_STREAM	include/decoder/IDecoder.hpp	/^    END_OF_STREAM,             \/\/ 流结束 (对应 AVERROR_EOF)$/;"	e	language:C++	enum:DecoderStatus
 ERROR	include/buffer/BufferManager.hpp	/^        ERROR       \/\/ 错误状态$/;"	e	language:C++	enum:BufferManager::ProducerState
 EXTERNAL	include/buffer/Buffer.hpp	/^        EXTERNAL    \/\/ 外部拥有，BufferPool 只负责调度$/;"	e	language:C++	enum:Buffer::Ownership
 ErrorCallback	include/buffer/BufferManager.hpp	/^    using ErrorCallback = std::function<void(const std::string& error_msg)>;$/;"	t	language:C++	class:BufferManager
@@ -150,43 +182,70 @@ ErrorCallback	include/producer/VideoProducer.hpp	/^    using ErrorCallback = std
 ExternalAllocator	include/buffer/BufferAllocator.hpp	/^class ExternalAllocator : public BufferAllocator {$/;"	c	language:C++
 ExternalBufferInfo	include/buffer/BufferPool.hpp	/^    struct ExternalBufferInfo {$/;"	s	language:C++	class:BufferPool
 FB_IOCTL_SET_DMA_INFO	source/display/LinuxFramebufferDevice.cpp	/^#define FB_IOCTL_SET_DMA_INFO /;"	d	language:C++	file:
+FFMPEG	include/decoder/DecoderFactory.hpp	/^        FFMPEG,         \/\/ FFmpeg软件解码$/;"	e	language:C++	enum:DecoderFactory::DecoderType
+FFMPEG	include/videoFile/VideoReaderFactory.hpp	/^        FFMPEG         \/\/ FFmpeg 编码视频文件解码器$/;"	e	language:C++	enum:VideoReaderFactory::ReaderType
+FFMPEG	test.cpp	/^    FFMPEG,$/;"	e	language:C++	enum:TestMode	file:
+FFMPEG_DECODER_HPP	include/decoder/FFmpegDecoder.hpp	/^#define FFMPEG_DECODER_HPP$/;"	d	language:C++
+FFMPEG_VIDEO_READER_HPP	include/videoFile/FfmpegVideoReader.hpp	/^#define FFMPEG_VIDEO_READER_HPP$/;"	d	language:C++
+FFmpegDecoder	include/decoder/FFmpegDecoder.hpp	/^class FFmpegDecoder : public IDecoder {$/;"	c	language:C++
+FFmpegDecoder	source/decoder/FFmpegDecoder.cpp	/^FFmpegDecoder::FFmpegDecoder()$/;"	f	language:C++	class:FFmpegDecoder	signature:()
+FfmpegVideoReader	include/videoFile/FfmpegVideoReader.hpp	/^class FfmpegVideoReader : public IVideoReader {$/;"	c	language:C++
+FfmpegVideoReader	source/videoFile/FfmpegVideoReader.cpp	/^FfmpegVideoReader::FfmpegVideoReader()$/;"	f	language:C++	class:FfmpegVideoReader	signature:()
 FileFormat	include/videoFile/MmapVideoReader.hpp	/^    enum class FileFormat {$/;"	g	language:C++	class:MmapVideoReader
 FrameSlot	include/videoFile/RtspVideoReader.hpp	/^    struct FrameSlot {$/;"	s	language:C++	class:RtspVideoReader
+GCC/Clang 编译器警告	cpp_compile_error.md	/^# GCC\/Clang 编译器警告$/;"	c	language:Markdown
 GlobalStats	include/buffer/BufferPoolRegistry.hpp	/^    struct GlobalStats {$/;"	s	language:C++	class:BufferPoolRegistry
 GlobalStats 结构	source/buffer/buffer_design.md	/^#### GlobalStats 结构$/;"	t	language:Markdown
 H264	include/videoFile/MmapVideoReader.hpp	/^        H264,         \/\/ H.264裸流$/;"	e	language:C++	enum:MmapVideoReader::FileFormat
 H265	include/videoFile/MmapVideoReader.hpp	/^        H265,         \/\/ H.265裸流$/;"	e	language:C++	enum:MmapVideoReader::FileFormat
+HARDWARE	include/decoder/DecoderFactory.hpp	/^        HARDWARE,       \/\/ 通用硬件加速解码$/;"	e	language:C++	enum:DecoderFactory::DecoderType
 HAS_DMA_HEAP	source/buffer/BufferAllocator.cpp	/^#define HAS_DMA_HEAP /;"	d	language:C++	file:
+HardwareAccelConfig	include/decoder/IDecoder.hpp	/^    HardwareAccelConfig()$/;"	f	language:C++	struct:HardwareAccelConfig	signature:()
+HardwareAccelConfig	include/decoder/IDecoder.hpp	/^struct HardwareAccelConfig {$/;"	s	language:C++
+IDECODER_HPP	include/decoder/IDecoder.hpp	/^#define IDECODER_HPP$/;"	d	language:C++
 IDISPLAYDEVICE_HPP	include/display/IDisplayDevice.hpp	/^#define IDISPLAYDEVICE_HPP$/;"	d	language:C++
 IDLE	include/buffer/Buffer.hpp	/^        IDLE,                    \/\/ 空闲，等待生产者获取（在 free_queue）$/;"	e	language:C++	enum:Buffer::State
+IDecoder	include/decoder/IDecoder.hpp	/^class IDecoder {$/;"	c	language:C++
 IDisplayDevice	include/display/IDisplayDevice.hpp	/^class IDisplayDevice {$/;"	c	language:C++
+INJECTION	include/decoder/IDecoder.hpp	/^    INJECTION$/;"	e	language:C++	enum:BufferAllocationMode
+INTERNAL	include/decoder/IDecoder.hpp	/^    INTERNAL,$/;"	e	language:C++	enum:BufferAllocationMode
 IOURING	include/videoFile/VideoReaderFactory.hpp	/^        IOURING,       \/\/ 强制使用 io_uring 实现$/;"	e	language:C++	enum:VideoReaderFactory::ReaderType
+IOURING	test.cpp	/^    IOURING,$/;"	e	language:C++	enum:TestMode	file:
 IOURING_VIDEO_READER_HPP	include/videoFile/IoUringVideoReader.hpp	/^#define IOURING_VIDEO_READER_HPP$/;"	d	language:C++
 IVIDEO_READER_HPP	include/videoFile/IVideoReader.hpp	/^#define IVIDEO_READER_HPP$/;"	d	language:C++
 IVideoReader	include/videoFile/IVideoReader.hpp	/^class IVideoReader {$/;"	c	language:C++
 IoUringVideoReader	include/videoFile/IoUringVideoReader.hpp	/^class IoUringVideoReader : public IVideoReader {$/;"	c	language:C++
 IoUringVideoReader	source/videoFile/IoUringVideoReader.cpp	/^IoUringVideoReader::IoUringVideoReader(int queue_depth)$/;"	f	language:C++	class:IoUringVideoReader	signature:(int queue_depth)
-LDADD	Makefile.am	/^LDADD = -lpthread -luring -lavformat -lavcodec -lavutil -lswscale$/;"	m	language:Make
+LDADD	Makefile.am	/^LDADD = -lpthread -luring -lavformat -lavcodec -lavutil -lswscale -ltacosys$/;"	m	language:Make
 LINUX_FRAMEBUFFER_DEVICE_HPP	include/display/LinuxFramebufferDevice.hpp	/^#define LINUX_FRAMEBUFFER_DEVICE_HPP$/;"	d	language:C++
 LOCKED_BY_CONSUMER	include/buffer/Buffer.hpp	/^        LOCKED_BY_CONSUMER       \/\/ 被消费者锁定，正在使用数据$/;"	e	language:C++	enum:Buffer::State
 LOCKED_BY_PRODUCER	include/buffer/Buffer.hpp	/^        LOCKED_BY_PRODUCER,      \/\/ 被生产者锁定，正在填充数据$/;"	e	language:C++	enum:Buffer::State
+LOOP	test.cpp	/^    LOOP,$/;"	e	language:C++	enum:TestMode	file:
 LinuxFramebufferDevice	include/display/LinuxFramebufferDevice.hpp	/^class LinuxFramebufferDevice : public IDisplayDevice {$/;"	c	language:C++
 LinuxFramebufferDevice	source/display/LinuxFramebufferDevice.cpp	/^LinuxFramebufferDevice::LinuxFramebufferDevice()$/;"	f	language:C++	class:LinuxFramebufferDevice	signature:()
 LinuxFramebufferDevice 显示方法使用指南	include/display/display_buffer_usage_guide.md	/^# LinuxFramebufferDevice 显示方法使用指南$/;"	c	language:Markdown
 MAGIC_NUMBER	include/buffer/Buffer.hpp	/^    static constexpr uint32_t MAGIC_NUMBER = 0xBEEFF123;  \/\/ 魔数：BEEF + F123$/;"	m	language:C++	class:Buffer	typeref:typename:uint32_t
 MAX_PATH_LENGTH	include/videoFile/MmapVideoReader.hpp	/^#define MAX_PATH_LENGTH /;"	d	language:C++
 MAX_RTSP_PATH_LENGTH	include/videoFile/RtspVideoReader.hpp	/^#define MAX_RTSP_PATH_LENGTH /;"	d	language:C++
+MAX_VIDEO_PATH_LENGTH	include/videoFile/FfmpegVideoReader.hpp	/^#define MAX_VIDEO_PATH_LENGTH /;"	d	language:C++
 MMAP	include/videoFile/VideoReaderFactory.hpp	/^        MMAP,          \/\/ 强制使用 mmap 实现$/;"	e	language:C++	enum:VideoReaderFactory::ReaderType
 MMAP_VIDEO_READER_HPP	include/videoFile/MmapVideoReader.hpp	/^#define MMAP_VIDEO_READER_HPP$/;"	d	language:C++
 MP4	include/videoFile/MmapVideoReader.hpp	/^        MP4,          \/\/ MP4容器$/;"	e	language:C++	enum:MmapVideoReader::FileFormat
 Makefile.am	cpp_compile_error.md	/^# Makefile.am$/;"	c	language:Markdown
 MmapVideoReader	include/videoFile/MmapVideoReader.hpp	/^class MmapVideoReader : public IVideoReader {$/;"	c	language:C++
 MmapVideoReader	source/videoFile/MmapVideoReader.cpp	/^MmapVideoReader::MmapVideoReader()$/;"	f	language:C++	class:MmapVideoReader	signature:()
+NEED_MORE_DATA	include/decoder/IDecoder.hpp	/^    NEED_MORE_DATA,            \/\/ 需要更多输入数据 (对应 AVERROR(EAGAIN))$/;"	e	language:C++	enum:DecoderStatus
+NOT_INITIALIZED	include/decoder/IDecoder.hpp	/^    NOT_INITIALIZED            \/\/ 解码器未初始化$/;"	e	language:C++	enum:DecoderStatus
+NVDEC	include/decoder/DecoderFactory.hpp	/^        NVDEC,          \/\/ NVIDIA硬件解码$/;"	e	language:C++	enum:DecoderFactory::DecoderType
 NormalAllocator	include/buffer/BufferAllocator.hpp	/^class NormalAllocator : public BufferAllocator {$/;"	c	language:C++
+OK	include/decoder/IDecoder.hpp	/^    OK = 0,                    \/\/ 成功$/;"	e	language:C++	enum:DecoderStatus
+OUT_OF_MEMORY	include/decoder/IDecoder.hpp	/^    OUT_OF_MEMORY,             \/\/ 内存不足$/;"	e	language:C++	enum:DecoderStatus
 OWNED	include/buffer/Buffer.hpp	/^        OWNED,      \/\/ BufferPool 拥有并管理生命周期$/;"	e	language:C++	enum:Buffer::Ownership
 Ownership	include/buffer/Buffer.hpp	/^    enum class Ownership {$/;"	g	language:C++	class:Buffer
 PERFORMANCE_MONITOR_HPP	include/monitor/PerformanceMonitor.hpp	/^#define PERFORMANCE_MONITOR_HPP$/;"	d	language:C++
+PLATFORM_ERROR	include/decoder/IDecoder.hpp	/^    PLATFORM_ERROR,            \/\/ 平台相关错误$/;"	e	language:C++	enum:DecoderStatus
 PROC_FB	source/display/LinuxFramebufferDevice.cpp	/^#define PROC_FB /;"	d	language:C++	file:
+PRODUCER	test.cpp	/^    PRODUCER,$/;"	e	language:C++	enum:TestMode	file:
 PerformanceMonitor	include/monitor/PerformanceMonitor.hpp	/^class PerformanceMonitor {$/;"	c	language:C++
 PerformanceMonitor	source/monitor/PerformanceMonitor.cpp	/^PerformanceMonitor::PerformanceMonitor()$/;"	f	language:C++	class:PerformanceMonitor	signature:()
 PoolInfo	include/buffer/BufferPoolRegistry.hpp	/^    struct PoolInfo {$/;"	s	language:C++	class:BufferPoolRegistry
@@ -197,23 +256,30 @@ Q3: 外部 Buffer 被销毁后 Pool 会崩溃吗？	source/buffer/buffer_design.
 Q4: 支持 Windows/macOS 吗？	source/buffer/buffer_design.md	/^### Q4: 支持 Windows\/macOS 吗？$/;"	S	language:Markdown
 RAW	include/videoFile/MmapVideoReader.hpp	/^        RAW,          \/\/ 原始格式$/;"	e	language:C++	enum:MmapVideoReader::FileFormat
 READY_FOR_CONSUME	include/buffer/Buffer.hpp	/^        READY_FOR_CONSUME,       \/\/ 数据就绪，等待消费者获取（在 filled_queue）$/;"	e	language:C++	enum:Buffer::State
-RTSP	include/videoFile/VideoReaderFactory.hpp	/^        RTSP           \/\/ RTSP 视频流解码器$/;"	e	language:C++	enum:VideoReaderFactory::ReaderType
+RTSP	include/videoFile/VideoReaderFactory.hpp	/^        RTSP,          \/\/ RTSP 视频流解码器$/;"	e	language:C++	enum:VideoReaderFactory::ReaderType
+RTSP	test.cpp	/^    RTSP,$/;"	e	language:C++	enum:TestMode	file:
 RTSP_VIDEO_READER_HPP	include/videoFile/RtspVideoReader.hpp	/^#define RTSP_VIDEO_READER_HPP$/;"	d	language:C++
 RUNNING	include/buffer/BufferManager.hpp	/^        RUNNING,    \/\/ 运行中$/;"	e	language:C++	enum:BufferManager::ProducerState
 ReadRequest	include/videoFile/IoUringVideoReader.hpp	/^    struct ReadRequest {$/;"	s	language:C++	class:IoUringVideoReader
 ReaderType	include/videoFile/VideoReaderFactory.hpp	/^    enum class ReaderType {$/;"	g	language:C++	class:VideoReaderFactory
 RtspVideoReader	include/videoFile/RtspVideoReader.hpp	/^class RtspVideoReader : public IVideoReader {$/;"	c	language:C++
 RtspVideoReader	source/videoFile/RtspVideoReader.cpp	/^RtspVideoReader::RtspVideoReader()$/;"	f	language:C++	class:RtspVideoReader	signature:()
+SEQUENTIAL	test.cpp	/^    SEQUENTIAL,$/;"	e	language:C++	enum:TestMode	file:
 STOPPED	include/buffer/BufferManager.hpp	/^        STOPPED,    \/\/ 已停止$/;"	e	language:C++	enum:BufferManager::ProducerState
 State	include/buffer/Buffer.hpp	/^    enum class State {$/;"	g	language:C++	class:Buffer
 Stats	include/videoFile/IoUringVideoReader.hpp	/^    struct Stats {$/;"	s	language:C++	class:IoUringVideoReader
 TIMER_HPP	include/monitor/Timer.hpp	/^#define TIMER_HPP$/;"	d	language:C++
 TPS_FB0	source/display/LinuxFramebufferDevice.cpp	/^#define TPS_FB0 /;"	d	language:C++	file:
 TPS_FB1	source/display/LinuxFramebufferDevice.cpp	/^#define TPS_FB1 /;"	d	language:C++	file:
+TestMode	test.cpp	/^enum class TestMode {$/;"	g	language:C++	file:
 Timer	include/monitor/Timer.hpp	/^class Timer {$/;"	c	language:C++
 Timer	source/monitor/Timer.cpp	/^Timer::Timer(double interval_seconds, $/;"	f	language:C++	class:Timer	signature:(double interval_seconds,void (* callback)(void *),void * user_data,double delay_seconds,double duration_seconds,void (* delay_end_callback)(void *))
 UNKNOWN	include/videoFile/MmapVideoReader.hpp	/^        UNKNOWN,$/;"	e	language:C++	enum:MmapVideoReader::FileFormat
+UNKNOWN	test.cpp	/^    UNKNOWN$/;"	e	language:C++	enum:TestMode	file:
+UNSUPPORTED_CONFIG	include/decoder/IDecoder.hpp	/^    UNSUPPORTED_CONFIG,        \/\/ 不支持的配置$/;"	e	language:C++	enum:DecoderStatus
+VAAPI	include/decoder/DecoderFactory.hpp	/^        VAAPI,          \/\/ VA-API硬件解码（Intel\/AMD）$/;"	e	language:C++	enum:DecoderFactory::DecoderType
 VIDEOFILE_HPP	include/videoFile/VideoFile.hpp	/^#define VIDEOFILE_HPP$/;"	d	language:C++
+VIDEOTOOLBOX	include/decoder/DecoderFactory.hpp	/^        VIDEOTOOLBOX,   \/\/ Apple VideoToolbox（macOS\/iOS）$/;"	e	language:C++	enum:DecoderFactory::DecoderType
 VIDEO_READER_FACTORY_HPP	include/videoFile/VideoReaderFactory.hpp	/^#define VIDEO_READER_FACTORY_HPP$/;"	d	language:C++
 ValidationCallback	include/buffer/Buffer.hpp	/^    using ValidationCallback = std::function<bool(const Buffer*)>;$/;"	t	language:C++	class:Buffer
 VideoFile	include/videoFile/VideoFile.hpp	/^class VideoFile {$/;"	c	language:C++
@@ -222,6 +288,7 @@ VideoProducer	include/producer/VideoProducer.hpp	/^class VideoProducer {$/;"	c	l
 VideoProducer	source/producer/VideoProducer.cpp	/^VideoProducer::VideoProducer(BufferPool& pool)$/;"	f	language:C++	class:VideoProducer	signature:(BufferPool & pool)
 VideoProducer::Config 初始化	source/buffer/buffer_design.md	/^#### VideoProducer::Config 初始化$/;"	t	language:Markdown
 VideoReaderFactory	include/videoFile/VideoReaderFactory.hpp	/^class VideoReaderFactory {$/;"	c	language:C++
+ZERO_COPY	include/decoder/IDecoder.hpp	/^    ZERO_COPY,$/;"	e	language:C++	enum:BufferAllocationMode
 __anon4174dafa0102	source/buffer/BufferAllocator.cpp	/^                          [ptr](const DmaBufferInfo& info) {$/;"	f	language:C++	function:CMAAllocator::deallocate	file:	signature:(const DmaBufferInfo& info) 
 __anon4174dafa0202	source/buffer/BufferAllocator.cpp	/^                          [ptr](const DmaBufferInfo& info) {$/;"	f	language:C++	function:CMAAllocator::getDmaBufFd	file:	signature:(const DmaBufferInfo& info) 
 __anon597c9f4f0102	source/videoFile/RtspVideoReader.cpp	/^                [](void* ptr) {$/;"	f	language:C++	function:RtspVideoReader::decodeThreadFunc	file:	signature:(void* ptr) 
@@ -236,6 +303,7 @@ __anonbde1b1730502	source/buffer/BufferPool.cpp	/^            [buffer](const std
 __anonfcd100560102	test.cpp	/^    producer.setErrorCallback([](const std::string& error) {$/;"	f	language:C++	function:test_buffermanager_producer	file:	signature:(const std::string& error) 
 __anonfcd100560202	test.cpp	/^    producer.setErrorCallback([](const std::string& error) {$/;"	f	language:C++	function:test_buffermanager_iouring	file:	signature:(const std::string& error) 
 __anonfcd100560302	test.cpp	/^    producer.setErrorCallback([](const std::string& error) {$/;"	f	language:C++	function:test_rtsp_stream	file:	signature:(const std::string& error) 
+__anonfcd100560402	test.cpp	/^    producer.setErrorCallback([](const std::string& error) {$/;"	f	language:C++	function:test_ffmpeg_video	file:	signature:(const std::string& error) 
 acquireFilled	source/buffer/BufferPool.cpp	/^Buffer* BufferPool::acquireFilled(bool blocking, int timeout_ms) {$/;"	f	language:C++	class:BufferPool	typeref:typename:Buffer *	signature:(bool blocking,int timeout_ms)
 acquireFree	source/buffer/BufferPool.cpp	/^Buffer* BufferPool::acquireFree(bool blocking, int timeout_ms) {$/;"	f	language:C++	class:BufferPool	typeref:typename:Buffer *	signature:(bool blocking,int timeout_ms)
 addRef	include/buffer/Buffer.hpp	/^    void addRef() { ref_count_.fetch_add(1); }$/;"	f	language:C++	class:Buffer	typeref:typename:void	signature:()
@@ -243,26 +311,39 @@ alive_	include/buffer/BufferHandle.hpp	/^    std::shared_ptr<bool> alive_;  \/\/
 allocate	source/buffer/BufferAllocator.cpp	/^void* CMAAllocator::allocate(size_t size, uint64_t* out_phys_addr) {$/;"	f	language:C++	class:CMAAllocator	typeref:typename:void *	signature:(size_t size,uint64_t * out_phys_addr)
 allocate	source/buffer/BufferAllocator.cpp	/^void* ExternalAllocator::allocate(size_t size, uint64_t* out_phys_addr) {$/;"	f	language:C++	class:ExternalAllocator	typeref:typename:void *	signature:(size_t size,uint64_t * out_phys_addr)
 allocate	source/buffer/BufferAllocator.cpp	/^void* NormalAllocator::allocate(size_t size, uint64_t* out_phys_addr) {$/;"	f	language:C++	class:NormalAllocator	typeref:typename:void *	signature:(size_t size,uint64_t * out_phys_addr)
+allocateBuffer	source/decoder/FFmpegDecoder.cpp	/^int FFmpegDecoder::allocateBuffer(AVFrame* frame, int flags) {$/;"	f	language:C++	class:FFmpegDecoder	typeref:typename:int	signature:(AVFrame * frame,int flags)
 allocateDmaBuf	source/buffer/BufferAllocator.cpp	/^void* CMAAllocator::allocateDmaBuf(size_t size, int* out_fd, uint64_t* out_phys_addr) {$/;"	f	language:C++	class:CMAAllocator	typeref:typename:void *	signature:(size_t size,int * out_fd,uint64_t * out_phys_addr)
 allocator_	include/buffer/BufferPool.hpp	/^    std::unique_ptr<BufferAllocator> allocator_;$/;"	m	language:C++	class:BufferPool	typeref:typename:std::unique_ptr<BufferAllocator>
 asyncProducerThread	source/videoFile/IoUringVideoReader.cpp	/^void IoUringVideoReader::asyncProducerThread(int thread_id,$/;"	f	language:C++	class:IoUringVideoReader	typeref:typename:void	signature:(int thread_id,BufferManager * manager,const std::vector<int> & frame_indices,std::atomic<bool> & running,bool loop)
+attachBufferPool	source/decoder/Decoder.cpp	/^bool Decoder::attachBufferPool(BufferPool* pool) {$/;"	f	language:C++	class:Decoder	typeref:typename:bool	signature:(BufferPool * pool)
 autoDetect	source/videoFile/VideoReaderFactory.cpp	/^std::unique_ptr<IVideoReader> VideoReaderFactory::autoDetect() {$/;"	f	language:C++	class:VideoReaderFactory	typeref:typename:std::unique_ptr<IVideoReader>	signature:()
+av_frame	include/decoder/IDecoder.hpp	/^    AVFrame* av_frame;                 \/\/ FFmpeg原生帧（包含所有元数据）$/;"	m	language:C++	struct:DecodedFrame	typeref:typename:AVFrame *
 avg_latency_us	include/videoFile/IoUringVideoReader.hpp	/^        double avg_latency_us;    \/\/ 平均延迟（微秒）$/;"	m	language:C++	struct:IoUringVideoReader::Stats	typeref:typename:double
 beginDecodeFrameTiming	source/monitor/PerformanceMonitor.cpp	/^void PerformanceMonitor::beginDecodeFrameTiming() {$/;"	f	language:C++	class:PerformanceMonitor	typeref:typename:void	signature:()
 beginDisplayFrameTiming	source/monitor/PerformanceMonitor.cpp	/^void PerformanceMonitor::beginDisplayFrameTiming() {$/;"	f	language:C++	class:PerformanceMonitor	typeref:typename:void	signature:()
 beginLoadFrameTiming	source/monitor/PerformanceMonitor.cpp	/^void PerformanceMonitor::beginLoadFrameTiming() {$/;"	f	language:C++	class:PerformanceMonitor	typeref:typename:void	signature:()
 bin_PROGRAMS	Makefile.am	/^bin_PROGRAMS = display_test$/;"	m	language:Make
+bit_rate	include/decoder/IDecoder.hpp	/^    int64_t bit_rate;                  \/\/ 比特率（bps）$/;"	m	language:C++	struct:DecoderConfig	typeref:typename:int64_t
 bits_per_pixel	include/producer/VideoProducer.hpp	/^        int bits_per_pixel;                            \/\/ 每像素位数（8\/16\/24\/32）$/;"	m	language:C++	struct:VideoProducer::Config	typeref:typename:int
 bits_per_pixel_	include/display/LinuxFramebufferDevice.hpp	/^    int bits_per_pixel_;              \/\/ 每像素位数（可以是非整数字节，如12bit/;"	m	language:C++	class:LinuxFramebufferDevice	typeref:typename:int
 bits_per_pixel_	include/videoFile/IoUringVideoReader.hpp	/^    int bits_per_pixel_;$/;"	m	language:C++	class:IoUringVideoReader	typeref:typename:int
 bits_per_pixel_	include/videoFile/MmapVideoReader.hpp	/^    int bits_per_pixel_;              \/\/ 每像素位数$/;"	m	language:C++	class:MmapVideoReader	typeref:typename:int
+buffer	include/decoder/IDecoder.hpp	/^    Buffer* buffer;                    \/\/ 关联的Buffer（可能为nullptr）$/;"	m	language:C++	struct:DecodedFrame	typeref:typename:Buffer *
 buffer	include/videoFile/IoUringVideoReader.hpp	/^        Buffer* buffer;           \/\/ 目标buffer$/;"	m	language:C++	struct:IoUringVideoReader::ReadRequest	typeref:typename:Buffer *
+buffer_alignment	include/decoder/IDecoder.hpp	/^    size_t buffer_alignment;           \/\/ 内存对齐（字节，默认32，某些硬件要求/;"	m	language:C++	struct:DecoderConfig	typeref:typename:size_t
+buffer_alignment_	include/decoder/FFmpegDecoder.hpp	/^    size_t buffer_alignment_;            \/\/ 内存对齐$/;"	m	language:C++	class:FFmpegDecoder	typeref:typename:size_t
 buffer_count_	include/display/LinuxFramebufferDevice.hpp	/^    int buffer_count_;                        \/\/ buffer 数量$/;"	m	language:C++	class:LinuxFramebufferDevice	typeref:typename:int
 buffer_cv_	include/videoFile/RtspVideoReader.hpp	/^    std::condition_variable buffer_cv_;$/;"	m	language:C++	class:RtspVideoReader	typeref:typename:std::condition_variable
 buffer_map_	include/buffer/BufferPool.hpp	/^    std::unordered_map<uint32_t, Buffer*> buffer_map_; \/\/ ID -> Buffer* 快速索引$/;"	m	language:C++	class:BufferPool	typeref:typename:std::unordered_map<uint32_t,Buffer * >
+buffer_map_	include/decoder/FFmpegDecoder.hpp	/^    std::map<uint8_t*, Buffer*> buffer_map_;$/;"	m	language:C++	class:FFmpegDecoder	typeref:typename:std::map<uint8_t *,Buffer * >
+buffer_mode	include/decoder/IDecoder.hpp	/^    BufferAllocationMode buffer_mode;  \/\/ Buffer分配模式$/;"	m	language:C++	struct:DecoderConfig	typeref:typename:BufferAllocationMode
+buffer_mode_	include/decoder/FFmpegDecoder.hpp	/^    BufferAllocationMode buffer_mode_;   \/\/ Buffer分配模式$/;"	m	language:C++	class:FFmpegDecoder	typeref:typename:BufferAllocationMode
 buffer_mutex_	include/videoFile/RtspVideoReader.hpp	/^    std::mutex buffer_mutex_;$/;"	m	language:C++	class:RtspVideoReader	typeref:typename:std::mutex
+buffer_pool	include/decoder/IDecoder.hpp	/^    BufferPool* buffer_pool;           \/\/ 关联的BufferPool$/;"	m	language:C++	struct:DecoderConfig	typeref:typename:BufferPool *
+buffer_pool_	include/decoder/FFmpegDecoder.hpp	/^    BufferPool* buffer_pool_;            \/\/ 关联的BufferPool$/;"	m	language:C++	class:FFmpegDecoder	typeref:typename:BufferPool *
 buffer_pool_	include/display/LinuxFramebufferDevice.hpp	/^    std::unique_ptr<BufferPool> buffer_pool_;  \/\/ BufferPool 管理 framebuffer$/;"	m	language:C++	class:LinuxFramebufferDevice	typeref:typename:std::unique_ptr<BufferPool>
 buffer_pool_	include/producer/VideoProducer.hpp	/^    BufferPool& buffer_pool_;$/;"	m	language:C++	class:VideoProducer	typeref:typename:BufferPool &
+buffer_pool_	include/videoFile/FfmpegVideoReader.hpp	/^    BufferPool* buffer_pool_;          \/\/ 可选：零拷贝模式的BufferPool$/;"	m	language:C++	class:FfmpegVideoReader	typeref:typename:BufferPool *
 buffer_pool_	include/videoFile/RtspVideoReader.hpp	/^    BufferPool* buffer_pool_;          \/\/ 可选：零拷贝模式的BufferPool$/;"	m	language:C++	class:RtspVideoReader	typeref:typename:BufferPool *
 buffer_size_	include/buffer/BufferManager.hpp	/^    size_t buffer_size_;                 \/\/ 每个 Buffer 的大小$/;"	m	language:C++	class:BufferManager	typeref:typename:size_t
 buffer_size_	include/buffer/BufferPool.hpp	/^    size_t buffer_size_;                              \/\/ 单个 buffer 大小$/;"	m	language:C++	class:BufferPool	typeref:typename:size_t
@@ -271,44 +352,78 @@ buffers_	include/buffer/BufferManager.hpp	/^    std::vector<Buffer> buffers_;   
 buffers_	include/buffer/BufferPool.hpp	/^    std::vector<Buffer> buffers_;                     \/\/ Buffer 对象池$/;"	m	language:C++	class:BufferPool	typeref:typename:std::vector<Buffer>
 calculateAverageFPS	source/monitor/PerformanceMonitor.cpp	/^double PerformanceMonitor::calculateAverageFPS(int frame_count) const {$/;"	f	language:C++	class:PerformanceMonitor	typeref:typename:double	signature:(int frame_count) const
 calculateBufferAddresses	source/display/LinuxFramebufferDevice.cpp	/^void LinuxFramebufferDevice::calculateBufferAddresses() {$/;"	f	language:C++	class:LinuxFramebufferDevice	typeref:typename:void	signature:()
+calculateFrameSize	source/decoder/FFmpegDecoder.cpp	/^size_t FFmpegDecoder::calculateFrameSize(int width, int height, AVPixelFormat format) const {$/;"	f	language:C++	class:FFmpegDecoder	typeref:typename:size_t	signature:(int width,int height,AVPixelFormat format) const
 callback_	include/monitor/Timer.hpp	/^    void (*callback_)(void*);           \/\/ 周期性回调$/;"	m	language:C++	class:Timer	typeref:typename:void (*)(void *)
 category	include/buffer/BufferPoolRegistry.hpp	/^        std::string category;                                \/\/ 分类$/;"	m	language:C++	struct:BufferPoolRegistry::PoolInfo	typeref:typename:std::string
 category_	include/buffer/BufferPool.hpp	/^    std::string category_;                \/\/ Pool 分类$/;"	m	language:C++	class:BufferPool	typeref:typename:std::string
+checkZeroCopySupport	source/videoFile/FfmpegVideoReader.cpp	/^bool FfmpegVideoReader::checkZeroCopySupport() {$/;"	f	language:C++	class:FfmpegVideoReader	typeref:typename:bool	signature:()
 cleanup	source/display/LinuxFramebufferDevice.cpp	/^void LinuxFramebufferDevice::cleanup() {$/;"	f	language:C++	class:LinuxFramebufferDevice	typeref:typename:void	signature:()
+cleanupFFmpeg	source/decoder/FFmpegDecoder.cpp	/^void FFmpegDecoder::cleanupFFmpeg() {$/;"	f	language:C++	class:FFmpegDecoder	typeref:typename:void	signature:()
+close	source/decoder/Decoder.cpp	/^void Decoder::close() {$/;"	f	language:C++	class:Decoder	typeref:typename:void	signature:()
+close	source/decoder/FFmpegDecoder.cpp	/^void FFmpegDecoder::close() {$/;"	f	language:C++	class:FFmpegDecoder	typeref:typename:void	signature:()
+close	source/videoFile/FfmpegVideoReader.cpp	/^void FfmpegVideoReader::close() {$/;"	f	language:C++	class:FfmpegVideoReader	typeref:typename:void	signature:()
 close	source/videoFile/IoUringVideoReader.cpp	/^void IoUringVideoReader::close() {$/;"	f	language:C++	class:IoUringVideoReader	typeref:typename:void	signature:()
 close	source/videoFile/MmapVideoReader.cpp	/^void MmapVideoReader::close() {$/;"	f	language:C++	class:MmapVideoReader	typeref:typename:void	signature:()
 close	source/videoFile/RtspVideoReader.cpp	/^void RtspVideoReader::close() {$/;"	f	language:C++	class:RtspVideoReader	typeref:typename:void	signature:()
 close	source/videoFile/VideoFile.cpp	/^void VideoFile::close() {$/;"	f	language:C++	class:VideoFile	typeref:typename:void	signature:()
+closeVideo	source/videoFile/FfmpegVideoReader.cpp	/^void FfmpegVideoReader::closeVideo() {$/;"	f	language:C++	class:FfmpegVideoReader	typeref:typename:void	signature:()
+codec_	include/decoder/FFmpegDecoder.hpp	/^    const AVCodec* codec_;           \/\/ 编解码器$/;"	m	language:C++	class:FFmpegDecoder	typeref:typename:const AVCodec *
+codec_ctx_	include/decoder/FFmpegDecoder.hpp	/^    AVCodecContext* codec_ctx_;      \/\/ 解码器上下文$/;"	m	language:C++	class:FFmpegDecoder	typeref:typename:AVCodecContext *
+codec_ctx_	include/videoFile/FfmpegVideoReader.hpp	/^    AVCodecContext* codec_ctx_;$/;"	m	language:C++	class:FfmpegVideoReader	typeref:typename:AVCodecContext *
 codec_ctx_	include/videoFile/RtspVideoReader.hpp	/^    AVCodecContext* codec_ctx_;$/;"	m	language:C++	class:RtspVideoReader	typeref:typename:AVCodecContext *
+codec_id	include/decoder/IDecoder.hpp	/^    AVCodecID codec_id;                \/\/ 编解码器 ID (如 AV_CODEC_ID_H264)$/;"	m	language:C++	struct:DecoderConfig	typeref:typename:AVCodecID
+codec_name	include/decoder/IDecoder.hpp	/^    const char* codec_name;            \/\/ 编解码器名称（可选，优先使用 codec_id）$/;"	m	language:C++	struct:DecoderConfig	typeref:typename:const char *
+codec_name_	include/decoder/FFmpegDecoder.hpp	/^    std::string codec_name_;         \/\/ 编解码器名称$/;"	m	language:C++	class:FFmpegDecoder	typeref:typename:std::string
+codec_options_	include/videoFile/FfmpegVideoReader.hpp	/^    AVDictionary* codec_options_;      \/\/ 解码器选项（用于 h264_taco 配置）$/;"	m	language:C++	class:FfmpegVideoReader	typeref:typename:AVDictionary *
 component	configure.ac	/^AC_INIT([component], [1.0])$/;"	p	language:Autoconf
+config_	include/decoder/Decoder.hpp	/^    DecoderConfig config_;                   \/\/ 配置参数$/;"	m	language:C++	class:Decoder	typeref:typename:DecoderConfig
+config_	include/decoder/FFmpegDecoder.hpp	/^    DecoderConfig config_;           \/\/ 解码器配置$/;"	m	language:C++	class:FFmpegDecoder	typeref:typename:DecoderConfig
 config_	include/producer/VideoProducer.hpp	/^    Config config_;$/;"	m	language:C++	class:VideoProducer	typeref:typename:Config
+configureSpecialDecoder	source/videoFile/FfmpegVideoReader.cpp	/^bool FfmpegVideoReader::configureSpecialDecoder() {$/;"	f	language:C++	class:FfmpegVideoReader	typeref:typename:bool	signature:()
 connectRTSP	source/videoFile/RtspVideoReader.cpp	/^bool RtspVideoReader::connectRTSP() {$/;"	f	language:C++	class:RtspVideoReader	typeref:typename:bool	signature:()
 connected_	include/videoFile/RtspVideoReader.hpp	/^    std::atomic<bool> connected_;$/;"	m	language:C++	class:RtspVideoReader	typeref:typename:std::atomic<bool>
+convertFFmpegError	source/decoder/FFmpegDecoder.cpp	/^DecoderStatus FFmpegDecoder::convertFFmpegError(int ffmpeg_error) {$/;"	f	language:C++	class:FFmpegDecoder	typeref:typename:DecoderStatus	signature:(int ffmpeg_error)
+convertFrameTo	source/videoFile/FfmpegVideoReader.cpp	/^bool FfmpegVideoReader::convertFrameTo(AVFrame* src_frame, void* dest, size_t dest_size) {$/;"	f	language:C++	class:FfmpegVideoReader	typeref:typename:bool	signature:(AVFrame * src_frame,void * dest,size_t dest_size)
 copyFromInternalBuffer	source/videoFile/RtspVideoReader.cpp	/^bool RtspVideoReader::copyFromInternalBuffer(void* dest, size_t size) {$/;"	f	language:C++	class:RtspVideoReader	typeref:typename:bool	signature:(void * dest,size_t size)
 create	source/videoFile/VideoReaderFactory.cpp	/^std::unique_ptr<IVideoReader> VideoReaderFactory::create(ReaderType type) {$/;"	f	language:C++	class:VideoReaderFactory	typeref:typename:std::unique_ptr<IVideoReader>	signature:(ReaderType type)
 createByName	source/videoFile/VideoReaderFactory.cpp	/^std::unique_ptr<IVideoReader> VideoReaderFactory::createByName(const char* name) {$/;"	f	language:C++	class:VideoReaderFactory	typeref:typename:std::unique_ptr<IVideoReader>	signature:(const char * name)
 createByType	source/videoFile/VideoReaderFactory.cpp	/^std::unique_ptr<IVideoReader> VideoReaderFactory::createByType(ReaderType type) {$/;"	f	language:C++	class:VideoReaderFactory	typeref:typename:std::unique_ptr<IVideoReader>	signature:(ReaderType type)
+createDecoder	source/decoder/DecoderFactory.cpp	/^std::unique_ptr<IDecoder> DecoderFactory::createDecoder(DecoderType type) {$/;"	f	language:C++	class:DecoderFactory	typeref:typename:std::unique_ptr<IDecoder>	signature:(DecoderType type)
+createDecoderByName	source/decoder/DecoderFactory.cpp	/^std::unique_ptr<IDecoder> DecoderFactory::createDecoderByName(const char* type_name) {$/;"	f	language:C++	class:DecoderFactory	typeref:typename:std::unique_ptr<IDecoder>	signature:(const char * type_name)
+createZeroCopyBuffer	source/videoFile/FfmpegVideoReader.cpp	/^Buffer* FfmpegVideoReader::createZeroCopyBuffer(AVFrame* frame) {$/;"	f	language:C++	class:FfmpegVideoReader	typeref:typename:Buffer *	signature:(AVFrame * frame)
 created_time	include/buffer/BufferPoolRegistry.hpp	/^        std::chrono::system_clock::time_point created_time;  \/\/ 创建时间$/;"	m	language:C++	struct:BufferPoolRegistry::PoolInfo	typeref:typename:std::chrono::system_clock::time_point
 current_buffer_index_	include/display/LinuxFramebufferDevice.hpp	/^    int current_buffer_index_;                \/\/ 当前显示的buffer索引$/;"	m	language:C++	class:LinuxFramebufferDevice	typeref:typename:int
+current_frame_index_	include/videoFile/FfmpegVideoReader.hpp	/^    int current_frame_index_;          \/\/ 当前帧索引$/;"	m	language:C++	class:FfmpegVideoReader	typeref:typename:int
 current_frame_index_	include/videoFile/IoUringVideoReader.hpp	/^    int current_frame_index_;  \/\/ 当前帧索引（用于顺序读取）$/;"	m	language:C++	class:IoUringVideoReader	typeref:typename:int
 current_frame_index_	include/videoFile/MmapVideoReader.hpp	/^    int current_frame_index_;         \/\/ 当前帧索引$/;"	m	language:C++	class:MmapVideoReader	typeref:typename:int
 cv_	include/monitor/Timer.hpp	/^    std::condition_variable cv_;$/;"	m	language:C++	class:Timer	typeref:typename:std::condition_variable
 data	include/buffer/Buffer.hpp	/^    void* data() const { return virt_addr_; }$/;"	f	language:C++	class:Buffer	typeref:typename:void *	signature:() const
+data	include/decoder/IDecoder.hpp	/^    inline void* data(int plane = 0) const {$/;"	f	language:C++	struct:DecodedFrame	typeref:typename:void *	signature:(int plane=0) const
 data	include/videoFile/RtspVideoReader.hpp	/^        std::vector<uint8_t> data;     \/\/ 帧数据$/;"	m	language:C++	struct:RtspVideoReader::FrameSlot	typeref:typename:std::vector<uint8_t>
 deallocate	source/buffer/BufferAllocator.cpp	/^void CMAAllocator::deallocate(void* ptr, size_t size) {$/;"	f	language:C++	class:CMAAllocator	typeref:typename:void	signature:(void * ptr,size_t size)
 deallocate	source/buffer/BufferAllocator.cpp	/^void ExternalAllocator::deallocate(void* ptr, size_t size) {$/;"	f	language:C++	class:ExternalAllocator	typeref:typename:void	signature:(void * ptr,size_t size)
 deallocate	source/buffer/BufferAllocator.cpp	/^void NormalAllocator::deallocate(void* ptr, size_t size) {$/;"	f	language:C++	class:NormalAllocator	typeref:typename:void	signature:(void * ptr,size_t size)
+deallocateBuffer	source/decoder/FFmpegDecoder.cpp	/^void FFmpegDecoder::deallocateBuffer(uint8_t* data) {$/;"	f	language:C++	class:FFmpegDecoder	typeref:typename:void	signature:(uint8_t * data)
 debug	configure.ac	/^AC_ARG_ENABLE([debug],$/;"	e	language:Autoconf
+decode	source/decoder/Decoder.cpp	/^DecoderStatus Decoder::decode(AVPacket* packet, DecodedFrame& out_frame) {$/;"	f	language:C++	class:Decoder	typeref:typename:DecoderStatus	signature:(AVPacket * packet,DecodedFrame & out_frame)
+decode	source/decoder/FFmpegDecoder.cpp	/^DecoderStatus FFmpegDecoder::decode(AVPacket* packet, DecodedFrame& out_frame) {$/;"	f	language:C++	class:FFmpegDecoder	typeref:typename:DecoderStatus	signature:(AVPacket * packet,DecodedFrame & out_frame)
+decodeOneFrame	source/videoFile/FfmpegVideoReader.cpp	/^AVFrame* FfmpegVideoReader::decodeOneFrame() {$/;"	f	language:C++	class:FfmpegVideoReader	typeref:typename:AVFrame *	signature:()
 decodeOneFrame	source/videoFile/RtspVideoReader.cpp	/^AVFrame* RtspVideoReader::decodeOneFrame() {$/;"	f	language:C++	class:RtspVideoReader	typeref:typename:AVFrame *	signature:()
 decodeThreadFunc	source/videoFile/RtspVideoReader.cpp	/^void RtspVideoReader::decodeThreadFunc() {$/;"	f	language:C++	class:RtspVideoReader	typeref:typename:void	signature:()
+decode_errors_	include/videoFile/FfmpegVideoReader.hpp	/^    std::atomic<int> decode_errors_;$/;"	m	language:C++	class:FfmpegVideoReader	typeref:typename:std::atomic<int>
 decode_start_	include/monitor/PerformanceMonitor.hpp	/^    std::chrono::steady_clock::time_point decode_start_;$/;"	m	language:C++	class:PerformanceMonitor	typeref:typename:std::chrono::steady_clock::time_point
 decode_thread_	include/videoFile/RtspVideoReader.hpp	/^    std::thread decode_thread_;$/;"	m	language:C++	class:RtspVideoReader	typeref:typename:std::thread
+decoded_frames_	include/videoFile/FfmpegVideoReader.hpp	/^    std::atomic<int> decoded_frames_;$/;"	m	language:C++	class:FfmpegVideoReader	typeref:typename:std::atomic<int>
 decoded_frames_	include/videoFile/RtspVideoReader.hpp	/^    std::atomic<int> decoded_frames_;$/;"	m	language:C++	class:RtspVideoReader	typeref:typename:std::atomic<int>
+decoder_	include/decoder/Decoder.hpp	/^    std::unique_ptr<IDecoder> decoder_;      \/\/ 具体解码器实例$/;"	m	language:C++	class:Decoder	typeref:typename:std::unique_ptr<IDecoder>
+decoder_name_	include/videoFile/FfmpegVideoReader.hpp	/^    const char* decoder_name_;         \/\/ 指定解码器名称（如 "h264_taco"）$/;"	m	language:C++	class:FfmpegVideoReader	typeref:typename:const char *
 delay_end_callback_	include/monitor/Timer.hpp	/^    void (*delay_end_callback_)(void*); \/\/ 延迟结束回调（可选）$/;"	m	language:C++	class:Timer	typeref:typename:void (*)(void *)
 delay_seconds_	include/monitor/Timer.hpp	/^    double delay_seconds_;      \/\/ 延迟启动时间$/;"	m	language:C++	class:Timer	typeref:typename:double
 deleter_	include/buffer/BufferHandle.hpp	/^    Deleter deleter_;           \/\/ 自定义释放函数$/;"	m	language:C++	class:BufferHandle	typeref:typename:Deleter
 detectFileFormat	source/videoFile/MmapVideoReader.cpp	/^MmapVideoReader::FileFormat MmapVideoReader::detectFileFormat() {$/;"	f	language:C++	class:MmapVideoReader	typeref:typename:MmapVideoReader::FileFormat	signature:()
 detected_format_	include/videoFile/MmapVideoReader.hpp	/^    FileFormat detected_format_;$/;"	m	language:C++	class:MmapVideoReader	typeref:typename:FileFormat
+device_ctx	include/decoder/IDecoder.hpp	/^    AVBufferRef* device_ctx;           \/\/ 设备上下文（可选）$/;"	m	language:C++	struct:HardwareAccelConfig	typeref:typename:AVBufferRef *
+device_type	include/decoder/IDecoder.hpp	/^    AVHWDeviceType device_type;        \/\/ 硬件设备类型 (如 AV_HWDEVICE_TYPE_VAAPI)$/;"	m	language:C++	struct:HardwareAccelConfig	typeref:typename:AVHWDeviceType
 disconnectRTSP	source/videoFile/RtspVideoReader.cpp	/^void RtspVideoReader::disconnectRTSP() {$/;"	f	language:C++	class:RtspVideoReader	typeref:typename:void	signature:()
 displayBuffer	source/display/LinuxFramebufferDevice.cpp	/^bool LinuxFramebufferDevice::displayBuffer(int buffer_index) {$/;"	f	language:C++	class:LinuxFramebufferDevice	typeref:typename:bool	signature:(int buffer_index)
 displayBufferByDMA	source/display/LinuxFramebufferDevice.cpp	/^bool LinuxFramebufferDevice::displayBufferByDMA(Buffer* buffer) {$/;"	f	language:C++	class:LinuxFramebufferDevice	typeref:typename:bool	signature:(Buffer * buffer)
@@ -322,19 +437,26 @@ dma_fd_	include/buffer/Buffer.hpp	/^    int dma_fd_;                     \/\/ DM
 dma_fds_	include/buffer/BufferManager.hpp	/^    std::vector<int> dma_fds_;           \/\/ DMA buffer 文件描述符（CMA模式）$/;"	m	language:C++	class:BufferManager	typeref:typename:std::vector<int>
 dma_heap_allocation_data	source/buffer/BufferAllocator.cpp	/^struct dma_heap_allocation_data {$/;"	s	language:C++	file:
 dropped_frames_	include/videoFile/RtspVideoReader.hpp	/^    std::atomic<int> dropped_frames_;$/;"	m	language:C++	class:RtspVideoReader	typeref:typename:std::atomic<int>
+dts	include/decoder/IDecoder.hpp	/^    inline int64_t dts() const { $/;"	f	language:C++	struct:DecodedFrame	typeref:typename:int64_t	signature:() const
 duration_seconds_	include/monitor/Timer.hpp	/^    double duration_seconds_;   \/\/ 总运行时长$/;"	m	language:C++	class:Timer	typeref:typename:double
 ejectBuffer	source/buffer/BufferPool.cpp	/^bool BufferPool::ejectBuffer(Buffer* buffer) {$/;"	f	language:C++	class:BufferPool	typeref:typename:bool	signature:(Buffer * buffer)
 endDecodeFrameTiming	source/monitor/PerformanceMonitor.cpp	/^void PerformanceMonitor::endDecodeFrameTiming() {$/;"	f	language:C++	class:PerformanceMonitor	typeref:typename:void	signature:()
 endDisplayFrameTiming	source/monitor/PerformanceMonitor.cpp	/^void PerformanceMonitor::endDisplayFrameTiming() {$/;"	f	language:C++	class:PerformanceMonitor	typeref:typename:void	signature:()
 endLoadFrameTiming	source/monitor/PerformanceMonitor.cpp	/^void PerformanceMonitor::endLoadFrameTiming() {$/;"	f	language:C++	class:PerformanceMonitor	typeref:typename:void	signature:()
+eof_reached_	include/videoFile/FfmpegVideoReader.hpp	/^    bool eof_reached_;$/;"	m	language:C++	class:FfmpegVideoReader	typeref:typename:bool
 eof_reached_	include/videoFile/RtspVideoReader.hpp	/^    std::atomic<bool> eof_reached_;    \/\/ 流结束标志$/;"	m	language:C++	class:RtspVideoReader	typeref:typename:std::atomic<bool>
 error_callback_	include/buffer/BufferManager.hpp	/^    ErrorCallback error_callback_;                   \/\/ 错误回调函数$/;"	m	language:C++	class:BufferManager	typeref:typename:ErrorCallback
 error_callback_	include/producer/VideoProducer.hpp	/^    ErrorCallback error_callback_;$/;"	m	language:C++	class:VideoProducer	typeref:typename:ErrorCallback
 error_mutex_	include/buffer/BufferManager.hpp	/^    mutable std::mutex error_mutex_;                 \/\/ 错误信息互斥锁$/;"	m	language:C++	class:BufferManager	typeref:typename:std::mutex
 error_mutex_	include/producer/VideoProducer.hpp	/^    mutable std::mutex error_mutex_;$/;"	m	language:C++	class:VideoProducer	typeref:typename:std::mutex
 error_mutex_	include/videoFile/RtspVideoReader.hpp	/^    mutable std::mutex error_mutex_;$/;"	m	language:C++	class:RtspVideoReader	typeref:typename:std::mutex
+estimateTotalFrames	source/videoFile/FfmpegVideoReader.cpp	/^int FfmpegVideoReader::estimateTotalFrames() {$/;"	f	language:C++	class:FfmpegVideoReader	typeref:typename:int	signature:()
+explicit 的适用场景	cpp_compile_error.md	/^### explicit 的适用场景$/;"	S	language:Markdown
 exportBufferAsDmaBuf	source/buffer/BufferPool.cpp	/^int BufferPool::exportBufferAsDmaBuf(uint32_t buffer_id) {$/;"	f	language:C++	class:BufferPool	typeref:typename:int	signature:(uint32_t buffer_id)
 external_handles_	include/buffer/BufferPool.hpp	/^    std::vector<std::unique_ptr<BufferHandle>> external_handles_;  \/\/ 持有所有权$/;"	m	language:C++	class:BufferPool	typeref:typename:std::vector<std::unique_ptr<BufferHandle>>
+extractPhysicalAddress	source/videoFile/FfmpegVideoReader.cpp	/^uint64_t FfmpegVideoReader::extractPhysicalAddress(AVFrame* frame) {$/;"	f	language:C++	class:FfmpegVideoReader	typeref:typename:uint64_t	signature:(AVFrame * frame)
+extradata	include/decoder/IDecoder.hpp	/^    const uint8_t* extradata;          \/\/ 额外数据 (SPS\/PPS\/VPS 等)$/;"	m	language:C++	struct:DecoderConfig	typeref:typename:const uint8_t *
+extradata_size	include/decoder/IDecoder.hpp	/^    int extradata_size;                \/\/ 额外数据大小$/;"	m	language:C++	struct:DecoderConfig	typeref:typename:int
 failed_reads	include/videoFile/IoUringVideoReader.hpp	/^        long failed_reads;        \/\/ 失败读取次数$/;"	m	language:C++	struct:IoUringVideoReader::Stats	typeref:typename:long
 failed_reads_	include/videoFile/IoUringVideoReader.hpp	/^    std::atomic<long> failed_reads_{0};$/;"	m	language:C++	class:IoUringVideoReader	typeref:typename:std::atomic<long>
 fb_index_	include/display/LinuxFramebufferDevice.hpp	/^    int fb_index_;                    \/\/ framebuffer索引（0或1）$/;"	m	language:C++	class:LinuxFramebufferDevice	typeref:typename:int
@@ -345,6 +467,7 @@ fd_	include/display/LinuxFramebufferDevice.hpp	/^    int fd_;                   
 fd_	include/videoFile/MmapVideoReader.hpp	/^    int fd_;                          \/\/ 文件描述符$/;"	m	language:C++	class:MmapVideoReader	typeref:typename:int
 fd_flags	source/buffer/BufferAllocator.cpp	/^    unsigned int fd_flags;$/;"	m	language:C++	struct:dma_heap_allocation_data	typeref:typename:unsigned int	file:
 file_path	include/producer/VideoProducer.hpp	/^        std::string file_path;                         \/\/ 视频文件路径$/;"	m	language:C++	struct:VideoProducer::Config	typeref:typename:std::string
+file_path_	include/videoFile/FfmpegVideoReader.hpp	/^    char file_path_[MAX_VIDEO_PATH_LENGTH];$/;"	m	language:C++	class:FfmpegVideoReader	typeref:typename:char[]
 file_size_	include/videoFile/IoUringVideoReader.hpp	/^    long file_size_;$/;"	m	language:C++	class:IoUringVideoReader	typeref:typename:long
 file_size_	include/videoFile/MmapVideoReader.hpp	/^    long file_size_;                  \/\/ 文件大小（字节）$/;"	m	language:C++	class:MmapVideoReader	typeref:typename:long
 filled	include/videoFile/RtspVideoReader.hpp	/^        bool filled;                   \/\/ 是否已填充$/;"	m	language:C++	struct:RtspVideoReader::FrameSlot	typeref:typename:bool
@@ -354,12 +477,17 @@ filled_queue_	include/buffer/BufferManager.hpp	/^    std::queue<Buffer*> filled_
 filled_queue_	include/buffer/BufferPool.hpp	/^    std::queue<Buffer*> filled_queue_;    \/\/ 就绪队列$/;"	m	language:C++	class:BufferPool	typeref:typename:std::queue<Buffer * >
 findByName	source/buffer/BufferPoolRegistry.cpp	/^BufferPool* BufferPoolRegistry::findByName(const std::string& name) const {$/;"	f	language:C++	class:BufferPoolRegistry	typeref:typename:BufferPool *	signature:(const std::string & name) const
 findDeviceNode	source/display/LinuxFramebufferDevice.cpp	/^const char* LinuxFramebufferDevice::findDeviceNode(int device_index) {$/;"	f	language:C++	class:LinuxFramebufferDevice	typeref:typename:const char *	signature:(int device_index)
+findVideoStream	source/videoFile/FfmpegVideoReader.cpp	/^bool FfmpegVideoReader::findVideoStream() {$/;"	f	language:C++	class:FfmpegVideoReader	typeref:typename:bool	signature:()
+flush	source/decoder/Decoder.cpp	/^DecoderStatus Decoder::flush(DecodedFrame& out_frame) {$/;"	f	language:C++	class:Decoder	typeref:typename:DecoderStatus	signature:(DecodedFrame & out_frame)
+flush	source/decoder/FFmpegDecoder.cpp	/^DecoderStatus FFmpegDecoder::flush(DecodedFrame& out_frame) {$/;"	f	language:C++	class:FFmpegDecoder	typeref:typename:DecoderStatus	signature:(DecodedFrame & out_frame)
+format_ctx_	include/videoFile/FfmpegVideoReader.hpp	/^    AVFormatContext* format_ctx_;$/;"	m	language:C++	class:FfmpegVideoReader	typeref:typename:AVFormatContext *
 format_ctx_	include/videoFile/RtspVideoReader.hpp	/^    AVFormatContext* format_ctx_;$/;"	m	language:C++	class:RtspVideoReader	typeref:typename:AVFormatContext *
 frame_index	include/videoFile/IoUringVideoReader.hpp	/^        int frame_index;          \/\/ 帧索引$/;"	m	language:C++	struct:IoUringVideoReader::ReadRequest	typeref:typename:int
 frame_size_	include/videoFile/IoUringVideoReader.hpp	/^    size_t frame_size_;$/;"	m	language:C++	class:IoUringVideoReader	typeref:typename:size_t
 frame_size_	include/videoFile/MmapVideoReader.hpp	/^    size_t frame_size_;               \/\/ 单帧大小（字节）$/;"	m	language:C++	class:MmapVideoReader	typeref:typename:size_t
 framebuffer_base_	include/display/LinuxFramebufferDevice.hpp	/^    void* framebuffer_base_;          \/\/ mmap返回的基地址$/;"	m	language:C++	class:LinuxFramebufferDevice	typeref:typename:void *
 framebuffer_total_size_	include/display/LinuxFramebufferDevice.hpp	/^    size_t framebuffer_total_size_;   \/\/ 映射的总大小$/;"	m	language:C++	class:LinuxFramebufferDevice	typeref:typename:size_t
+framerate	include/decoder/IDecoder.hpp	/^    AVRational framerate;              \/\/ 帧率$/;"	m	language:C++	struct:DecoderConfig	typeref:typename:AVRational
 frames_decoded_	include/monitor/PerformanceMonitor.hpp	/^    int frames_decoded_;              \/\/ 解码的帧数（如果有解码）$/;"	m	language:C++	class:PerformanceMonitor	typeref:typename:int
 frames_displayed_	include/monitor/PerformanceMonitor.hpp	/^    int frames_displayed_;            \/\/ 显示的帧数$/;"	m	language:C++	class:PerformanceMonitor	typeref:typename:int
 frames_loaded_	include/monitor/PerformanceMonitor.hpp	/^    int frames_loaded_;               \/\/ 加载的帧数$/;"	m	language:C++	class:PerformanceMonitor	typeref:typename:int
@@ -380,34 +508,49 @@ getBuffer	source/display/LinuxFramebufferDevice.cpp	/^Buffer& LinuxFramebufferDe
 getBuffer	source/display/LinuxFramebufferDevice.cpp	/^const Buffer& LinuxFramebufferDevice::getBuffer(int buffer_index) const {$/;"	f	language:C++	class:LinuxFramebufferDevice	typeref:typename:const Buffer &	signature:(int buffer_index) const
 getBufferById	source/buffer/BufferPool.cpp	/^Buffer* BufferPool::getBufferById(uint32_t id) {$/;"	f	language:C++	class:BufferPool	typeref:typename:Buffer *	signature:(uint32_t id)
 getBufferById	source/buffer/BufferPool.cpp	/^const Buffer* BufferPool::getBufferById(uint32_t id) const {$/;"	f	language:C++	class:BufferPool	typeref:typename:const Buffer *	signature:(uint32_t id) const
+getBufferCallback	source/decoder/FFmpegDecoder.cpp	/^int FFmpegDecoder::getBufferCallback(AVCodecContext* ctx, AVFrame* frame, int flags) {$/;"	f	language:C++	class:FFmpegDecoder	typeref:typename:int	signature:(AVCodecContext * ctx,AVFrame * frame,int flags)
 getBufferCount	source/display/LinuxFramebufferDevice.cpp	/^int LinuxFramebufferDevice::getBufferCount() const {$/;"	f	language:C++	class:LinuxFramebufferDevice	typeref:typename:int	signature:() const
 getBufferPool	include/display/LinuxFramebufferDevice.hpp	/^    BufferPool& getBufferPool() {$/;"	f	language:C++	class:LinuxFramebufferDevice	typeref:typename:BufferPool &	signature:()
 getBufferPool	include/display/LinuxFramebufferDevice.hpp	/^    const BufferPool& getBufferPool() const {$/;"	f	language:C++	class:LinuxFramebufferDevice	typeref:typename:const BufferPool &	signature:() const
 getBufferSize	source/buffer/BufferPool.cpp	/^size_t BufferPool::getBufferSize() const {$/;"	f	language:C++	class:BufferPool	typeref:typename:size_t	signature:() const
 getBufferSize	source/display/LinuxFramebufferDevice.cpp	/^size_t LinuxFramebufferDevice::getBufferSize() const {$/;"	f	language:C++	class:LinuxFramebufferDevice	typeref:typename:size_t	signature:() const
 getBytesPerPixel	source/display/LinuxFramebufferDevice.cpp	/^int LinuxFramebufferDevice::getBytesPerPixel() const {$/;"	f	language:C++	class:LinuxFramebufferDevice	typeref:typename:int	signature:() const
+getBytesPerPixel	source/videoFile/FfmpegVideoReader.cpp	/^int FfmpegVideoReader::getBytesPerPixel() const {$/;"	f	language:C++	class:FfmpegVideoReader	typeref:typename:int	signature:() const
 getBytesPerPixel	source/videoFile/IoUringVideoReader.cpp	/^int IoUringVideoReader::getBytesPerPixel() const {$/;"	f	language:C++	class:IoUringVideoReader	typeref:typename:int	signature:() const
 getBytesPerPixel	source/videoFile/MmapVideoReader.cpp	/^int MmapVideoReader::getBytesPerPixel() const {$/;"	f	language:C++	class:MmapVideoReader	typeref:typename:int	signature:() const
 getBytesPerPixel	source/videoFile/RtspVideoReader.cpp	/^int RtspVideoReader::getBytesPerPixel() const {$/;"	f	language:C++	class:RtspVideoReader	typeref:typename:int	signature:() const
 getBytesPerPixel	source/videoFile/VideoFile.cpp	/^int VideoFile::getBytesPerPixel() const {$/;"	f	language:C++	class:VideoFile	typeref:typename:int	signature:() const
 getCategory	include/buffer/BufferPool.hpp	/^    const std::string& getCategory() const { return category_; }$/;"	f	language:C++	class:BufferPool	typeref:typename:const std::string &	signature:() const
+getCodecName	source/decoder/Decoder.cpp	/^const char* Decoder::getCodecName() const {$/;"	f	language:C++	class:Decoder	typeref:typename:const char *	signature:() const
+getCodecName	source/decoder/FFmpegDecoder.cpp	/^const char* FFmpegDecoder::getCodecName() const {$/;"	f	language:C++	class:FFmpegDecoder	typeref:typename:const char *	signature:() const
+getCodecName	source/videoFile/FfmpegVideoReader.cpp	/^const char* FfmpegVideoReader::getCodecName() const {$/;"	f	language:C++	class:FfmpegVideoReader	typeref:typename:const char *	signature:() const
+getConfig	source/decoder/Decoder.cpp	/^const DecoderConfig& Decoder::getConfig() const {$/;"	f	language:C++	class:Decoder	typeref:typename:const DecoderConfig &	signature:() const
+getConfig	source/decoder/FFmpegDecoder.cpp	/^const DecoderConfig& FFmpegDecoder::getConfig() const {$/;"	f	language:C++	class:FFmpegDecoder	typeref:typename:const DecoderConfig &	signature:() const
 getCurrentDisplayBuffer	source/display/LinuxFramebufferDevice.cpp	/^int LinuxFramebufferDevice::getCurrentDisplayBuffer() const {$/;"	f	language:C++	class:LinuxFramebufferDevice	typeref:typename:int	signature:() const
+getCurrentFrameIndex	source/videoFile/FfmpegVideoReader.cpp	/^int FfmpegVideoReader::getCurrentFrameIndex() const {$/;"	f	language:C++	class:FfmpegVideoReader	typeref:typename:int	signature:() const
 getCurrentFrameIndex	source/videoFile/IoUringVideoReader.cpp	/^int IoUringVideoReader::getCurrentFrameIndex() const {$/;"	f	language:C++	class:IoUringVideoReader	typeref:typename:int	signature:() const
 getCurrentFrameIndex	source/videoFile/MmapVideoReader.cpp	/^int MmapVideoReader::getCurrentFrameIndex() const {$/;"	f	language:C++	class:MmapVideoReader	typeref:typename:int	signature:() const
 getCurrentFrameIndex	source/videoFile/RtspVideoReader.cpp	/^int RtspVideoReader::getCurrentFrameIndex() const {$/;"	f	language:C++	class:RtspVideoReader	typeref:typename:int	signature:() const
 getCurrentFrameIndex	source/videoFile/VideoFile.cpp	/^int VideoFile::getCurrentFrameIndex() const {$/;"	f	language:C++	class:VideoFile	typeref:typename:int	signature:() const
+getDecodeErrors	include/videoFile/FfmpegVideoReader.hpp	/^    int getDecodeErrors() const { return decode_errors_.load(); }$/;"	f	language:C++	class:FfmpegVideoReader	typeref:typename:int	signature:() const
+getDecodedFrames	include/videoFile/FfmpegVideoReader.hpp	/^    int getDecodedFrames() const { return decoded_frames_.load(); }$/;"	f	language:C++	class:FfmpegVideoReader	typeref:typename:int	signature:() const
 getDecodedFrames	include/videoFile/RtspVideoReader.hpp	/^    int getDecodedFrames() const { return decoded_frames_.load(); }$/;"	f	language:C++	class:RtspVideoReader	typeref:typename:int	signature:() const
 getDecodedFrames	source/monitor/PerformanceMonitor.cpp	/^int PerformanceMonitor::getDecodedFrames() const {$/;"	f	language:C++	class:PerformanceMonitor	typeref:typename:int	signature:() const
+getDecoderType	source/decoder/Decoder.cpp	/^DecoderFactory::DecoderType Decoder::getDecoderType() const {$/;"	f	language:C++	class:Decoder	typeref:typename:DecoderFactory::DecoderType	signature:() const
+getDecoderType	source/decoder/FFmpegDecoder.cpp	/^const char* FFmpegDecoder::getDecoderType() const {$/;"	f	language:C++	class:FFmpegDecoder	typeref:typename:const char *	signature:() const
+getDecoderTypeName	source/decoder/DecoderFactory.cpp	/^const char* DecoderFactory::getDecoderTypeName(DecoderType type) {$/;"	f	language:C++	class:DecoderFactory	typeref:typename:const char *	signature:(DecoderType type)
 getDisplayedFrames	source/monitor/PerformanceMonitor.cpp	/^int PerformanceMonitor::getDisplayedFrames() const {$/;"	f	language:C++	class:PerformanceMonitor	typeref:typename:int	signature:() const
 getDmaBufFd	include/buffer/Buffer.hpp	/^    int getDmaBufFd() const { return dma_fd_; }$/;"	f	language:C++	class:Buffer	typeref:typename:int	signature:() const
 getDmaBufFd	source/buffer/BufferAllocator.cpp	/^int CMAAllocator::getDmaBufFd(void* ptr) const {$/;"	f	language:C++	class:CMAAllocator	typeref:typename:int	signature:(void * ptr) const
 getDroppedFrames	include/videoFile/RtspVideoReader.hpp	/^    int getDroppedFrames() const { return dropped_frames_.load(); }$/;"	f	language:C++	class:RtspVideoReader	typeref:typename:int	signature:() const
 getElapsedTime	source/monitor/PerformanceMonitor.cpp	/^double PerformanceMonitor::getElapsedTime() const {$/;"	f	language:C++	class:PerformanceMonitor	typeref:typename:double	signature:() const
+getFileSize	source/videoFile/FfmpegVideoReader.cpp	/^long FfmpegVideoReader::getFileSize() const {$/;"	f	language:C++	class:FfmpegVideoReader	typeref:typename:long	signature:() const
 getFileSize	source/videoFile/IoUringVideoReader.cpp	/^long IoUringVideoReader::getFileSize() const {$/;"	f	language:C++	class:IoUringVideoReader	typeref:typename:long	signature:() const
 getFileSize	source/videoFile/MmapVideoReader.cpp	/^long MmapVideoReader::getFileSize() const {$/;"	f	language:C++	class:MmapVideoReader	typeref:typename:long	signature:() const
 getFileSize	source/videoFile/RtspVideoReader.cpp	/^long RtspVideoReader::getFileSize() const {$/;"	f	language:C++	class:RtspVideoReader	typeref:typename:long	signature:() const
 getFileSize	source/videoFile/VideoFile.cpp	/^long VideoFile::getFileSize() const {$/;"	f	language:C++	class:VideoFile	typeref:typename:long	signature:() const
 getFilledCount	source/buffer/BufferPool.cpp	/^int BufferPool::getFilledCount() const {$/;"	f	language:C++	class:BufferPool	typeref:typename:int	signature:() const
+getFrameSize	source/videoFile/FfmpegVideoReader.cpp	/^size_t FfmpegVideoReader::getFrameSize() const {$/;"	f	language:C++	class:FfmpegVideoReader	typeref:typename:size_t	signature:() const
 getFrameSize	source/videoFile/IoUringVideoReader.cpp	/^size_t IoUringVideoReader::getFrameSize() const {$/;"	f	language:C++	class:IoUringVideoReader	typeref:typename:size_t	signature:() const
 getFrameSize	source/videoFile/MmapVideoReader.cpp	/^size_t MmapVideoReader::getFrameSize() const {$/;"	f	language:C++	class:MmapVideoReader	typeref:typename:size_t	signature:() const
 getFrameSize	source/videoFile/RtspVideoReader.cpp	/^size_t RtspVideoReader::getFrameSize() const {$/;"	f	language:C++	class:RtspVideoReader	typeref:typename:size_t	signature:() const
@@ -415,16 +558,24 @@ getFrameSize	source/videoFile/VideoFile.cpp	/^size_t VideoFile::getFrameSize() c
 getFreeCount	source/buffer/BufferPool.cpp	/^int BufferPool::getFreeCount() const {$/;"	f	language:C++	class:BufferPool	typeref:typename:int	signature:() const
 getGlobalStats	source/buffer/BufferPoolRegistry.cpp	/^BufferPoolRegistry::GlobalStats BufferPoolRegistry::getGlobalStats() const {$/;"	f	language:C++	class:BufferPoolRegistry	typeref:typename:BufferPoolRegistry::GlobalStats	signature:() const
 getHeight	source/display/LinuxFramebufferDevice.cpp	/^int LinuxFramebufferDevice::getHeight() const {$/;"	f	language:C++	class:LinuxFramebufferDevice	typeref:typename:int	signature:() const
+getHeight	source/videoFile/FfmpegVideoReader.cpp	/^int FfmpegVideoReader::getHeight() const {$/;"	f	language:C++	class:FfmpegVideoReader	typeref:typename:int	signature:() const
 getHeight	source/videoFile/IoUringVideoReader.cpp	/^int IoUringVideoReader::getHeight() const {$/;"	f	language:C++	class:IoUringVideoReader	typeref:typename:int	signature:() const
 getHeight	source/videoFile/MmapVideoReader.cpp	/^int MmapVideoReader::getHeight() const {$/;"	f	language:C++	class:MmapVideoReader	typeref:typename:int	signature:() const
 getHeight	source/videoFile/RtspVideoReader.cpp	/^int RtspVideoReader::getHeight() const {$/;"	f	language:C++	class:RtspVideoReader	typeref:typename:int	signature:() const
 getHeight	source/videoFile/VideoFile.cpp	/^int VideoFile::getHeight() const {$/;"	f	language:C++	class:VideoFile	typeref:typename:int	signature:() const
 getInstance	source/buffer/BufferPoolRegistry.cpp	/^BufferPoolRegistry& BufferPoolRegistry::getInstance() {$/;"	f	language:C++	class:BufferPoolRegistry	typeref:typename:BufferPoolRegistry &	signature:()
+getLastError	source/decoder/Decoder.cpp	/^const char* Decoder::getLastError() const {$/;"	f	language:C++	class:Decoder	typeref:typename:const char *	signature:() const
+getLastError	source/decoder/FFmpegDecoder.cpp	/^const char* FFmpegDecoder::getLastError() const {$/;"	f	language:C++	class:FFmpegDecoder	typeref:typename:const char *	signature:() const
 getLastError	source/producer/VideoProducer.cpp	/^std::string VideoProducer::getLastError() const {$/;"	f	language:C++	class:VideoProducer	typeref:typename:std::string	signature:() const
+getLastError	source/videoFile/FfmpegVideoReader.cpp	/^std::string FfmpegVideoReader::getLastError() const {$/;"	f	language:C++	class:FfmpegVideoReader	typeref:typename:std::string	signature:() const
 getLastError	source/videoFile/RtspVideoReader.cpp	/^std::string RtspVideoReader::getLastError() const {$/;"	f	language:C++	class:RtspVideoReader	typeref:typename:std::string	signature:() const
+getLastFFmpegError	include/videoFile/FfmpegVideoReader.hpp	/^    int getLastFFmpegError() const { return last_ffmpeg_error_; }$/;"	f	language:C++	class:FfmpegVideoReader	typeref:typename:int	signature:() const
+getLastFFmpegError	source/decoder/Decoder.cpp	/^int Decoder::getLastFFmpegError() const {$/;"	f	language:C++	class:Decoder	typeref:typename:int	signature:() const
+getLastFFmpegError	source/decoder/FFmpegDecoder.cpp	/^int FFmpegDecoder::getLastFFmpegError() const {$/;"	f	language:C++	class:FFmpegDecoder	typeref:typename:int	signature:() const
 getLifetimeTracker	include/buffer/BufferHandle.hpp	/^    std::weak_ptr<bool> getLifetimeTracker() const {$/;"	f	language:C++	class:BufferHandle	typeref:typename:std::weak_ptr<bool>	signature:() const
 getLoadedFrames	source/monitor/PerformanceMonitor.cpp	/^int PerformanceMonitor::getLoadedFrames() const {$/;"	f	language:C++	class:PerformanceMonitor	typeref:typename:int	signature:() const
 getName	include/buffer/BufferPool.hpp	/^    const std::string& getName() const { return name_; }$/;"	f	language:C++	class:BufferPool	typeref:typename:const std::string &	signature:() const
+getPath	source/videoFile/FfmpegVideoReader.cpp	/^const char* FfmpegVideoReader::getPath() const {$/;"	f	language:C++	class:FfmpegVideoReader	typeref:typename:const char *	signature:() const
 getPath	source/videoFile/IoUringVideoReader.cpp	/^const char* IoUringVideoReader::getPath() const {$/;"	f	language:C++	class:IoUringVideoReader	typeref:typename:const char *	signature:() const
 getPath	source/videoFile/MmapVideoReader.cpp	/^const char* MmapVideoReader::getPath() const {$/;"	f	language:C++	class:MmapVideoReader	typeref:typename:const char *	signature:() const
 getPath	source/videoFile/RtspVideoReader.cpp	/^const char* RtspVideoReader::getPath() const {$/;"	f	language:C++	class:RtspVideoReader	typeref:typename:const char *	signature:() const
@@ -437,10 +588,12 @@ getPhysicalAddress	source/buffer/BufferPool.cpp	/^uint64_t BufferPool::getPhysic
 getPoolCount	source/buffer/BufferPoolRegistry.cpp	/^size_t BufferPoolRegistry::getPoolCount() const {$/;"	f	language:C++	class:BufferPoolRegistry	typeref:typename:size_t	signature:() const
 getPoolsByCategory	source/buffer/BufferPoolRegistry.cpp	/^std::vector<BufferPool*> BufferPoolRegistry::getPoolsByCategory(const std::string& category) con/;"	f	language:C++	class:BufferPoolRegistry	typeref:typename:std::vector<BufferPool * >	signature:(const std::string & category) const
 getProducedFrames	include/producer/VideoProducer.hpp	/^    int getProducedFrames() const { return produced_frames_.load(); }$/;"	f	language:C++	class:VideoProducer	typeref:typename:int	signature:() const
+getReaderType	source/videoFile/FfmpegVideoReader.cpp	/^const char* FfmpegVideoReader::getReaderType() const {$/;"	f	language:C++	class:FfmpegVideoReader	typeref:typename:const char *	signature:() const
 getReaderType	source/videoFile/IoUringVideoReader.cpp	/^const char* IoUringVideoReader::getReaderType() const {$/;"	f	language:C++	class:IoUringVideoReader	typeref:typename:const char *	signature:() const
 getReaderType	source/videoFile/MmapVideoReader.cpp	/^const char* MmapVideoReader::getReaderType() const {$/;"	f	language:C++	class:MmapVideoReader	typeref:typename:const char *	signature:() const
 getReaderType	source/videoFile/RtspVideoReader.cpp	/^const char* RtspVideoReader::getReaderType() const {$/;"	f	language:C++	class:RtspVideoReader	typeref:typename:const char *	signature:() const
 getReaderType	source/videoFile/VideoFile.cpp	/^const char* VideoFile::getReaderType() const {$/;"	f	language:C++	class:VideoFile	typeref:typename:const char *	signature:() const
+getRecommendedDecoderType	source/decoder/DecoderFactory.cpp	/^DecoderFactory::DecoderType DecoderFactory::getRecommendedDecoderType() {$/;"	f	language:C++	class:DecoderFactory	typeref:typename:DecoderFactory::DecoderType	signature:()
 getRecommendedType	source/videoFile/VideoReaderFactory.cpp	/^VideoReaderFactory::ReaderType VideoReaderFactory::getRecommendedType() {$/;"	f	language:C++	class:VideoReaderFactory	typeref:typename:VideoReaderFactory::ReaderType	signature:()
 getRegistryId	include/buffer/BufferPool.hpp	/^    uint64_t getRegistryId() const { return registry_id_; }$/;"	f	language:C++	class:BufferPool	typeref:typename:uint64_t	signature:() const
 getSkippedFrames	include/producer/VideoProducer.hpp	/^    int getSkippedFrames() const { return skipped_frames_.load(); }$/;"	f	language:C++	class:VideoProducer	typeref:typename:int	signature:() const
@@ -448,6 +601,7 @@ getStats	source/videoFile/IoUringVideoReader.cpp	/^IoUringVideoReader::Stats IoU
 getTotalCount	source/buffer/BufferPool.cpp	/^int BufferPool::getTotalCount() const {$/;"	f	language:C++	class:BufferPool	typeref:typename:int	signature:() const
 getTotalDuration	source/monitor/PerformanceMonitor.cpp	/^double PerformanceMonitor::getTotalDuration() const {$/;"	f	language:C++	class:PerformanceMonitor	typeref:typename:double	signature:() const
 getTotalFrames	source/producer/VideoProducer.cpp	/^int VideoProducer::getTotalFrames() const {$/;"	f	language:C++	class:VideoProducer	typeref:typename:int	signature:() const
+getTotalFrames	source/videoFile/FfmpegVideoReader.cpp	/^int FfmpegVideoReader::getTotalFrames() const {$/;"	f	language:C++	class:FfmpegVideoReader	typeref:typename:int	signature:() const
 getTotalFrames	source/videoFile/IoUringVideoReader.cpp	/^int IoUringVideoReader::getTotalFrames() const {$/;"	f	language:C++	class:IoUringVideoReader	typeref:typename:int	signature:() const
 getTotalFrames	source/videoFile/MmapVideoReader.cpp	/^int MmapVideoReader::getTotalFrames() const {$/;"	f	language:C++	class:MmapVideoReader	typeref:typename:int	signature:() const
 getTotalFrames	source/videoFile/RtspVideoReader.cpp	/^int RtspVideoReader::getTotalFrames() const {$/;"	f	language:C++	class:RtspVideoReader	typeref:typename:int	signature:() const
@@ -456,44 +610,64 @@ getTotalMemoryUsage	source/buffer/BufferPoolRegistry.cpp	/^size_t BufferPoolRegi
 getTotalTime	source/monitor/PerformanceMonitor.cpp	/^double PerformanceMonitor::getTotalTime() const {$/;"	f	language:C++	class:PerformanceMonitor	typeref:typename:double	signature:() const
 getTypeFromConfig	source/videoFile/VideoReaderFactory.cpp	/^VideoReaderFactory::ReaderType VideoReaderFactory::getTypeFromConfig() {$/;"	f	language:C++	class:VideoReaderFactory	typeref:typename:VideoReaderFactory::ReaderType	signature:()
 getTypeFromEnvironment	source/videoFile/VideoReaderFactory.cpp	/^VideoReaderFactory::ReaderType VideoReaderFactory::getTypeFromEnvironment() {$/;"	f	language:C++	class:VideoReaderFactory	typeref:typename:VideoReaderFactory::ReaderType	signature:()
+getUnderlyingDecoder	source/decoder/Decoder.cpp	/^IDecoder* Decoder::getUnderlyingDecoder() {$/;"	f	language:C++	class:Decoder	typeref:typename:IDecoder *	signature:()
 getVirtualAddress	include/buffer/Buffer.hpp	/^    void* getVirtualAddress() const { return virt_addr_; }$/;"	f	language:C++	class:Buffer	typeref:typename:void *	signature:() const
 getVirtualAddress	include/buffer/BufferHandle.hpp	/^    void* getVirtualAddress() const { return virt_addr_; }$/;"	f	language:C++	class:BufferHandle	typeref:typename:void *	signature:() const
 getWidth	source/display/LinuxFramebufferDevice.cpp	/^int LinuxFramebufferDevice::getWidth() const {$/;"	f	language:C++	class:LinuxFramebufferDevice	typeref:typename:int	signature:() const
+getWidth	source/videoFile/FfmpegVideoReader.cpp	/^int FfmpegVideoReader::getWidth() const {$/;"	f	language:C++	class:FfmpegVideoReader	typeref:typename:int	signature:() const
 getWidth	source/videoFile/IoUringVideoReader.cpp	/^int IoUringVideoReader::getWidth() const {$/;"	f	language:C++	class:IoUringVideoReader	typeref:typename:int	signature:() const
 getWidth	source/videoFile/MmapVideoReader.cpp	/^int MmapVideoReader::getWidth() const {$/;"	f	language:C++	class:MmapVideoReader	typeref:typename:int	signature:() const
 getWidth	source/videoFile/RtspVideoReader.cpp	/^int RtspVideoReader::getWidth() const {$/;"	f	language:C++	class:RtspVideoReader	typeref:typename:int	signature:() const
 getWidth	source/videoFile/VideoFile.cpp	/^int VideoFile::getWidth() const {$/;"	f	language:C++	class:VideoFile	typeref:typename:int	signature:() const
 harvestCompletions	source/videoFile/IoUringVideoReader.cpp	/^int IoUringVideoReader::harvestCompletions(BufferManager* manager, bool blocking) {$/;"	f	language:C++	class:IoUringVideoReader	typeref:typename:int	signature:(BufferManager * manager,bool blocking)
+hasMoreFrames	source/videoFile/FfmpegVideoReader.cpp	/^bool FfmpegVideoReader::hasMoreFrames() const {$/;"	f	language:C++	class:FfmpegVideoReader	typeref:typename:bool	signature:() const
 hasMoreFrames	source/videoFile/IoUringVideoReader.cpp	/^bool IoUringVideoReader::hasMoreFrames() const {$/;"	f	language:C++	class:IoUringVideoReader	typeref:typename:bool	signature:() const
 hasMoreFrames	source/videoFile/MmapVideoReader.cpp	/^bool MmapVideoReader::hasMoreFrames() const {$/;"	f	language:C++	class:MmapVideoReader	typeref:typename:bool	signature:() const
 hasMoreFrames	source/videoFile/RtspVideoReader.cpp	/^bool RtspVideoReader::hasMoreFrames() const {$/;"	f	language:C++	class:RtspVideoReader	typeref:typename:bool	signature:() const
 hasMoreFrames	source/videoFile/VideoFile.cpp	/^bool VideoFile::hasMoreFrames() const {$/;"	f	language:C++	class:VideoFile	typeref:typename:bool	signature:() const
 heap_flags	source/buffer/BufferAllocator.cpp	/^    unsigned long heap_flags;$/;"	m	language:C++	struct:dma_heap_allocation_data	typeref:typename:unsigned long	file:
+height	include/decoder/IDecoder.hpp	/^    inline int height() const { $/;"	f	language:C++	struct:DecodedFrame	typeref:typename:int	signature:() const
+height	include/decoder/IDecoder.hpp	/^    int height;                        \/\/ 视频高度（像素）$/;"	m	language:C++	struct:DecoderConfig	typeref:typename:int
 height	include/producer/VideoProducer.hpp	/^        int height;                                    \/\/ 分辨率高度$/;"	m	language:C++	struct:VideoProducer::Config	typeref:typename:int
 height_	include/display/LinuxFramebufferDevice.hpp	/^    int height_;                      \/\/ 显示高度（像素）$/;"	m	language:C++	class:LinuxFramebufferDevice	typeref:typename:int
+height_	include/videoFile/FfmpegVideoReader.hpp	/^    int height_;                       \/\/ 视频原始高度$/;"	m	language:C++	class:FfmpegVideoReader	typeref:typename:int
 height_	include/videoFile/IoUringVideoReader.hpp	/^    int height_;$/;"	m	language:C++	class:IoUringVideoReader	typeref:typename:int
 height_	include/videoFile/MmapVideoReader.hpp	/^    int height_;                      \/\/ 视频高度（像素）$/;"	m	language:C++	class:MmapVideoReader	typeref:typename:int
 height_	include/videoFile/RtspVideoReader.hpp	/^    int height_;                       \/\/ 输出高度$/;"	m	language:C++	class:RtspVideoReader	typeref:typename:int
+hw_pix_fmt	include/decoder/IDecoder.hpp	/^    AVPixelFormat hw_pix_fmt;          \/\/ 硬件像素格式$/;"	m	language:C++	struct:HardwareAccelConfig	typeref:typename:AVPixelFormat
+hwaccel	include/decoder/IDecoder.hpp	/^    HardwareAccelConfig hwaccel;       \/\/ 硬件加速配置$/;"	m	language:C++	struct:DecoderConfig	typeref:typename:HardwareAccelConfig
 id	include/buffer/Buffer.hpp	/^    uint32_t id() const { return id_; }$/;"	f	language:C++	class:Buffer	typeref:typename:uint32_t	signature:() const
 id	include/buffer/BufferPoolRegistry.hpp	/^        uint64_t id;                                         \/\/ 唯一 ID$/;"	m	language:C++	struct:BufferPoolRegistry::PoolInfo	typeref:typename:uint64_t
 id_	include/buffer/Buffer.hpp	/^    uint32_t id_;                    \/\/ 唯一标识$/;"	m	language:C++	class:Buffer	typeref:typename:uint32_t
+initialize	source/decoder/FFmpegDecoder.cpp	/^DecoderStatus FFmpegDecoder::initialize(const DecoderConfig& config) {$/;"	f	language:C++	class:FFmpegDecoder	typeref:typename:DecoderStatus	signature:(const DecoderConfig & config)
 initialize	source/display/LinuxFramebufferDevice.cpp	/^bool LinuxFramebufferDevice::initialize(int device_index) {$/;"	f	language:C++	class:LinuxFramebufferDevice	typeref:typename:bool	signature:(int device_index)
+initializeDecoder	source/videoFile/FfmpegVideoReader.cpp	/^bool FfmpegVideoReader::initializeDecoder() {$/;"	f	language:C++	class:FfmpegVideoReader	typeref:typename:bool	signature:()
 initializeExternalBuffers	source/buffer/BufferPool.cpp	/^void BufferPool::initializeExternalBuffers(const std::vector<ExternalBufferInfo>& infos) {$/;"	f	language:C++	class:BufferPool	typeref:typename:void	signature:(const std::vector<ExternalBufferInfo> & infos)
+initializeFFmpeg	source/decoder/FFmpegDecoder.cpp	/^DecoderStatus FFmpegDecoder::initializeFFmpeg() {$/;"	f	language:C++	class:FFmpegDecoder	typeref:typename:DecoderStatus	signature:()
 initializeFromHandles	source/buffer/BufferPool.cpp	/^void BufferPool::initializeFromHandles(std::vector<std::unique_ptr<BufferHandle>> handles) {$/;"	f	language:C++	class:BufferPool	typeref:typename:void	signature:(std::vector<std::unique_ptr<BufferHandle>> handles)
 initializeOwnedBuffers	source/buffer/BufferPool.cpp	/^void BufferPool::initializeOwnedBuffers(int count, size_t size, bool use_cma) {$/;"	f	language:C++	class:BufferPool	typeref:typename:void	signature:(int count,size_t size,bool use_cma)
+initializeScaler	source/decoder/FFmpegDecoder.cpp	/^DecoderStatus FFmpegDecoder::initializeScaler() {$/;"	f	language:C++	class:FFmpegDecoder	typeref:typename:DecoderStatus	signature:()
+initializeSwsContext	source/videoFile/FfmpegVideoReader.cpp	/^bool FfmpegVideoReader::initializeSwsContext() {$/;"	f	language:C++	class:FfmpegVideoReader	typeref:typename:bool	signature:()
 initialized_	include/videoFile/IoUringVideoReader.hpp	/^    bool initialized_;$/;"	m	language:C++	class:IoUringVideoReader	typeref:typename:bool
 injectFilledBuffer	source/buffer/BufferPool.cpp	/^Buffer* BufferPool::injectFilledBuffer(std::unique_ptr<BufferHandle> handle) {$/;"	f	language:C++	class:BufferPool	typeref:typename:Buffer *	signature:(std::unique_ptr<BufferHandle> handle)
 internal_buffer_	include/videoFile/RtspVideoReader.hpp	/^    std::vector<FrameSlot> internal_buffer_;  \/\/ 环形缓冲区（默认30帧）$/;"	m	language:C++	class:RtspVideoReader	typeref:typename:std::vector<FrameSlot>
 interval_seconds_	include/monitor/Timer.hpp	/^    double interval_seconds_;   \/\/ 触发间隔$/;"	m	language:C++	class:Timer	typeref:typename:double
 iouring_readers_	include/buffer/BufferManager.hpp	/^    std::vector<void*> iouring_readers_;             \/\/ IoUringVideoReader指针数组（避免/;"	m	language:C++	class:BufferManager	typeref:typename:std::vector<void * >
+isAtEnd	source/videoFile/FfmpegVideoReader.cpp	/^bool FfmpegVideoReader::isAtEnd() const {$/;"	f	language:C++	class:FfmpegVideoReader	typeref:typename:bool	signature:() const
 isAtEnd	source/videoFile/IoUringVideoReader.cpp	/^bool IoUringVideoReader::isAtEnd() const {$/;"	f	language:C++	class:IoUringVideoReader	typeref:typename:bool	signature:() const
 isAtEnd	source/videoFile/MmapVideoReader.cpp	/^bool MmapVideoReader::isAtEnd() const {$/;"	f	language:C++	class:MmapVideoReader	typeref:typename:bool	signature:() const
 isAtEnd	source/videoFile/RtspVideoReader.cpp	/^bool RtspVideoReader::isAtEnd() const {$/;"	f	language:C++	class:RtspVideoReader	typeref:typename:bool	signature:() const
 isAtEnd	source/videoFile/VideoFile.cpp	/^bool VideoFile::isAtEnd() const {$/;"	f	language:C++	class:VideoFile	typeref:typename:bool	signature:() const
 isConnected	include/videoFile/RtspVideoReader.hpp	/^    bool isConnected() const { return connected_.load(); }$/;"	f	language:C++	class:RtspVideoReader	typeref:typename:bool	signature:() const
+isDecoderAvailable	source/decoder/DecoderFactory.cpp	/^bool DecoderFactory::isDecoderAvailable(DecoderType type) {$/;"	f	language:C++	class:DecoderFactory	typeref:typename:bool	signature:(DecoderType type)
+isHardwareAccelerated	source/decoder/Decoder.cpp	/^bool Decoder::isHardwareAccelerated() const {$/;"	f	language:C++	class:Decoder	typeref:typename:bool	signature:() const
+isHardwareAccelerated	source/decoder/FFmpegDecoder.cpp	/^bool FFmpegDecoder::isHardwareAccelerated() const {$/;"	f	language:C++	class:FFmpegDecoder	typeref:typename:bool	signature:() const
+isInitialized	source/decoder/FFmpegDecoder.cpp	/^bool FFmpegDecoder::isInitialized() const {$/;"	f	language:C++	class:FFmpegDecoder	typeref:typename:bool	signature:() const
 isIoUringAvailable	source/videoFile/VideoReaderFactory.cpp	/^bool VideoReaderFactory::isIoUringAvailable() {$/;"	f	language:C++	class:VideoReaderFactory	typeref:typename:bool	signature:()
 isIoUringSuitable	source/videoFile/VideoReaderFactory.cpp	/^bool VideoReaderFactory::isIoUringSuitable() {$/;"	f	language:C++	class:VideoReaderFactory	typeref:typename:bool	signature:()
 isMmapAvailable	source/videoFile/VideoReaderFactory.cpp	/^bool VideoReaderFactory::isMmapAvailable() {$/;"	f	language:C++	class:VideoReaderFactory	typeref:typename:bool	signature:()
+isOpen	source/decoder/Decoder.cpp	/^bool Decoder::isOpen() const {$/;"	f	language:C++	class:Decoder	typeref:typename:bool	signature:() const
+isOpen	source/videoFile/FfmpegVideoReader.cpp	/^bool FfmpegVideoReader::isOpen() const {$/;"	f	language:C++	class:FfmpegVideoReader	typeref:typename:bool	signature:() const
 isOpen	source/videoFile/IoUringVideoReader.cpp	/^bool IoUringVideoReader::isOpen() const {$/;"	f	language:C++	class:IoUringVideoReader	typeref:typename:bool	signature:() const
 isOpen	source/videoFile/MmapVideoReader.cpp	/^bool MmapVideoReader::isOpen() const {$/;"	f	language:C++	class:MmapVideoReader	typeref:typename:bool	signature:() const
 isOpen	source/videoFile/RtspVideoReader.cpp	/^bool RtspVideoReader::isOpen() const {$/;"	f	language:C++	class:RtspVideoReader	typeref:typename:bool	signature:() const
@@ -502,26 +676,40 @@ isRunning	include/producer/VideoProducer.hpp	/^    bool isRunning() const { retu
 isRunning	source/monitor/Timer.cpp	/^bool Timer::isRunning() const {$/;"	f	language:C++	class:Timer	typeref:typename:bool	signature:() const
 isValid	include/buffer/Buffer.hpp	/^    bool isValid() const { $/;"	f	language:C++	class:Buffer	typeref:typename:bool	signature:() const
 isValid	include/buffer/BufferHandle.hpp	/^    bool isValid() const { return virt_addr_ != nullptr; }$/;"	f	language:C++	class:BufferHandle	typeref:typename:bool	signature:() const
+is_flushing_	include/decoder/FFmpegDecoder.hpp	/^    bool is_flushing_;               \/\/ 是否正在flush$/;"	m	language:C++	class:FFmpegDecoder	typeref:typename:bool
+is_initialized_	include/decoder/FFmpegDecoder.hpp	/^    bool is_initialized_;            \/\/ 是否已初始化$/;"	m	language:C++	class:FFmpegDecoder	typeref:typename:bool
 is_initialized_	include/display/LinuxFramebufferDevice.hpp	/^    bool is_initialized_;$/;"	m	language:C++	class:LinuxFramebufferDevice	typeref:typename:bool
+is_open_	include/decoder/Decoder.hpp	/^    bool is_open_;                           \/\/ 是否已打开$/;"	m	language:C++	class:Decoder	typeref:typename:bool
+is_open_	include/videoFile/FfmpegVideoReader.hpp	/^    bool is_open_;$/;"	m	language:C++	class:FfmpegVideoReader	typeref:typename:bool
 is_open_	include/videoFile/IoUringVideoReader.hpp	/^    bool is_open_;$/;"	m	language:C++	class:IoUringVideoReader	typeref:typename:bool
 is_open_	include/videoFile/MmapVideoReader.hpp	/^    bool is_open_;$/;"	m	language:C++	class:MmapVideoReader	typeref:typename:bool
 is_open_	include/videoFile/RtspVideoReader.hpp	/^    bool is_open_;$/;"	m	language:C++	class:RtspVideoReader	typeref:typename:bool
 is_paused_	include/monitor/PerformanceMonitor.hpp	/^    bool is_paused_;$/;"	m	language:C++	class:PerformanceMonitor	typeref:typename:bool
 is_started_	include/monitor/PerformanceMonitor.hpp	/^    bool is_started_;$/;"	m	language:C++	class:PerformanceMonitor	typeref:typename:bool
+key_frame	include/decoder/IDecoder.hpp	/^    inline bool key_frame() const { $/;"	f	language:C++	struct:DecodedFrame	typeref:typename:bool	signature:() const
 last_error_	include/buffer/BufferManager.hpp	/^    std::string last_error_;                         \/\/ 最后一次错误消息$/;"	m	language:C++	class:BufferManager	typeref:typename:std::string
+last_error_	include/decoder/Decoder.hpp	/^    std::string last_error_;                 \/\/ 最后一次错误信息$/;"	m	language:C++	class:Decoder	typeref:typename:std::string
+last_error_	include/decoder/FFmpegDecoder.hpp	/^    std::string last_error_;         \/\/ 最后一次错误信息$/;"	m	language:C++	class:FFmpegDecoder	typeref:typename:std::string
 last_error_	include/producer/VideoProducer.hpp	/^    std::string last_error_;$/;"	m	language:C++	class:VideoProducer	typeref:typename:std::string
+last_error_	include/videoFile/FfmpegVideoReader.hpp	/^    std::string last_error_;$/;"	m	language:C++	class:FfmpegVideoReader	typeref:typename:std::string
 last_error_	include/videoFile/RtspVideoReader.hpp	/^    std::string last_error_;$/;"	m	language:C++	class:RtspVideoReader	typeref:typename:std::string
+last_ffmpeg_error_	include/decoder/FFmpegDecoder.hpp	/^    int last_ffmpeg_error_;          \/\/ 最后一次FFmpeg错误码$/;"	m	language:C++	class:FFmpegDecoder	typeref:typename:int
+last_ffmpeg_error_	include/videoFile/FfmpegVideoReader.hpp	/^    int last_ffmpeg_error_;$/;"	m	language:C++	class:FfmpegVideoReader	typeref:typename:int
 last_report_time_	include/monitor/PerformanceMonitor.hpp	/^    std::chrono::steady_clock::time_point last_report_time_;$/;"	m	language:C++	class:PerformanceMonitor	typeref:typename:std::chrono::steady_clock::time_point
 len	source/buffer/BufferAllocator.cpp	/^    unsigned long len;$/;"	m	language:C++	struct:dma_heap_allocation_data	typeref:typename:unsigned long	file:
+level	include/decoder/IDecoder.hpp	/^    int level;                         \/\/ Level$/;"	m	language:C++	struct:DecoderConfig	typeref:typename:int
 lifetime_trackers_	include/buffer/BufferPool.hpp	/^    std::vector<std::weak_ptr<bool>> lifetime_trackers_;           \/\/ 生命周期检测$/;"	m	language:C++	class:BufferPool	typeref:typename:std::vector<std::weak_ptr<bool>>
+linesize	include/decoder/IDecoder.hpp	/^    inline int linesize(int plane = 0) const {$/;"	f	language:C++	struct:DecodedFrame	typeref:typename:int	signature:(int plane=0) const
 load_start_	include/monitor/PerformanceMonitor.hpp	/^    std::chrono::steady_clock::time_point load_start_;$/;"	m	language:C++	class:PerformanceMonitor	typeref:typename:std::chrono::steady_clock::time_point
 loop	include/producer/VideoProducer.hpp	/^        bool loop;                                     \/\/ 是否循环播放$/;"	m	language:C++	struct:VideoProducer::Config	typeref:typename:bool
+low_delay	include/decoder/IDecoder.hpp	/^    bool low_delay;                    \/\/ 低延迟模式（禁用B帧重排序）$/;"	m	language:C++	struct:DecoderConfig	typeref:typename:bool
 main	test.cpp	/^int main(int argc, char* argv[]) {$/;"	f	language:C++	typeref:typename:int	signature:(int argc,char * argv[])
 manager	include/videoFile/IoUringVideoReader.hpp	/^        BufferManager* manager;   \/\/ BufferManager指针$/;"	m	language:C++	struct:IoUringVideoReader::ReadRequest	typeref:typename:BufferManager *
 mapFile	source/videoFile/MmapVideoReader.cpp	/^bool MmapVideoReader::mapFile() {$/;"	f	language:C++	class:MmapVideoReader	typeref:typename:bool	signature:()
 mapHardwareFramebufferMemory	source/display/LinuxFramebufferDevice.cpp	/^bool LinuxFramebufferDevice::mapHardwareFramebufferMemory() {$/;"	f	language:C++	class:LinuxFramebufferDevice	typeref:typename:bool	signature:()
 mapped_file_	include/videoFile/MmapVideoReader.hpp	/^    void* mapped_file_;               \/\/ mmap映射的文件地址$/;"	m	language:C++	class:MmapVideoReader	typeref:typename:void *
 mapped_size_	include/videoFile/MmapVideoReader.hpp	/^    size_t mapped_size_;              \/\/ 映射的文件大小$/;"	m	language:C++	class:MmapVideoReader	typeref:typename:size_t
+max_b_frames	include/decoder/IDecoder.hpp	/^    int max_b_frames;                  \/\/ 最大B帧数$/;"	m	language:C++	struct:DecoderConfig	typeref:typename:int
 max_capacity_	include/buffer/BufferPool.hpp	/^    size_t max_capacity_;                             \/\/ 最大容量限制（0 表示无限制/;"	m	language:C++	class:BufferPool	typeref:typename:size_t
 memory_blocks_	include/buffer/BufferManager.hpp	/^    std::vector<void*> memory_blocks_;   \/\/ 物理内存块指针（用于释放）$/;"	m	language:C++	class:BufferManager	typeref:typename:std::vector<void * >
 mutex_	include/buffer/BufferManager.hpp	/^    mutable std::mutex mutex_;           \/\/ 互斥锁$/;"	m	language:C++	class:BufferManager	typeref:typename:std::mutex
@@ -529,6 +717,7 @@ mutex_	include/buffer/BufferPool.hpp	/^    mutable std::mutex mutex_;           
 mutex_	include/buffer/BufferPoolRegistry.hpp	/^    mutable std::mutex mutex_;                              \/\/ 保护所有成员变量$/;"	m	language:C++	class:BufferPoolRegistry	typeref:typename:std::mutex
 mutex_	include/monitor/PerformanceMonitor.hpp	/^    mutable std::mutex mutex_;$/;"	m	language:C++	class:PerformanceMonitor	typeref:typename:std::mutex
 mutex_	include/monitor/Timer.hpp	/^    std::mutex mutex_;$/;"	m	language:C++	class:Timer	typeref:typename:std::mutex
+mutex_	include/videoFile/FfmpegVideoReader.hpp	/^    mutable std::mutex mutex_;$/;"	m	language:C++	class:FfmpegVideoReader	typeref:typename:std::mutex
 name	include/buffer/BufferAllocator.hpp	/^    const char* name() const override { return "CMAAllocator"; }$/;"	f	language:C++	class:CMAAllocator	typeref:typename:const char *	signature:() const
 name	include/buffer/BufferAllocator.hpp	/^    const char* name() const override { return "ExternalAllocator"; }$/;"	f	language:C++	class:ExternalAllocator	typeref:typename:const char *	signature:() const
 name	include/buffer/BufferAllocator.hpp	/^    const char* name() const override { return "NormalAllocator"; }$/;"	f	language:C++	class:NormalAllocator	typeref:typename:const char *	signature:() const
@@ -540,29 +729,44 @@ next_frame_index_	include/buffer/BufferManager.hpp	/^    std::atomic<int> next_f
 next_frame_index_	include/producer/VideoProducer.hpp	/^    std::atomic<int> next_frame_index_;  \/\/ 下一个要读取的帧索引（原子递增）$/;"	m	language:C++	class:VideoProducer	typeref:typename:std::atomic<int>
 next_id_	include/buffer/BufferPoolRegistry.hpp	/^    uint64_t next_id_ = 1;                                  \/\/ 下一个可用 ID$/;"	m	language:C++	class:BufferPoolRegistry	typeref:typename:uint64_t
 note: 'std::runtime_error' is defined in header '<stdexcept>';	cpp_compile_error.md	/^# note: 'std::runtime_error' is defined in header '<stdexcept>'; $/;"	c	language:Markdown
+open	source/decoder/Decoder.cpp	/^DecoderStatus Decoder::open() {$/;"	f	language:C++	class:Decoder	typeref:typename:DecoderStatus	signature:()
+open	source/videoFile/FfmpegVideoReader.cpp	/^bool FfmpegVideoReader::open(const char* path) {$/;"	f	language:C++	class:FfmpegVideoReader	typeref:typename:bool	signature:(const char * path)
 open	source/videoFile/IoUringVideoReader.cpp	/^bool IoUringVideoReader::open(const char* path) {$/;"	f	language:C++	class:IoUringVideoReader	typeref:typename:bool	signature:(const char * path)
 open	source/videoFile/MmapVideoReader.cpp	/^bool MmapVideoReader::open(const char* path) {$/;"	f	language:C++	class:MmapVideoReader	typeref:typename:bool	signature:(const char * path)
 open	source/videoFile/RtspVideoReader.cpp	/^bool RtspVideoReader::open(const char* path) {$/;"	f	language:C++	class:RtspVideoReader	typeref:typename:bool	signature:(const char * path)
-open	source/videoFile/VideoFile.cpp	/^bool VideoFile::open(const char* path) {$/;"	f	language:C++	class:VideoFile	typeref:typename:bool	signature:(const char * path)
+open	source/videoFile/VideoFile.cpp	/^bool VideoFile::open(const char* path, int width, int height, int bits_per_pixel) {$/;"	f	language:C++	class:VideoFile	typeref:typename:bool	signature:(const char * path,int width,int height,int bits_per_pixel)
+openRaw	source/videoFile/FfmpegVideoReader.cpp	/^bool FfmpegVideoReader::openRaw(const char* path, int width, int height, int bits_per_pixel) {$/;"	f	language:C++	class:FfmpegVideoReader	typeref:typename:bool	signature:(const char * path,int width,int height,int bits_per_pixel)
 openRaw	source/videoFile/IoUringVideoReader.cpp	/^bool IoUringVideoReader::openRaw(const char* path, int width, int height, int bits_per_pixel) {$/;"	f	language:C++	class:IoUringVideoReader	typeref:typename:bool	signature:(const char * path,int width,int height,int bits_per_pixel)
 openRaw	source/videoFile/MmapVideoReader.cpp	/^bool MmapVideoReader::openRaw(const char* path, int width, int height, int bits_per_pixel) {$/;"	f	language:C++	class:MmapVideoReader	typeref:typename:bool	signature:(const char * path,int width,int height,int bits_per_pixel)
 openRaw	source/videoFile/RtspVideoReader.cpp	/^bool RtspVideoReader::openRaw(const char* path, int width, int height, int bits_per_pixel) {$/;"	f	language:C++	class:RtspVideoReader	typeref:typename:bool	signature:(const char * path,int width,int height,int bits_per_pixel)
 openRaw	source/videoFile/VideoFile.cpp	/^bool VideoFile::openRaw(const char* path, int width, int height, int bits_per_pixel) {$/;"	f	language:C++	class:VideoFile	typeref:typename:bool	signature:(const char * path,int width,int height,int bits_per_pixel)
+openVideo	source/videoFile/FfmpegVideoReader.cpp	/^bool FfmpegVideoReader::openVideo() {$/;"	f	language:C++	class:FfmpegVideoReader	typeref:typename:bool	signature:()
+operator =	include/decoder/IDecoder.hpp	/^    DecodedFrame& operator=(DecodedFrame&& other) noexcept {$/;"	f	language:C++	struct:DecodedFrame	typeref:typename:DecodedFrame &	signature:(DecodedFrame && other)
 operator =	source/buffer/Buffer.cpp	/^Buffer& Buffer::operator=(Buffer&& other) noexcept {$/;"	f	language:C++	class:Buffer	typeref:typename:Buffer &	signature:(Buffer && other)
 operator =	source/buffer/BufferHandle.cpp	/^BufferHandle& BufferHandle::operator=(BufferHandle&& other) noexcept {$/;"	f	language:C++	class:BufferHandle	typeref:typename:BufferHandle &	signature:(BufferHandle && other)
+operator =	source/decoder/Decoder.cpp	/^Decoder& Decoder::operator=(Decoder&& other) noexcept {$/;"	f	language:C++	class:Decoder	typeref:typename:Decoder &	signature:(Decoder && other)
+output_bpp_	include/videoFile/FfmpegVideoReader.hpp	/^    int output_bpp_;                   \/\/ 输出位深（如 32 for ARGB888）$/;"	m	language:C++	class:FfmpegVideoReader	typeref:typename:int
+output_height_	include/videoFile/FfmpegVideoReader.hpp	/^    int output_height_;                \/\/ 输出高度（可能缩放）$/;"	m	language:C++	class:FfmpegVideoReader	typeref:typename:int
+output_pixel_format_	include/videoFile/FfmpegVideoReader.hpp	/^    int output_pixel_format_;          \/\/ 输出像素格式（如 AV_PIX_FMT_BGRA）$/;"	m	language:C++	class:FfmpegVideoReader	typeref:typename:int
 output_pixel_format_	include/videoFile/RtspVideoReader.hpp	/^    int output_pixel_format_;          \/\/ 输出像素格式（如AV_PIX_FMT_BGRA）$/;"	m	language:C++	class:RtspVideoReader	typeref:typename:int
+output_width_	include/videoFile/FfmpegVideoReader.hpp	/^    int output_width_;                 \/\/ 输出宽度（可能缩放）$/;"	m	language:C++	class:FfmpegVideoReader	typeref:typename:int
 ovl_idx	source/display/LinuxFramebufferDevice.cpp	/^    uint32_t ovl_idx;      \/\/ overlay 索引$/;"	m	language:C++	struct:tpsfb_dma_info	typeref:typename:uint32_t	file:
 ownership	include/buffer/Buffer.hpp	/^    Ownership ownership() const { return ownership_; }$/;"	f	language:C++	class:Buffer	typeref:typename:Ownership	signature:() const
 ownershipToString	source/buffer/Buffer.cpp	/^const char* Buffer::ownershipToString(Ownership ownership) {$/;"	f	language:C++	class:Buffer	typeref:typename:const char *	signature:(Ownership ownership)
 ownership_	include/buffer/Buffer.hpp	/^    Ownership ownership_;            \/\/ 所有权类型$/;"	m	language:C++	class:Buffer	typeref:typename:Ownership
+owns_av_frame	include/decoder/IDecoder.hpp	/^    bool owns_av_frame;                \/\/ 是否拥有av_frame（决定析构时是否释放）$/;"	m	language:C++	struct:DecodedFrame	typeref:typename:bool
 parseH264Header	source/videoFile/MmapVideoReader.cpp	/^bool MmapVideoReader::parseH264Header() {$/;"	f	language:C++	class:MmapVideoReader	typeref:typename:bool	signature:()
 parseMP4Header	source/videoFile/MmapVideoReader.cpp	/^bool MmapVideoReader::parseMP4Header() {$/;"	f	language:C++	class:MmapVideoReader	typeref:typename:bool	signature:()
+parse_test_mode	test.cpp	/^static TestMode parse_test_mode(const char* mode_str) {$/;"	f	language:C++	typeref:typename:TestMode	file:	signature:(const char * mode_str)
 path_	include/videoFile/MmapVideoReader.hpp	/^    char path_[MAX_PATH_LENGTH];     \/\/ 文件路径$/;"	m	language:C++	class:MmapVideoReader	typeref:typename:char[]
 pause	source/monitor/PerformanceMonitor.cpp	/^void PerformanceMonitor::pause() {$/;"	f	language:C++	class:PerformanceMonitor	typeref:typename:void	signature:()
 phys_addr	include/buffer/BufferPool.hpp	/^        uint64_t phys_addr;     \/\/ 物理地址（0表示未知，需自动获取）$/;"	m	language:C++	struct:BufferPool::ExternalBufferInfo	typeref:typename:uint64_t
 phys_addr	source/display/LinuxFramebufferDevice.cpp	/^    uint64_t phys_addr;    \/\/ 物理地址$/;"	m	language:C++	struct:tpsfb_dma_info	typeref:typename:uint64_t	file:
 phys_addr_	include/buffer/Buffer.hpp	/^    uint64_t phys_addr_;             \/\/ 物理地址（硬件\/DMA）$/;"	m	language:C++	class:Buffer	typeref:typename:uint64_t
 phys_addr_	include/buffer/BufferHandle.hpp	/^    uint64_t phys_addr_;        \/\/ 物理地址$/;"	m	language:C++	class:BufferHandle	typeref:typename:uint64_t
+physicalAddress	include/decoder/IDecoder.hpp	/^    inline uint64_t physicalAddress() const {$/;"	f	language:C++	struct:DecodedFrame	typeref:typename:uint64_t	signature:() const
+pix_fmt	include/decoder/IDecoder.hpp	/^    AVPixelFormat pix_fmt;             \/\/ 像素格式（直接使用FFmpeg标准！）$/;"	m	language:C++	struct:DecoderConfig	typeref:typename:AVPixelFormat
+pix_fmt	include/decoder/IDecoder.hpp	/^    inline AVPixelFormat pix_fmt() const { $/;"	f	language:C++	struct:DecodedFrame	typeref:typename:AVPixelFormat	signature:() const
 pool	include/buffer/BufferPoolRegistry.hpp	/^        BufferPool* pool;                                    \/\/ Pool 指针$/;"	m	language:C++	struct:BufferPoolRegistry::PoolInfo	typeref:typename:BufferPool *
 pools_	include/buffer/BufferPoolRegistry.hpp	/^    std::unordered_map<uint64_t, PoolInfo> pools_;          \/\/ ID -> PoolInfo$/;"	m	language:C++	class:BufferPoolRegistry	typeref:typename:std::unordered_map<uint64_t,PoolInfo>
 preferred_type_	include/videoFile/VideoFile.hpp	/^    VideoReaderFactory::ReaderType preferred_type_;  \/\/ 用户偏好的类型$/;"	m	language:C++	class:VideoFile	typeref:typename:VideoReaderFactory::ReaderType
@@ -573,7 +777,9 @@ printRealTimeStats	source/monitor/PerformanceMonitor.cpp	/^void PerformanceMonit
 printStatistics	source/monitor/PerformanceMonitor.cpp	/^void PerformanceMonitor::printStatistics() const {$/;"	f	language:C++	class:PerformanceMonitor	typeref:typename:void	signature:() const
 printStats	source/buffer/BufferPool.cpp	/^void BufferPool::printStats() const {$/;"	f	language:C++	class:BufferPool	typeref:typename:void	signature:() const
 printStats	source/producer/VideoProducer.cpp	/^void VideoProducer::printStats() const {$/;"	f	language:C++	class:VideoProducer	typeref:typename:void	signature:() const
+printStats	source/videoFile/FfmpegVideoReader.cpp	/^void FfmpegVideoReader::printStats() const {$/;"	f	language:C++	class:FfmpegVideoReader	typeref:typename:void	signature:() const
 printStats	source/videoFile/RtspVideoReader.cpp	/^void RtspVideoReader::printStats() const {$/;"	f	language:C++	class:RtspVideoReader	typeref:typename:void	signature:() const
+printVideoInfo	source/videoFile/FfmpegVideoReader.cpp	/^void FfmpegVideoReader::printVideoInfo() const {$/;"	f	language:C++	class:FfmpegVideoReader	typeref:typename:void	signature:() const
 print_usage	test.cpp	/^static void print_usage(const char* prog_name) {$/;"	f	language:C++	typeref:typename:void	file:	signature:(const char * prog_name)
 produced_frames_	include/producer/VideoProducer.hpp	/^    std::atomic<int> produced_frames_;$/;"	m	language:C++	class:VideoProducer	typeref:typename:std::atomic<int>
 producerThreadFunc	source/producer/VideoProducer.cpp	/^void VideoProducer::producerThreadFunc(int thread_id) {$/;"	f	language:C++	class:VideoProducer	typeref:typename:void	signature:(int thread_id)
@@ -581,9 +787,13 @@ producer_running_	include/buffer/BufferManager.hpp	/^    std::atomic<bool> produ
 producer_state_	include/buffer/BufferManager.hpp	/^    std::atomic<ProducerState> producer_state_;      \/\/ 线程状态（所有线程共享）$/;"	m	language:C++	class:BufferManager	typeref:typename:std::atomic<ProducerState>
 producer_thread_count_	include/buffer/BufferManager.hpp	/^    int producer_thread_count_;                      \/\/ 当前运行的生产者线程数量$/;"	m	language:C++	class:BufferManager	typeref:typename:int
 producer_threads_	include/buffer/BufferManager.hpp	/^    std::vector<std::thread> producer_threads_;      \/\/ 生产者线程数组（支持1个或多/;"	m	language:C++	class:BufferManager	typeref:typename:std::vector<std::thread>
+profile	include/decoder/IDecoder.hpp	/^    int profile;                       \/\/ Profile (如 FF_PROFILE_H264_HIGH)$/;"	m	language:C++	struct:DecoderConfig	typeref:typename:int
+pts	include/decoder/IDecoder.hpp	/^    inline int64_t pts() const { $/;"	f	language:C++	struct:DecodedFrame	typeref:typename:int64_t	signature:() const
 queryHardwareDisplayParameters	source/display/LinuxFramebufferDevice.cpp	/^bool LinuxFramebufferDevice::queryHardwareDisplayParameters() {$/;"	f	language:C++	class:LinuxFramebufferDevice	typeref:typename:bool	signature:()
 queue_depth_	include/videoFile/IoUringVideoReader.hpp	/^    int queue_depth_;$/;"	m	language:C++	class:IoUringVideoReader	typeref:typename:int
 readFileHeader	source/videoFile/MmapVideoReader.cpp	/^ssize_t MmapVideoReader::readFileHeader(unsigned char* header, size_t size) {$/;"	f	language:C++	class:MmapVideoReader	typeref:typename:ssize_t	signature:(unsigned char * header,size_t size)
+readFrameAt	source/videoFile/FfmpegVideoReader.cpp	/^bool FfmpegVideoReader::readFrameAt(int frame_index, Buffer& dest_buffer) {$/;"	f	language:C++	class:FfmpegVideoReader	typeref:typename:bool	signature:(int frame_index,Buffer & dest_buffer)
+readFrameAt	source/videoFile/FfmpegVideoReader.cpp	/^bool FfmpegVideoReader::readFrameAt(int frame_index, void* dest_buffer, size_t buffer_size) {$/;"	f	language:C++	class:FfmpegVideoReader	typeref:typename:bool	signature:(int frame_index,void * dest_buffer,size_t buffer_size)
 readFrameAt	source/videoFile/IoUringVideoReader.cpp	/^bool IoUringVideoReader::readFrameAt(int frame_index, Buffer& dest_buffer) {$/;"	f	language:C++	class:IoUringVideoReader	typeref:typename:bool	signature:(int frame_index,Buffer & dest_buffer)
 readFrameAt	source/videoFile/IoUringVideoReader.cpp	/^bool IoUringVideoReader::readFrameAt(int frame_index, void* dest_buffer, size_t buffer_size) {$/;"	f	language:C++	class:IoUringVideoReader	typeref:typename:bool	signature:(int frame_index,void * dest_buffer,size_t buffer_size)
 readFrameAt	source/videoFile/MmapVideoReader.cpp	/^bool MmapVideoReader::readFrameAt(int frame_index, Buffer& dest_buffer) {$/;"	f	language:C++	class:MmapVideoReader	typeref:typename:bool	signature:(int frame_index,Buffer & dest_buffer)
@@ -592,10 +802,13 @@ readFrameAt	source/videoFile/RtspVideoReader.cpp	/^bool RtspVideoReader::readFra
 readFrameAt	source/videoFile/RtspVideoReader.cpp	/^bool RtspVideoReader::readFrameAt(int frame_index, void* dest_buffer, size_t buffer_size) {$/;"	f	language:C++	class:RtspVideoReader	typeref:typename:bool	signature:(int frame_index,void * dest_buffer,size_t buffer_size)
 readFrameAt	source/videoFile/VideoFile.cpp	/^bool VideoFile::readFrameAt(int frame_index, Buffer& dest_buffer) {$/;"	f	language:C++	class:VideoFile	typeref:typename:bool	signature:(int frame_index,Buffer & dest_buffer)
 readFrameAt	source/videoFile/VideoFile.cpp	/^bool VideoFile::readFrameAt(int frame_index, void* dest_buffer, size_t buffer_size) {$/;"	f	language:C++	class:VideoFile	typeref:typename:bool	signature:(int frame_index,void * dest_buffer,size_t buffer_size)
+readFrameAtThreadSafe	source/videoFile/FfmpegVideoReader.cpp	/^bool FfmpegVideoReader::readFrameAtThreadSafe(int frame_index, void* dest_buffer, size_t buffer_/;"	f	language:C++	class:FfmpegVideoReader	typeref:typename:bool	signature:(int frame_index,void * dest_buffer,size_t buffer_size) const
 readFrameAtThreadSafe	source/videoFile/IoUringVideoReader.cpp	/^bool IoUringVideoReader::readFrameAtThreadSafe(int frame_index, void* dest_buffer, size_t buffer/;"	f	language:C++	class:IoUringVideoReader	typeref:typename:bool	signature:(int frame_index,void * dest_buffer,size_t buffer_size) const
 readFrameAtThreadSafe	source/videoFile/MmapVideoReader.cpp	/^bool MmapVideoReader::readFrameAtThreadSafe(int frame_index, void* dest_buffer, size_t buffer_si/;"	f	language:C++	class:MmapVideoReader	typeref:typename:bool	signature:(int frame_index,void * dest_buffer,size_t buffer_size) const
 readFrameAtThreadSafe	source/videoFile/RtspVideoReader.cpp	/^bool RtspVideoReader::readFrameAtThreadSafe(int frame_index, void* dest_buffer, size_t buffer_si/;"	f	language:C++	class:RtspVideoReader	typeref:typename:bool	signature:(int frame_index,void * dest_buffer,size_t buffer_size) const
 readFrameAtThreadSafe	source/videoFile/VideoFile.cpp	/^bool VideoFile::readFrameAtThreadSafe(int frame_index, void* dest_buffer, size_t buffer_size) co/;"	f	language:C++	class:VideoFile	typeref:typename:bool	signature:(int frame_index,void * dest_buffer,size_t buffer_size) const
+readFrameTo	source/videoFile/FfmpegVideoReader.cpp	/^bool FfmpegVideoReader::readFrameTo(Buffer& dest_buffer) {$/;"	f	language:C++	class:FfmpegVideoReader	typeref:typename:bool	signature:(Buffer & dest_buffer)
+readFrameTo	source/videoFile/FfmpegVideoReader.cpp	/^bool FfmpegVideoReader::readFrameTo(void* dest_buffer, size_t buffer_size) {$/;"	f	language:C++	class:FfmpegVideoReader	typeref:typename:bool	signature:(void * dest_buffer,size_t buffer_size)
 readFrameTo	source/videoFile/IoUringVideoReader.cpp	/^bool IoUringVideoReader::readFrameTo(Buffer& dest_buffer) {$/;"	f	language:C++	class:IoUringVideoReader	typeref:typename:bool	signature:(Buffer & dest_buffer)
 readFrameTo	source/videoFile/IoUringVideoReader.cpp	/^bool IoUringVideoReader::readFrameTo(void* dest_buffer, size_t buffer_size) {$/;"	f	language:C++	class:IoUringVideoReader	typeref:typename:bool	signature:(void * dest_buffer,size_t buffer_size)
 readFrameTo	source/videoFile/MmapVideoReader.cpp	/^bool MmapVideoReader::readFrameTo(Buffer& dest_buffer) {$/;"	f	language:C++	class:MmapVideoReader	typeref:typename:bool	signature:(Buffer & dest_buffer)
@@ -607,6 +820,8 @@ readFrameTo	source/videoFile/VideoFile.cpp	/^bool VideoFile::readFrameTo(void* d
 read_index_	include/videoFile/RtspVideoReader.hpp	/^    int read_index_;                   \/\/ 读取索引$/;"	m	language:C++	class:RtspVideoReader	typeref:typename:int
 reader_	include/videoFile/VideoFile.hpp	/^    std::unique_ptr<IVideoReader> reader_;  \/\/ 实际的读取器实现$/;"	m	language:C++	class:VideoFile	typeref:typename:std::unique_ptr<IVideoReader>
 reader_type	include/producer/VideoProducer.hpp	/^        VideoReaderFactory::ReaderType reader_type;    \/\/ 读取器类型（默认AUTO）$/;"	m	language:C++	struct:VideoProducer::Config	typeref:typename:VideoReaderFactory::ReaderType
+receiveFrame	source/decoder/Decoder.cpp	/^DecoderStatus Decoder::receiveFrame(DecodedFrame& out_frame) {$/;"	f	language:C++	class:Decoder	typeref:typename:DecoderStatus	signature:(DecodedFrame & out_frame)
+receiveFrame	source/decoder/FFmpegDecoder.cpp	/^DecoderStatus FFmpegDecoder::receiveFrame(DecodedFrame& out_frame) {$/;"	f	language:C++	class:FFmpegDecoder	typeref:typename:DecoderStatus	signature:(DecodedFrame & out_frame)
 recordFrameDecoded	source/monitor/PerformanceMonitor.cpp	/^void PerformanceMonitor::recordFrameDecoded() {$/;"	f	language:C++	class:PerformanceMonitor	typeref:typename:void	signature:()
 recordFrameDisplayed	source/monitor/PerformanceMonitor.cpp	/^void PerformanceMonitor::recordFrameDisplayed() {$/;"	f	language:C++	class:PerformanceMonitor	typeref:typename:void	signature:()
 recordFrameLoaded	source/monitor/PerformanceMonitor.cpp	/^void PerformanceMonitor::recordFrameLoaded() {$/;"	f	language:C++	class:PerformanceMonitor	typeref:typename:void	signature:()
@@ -614,9 +829,18 @@ refCount	include/buffer/Buffer.hpp	/^    int refCount() const { return ref_count
 ref_count_	include/buffer/Buffer.hpp	/^    std::atomic<int> ref_count_;     \/\/ 引用计数（外部buffer检测）$/;"	m	language:C++	class:Buffer	typeref:typename:std::atomic<int>
 registerPool	source/buffer/BufferPoolRegistry.cpp	/^uint64_t BufferPoolRegistry::registerPool(BufferPool* pool, $/;"	f	language:C++	class:BufferPoolRegistry	typeref:typename:uint64_t	signature:(BufferPool * pool,const std::string & name,const std::string & category)
 registry_id_	include/buffer/BufferPool.hpp	/^    uint64_t registry_id_;                \/\/ 在 BufferPoolRegistry 中的唯一 ID$/;"	m	language:C++	class:BufferPool	typeref:typename:uint64_t
+release	include/decoder/IDecoder.hpp	/^    void release() {$/;"	f	language:C++	struct:DecodedFrame	typeref:typename:void	signature:()
+releaseBufferCallback	source/decoder/FFmpegDecoder.cpp	/^void FFmpegDecoder::releaseBufferCallback(void* opaque, uint8_t* data) {$/;"	f	language:C++	class:FFmpegDecoder	typeref:typename:void	signature:(void * opaque,uint8_t * data)
 releaseFilled	source/buffer/BufferPool.cpp	/^void BufferPool::releaseFilled(Buffer* buffer) {$/;"	f	language:C++	class:BufferPool	typeref:typename:void	signature:(Buffer * buffer)
 releaseRef	include/buffer/Buffer.hpp	/^    void releaseRef() { $/;"	f	language:C++	class:Buffer	typeref:typename:void	signature:()
 report_interval_ms_	include/monitor/PerformanceMonitor.hpp	/^    int report_interval_ms_;          \/\/ 报告间隔（毫秒）$/;"	m	language:C++	class:PerformanceMonitor	typeref:typename:int
+requiresExternalBuffer	include/videoFile/FfmpegVideoReader.hpp	/^    bool requiresExternalBuffer() const override {$/;"	f	language:C++	class:FfmpegVideoReader	typeref:typename:bool	signature:() const
+requiresExternalBuffer	include/videoFile/IoUringVideoReader.hpp	/^    bool requiresExternalBuffer() const override {$/;"	f	language:C++	class:IoUringVideoReader	typeref:typename:bool	signature:() const
+requiresExternalBuffer	include/videoFile/MmapVideoReader.hpp	/^    bool requiresExternalBuffer() const override {$/;"	f	language:C++	class:MmapVideoReader	typeref:typename:bool	signature:() const
+requiresExternalBuffer	include/videoFile/RtspVideoReader.hpp	/^    bool requiresExternalBuffer() const override {$/;"	f	language:C++	class:RtspVideoReader	typeref:typename:bool	signature:() const
+requiresExternalBuffer	source/videoFile/VideoFile.cpp	/^bool VideoFile::requiresExternalBuffer() const {$/;"	f	language:C++	class:VideoFile	typeref:typename:bool	signature:() const
+reset	source/decoder/Decoder.cpp	/^DecoderStatus Decoder::reset() {$/;"	f	language:C++	class:Decoder	typeref:typename:DecoderStatus	signature:()
+reset	source/decoder/FFmpegDecoder.cpp	/^DecoderStatus FFmpegDecoder::reset() {$/;"	f	language:C++	class:FFmpegDecoder	typeref:typename:DecoderStatus	signature:()
 reset	source/monitor/PerformanceMonitor.cpp	/^void PerformanceMonitor::reset() {$/;"	f	language:C++	class:PerformanceMonitor	typeref:typename:void	signature:()
 resetStats	source/videoFile/IoUringVideoReader.cpp	/^void IoUringVideoReader::resetStats() {$/;"	f	language:C++	class:IoUringVideoReader	typeref:typename:void	signature:()
 resume	source/monitor/PerformanceMonitor.cpp	/^void PerformanceMonitor::resume() {$/;"	f	language:C++	class:PerformanceMonitor	typeref:typename:void	signature:()
@@ -625,29 +849,52 @@ rtsp_url_	include/videoFile/RtspVideoReader.hpp	/^    char rtsp_url_[MAX_RTSP_PA
 running_	include/monitor/Timer.hpp	/^    std::atomic<bool> running_;$/;"	m	language:C++	class:Timer	typeref:typename:std::atomic<bool>
 running_	include/producer/VideoProducer.hpp	/^    std::atomic<bool> running_;$/;"	m	language:C++	class:VideoProducer	typeref:typename:std::atomic<bool>
 running_	include/videoFile/RtspVideoReader.hpp	/^    std::atomic<bool> running_;$/;"	m	language:C++	class:RtspVideoReader	typeref:typename:std::atomic<bool>
+sample_aspect_ratio	include/decoder/IDecoder.hpp	/^    AVRational sample_aspect_ratio;    \/\/ 样本宽高比$/;"	m	language:C++	struct:DecoderConfig	typeref:typename:AVRational
+seek	source/videoFile/FfmpegVideoReader.cpp	/^bool FfmpegVideoReader::seek(int frame_index) {$/;"	f	language:C++	class:FfmpegVideoReader	typeref:typename:bool	signature:(int frame_index)
 seek	source/videoFile/IoUringVideoReader.cpp	/^bool IoUringVideoReader::seek(int frame_index) {$/;"	f	language:C++	class:IoUringVideoReader	typeref:typename:bool	signature:(int frame_index)
 seek	source/videoFile/MmapVideoReader.cpp	/^bool MmapVideoReader::seek(int frame_index) {$/;"	f	language:C++	class:MmapVideoReader	typeref:typename:bool	signature:(int frame_index)
 seek	source/videoFile/RtspVideoReader.cpp	/^bool RtspVideoReader::seek(int frame_index) {$/;"	f	language:C++	class:RtspVideoReader	typeref:typename:bool	signature:(int frame_index)
 seek	source/videoFile/VideoFile.cpp	/^bool VideoFile::seek(int frame_index) {$/;"	f	language:C++	class:VideoFile	typeref:typename:bool	signature:(int frame_index)
+seekToBegin	source/videoFile/FfmpegVideoReader.cpp	/^bool FfmpegVideoReader::seekToBegin() {$/;"	f	language:C++	class:FfmpegVideoReader	typeref:typename:bool	signature:()
 seekToBegin	source/videoFile/IoUringVideoReader.cpp	/^bool IoUringVideoReader::seekToBegin() {$/;"	f	language:C++	class:IoUringVideoReader	typeref:typename:bool	signature:()
 seekToBegin	source/videoFile/MmapVideoReader.cpp	/^bool MmapVideoReader::seekToBegin() {$/;"	f	language:C++	class:MmapVideoReader	typeref:typename:bool	signature:()
 seekToBegin	source/videoFile/RtspVideoReader.cpp	/^bool RtspVideoReader::seekToBegin() {$/;"	f	language:C++	class:RtspVideoReader	typeref:typename:bool	signature:()
 seekToBegin	source/videoFile/VideoFile.cpp	/^bool VideoFile::seekToBegin() {$/;"	f	language:C++	class:VideoFile	typeref:typename:bool	signature:()
+seekToEnd	source/videoFile/FfmpegVideoReader.cpp	/^bool FfmpegVideoReader::seekToEnd() {$/;"	f	language:C++	class:FfmpegVideoReader	typeref:typename:bool	signature:()
 seekToEnd	source/videoFile/IoUringVideoReader.cpp	/^bool IoUringVideoReader::seekToEnd() {$/;"	f	language:C++	class:IoUringVideoReader	typeref:typename:bool	signature:()
 seekToEnd	source/videoFile/MmapVideoReader.cpp	/^bool MmapVideoReader::seekToEnd() {$/;"	f	language:C++	class:MmapVideoReader	typeref:typename:bool	signature:()
 seekToEnd	source/videoFile/RtspVideoReader.cpp	/^bool RtspVideoReader::seekToEnd() {$/;"	f	language:C++	class:RtspVideoReader	typeref:typename:bool	signature:()
 seekToEnd	source/videoFile/VideoFile.cpp	/^bool VideoFile::seekToEnd() {$/;"	f	language:C++	class:VideoFile	typeref:typename:bool	signature:()
+send/receive 分离模式（推荐）	include/decoder/README.md	/^### send\/receive 分离模式（推荐）$/;"	S	language:Markdown
+sendPacket	source/decoder/Decoder.cpp	/^DecoderStatus Decoder::sendPacket(AVPacket* packet) {$/;"	f	language:C++	class:Decoder	typeref:typename:DecoderStatus	signature:(AVPacket * packet)
+sendPacket	source/decoder/FFmpegDecoder.cpp	/^DecoderStatus FFmpegDecoder::sendPacket(AVPacket* packet) {$/;"	f	language:C++	class:FFmpegDecoder	typeref:typename:DecoderStatus	signature:(AVPacket * packet)
+setBufferMode	source/decoder/Decoder.cpp	/^bool Decoder::setBufferMode(BufferAllocationMode mode) {$/;"	f	language:C++	class:Decoder	typeref:typename:bool	signature:(BufferAllocationMode mode)
 setBufferPool	include/videoFile/IVideoReader.hpp	/^    virtual void setBufferPool(void* pool) {$/;"	f	language:C++	class:IVideoReader	typeref:typename:void	signature:(void * pool)
+setBufferPool	source/videoFile/FfmpegVideoReader.cpp	/^void FfmpegVideoReader::setBufferPool(void* pool) {$/;"	f	language:C++	class:FfmpegVideoReader	typeref:typename:void	signature:(void * pool)
 setBufferPool	source/videoFile/RtspVideoReader.cpp	/^void RtspVideoReader::setBufferPool(void* pool) {$/;"	f	language:C++	class:RtspVideoReader	typeref:typename:void	signature:(void * pool)
 setBufferPool	source/videoFile/VideoFile.cpp	/^void VideoFile::setBufferPool(void* pool) {$/;"	f	language:C++	class:VideoFile	typeref:typename:void	signature:(void * pool)
 setBufferSize	source/buffer/BufferPool.cpp	/^bool BufferPool::setBufferSize(size_t size) {$/;"	f	language:C++	class:BufferPool	typeref:typename:bool	signature:(size_t size)
+setCodec	source/decoder/Decoder.cpp	/^bool Decoder::setCodec(AVCodecID codec_id) {$/;"	f	language:C++	class:Decoder	typeref:typename:bool	signature:(AVCodecID codec_id)
+setCodec	source/decoder/Decoder.cpp	/^bool Decoder::setCodec(const char* codec_name) {$/;"	f	language:C++	class:Decoder	typeref:typename:bool	signature:(const char * codec_name)
+setDecoderName	source/videoFile/FfmpegVideoReader.cpp	/^void FfmpegVideoReader::setDecoderName(const char* decoder_name) {$/;"	f	language:C++	class:FfmpegVideoReader	typeref:typename:void	signature:(const char * decoder_name)
+setDecoderType	source/decoder/Decoder.cpp	/^bool Decoder::setDecoderType(DecoderFactory::DecoderType type) {$/;"	f	language:C++	class:Decoder	typeref:typename:bool	signature:(DecoderFactory::DecoderType type)
 setDmaBufFd	include/buffer/Buffer.hpp	/^    void setDmaBufFd(int fd) { dma_fd_ = fd; }$/;"	f	language:C++	class:Buffer	typeref:typename:void	signature:(int fd)
+setError	source/decoder/Decoder.cpp	/^void Decoder::setError(const char* error_msg) {$/;"	f	language:C++	class:Decoder	typeref:typename:void	signature:(const char * error_msg)
+setError	source/decoder/FFmpegDecoder.cpp	/^void FFmpegDecoder::setError(const char* error_msg, int ffmpeg_error) {$/;"	f	language:C++	class:FFmpegDecoder	typeref:typename:void	signature:(const char * error_msg,int ffmpeg_error)
 setError	source/producer/VideoProducer.cpp	/^void VideoProducer::setError(const std::string& error_msg) {$/;"	f	language:C++	class:VideoProducer	typeref:typename:void	signature:(const std::string & error_msg)
+setError	source/videoFile/FfmpegVideoReader.cpp	/^void FfmpegVideoReader::setError(const std::string& error, int ffmpeg_error) {$/;"	f	language:C++	class:FfmpegVideoReader	typeref:typename:void	signature:(const std::string & error,int ffmpeg_error)
 setError	source/videoFile/RtspVideoReader.cpp	/^void RtspVideoReader::setError(const std::string& error) {$/;"	f	language:C++	class:RtspVideoReader	typeref:typename:void	signature:(const std::string & error)
 setErrorCallback	include/producer/VideoProducer.hpp	/^    void setErrorCallback(ErrorCallback callback) {$/;"	f	language:C++	class:VideoProducer	typeref:typename:void	signature:(ErrorCallback callback)
+setExtraData	source/decoder/Decoder.cpp	/^bool Decoder::setExtraData(const uint8_t* data, int size) {$/;"	f	language:C++	class:Decoder	typeref:typename:bool	signature:(const uint8_t * data,int size)
+setHardwareDecoder	source/videoFile/FfmpegVideoReader.cpp	/^void FfmpegVideoReader::setHardwareDecoder(bool enable) {$/;"	f	language:C++	class:FfmpegVideoReader	typeref:typename:void	signature:(bool enable)
+setOutputBitsPerPixel	source/videoFile/FfmpegVideoReader.cpp	/^void FfmpegVideoReader::setOutputBitsPerPixel(int bpp) {$/;"	f	language:C++	class:FfmpegVideoReader	typeref:typename:void	signature:(int bpp)
+setOutputFormat	source/decoder/Decoder.cpp	/^bool Decoder::setOutputFormat(int width, int height, AVPixelFormat pix_fmt) {$/;"	f	language:C++	class:Decoder	typeref:typename:bool	signature:(int width,int height,AVPixelFormat pix_fmt)
+setOutputResolution	source/videoFile/FfmpegVideoReader.cpp	/^void FfmpegVideoReader::setOutputResolution(int width, int height) {$/;"	f	language:C++	class:FfmpegVideoReader	typeref:typename:void	signature:(int width,int height)
 setReaderType	source/videoFile/VideoFile.cpp	/^void VideoFile::setReaderType(VideoReaderFactory::ReaderType type) {$/;"	f	language:C++	class:VideoFile	typeref:typename:void	signature:(VideoReaderFactory::ReaderType type)
 setReportInterval	source/monitor/PerformanceMonitor.cpp	/^void PerformanceMonitor::setReportInterval(int interval_ms) {$/;"	f	language:C++	class:PerformanceMonitor	typeref:typename:void	signature:(int interval_ms)
 setState	include/buffer/Buffer.hpp	/^    void setState(State state) { state_.store(state); }$/;"	f	language:C++	class:Buffer	typeref:typename:void	signature:(State state)
+setThreadCount	source/decoder/Decoder.cpp	/^bool Decoder::setThreadCount(int thread_count) {$/;"	f	language:C++	class:Decoder	typeref:typename:bool	signature:(int thread_count)
+setTimeBase	source/decoder/Decoder.cpp	/^bool Decoder::setTimeBase(AVRational time_base) {$/;"	f	language:C++	class:Decoder	typeref:typename:bool	signature:(AVRational time_base)
 setValidationCallback	include/buffer/Buffer.hpp	/^    void setValidationCallback(ValidationCallback cb) {$/;"	f	language:C++	class:Buffer	typeref:typename:void	signature:(ValidationCallback cb)
 shared_video_file_	include/buffer/BufferManager.hpp	/^    std::shared_ptr<VideoFile> shared_video_file_;   \/\/ 共享的VideoFile对象（多线程共/;"	m	language:C++	class:BufferManager	typeref:typename:std::shared_ptr<VideoFile>
 signal_handler	test.cpp	/^static void signal_handler(int signum) {$/;"	f	language:C++	typeref:typename:void	file:	signature:(int signum)
@@ -655,8 +902,10 @@ size	include/buffer/Buffer.hpp	/^    size_t size() const { return size_; }$/;"	f
 size	include/buffer/BufferAllocator.hpp	/^        size_t size;$/;"	m	language:C++	struct:CMAAllocator::DmaBufferInfo	typeref:typename:size_t
 size	include/buffer/BufferHandle.hpp	/^    size_t size() const { return size_; }$/;"	f	language:C++	class:BufferHandle	typeref:typename:size_t	signature:() const
 size	include/buffer/BufferPool.hpp	/^        size_t size;            \/\/ Buffer 大小$/;"	m	language:C++	struct:BufferPool::ExternalBufferInfo	typeref:typename:size_t
+size	include/decoder/IDecoder.hpp	/^    inline size_t size() const {$/;"	f	language:C++	struct:DecodedFrame	typeref:typename:size_t	signature:() const
 size_	include/buffer/Buffer.hpp	/^    size_t size_;                    \/\/ Buffer 大小$/;"	m	language:C++	class:Buffer	typeref:typename:size_t
 size_	include/buffer/BufferHandle.hpp	/^    size_t size_;               \/\/ Buffer 大小$/;"	m	language:C++	class:BufferHandle	typeref:typename:size_t
+skip	source/videoFile/FfmpegVideoReader.cpp	/^bool FfmpegVideoReader::skip(int frame_count) {$/;"	f	language:C++	class:FfmpegVideoReader	typeref:typename:bool	signature:(int frame_count)
 skip	source/videoFile/IoUringVideoReader.cpp	/^bool IoUringVideoReader::skip(int frame_count) {$/;"	f	language:C++	class:IoUringVideoReader	typeref:typename:bool	signature:(int frame_count)
 skip	source/videoFile/MmapVideoReader.cpp	/^bool MmapVideoReader::skip(int frame_count) {$/;"	f	language:C++	class:MmapVideoReader	typeref:typename:bool	signature:(int frame_count)
 skip	source/videoFile/RtspVideoReader.cpp	/^bool RtspVideoReader::skip(int frame_count) {$/;"	f	language:C++	class:RtspVideoReader	typeref:typename:bool	signature:(int frame_count)
@@ -678,16 +927,25 @@ submitFilled	source/buffer/BufferPool.cpp	/^void BufferPool::submitFilled(Buffer
 submitReadBatch	source/videoFile/IoUringVideoReader.cpp	/^int IoUringVideoReader::submitReadBatch(BufferManager* manager, $/;"	f	language:C++	class:IoUringVideoReader	typeref:typename:int	signature:(BufferManager * manager,const std::vector<int> & frame_indices)
 successful_reads	include/videoFile/IoUringVideoReader.hpp	/^        long successful_reads;    \/\/ 成功读取次数$/;"	m	language:C++	struct:IoUringVideoReader::Stats	typeref:typename:long
 successful_reads_	include/videoFile/IoUringVideoReader.hpp	/^    std::atomic<long> successful_reads_{0};$/;"	m	language:C++	class:IoUringVideoReader	typeref:typename:std::atomic<long>
+supportsZeroCopy	include/videoFile/FfmpegVideoReader.hpp	/^    bool supportsZeroCopy() const { return supports_zero_copy_; }$/;"	f	language:C++	class:FfmpegVideoReader	typeref:typename:bool	signature:() const
+supports_zero_copy_	include/videoFile/FfmpegVideoReader.hpp	/^    bool supports_zero_copy_;          \/\/ 解码器是否支持零拷贝$/;"	m	language:C++	class:FfmpegVideoReader	typeref:typename:bool
+sws_ctx_	include/decoder/FFmpegDecoder.hpp	/^    SwsContext* sws_ctx_;            \/\/ 像素格式转换上下文（如果需要）$/;"	m	language:C++	class:FFmpegDecoder	typeref:typename:SwsContext *
+sws_ctx_	include/videoFile/FfmpegVideoReader.hpp	/^    SwsContext* sws_ctx_;              \/\/ 图像格式转换$/;"	m	language:C++	class:FfmpegVideoReader	typeref:typename:SwsContext *
 sws_ctx_	include/videoFile/RtspVideoReader.hpp	/^    SwsContext* sws_ctx_;              \/\/ 图像格式转换$/;"	m	language:C++	class:RtspVideoReader	typeref:typename:SwsContext *
 test_4frame_loop	test.cpp	/^static int test_4frame_loop(const char* raw_video_path) {$/;"	f	language:C++	typeref:typename:int	file:	signature:(const char * raw_video_path)
 test_buffermanager_iouring	test.cpp	/^static int test_buffermanager_iouring(const char* raw_video_path) {$/;"	f	language:C++	typeref:typename:int	file:	signature:(const char * raw_video_path)
 test_buffermanager_producer	test.cpp	/^static int test_buffermanager_producer(const char* raw_video_path) {$/;"	f	language:C++	typeref:typename:int	file:	signature:(const char * raw_video_path)
+test_decoder_basic	test.cpp	/^static int test_decoder_basic() {$/;"	f	language:C++	typeref:typename:int	file:	signature:()
+test_ffmpeg_video	test.cpp	/^static int test_ffmpeg_video(const char* video_path, bool use_zero_copy = false) {$/;"	f	language:C++	typeref:typename:int	file:	signature:(const char * video_path,bool use_zero_copy=false)
 test_rtsp_stream	test.cpp	/^static int test_rtsp_stream(const char* rtsp_url) {$/;"	f	language:C++	typeref:typename:int	file:	signature:(const char * rtsp_url)
 test_sequential_playback	test.cpp	/^static int test_sequential_playback(const char* raw_video_path) {$/;"	f	language:C++	typeref:typename:int	file:	signature:(const char * raw_video_path)
 this is probably fixable by adding '#include <stdexcept>'	cpp_compile_error.md	/^#       this is probably fixable by adding '#include <stdexcept>'$/;"	c	language:Markdown
 thread_	include/monitor/Timer.hpp	/^    std::thread thread_;$/;"	m	language:C++	class:Timer	typeref:typename:std::thread
+thread_count	include/decoder/IDecoder.hpp	/^    int thread_count;                  \/\/ 线程数（0=自动）$/;"	m	language:C++	struct:DecoderConfig	typeref:typename:int
 thread_count	include/producer/VideoProducer.hpp	/^        int thread_count;                              \/\/ 生产者线程数（默认1）$/;"	m	language:C++	struct:VideoProducer::Config	typeref:typename:int
+thread_type	include/decoder/IDecoder.hpp	/^    int thread_type;                   \/\/ 线程类型（FF_THREAD_FRAME\/FF_THREAD_SLICE）$/;"	m	language:C++	struct:DecoderConfig	typeref:typename:int
 threads_	include/producer/VideoProducer.hpp	/^    std::vector<std::thread> threads_;$/;"	m	language:C++	class:VideoProducer	typeref:typename:std::vector<std::thread>
+time_base	include/decoder/IDecoder.hpp	/^    AVRational time_base;              \/\/ 时间基准$/;"	m	language:C++	struct:DecoderConfig	typeref:typename:AVRational
 timerLoop	source/monitor/Timer.cpp	/^void Timer::timerLoop() {$/;"	f	language:C++	class:Timer	typeref:typename:void	signature:()
 timestamp	include/videoFile/RtspVideoReader.hpp	/^        uint64_t timestamp;            \/\/ 时间戳$/;"	m	language:C++	struct:RtspVideoReader::FrameSlot	typeref:typename:uint64_t
 total_buffers	include/buffer/BufferPoolRegistry.hpp	/^        int total_buffers;       \/\/ 总 Buffer 数量$/;"	m	language:C++	struct:BufferPoolRegistry::GlobalStats	typeref:typename:int
@@ -697,6 +955,7 @@ total_decode_time_us_	include/monitor/PerformanceMonitor.hpp	/^    long long tot
 total_display_time_us_	include/monitor/PerformanceMonitor.hpp	/^    long long total_display_time_us_; \/\/ 总显示时间（微秒）$/;"	m	language:C++	class:PerformanceMonitor	typeref:typename:long long
 total_filled	include/buffer/BufferPoolRegistry.hpp	/^        int total_filled;        \/\/ 总已填充 Buffer 数量$/;"	m	language:C++	struct:BufferPoolRegistry::GlobalStats	typeref:typename:int
 total_frames_	include/producer/VideoProducer.hpp	/^    int total_frames_;$/;"	m	language:C++	class:VideoProducer	typeref:typename:int
+total_frames_	include/videoFile/FfmpegVideoReader.hpp	/^    int total_frames_;                 \/\/ 总帧数（估算）$/;"	m	language:C++	class:FfmpegVideoReader	typeref:typename:int
 total_frames_	include/videoFile/IoUringVideoReader.hpp	/^    int total_frames_;$/;"	m	language:C++	class:IoUringVideoReader	typeref:typename:int
 total_frames_	include/videoFile/MmapVideoReader.hpp	/^    int total_frames_;                \/\/ 总帧数$/;"	m	language:C++	class:MmapVideoReader	typeref:typename:int
 total_free	include/buffer/BufferPoolRegistry.hpp	/^        int total_free;          \/\/ 总空闲 Buffer 数量$/;"	m	language:C++	struct:BufferPoolRegistry::GlobalStats	typeref:typename:int
@@ -711,15 +970,18 @@ transient_buffers_	include/buffer/BufferPool.hpp	/^    std::vector<std::unique_p
 transient_handles_	include/buffer/BufferPool.hpp	/^    std::unordered_map<Buffer*, std::unique_ptr<BufferHandle>> transient_handles_;  \/\/ Buffer*/;"	m	language:C++	class:BufferPool	typeref:typename:std::unordered_map<Buffer *,std::unique_ptr<BufferHandle>>
 transient_mutex_	include/buffer/BufferPool.hpp	/^    std::mutex transient_mutex_;          \/\/ 保护临时buffer列表$/;"	m	language:C++	class:BufferPool	typeref:typename:std::mutex
 typeToString	source/videoFile/VideoReaderFactory.cpp	/^const char* VideoReaderFactory::typeToString(ReaderType type) {$/;"	f	language:C++	class:VideoReaderFactory	typeref:typename:const char *	signature:(ReaderType type)
+type_	include/decoder/Decoder.hpp	/^    DecoderFactory::DecoderType type_;       \/\/ 解码器类型$/;"	m	language:C++	class:Decoder	typeref:typename:DecoderFactory::DecoderType
 unique_ptr 的简化实现（伪代码）	cpp_compile_error.md	/^### unique_ptr 的简化实现（伪代码）$/;"	S	language:Markdown
 unmapFile	source/videoFile/MmapVideoReader.cpp	/^void MmapVideoReader::unmapFile() {$/;"	f	language:C++	class:MmapVideoReader	typeref:typename:void	signature:()
 unmapHardwareFramebufferMemory	source/display/LinuxFramebufferDevice.cpp	/^void LinuxFramebufferDevice::unmapHardwareFramebufferMemory() {$/;"	f	language:C++	class:LinuxFramebufferDevice	typeref:typename:void	signature:()
 unregisterPool	source/buffer/BufferPoolRegistry.cpp	/^void BufferPoolRegistry::unregisterPool(uint64_t id) {$/;"	f	language:C++	class:BufferPoolRegistry	typeref:typename:void	signature:(uint64_t id)
 use_cma_	include/buffer/BufferManager.hpp	/^    bool use_cma_;                       \/\/ 是否使用 CMA$/;"	m	language:C++	class:BufferManager	typeref:typename:bool
+use_hardware_decoder_	include/videoFile/FfmpegVideoReader.hpp	/^    bool use_hardware_decoder_;        \/\/ 是否使用硬件解码$/;"	m	language:C++	class:FfmpegVideoReader	typeref:typename:bool
 user_data_	include/monitor/Timer.hpp	/^    void* user_data_;$/;"	m	language:C++	class:Timer	typeref:typename:void *
 validate	source/buffer/Buffer.cpp	/^bool Buffer::validate() const {$/;"	f	language:C++	class:Buffer	typeref:typename:bool	signature:() const
 validateAllBuffers	source/buffer/BufferPool.cpp	/^bool BufferPool::validateAllBuffers() const {$/;"	f	language:C++	class:BufferPool	typeref:typename:bool	signature:() const
 validateBuffer	source/buffer/BufferPool.cpp	/^bool BufferPool::validateBuffer(const Buffer* buffer) const {$/;"	f	language:C++	class:BufferPool	typeref:typename:bool	signature:(const Buffer * buffer) const
+validateConfig	source/decoder/Decoder.cpp	/^bool Decoder::validateConfig() const {$/;"	f	language:C++	class:Decoder	typeref:typename:bool	signature:() const
 validateFile	source/videoFile/MmapVideoReader.cpp	/^bool MmapVideoReader::validateFile() {$/;"	f	language:C++	class:MmapVideoReader	typeref:typename:bool	signature:()
 validation_callback_	include/buffer/Buffer.hpp	/^    ValidationCallback validation_callback_;$/;"	m	language:C++	class:Buffer	typeref:typename:ValidationCallback
 validation_magic_	include/buffer/Buffer.hpp	/^    uint32_t validation_magic_;      \/\/ 魔数，用于检测野指针$/;"	m	language:C++	class:Buffer	typeref:typename:uint32_t
@@ -728,14 +990,18 @@ video_fd_	include/videoFile/IoUringVideoReader.hpp	/^    int video_fd_;$/;"	m	la
 video_file_	include/producer/VideoProducer.hpp	/^    std::shared_ptr<VideoFile> video_file_;$/;"	m	language:C++	class:VideoProducer	typeref:typename:std::shared_ptr<VideoFile>
 video_file_mutex_	include/buffer/BufferManager.hpp	/^    std::mutex video_file_mutex_;                    \/\/ VideoFile 互斥锁（如果共享）$/;"	m	language:C++	class:BufferManager	typeref:typename:std::mutex
 video_path_	include/videoFile/IoUringVideoReader.hpp	/^    std::string video_path_;$/;"	m	language:C++	class:IoUringVideoReader	typeref:typename:std::string
+video_stream_index_	include/videoFile/FfmpegVideoReader.hpp	/^    int video_stream_index_;$/;"	m	language:C++	class:FfmpegVideoReader	typeref:typename:int
 video_stream_index_	include/videoFile/RtspVideoReader.hpp	/^    int video_stream_index_;$/;"	m	language:C++	class:RtspVideoReader	typeref:typename:int
 virt_addr	include/buffer/BufferAllocator.hpp	/^        void* virt_addr;$/;"	m	language:C++	struct:CMAAllocator::DmaBufferInfo	typeref:typename:void *
 virt_addr	include/buffer/BufferPool.hpp	/^        void* virt_addr;        \/\/ 虚拟地址$/;"	m	language:C++	struct:BufferPool::ExternalBufferInfo	typeref:typename:void *
 virt_addr_	include/buffer/Buffer.hpp	/^    void* virt_addr_;                \/\/ 虚拟地址（用户空间）$/;"	m	language:C++	class:Buffer	typeref:typename:void *
 virt_addr_	include/buffer/BufferHandle.hpp	/^    void* virt_addr_;           \/\/ 虚拟地址$/;"	m	language:C++	class:BufferHandle	typeref:typename:void *
 waitVerticalSync	source/display/LinuxFramebufferDevice.cpp	/^bool LinuxFramebufferDevice::waitVerticalSync() {$/;"	f	language:C++	class:LinuxFramebufferDevice	typeref:typename:bool	signature:()
+width	include/decoder/IDecoder.hpp	/^    inline int width() const { $/;"	f	language:C++	struct:DecodedFrame	typeref:typename:int	signature:() const
+width	include/decoder/IDecoder.hpp	/^    int width;                         \/\/ 视频宽度（像素）$/;"	m	language:C++	struct:DecoderConfig	typeref:typename:int
 width	include/producer/VideoProducer.hpp	/^        int width;                                     \/\/ 分辨率宽度$/;"	m	language:C++	struct:VideoProducer::Config	typeref:typename:int
 width_	include/display/LinuxFramebufferDevice.hpp	/^    int width_;                       \/\/ 显示宽度（像素）$/;"	m	language:C++	class:LinuxFramebufferDevice	typeref:typename:int
+width_	include/videoFile/FfmpegVideoReader.hpp	/^    int width_;                        \/\/ 视频原始宽度$/;"	m	language:C++	class:FfmpegVideoReader	typeref:typename:int
 width_	include/videoFile/IoUringVideoReader.hpp	/^    int width_;$/;"	m	language:C++	class:IoUringVideoReader	typeref:typename:int
 width_	include/videoFile/MmapVideoReader.hpp	/^    int width_;                       \/\/ 视频宽度（像素）$/;"	m	language:C++	class:MmapVideoReader	typeref:typename:int
 width_	include/videoFile/RtspVideoReader.hpp	/^    int width_;                        \/\/ 输出宽度$/;"	m	language:C++	class:RtspVideoReader	typeref:typename:int
@@ -743,6 +1009,10 @@ write_index_	include/videoFile/RtspVideoReader.hpp	/^    int write_index_;      
 ~BufferHandle	source/buffer/BufferHandle.cpp	/^BufferHandle::~BufferHandle() {$/;"	f	language:C++	class:BufferHandle	signature:()
 ~BufferPool	source/buffer/BufferPool.cpp	/^BufferPool::~BufferPool() {$/;"	f	language:C++	class:BufferPool	signature:()
 ~CMAAllocator	source/buffer/BufferAllocator.cpp	/^CMAAllocator::~CMAAllocator() {$/;"	f	language:C++	class:CMAAllocator	signature:()
+~DecodedFrame	include/decoder/IDecoder.hpp	/^    ~DecodedFrame() {$/;"	f	language:C++	struct:DecodedFrame	signature:()
+~Decoder	source/decoder/Decoder.cpp	/^Decoder::~Decoder() {$/;"	f	language:C++	class:Decoder	signature:()
+~FFmpegDecoder	source/decoder/FFmpegDecoder.cpp	/^FFmpegDecoder::~FFmpegDecoder() {$/;"	f	language:C++	class:FFmpegDecoder	signature:()
+~FfmpegVideoReader	source/videoFile/FfmpegVideoReader.cpp	/^FfmpegVideoReader::~FfmpegVideoReader() {$/;"	f	language:C++	class:FfmpegVideoReader	signature:()
 ~IoUringVideoReader	source/videoFile/IoUringVideoReader.cpp	/^IoUringVideoReader::~IoUringVideoReader() {$/;"	f	language:C++	class:IoUringVideoReader	signature:()
 ~LinuxFramebufferDevice	source/display/LinuxFramebufferDevice.cpp	/^LinuxFramebufferDevice::~LinuxFramebufferDevice() {$/;"	f	language:C++	class:LinuxFramebufferDevice	signature:()
 ~MmapVideoReader	source/videoFile/MmapVideoReader.cpp	/^MmapVideoReader::~MmapVideoReader() {$/;"	f	language:C++	class:MmapVideoReader	signature:()
@@ -755,14 +1025,24 @@ write_index_	include/videoFile/RtspVideoReader.hpp	/^    int write_index_;      
 ✅ Phase 1: 核心实现 - **已完成**	source/buffer/buffer_design.md	/^### ✅ Phase 1: 核心实现 - **已完成**$/;"	S	language:Markdown
 ✅ Phase 2: 高级特性 - **已完成**	source/buffer/buffer_design.md	/^### ✅ Phase 2: 高级特性 - **已完成**$/;"	S	language:Markdown
 ✅ Phase 3: 生产者分离 - **已完成**	source/buffer/buffer_design.md	/^### ✅ Phase 3: 生产者分离 - **已完成**$/;"	S	language:Markdown
+✅ 应该使用 explicit 的场景	cpp_compile_error.md	/^#### ✅ 应该使用 explicit 的场景$/;"	t	language:Markdown
 ✅ 总结	cpp_compile_error.md	/^## ✅ 总结$/;"	s	language:Markdown
+✅ 推荐做法	cpp_compile_error.md	/^#### ✅ 推荐做法$/;"	t	language:Markdown
 ✅ 新配置	cpp_compile_error.md	/^# ✅ 新配置$/;"	c	language:Markdown
+❌ 不需要 explicit 的场景	cpp_compile_error.md	/^#### ❌ 不需要 explicit 的场景$/;"	t	language:Markdown
 ❌ 旧配置	cpp_compile_error.md	/^# ❌ 旧配置$/;"	c	language:Markdown
 三种访问方式详解	cpp_compile_error.md	/^### 三种访问方式详解$/;"	S	language:Markdown
+与Display集成（完整播放流程）	include/decoder/README.md	/^### 与Display集成（完整播放流程）$/;"	S	language:Markdown
 与原始指针的对比	cpp_compile_error.md	/^### 与原始指针的对比$/;"	S	language:Markdown
+为什么要用 explicit？	cpp_compile_error.md	/^#### 为什么要用 explicit？$/;"	t	language:Markdown
+为什么需要防止隐式转换？	cpp_compile_error.md	/^### 为什么需要防止隐式转换？$/;"	S	language:Markdown
 书籍推荐	cpp_compile_error.md	/^### 书籍推荐$/;"	S	language:Markdown
+什么是 explicit 关键字？	cpp_compile_error.md	/^### 什么是 explicit 关键字？$/;"	S	language:Markdown
 代码示例	include/display/display_buffer_usage_guide.md	/^### 代码示例$/;"	S	language:Markdown
 使用 -ftemplate-backtrace-limit=0 查看完整模板错误	cpp_compile_error.md	/^# 使用 -ftemplate-backtrace-limit=0 查看完整模板错误$/;"	c	language:Markdown
+使用 explicit 后的效果	cpp_compile_error.md	/^#### 使用 explicit 后的效果$/;"	t	language:Markdown
+使用 static_assert 验证	cpp_compile_error.md	/^#### 使用 static_assert 验证$/;"	t	language:Markdown
+使用FFmpeg原生AVFrame	include/decoder/README.md	/^### 使用FFmpeg原生AVFrame$/;"	S	language:Markdown
 使用场景对比	cpp_compile_error.md	/^### 使用场景对比$/;"	S	language:Markdown
 使用要求	include/display/display_buffer_usage_guide.md	/^### 使用要求$/;"	S	language:Markdown
 全局监控接口	source/buffer/buffer_design.md	/^#### 全局监控接口$/;"	t	language:Markdown
@@ -772,28 +1052,54 @@ write_index_	include/videoFile/RtspVideoReader.hpp	/^    int write_index_;      
 功能描述	include/display/display_buffer_usage_guide.md	/^### 功能描述$/;"	S	language:Markdown
 单例模式	source/buffer/buffer_design.md	/^#### 单例模式$/;"	t	language:Markdown
 参考代码位置	cpp_compile_error.md	/^### 参考代码位置$/;"	S	language:Markdown
+参考资料	include/decoder/README.md	/^## 参考资料$/;"	s	language:Markdown
 命名冲突处理	source/buffer/buffer_design.md	/^#### 命名冲突处理$/;"	t	language:Markdown
+场景 1：基本使用	cpp_compile_error.md	/^#### 场景 1：基本使用$/;"	t	language:Markdown
+场景 2：函数参数传递	cpp_compile_error.md	/^#### 场景 2：函数参数传递$/;"	t	language:Markdown
+场景 3：返回值	cpp_compile_error.md	/^#### 场景 3：返回值$/;"	t	language:Markdown
+基本用法（零拷贝）	include/decoder/README.md	/^### 基本用法（零拷贝）$/;"	S	language:Markdown
 实测数据（1920x1080 @ 30fps）	include/display/display_buffer_usage_guide.md	/^### 实测数据（1920x1080 @ 30fps）$/;"	S	language:Markdown
+实际代码对比	cpp_compile_error.md	/^### 实际代码对比$/;"	S	language:Markdown
 实际代码示例	cpp_compile_error.md	/^### 实际代码示例$/;"	S	language:Markdown
+实际案例：Decoder 类	cpp_compile_error.md	/^### 实际案例：Decoder 类$/;"	S	language:Markdown
+对比：传统方式 vs 零拷贝	include/decoder/README.md	/^## 对比：传统方式 vs 零拷贝$/;"	s	language:Markdown
+工作原理	include/decoder/README.md	/^### 工作原理$/;"	S	language:Markdown
 常见困惑	cpp_compile_error.md	/^### 常见困惑$/;"	S	language:Markdown
 常见错误	cpp_compile_error.md	/^### 常见错误$/;"	S	language:Markdown
+常见错误和解决方案	cpp_compile_error.md	/^### 常见错误和解决方案$/;"	S	language:Markdown
 快速参考	include/display/display_buffer_usage_guide.md	/^### 快速参考$/;"	S	language:Markdown
+快速开始	include/decoder/README.md	/^## 快速开始$/;"	s	language:Markdown
+性能优化建议	include/decoder/README.md	/^## 性能优化建议$/;"	s	language:Markdown
+总结	cpp_compile_error.md	/^### 总结$/;"	S	language:Markdown
 或完全清理	cpp_compile_error.md	/^# 或完全清理$/;"	c	language:Markdown
+扩展新解码器	include/decoder/README.md	/^## 扩展新解码器$/;"	s	language:Markdown
+推荐阅读	cpp_compile_error.md	/^### 推荐阅读$/;"	S	language:Markdown
 搜索类型定义	cpp_compile_error.md	/^# 搜索类型定义$/;"	c	language:Markdown
 操作符总结表	cpp_compile_error.md	/^### 操作符总结表$/;"	S	language:Markdown
+支持的像素格式	include/decoder/README.md	/^## 支持的像素格式$/;"	s	language:Markdown
+支持的编解码器	include/decoder/README.md	/^## 支持的编解码器$/;"	s	language:Markdown
 文档版本历史	source/buffer/buffer_design.md	/^## 文档版本历史$/;"	s	language:Markdown
 新 API（推荐）	include/display/display_buffer_usage_guide.md	/^### 新 API（推荐）$/;"	S	language:Markdown
 旧 API（已删除）	include/display/display_buffer_usage_guide.md	/^### 旧 API（已删除）$/;"	S	language:Markdown
 更新实现状态（第10章）	source/buffer/buffer_design.md	/^#### 更新实现状态（第10章）$/;"	t	language:Markdown
 更新文件结构（第11章）	source/buffer/buffer_design.md	/^#### 更新文件结构（第11章）$/;"	t	language:Markdown
 更新构造函数（第3章）	source/buffer/buffer_design.md	/^#### 更新构造函数（第3章）$/;"	t	language:Markdown
+最佳实践	cpp_compile_error.md	/^### 最佳实践$/;"	S	language:Markdown
 构造函数	source/buffer/buffer_design.md	/^#### 构造函数$/;"	t	language:Markdown
+架构设计	include/decoder/README.md	/^## 架构设计$/;"	s	language:Markdown
+查找所有单参数构造函数	cpp_compile_error.md	/^# 查找所有单参数构造函数$/;"	c	language:Markdown
+查找隐式转换问题	cpp_compile_error.md	/^#### 查找隐式转换问题$/;"	t	language:Markdown
 查看编译器提示	cpp_compile_error.md	/^# 查看编译器提示$/;"	c	language:Markdown
 查询接口	source/buffer/buffer_design.md	/^#### 查询接口$/;"	t	language:Markdown
 校验接口	source/buffer/buffer_design.md	/^#### 校验接口$/;"	t	language:Markdown
+核心机制	include/decoder/README.md	/^### 核心机制$/;"	S	language:Markdown
+核心概念：隐式类型转换	cpp_compile_error.md	/^### 核心概念：隐式类型转换$/;"	S	language:Markdown
 核心理解	cpp_compile_error.md	/^### 核心理解$/;"	S	language:Markdown
+核心组件	include/decoder/README.md	/^## 核心组件$/;"	s	language:Markdown
 核心设计理念	include/display/display_buffer_usage_guide.md	/^### 核心设计理念$/;"	S	language:Markdown
+概述	include/decoder/README.md	/^## 概述$/;"	s	language:Markdown
 注册管理接口	source/buffer/buffer_design.md	/^#### 注册管理接口$/;"	t	language:Markdown
+注意事项	include/decoder/README.md	/^## 注意事项$/;"	s	language:Markdown
 消费者接口	source/buffer/buffer_design.md	/^#### 消费者接口$/;"	t	language:Markdown
 现代编译器通常会提示：	cpp_compile_error.md	/^# 现代编译器通常会提示：$/;"	c	language:Markdown
 生产者接口	source/buffer/buffer_design.md	/^#### 生产者接口$/;"	t	language:Markdown
@@ -801,19 +1107,27 @@ write_index_	include/videoFile/RtspVideoReader.hpp	/^    int write_index_;      
 相关 C++ 标准	cpp_compile_error.md	/^### 相关 C++ 标准$/;"	S	language:Markdown
 知识点	cpp_compile_error.md	/^### 知识点$/;"	S	language:Markdown
 知识点 #10: std::unique_ptr 的解引用和访问操作符	cpp_compile_error.md	/^## 知识点 #10: std::unique_ptr 的解引用和访问操作符$/;"	s	language:Markdown
+知识点 #11: explicit 关键字与隐式类型转换	cpp_compile_error.md	/^## 知识点 #11: explicit 关键字与隐式类型转换$/;"	s	language:Markdown
 知识点总结	cpp_compile_error.md	/^### 知识点总结$/;"	S	language:Markdown
 示例1：创建 Pool 时指定名称	source/buffer/buffer_design.md	/^#### 示例1：创建 Pool 时指定名称$/;"	t	language:Markdown
 示例2：全局监控所有 Pool	source/buffer/buffer_design.md	/^#### 示例2：全局监控所有 Pool$/;"	t	language:Markdown
 示例3：按名称查找 Pool	source/buffer/buffer_design.md	/^#### 示例3：按名称查找 Pool$/;"	t	language:Markdown
 示例4：按分类查询 Pool	source/buffer/buffer_design.md	/^#### 示例4：按分类查询 Pool$/;"	t	language:Markdown
 示例5：获取全局统计	source/buffer/buffer_design.md	/^#### 示例5：获取全局统计$/;"	t	language:Markdown
+示例代码	include/decoder/README.md	/^## 示例代码$/;"	s	language:Markdown
+简单示例：没有 explicit 的问题	cpp_compile_error.md	/^#### 简单示例：没有 explicit 的问题$/;"	t	language:Markdown
 类关系图	source/buffer/buffer_design.md	/^#### 类关系图$/;"	t	language:Markdown
 线程安全	source/buffer/buffer_design.md	/^#### 线程安全$/;"	t	language:Markdown
 编译器文档	cpp_compile_error.md	/^### 编译器文档$/;"	S	language:Markdown
+编译器的转换步骤	cpp_compile_error.md	/^#### 编译器的转换步骤$/;"	t	language:Markdown
 自动注册流程	source/buffer/buffer_design.md	/^#### 自动注册流程$/;"	t	language:Markdown
 解决方案	cpp_compile_error.md	/^### 解决方案$/;"	S	language:Markdown
 解决方案：BufferPoolRegistry（注册表模式）	source/buffer/buffer_design.md	/^#### 解决方案：BufferPoolRegistry（注册表模式）$/;"	t	language:Markdown
+解码器系统使用指南	include/decoder/README.md	/^# 解码器系统使用指南$/;"	c	language:Markdown
+设置extradata（SPS/PPS等）	include/decoder/README.md	/^### 设置extradata（SPS\/PPS等）$/;"	S	language:Markdown
+设置时间基准	include/decoder/README.md	/^### 设置时间基准$/;"	S	language:Markdown
 设计考虑	cpp_compile_error.md	/^### 设计考虑$/;"	S	language:Markdown
+调试技巧	cpp_compile_error.md	/^### 调试技巧$/;"	S	language:Markdown
 迁移步骤	include/display/display_buffer_usage_guide.md	/^### 迁移步骤$/;"	S	language:Markdown
 选择建议	include/display/display_buffer_usage_guide.md	/^### 选择建议$/;"	S	language:Markdown
 重构策略	cpp_compile_error.md	/^### 重构策略$/;"	S	language:Markdown
@@ -826,14 +1140,21 @@ write_index_	include/videoFile/RtspVideoReader.hpp	/^    int write_index_;      
 错误 #7: 成员变量 buffers_ 未声明	cpp_compile_error.md	/^## 错误 #7: 成员变量 buffers_ 未声明$/;"	s	language:Markdown
 错误 #8: Makefile 引用已删除的源文件	cpp_compile_error.md	/^## 错误 #8: Makefile 引用已删除的源文件$/;"	s	language:Markdown
 错误 #9: 缺少头文件和默认参数类型不匹配	cpp_compile_error.md	/^## 错误 #9: 缺少头文件和默认参数类型不匹配$/;"	s	language:Markdown
+错误 1: 忘记加 explicit	cpp_compile_error.md	/^#### 错误 1: 忘记加 explicit$/;"	t	language:Markdown
+错误 2: 在拷贝构造函数上错误使用 explicit	cpp_compile_error.md	/^#### 错误 2: 在拷贝构造函数上错误使用 explicit$/;"	t	language:Markdown
+错误 3: 多参数构造函数的列表初始化	cpp_compile_error.md	/^#### 错误 3: 多参数构造函数的列表初始化$/;"	t	language:Markdown
 错误信息	cpp_compile_error.md	/^### 错误信息$/;"	S	language:Markdown
 错误原因	cpp_compile_error.md	/^### 错误原因$/;"	S	language:Markdown
+错误处理	include/decoder/README.md	/^## 错误处理$/;"	s	language:Markdown
 错误处理	include/display/display_buffer_usage_guide.md	/^### 错误处理$/;"	S	language:Markdown
 问题场景	source/buffer/buffer_design.md	/^#### 问题场景$/;"	t	language:Markdown
 附录 A: 错误处理策略	source/buffer/buffer_design.md	/^## 附录 A: 错误处理策略$/;"	s	language:Markdown
 附录 B: 性能指标	source/buffer/buffer_design.md	/^## 附录 B: 性能指标$/;"	s	language:Markdown
 附录 C: 常见问题	source/buffer/buffer_design.md	/^## 附录 C: 常见问题$/;"	s	language:Markdown
+隐式类型转换的工作原理	cpp_compile_error.md	/^### 隐式类型转换的工作原理$/;"	S	language:Markdown
+零拷贝模式详解	include/decoder/README.md	/^## 零拷贝模式详解$/;"	s	language:Markdown
 高级接口	source/buffer/buffer_design.md	/^#### 高级接口$/;"	t	language:Markdown
+高级用法	include/decoder/README.md	/^## 高级用法$/;"	s	language:Markdown
 🎓 关键知识点总结	cpp_compile_error.md	/^## 🎓 关键知识点总结$/;"	s	language:Markdown
 🎯 三种显示方法对比	include/display/display_buffer_usage_guide.md	/^## 🎯 三种显示方法对比$/;"	s	language:Markdown
 📊 性能对比	include/display/display_buffer_usage_guide.md	/^## 📊 性能对比$/;"	s	language:Markdown

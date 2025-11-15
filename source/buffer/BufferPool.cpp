@@ -1,5 +1,7 @@
 #include "../../include/buffer/BufferPool.hpp"
 #include "../../include/buffer/BufferPoolRegistry.hpp"
+#include "../../include/buffer/DMAHeapAllocator.hpp"
+#include "../../include/buffer/TacoSysAllocator.hpp"
 #include <stdio.h>
 #include <string.h>
 #include <stdexcept>
@@ -10,7 +12,7 @@
 // 构造函数实现
 // ============================================================
 
-BufferPool::BufferPool(int count, size_t size, bool use_cma,
+BufferPool::BufferPool(int count, size_t size, BufferMemoryAllocatorType allocator_type,
                        const std::string name, const std::string category)
     : name_(name)
     , category_(category)
@@ -22,9 +24,18 @@ BufferPool::BufferPool(int count, size_t size, bool use_cma,
     printf("\n📦 Initializing BufferPool '%s' (owned buffers)...\n", name_.c_str());
     printf("   Buffer count: %d\n", count);
     printf("   Buffer size: %zu bytes (%.2f MB)\n", size, size / (1024.0 * 1024.0));
-    printf("   Memory type: %s\n", use_cma ? "CMA/DMA (连续物理内存)" : "Normal (普通内存)");
     
-    initializeOwnedBuffers(count, size, use_cma);
+    // 打印分配器类型
+    const char* allocator_name = "Unknown";
+    switch (allocator_type) {
+        case BufferMemoryAllocatorType::NORMAL_MALLOC: allocator_name = "Normal Memory (malloc)"; break;
+        case BufferMemoryAllocatorType::CMA: allocator_name = "CMA (连续物理内存)"; break;
+        case BufferMemoryAllocatorType::DMA_HEAP: allocator_name = "DMA-HEAP"; break;
+        case BufferMemoryAllocatorType::TACO_SYS: allocator_name = "TACO System Allocator"; break;
+    }
+    printf("   Memory type: %s\n", allocator_name);
+    
+    initializeOwnedBuffers(count, size, allocator_type);
     
     // 自动注册到全局注册表
     registry_id_ = BufferPoolRegistry::getInstance().registerPool(this, name_, category_);
@@ -143,12 +154,23 @@ BufferPool::~BufferPool() {
 // 内部初始化方法
 // ============================================================
 
-void BufferPool::initializeOwnedBuffers(int count, size_t size, bool use_cma) {
-    // 选择分配器
-    if (use_cma) {
-        allocator_ = std::make_unique<CMAAllocator>();
-    } else {
-        allocator_ = std::make_unique<NormalAllocator>();
+void BufferPool::initializeOwnedBuffers(int count, size_t size, BufferMemoryAllocatorType allocator_type) {
+    // 根据类型选择分配器
+    switch (allocator_type) {
+        case BufferMemoryAllocatorType::NORMAL_MALLOC:
+            allocator_ = std::make_unique<NormalAllocator>();
+            break;
+        case BufferMemoryAllocatorType::CMA:
+            allocator_ = std::make_unique<CMAAllocator>();
+            break;
+        case BufferMemoryAllocatorType::DMA_HEAP:
+            allocator_ = std::make_unique<DMAHeapAllocator>();
+            break;
+        case BufferMemoryAllocatorType::TACO_SYS:
+            allocator_ = std::make_unique<TacoSysAllocator>();
+            break;
+        default:
+            throw std::invalid_argument("Unknown allocator type");
     }
     
     printf("   Selected allocator: %s\n", allocator_->name());
@@ -165,8 +187,10 @@ void BufferPool::initializeOwnedBuffers(int count, size_t size, bool use_cma) {
         if (virt_addr == nullptr) {
             printf("❌ ERROR: Failed to allocate buffer #%d\n", i);
             
-            // 如果是 CMA 失败，尝试降级到普通内存
-            if (use_cma) {
+            // 如果是 CMA/DMA-HEAP/TACO-SYS 失败，尝试降级到普通内存
+            if (allocator_type == BufferMemoryAllocatorType::CMA ||
+                allocator_type == BufferMemoryAllocatorType::DMA_HEAP ||
+                allocator_type == BufferMemoryAllocatorType::TACO_SYS) {
                 printf("⚠️  Falling back to normal memory...\n");
                 allocator_ = std::make_unique<NormalAllocator>();
                 virt_addr = allocator_->allocate(size, &phys_addr);

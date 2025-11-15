@@ -443,8 +443,8 @@ static int test_decoder_basic() {
     printf("   Frame size: %zu bytes (%.2f MB)\n", frame_size, frame_size / (1024.0 * 1024.0));
     
     // 创建预分配的BufferPool（自动分配模式）
-    // 使用构造方式 1：BufferPool(int count, size_t size, bool use_cma, name, category)
-    BufferPool decoder_pool(10, frame_size, false, "Decoder_Pool", "Decoder");
+    // 使用构造方式 1：BufferPool(int count, size_t size, BufferMemoryAllocatorType, name, category)
+    BufferPool decoder_pool(10, frame_size, BufferMemoryAllocatorType::NORMAL_MALLOC, "Decoder_Pool", "Decoder");
     printf("   ✅ BufferPool created: 10 buffers x %.2f MB\n", 
            frame_size / (1024.0 * 1024.0));
     
