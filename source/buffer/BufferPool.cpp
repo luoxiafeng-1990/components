@@ -59,7 +59,7 @@ std::unique_ptr<BufferPool> BufferPool::CreateDynamic(
 // ============================================================
 
 BufferPool::BufferPool(int count, size_t size, BufferMemoryAllocatorType allocator_type,
-                       const std::string name, const std::string category)
+                       const std::string& name, const std::string& category)
     : name_(name)
     , category_(category)
     , registry_id_(0)
@@ -93,7 +93,7 @@ BufferPool::BufferPool(int count, size_t size, BufferMemoryAllocatorType allocat
 }
 
 BufferPool::BufferPool(const std::vector<ExternalBufferInfo>& external_buffers,
-                       const std::string name, const std::string category)
+                       const std::string& name, const std::string& category)
     : name_(name)
     , category_(category)
     , registry_id_(0)
@@ -119,7 +119,7 @@ BufferPool::BufferPool(const std::vector<ExternalBufferInfo>& external_buffers,
 }
 
 BufferPool::BufferPool(std::vector<std::unique_ptr<BufferHandle>> handles,
-                       const std::string name, const std::string category)
+                       const std::string& name, const std::string& category)
     : name_(name)
     , category_(category)
     , registry_id_(0)
@@ -145,7 +145,7 @@ BufferPool::BufferPool(std::vector<std::unique_ptr<BufferHandle>> handles,
     printf("   Lifetime trackers: %zu\n", lifetime_trackers_.size());
 }
 
-BufferPool::BufferPool(const std::string name, const std::string category, size_t max_capacity)
+BufferPool::BufferPool(const std::string& name, const std::string& category, size_t max_capacity)
     : name_(name)
     , category_(category)
     , registry_id_(0)

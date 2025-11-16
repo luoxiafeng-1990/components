@@ -152,6 +152,10 @@ CUSTOM	include/decoder/DecoderFactory.hpp	/^        CUSTOM          \/\/ 自定�
 Config	include/producer/VideoProducer.hpp	/^        Config() $/;"	f	language:C++	struct:VideoProducer::Config	signature:()
 Config	include/producer/VideoProducer.hpp	/^        Config(const std::string& path, int w, int h, int bpp, bool l = false, int tc = 1,$/;"	f	language:C++	struct:VideoProducer::Config	signature:(const std::string & path,int w,int h,int bpp,bool l=false,int tc=1,VideoReaderFactory::ReaderType rt=VideoReaderFactory::ReaderType::AUTO)
 Config	include/producer/VideoProducer.hpp	/^    struct Config {$/;"	s	language:C++	class:VideoProducer
+CreateDynamic	source/buffer/BufferPool.cpp	/^std::unique_ptr<BufferPool> BufferPool::CreateDynamic($/;"	f	language:C++	class:BufferPool	typeref:typename:std::unique_ptr<BufferPool>	signature:(const std::string & name,const std::string & category,size_t max_capacity)
+CreateFromExternal	source/buffer/BufferPool.cpp	/^std::unique_ptr<BufferPool> BufferPool::CreateFromExternal($/;"	f	language:C++	class:BufferPool	typeref:typename:std::unique_ptr<BufferPool>	signature:(const std::vector<ExternalBufferInfo> & external_buffers,const std::string & name,const std::string & category)
+CreateFromHandles	source/buffer/BufferPool.cpp	/^std::unique_ptr<BufferPool> BufferPool::CreateFromHandles($/;"	f	language:C++	class:BufferPool	typeref:typename:std::unique_ptr<BufferPool>	signature:(std::vector<std::unique_ptr<BufferHandle>> handles,const std::string & name,const std::string & category)
+CreatePreallocated	source/buffer/BufferPool.cpp	/^std::unique_ptr<BufferPool> BufferPool::CreatePreallocated($/;"	f	language:C++	class:BufferPool	typeref:typename:std::unique_ptr<BufferPool>	signature:(int count,size_t size,BufferMemoryAllocatorType allocator_type,const std::string & name,const std::string & category)
 DEBUG	configure.ac	/^AM_CONDITIONAL([DEBUG], [test "x$enable_debug" = "xyes"])$/;"	c	language:Autoconf
 DECODER	test.cpp	/^    DECODER,$/;"	e	language:C++	enum:TestMode	file:
 DECODER_FACTORY_HPP	include/decoder/DecoderFactory.hpp	/^#define DECODER_FACTORY_HPP$/;"	d	language:C++
@@ -967,7 +971,7 @@ test_4frame_loop	test.cpp	/^static int test_4frame_loop(const char* raw_video_pa
 test_buffermanager_iouring	test.cpp	/^static int test_buffermanager_iouring(const char* raw_video_path) {$/;"	f	language:C++	typeref:typename:int	file:	signature:(const char * raw_video_path)
 test_buffermanager_producer	test.cpp	/^static int test_buffermanager_producer(const char* raw_video_path) {$/;"	f	language:C++	typeref:typename:int	file:	signature:(const char * raw_video_path)
 test_decoder_basic	test.cpp	/^static int test_decoder_basic() {$/;"	f	language:C++	typeref:typename:int	file:	signature:()
-test_ffmpeg_video	test.cpp	/^static int test_ffmpeg_video(const char* video_path, bool use_zero_copy = false) {$/;"	f	language:C++	typeref:typename:int	file:	signature:(const char * video_path,bool use_zero_copy=false)
+test_ffmpeg_video	test.cpp	/^static int test_ffmpeg_video(const char* video_path) {$/;"	f	language:C++	typeref:typename:int	file:	signature:(const char * video_path)
 test_rtsp_stream	test.cpp	/^static int test_rtsp_stream(const char* rtsp_url) {$/;"	f	language:C++	typeref:typename:int	file:	signature:(const char * rtsp_url)
 test_sequential_playback	test.cpp	/^static int test_sequential_playback(const char* raw_video_path) {$/;"	f	language:C++	typeref:typename:int	file:	signature:(const char * raw_video_path)
 this is probably fixable by adding '#include <stdexcept>'	cpp_compile_error.md	/^#       this is probably fixable by adding '#include <stdexcept>'$/;"	c	language:Markdown
