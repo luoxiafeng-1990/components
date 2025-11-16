@@ -394,7 +394,7 @@ void LinuxFramebufferDevice::calculateBufferAddresses() {
     std::string pool_category = "Display";
     
     try {
-        buffer_pool_ = std::make_unique<BufferPool>(
+        buffer_pool_ = BufferPool::CreateFromExternal(
             fb_infos,
             pool_name,
             pool_category

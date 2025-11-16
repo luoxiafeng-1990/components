@@ -26,6 +26,7 @@
 #include <getopt.h>
 #include <string>
 #include <vector>
+#include <memory>
 #include "include/display/LinuxFramebufferDevice.hpp"
 #include "include/videoFile/VideoFile.hpp"
 #include "include/buffer/BufferPool.hpp"
@@ -442,9 +443,9 @@ static int test_decoder_basic() {
     size_t frame_size = 1920 * 1080 * 3 / 2;  // NV12 是 12bpp
     printf("   Frame size: %zu bytes (%.2f MB)\n", frame_size, frame_size / (1024.0 * 1024.0));
     
-    // 创建预分配的BufferPool（自动分配模式）
-    // 使用构造方式 1：BufferPool(int count, size_t size, BufferMemoryAllocatorType, name, category)
-    BufferPool decoder_pool(10, frame_size, BufferMemoryAllocatorType::NORMAL_MALLOC, "Decoder_Pool", "Decoder");
+    // 创建预分配的BufferPool（预分配模式）
+    // 使用静态工厂方法：BufferPool::CreatePreallocated()
+    auto decoder_pool = BufferPool::CreatePreallocated(10, frame_size, BufferMemoryAllocatorType::NORMAL_MALLOC, "Decoder_Pool", "Decoder");
     printf("   ✅ BufferPool created: 10 buffers x %.2f MB\n", 
            frame_size / (1024.0 * 1024.0));
     
@@ -460,7 +461,7 @@ static int test_decoder_basic() {
     // 4. 关键：设置零拷贝模式并关联BufferPool
     printf("   🔗 Attaching BufferPool for zero-copy...\n");
     decoder.setBufferMode(BufferAllocationMode::ZERO_COPY);  // 零拷贝模式
-    decoder.attachBufferPool(&decoder_pool);
+    decoder.attachBufferPool(decoder_pool.get());
     
     // 5. 初始化解码器
     printf("\n🚀 Step 3: Initialize decoder...\n");
@@ -576,17 +577,20 @@ static int test_rtsp_stream(const char* rtsp_url) {
     
     // 2. 创建独立的 BufferPool（动态注入模式）
     printf("📦 Creating independent BufferPool for RTSP decoder...\n");
-    // 使用动态注入模式构造函数：初始为空，buffer 由 RtspVideoReader 在运行时动态注入
+    // 使用静态工厂方法：BufferPool::CreateDynamic()
+    // - 初始为空，buffer 由 RtspVideoReader 在运行时动态注入
     // - 对用户透明：RtspVideoReader 内部通过 injectFilledBuffer() 注入解码后的 AVFrame
     // - 用户只需要正常使用 acquireFilled() / releaseFilled()，无需关心内部细节
-    BufferPool rtsp_pool("RTSP_Decoder_Pool", "RTSP", 10);  // 最多缓存10帧
+    // - 默认无容量限制，真正的动态扩展
+    // - 一眼就能看出这是动态注入模式！
+    auto rtsp_pool = BufferPool::CreateDynamic("RTSP_Decoder_Pool", "RTSP");
     
-    printf("✅ Independent BufferPool created (dynamic injection mode)\n");
-    rtsp_pool.printStats();
+    printf("✅ Independent BufferPool created (dynamic injection mode - unlimited capacity)\n");
+    rtsp_pool->printStats();
     
     // 3. 创建 VideoProducer（依赖注入独立的 BufferPool）
     printf("📹 Creating VideoProducer with independent BufferPool...\n");
-    VideoProducer producer(rtsp_pool);  // 使用独立的 rtsp_pool
+    VideoProducer producer(*rtsp_pool);  // 使用独立的 rtsp_pool
     
     // 4. 配置 RTSP 流（注意：推荐单线程）
     printf("🔗 Configuring RTSP stream: %s\n", rtsp_url);
@@ -627,7 +631,7 @@ static int test_rtsp_stream(const char* rtsp_url) {
     
     while (g_running) {
         // 从独立的 RTSP BufferPool 获取已解码的 buffer（带物理地址）
-        Buffer* decoded_buffer = rtsp_pool.acquireFilled(true, 100);
+        Buffer* decoded_buffer = rtsp_pool->acquireFilled(true, 100);
         if (decoded_buffer == nullptr) {
             continue;  // 超时，继续等待
         }
@@ -647,7 +651,7 @@ static int test_rtsp_stream(const char* rtsp_url) {
         }
         
         // 归还 buffer（会触发 RtspVideoReader 的 deleter 回收 AVFrame）
-        rtsp_pool.releaseFilled(decoded_buffer);
+        rtsp_pool->releaseFilled(decoded_buffer);
         
         frame_count++;
         
@@ -670,7 +674,7 @@ static int test_rtsp_stream(const char* rtsp_url) {
            frame_count > 0 ? (100.0 * dma_success / frame_count) : 0.0);
     
     printf("\n📦 Final BufferPool statistics:\n");
-    rtsp_pool.printStats();
+    rtsp_pool->printStats();
     
     return 0;
 }
@@ -682,19 +686,16 @@ static int test_rtsp_stream(const char* rtsp_url) {
  * - 打开编码视频文件（MP4, AVI, MKV等）
  * - 使用 FfmpegVideoReader 进行解码
  * - 集成 VideoProducer + BufferPool 架构
- * - 支持两种模式：
- *   1. 普通模式：使用 framebuffer pool（解码后 memcpy）
- *   2. 零拷贝模式：使用独立 pool + 特殊解码器（如 h264_taco）
+ * - 使用独立的 BufferPool（动态注入模式）
+ * - 支持 DMA 零拷贝显示
  * 
  * 参数：
  * @param video_path 视频文件路径（如 "video.mp4"）
- * @param use_zero_copy 是否使用零拷贝模式（需要特殊硬件）
  */
-static int test_ffmpeg_video(const char* video_path, bool use_zero_copy = false) {
+static int test_ffmpeg_video(const char* video_path) {
     printf("\n═══════════════════════════════════════════════════════\n");
     printf("  Test: FFmpeg Encoded Video Playback\n");
     printf("  File: %s\n", video_path);
-    printf("  Mode: %s\n", use_zero_copy ? "Zero-Copy (h264_taco)" : "Normal (memcpy)");
     printf("═══════════════════════════════════════════════════════\n\n");
     
     // 1. 初始化显示设备
@@ -704,14 +705,11 @@ static int test_ffmpeg_video(const char* video_path, bool use_zero_copy = false)
         return -1;
     }
     
-    // 2. 根据模式选择 BufferPool
-    BufferPool* pool = nullptr;
-    BufferPool* independent_pool = nullptr;
-    // 零拷贝模式：创建独立的 BufferPool（动态注入模式）
-    printf("📦 Creating independent BufferPool for FFmpeg decoder (zero-copy)...\n");
-    independent_pool = new BufferPool("FFmpeg_Decoder_Pool", "FFMPEG", 10);
-    pool = independent_pool;
-    printf("✅ Independent BufferPool created (dynamic injection mode)\n");
+    // 2. 创建独立的 BufferPool（动态注入模式）
+    printf("📦 Creating independent BufferPool for FFmpeg decoder...\n");
+    // 使用静态工厂方法：BufferPool::CreateDynamic() - 一眼就能看出是动态注入模式！
+    auto pool = BufferPool::CreateDynamic("FFmpeg_Decoder_Pool", "FFMPEG");
+    printf("✅ Independent BufferPool created (dynamic injection mode - unlimited capacity)\n");
     pool->printStats();
     // 3. 创建 VideoProducer（依赖注入 BufferPool）
     printf("📹 Creating VideoProducer with BufferPool...\n");
@@ -740,7 +738,6 @@ static int test_ffmpeg_video(const char* video_path, bool use_zero_copy = false)
     printf("🚀 Starting FFmpeg video producer...\n");
     if (!producer.start(config)) {
         printf("❌ Failed to start FFmpeg producer\n");
-        if (independent_pool) delete independent_pool;
         return -1;
     }
     
@@ -791,11 +788,7 @@ static int test_ffmpeg_video(const char* video_path, bool use_zero_copy = false)
     printf("\n📦 Final BufferPool statistics:\n");
     pool->printStats();
     
-    // 清理
-    if (independent_pool) {
-        delete independent_pool;
-    }
-    
+    // unique_ptr 会自动清理资源
     return 0;
 }
 
@@ -925,8 +918,7 @@ int main(int argc, char* argv[]) {
             break;
         
         case TestMode::FFMPEG:
-            result = test_ffmpeg_video(raw_video_path, false);  // 使用普通模式（memcpy）
-            // 如果需要零拷贝模式，可以改为: test_ffmpeg_video(raw_video_path, true)
+            result = test_ffmpeg_video(raw_video_path);
             break;
         
         case TestMode::UNKNOWN:

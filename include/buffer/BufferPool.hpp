@@ -51,51 +51,96 @@ public:
         size_t size;            // Buffer 大小
     };
     
-    // ========== 构造方式 1: 自己分配 buffer ==========
+    // ========== 静态工厂方法（推荐使用）==========
+    
     /**
-     * @brief 创建 BufferPool（自有内存）
+     * @brief 创建预分配模式的 BufferPool（自有内存）
+     * 
+     * 适用场景：提前知道 buffer 数量和大小，需要预分配内存
+     * 
      * @param count Buffer 数量
      * @param size 每个 Buffer 的大小
      * @param allocator_type 内存分配器类型（NORMAL_MALLOC/CMA/DMA_HEAP/TACO_SYS）
      * @param name Pool 名称（用于全局注册和调试）
-     * @param category Pool 分类（如 "Display", "Video", "Network"）
+     * @param category Pool 分类（如 "Display", "Video", "Decoder"）
+     * @return std::unique_ptr<BufferPool> BufferPool 智能指针
      * @throws std::runtime_error 如果分配失败
+     * 
+     * 使用示例：
+     * @code
+     * auto pool = BufferPool::CreatePreallocated(
+     *     10, 
+     *     1920 * 1080 * 3 / 2,
+     *     BufferMemoryAllocatorType::NORMAL_MALLOC,
+     *     "Decoder_Pool",
+     *     "Decoder"
+     * );
+     * @endcode
      */
-    BufferPool(int count, size_t size, 
-               BufferMemoryAllocatorType allocator_type = BufferMemoryAllocatorType::NORMAL_MALLOC,
-               const std::string name = "UnnamedPool",
-               const std::string category = "");
+    static std::unique_ptr<BufferPool> CreatePreallocated(
+        int count, 
+        size_t size,
+        BufferMemoryAllocatorType allocator_type = BufferMemoryAllocatorType::NORMAL_MALLOC,
+        const std::string& name = "UnnamedPool",
+        const std::string& category = ""
+    );
     
-    // ========== 构造方式 2: 托管外部 buffer（简单版）==========
     /**
-     * @brief 创建 BufferPool（托管外部buffer）
+     * @brief 创建托管模式的 BufferPool（托管外部 buffer，简单版）
+     * 
+     * 适用场景：外部已有 buffer（如 framebuffer），需要 BufferPool 管理调度
+     * 
      * @param external_buffers 外部 buffer 信息数组
      * @param name Pool 名称（用于全局注册和调试）
-     * @param category Pool 分类（如 "Display", "Video", "Network"）
+     * @param category Pool 分类（如 "Display", "Framebuffer"）
+     * @return std::unique_ptr<BufferPool> BufferPool 智能指针
      * @note BufferPool 只管理调度，不负责释放这些 buffer
+     * 
+     * 使用示例：
+     * @code
+     * std::vector<BufferPool::ExternalBufferInfo> buffers = {
+     *     {fb_addr1, phys_addr1, size},
+     *     {fb_addr2, phys_addr2, size}
+     * };
+     * auto pool = BufferPool::CreateFromExternal(buffers, "FB_Pool", "Display");
+     * @endcode
      */
-    BufferPool(const std::vector<ExternalBufferInfo>& external_buffers,
-               const std::string name = "UnnamedPool",
-               const std::string category = "");
+    static std::unique_ptr<BufferPool> CreateFromExternal(
+        const std::vector<ExternalBufferInfo>& external_buffers,
+        const std::string& name = "UnnamedPool",
+        const std::string& category = ""
+    );
     
-    // ========== 构造方式 3: 托管外部 buffer（带生命周期检测）==========
     /**
-     * @brief 创建 BufferPool（托管外部buffer + 生命周期检测）
+     * @brief 创建托管模式的 BufferPool（托管外部 buffer，带生命周期检测）
+     * 
+     * 适用场景：外部 buffer 有独立生命周期，需要检测是否失效
+     * 
      * @param handles BufferHandle 数组（转移所有权）
      * @param name Pool 名称（用于全局注册和调试）
-     * @param category Pool 分类（如 "Display", "Video", "Network"）
+     * @param category Pool 分类（如 "Display", "Video"）
+     * @return std::unique_ptr<BufferPool> BufferPool 智能指针
      * @note BufferPool 会保存 weak_ptr 用于检测 buffer 是否失效
+     * 
+     * 使用示例：
+     * @code
+     * std::vector<std::unique_ptr<BufferHandle>> handles;
+     * handles.push_back(std::make_unique<BufferHandle>(...));
+     * auto pool = BufferPool::CreateFromHandles(std::move(handles), "Handle_Pool", "Video");
+     * @endcode
      */
-    BufferPool(std::vector<std::unique_ptr<BufferHandle>> handles,
-               const std::string name = "UnnamedPool",
-               const std::string category = "");
+    static std::unique_ptr<BufferPool> CreateFromHandles(
+        std::vector<std::unique_ptr<BufferHandle>> handles,
+        const std::string& name = "UnnamedPool",
+        const std::string& category = ""
+    );
     
-    // ========== 构造方式 4: 动态注入模式（初始为空）==========
     /**
-     * @brief 创建 BufferPool（动态注入模式 - 初始为空）
+     * @brief 创建动态注入模式的 BufferPool（初始为空，运行时动态扩展）⭐
      * 
      * 适用场景：
      * - RTSP 流解码（AVFrame 动态注入）
+     * - FFmpeg 解码器（动态注入解码帧）
      * - 网络接收器（零拷贝动态注入）
      * - 任何需要运行时动态填充 buffer 的场景
      * 
@@ -107,32 +152,44 @@ public:
      * 特点：
      * - Pool 纯粹作为队列调度器，不拥有任何预分配的 buffer
      * - 所有 buffer 都通过 injectFilledBuffer() 运行时注入
-     * - 适合 RTSP 等动态解码场景，对用户透明
+     * - 默认无容量限制，真正的动态扩展
+     * - 代码自解释，一眼看出是动态注入模式
      * 
      * @param name Pool 名称（用于全局注册和调试）
-     * @param category Pool 分类（如 "Display", "Video", "RTSP"）
-     * @param max_capacity 最大容量限制（0 表示无限制）
+     * @param category Pool 分类（如 "RTSP", "FFMPEG", "Network"）
+     * @param max_capacity 最大容量限制（默认 0 表示无限制，推荐使用默认值）
+     * @return std::unique_ptr<BufferPool> BufferPool 智能指针
      * 
      * @note 这个模式下 getTotalCount() 会返回当前已注入的 buffer 数量（动态变化）
+     * @note max_capacity = 0（默认值）表示无限制，适合大部分动态注入场景
+     * @note 仅在需要流控时才设置 max_capacity > 0（例如防止内存溢出）
      * 
      * 使用示例：
      * @code
-     * // 创建动态注入模式的 BufferPool（初始为空）
-     * BufferPool rtsp_pool("RTSP_Decoder_Pool", "RTSP", 10);  // 最多缓存10帧
+     * // 推荐用法：无限制动态注入（真正的动态）
+     * auto ffmpeg_pool = BufferPool::CreateDynamic("FFmpeg_Decoder_Pool", "FFMPEG");
      * 
-     * // RtspVideoReader 内部会动态注入解码后的 AVFrame
-     * VideoProducer producer(rtsp_pool);
+     * // 可选：如果需要流控，设置最大容量
+     * auto rtsp_pool = BufferPool::CreateDynamic("RTSP_Decoder_Pool", "RTSP", 10);
+     * 
+     * // RtspVideoReader/FfmpegVideoReader 内部会动态注入解码后的 AVFrame
+     * VideoProducer producer(*ffmpeg_pool);
      * producer.start(config);
      * 
      * // 消费循环（对用户透明）
      * while (running) {
-     *     Buffer* buf = rtsp_pool.acquireFilled(true, 100);
+     *     Buffer* buf = ffmpeg_pool->acquireFilled(true, 100);
      *     display.displayBufferByDMA(buf);
-     *     rtsp_pool.releaseFilled(buf);
+     *     ffmpeg_pool->releaseFilled(buf);
      * }
      * @endcode
      */
-    BufferPool(const std::string name, const std::string category, size_t max_capacity = 0);
+    static std::unique_ptr<BufferPool> CreateDynamic(
+        const std::string& name,
+        const std::string& category = "",
+        size_t max_capacity = 0
+    );
+    
     
     /**
      * @brief 析构函数 - 释放资源
@@ -312,6 +369,41 @@ public:
     int exportBufferAsDmaBuf(uint32_t buffer_id);
     
 private:
+    // ========== 构造函数（Private - 仅通过静态工厂方法创建）==========
+    
+    /**
+     * @brief 构造函数 1：预分配模式（自有内存）
+     * @note Private - 请使用 CreatePreallocated() 创建
+     */
+    BufferPool(int count, size_t size, 
+               BufferMemoryAllocatorType allocator_type,
+               const std::string& name,
+               const std::string& category);
+    
+    /**
+     * @brief 构造函数 2：托管外部 buffer（简单版）
+     * @note Private - 请使用 CreateFromExternal() 创建
+     */
+    BufferPool(const std::vector<ExternalBufferInfo>& external_buffers,
+               const std::string& name,
+               const std::string& category);
+    
+    /**
+     * @brief 构造函数 3：托管外部 buffer（带生命周期检测）
+     * @note Private - 请使用 CreateFromHandles() 创建
+     */
+    BufferPool(std::vector<std::unique_ptr<BufferHandle>> handles,
+               const std::string& name,
+               const std::string& category);
+    
+    /**
+     * @brief 构造函数 4：动态注入模式（初始为空）
+     * @note Private - 请使用 CreateDynamic() 创建
+     */
+    BufferPool(const std::string& name, 
+               const std::string& category, 
+               size_t max_capacity);
+    
     // ========== 内部初始化方法 ==========
     
     void initializeOwnedBuffers(int count, size_t size, BufferMemoryAllocatorType allocator_type);

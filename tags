@@ -122,10 +122,11 @@ BufferHandle	include/buffer/BufferHandle.hpp	/^class BufferHandle {$/;"	c	langua
 BufferHandle	source/buffer/BufferHandle.cpp	/^BufferHandle::BufferHandle(BufferHandle&& other) noexcept$/;"	f	language:C++	class:BufferHandle	signature:(BufferHandle && other)
 BufferHandle	source/buffer/BufferHandle.cpp	/^BufferHandle::BufferHandle(void* virt_addr, $/;"	f	language:C++	class:BufferHandle	signature:(void * virt_addr,uint64_t phys_addr,size_t size,Deleter deleter)
 BufferManager	include/buffer/BufferManager.hpp	/^class BufferManager {$/;"	c	language:C++
+BufferMemoryAllocatorType	include/buffer/BufferPool.hpp	/^enum class BufferMemoryAllocatorType {$/;"	g	language:C++
 BufferPool	include/buffer/BufferPool.hpp	/^class BufferPool {$/;"	c	language:C++
 BufferPool	source/buffer/BufferPool.cpp	/^BufferPool::BufferPool(const std::string name, const std::string category, size_t max_capacity)$/;"	f	language:C++	class:BufferPool	signature:(const std::string name,const std::string category,size_t max_capacity)
 BufferPool	source/buffer/BufferPool.cpp	/^BufferPool::BufferPool(const std::vector<ExternalBufferInfo>& external_buffers,$/;"	f	language:C++	class:BufferPool	signature:(const std::vector<ExternalBufferInfo> & external_buffers,const std::string name,const std::string category)
-BufferPool	source/buffer/BufferPool.cpp	/^BufferPool::BufferPool(int count, size_t size, bool use_cma,$/;"	f	language:C++	class:BufferPool	signature:(int count,size_t size,bool use_cma,const std::string name,const std::string category)
+BufferPool	source/buffer/BufferPool.cpp	/^BufferPool::BufferPool(int count, size_t size, BufferMemoryAllocatorType allocator_type,$/;"	f	language:C++	class:BufferPool	signature:(int count,size_t size,BufferMemoryAllocatorType allocator_type,const std::string name,const std::string category)
 BufferPool	source/buffer/BufferPool.cpp	/^BufferPool::BufferPool(std::vector<std::unique_ptr<BufferHandle>> handles,$/;"	f	language:C++	class:BufferPool	signature:(std::vector<std::unique_ptr<BufferHandle>> handles,const std::string name,const std::string category)
 BufferPool 改造	source/buffer/buffer_design.md	/^#### BufferPool 改造$/;"	t	language:Markdown
 BufferPool 架构设计文档	source/buffer/buffer_design.md	/^# BufferPool 架构设计文档$/;"	c	language:Markdown
@@ -135,6 +136,7 @@ C++ 标准库文档	cpp_compile_error.md	/^### C++ 标准库文档$/;"	S	languag
 C++ 标准演进	cpp_compile_error.md	/^### C++ 标准演进$/;"	S	language:Markdown
 C++ 编译错误汇总文档	cpp_compile_error.md	/^# C++ 编译错误汇总文档$/;"	c	language:Markdown
 C++20 的 explicit(bool)	cpp_compile_error.md	/^#### C++20 的 explicit(bool)$/;"	t	language:Markdown
+CMA	include/buffer/BufferPool.hpp	/^    CMA = 1,            \/\/ CMA 连续物理内存分配器$/;"	e	language:C++	enum:BufferMemoryAllocatorType
 CMAAllocator	include/buffer/BufferAllocator.hpp	/^class CMAAllocator : public BufferAllocator {$/;"	c	language:C++
 CMAAllocator	source/buffer/BufferAllocator.cpp	/^CMAAllocator::CMAAllocator() {$/;"	f	language:C++	class:CMAAllocator	signature:()
 CMake 项目	cpp_compile_error.md	/^# CMake 项目$/;"	c	language:Markdown
@@ -159,6 +161,9 @@ DEV_FB0	source/display/LinuxFramebufferDevice.cpp	/^#define DEV_FB0 /;"	d	langua
 DEV_FB1	source/display/LinuxFramebufferDevice.cpp	/^#define DEV_FB1 /;"	d	language:C++	file:
 DEV_FB2	source/display/LinuxFramebufferDevice.cpp	/^#define DEV_FB2 /;"	d	language:C++	file:
 DIRECT_READ	include/videoFile/VideoReaderFactory.hpp	/^        DIRECT_READ,   \/\/ 强制使用普通 read 实现（暂未实现）$/;"	e	language:C++	enum:VideoReaderFactory::ReaderType
+DMAHeapAllocator	include/buffer/DMAHeapAllocator.hpp	/^class DMAHeapAllocator : public BufferAllocator {$/;"	c	language:C++
+DMAHeapAllocator	source/buffer/DMAHeapAllocator.cpp	/^DMAHeapAllocator::DMAHeapAllocator()$/;"	f	language:C++	class:DMAHeapAllocator	signature:()
+DMA_HEAP	include/buffer/BufferPool.hpp	/^    DMA_HEAP = 2,       \/\/ DMA-HEAP 分配器$/;"	e	language:C++	enum:BufferMemoryAllocatorType
 DMA_HEAP_IOCTL_ALLOC	source/buffer/BufferAllocator.cpp	/^#define DMA_HEAP_IOCTL_ALLOC /;"	d	language:C++	file:
 DecodedFrame	include/decoder/IDecoder.hpp	/^    DecodedFrame()$/;"	f	language:C++	struct:DecodedFrame	signature:()
 DecodedFrame	include/decoder/IDecoder.hpp	/^    DecodedFrame(DecodedFrame&& other) noexcept$/;"	f	language:C++	struct:DecodedFrame	signature:(DecodedFrame && other)
@@ -174,6 +179,7 @@ DecoderStatus 状态码	include/decoder/README.md	/^## DecoderStatus 状态码$/
 DecoderType	include/decoder/DecoderFactory.hpp	/^    enum class DecoderType {$/;"	g	language:C++	class:DecoderFactory
 Deleter	include/buffer/BufferHandle.hpp	/^    using Deleter = std::function<void(void*)>;$/;"	t	language:C++	class:BufferHandle
 DmaBufferInfo	include/buffer/BufferAllocator.hpp	/^    struct DmaBufferInfo {$/;"	s	language:C++	class:CMAAllocator
+DmaBufferInfo	include/buffer/DMAHeapAllocator.hpp	/^    struct DmaBufferInfo {$/;"	s	language:C++	class:DMAHeapAllocator
 END_OF_STREAM	include/decoder/IDecoder.hpp	/^    END_OF_STREAM,             \/\/ 流结束 (对应 AVERROR_EOF)$/;"	e	language:C++	enum:DecoderStatus
 ERROR	include/buffer/BufferManager.hpp	/^        ERROR       \/\/ 错误状态$/;"	e	language:C++	enum:BufferManager::ProducerState
 EXTERNAL	include/buffer/Buffer.hpp	/^        EXTERNAL    \/\/ 外部拥有，BufferPool 只负责调度$/;"	e	language:C++	enum:Buffer::Ownership
@@ -235,6 +241,7 @@ Makefile.am	cpp_compile_error.md	/^# Makefile.am$/;"	c	language:Markdown
 MmapVideoReader	include/videoFile/MmapVideoReader.hpp	/^class MmapVideoReader : public IVideoReader {$/;"	c	language:C++
 MmapVideoReader	source/videoFile/MmapVideoReader.cpp	/^MmapVideoReader::MmapVideoReader()$/;"	f	language:C++	class:MmapVideoReader	signature:()
 NEED_MORE_DATA	include/decoder/IDecoder.hpp	/^    NEED_MORE_DATA,            \/\/ 需要更多输入数据 (对应 AVERROR(EAGAIN))$/;"	e	language:C++	enum:DecoderStatus
+NORMAL_MALLOC	include/buffer/BufferPool.hpp	/^    NORMAL_MALLOC = 0,  \/\/ 普通 malloc 分配器$/;"	e	language:C++	enum:BufferMemoryAllocatorType
 NOT_INITIALIZED	include/decoder/IDecoder.hpp	/^    NOT_INITIALIZED            \/\/ 解码器未初始化$/;"	e	language:C++	enum:DecoderStatus
 NVDEC	include/decoder/DecoderFactory.hpp	/^        NVDEC,          \/\/ NVIDIA硬件解码$/;"	e	language:C++	enum:DecoderFactory::DecoderType
 NormalAllocator	include/buffer/BufferAllocator.hpp	/^class NormalAllocator : public BufferAllocator {$/;"	c	language:C++
@@ -268,9 +275,13 @@ SEQUENTIAL	test.cpp	/^    SEQUENTIAL,$/;"	e	language:C++	enum:TestMode	file:
 STOPPED	include/buffer/BufferManager.hpp	/^        STOPPED,    \/\/ 已停止$/;"	e	language:C++	enum:BufferManager::ProducerState
 State	include/buffer/Buffer.hpp	/^    enum class State {$/;"	g	language:C++	class:Buffer
 Stats	include/videoFile/IoUringVideoReader.hpp	/^    struct Stats {$/;"	s	language:C++	class:IoUringVideoReader
+TACO_SYS	include/buffer/BufferPool.hpp	/^    TACO_SYS = 3        \/\/ TACO 系统专用分配器$/;"	e	language:C++	enum:BufferMemoryAllocatorType
 TIMER_HPP	include/monitor/Timer.hpp	/^#define TIMER_HPP$/;"	d	language:C++
 TPS_FB0	source/display/LinuxFramebufferDevice.cpp	/^#define TPS_FB0 /;"	d	language:C++	file:
 TPS_FB1	source/display/LinuxFramebufferDevice.cpp	/^#define TPS_FB1 /;"	d	language:C++	file:
+TacoBufferInfo	include/buffer/TacoSysAllocator.hpp	/^    struct TacoBufferInfo {$/;"	s	language:C++	class:TacoSysAllocator
+TacoSysAllocator	include/buffer/TacoSysAllocator.hpp	/^class TacoSysAllocator : public BufferAllocator {$/;"	c	language:C++
+TacoSysAllocator	source/buffer/TacoSysAllocator.cpp	/^TacoSysAllocator::TacoSysAllocator()$/;"	f	language:C++	class:TacoSysAllocator	signature:()
 TestMode	test.cpp	/^enum class TestMode {$/;"	g	language:C++	file:
 Timer	include/monitor/Timer.hpp	/^class Timer {$/;"	c	language:C++
 Timer	source/monitor/Timer.cpp	/^Timer::Timer(double interval_seconds, $/;"	f	language:C++	class:Timer	signature:(double interval_seconds,void (* callback)(void *),void * user_data,double delay_seconds,double duration_seconds,void (* delay_end_callback)(void *))
@@ -311,6 +322,8 @@ alive_	include/buffer/BufferHandle.hpp	/^    std::shared_ptr<bool> alive_;  \/\/
 allocate	source/buffer/BufferAllocator.cpp	/^void* CMAAllocator::allocate(size_t size, uint64_t* out_phys_addr) {$/;"	f	language:C++	class:CMAAllocator	typeref:typename:void *	signature:(size_t size,uint64_t * out_phys_addr)
 allocate	source/buffer/BufferAllocator.cpp	/^void* ExternalAllocator::allocate(size_t size, uint64_t* out_phys_addr) {$/;"	f	language:C++	class:ExternalAllocator	typeref:typename:void *	signature:(size_t size,uint64_t * out_phys_addr)
 allocate	source/buffer/BufferAllocator.cpp	/^void* NormalAllocator::allocate(size_t size, uint64_t* out_phys_addr) {$/;"	f	language:C++	class:NormalAllocator	typeref:typename:void *	signature:(size_t size,uint64_t * out_phys_addr)
+allocate	source/buffer/DMAHeapAllocator.cpp	/^void* DMAHeapAllocator::allocate(size_t size, uint64_t* out_phys_addr) {$/;"	f	language:C++	class:DMAHeapAllocator	typeref:typename:void *	signature:(size_t size,uint64_t * out_phys_addr)
+allocate	source/buffer/TacoSysAllocator.cpp	/^void* TacoSysAllocator::allocate(size_t size, uint64_t* out_phys_addr) {$/;"	f	language:C++	class:TacoSysAllocator	typeref:typename:void *	signature:(size_t size,uint64_t * out_phys_addr)
 allocateBuffer	source/decoder/FFmpegDecoder.cpp	/^int FFmpegDecoder::allocateBuffer(AVFrame* frame, int flags) {$/;"	f	language:C++	class:FFmpegDecoder	typeref:typename:int	signature:(AVFrame * frame,int flags)
 allocateDmaBuf	source/buffer/BufferAllocator.cpp	/^void* CMAAllocator::allocateDmaBuf(size_t size, int* out_fd, uint64_t* out_phys_addr) {$/;"	f	language:C++	class:CMAAllocator	typeref:typename:void *	signature:(size_t size,int * out_fd,uint64_t * out_phys_addr)
 allocator_	include/buffer/BufferPool.hpp	/^    std::unique_ptr<BufferAllocator> allocator_;$/;"	m	language:C++	class:BufferPool	typeref:typename:std::unique_ptr<BufferAllocator>
@@ -403,6 +416,8 @@ data	include/videoFile/RtspVideoReader.hpp	/^        std::vector<uint8_t> data; 
 deallocate	source/buffer/BufferAllocator.cpp	/^void CMAAllocator::deallocate(void* ptr, size_t size) {$/;"	f	language:C++	class:CMAAllocator	typeref:typename:void	signature:(void * ptr,size_t size)
 deallocate	source/buffer/BufferAllocator.cpp	/^void ExternalAllocator::deallocate(void* ptr, size_t size) {$/;"	f	language:C++	class:ExternalAllocator	typeref:typename:void	signature:(void * ptr,size_t size)
 deallocate	source/buffer/BufferAllocator.cpp	/^void NormalAllocator::deallocate(void* ptr, size_t size) {$/;"	f	language:C++	class:NormalAllocator	typeref:typename:void	signature:(void * ptr,size_t size)
+deallocate	source/buffer/DMAHeapAllocator.cpp	/^void DMAHeapAllocator::deallocate(void* ptr, size_t size) {$/;"	f	language:C++	class:DMAHeapAllocator	typeref:typename:void	signature:(void * ptr,size_t size)
+deallocate	source/buffer/TacoSysAllocator.cpp	/^void TacoSysAllocator::deallocate(void* ptr, size_t size) {$/;"	f	language:C++	class:TacoSysAllocator	typeref:typename:void	signature:(void * ptr,size_t size)
 deallocateBuffer	source/decoder/FFmpegDecoder.cpp	/^void FFmpegDecoder::deallocateBuffer(uint8_t* data) {$/;"	f	language:C++	class:FFmpegDecoder	typeref:typename:void	signature:(uint8_t * data)
 debug	configure.ac	/^AC_ARG_ENABLE([debug],$/;"	e	language:Autoconf
 decode	source/decoder/Decoder.cpp	/^DecoderStatus Decoder::decode(AVPacket* packet, DecodedFrame& out_frame) {$/;"	f	language:C++	class:Decoder	typeref:typename:DecoderStatus	signature:(AVPacket * packet,DecodedFrame & out_frame)
@@ -433,6 +448,7 @@ display_start_	include/monitor/PerformanceMonitor.hpp	/^    std::chrono::steady_
 display_test	Makefile.am	/^bin_PROGRAMS = display_test$/;"	P	language:Automake	directory:bin
 display_test_SOURCES	Makefile.am	/^display_test_SOURCES = test.cpp \\$/;"	m	language:Make
 dma_buffers_	include/buffer/BufferAllocator.hpp	/^    std::vector<DmaBufferInfo> dma_buffers_;$/;"	m	language:C++	class:CMAAllocator	typeref:typename:std::vector<DmaBufferInfo>
+dma_buffers_	include/buffer/DMAHeapAllocator.hpp	/^    std::vector<DmaBufferInfo> dma_buffers_;$/;"	m	language:C++	class:DMAHeapAllocator	typeref:typename:std::vector<DmaBufferInfo>
 dma_fd_	include/buffer/Buffer.hpp	/^    int dma_fd_;                     \/\/ DMA-BUF file descriptor$/;"	m	language:C++	class:Buffer	typeref:typename:int
 dma_fds_	include/buffer/BufferManager.hpp	/^    std::vector<int> dma_fds_;           \/\/ DMA buffer 文件描述符（CMA模式）$/;"	m	language:C++	class:BufferManager	typeref:typename:std::vector<int>
 dma_heap_allocation_data	source/buffer/BufferAllocator.cpp	/^struct dma_heap_allocation_data {$/;"	s	language:C++	file:
@@ -462,6 +478,7 @@ failed_reads_	include/videoFile/IoUringVideoReader.hpp	/^    std::atomic<long> f
 fb_index_	include/display/LinuxFramebufferDevice.hpp	/^    int fb_index_;                    \/\/ framebuffer索引（0或1）$/;"	m	language:C++	class:LinuxFramebufferDevice	typeref:typename:int
 fb_mappings_	include/display/LinuxFramebufferDevice.hpp	/^    std::vector<void*> fb_mappings_;          \/\/ framebuffer 映射地址（用于物理地址/;"	m	language:C++	class:LinuxFramebufferDevice	typeref:typename:std::vector<void * >
 fd	include/buffer/BufferAllocator.hpp	/^        int fd;$/;"	m	language:C++	struct:CMAAllocator::DmaBufferInfo	typeref:typename:int
+fd	include/buffer/DMAHeapAllocator.hpp	/^        int fd;             \/\/ DMA-BUF fd$/;"	m	language:C++	struct:DMAHeapAllocator::DmaBufferInfo	typeref:typename:int
 fd	source/buffer/BufferAllocator.cpp	/^    unsigned int fd;$/;"	m	language:C++	struct:dma_heap_allocation_data	typeref:typename:unsigned int	file:
 fd_	include/display/LinuxFramebufferDevice.hpp	/^    int fd_;                          \/\/ framebuffer文件描述符$/;"	m	language:C++	class:LinuxFramebufferDevice	typeref:typename:int
 fd_	include/videoFile/MmapVideoReader.hpp	/^    int fd_;                          \/\/ 文件描述符$/;"	m	language:C++	class:MmapVideoReader	typeref:typename:int
@@ -542,6 +559,7 @@ getDecoderTypeName	source/decoder/DecoderFactory.cpp	/^const char* DecoderFactor
 getDisplayedFrames	source/monitor/PerformanceMonitor.cpp	/^int PerformanceMonitor::getDisplayedFrames() const {$/;"	f	language:C++	class:PerformanceMonitor	typeref:typename:int	signature:() const
 getDmaBufFd	include/buffer/Buffer.hpp	/^    int getDmaBufFd() const { return dma_fd_; }$/;"	f	language:C++	class:Buffer	typeref:typename:int	signature:() const
 getDmaBufFd	source/buffer/BufferAllocator.cpp	/^int CMAAllocator::getDmaBufFd(void* ptr) const {$/;"	f	language:C++	class:CMAAllocator	typeref:typename:int	signature:(void * ptr) const
+getDmaBufFd	source/buffer/DMAHeapAllocator.cpp	/^int DMAHeapAllocator::getDmaBufFd(void* ptr) const {$/;"	f	language:C++	class:DMAHeapAllocator	typeref:typename:int	signature:(void * ptr) const
 getDroppedFrames	include/videoFile/RtspVideoReader.hpp	/^    int getDroppedFrames() const { return dropped_frames_.load(); }$/;"	f	language:C++	class:RtspVideoReader	typeref:typename:int	signature:() const
 getElapsedTime	source/monitor/PerformanceMonitor.cpp	/^double PerformanceMonitor::getElapsedTime() const {$/;"	f	language:C++	class:PerformanceMonitor	typeref:typename:double	signature:() const
 getFileSize	source/videoFile/FfmpegVideoReader.cpp	/^long FfmpegVideoReader::getFileSize() const {$/;"	f	language:C++	class:FfmpegVideoReader	typeref:typename:long	signature:() const
@@ -585,6 +603,8 @@ getPhysicalAddress	include/buffer/BufferHandle.hpp	/^    uint64_t getPhysicalAdd
 getPhysicalAddress	source/buffer/BufferAllocator.cpp	/^uint64_t CMAAllocator::getPhysicalAddress(void* virt_addr) {$/;"	f	language:C++	class:CMAAllocator	typeref:typename:uint64_t	signature:(void * virt_addr)
 getPhysicalAddress	source/buffer/BufferAllocator.cpp	/^uint64_t NormalAllocator::getPhysicalAddress(void* virt_addr) {$/;"	f	language:C++	class:NormalAllocator	typeref:typename:uint64_t	signature:(void * virt_addr)
 getPhysicalAddress	source/buffer/BufferPool.cpp	/^uint64_t BufferPool::getPhysicalAddress(void* virt_addr) {$/;"	f	language:C++	class:BufferPool	typeref:typename:uint64_t	signature:(void * virt_addr)
+getPhysicalAddress	source/buffer/DMAHeapAllocator.cpp	/^uint64_t DMAHeapAllocator::getPhysicalAddress(void* virt_addr) {$/;"	f	language:C++	class:DMAHeapAllocator	typeref:typename:uint64_t	signature:(void * virt_addr)
+getPhysicalAddress	source/buffer/TacoSysAllocator.cpp	/^uint64_t TacoSysAllocator::getPhysicalAddress(void* virt_addr) {$/;"	f	language:C++	class:TacoSysAllocator	typeref:typename:uint64_t	signature:(void * virt_addr)
 getPoolCount	source/buffer/BufferPoolRegistry.cpp	/^size_t BufferPoolRegistry::getPoolCount() const {$/;"	f	language:C++	class:BufferPoolRegistry	typeref:typename:size_t	signature:() const
 getPoolsByCategory	source/buffer/BufferPoolRegistry.cpp	/^std::vector<BufferPool*> BufferPoolRegistry::getPoolsByCategory(const std::string& category) con/;"	f	language:C++	class:BufferPoolRegistry	typeref:typename:std::vector<BufferPool * >	signature:(const std::string & category) const
 getProducedFrames	include/producer/VideoProducer.hpp	/^    int getProducedFrames() const { return produced_frames_.load(); }$/;"	f	language:C++	class:VideoProducer	typeref:typename:int	signature:() const
@@ -598,6 +618,7 @@ getRecommendedType	source/videoFile/VideoReaderFactory.cpp	/^VideoReaderFactory:
 getRegistryId	include/buffer/BufferPool.hpp	/^    uint64_t getRegistryId() const { return registry_id_; }$/;"	f	language:C++	class:BufferPool	typeref:typename:uint64_t	signature:() const
 getSkippedFrames	include/producer/VideoProducer.hpp	/^    int getSkippedFrames() const { return skipped_frames_.load(); }$/;"	f	language:C++	class:VideoProducer	typeref:typename:int	signature:() const
 getStats	source/videoFile/IoUringVideoReader.cpp	/^IoUringVideoReader::Stats IoUringVideoReader::getStats() const {$/;"	f	language:C++	class:IoUringVideoReader	typeref:typename:IoUringVideoReader::Stats	signature:() const
+getTacoBufferHandle	source/buffer/TacoSysAllocator.cpp	/^int TacoSysAllocator::getTacoBufferHandle(void* ptr) const {$/;"	f	language:C++	class:TacoSysAllocator	typeref:typename:int	signature:(void * ptr) const
 getTotalCount	source/buffer/BufferPool.cpp	/^int BufferPool::getTotalCount() const {$/;"	f	language:C++	class:BufferPool	typeref:typename:int	signature:() const
 getTotalDuration	source/monitor/PerformanceMonitor.cpp	/^double PerformanceMonitor::getTotalDuration() const {$/;"	f	language:C++	class:PerformanceMonitor	typeref:typename:double	signature:() const
 getTotalFrames	source/producer/VideoProducer.cpp	/^int VideoProducer::getTotalFrames() const {$/;"	f	language:C++	class:VideoProducer	typeref:typename:int	signature:() const
@@ -619,12 +640,14 @@ getWidth	source/videoFile/IoUringVideoReader.cpp	/^int IoUringVideoReader::getWi
 getWidth	source/videoFile/MmapVideoReader.cpp	/^int MmapVideoReader::getWidth() const {$/;"	f	language:C++	class:MmapVideoReader	typeref:typename:int	signature:() const
 getWidth	source/videoFile/RtspVideoReader.cpp	/^int RtspVideoReader::getWidth() const {$/;"	f	language:C++	class:RtspVideoReader	typeref:typename:int	signature:() const
 getWidth	source/videoFile/VideoFile.cpp	/^int VideoFile::getWidth() const {$/;"	f	language:C++	class:VideoFile	typeref:typename:int	signature:() const
+handle	include/buffer/TacoSysAllocator.hpp	/^        int handle;         \/\/ TACO buffer 句柄$/;"	m	language:C++	struct:TacoSysAllocator::TacoBufferInfo	typeref:typename:int
 harvestCompletions	source/videoFile/IoUringVideoReader.cpp	/^int IoUringVideoReader::harvestCompletions(BufferManager* manager, bool blocking) {$/;"	f	language:C++	class:IoUringVideoReader	typeref:typename:int	signature:(BufferManager * manager,bool blocking)
 hasMoreFrames	source/videoFile/FfmpegVideoReader.cpp	/^bool FfmpegVideoReader::hasMoreFrames() const {$/;"	f	language:C++	class:FfmpegVideoReader	typeref:typename:bool	signature:() const
 hasMoreFrames	source/videoFile/IoUringVideoReader.cpp	/^bool IoUringVideoReader::hasMoreFrames() const {$/;"	f	language:C++	class:IoUringVideoReader	typeref:typename:bool	signature:() const
 hasMoreFrames	source/videoFile/MmapVideoReader.cpp	/^bool MmapVideoReader::hasMoreFrames() const {$/;"	f	language:C++	class:MmapVideoReader	typeref:typename:bool	signature:() const
 hasMoreFrames	source/videoFile/RtspVideoReader.cpp	/^bool RtspVideoReader::hasMoreFrames() const {$/;"	f	language:C++	class:RtspVideoReader	typeref:typename:bool	signature:() const
 hasMoreFrames	source/videoFile/VideoFile.cpp	/^bool VideoFile::hasMoreFrames() const {$/;"	f	language:C++	class:VideoFile	typeref:typename:bool	signature:() const
+heap_fd_	include/buffer/DMAHeapAllocator.hpp	/^    int heap_fd_;$/;"	m	language:C++	class:DMAHeapAllocator	typeref:typename:int
 heap_flags	source/buffer/BufferAllocator.cpp	/^    unsigned long heap_flags;$/;"	m	language:C++	struct:dma_heap_allocation_data	typeref:typename:unsigned long	file:
 height	include/decoder/IDecoder.hpp	/^    inline int height() const { $/;"	f	language:C++	struct:DecodedFrame	typeref:typename:int	signature:() const
 height	include/decoder/IDecoder.hpp	/^    int height;                        \/\/ 视频高度（像素）$/;"	m	language:C++	struct:DecoderConfig	typeref:typename:int
@@ -645,7 +668,7 @@ initializeDecoder	source/videoFile/FfmpegVideoReader.cpp	/^bool FfmpegVideoReade
 initializeExternalBuffers	source/buffer/BufferPool.cpp	/^void BufferPool::initializeExternalBuffers(const std::vector<ExternalBufferInfo>& infos) {$/;"	f	language:C++	class:BufferPool	typeref:typename:void	signature:(const std::vector<ExternalBufferInfo> & infos)
 initializeFFmpeg	source/decoder/FFmpegDecoder.cpp	/^DecoderStatus FFmpegDecoder::initializeFFmpeg() {$/;"	f	language:C++	class:FFmpegDecoder	typeref:typename:DecoderStatus	signature:()
 initializeFromHandles	source/buffer/BufferPool.cpp	/^void BufferPool::initializeFromHandles(std::vector<std::unique_ptr<BufferHandle>> handles) {$/;"	f	language:C++	class:BufferPool	typeref:typename:void	signature:(std::vector<std::unique_ptr<BufferHandle>> handles)
-initializeOwnedBuffers	source/buffer/BufferPool.cpp	/^void BufferPool::initializeOwnedBuffers(int count, size_t size, bool use_cma) {$/;"	f	language:C++	class:BufferPool	typeref:typename:void	signature:(int count,size_t size,bool use_cma)
+initializeOwnedBuffers	source/buffer/BufferPool.cpp	/^void BufferPool::initializeOwnedBuffers(int count, size_t size, BufferMemoryAllocatorType alloca/;"	f	language:C++	class:BufferPool	typeref:typename:void	signature:(int count,size_t size,BufferMemoryAllocatorType allocator_type)
 initializeScaler	source/decoder/FFmpegDecoder.cpp	/^DecoderStatus FFmpegDecoder::initializeScaler() {$/;"	f	language:C++	class:FFmpegDecoder	typeref:typename:DecoderStatus	signature:()
 initializeSwsContext	source/videoFile/FfmpegVideoReader.cpp	/^bool FfmpegVideoReader::initializeSwsContext() {$/;"	f	language:C++	class:FfmpegVideoReader	typeref:typename:bool	signature:()
 initialized_	include/videoFile/IoUringVideoReader.hpp	/^    bool initialized_;$/;"	m	language:C++	class:IoUringVideoReader	typeref:typename:bool
@@ -722,6 +745,8 @@ name	include/buffer/BufferAllocator.hpp	/^    const char* name() const override 
 name	include/buffer/BufferAllocator.hpp	/^    const char* name() const override { return "ExternalAllocator"; }$/;"	f	language:C++	class:ExternalAllocator	typeref:typename:const char *	signature:() const
 name	include/buffer/BufferAllocator.hpp	/^    const char* name() const override { return "NormalAllocator"; }$/;"	f	language:C++	class:NormalAllocator	typeref:typename:const char *	signature:() const
 name	include/buffer/BufferPoolRegistry.hpp	/^        std::string name;                                    \/\/ 可读名称$/;"	m	language:C++	struct:BufferPoolRegistry::PoolInfo	typeref:typename:std::string
+name	include/buffer/DMAHeapAllocator.hpp	/^    const char* name() const override { return "DMAHeapAllocator"; }$/;"	f	language:C++	class:DMAHeapAllocator	typeref:typename:const char *	signature:() const
+name	include/buffer/TacoSysAllocator.hpp	/^    const char* name() const override { return "TacoSysAllocator"; }$/;"	f	language:C++	class:TacoSysAllocator	typeref:typename:const char *	signature:() const
 name_	include/buffer/BufferPool.hpp	/^    std::string name_;                    \/\/ Pool 名称$/;"	m	language:C++	class:BufferPool	typeref:typename:std::string
 name_to_id_	include/buffer/BufferPoolRegistry.hpp	/^    std::unordered_map<std::string, uint64_t> name_to_id_;  \/\/ Name -> ID（快速查找）$/;"	m	language:C++	class:BufferPoolRegistry	typeref:typename:std::unordered_map<std::string,uint64_t>
 next_buffer_id_	include/buffer/BufferPool.hpp	/^    uint32_t next_buffer_id_;             \/\/ 下一个分配的 Buffer ID$/;"	m	language:C++	class:BufferPool	typeref:typename:uint32_t
@@ -761,6 +786,8 @@ parse_test_mode	test.cpp	/^static TestMode parse_test_mode(const char* mode_str)
 path_	include/videoFile/MmapVideoReader.hpp	/^    char path_[MAX_PATH_LENGTH];     \/\/ 文件路径$/;"	m	language:C++	class:MmapVideoReader	typeref:typename:char[]
 pause	source/monitor/PerformanceMonitor.cpp	/^void PerformanceMonitor::pause() {$/;"	f	language:C++	class:PerformanceMonitor	typeref:typename:void	signature:()
 phys_addr	include/buffer/BufferPool.hpp	/^        uint64_t phys_addr;     \/\/ 物理地址（0表示未知，需自动获取）$/;"	m	language:C++	struct:BufferPool::ExternalBufferInfo	typeref:typename:uint64_t
+phys_addr	include/buffer/DMAHeapAllocator.hpp	/^        uint64_t phys_addr; \/\/ 物理地址$/;"	m	language:C++	struct:DMAHeapAllocator::DmaBufferInfo	typeref:typename:uint64_t
+phys_addr	include/buffer/TacoSysAllocator.hpp	/^        uint64_t phys_addr; \/\/ 物理地址$/;"	m	language:C++	struct:TacoSysAllocator::TacoBufferInfo	typeref:typename:uint64_t
 phys_addr	source/display/LinuxFramebufferDevice.cpp	/^    uint64_t phys_addr;    \/\/ 物理地址$/;"	m	language:C++	struct:tpsfb_dma_info	typeref:typename:uint64_t	file:
 phys_addr_	include/buffer/Buffer.hpp	/^    uint64_t phys_addr_;             \/\/ 物理地址（硬件\/DMA）$/;"	m	language:C++	class:Buffer	typeref:typename:uint64_t
 phys_addr_	include/buffer/BufferHandle.hpp	/^    uint64_t phys_addr_;        \/\/ 物理地址$/;"	m	language:C++	class:BufferHandle	typeref:typename:uint64_t
@@ -902,6 +929,8 @@ size	include/buffer/Buffer.hpp	/^    size_t size() const { return size_; }$/;"	f
 size	include/buffer/BufferAllocator.hpp	/^        size_t size;$/;"	m	language:C++	struct:CMAAllocator::DmaBufferInfo	typeref:typename:size_t
 size	include/buffer/BufferHandle.hpp	/^    size_t size() const { return size_; }$/;"	f	language:C++	class:BufferHandle	typeref:typename:size_t	signature:() const
 size	include/buffer/BufferPool.hpp	/^        size_t size;            \/\/ Buffer 大小$/;"	m	language:C++	struct:BufferPool::ExternalBufferInfo	typeref:typename:size_t
+size	include/buffer/DMAHeapAllocator.hpp	/^        size_t size;        \/\/ 大小$/;"	m	language:C++	struct:DMAHeapAllocator::DmaBufferInfo	typeref:typename:size_t
+size	include/buffer/TacoSysAllocator.hpp	/^        size_t size;        \/\/ 大小$/;"	m	language:C++	struct:TacoSysAllocator::TacoBufferInfo	typeref:typename:size_t
 size	include/decoder/IDecoder.hpp	/^    inline size_t size() const {$/;"	f	language:C++	struct:DecodedFrame	typeref:typename:size_t	signature:() const
 size_	include/buffer/Buffer.hpp	/^    size_t size_;                    \/\/ Buffer 大小$/;"	m	language:C++	class:Buffer	typeref:typename:size_t
 size_	include/buffer/BufferHandle.hpp	/^    size_t size_;               \/\/ Buffer 大小$/;"	m	language:C++	class:BufferHandle	typeref:typename:size_t
@@ -932,6 +961,8 @@ supports_zero_copy_	include/videoFile/FfmpegVideoReader.hpp	/^    bool supports_
 sws_ctx_	include/decoder/FFmpegDecoder.hpp	/^    SwsContext* sws_ctx_;            \/\/ 像素格式转换上下文（如果需要）$/;"	m	language:C++	class:FFmpegDecoder	typeref:typename:SwsContext *
 sws_ctx_	include/videoFile/FfmpegVideoReader.hpp	/^    SwsContext* sws_ctx_;              \/\/ 图像格式转换$/;"	m	language:C++	class:FfmpegVideoReader	typeref:typename:SwsContext *
 sws_ctx_	include/videoFile/RtspVideoReader.hpp	/^    SwsContext* sws_ctx_;              \/\/ 图像格式转换$/;"	m	language:C++	class:RtspVideoReader	typeref:typename:SwsContext *
+taco_buffers_	include/buffer/TacoSysAllocator.hpp	/^    std::vector<TacoBufferInfo> taco_buffers_;$/;"	m	language:C++	class:TacoSysAllocator	typeref:typename:std::vector<TacoBufferInfo>
+taco_ctx_	include/buffer/TacoSysAllocator.hpp	/^    void* taco_ctx_;$/;"	m	language:C++	class:TacoSysAllocator	typeref:typename:void *
 test_4frame_loop	test.cpp	/^static int test_4frame_loop(const char* raw_video_path) {$/;"	f	language:C++	typeref:typename:int	file:	signature:(const char * raw_video_path)
 test_buffermanager_iouring	test.cpp	/^static int test_buffermanager_iouring(const char* raw_video_path) {$/;"	f	language:C++	typeref:typename:int	file:	signature:(const char * raw_video_path)
 test_buffermanager_producer	test.cpp	/^static int test_buffermanager_producer(const char* raw_video_path) {$/;"	f	language:C++	typeref:typename:int	file:	signature:(const char * raw_video_path)
@@ -994,6 +1025,8 @@ video_stream_index_	include/videoFile/FfmpegVideoReader.hpp	/^    int video_stre
 video_stream_index_	include/videoFile/RtspVideoReader.hpp	/^    int video_stream_index_;$/;"	m	language:C++	class:RtspVideoReader	typeref:typename:int
 virt_addr	include/buffer/BufferAllocator.hpp	/^        void* virt_addr;$/;"	m	language:C++	struct:CMAAllocator::DmaBufferInfo	typeref:typename:void *
 virt_addr	include/buffer/BufferPool.hpp	/^        void* virt_addr;        \/\/ 虚拟地址$/;"	m	language:C++	struct:BufferPool::ExternalBufferInfo	typeref:typename:void *
+virt_addr	include/buffer/DMAHeapAllocator.hpp	/^        void* virt_addr;    \/\/ 虚拟地址$/;"	m	language:C++	struct:DMAHeapAllocator::DmaBufferInfo	typeref:typename:void *
+virt_addr	include/buffer/TacoSysAllocator.hpp	/^        void* virt_addr;    \/\/ 虚拟地址$/;"	m	language:C++	struct:TacoSysAllocator::TacoBufferInfo	typeref:typename:void *
 virt_addr_	include/buffer/Buffer.hpp	/^    void* virt_addr_;                \/\/ 虚拟地址（用户空间）$/;"	m	language:C++	class:Buffer	typeref:typename:void *
 virt_addr_	include/buffer/BufferHandle.hpp	/^    void* virt_addr_;           \/\/ 虚拟地址$/;"	m	language:C++	class:BufferHandle	typeref:typename:void *
 waitVerticalSync	source/display/LinuxFramebufferDevice.cpp	/^bool LinuxFramebufferDevice::waitVerticalSync() {$/;"	f	language:C++	class:LinuxFramebufferDevice	typeref:typename:bool	signature:()
@@ -1009,6 +1042,7 @@ write_index_	include/videoFile/RtspVideoReader.hpp	/^    int write_index_;      
 ~BufferHandle	source/buffer/BufferHandle.cpp	/^BufferHandle::~BufferHandle() {$/;"	f	language:C++	class:BufferHandle	signature:()
 ~BufferPool	source/buffer/BufferPool.cpp	/^BufferPool::~BufferPool() {$/;"	f	language:C++	class:BufferPool	signature:()
 ~CMAAllocator	source/buffer/BufferAllocator.cpp	/^CMAAllocator::~CMAAllocator() {$/;"	f	language:C++	class:CMAAllocator	signature:()
+~DMAHeapAllocator	source/buffer/DMAHeapAllocator.cpp	/^DMAHeapAllocator::~DMAHeapAllocator() {$/;"	f	language:C++	class:DMAHeapAllocator	signature:()
 ~DecodedFrame	include/decoder/IDecoder.hpp	/^    ~DecodedFrame() {$/;"	f	language:C++	struct:DecodedFrame	signature:()
 ~Decoder	source/decoder/Decoder.cpp	/^Decoder::~Decoder() {$/;"	f	language:C++	class:Decoder	signature:()
 ~FFmpegDecoder	source/decoder/FFmpegDecoder.cpp	/^FFmpegDecoder::~FFmpegDecoder() {$/;"	f	language:C++	class:FFmpegDecoder	signature:()
@@ -1018,6 +1052,7 @@ write_index_	include/videoFile/RtspVideoReader.hpp	/^    int write_index_;      
 ~MmapVideoReader	source/videoFile/MmapVideoReader.cpp	/^MmapVideoReader::~MmapVideoReader() {$/;"	f	language:C++	class:MmapVideoReader	signature:()
 ~PerformanceMonitor	source/monitor/PerformanceMonitor.cpp	/^PerformanceMonitor::~PerformanceMonitor() {$/;"	f	language:C++	class:PerformanceMonitor	signature:()
 ~RtspVideoReader	source/videoFile/RtspVideoReader.cpp	/^RtspVideoReader::~RtspVideoReader() {$/;"	f	language:C++	class:RtspVideoReader	signature:()
+~TacoSysAllocator	source/buffer/TacoSysAllocator.cpp	/^TacoSysAllocator::~TacoSysAllocator() {$/;"	f	language:C++	class:TacoSysAllocator	signature:()
 ~Timer	source/monitor/Timer.cpp	/^Timer::~Timer() {$/;"	f	language:C++	class:Timer	signature:()
 ~VideoFile	source/videoFile/VideoFile.cpp	/^VideoFile::~VideoFile() {$/;"	f	language:C++	class:VideoFile	signature:()
 ~VideoProducer	source/producer/VideoProducer.cpp	/^VideoProducer::~VideoProducer() {$/;"	f	language:C++	class:VideoProducer	signature:()

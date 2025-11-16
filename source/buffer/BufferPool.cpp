@@ -9,7 +9,53 @@
 #include <chrono>
 
 // ============================================================
-// 构造函数实现
+// 静态工厂方法实现（推荐使用）
+// ============================================================
+
+std::unique_ptr<BufferPool> BufferPool::CreatePreallocated(
+    int count, 
+    size_t size,
+    BufferMemoryAllocatorType allocator_type,
+    const std::string& name,
+    const std::string& category)
+{
+    return std::unique_ptr<BufferPool>(
+        new BufferPool(count, size, allocator_type, name, category)
+    );
+}
+
+std::unique_ptr<BufferPool> BufferPool::CreateFromExternal(
+    const std::vector<ExternalBufferInfo>& external_buffers,
+    const std::string& name,
+    const std::string& category)
+{
+    return std::unique_ptr<BufferPool>(
+        new BufferPool(external_buffers, name, category)
+    );
+}
+
+std::unique_ptr<BufferPool> BufferPool::CreateFromHandles(
+    std::vector<std::unique_ptr<BufferHandle>> handles,
+    const std::string& name,
+    const std::string& category)
+{
+    return std::unique_ptr<BufferPool>(
+        new BufferPool(std::move(handles), name, category)
+    );
+}
+
+std::unique_ptr<BufferPool> BufferPool::CreateDynamic(
+    const std::string& name,
+    const std::string& category,
+    size_t max_capacity)
+{
+    return std::unique_ptr<BufferPool>(
+        new BufferPool(name, category, max_capacity)
+    );
+}
+
+// ============================================================
+// 构造函数实现（Private - 仅通过静态工厂方法调用）
 // ============================================================
 
 BufferPool::BufferPool(int count, size_t size, BufferMemoryAllocatorType allocator_type,
