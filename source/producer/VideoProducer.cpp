@@ -8,6 +8,7 @@
 
 VideoProducer::VideoProducer(BufferPool& pool)
     : buffer_pool_(pool)
+    , buffer_pool_ptr_(nullptr)
     , running_(false)
     , produced_frames_(0)
     , skipped_frames_(0)
@@ -72,9 +73,22 @@ bool VideoProducer::start(const Config& config) {
         return false;
     }
     
-    // ✨ 注入BufferPool（统一处理，所有Reader都调用）
-    // 特殊Reader（如RTSP）会利用此优化，普通Reader会忽略
-    video_file_->setBufferPool(&buffer_pool_);
+    // 🎯 确定工作 BufferPool
+    void* reader_output_pool = video_file_->getOutputBufferPool();
+    if (reader_output_pool) {
+        // Reader 有自己的 BufferPool（如 TacoH264DecoderReader）
+        buffer_pool_ptr_ = static_cast<BufferPool*>(reader_output_pool);
+        printf("   ✅ Using Reader's output BufferPool: '%s'\n", 
+               buffer_pool_ptr_->getName().c_str());
+    } else {
+        // Reader 使用外部 BufferPool（如 MmapVideoReader）
+        buffer_pool_ptr_ = &buffer_pool_;
+        printf("   ✅ Using external BufferPool: '%s'\n", 
+               buffer_pool_ptr_->getName().c_str());
+        
+        // 注入 BufferPool（用于特殊 Reader，如 RTSP）
+        video_file_->setBufferPool(&buffer_pool_);
+    }
     
     total_frames_ = video_file_->getTotalFrames();
     size_t frame_size = video_file_->getFrameSize();
@@ -82,29 +96,34 @@ bool VideoProducer::start(const Config& config) {
     printf("   Total frames: %d\n", total_frames_);
     printf("   Frame size: %zu bytes (%.2f MB)\n", frame_size, frame_size / (1024.0 * 1024.0));
     
-    // 验证/设置帧大小
-    size_t pool_buffer_size = buffer_pool_.getBufferSize();
-    
-    if (pool_buffer_size == 0) {
-        // 动态注入模式：设置 buffer_size
-        printf("   Dynamic injection mode detected, setting buffer size...\n");
-        if (!buffer_pool_.setBufferSize(frame_size)) {
-            setError("Failed to set buffer size for dynamic injection mode");
+    // 🎯 验证/设置帧大小（只对外部 BufferPool 需要）
+    if (buffer_pool_ptr_ == &buffer_pool_) {
+        size_t pool_buffer_size = buffer_pool_.getBufferSize();
+        
+        if (pool_buffer_size == 0) {
+            // 动态注入模式：设置 buffer_size
+            printf("   Dynamic injection mode detected, setting buffer size...\n");
+            if (!buffer_pool_.setBufferSize(frame_size)) {
+                setError("Failed to set buffer size for dynamic injection mode");
+                video_file_.reset();
+                return false;
+            }
+        } else if (frame_size != pool_buffer_size) {
+            // 普通模式：验证大小匹配
+            char error_msg[256];
+            snprintf(error_msg, sizeof(error_msg),
+                    "Frame size mismatch: video=%zu, buffer=%zu",
+                    frame_size, pool_buffer_size);
+            setError(error_msg);
             video_file_.reset();
             return false;
+        } else {
+            // 大小匹配
+            printf("   Frame size matches BufferPool size: %zu bytes\n", frame_size);
         }
-    } else if (frame_size != pool_buffer_size) {
-        // 普通模式：验证大小匹配
-        char error_msg[256];
-        snprintf(error_msg, sizeof(error_msg),
-                "Frame size mismatch: video=%zu, buffer=%zu",
-                frame_size, pool_buffer_size);
-        setError(error_msg);
-        video_file_.reset();
-        return false;
     } else {
-        // 大小匹配
-        printf("   Frame size matches BufferPool size: %zu bytes\n", frame_size);
+        // Reader's BufferPool（零拷贝模式），不需要验证大小
+        printf("   Using Reader's BufferPool (zero-copy mode), no size validation needed\n");
     }
     
     // 重置状态
@@ -217,13 +236,8 @@ void VideoProducer::printStats() const {
 // ============================================================
 
 void VideoProducer::producerThreadFunc(int thread_id) {
-    printf("🚀 Thread #%d: Starting producer loop\n", thread_id);
-    
-    // 🎯 查询 Reader 能力（只查询一次）
-    bool needs_external_buffer = video_file_->requiresExternalBuffer();
-    printf("   Thread #%d: Reader mode: %s\n", thread_id,
-           needs_external_buffer ? "External Buffer (Pre-allocated)" 
-                                 : "Self-Inject (Dynamic)");
+    printf("🚀 Thread #%d: Starting unified producer loop\n", thread_id);
+    printf("   Working BufferPool: '%s'\n", buffer_pool_ptr_->getName().c_str());
     
     int thread_produced = 0;
     int thread_skipped = 0;
@@ -252,52 +266,32 @@ void VideoProducer::producerThreadFunc(int thread_id) {
             }
         }
         
-        // 3. 根据 Reader 能力选择不同的流程
-        bool read_success = false;
-        
-        if (needs_external_buffer) {
-            // ============ 流程 A：预分配模式 ============
-            // 获取空闲 buffer（循环等待直到成功）
-            Buffer* buffer = nullptr;
-            while (running_ && buffer == nullptr) {
-                buffer = buffer_pool_.acquireFree(true, 100);  // 100ms 超时
-                if (buffer == nullptr && running_) {
-                    // 超时但仍在运行，继续等待
-                    // printf("   [Thread #%d] Waiting for free buffer...\n", thread_id);
-                }
+        // 3. 🎯 统一的流程：从工作 BufferPool 获取 buffer
+        Buffer* buffer = nullptr;
+        while (running_ && buffer == nullptr) {
+            buffer = buffer_pool_ptr_->acquireFree(true, 100);  // 100ms 超时
+            if (buffer == nullptr && running_) {
+                // 超时但仍在运行，继续等待
+                // printf("   [Thread #%d] Waiting for free buffer...\n", thread_id);
             }
-            
-            // 检查是否因为停止信号退出循环
-            if (!running_) {
-                break;
-            }
-            
-            // 读取帧数据到 buffer
-            read_success = video_file_->readFrameAtThreadSafe(
-                frame_index, buffer->getVirtualAddress(), buffer->size());
-            
-            if (read_success) {
-                // 读取成功，提交填充好的 buffer
-                buffer_pool_.submitFilled(buffer);
-            } else {
-                // 读取失败，归还 buffer 到 free 队列
-                // 注意：releaseFilled 会把 buffer 归还到 free 队列（循环利用）
-                buffer_pool_.releaseFilled(buffer);
-            }
-            
-        } else {
-            // ============ 流程 B：动态注入模式 ============
-            // 直接读取，Reader 内部会注入 buffer
-            // 注意：对于动态注入模式，readFrameAtThreadSafe 的后两个参数会被忽略
-            read_success = video_file_->readFrameAtThreadSafe(
-                frame_index, nullptr, 0);
-            
-            // Reader 内部已经 injectFilledBuffer()，无需手动提交
         }
         
-        // 4. 处理读取结果
-        if (!read_success) {
-            // 读取失败
+        // 检查是否因为停止信号退出循环
+        if (!running_) {
+            break;
+        }
+        
+        // 4. 🎯 统一的接口：调用 Reader 填充 buffer
+        bool read_success = video_file_->readFrame(frame_index, buffer);
+        
+        // 5. 🎯 统一的处理：提交或归还
+        if (read_success) {
+            buffer_pool_ptr_->submitFilled(buffer);
+            produced_frames_.fetch_add(1);
+            thread_produced++;
+            consecutive_failures = 0;  // 重置失败计数
+        } else {
+            buffer_pool_ptr_->releaseFilled(buffer);
             skipped_frames_.fetch_add(1);
             thread_skipped++;
             
@@ -314,17 +308,10 @@ void VideoProducer::producerThreadFunc(int thread_id) {
                 setError(error_msg);
                 break;
             }
-            continue;
         }
         
-        // 5. 读取成功，重置失败计数
-        consecutive_failures = 0;
-        
-        produced_frames_.fetch_add(1);
-        thread_produced++;
-        
         // 定期打印进度（每100帧）
-        if (thread_produced % 100 == 0) {
+        if (thread_produced % 100 == 0 && thread_produced > 0) {
             printf("   [Thread #%d] Produced %d frames (%.1f fps)\n",
                    thread_id, thread_produced, getAverageFPS());
         }

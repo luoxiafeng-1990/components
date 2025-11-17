@@ -1,5 +1,6 @@
 #include "../../include/decoder/DecoderFactory.hpp"
 #include "../../include/decoder/FFmpegDecoder.hpp"
+#include "../../include/decoder/TacoHardwareDecoder.hpp"
 #include <cstring>
 #include <strings.h>  // for strcasecmp
 
@@ -18,6 +19,9 @@ std::unique_ptr<IDecoder> DecoderFactory::createDecoder(DecoderType type) {
             // TODO: 实现硬件解码器
             // return std::make_unique<HardwareDecoder>();
             return nullptr;
+            
+        case DecoderType::TACO_HARDWARE:
+            return std::make_unique<TacoHardwareDecoder>();
             
         case DecoderType::VAAPI:
             // TODO: 实现VA-API解码器
@@ -55,6 +59,8 @@ std::unique_ptr<IDecoder> DecoderFactory::createDecoderByName(const char* type_n
         return createDecoder(DecoderType::FFMPEG);
     } else if (strcasecmp(type_name, "hardware") == 0 || strcasecmp(type_name, "hw") == 0) {
         return createDecoder(DecoderType::HARDWARE);
+    } else if (strcasecmp(type_name, "taco") == 0 || strcasecmp(type_name, "taco_hardware") == 0 || strcasecmp(type_name, "h264_taco") == 0) {
+        return createDecoder(DecoderType::TACO_HARDWARE);
     } else if (strcasecmp(type_name, "vaapi") == 0) {
         return createDecoder(DecoderType::VAAPI);
     } else if (strcasecmp(type_name, "nvdec") == 0 || strcasecmp(type_name, "nvidia") == 0) {
@@ -77,6 +83,9 @@ bool DecoderFactory::isDecoderAvailable(DecoderType type) {
         case DecoderType::FFMPEG:
             return true;  // FFmpeg总是可用
             
+        case DecoderType::TACO_HARDWARE:
+            return true;  // TacoHardwareDecoder已实现
+            
         case DecoderType::HARDWARE:
         case DecoderType::VAAPI:
         case DecoderType::NVDEC:
@@ -98,6 +107,8 @@ const char* DecoderFactory::getDecoderTypeName(DecoderType type) {
             return "FFMPEG";
         case DecoderType::HARDWARE:
             return "HARDWARE";
+        case DecoderType::TACO_HARDWARE:
+            return "TACO_HARDWARE";
         case DecoderType::VAAPI:
             return "VAAPI";
         case DecoderType::NVDEC:
@@ -120,6 +131,7 @@ DecoderFactory::DecoderType DecoderFactory::getRecommendedDecoderType() {
     // 目前返回FFmpeg软件解码
     return DecoderType::FFMPEG;
 }
+
 
 
 

@@ -142,6 +142,9 @@ private:
     // BufferPool 引用（依赖注入，不拥有所有权）
     BufferPool& buffer_pool_;
     
+    // 🆕 工作 BufferPool 指针（可能指向 buffer_pool_ 或 Reader 内部的 BufferPool）
+    BufferPool* buffer_pool_ptr_;
+    
     // 视频文件（多线程共享）
     std::shared_ptr<VideoFile> video_file_;
     

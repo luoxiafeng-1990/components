@@ -141,6 +141,11 @@ public:
     bool readFrameAt(int frame_index, void* dest_buffer, size_t buffer_size);
     bool readFrameAtThreadSafe(int frame_index, void* dest_buffer, size_t buffer_size) const;
     
+    /**
+     * 🆕 读取并填充一帧（统一接口）
+     */
+    bool readFrame(int frame_index, Buffer* buffer);
+    
     // ============ 导航操作（转发） ============
     
     bool seek(int frame_index);
@@ -178,6 +183,11 @@ public:
      * @param pool BufferPool指针
      */
     void setBufferPool(void* pool);
+    
+    /**
+     * 🆕 获取输出 BufferPool（如果有）
+     */
+    void* getOutputBufferPool() const;
 };
 
 #endif // VIDEOFILE_HPP

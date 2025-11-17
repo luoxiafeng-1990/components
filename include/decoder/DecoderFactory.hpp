@@ -30,6 +30,7 @@ public:
         AUTO,           // 自动选择（优先硬件，回退软件）
         FFMPEG,         // FFmpeg软件解码
         HARDWARE,       // 通用硬件加速解码
+        TACO_HARDWARE,  // Taco FPGA硬件解码（h264_taco）
         VAAPI,          // VA-API硬件解码（Intel/AMD）
         NVDEC,          // NVIDIA硬件解码
         VIDEOTOOLBOX,   // Apple VideoToolbox（macOS/iOS）

@@ -128,6 +128,14 @@ bool VideoFile::readFrameAtThreadSafe(int frame_index, void* dest_buffer, size_t
     return reader_->readFrameAtThreadSafe(frame_index, dest_buffer, buffer_size);
 }
 
+bool VideoFile::readFrame(int frame_index, Buffer* buffer) {
+    if (!reader_) {
+        printf("❌ ERROR: Reader not initialized\n");
+        return false;
+    }
+    return reader_->readFrame(frame_index, buffer);
+}
+
 // ============ 导航操作（门面转发） ============
 
 bool VideoFile::seek(int frame_index) {
@@ -218,5 +226,12 @@ void VideoFile::setBufferPool(void* pool) {
     if (reader_) {
         reader_->setBufferPool(pool);
     }
+}
+
+void* VideoFile::getOutputBufferPool() const {
+    if (reader_) {
+        return reader_->getOutputBufferPool();
+    }
+    return nullptr;
 }
 

@@ -124,10 +124,10 @@ BufferHandle	source/buffer/BufferHandle.cpp	/^BufferHandle::BufferHandle(void* v
 BufferManager	include/buffer/BufferManager.hpp	/^class BufferManager {$/;"	c	language:C++
 BufferMemoryAllocatorType	include/buffer/BufferPool.hpp	/^enum class BufferMemoryAllocatorType {$/;"	g	language:C++
 BufferPool	include/buffer/BufferPool.hpp	/^class BufferPool {$/;"	c	language:C++
-BufferPool	source/buffer/BufferPool.cpp	/^BufferPool::BufferPool(const std::string name, const std::string category, size_t max_capacity)$/;"	f	language:C++	class:BufferPool	signature:(const std::string name,const std::string category,size_t max_capacity)
-BufferPool	source/buffer/BufferPool.cpp	/^BufferPool::BufferPool(const std::vector<ExternalBufferInfo>& external_buffers,$/;"	f	language:C++	class:BufferPool	signature:(const std::vector<ExternalBufferInfo> & external_buffers,const std::string name,const std::string category)
-BufferPool	source/buffer/BufferPool.cpp	/^BufferPool::BufferPool(int count, size_t size, BufferMemoryAllocatorType allocator_type,$/;"	f	language:C++	class:BufferPool	signature:(int count,size_t size,BufferMemoryAllocatorType allocator_type,const std::string name,const std::string category)
-BufferPool	source/buffer/BufferPool.cpp	/^BufferPool::BufferPool(std::vector<std::unique_ptr<BufferHandle>> handles,$/;"	f	language:C++	class:BufferPool	signature:(std::vector<std::unique_ptr<BufferHandle>> handles,const std::string name,const std::string category)
+BufferPool	source/buffer/BufferPool.cpp	/^BufferPool::BufferPool(const std::string& name, const std::string& category, size_t max_capacity/;"	f	language:C++	class:BufferPool	signature:(const std::string & name,const std::string & category,size_t max_capacity)
+BufferPool	source/buffer/BufferPool.cpp	/^BufferPool::BufferPool(const std::vector<ExternalBufferInfo>& external_buffers,$/;"	f	language:C++	class:BufferPool	signature:(const std::vector<ExternalBufferInfo> & external_buffers,const std::string & name,const std::string & category)
+BufferPool	source/buffer/BufferPool.cpp	/^BufferPool::BufferPool(int count, size_t size, BufferMemoryAllocatorType allocator_type,$/;"	f	language:C++	class:BufferPool	signature:(int count,size_t size,BufferMemoryAllocatorType allocator_type,const std::string & name,const std::string & category)
+BufferPool	source/buffer/BufferPool.cpp	/^BufferPool::BufferPool(std::vector<std::unique_ptr<BufferHandle>> handles,$/;"	f	language:C++	class:BufferPool	signature:(std::vector<std::unique_ptr<BufferHandle>> handles,const std::string & name,const std::string & category)
 BufferPool 改造	source/buffer/buffer_design.md	/^#### BufferPool 改造$/;"	t	language:Markdown
 BufferPool 架构设计文档	source/buffer/buffer_design.md	/^# BufferPool 架构设计文档$/;"	c	language:Markdown
 BufferPoolRegistry	include/buffer/BufferPoolRegistry.hpp	/^class BufferPoolRegistry {$/;"	c	language:C++

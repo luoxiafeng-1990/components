@@ -62,9 +62,11 @@ public:
     const char* getLastError() const override;
     int getLastFFmpegError() const override;
 
-private:
-    // ============ FFmpeg 上下文 ============
+protected:
+    // ============ FFmpeg 上下文（子类可访问）============
     AVCodecContext* codec_ctx_;      // 解码器上下文
+    
+private:
     const AVCodec* codec_;           // 编解码器
     SwsContext* sws_ctx_;            // 像素格式转换上下文（如果需要）
     

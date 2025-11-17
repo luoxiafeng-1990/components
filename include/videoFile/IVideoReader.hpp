@@ -116,6 +116,31 @@ public:
      */
     virtual bool readFrameAtThreadSafe(int frame_index, void* dest_buffer, size_t buffer_size) const = 0;
     
+    /**
+     * 🆕 读取并填充一帧（统一接口，推荐）
+     * @param frame_index 帧索引
+     * @param buffer 输出 Buffer（从 BufferPool 获取）
+     * @return 成功返回 true
+     * 
+     * 实现要求：
+     * - MmapVideoReader: 读取数据到 buffer->data()
+     * - TacoH264DecoderReader: 解码并设置 DMA 到 buffer->id()
+     * - RtspVideoReader: 解码并填充 buffer 元数据
+     * 
+     * 注意：
+     * - buffer 由调用者（VideoProducer）从 BufferPool 获取
+     * - 实现者只负责填充数据或设置元数据
+     * - 成功返回 true，失败返回 false（buffer 由调用者归还）
+     * 
+     * 默认实现：调用 readFrameAtThreadSafe（向后兼容）
+     */
+    virtual bool readFrame(int frame_index, Buffer* buffer) {
+        if (!buffer || !buffer->data()) {
+            return false;
+        }
+        return readFrameAtThreadSafe(frame_index, buffer->data(), buffer->size());
+    }
+    
     // ============ 导航操作 ============
     
     /**
@@ -222,6 +247,21 @@ public:
         // 默认实现：什么都不做
         // 普通Reader（Mmap、IoUring）不需要BufferPool
         (void)pool;
+    }
+    
+    /**
+     * 🆕 获取输出 BufferPool（如果有）
+     * @return BufferPool* 如果 Reader 内部管理 BufferPool，返回指针；否则返回 nullptr
+     * 
+     * 使用场景：
+     * - TacoH264DecoderReader 返回内部创建的 overlay BufferPool
+     * - MmapVideoReader 返回 nullptr（使用外部 BufferPool）
+     * - VideoProducer 通过此方法获取 Reader 的 BufferPool（如果有）
+     * 
+     * 默认实现：返回 nullptr（普通 Reader 没有内部 BufferPool）
+     */
+    virtual void* getOutputBufferPool() const {
+        return nullptr;
     }
 };
 
