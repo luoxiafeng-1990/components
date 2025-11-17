@@ -1,6 +1,6 @@
 #include "../../include/videoFile/RtspVideoReader.hpp"
 #include "../../include/buffer/BufferPool.hpp"
-#include "../../include/buffer/BufferHandle.hpp"
+#include "../../include/buffer/NormalAllocator.hpp"
 #include <stdio.h>
 #include <string.h>
 #include <chrono>
@@ -421,31 +421,11 @@ void RtspVideoReader::decodeThreadFunc() {
         
         if (buffer_pool_) {
             // ✨ 零拷贝模式：直接注入BufferPool
-            
-            // 分配目标buffer（临时，用于转换）
-            size_t frame_size = width_ * height_ * getBytesPerPixel();
-            std::unique_ptr<uint8_t[]> temp_buffer(new uint8_t[frame_size]);
-            
-            // 转换格式到临时buffer
-            uint8_t* dest_data[1] = { temp_buffer.get() };
-            int dest_linesize[1] = { width_ * getBytesPerPixel() };
-            
-            sws_scale(sws_ctx_,
-                     frame->data, frame->linesize, 0, frame->height,
-                     dest_data, dest_linesize);
-            
-            // 包装为BufferHandle并注入
-            auto handle = std::make_unique<BufferHandle>(
-                temp_buffer.release(),  // 转移所有权
-                0,  // 物理地址（暂时不可用）
-                frame_size,
-                [](void* ptr) {
-                    // Deleter: 释放临时buffer
-                    delete[] reinterpret_cast<uint8_t*>(ptr);
-                }
-            );
-            
-            buffer_pool_->injectFilledBuffer(std::move(handle));
+            // TODO: 实现 NormalAllocator 动态注入逻辑
+            // 临时方案：使用传统模式
+            printf("⚠️  Buffer pool injection not yet implemented with new allocator\n");
+            printf("   Falling back to internal buffer mode\n");
+            storeToInternalBuffer(frame);
             decoded_frames_++;
             
         } else {

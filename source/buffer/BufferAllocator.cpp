@@ -1,313 +1,189 @@
 #include "../../include/buffer/BufferAllocator.hpp"
 #include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <errno.h>
-#include <stdexcept>
-#include <algorithm>
 
-// Linux 特定头文件
-#ifdef __linux__
-#include <fcntl.h>
-#include <unistd.h>
-#include <sys/mman.h>
-#include <sys/ioctl.h>
-
-// DMA-BUF 相关头文件
-#if __has_include(<linux/dma-buf.h>)
-#include <linux/dma-buf.h>
-#endif
-
-#if __has_include(<linux/dma-heap.h>)
-#include <linux/dma-heap.h>
-#define HAS_DMA_HEAP 1
-#else
-#define HAS_DMA_HEAP 0
-// 如果系统不支持，定义必要的结构体
-struct dma_heap_allocation_data {
-    unsigned long len;
-    unsigned int fd;
-    unsigned int fd_flags;
-    unsigned long heap_flags;
-};
-#define DMA_HEAP_IOCTL_ALLOC _IOWR('H', 0x0, struct dma_heap_allocation_data)
-#endif
-
-#endif  // __linux__
+// 静态成员定义
+std::unordered_map<Buffer*, BufferAllocator*> BufferAllocator::buffer_ownership_;
+std::mutex BufferAllocator::ownership_mutex_;
 
 // ============================================================
-// NormalAllocator 实现
+// 批量分配实现
 // ============================================================
 
-void* NormalAllocator::allocate(size_t size, uint64_t* out_phys_addr) {
-    // 使用 posix_memalign 分配对齐的内存（4KB 对齐）
-    void* addr = nullptr;
-    int ret = posix_memalign(&addr, 4096, size);
-    if (ret != 0) {
-        printf("❌ posix_memalign failed: %s\n", strerror(ret));
+std::unique_ptr<BufferPool> BufferAllocator::allocatePoolWithBuffers(
+    int count,
+    size_t size,
+    const std::string& name,
+    const std::string& category)
+{
+    printf("\n🏭 BufferAllocator: Creating pool '%s' with %d buffers...\n",
+           name.c_str(), count);
+    
+    // 1. 创建空池
+    auto pool = BufferPool::CreateEmpty(name, category);
+    if (!pool) {
+        printf("❌ Failed to create empty pool\n");
         return nullptr;
     }
     
-    // 清零（可选，根据需求）
-    memset(addr, 0, size);
-    
-    // 尝试获取物理地址
-    if (out_phys_addr) {
-        *out_phys_addr = getPhysicalAddress(addr);
-        if (*out_phys_addr == 0) {
-            printf("⚠️  Warning: Failed to get physical address for normal memory\n");
-        }
-    }
-    
-    return addr;
-}
-
-void NormalAllocator::deallocate(void* ptr, size_t size) {
-    (void)size;  // 普通内存不需要 size
-    if (ptr) {
-        free(ptr);
-    }
-}
-
-uint64_t NormalAllocator::getPhysicalAddress(void* virt_addr) {
-#ifdef __linux__
-    // 通过 /proc/self/pagemap 获取物理地址
-    int fd = open("/proc/self/pagemap", O_RDONLY);
-    if (fd < 0) {
-        // 权限不足或系统不支持
-        return 0;
-    }
-    
-    uintptr_t virt = reinterpret_cast<uintptr_t>(virt_addr);
-    size_t page_size = sysconf(_SC_PAGE_SIZE);
-    uint64_t page_offset = virt % page_size;
-    uint64_t pfn_item_offset = (virt / page_size) * sizeof(uint64_t);
-    
-    uint64_t pfn_item;
-    if (lseek(fd, pfn_item_offset, SEEK_SET) < 0) {
-        close(fd);
-        return 0;
-    }
-    
-    if (read(fd, &pfn_item, sizeof(uint64_t)) != sizeof(uint64_t)) {
-        close(fd);
-        return 0;
-    }
-    
-    close(fd);
-    
-    // 检查页是否存在于物理内存
-    if ((pfn_item & (1ULL << 63)) == 0) {
-        // 页未分配或已换出
-        return 0;
-    }
-    
-    // 提取物理页帧号 (PFN)
-    uint64_t pfn = pfn_item & ((1ULL << 55) - 1);
-    uint64_t phys_addr = (pfn * page_size) + page_offset;
-    
-    return phys_addr;
-#else
-    // 非 Linux 系统不支持
-    (void)virt_addr;
-    return 0;
-#endif
-}
-
-// ============================================================
-// CMAAllocator 实现
-// ============================================================
-
-CMAAllocator::CMAAllocator() {
-    // 构造时可以检测系统是否支持 DMA-BUF
-#ifdef __linux__
-    printf("🔧 Initializing CMAAllocator...\n");
-#if HAS_DMA_HEAP
-    printf("   DMA-BUF heap support: ✅ Available\n");
-#else
-    printf("   DMA-BUF heap support: ⚠️  Headers not found (will try runtime detection)\n");
-#endif
-#else
-    printf("⚠️  Warning: CMAAllocator not supported on this platform\n");
-#endif
-}
-
-CMAAllocator::~CMAAllocator() {
-    // 清理所有 DMA buffer
-    for (auto& info : dma_buffers_) {
-        if (info.virt_addr) {
-            munmap(info.virt_addr, info.size);
-        }
-        if (info.fd >= 0) {
-            close(info.fd);
-        }
-    }
-    dma_buffers_.clear();
-}
-
-void* CMAAllocator::allocate(size_t size, uint64_t* out_phys_addr) {
-#ifdef __linux__
-    int dma_fd = -1;
-    uint64_t phys_addr = 0;
-    
-    void* virt_addr = allocateDmaBuf(size, &dma_fd, &phys_addr);
-    
-    if (virt_addr) {
-        // 保存映射信息
-        dma_buffers_.push_back({virt_addr, dma_fd, size});
-        
-        if (out_phys_addr) {
-            *out_phys_addr = phys_addr;
+    // 2. 批量创建 Buffer 并注入
+    for (int i = 0; i < count; i++) {
+        Buffer* buffer = createBuffer(i, size);
+        if (!buffer) {
+            printf("❌ Failed to create buffer #%d\n", i);
+            // 失败：清理已分配的 buffer
+            cleanupPool(pool.get());
+            return nullptr;
         }
         
-        printf("✅ CMA buffer allocated: virt=%p, phys=0x%lx, size=%zu, fd=%d\n",
-               virt_addr, phys_addr, size, dma_fd);
-    }
-    
-    return virt_addr;
-#else
-    // 非 Linux 系统不支持
-    (void)size;
-    (void)out_phys_addr;
-    printf("❌ ERROR: CMA allocation not supported on this platform\n");
-    return nullptr;
-#endif
-}
-
-void CMAAllocator::deallocate(void* ptr, size_t size) {
-    if (!ptr) return;
-    
-    // 查找对应的 DMA buffer 信息
-    auto it = std::find_if(dma_buffers_.begin(), dma_buffers_.end(),
-                          [ptr](const DmaBufferInfo& info) {
-                              return info.virt_addr == ptr;
-                          });
-    
-    if (it != dma_buffers_.end()) {
-        // 找到了，释放
-        munmap(it->virt_addr, it->size);
-        if (it->fd >= 0) {
-            close(it->fd);
+        // 3. 通过辅助方法添加到 pool 的 free 队列
+        if (!addBufferToPoolQueue(pool.get(), buffer, QueueType::FREE)) {
+            printf("❌ Failed to add buffer #%d to pool\n", i);
+            deallocateBuffer(buffer);
+            cleanupPool(pool.get());
+            return nullptr;
         }
-        dma_buffers_.erase(it);
-        printf("🧹 CMA buffer deallocated: %p\n", ptr);
-    } else {
-        // 没找到，但仍然尝试释放
-        munmap(ptr, size);
-        printf("⚠️  Warning: CMA buffer %p not found in registry, forced unmap\n", ptr);
-    }
-}
-
-int CMAAllocator::getDmaBufFd(void* ptr) const {
-    auto it = std::find_if(dma_buffers_.begin(), dma_buffers_.end(),
-                          [ptr](const DmaBufferInfo& info) {
-                              return info.virt_addr == ptr;
-                          });
-    
-    if (it != dma_buffers_.end()) {
-        return it->fd;
+        
+        // 4. 记录所有权
+        registerBufferOwnership(buffer, this);
+        
+        printf("   ✅ Buffer #%d created: virt=%p, phys=0x%lx, size=%zu\n",
+               i, buffer->getVirtualAddress(), buffer->getPhysicalAddress(), size);
     }
     
-    return -1;
-}
-
-void* CMAAllocator::allocateDmaBuf(size_t size, int* out_fd, uint64_t* out_phys_addr) {
-#ifdef __linux__
-    // 尝试打开 DMA heap 设备
-    const char* heap_paths[] = {
-        "/dev/dma_heap/linux,cma",   // CMA heap
-        "/dev/dma_heap/system",      // System heap
-        "/dev/ion",                  // 旧版 ION（Android）
-    };
+    printf("✅ BufferPool '%s' created with %d buffers by allocator\n", 
+           name.c_str(), count);
     
-    int heap_fd = -1;
-    const char* used_path = nullptr;
-    
-    for (const char* path : heap_paths) {
-        heap_fd = open(path, O_RDWR);
-        if (heap_fd >= 0) {
-            used_path = path;
-            break;
-        }
-    }
-    
-    if (heap_fd < 0) {
-        printf("❌ Failed to open DMA heap device (tried %zu paths)\n", 
-               sizeof(heap_paths) / sizeof(heap_paths[0]));
-        return nullptr;
-    }
-    
-    printf("   📂 Opened DMA heap: %s\n", used_path);
-    
-    // 分配 DMA buffer
-    struct dma_heap_allocation_data heap_data;
-    memset(&heap_data, 0, sizeof(heap_data));
-    heap_data.len = size;
-    heap_data.fd_flags = O_RDWR | O_CLOEXEC;
-    heap_data.heap_flags = 0;
-    
-    if (ioctl(heap_fd, DMA_HEAP_IOCTL_ALLOC, &heap_data) < 0) {
-        printf("❌ DMA_HEAP_IOCTL_ALLOC failed: %s\n", strerror(errno));
-        close(heap_fd);
-        return nullptr;
-    }
-    
-    *out_fd = heap_data.fd;
-    close(heap_fd);  // heap_fd 可以关闭，DMA buffer fd 保持打开
-    
-    // mmap DMA buffer 到用户空间
-    void* virt_addr = mmap(NULL, size, PROT_READ | PROT_WRITE, 
-                           MAP_SHARED, *out_fd, 0);
-    if (virt_addr == MAP_FAILED) {
-        printf("❌ mmap DMA buffer failed: %s\n", strerror(errno));
-        close(*out_fd);
-        *out_fd = -1;
-        return nullptr;
-    }
-    
-    // 获取物理地址
-    if (out_phys_addr) {
-        *out_phys_addr = getPhysicalAddress(virt_addr);
-        if (*out_phys_addr == 0) {
-            printf("⚠️  Warning: Failed to get physical address for CMA buffer\n");
-        }
-    }
-    
-    return virt_addr;
-#else
-    // 非 Linux 系统
-    (void)size;
-    (void)out_fd;
-    (void)out_phys_addr;
-    return nullptr;
-#endif
-}
-
-uint64_t CMAAllocator::getPhysicalAddress(void* virt_addr) {
-    // 复用 NormalAllocator 的实现
-    NormalAllocator normal;
-    return normal.getPhysicalAddress(virt_addr);
+    return pool;
 }
 
 // ============================================================
-// ExternalAllocator 实现
+// 单个注入实现
 // ============================================================
 
-void* ExternalAllocator::allocate(size_t size, uint64_t* out_phys_addr) {
-    (void)size;
-    (void)out_phys_addr;
-    throw std::logic_error("ExternalAllocator::allocate() should not be called. "
-                          "External buffers must be provided by user.");
+Buffer* BufferAllocator::injectBufferToPool(
+    size_t size,
+    BufferPool* pool,
+    QueueType queue)
+{
+    if (!pool) {
+        printf("❌ BufferAllocator::injectBufferToPool: pool is nullptr\n");
+        return nullptr;
+    }
+    
+    // 1. 生成 Buffer ID（从 pool 的当前 buffer 数量）
+    uint32_t id = pool->getTotalCount();
+    
+    // 2. 创建 Buffer
+    Buffer* buffer = createBuffer(id, size);
+    if (!buffer) {
+        printf("❌ Failed to create buffer #%u\n", id);
+        return nullptr;
+    }
+    
+    // 3. 通过辅助方法添加到 pool 的指定队列
+    if (!addBufferToPoolQueue(pool, buffer, queue)) {
+        printf("❌ Failed to add buffer #%u to pool '%s'\n", 
+               id, pool->getName().c_str());
+        deallocateBuffer(buffer);
+        return nullptr;
+    }
+    
+    // 4. 记录所有权
+    registerBufferOwnership(buffer, this);
+    
+    printf("✅ Buffer #%u injected to pool '%s' (queue: %s)\n",
+           id, pool->getName().c_str(), 
+           queue == QueueType::FREE ? "FREE" : "FILLED");
+    
+    return buffer;
 }
 
-void ExternalAllocator::deallocate(void* ptr, size_t size) {
-    // 不释放外部内存（由用户管理）
-    (void)ptr;
-    (void)size;
-    // printf("ℹ️  ExternalAllocator::deallocate() called (no-op for external buffer %p)\n", ptr);
+// ============================================================
+// Buffer 移除实现
+// ============================================================
+
+bool BufferAllocator::removeBufferFromPool(Buffer* buffer, BufferPool* pool) {
+    if (!buffer || !pool) {
+        printf("❌ BufferAllocator::removeBufferFromPool: invalid parameters\n");
+        return false;
+    }
+    
+    // 1. 通过辅助方法从 pool 移除（只能移除 free_queue 中的）
+    if (!removeBufferFromPoolInternal(pool, buffer)) {
+        printf("⚠️  Failed to remove buffer #%u from pool '%s' (in use or not in pool)\n",
+               buffer->id(), pool->getName().c_str());
+        return false;
+    }
+    
+    // 2. 销毁 Buffer
+    deallocateBuffer(buffer);
+    
+    // 3. 清除所有权记录
+    unregisterBufferOwnership(buffer);
+    
+    printf("✅ Buffer #%u removed from pool '%s'\n",
+           buffer->id(), pool->getName().c_str());
+    
+    return true;
 }
 
+// ============================================================
+// 辅助方法实现
+// ============================================================
 
+void BufferAllocator::registerBufferOwnership(Buffer* buffer, BufferAllocator* allocator) {
+    std::lock_guard<std::mutex> lock(ownership_mutex_);
+    buffer_ownership_[buffer] = allocator;
+}
 
+void BufferAllocator::unregisterBufferOwnership(Buffer* buffer) {
+    std::lock_guard<std::mutex> lock(ownership_mutex_);
+    buffer_ownership_.erase(buffer);
+}
 
+void BufferAllocator::cleanupPool(BufferPool* pool) {
+    if (!pool) {
+        return;
+    }
+    
+    printf("🧹 Cleaning up pool '%s'...\n", pool->getName().c_str());
+    
+    std::lock_guard<std::mutex> lock(ownership_mutex_);
+    
+    // 找到所有属于此 allocator 的 buffer
+    std::vector<Buffer*> to_remove;
+    for (auto& [buf, alloc] : buffer_ownership_) {
+        if (alloc == this) {
+            to_remove.push_back(buf);
+        }
+    }
+    
+    // 移除并销毁
+    for (Buffer* buf : to_remove) {
+        removeBufferFromPoolInternal(pool, buf);  // 通过辅助方法访问
+        deallocateBuffer(buf);
+        buffer_ownership_.erase(buf);
+    }
+    
+    printf("✅ Cleanup complete: removed %zu buffers\n", to_remove.size());
+}
 
+// ============================================================
+// 友元访问辅助方法实现
+// ============================================================
+
+bool BufferAllocator::addBufferToPoolQueue(BufferPool* pool, Buffer* buffer, QueueType queue) {
+    if (!pool || !buffer) {
+        return false;
+    }
+    // 通过友元关系访问 BufferPool 的私有方法
+    return pool->addBufferToQueue(buffer, queue);
+}
+
+bool BufferAllocator::removeBufferFromPoolInternal(BufferPool* pool, Buffer* buffer) {
+    if (!pool || !buffer) {
+        return false;
+    }
+    // 通过友元关系访问 BufferPool 的私有方法
+    return pool->removeBufferFromPool(buffer);
+}

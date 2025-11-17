@@ -76,7 +76,7 @@ bool VideoProducer::start(const Config& config) {
     // 🎯 确定工作 BufferPool
     void* reader_output_pool = video_file_->getOutputBufferPool();
     if (reader_output_pool) {
-        // Reader 有自己的 BufferPool（如 TacoH264DecoderReader）
+        // Reader 有自己的 BufferPool（如硬件解码器的 overlay pool）
         buffer_pool_ptr_ = static_cast<BufferPool*>(reader_output_pool);
         printf("   ✅ Using Reader's output BufferPool: '%s'\n", 
                buffer_pool_ptr_->getName().c_str());
@@ -96,18 +96,14 @@ bool VideoProducer::start(const Config& config) {
     printf("   Total frames: %d\n", total_frames_);
     printf("   Frame size: %zu bytes (%.2f MB)\n", frame_size, frame_size / (1024.0 * 1024.0));
     
-    // 🎯 验证/设置帧大小（只对外部 BufferPool 需要）
+    // 🎯 验证帧大小（只对外部 BufferPool 需要）
     if (buffer_pool_ptr_ == &buffer_pool_) {
         size_t pool_buffer_size = buffer_pool_.getBufferSize();
         
         if (pool_buffer_size == 0) {
-            // 动态注入模式：设置 buffer_size
-            printf("   Dynamic injection mode detected, setting buffer size...\n");
-            if (!buffer_pool_.setBufferSize(frame_size)) {
-                setError("Failed to set buffer size for dynamic injection mode");
-                video_file_.reset();
-                return false;
-            }
+            // 动态注入模式（RTSP/FFmpeg）：无需验证大小
+            printf("   ⚡ Dynamic injection mode detected (empty pool)\n");
+            printf("   Buffers will be created and injected by Reader/Allocator\n");
         } else if (frame_size != pool_buffer_size) {
             // 普通模式：验证大小匹配
             char error_msg[256];
@@ -119,11 +115,11 @@ bool VideoProducer::start(const Config& config) {
             return false;
         } else {
             // 大小匹配
-            printf("   Frame size matches BufferPool size: %zu bytes\n", frame_size);
+            printf("   ✅ Frame size matches BufferPool size: %zu bytes\n", frame_size);
         }
     } else {
         // Reader's BufferPool（零拷贝模式），不需要验证大小
-        printf("   Using Reader's BufferPool (zero-copy mode), no size validation needed\n");
+        printf("   ⚡ Using Reader's BufferPool (zero-copy mode), no size validation needed\n");
     }
     
     // 重置状态

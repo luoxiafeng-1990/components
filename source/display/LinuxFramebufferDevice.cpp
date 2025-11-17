@@ -1,4 +1,5 @@
 #include "../../include/display/LinuxFramebufferDevice.hpp"
+#include "../../include/buffer/FramebufferAllocator.hpp"
 #include <stdio.h>
 #include <fcntl.h>
 #include <unistd.h>
@@ -364,8 +365,8 @@ void LinuxFramebufferDevice::calculateBufferAddresses() {
         buffer_count_ = safe_count;
     }
     
-    // 计算每个 buffer 的地址并创建 BufferPool
-    std::vector<BufferPool::ExternalBufferInfo> fb_infos;
+    // 计算每个 buffer 的地址并使用 FramebufferAllocator 创建 BufferPool
+    std::vector<FramebufferAllocator::BufferInfo> fb_infos;
     fb_mappings_.clear();
     fb_mappings_.reserve(buffer_count_);
     
@@ -388,19 +389,26 @@ void LinuxFramebufferDevice::calculateBufferAddresses() {
                i, buffer_addr, buffer_size_);
     }
     
-    // 创建 BufferPool（托管framebuffer）
     // 生成唯一名称：FramebufferPool_FB0 或 FramebufferPool_FB1
     std::string pool_name = "FramebufferPool_FB" + std::to_string(fb_index_);
     std::string pool_category = "Display";
     
     try {
-        buffer_pool_ = BufferPool::CreateFromExternal(
-            fb_infos,
+        // 使用 FramebufferAllocator 管理外部内存
+        auto allocator = std::make_unique<FramebufferAllocator>(fb_infos);
+        buffer_pool_ = allocator->allocatePoolWithBuffers(
+            buffer_count_,
+            buffer_size_,
             pool_name,
             pool_category
         );
-        printf("✅ BufferPool created successfully (managing %d framebuffers)\n", buffer_count_);
-        buffer_pool_->printStats();
+        
+        if (buffer_pool_) {
+            printf("✅ BufferPool created successfully (managing %d framebuffers)\n", buffer_count_);
+            buffer_pool_->printStats();
+        } else {
+            printf("❌ ERROR: Failed to create BufferPool\n");
+        }
     } catch (const std::exception& e) {
         printf("❌ ERROR: Failed to create BufferPool: %s\n", e.what());
         buffer_pool_.reset();

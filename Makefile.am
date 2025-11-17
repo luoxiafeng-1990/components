@@ -13,16 +13,14 @@ display_test_SOURCES = test.cpp \
                        source/monitor/Timer.cpp \
                        source/buffer/Buffer.cpp \
                        source/buffer/BufferAllocator.cpp \
-                       source/buffer/BufferHandle.cpp \
+                       source/buffer/NormalAllocator.cpp \
+                       source/buffer/FramebufferAllocator.cpp \
+                       source/buffer/AVFrameAllocator.cpp \
                        source/buffer/BufferPool.cpp \
                        source/buffer/BufferPoolRegistry.cpp \
-                       source/buffer/DMAHeapAllocator.cpp \
-                       source/buffer/TacoSysAllocator.cpp \
                        source/producer/VideoProducer.cpp \
-                       source/videoFile/IoUringVideoReader.cpp \
-                       source/decoder/Decoder.cpp \
-                       source/decoder/FFmpegDecoder.cpp \
-                       source/decoder/DecoderFactory.cpp
+                       source/videoFile/IoUringVideoReader.cpp 
+                       
 
 AM_CPPFLAGS = -I$(top_srcdir)/include
 

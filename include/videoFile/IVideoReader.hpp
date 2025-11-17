@@ -124,7 +124,7 @@ public:
      * 
      * 实现要求：
      * - MmapVideoReader: 读取数据到 buffer->data()
-     * - TacoH264DecoderReader: 解码并设置 DMA 到 buffer->id()
+     * - 硬件解码器: 解码并设置 DMA 到 buffer->id()
      * - RtspVideoReader: 解码并填充 buffer 元数据
      * 
      * 注意：
@@ -254,7 +254,7 @@ public:
      * @return BufferPool* 如果 Reader 内部管理 BufferPool，返回指针；否则返回 nullptr
      * 
      * 使用场景：
-     * - TacoH264DecoderReader 返回内部创建的 overlay BufferPool
+     * - 硬件解码器 Reader 返回内部创建的 overlay BufferPool
      * - MmapVideoReader 返回 nullptr（使用外部 BufferPool）
      * - VideoProducer 通过此方法获取 Reader 的 BufferPool（如果有）
      * 

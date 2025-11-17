@@ -31,7 +31,6 @@
 #include "include/videoFile/VideoFile.hpp"
 #include "include/buffer/BufferPool.hpp"
 #include "include/producer/VideoProducer.hpp"
-#include "include/decoder/Decoder.hpp"
 
 // FFmpeg头文件（解码器测试使用）
 extern "C" {
@@ -48,7 +47,6 @@ enum class TestMode {
     SEQUENTIAL,
     PRODUCER,
     IOURING,
-    DECODER,
     RTSP,
     FFMPEG,
     UNKNOWN
@@ -64,8 +62,6 @@ static TestMode parse_test_mode(const char* mode_str) {
         return TestMode::PRODUCER;
     } else if (strcmp(mode_str, "iouring") == 0) {
         return TestMode::IOURING;
-    } else if (strcmp(mode_str, "decoder") == 0) {
-        return TestMode::DECODER;
     } else if (strcmp(mode_str, "rtsp") == 0) {
         return TestMode::RTSP;
     } else if (strcmp(mode_str, "ffmpeg") == 0) {
@@ -411,112 +407,6 @@ static int test_buffermanager_iouring(const char* raw_video_path) {
     return 0;
 }
 
-/**
- * 测试5：解码器基础功能测试（零拷贝模式）
- * 
- * 功能：
- * - 演示解码器系统的零拷贝使用方法
- * - 测试FFmpeg解码器与BufferPool深度集成
- * - 展示FFmpeg原生类型的使用（AVPixelFormat等）
- * - 演示send/receive模式（FFmpeg标准）
- * 
- * 零拷贝工作流程：
- * 1. 创建BufferPool（预分配内存）
- * 2. 配置解码器使用ZERO_COPY模式
- * 3. FFmpeg通过get_buffer2回调从BufferPool获取空闲Buffer
- * 4. FFmpeg直接解码到BufferPool的Buffer
- * 5. 用户通过DecodedFrame.buffer使用（零拷贝！）
- * 6. 用户归还buffer到BufferPool
- * 
- * 架构设计：
- * 编码数据 → FFmpeg(get_buffer2) → 直接写入BufferPool → Display
- *                      ^^^^^^^^^^^^^^^^^^^^^^^^ 零拷贝！
- */
-static int test_decoder_basic() {
-    printf("\n═══════════════════════════════════════════════════════\n");
-    printf("  TEST 5: Decoder Zero-Copy Test\n");
-    printf("═══════════════════════════════════════════════════════\n\n");
-    
-    // 1. 创建BufferPool（必须在配置解码器前创建）
-    printf("📦 Step 1: Create BufferPool...\n");
-    // 计算buffer大小：1920x1080 NV12 = 1920*1080*1.5 = 3,110,400 bytes
-    size_t frame_size = 1920 * 1080 * 3 / 2;  // NV12 是 12bpp
-    printf("   Frame size: %zu bytes (%.2f MB)\n", frame_size, frame_size / (1024.0 * 1024.0));
-    
-    // 创建预分配的BufferPool（预分配模式）
-    // 使用静态工厂方法：BufferPool::CreatePreallocated()
-    auto decoder_pool = BufferPool::CreatePreallocated(10, frame_size, BufferMemoryAllocatorType::NORMAL_MALLOC, "Decoder_Pool", "Decoder");
-    printf("   ✅ BufferPool created: 10 buffers x %.2f MB\n", 
-           frame_size / (1024.0 * 1024.0));
-    
-    // 2. 创建解码器（使用工厂模式）
-    printf("\n⚙️  Step 2: Create and configure decoder...\n");
-    Decoder decoder(DecoderFactory::DecoderType::FFMPEG);
-    
-    // 3. 配置解码器（使用FFmpeg原生类型！）
-    decoder.setCodec(AV_CODEC_ID_H264);  // 使用FFmpeg的codec ID
-    decoder.setOutputFormat(1920, 1080, AV_PIX_FMT_NV12);  // 使用FFmpeg的像素格式
-    decoder.setThreadCount(4);
-    
-    // 4. 关键：设置零拷贝模式并关联BufferPool
-    printf("   🔗 Attaching BufferPool for zero-copy...\n");
-    decoder.setBufferMode(BufferAllocationMode::ZERO_COPY);  // 零拷贝模式
-    decoder.attachBufferPool(decoder_pool.get());
-    
-    // 5. 初始化解码器
-    printf("\n🚀 Step 3: Initialize decoder...\n");
-    DecoderStatus status = decoder.open();
-    if (status != DecoderStatus::OK) {
-        printf("❌ Failed to open decoder: %s\n", decoder.getLastError());
-        return -1;
-    }
-    
-    // 6. 显示解码器信息
-    printf("\n📊 Decoder Information:\n");
-    printf("   Type: %s\n", DecoderFactory::getDecoderTypeName(decoder.getDecoderType()));
-    printf("   Codec: %s (ID=%d)\n", decoder.getCodecName(), decoder.getConfig().codec_id);
-    printf("   Output: %dx%d\n", decoder.getConfig().width, decoder.getConfig().height);
-    printf("   Pixel format: %s\n", av_get_pix_fmt_name(decoder.getConfig().pix_fmt));
-    printf("   Hardware accelerated: %s\n", decoder.isHardwareAccelerated() ? "Yes" : "No");
-    printf("   Buffer mode: ZERO_COPY ⚡\n");
-    
-    // 7. 模拟解码流程
-    printf("\n🎬 Step 4: Decoder workflow demonstration:\n");
-    printf("\n💡 Zero-Copy Workflow:\n");
-    printf("   1. Create AVPacket with encoded data\n");
-    printf("   2. Call decoder.sendPacket(packet)\n");
-    printf("   3. Loop: decoder.receiveFrame(frame) until NEED_MORE_DATA\n");
-    printf("   4. frame.buffer points to BufferPool's Buffer (zero-copy!)\n");
-    printf("   5. Use: display.displayBufferByDMA(frame.buffer)\n");
-    printf("   6. Release: frame.release() and pool.releaseFilled(buffer)\n");
-    
-    printf("\n📝 Example code:\n");
-    printf("   AVPacket* packet = /* read from file/network */;\n");
-    printf("   decoder.sendPacket(packet);\n");
-    printf("   \n");
-    printf("   DecodedFrame frame;\n");
-    printf("   while (decoder.receiveFrame(frame) == DecoderStatus::OK) {\n");
-    printf("       // frame.buffer -> BufferPool's Buffer (zero-copy!)\n");
-    printf("       display.displayBufferByDMA(frame.buffer);\n");
-    printf("       \n");
-    printf("       frame.release();\n");
-    printf("       pool.releaseFilled(frame.buffer);\n");
-    printf("   }\n");
-    
-    printf("\n✅ Zero-copy decoder test completed!\n");
-    printf("\n🎯 Key Benefits:\n");
-    printf("   ⚡ Zero memory copy: FFmpeg -> BufferPool directly\n");
-    printf("   🚀 High performance: Eliminates memcpy overhead\n");
-    printf("   🔗 Deep integration: FFmpeg + BufferPool + Display\n");
-    printf("   📐 Industry standard: Uses FFmpeg native types (AVPixelFormat, etc.)\n");
-    
-    // 8. 清理
-    decoder.close();
-    // BufferPool 会自动清理分配的 buffers
-    
-    printf("\n🎉 Test passed!\n\n");
-    return 0;
-}
 
 /**
  * 测试6：RTSP 视频流播放（独立 BufferPool + DMA 零拷贝显示）
@@ -577,13 +467,13 @@ static int test_rtsp_stream(const char* rtsp_url) {
     
     // 2. 创建独立的 BufferPool（动态注入模式）
     printf("📦 Creating independent BufferPool for RTSP decoder...\n");
-    // 使用静态工厂方法：BufferPool::CreateDynamic()
+    // 使用静态工厂方法：BufferPool::CreateEmpty()
     // - 初始为空，buffer 由 RtspVideoReader 在运行时动态注入
     // - 对用户透明：RtspVideoReader 内部通过 injectFilledBuffer() 注入解码后的 AVFrame
     // - 用户只需要正常使用 acquireFilled() / releaseFilled()，无需关心内部细节
     // - 默认无容量限制，真正的动态扩展
     // - 一眼就能看出这是动态注入模式！
-    auto rtsp_pool = BufferPool::CreateDynamic("RTSP_Decoder_Pool", "RTSP");
+    auto rtsp_pool = BufferPool::CreateEmpty("RTSP_Decoder_Pool", "RTSP");
     
     printf("✅ Independent BufferPool created (dynamic injection mode - unlimited capacity)\n");
     rtsp_pool->printStats();
@@ -707,8 +597,8 @@ static int test_ffmpeg_video(const char* video_path) {
     
     // 2. 创建独立的 BufferPool（动态注入模式）
     printf("📦 Creating independent BufferPool for FFmpeg decoder...\n");
-    // 使用静态工厂方法：BufferPool::CreateDynamic() - 一眼就能看出是动态注入模式！
-    auto pool = BufferPool::CreateDynamic("FFmpeg_Decoder_Pool", "FFMPEG");
+    // 使用静态工厂方法：BufferPool::CreateEmpty() - 一眼就能看出是动态注入模式！
+    auto pool = BufferPool::CreateEmpty("FFmpeg_Decoder_Pool", "FFMPEG");
     printf("✅ Independent BufferPool created (dynamic injection mode - unlimited capacity)\n");
     pool->printStats();
     // 3. 创建 VideoProducer（依赖注入 BufferPool）
@@ -804,7 +694,6 @@ static void print_usage(const char* prog_name) {
     printf("                      sequential: Sequential playback (play once)\n");
     printf("                      producer:   BufferPool + VideoProducer test\n");
     printf("                      iouring:    io_uring mode (using VideoProducer)\n");
-    printf("                      decoder:    Decoder system test\n");
     printf("                      rtsp:       RTSP stream playback (zero-copy)\n");
     printf("                      ffmpeg:     FFmpeg encoded video playback (NEW)\n");
     printf("\n");
@@ -814,7 +703,6 @@ static void print_usage(const char* prog_name) {
     printf("  %s -m sequential video.raw\n", prog_name);
     printf("  %s -m producer video.raw\n", prog_name);
     printf("  %s -m iouring video.raw\n", prog_name);
-    printf("  %s -m decoder\n", prog_name);
     printf("  %s -m rtsp rtsp://192.168.1.100:8554/stream\n", prog_name);
     printf("  %s -m ffmpeg video.mp4\n", prog_name);
     printf("\n");
@@ -823,14 +711,12 @@ static void print_usage(const char* prog_name) {
     printf("  sequential: Read and display frames sequentially from file\n");
     printf("  producer:   Use BufferPool + VideoProducer architecture (zero-copy)\n");
     printf("  iouring:    io_uring async I/O mode\n");
-    printf("  decoder:    Decoder system basic functionality test\n");
     printf("  rtsp:       RTSP stream decoding and display (zero-copy, FFmpeg)\n");
     printf("  ffmpeg:     FFmpeg encoded video file decoding (MP4/AVI/MKV/etc)\n");
     printf("\n");
     printf("Note:\n");
     printf("  - Raw video file must match framebuffer resolution\n");
     printf("  - Format: ARGB888 (4 bytes per pixel)\n");
-    printf("  - Decoder mode demonstrates the decoder API (no file needed)\n");
     printf("  - RTSP/FFmpeg modes require FFmpeg libraries\n");
     printf("  - Press Ctrl+C to stop playback\n");
 }
@@ -883,8 +769,8 @@ int main(int argc, char* argv[]) {
     // 解析测试模式
     TestMode test_mode = parse_test_mode(mode);
     
-    // 检查是否提供了视频文件路径（decoder模式除外）
-    if (!raw_video_path && test_mode != TestMode::DECODER) {
+    // 检查是否提供了视频文件路径
+    if (!raw_video_path) {
         printf("Error: Missing raw video file path\n\n");
         print_usage(argv[0]);
         return 1;
@@ -907,10 +793,6 @@ int main(int argc, char* argv[]) {
         
         case TestMode::IOURING:
             result = test_buffermanager_iouring(raw_video_path);
-            break;
-        
-        case TestMode::DECODER:
-            result = test_decoder_basic();
             break;
         
         case TestMode::RTSP:

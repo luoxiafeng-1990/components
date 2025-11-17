@@ -4,8 +4,6 @@
 #include "IVideoReader.hpp"
 #include "../buffer/Buffer.hpp"
 #include "../buffer/BufferPool.hpp"
-#include "../decoder/IDecoder.hpp"
-#include "../decoder/DecoderFactory.hpp"
 #include <string>
 #include <memory>
 #include <atomic>
