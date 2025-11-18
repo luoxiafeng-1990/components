@@ -1,6 +1,6 @@
-#include "../../include/videoFile/RtspVideoReader.hpp"
-#include "../../include/buffer/BufferPool.hpp"
-#include "../../include/buffer/NormalAllocator.hpp"
+#include "../../../include/productionline/worker/FfmpegDecodeRtspWorker.hpp"
+#include "../../../include/buffer/BufferPool.hpp"
+#include "../../../include/buffer/allocator/NormalAllocator.hpp"
 #include <stdio.h>
 #include <string.h>
 #include <chrono>
@@ -17,7 +17,7 @@ extern "C" {
 
 // ============ 构造/析构 ============
 
-RtspVideoReader::RtspVideoReader()
+FfmpegDecodeRtspWorker::FfmpegDecodeRtspWorker()
     : format_ctx_(nullptr)
     , codec_ctx_(nullptr)
     , sws_ctx_(nullptr)
@@ -44,23 +44,23 @@ RtspVideoReader::RtspVideoReader()
         slot.timestamp = 0;
     }
     
-    printf("🎬 RtspVideoReader created\n");
+    printf("🎬 FfmpegDecodeRtspWorker created\n");
 }
 
-RtspVideoReader::~RtspVideoReader() {
-    printf("🧹 Destroying RtspVideoReader...\n");
+FfmpegDecodeRtspWorker::~FfmpegDecodeRtspWorker() {
+    printf("🧹 Destroying FfmpegDecodeRtspWorker...\n");
     close();
 }
 
 // ============ IVideoReader 接口实现 ============
 
-bool RtspVideoReader::open(const char* path) {
+bool FfmpegDecodeRtspWorker::open(const char* path) {
     printf("❌ ERROR: RTSP stream requires explicit format specification\n");
     printf("   Please use: openRaw(rtsp_url, width, height, bits_per_pixel)\n");
     return false;
 }
 
-bool RtspVideoReader::openRaw(const char* path, int width, int height, int bits_per_pixel) {
+bool FfmpegDecodeRtspWorker::openRaw(const char* path, int width, int height, int bits_per_pixel) {
     if (is_open_) {
         printf("⚠️  Warning: Stream already open, closing previous stream\n");
         close();
@@ -104,7 +104,7 @@ bool RtspVideoReader::openRaw(const char* path, int width, int height, int bits_
     
     // 启动解码线程
     running_ = true;
-    decode_thread_ = std::thread(&RtspVideoReader::decodeThreadFunc, this);
+    decode_thread_ = std::thread(&FfmpegDecodeRtspWorker::decodeThreadFunc, this);
     
     is_open_ = true;
     
@@ -112,7 +112,7 @@ bool RtspVideoReader::openRaw(const char* path, int width, int height, int bits_
     return true;
 }
 
-void RtspVideoReader::close() {
+void FfmpegDecodeRtspWorker::close() {
     if (!is_open_) {
         return;
     }
@@ -138,92 +138,61 @@ void RtspVideoReader::close() {
     printf("   Dropped frames: %d\n", dropped_frames_.load());
 }
 
-bool RtspVideoReader::isOpen() const {
+bool FfmpegDecodeRtspWorker::isOpen() const {
     return is_open_;
 }
 
-bool RtspVideoReader::readFrameTo(Buffer& dest_buffer) {
-    return readFrameTo(dest_buffer.getVirtualAddress(), dest_buffer.size());
-}
 
-bool RtspVideoReader::readFrameTo(void* dest_buffer, size_t buffer_size) {
-    // 如果处于零拷贝模式，这个接口不应该被使用
-    if (buffer_pool_) {
-        // 零拷贝模式：数据已经直接注入BufferPool
-        // 这里返回true表示"操作成功"，但实际上不做任何事
-        return true;
-    }
-    
-    // 传统模式：从内部缓冲区拷贝
-    return copyFromInternalBuffer(dest_buffer, buffer_size);
-}
-
-bool RtspVideoReader::readFrameAt(int frame_index, Buffer& dest_buffer) {
-    // RTSP流不支持随机访问
-    printf("⚠️  Warning: RTSP stream does not support random access (readFrameAt)\n");
-    return readFrameTo(dest_buffer);
-}
-
-bool RtspVideoReader::readFrameAt(int frame_index, void* dest_buffer, size_t buffer_size) {
-    // RTSP流不支持随机访问
-    return readFrameTo(dest_buffer, buffer_size);
-}
-
-bool RtspVideoReader::readFrameAtThreadSafe(int frame_index, void* dest_buffer, size_t buffer_size) const {
-    // RTSP流不支持随机访问，忽略frame_index
-    return const_cast<RtspVideoReader*>(this)->readFrameTo(dest_buffer, buffer_size);
-}
-
-bool RtspVideoReader::seek(int frame_index) {
+bool FfmpegDecodeRtspWorker::seek(int frame_index) {
     printf("⚠️  Warning: RTSP stream does not support seeking\n");
     return false;
 }
 
-bool RtspVideoReader::seekToBegin() {
+bool FfmpegDecodeRtspWorker::seekToBegin() {
     printf("⚠️  Warning: RTSP stream does not support seeking\n");
     return false;
 }
 
-bool RtspVideoReader::seekToEnd() {
+bool FfmpegDecodeRtspWorker::seekToEnd() {
     printf("⚠️  Warning: RTSP stream does not support seeking\n");
     return false;
 }
 
-bool RtspVideoReader::skip(int frame_count) {
+bool FfmpegDecodeRtspWorker::skip(int frame_count) {
     printf("⚠️  Warning: RTSP stream does not support frame skipping\n");
     return false;
 }
 
-int RtspVideoReader::getTotalFrames() const {
+int FfmpegDecodeRtspWorker::getTotalFrames() const {
     // RTSP 实时流是无限的，返回一个很大的值以适配 VideoProducer 的接口
     // 这样可以通过边界检查 (frame_index >= total_frames_)，同时不影响实际使用
     // 注意：RTSP 流并不依赖这个值，只是为了接口兼容性
     return INT_MAX;
 }
 
-int RtspVideoReader::getCurrentFrameIndex() const {
+int FfmpegDecodeRtspWorker::getCurrentFrameIndex() const {
     // 返回已解码帧数作为"当前索引"
     return decoded_frames_.load();
 }
 
-size_t RtspVideoReader::getFrameSize() const {
+size_t FfmpegDecodeRtspWorker::getFrameSize() const {
     return width_ * height_ * getBytesPerPixel();
 }
 
-long RtspVideoReader::getFileSize() const {
+long FfmpegDecodeRtspWorker::getFileSize() const {
     // RTSP流没有文件大小概念
     return -1;
 }
 
-int RtspVideoReader::getWidth() const {
+int FfmpegDecodeRtspWorker::getWidth() const {
     return width_;
 }
 
-int RtspVideoReader::getHeight() const {
+int FfmpegDecodeRtspWorker::getHeight() const {
     return height_;
 }
 
-int RtspVideoReader::getBytesPerPixel() const {
+int FfmpegDecodeRtspWorker::getBytesPerPixel() const {
     switch (output_pixel_format_) {
         case AV_PIX_FMT_BGR24:
             return 3;
@@ -235,40 +204,63 @@ int RtspVideoReader::getBytesPerPixel() const {
     }
 }
 
-const char* RtspVideoReader::getPath() const {
+const char* FfmpegDecodeRtspWorker::getPath() const {
     return rtsp_url_;
 }
 
-bool RtspVideoReader::hasMoreFrames() const {
+bool FfmpegDecodeRtspWorker::hasMoreFrames() const {
     // 只要连接着且未到达EOF，就有更多帧
     return connected_.load() && !eof_reached_.load();
 }
 
-bool RtspVideoReader::isAtEnd() const {
+bool FfmpegDecodeRtspWorker::isAtEnd() const {
     return eof_reached_.load();
 }
 
-const char* RtspVideoReader::getReaderType() const {
-    return "RtspVideoReader";
+// ============================================================================
+// 核心功能：填充Buffer
+// ============================================================================
+
+bool FfmpegDecodeRtspWorker::fillBuffer(int frame_index, Buffer* buffer) {
+    if (!buffer || !buffer->data()) {
+        setError("Invalid buffer");
+        return false;
+    }
+    
+    if (!is_open_) {
+        setError("Worker is not open");
+        return false;
+    }
+    
+    // RTSP流：frame_index通常为0（表示最新帧）
+    // 从内部缓冲区拷贝最新帧到buffer
+    return copyFromInternalBuffer(buffer->data(), buffer->size());
 }
 
-void RtspVideoReader::setBufferPool(void* pool) {
-    buffer_pool_ = reinterpret_cast<BufferPool*>(pool);
-    if (buffer_pool_) {
-        printf("🚀 RtspVideoReader: Zero-copy mode enabled\n");
-    } else {
-        printf("📦 RtspVideoReader: Traditional buffering mode\n");
-    }
+// ============================================================================
+// 提供原材料（BufferPool）
+// ============================================================================
+
+std::unique_ptr<BufferPool> FfmpegDecodeRtspWorker::getOutputBufferPool() {
+    // FfmpegDecodeRtspWorker 目前没有创建内部 BufferPool
+    // 使用外部提供的 BufferPool
+    // TODO: 如果需要在open()时自动创建BufferPool，在这里返回创建的BufferPool
+    return nullptr;
+}
+
+void* FfmpegDecodeRtspWorker::getOutputBufferPoolRaw() const {
+    // 向后兼容：返回nullptr
+    return nullptr;
 }
 
 // ============ RTSP 特有接口 ============
 
-std::string RtspVideoReader::getLastError() const {
+std::string FfmpegDecodeRtspWorker::getLastError() const {
     std::lock_guard<std::mutex> lock(error_mutex_);
     return last_error_;
 }
 
-void RtspVideoReader::printStats() const {
+void FfmpegDecodeRtspWorker::printStats() const {
     printf("\n📊 RtspVideoReader Statistics:\n");
     printf("   Connected: %s\n", connected_.load() ? "Yes" : "No");
     printf("   Decoded frames: %d\n", decoded_frames_.load());
@@ -278,7 +270,7 @@ void RtspVideoReader::printStats() const {
 
 // ============ 内部实现 ============
 
-bool RtspVideoReader::connectRTSP() {
+bool FfmpegDecodeRtspWorker::connectRTSP() {
     // 1. 分配格式上下文
     format_ctx_ = avformat_alloc_context();
     if (!format_ctx_) {
@@ -387,7 +379,7 @@ bool RtspVideoReader::connectRTSP() {
     return true;
 }
 
-void RtspVideoReader::disconnectRTSP() {
+void FfmpegDecodeRtspWorker::disconnectRTSP() {
     if (sws_ctx_) {
         sws_freeContext(sws_ctx_);
         sws_ctx_ = nullptr;
@@ -407,7 +399,7 @@ void RtspVideoReader::disconnectRTSP() {
     connected_ = false;
 }
 
-void RtspVideoReader::decodeThreadFunc() {
+void FfmpegDecodeRtspWorker::decodeThreadFunc() {
     printf("🚀 RTSP decode thread started\n");
     
     while (running_) {
@@ -441,7 +433,7 @@ void RtspVideoReader::decodeThreadFunc() {
     printf("🏁 RTSP decode thread finished\n");
 }
 
-AVFrame* RtspVideoReader::decodeOneFrame() {
+AVFrame* FfmpegDecodeRtspWorker::decodeOneFrame() {
     AVPacket* packet = av_packet_alloc();
     AVFrame* frame = av_frame_alloc();
     
@@ -488,7 +480,7 @@ AVFrame* RtspVideoReader::decodeOneFrame() {
     return frame;  // 调用者负责释放
 }
 
-void RtspVideoReader::storeToInternalBuffer(AVFrame* frame) {
+void FfmpegDecodeRtspWorker::storeToInternalBuffer(AVFrame* frame) {
     std::lock_guard<std::mutex> lock(buffer_mutex_);
     
     FrameSlot& slot = internal_buffer_[write_index_];
@@ -516,7 +508,7 @@ void RtspVideoReader::storeToInternalBuffer(AVFrame* frame) {
     buffer_cv_.notify_one();
 }
 
-bool RtspVideoReader::copyFromInternalBuffer(void* dest, size_t size) {
+bool FfmpegDecodeRtspWorker::copyFromInternalBuffer(void* dest, size_t size) {
     std::unique_lock<std::mutex> lock(buffer_mutex_);
     
     // 等待有可用帧（最多等待100ms）
@@ -547,13 +539,13 @@ bool RtspVideoReader::copyFromInternalBuffer(void* dest, size_t size) {
     return true;
 }
 
-void RtspVideoReader::setError(const std::string& error) {
+void FfmpegDecodeRtspWorker::setError(const std::string& error) {
     std::lock_guard<std::mutex> lock(error_mutex_);
     last_error_ = error;
     printf("❌ RtspVideoReader Error: %s\n", error.c_str());
 }
 
-uint64_t RtspVideoReader::getAVFramePhysicalAddress(AVFrame* frame) {
+uint64_t FfmpegDecodeRtspWorker::getAVFramePhysicalAddress(AVFrame* frame) {
     // 对于软件解码的AVFrame，通常无法获取物理地址
     // 硬件解码器（如VAAPI、NVDEC）可能提供物理地址
     // 这里返回0表示不可用

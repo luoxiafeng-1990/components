@@ -1,9 +1,10 @@
-#ifndef FFMPEG_VIDEO_READER_HPP
-#define FFMPEG_VIDEO_READER_HPP
+#ifndef FFMPEG_DECODE_VIDEO_FILE_WORKER_HPP
+#define FFMPEG_DECODE_VIDEO_FILE_WORKER_HPP
 
-#include "IVideoReader.hpp"
-#include "../buffer/Buffer.hpp"
-#include "../buffer/BufferPool.hpp"
+#include "IBufferFillingWorker.hpp"
+#include "IVideoFileNavigator.hpp"
+#include "../../buffer/Buffer.hpp"
+#include "../../buffer/BufferPool.hpp"
 #include <string>
 #include <memory>
 #include <atomic>
@@ -21,7 +22,12 @@ struct AVDictionary;
 #define MAX_VIDEO_PATH_LENGTH 1024
 
 /**
- * @brief FfmpegVideoReader - 基于 FFmpeg 的编码视频文件读取器
+ * @brief FfmpegDecodeVideoFileWorker - FFmpeg解码视频文件Worker
+ * 
+ * 架构角色：Worker（工人）- FFmpeg解码视频文件类型
+ * 
+ * 功能：使用FFmpeg解码视频文件（MP4, AVI, MKV, MOV, FLV等）
+ * 目的：填充Buffer，得到填充后的buffer
  * 
  * 职责：
  * - 打开本地编码视频文件（MP4, AVI, MKV, MOV, FLV等）
@@ -29,6 +35,7 @@ struct AVDictionary;
  * - 支持两种工作模式：
  *   1. 普通模式：解码后 memcpy 到外部 Buffer
  *   2. 零拷贝模式：利用特殊解码器（如 h264_taco）的物理地址，动态注入 BufferPool
+ * - 提供BufferPool（原材料）给ProductionLine
  * 
  * 特性：
  * - 支持多种编码格式（H.264, H.265, VP9, AV1等）
@@ -40,25 +47,20 @@ struct AVDictionary;
  * 使用方式：
  * ```cpp
  * // 方式1：普通模式（memcpy）
- * FfmpegVideoReader reader;
- * reader.open("video.mp4");
+ * FfmpegDecodeVideoFileWorker worker;
+ * worker.open("video.mp4");
  * Buffer buffer(frame_size);
- * reader.readFrameTo(buffer);  // 解码后 memcpy 到 buffer
+ * worker.fillBuffer(0, &buffer);  // 填充buffer
  * 
  * // 方式2：零拷贝模式（需要特殊硬件解码器）
  * BufferPool pool("Decoder_Pool", "DECODER", 10);
- * FfmpegVideoReader reader;
- * reader.setBufferPool(&pool);  // 启用零拷贝
- * reader.open("video.mp4");
- * // reader内部直接注入pool，配合 VideoProducer 使用
+ * FfmpegDecodeVideoFileWorker worker;
+ * worker.setBufferPool(&pool);  // 启用零拷贝
+ * worker.open("video.mp4");
+ * // worker内部直接注入pool，配合 VideoProductionLine 使用
  * ```
- * 
- * 架构说明：
- * - 参考 RtspVideoReader 的设计
- * - 符合 IVideoReader 接口规范
- * - 与 VideoProducer + BufferPool 架构无缝集成
  */
-class FfmpegVideoReader : public IVideoReader {
+class FfmpegDecodeVideoFileWorker : public IBufferFillingWorker, public IVideoFileNavigator {
 private:
     // ============ FFmpeg 资源 ============
     AVFormatContext* format_ctx_;
@@ -71,7 +73,7 @@ private:
     int width_;                        // 视频原始宽度
     int height_;                       // 视频原始高度
     int output_width_;                 // 输出宽度（可能缩放）
-    int output_height_;                // 输出高度（可能缩放）
+    int output_height_;                 // 输出高度（可能缩放）
     int output_bpp_;                   // 输出位深（如 32 for ARGB888）
     int output_pixel_format_;          // 输出像素格式（如 AV_PIX_FMT_BGRA）
     
@@ -180,14 +182,14 @@ private:
 public:
     // ============ 构造/析构 ============
     
-    FfmpegVideoReader();
-    virtual ~FfmpegVideoReader();
+    FfmpegDecodeVideoFileWorker();
+    virtual ~FfmpegDecodeVideoFileWorker();
     
     // 禁止拷贝
-    FfmpegVideoReader(const FfmpegVideoReader&) = delete;
-    FfmpegVideoReader& operator=(const FfmpegVideoReader&) = delete;
+    FfmpegDecodeVideoFileWorker(const FfmpegDecodeVideoFileWorker&) = delete;
+    FfmpegDecodeVideoFileWorker& operator=(const FfmpegDecodeVideoFileWorker&) = delete;
     
-    // ============ IVideoReader 接口实现 ============
+    // ============ IBufferFillingWorker 接口实现 ============
     
     /**
      * @brief 打开编码视频文件（自动检测格式）
@@ -206,12 +208,15 @@ public:
         return false;  // 需要外部 buffer（解码后 memcpy 到外部 buffer）
     }
     
-    bool readFrameTo(Buffer& dest_buffer) override;
-    bool readFrameTo(void* dest_buffer, size_t buffer_size) override;
-    bool readFrameAt(int frame_index, Buffer& dest_buffer) override;
-    bool readFrameAt(int frame_index, void* dest_buffer, size_t buffer_size) override;
-    bool readFrameAtThreadSafe(int frame_index, void* dest_buffer, size_t buffer_size) const override;
+    /**
+     * @brief 填充Buffer（核心功能）
+     * @param frame_index 帧索引
+     * @param buffer 输出 Buffer（从 BufferPool 获取）
+     * @return 成功返回 true
+     */
+    bool fillBuffer(int frame_index, Buffer* buffer) override;
     
+    // ============ IVideoFileNavigator 接口实现 ============
     bool seek(int frame_index) override;
     bool seekToBegin() override;
     bool seekToEnd() override;
@@ -228,15 +233,36 @@ public:
     bool hasMoreFrames() const override;
     bool isAtEnd() const override;
     
-    const char* getReaderType() const override;
+    /**
+     * @brief 获取Worker类型名称
+     */
+    const char* getWorkerType() const override {
+        return "FfmpegDecodeVideoFileWorker";
+    }
+    
+    /**
+     * @brief 获取读取器类型名称（向后兼容）
+     */
+    const char* getReaderType() const override {
+        return getWorkerType();
+    }
     
     // ============ 零拷贝模式支持 ============
     
     /**
-     * @brief 设置BufferPool（启用零拷贝模式）
-     * @param pool BufferPool指针（void*避免头文件依赖）
+     * @brief 获取输出 BufferPool（如果有）
+     * @return BufferPool的智能指针，如果Worker创建了内部BufferPool，返回unique_ptr；否则返回nullptr
+     * 
+     * @note FfmpegDecodeVideoFileWorker目前没有创建内部BufferPool，返回nullptr
+     *       如果需要零拷贝模式，Worker应该在open()时自动创建BufferPool
      */
-    void setBufferPool(void* pool) override;
+    std::unique_ptr<BufferPool> getOutputBufferPool() override;
+    
+    /**
+     * @brief 获取输出BufferPool原始指针（向后兼容）
+     * @deprecated 推荐使用getOutputBufferPool()返回智能指针
+     */
+    void* getOutputBufferPoolRaw() const override;
     
     // ============ 扩展配置接口 ============
     
@@ -303,5 +329,5 @@ public:
     void printVideoInfo() const;
 };
 
-#endif // FFMPEG_VIDEO_READER_HPP
+#endif // FFMPEG_DECODE_VIDEO_FILE_WORKER_HPP
 

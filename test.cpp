@@ -1,12 +1,12 @@
 /**
  * Display Framework Test Program
  * 
- * 测试 LinuxFramebufferDevice, VideoFile, PerformanceMonitor, BufferManager 四个类的功能
+ * 测试 LinuxFramebufferDevice, BufferFillingWorker, PerformanceMonitor, BufferManager 四个类的功能
  * 
  * 编译命令：
  *   g++ -o test test.cpp \
  *       source/LinuxFramebufferDevice.cpp \
- *       source/VideoFile.cpp \
+ *       source/BufferFillingWorker.cpp \
  *       source/PerformanceMonitor.cpp \
  *       source/BufferManager.cpp \
  *       -I./include -std=c++17 -pthread
@@ -28,9 +28,9 @@
 #include <vector>
 #include <memory>
 #include "include/display/LinuxFramebufferDevice.hpp"
-#include "include/videoFile/VideoFile.hpp"
+#include "include/productionline/worker/BufferFillingWorker.hpp"
 #include "include/buffer/BufferPool.hpp"
-#include "include/producer/VideoProducer.hpp"
+#include "include/productionline/VideoProductionLine.hpp"
 
 // FFmpeg头文件（解码器测试使用）
 extern "C" {
@@ -89,10 +89,10 @@ static void signal_handler(int signum) {
  */
 static int test_4frame_loop(const char* raw_video_path) {
     printf("\n═══════════════════════════════════════════════════════\n");
-    printf("  Test: Multi-Buffer Loop Display\n");
+    printf("  Test: Multi-Buffer Loop Display (Using VideoProductionLine)\n");
     printf("═══════════════════════════════════════════════════════\n\n");
     
-    // 初始化显示设备
+    // 1. 初始化显示设备
     LinuxFramebufferDevice display;
     if (!display.initialize(0)) {
         return -1;
@@ -100,43 +100,65 @@ static int test_4frame_loop(const char* raw_video_path) {
     
     int buffer_count = display.getBufferCount();
     
-    // 打开视频文件（使用 MMAP 读取器）
-    VideoFile video;
-    video.setReaderType(VideoReaderFactory::ReaderType::MMAP);  // 显式指定 MMAP 读取器
-    if (!video.openRaw(raw_video_path, 
-                       display.getWidth(), 
-                       display.getHeight(), 
-                       display.getBitsPerPixel())) {
+    // 2. 获取 display 的 BufferPool（framebuffer 已托管）
+    BufferPool& pool = *display.getBufferPool();
+    
+    // 3. 创建 VideoProductionLine（Worker会在open()时自动创建BufferPool）
+    VideoProductionLine producer;
+    
+    // 4. 配置并启动视频生产者
+    VideoProductionLine::Config config(
+        raw_video_path,
+        display.getWidth(),
+        display.getHeight(),
+        display.getBitsPerPixel(),
+        true,  // loop
+        1,     // 单线程，顺序加载帧
+        BufferFillingWorkerFactory::WorkerType::MMAP_RAW  // 显式指定 MMAP Worker
+    );
+    
+    // 设置错误回调
+    producer.setErrorCallback([](const std::string& error) {
+        printf("\n❌ Producer Error: %s\n", error.c_str());
+        g_running = false;
+    });
+    
+    if (!producer.start(config)) {
+        printf("❌ Failed to start video producer\n");
         return -1;
     }
     
-    // 检查文件是否有足够的帧
-    if (video.getTotalFrames() < buffer_count) {
-        printf("❌ ERROR: File contains only %d frames, need at least %d frames\n",
-               video.getTotalFrames(), buffer_count);
-        return -1;
-    }
-    
-    // 加载帧到 framebuffer
+    // 5. 加载帧到 framebuffer（从Worker的BufferPool获取）
     printf("\n📥 Loading %d frames into framebuffer...\n", buffer_count);
+    BufferPool* worker_pool = producer.getWorkingBufferPool();
+    if (!worker_pool) {
+        printf("❌ ERROR: Worker failed to create BufferPool\n");
+        producer.stop();
+        return -1;
+    }
+    
+    // 等待生产者填充buffer（生产者线程会自动填充）
+    // 这里我们等待足够多的帧被填充
     for (int i = 0; i < buffer_count; i++) {
-        // 获取buffer引用
-        Buffer& buffer = display.getBuffer(i);
-        if (!buffer.isValid()) {
-            printf("❌ ERROR: Invalid buffer %d\n", i);
+        Buffer* filled_buffer = worker_pool->acquireFilled(true, 5000);
+        if (!filled_buffer || !filled_buffer->isValid()) {
+            printf("❌ ERROR: Failed to acquire filled buffer %d\n", i);
+            producer.stop();
             return -1;
         }
         
-        // 直接读取视频帧到framebuffer的buffer中
-        if (!video.readFrameTo(buffer)) {
-            printf("❌ ERROR: Failed to load frame %d\n", i);
-            return -1;
-        }
+        // 显示buffer（零拷贝）
+        display.waitVerticalSync();
+        display.displayFilledFramebuffer(filled_buffer);
+        
+        // 归还buffer（但保留在framebuffer中用于循环显示）
+        worker_pool->releaseFilled(filled_buffer);
     }
 
     // 注册信号处理
     signal(SIGINT, signal_handler);
     
+    // 6. 循环显示已加载的帧
     int loop_count = 0;
     while (g_running) {
         for (int buf_idx = 0; buf_idx < buffer_count && g_running; buf_idx++) {
@@ -149,85 +171,26 @@ static int test_4frame_loop(const char* raw_video_path) {
         loop_count++;
     }
     
-    printf("\n🛑 Playback stopped\n\n");
+    // 7. 停止生产者
+    producer.stop();
     
+    printf("\n🛑 Playback stopped\n\n");
     printf("\n✅ Test completed successfully\n");
     
     return 0;
 }
 
 /**
- * 测试2：顺序播放测试
+ * 测试2：顺序播放测试（使用 VideoProductionLine）
  * 
  * 功能：
- * - 打开原始视频文件
- * - 顺序读取并显示所有帧（只播放一次）
+ * - 使用 VideoProductionLine 架构
+ * - 顺序读取并显示所有帧（循环播放）
+ * - 展示生产者-消费者模式
  */
 static int test_sequential_playback(const char* raw_video_path) {
     printf("\n═══════════════════════════════════════════════════════\n");
-    printf("  Test: Sequential Playback\n");
-    printf("═══════════════════════════════════════════════════════\n\n");  
-    
-    // 初始化显示设备
-    LinuxFramebufferDevice display;
-    if (!display.initialize(0)) {
-        return -1;
-    }
-    
-    // 打开视频文件（使用 MMAP 读取器）
-    VideoFile video;
-    video.setReaderType(VideoReaderFactory::ReaderType::MMAP);  // 显式指定 MMAP 读取器
-    if (!video.openRaw(raw_video_path, 
-                       display.getWidth(), 
-                       display.getHeight(), 
-                       display.getBitsPerPixel())) {
-        return -1;
-    }
-    // 开始播放
-    printf("\n🎬 Starting sequential playback (Ctrl+C to stop)...\n\n");
-    
-    signal(SIGINT, signal_handler);
-    
-    int current_buffer = 0;
-    int frame_index = 0;
-    
-    while (g_running) {
-        // 检查视频是否播放完毕，如果是则回到开头继续循环
-        if (!video.hasMoreFrames()) {
-            video.seekToBegin();
-            printf("🔄 Video reached end, looping back to start...\n");
-        }
-        
-        Buffer& buffer = display.getBuffer(current_buffer);
-        if (!video.readFrameTo(buffer)) {
-            printf("❌ ERROR: Failed to read frame %d\n", frame_index);
-            break;
-        }
-        display.waitVerticalSync();
-        display.displayBuffer(current_buffer);
-        // 切换到下一个buffer
-        current_buffer = (current_buffer + 1) % display.getBufferCount();
-        frame_index++;
-    }
-    printf("\n🛑 Playback stopped\n\n");
-    // 打印最终统计
-    printf("   Total frames played: %d / %d\n", frame_index, video.getTotalFrames());
-    printf("\n✅ Test completed successfully\n");
-    return 0;
-}
-
-/**
- * 测试3：BufferPool + VideoProducer 测试（新架构）
- * 
- * 功能：
- * - 使用 LinuxFramebufferDevice 的 BufferPool（零拷贝）
- * - 使用 VideoProducer 自动从视频文件读取数据
- * - 主线程作为消费者，获取 buffer 并显示到屏幕
- * - 展示生产者-消费者模式的解耦架构
- */
-static int test_buffermanager_producer(const char* raw_video_path) {
-    printf("\n═══════════════════════════════════════════════════════\n");
-    printf("  Test: BufferPool + VideoProducer (New Architecture)\n");
+    printf("  Test: Sequential Playback (Using VideoProductionLine)\n");
     printf("═══════════════════════════════════════════════════════\n\n");
     
     // 1. 初始化显示设备
@@ -237,22 +200,118 @@ static int test_buffermanager_producer(const char* raw_video_path) {
     }
     
     // 2. 获取 display 的 BufferPool（framebuffer 已托管）
-    BufferPool& pool = display.getBufferPool();
+    BufferPool& pool = *display.getBufferPool();
+    
+    // 3. 创建 VideoProductionLine（Worker会在open()时自动创建BufferPool）
+    VideoProductionLine producer;
+    
+    // 4. 配置并启动视频生产者
+    VideoProductionLine::Config config(
+        raw_video_path,
+        display.getWidth(),
+        display.getHeight(),
+        display.getBitsPerPixel(),
+        true,  // loop
+        1,     // 单线程，顺序读取
+        BufferFillingWorkerFactory::WorkerType::MMAP_RAW  // 显式指定 MMAP Worker
+    );
+    
+    // 设置错误回调
+    producer.setErrorCallback([](const std::string& error) {
+        printf("\n❌ Producer Error: %s\n", error.c_str());
+        g_running = false;
+    });
+    
+    if (!producer.start(config)) {
+        printf("❌ Failed to start video producer\n");
+        return -1;
+    }
+    
+    // 5. 开始播放
+    printf("\n🎬 Starting sequential playback (Ctrl+C to stop)...\n\n");
+    
+    signal(SIGINT, signal_handler);
+    
+    // 6. 消费者循环：从 BufferPool 获取 buffer 并显示
+    int frame_count = 0;
+    BufferPool* worker_pool = producer.getWorkingBufferPool();
+    if (!worker_pool) {
+        printf("❌ ERROR: Worker failed to create BufferPool\n");
+        producer.stop();
+        return -1;
+    }
+    
+    while (g_running) {
+        // 获取一个已填充的 buffer（阻塞，100ms超时）
+        Buffer* filled_buffer = worker_pool->acquireFilled(true, 100);
+        if (filled_buffer == nullptr) {
+            // 超时，继续等待
+            continue;
+        }
+        
+        // 直接显示（零拷贝）
+        display.waitVerticalSync();
+        if (!display.displayFilledFramebuffer(filled_buffer)) {
+            printf("⚠️  Warning: Failed to display buffer\n");
+        }
+        
+        // 归还 buffer 到空闲队列
+        worker_pool->releaseFilled(filled_buffer);
+        frame_count++;
+        
+        // 每100帧打印一次进度
+        if (frame_count % 100 == 0) {
+            printf("   Frames displayed: %d (%.1f fps)\n", 
+                   frame_count, producer.getAverageFPS());
+        }
+    }
+    
+    // 7. 停止生产者
+    producer.stop();
+    
+    printf("\n🛑 Playback stopped\n\n");
+    printf("   Total frames played: %d\n", frame_count);
+    printf("\n✅ Test completed successfully\n");
+    return 0;
+}
+
+/**
+ * 测试3：BufferPool + VideoProductionLine 测试（新架构）
+ * 
+ * 功能：
+ * - 使用 LinuxFramebufferDevice 的 BufferPool（零拷贝）
+ * - 使用 VideoProductionLine 自动从视频文件读取数据
+ * - 主线程作为消费者，获取 buffer 并显示到屏幕
+ * - 展示生产者-消费者模式的解耦架构
+ */
+static int test_buffermanager_producer(const char* raw_video_path) {
+    printf("\n═══════════════════════════════════════════════════════\n");
+    printf("  Test: BufferPool + VideoProductionLine (New Architecture)\n");
+    printf("═══════════════════════════════════════════════════════\n\n");
+    
+    // 1. 初始化显示设备
+    LinuxFramebufferDevice display;
+    if (!display.initialize(0)) {
+        return -1;
+    }
+    
+    // 2. 获取 display 的 BufferPool（framebuffer 已托管）
+    BufferPool& pool = *display.getBufferPool();
     pool.printStats();
     
-    // 3. 创建 VideoProducer（依赖注入 BufferPool）
-    VideoProducer producer(pool);
+    // 3. 创建 VideoProductionLine（Worker会自动创建BufferPool）
+    VideoProductionLine producer;
     // 4. 配置并启动视频生产者
     int producer_thread_count = 2;  // 使用2个生产者线程
     
-    VideoProducer::Config config(
+    VideoProductionLine::Config config(
         raw_video_path,
         display.getWidth(),
         display.getHeight(),
         display.getBitsPerPixel(),
         true,  // loop
         producer_thread_count,
-        VideoReaderFactory::ReaderType::MMAP  // 显式指定 MMAP 读取器
+        BufferFillingWorkerFactory::WorkerType::MMAP_RAW  // 显式指定 MMAP Worker
     );
     
     // 设置错误回调
@@ -300,20 +359,20 @@ static int test_buffermanager_producer(const char* raw_video_path) {
 }
 
 /**
- * 测试4：io_uring 模式（待实现 IoUringVideoProducer）
+ * 测试4：io_uring 模式（待实现 IoUringVideoProductionLine）
  * 
  * 功能：
  * - 使用 BufferPool 管理 buffer 池
- * - 使用 IoUringVideoProducer 进行高性能异步 I/O（待实现）
- * - 暂时使用普通 VideoProducer 作为替代
+ * - 使用 IoUringVideoProductionLine 进行高性能异步 I/O（待实现）
+ * - 暂时使用普通 VideoProductionLine 作为替代
  */
 static int test_buffermanager_iouring(const char* raw_video_path) {
     printf("\n═══════════════════════════════════════════════════════\n");
-    printf("  Test: io_uring Mode (using VideoProducer temporarily)\n");
+    printf("  Test: io_uring Mode (using VideoProductionLine temporarily)\n");
     printf("═══════════════════════════════════════════════════════\n\n");
     
-    printf("ℹ️  Note: IoUringVideoProducer not yet implemented in new architecture\n");
-    printf("   Using standard VideoProducer as fallback\n\n");
+    printf("ℹ️  Note: IoUringVideoProductionLine not yet implemented in new architecture\n");
+    printf("   Using standard VideoProductionLine as fallback\n\n");
     
     // 1. 初始化显示设备
     LinuxFramebufferDevice display;
@@ -327,25 +386,25 @@ static int test_buffermanager_iouring(const char* raw_video_path) {
     printf("   Buffer count: %d\n", display.getBufferCount());
     
     // 2. 获取 display 的 BufferPool
-    BufferPool& pool = display.getBufferPool();
+    BufferPool& pool = *display.getBufferPool();
     
     printf("\n📦 Using LinuxFramebufferDevice's BufferPool\n");
     pool.printStats();
     
-    // 3. 创建 VideoProducer（单线程，顺序读取）
-    VideoProducer producer(pool);
+    // 3. 创建 VideoProductionLine（Worker会自动创建BufferPool）
+    VideoProductionLine producer;
     
     printf("\n🎬 Starting video producer (io_uring mode)...\n");
     printf("   Using 1 producer thread with io_uring async I/O\n");
     
-    VideoProducer::Config config(
+    VideoProductionLine::Config config(
         raw_video_path,
         display.getWidth(),
         display.getHeight(),
         display.getBitsPerPixel(),
         true,  // loop
         1,  // 单线程顺序读取
-        VideoReaderFactory::ReaderType::IOURING  // 显式指定 io_uring 读取器
+        BufferFillingWorkerFactory::WorkerType::IOURING_RAW  // 显式指定 IoUring Worker
     );
     
     producer.setErrorCallback([](const std::string& error) {
@@ -402,26 +461,30 @@ static int test_buffermanager_iouring(const char* raw_video_path) {
     pool.printStats();
     
     printf("\n✅ Test completed successfully\n");
-    printf("\nℹ️  TODO: Implement IoUringVideoProducer for true async I/O performance\n");
+    printf("\nℹ️  TODO: Implement IoUringVideoProductionLine for true async I/O performance\n");
     
     return 0;
 }
 
 
 /**
- * 测试6：RTSP 视频流播放（独立 BufferPool + DMA 零拷贝显示）
+ * 测试6：RTSP 视频流播放（Worker自动创建BufferPool + DMA 零拷贝显示）
  * 
  * 功能演示：
  * - 连接 RTSP 视频流
- * - 使用 RtspVideoReader 解码（FFmpeg + 硬件解码器）
- * - 独立的 BufferPool 管理解码输出
+ * - Worker在open()时自动创建BufferPool和Allocator
+ * - Worker自动管理BufferPool的创建和Buffer注入
  * - DMA 零拷贝显示：直接使用物理地址
  * - 展示 RTSP 流的实时处理能力
  * 
- * 架构设计：
- * RTSP Stream → FFmpeg 硬件解码 → AVFrame (带物理地址)
+ * 架构设计（最新）：
+ * RTSP Stream → Worker::open() → 自动创建BufferPool和Allocator
  *                                      ↓
- *                         独立的 BufferPool（管理解码输出）
+ *                          Worker内部解码循环
+ *                                      ↓
+ *                         FFmpeg解码 → AVFrame (带物理地址)
+ *                                      ↓
+ *                         Worker自动注入Buffer到BufferPool
  *                                      ↓
  *                         Buffer (包含物理地址)
  *                                      ↓
@@ -429,20 +492,22 @@ static int test_buffermanager_iouring(const char* raw_video_path) {
  *                                      ↓
  *                         Display 驱动 DMA 显示
  * 
- * 零拷贝工作流程：
- * 1. RtspVideoReader 解码 RTSP 流，获得带物理地址的 AVFrame
- * 2. RtspVideoReader 从 AVFrame 提取物理地址（通过 DMA buf）
- * 3. RtspVideoReader 将 AVFrame 包装为 Buffer，注入独立的 BufferPool
- * 4. 消费者从独立的 BufferPool 获取 Buffer（含物理地址）
- * 5. 消费者调用 display.displayBufferByDMA(buffer)：
+ * 零拷贝工作流程（最新架构）：
+ * 1. Worker在open()时自动创建BufferPool和Allocator（如果需要）
+ * 2. Worker解码RTSP流，获得带物理地址的AVFrame
+ * 3. Worker自动将AVFrame包装为Buffer，注入到Worker的BufferPool
+ * 4. ProductionLine从Worker获取BufferPool（通过getOutputBufferPool()）
+ * 5. 消费者从Worker的BufferPool获取Buffer（含物理地址）
+ * 6. 消费者调用display.displayBufferByDMA(buffer)：
  *    - 直接将物理地址传递给驱动（FB_IOCTL_SET_DMA_INFO）
- *    - 驱动通过 DMA 从解码器内存直接读取显示
- *    - 整个过程：0 次 memcpy！
- * 6. 消费者归还 buffer，触发 deleter 回收 AVFrame
+ *    - 驱动通过DMA从解码器内存直接读取显示
+ *    - 整个过程：0次memcpy！
+ * 7. 消费者归还buffer，Worker自动管理AVFrame的释放
  * 
- * 关键设计理念：
- * - 独立 BufferPool：专门管理 RTSP 解码输出，不依赖 framebuffer
- * - 显式 DMA 调用：明确使用 displayBufferByDMA，清晰可控
+ * 关键设计理念（最新架构）：
+ * - Worker自动创建BufferPool：Worker在open()时自动创建，应用层无需关心
+ * - Worker必须创建BufferPool：Worker在open()时自动调用Allocator创建BufferPool
+ * - 显式DMA调用：明确使用displayBufferByDMA，清晰可控
  * - 零拷贝路径：解码器输出 → DMA → 显示，无中间拷贝
  */
 static int test_rtsp_stream(const char* rtsp_url) {
@@ -451,10 +516,10 @@ static int test_rtsp_stream(const char* rtsp_url) {
     printf("═══════════════════════════════════════════════════════\n\n");
     
     printf("ℹ️  Zero-Copy Workflow:\n");
-    printf("   1. RtspVideoReader decodes RTSP → AVFrame with phys_addr\n");
-    printf("   2. Extract phys_addr from AVFrame (via DMA buf)\n");
-    printf("   3. Inject Buffer to independent BufferPool\n");
-    printf("   4. Consumer acquires Buffer from independent pool\n");
+    printf("   1. Worker opens RTSP stream and automatically creates BufferPool (if needed)\n");
+    printf("   2. Worker decodes RTSP → AVFrame with phys_addr\n");
+    printf("   3. Worker injects Buffer to its BufferPool\n");
+    printf("   4. Consumer acquires Buffer from Worker's BufferPool\n");
     printf("   5. display.displayBufferByDMA(buffer) → DMA zero-copy\n");
     printf("   6. Consumer releases Buffer → triggers deleter\n\n");
     
@@ -465,33 +530,20 @@ static int test_rtsp_stream(const char* rtsp_url) {
         return -1;
     }
     
-    // 2. 创建独立的 BufferPool（动态注入模式）
-    printf("📦 Creating independent BufferPool for RTSP decoder...\n");
-    // 使用静态工厂方法：BufferPool::CreateEmpty()
-    // - 初始为空，buffer 由 RtspVideoReader 在运行时动态注入
-    // - 对用户透明：RtspVideoReader 内部通过 injectFilledBuffer() 注入解码后的 AVFrame
-    // - 用户只需要正常使用 acquireFilled() / releaseFilled()，无需关心内部细节
-    // - 默认无容量限制，真正的动态扩展
-    // - 一眼就能看出这是动态注入模式！
-    auto rtsp_pool = BufferPool::CreateEmpty("RTSP_Decoder_Pool", "RTSP");
-    
-    printf("✅ Independent BufferPool created (dynamic injection mode - unlimited capacity)\n");
-    rtsp_pool->printStats();
-    
-    // 3. 创建 VideoProducer（依赖注入独立的 BufferPool）
-    printf("📹 Creating VideoProducer with independent BufferPool...\n");
-    VideoProducer producer(*rtsp_pool);  // 使用独立的 rtsp_pool
+    // 2. 创建 VideoProductionLine（Worker会在open()时自动调用Allocator创建BufferPool）
+    printf("📹 Creating VideoProductionLine...\n");
+    VideoProductionLine producer;  // Worker会在open()时自动创建BufferPool
     
     // 4. 配置 RTSP 流（注意：推荐单线程）
     printf("🔗 Configuring RTSP stream: %s\n", rtsp_url);
-    VideoProducer::Config config(
+    VideoProductionLine::Config config(
         rtsp_url,
         display.getWidth(),
         display.getHeight(),
         display.getBitsPerPixel(),
         false,  // loop（对RTSP无意义）
         1,      // thread_count（RTSP推荐单线程）
-        VideoReaderFactory::ReaderType::RTSP  // 显式指定 RTSP 读取器
+        BufferFillingWorkerFactory::WorkerType::FFMPEG_RTSP  // 显式指定 FFmpeg RTSP Worker
     );
     
     // 5. 设置错误回调
@@ -514,14 +566,25 @@ static int test_rtsp_stream(const char* rtsp_url) {
     // 注册信号处理
     signal(SIGINT, signal_handler);
     
-    // 7. 消费者循环：从独立 BufferPool 获取并通过 DMA 显示
+    // 7. 获取工作BufferPool（Worker创建的或fallback的）
+    BufferPool* working_pool = producer.getWorkingBufferPool();
+    if (!working_pool) {
+        printf("❌ ERROR: No working BufferPool available\n");
+        return -1;
+    }
+    
+    printf("✅ Using BufferPool: '%s' (created by Worker via Allocator)\n", 
+           working_pool->getName().c_str());
+    working_pool->printStats();
+    
+    // 8. 消费者循环：从工作BufferPool获取并通过DMA显示
     int frame_count = 0;
     int dma_success = 0;
     int dma_failed = 0;
     
     while (g_running) {
-        // 从独立的 RTSP BufferPool 获取已解码的 buffer（带物理地址）
-        Buffer* decoded_buffer = rtsp_pool->acquireFilled(true, 100);
+        // 从工作BufferPool获取已解码的buffer（带物理地址）
+        Buffer* decoded_buffer = working_pool->acquireFilled(true, 100);
         if (decoded_buffer == nullptr) {
             continue;  // 超时，继续等待
         }
@@ -541,7 +604,7 @@ static int test_rtsp_stream(const char* rtsp_url) {
         }
         
         // 归还 buffer（会触发 RtspVideoReader 的 deleter 回收 AVFrame）
-        rtsp_pool->releaseFilled(decoded_buffer);
+        working_pool->releaseFilled(decoded_buffer);
         
         frame_count++;
         
@@ -564,20 +627,25 @@ static int test_rtsp_stream(const char* rtsp_url) {
            frame_count > 0 ? (100.0 * dma_success / frame_count) : 0.0);
     
     printf("\n📦 Final BufferPool statistics:\n");
-    rtsp_pool->printStats();
+    working_pool->printStats();
     
     return 0;
 }
 
 /**
- * 测试6：FFmpeg 编码视频文件播放（使用 FfmpegVideoReader）
+ * 测试6：FFmpeg 编码视频文件播放（使用Worker自动创建BufferPool）
  * 
  * 功能：
  * - 打开编码视频文件（MP4, AVI, MKV等）
- * - 使用 FfmpegVideoReader 进行解码
- * - 集成 VideoProducer + BufferPool 架构
- * - 使用独立的 BufferPool（动态注入模式）
+ * - Worker在open()时自动创建BufferPool和Allocator
+ * - Worker自动管理BufferPool的创建和Buffer注入
+ * - 集成 VideoProductionLine + BufferPool 架构
  * - 支持 DMA 零拷贝显示
+ * 
+ * 架构说明（最新）：
+ * - Worker在open()时自动创建BufferPool（如果需要）
+ * - ProductionLine从Worker获取BufferPool（通过getOutputBufferPool()）
+ * - Worker必须创建BufferPool：Worker在open()时自动调用Allocator创建BufferPool
  * 
  * 参数：
  * @param video_path 视频文件路径（如 "video.mp4"）
@@ -595,27 +663,21 @@ static int test_ffmpeg_video(const char* video_path) {
         return -1;
     }
     
-    // 2. 创建独立的 BufferPool（动态注入模式）
-    printf("📦 Creating independent BufferPool for FFmpeg decoder...\n");
-    // 使用静态工厂方法：BufferPool::CreateEmpty() - 一眼就能看出是动态注入模式！
-    auto pool = BufferPool::CreateEmpty("FFmpeg_Decoder_Pool", "FFMPEG");
-    printf("✅ Independent BufferPool created (dynamic injection mode - unlimited capacity)\n");
-    pool->printStats();
-    // 3. 创建 VideoProducer（依赖注入 BufferPool）
-    printf("📹 Creating VideoProducer with BufferPool...\n");
-    VideoProducer producer(*pool);
+    // 2. 创建 VideoProductionLine（Worker会在open()时自动调用Allocator创建BufferPool）
+    printf("📹 Creating VideoProductionLine...\n");
+    VideoProductionLine producer;  // Worker会在open()时自动创建BufferPool
     
     // 4. 配置 FFmpeg 解码
     printf("🎬 Configuring FFmpeg video reader: %s\n", video_path);
     
-    VideoProducer::Config config(
+    VideoProductionLine::Config config(
         video_path,
         display.getWidth(),
         display.getHeight(),
         display.getBitsPerPixel(),
         true,  // loop（循环播放）
         1,  // 零拷贝推荐单线程，普通模式可以多线程
-        VideoReaderFactory::ReaderType::FFMPEG  // 显式指定 FFMPEG 读取器
+        BufferFillingWorkerFactory::WorkerType::FFMPEG_VIDEO_FILE  // 显式指定 FFmpeg Video File Worker
     );
     
     // 5. 设置错误回调
@@ -637,12 +699,23 @@ static int test_ffmpeg_video(const char* video_path) {
     // 注册信号处理
     signal(SIGINT, signal_handler);
     
-    // 7. 消费者循环
+    // 7. 获取工作BufferPool（Worker创建的或fallback的）
+    BufferPool* working_pool = producer.getWorkingBufferPool();
+    if (!working_pool) {
+        printf("❌ ERROR: No working BufferPool available\n");
+        return -1;
+    }
+    
+    printf("✅ Using BufferPool: '%s' (created by Worker via Allocator)\n", 
+           working_pool->getName().c_str());
+    working_pool->printStats();
+    
+    // 8. 消费者循环
     int frame_count = 0;
     
     while (g_running) {
-        // 从 BufferPool 获取已解码的 buffer
-        Buffer* filled_buffer = pool->acquireFilled(true, 100);
+        // 从工作BufferPool获取已解码的buffer
+        Buffer* filled_buffer = working_pool->acquireFilled(true, 100);
         if (filled_buffer == nullptr) {
             continue;  // 超时，继续等待
         }
@@ -654,7 +727,7 @@ static int test_ffmpeg_video(const char* video_path) {
             display.displayFilledFramebuffer(filled_buffer);
         }
         // 归还 buffer
-        pool->releaseFilled(filled_buffer);
+        working_pool->releaseFilled(filled_buffer);
         
         frame_count++;
         
@@ -676,9 +749,8 @@ static int test_ffmpeg_video(const char* video_path) {
     printf("   Average FPS: %.2f\n", producer.getAverageFPS());
     
     printf("\n📦 Final BufferPool statistics:\n");
-    pool->printStats();
+    working_pool->printStats();
     
-    // unique_ptr 会自动清理资源
     return 0;
 }
 
@@ -692,8 +764,8 @@ static void print_usage(const char* prog_name) {
     printf("  -m, --mode <mode>   Test mode (default: loop)\n");
     printf("                      loop:       4-frame loop display\n");
     printf("                      sequential: Sequential playback (play once)\n");
-    printf("                      producer:   BufferPool + VideoProducer test\n");
-    printf("                      iouring:    io_uring mode (using VideoProducer)\n");
+    printf("                      producer:   BufferPool + VideoProductionLine test\n");
+    printf("                      iouring:    io_uring mode (using VideoProductionLine)\n");
     printf("                      rtsp:       RTSP stream playback (zero-copy)\n");
     printf("                      ffmpeg:     FFmpeg encoded video playback (NEW)\n");
     printf("\n");
@@ -709,7 +781,7 @@ static void print_usage(const char* prog_name) {
     printf("Test Modes Description:\n");
     printf("  loop:       Load N frames into framebuffer and loop display them\n");
     printf("  sequential: Read and display frames sequentially from file\n");
-    printf("  producer:   Use BufferPool + VideoProducer architecture (zero-copy)\n");
+    printf("  producer:   Use BufferPool + VideoProductionLine architecture (zero-copy)\n");
     printf("  iouring:    io_uring async I/O mode\n");
     printf("  rtsp:       RTSP stream decoding and display (zero-copy, FFmpeg)\n");
     printf("  ffmpeg:     FFmpeg encoded video file decoding (MP4/AVI/MKV/etc)\n");

@@ -1,5 +1,4 @@
 #include "../../include/display/LinuxFramebufferDevice.hpp"
-#include "../../include/buffer/FramebufferAllocator.hpp"
 #include <stdio.h>
 #include <fcntl.h>
 #include <unistd.h>
@@ -35,7 +34,7 @@ LinuxFramebufferDevice::LinuxFramebufferDevice()
     , fb_index_(-1)
     , framebuffer_base_(nullptr)
     , framebuffer_total_size_(0)
-    , buffer_pool_(nullptr)
+    , buffer_pool_(nullptr)  // 由外部通过 setBufferPool() 注入
     , buffer_count_(0)
     , current_buffer_index_(0)
     , width_(0)
@@ -44,7 +43,7 @@ LinuxFramebufferDevice::LinuxFramebufferDevice()
     , buffer_size_(0)
     , is_initialized_(false)
 {
-    // BufferPool 会在 initialize() 中创建
+    // BufferPool 由外部通过 setBufferPool() 注入，不在内部创建
 }
 
 LinuxFramebufferDevice::~LinuxFramebufferDevice() {
@@ -118,8 +117,8 @@ void LinuxFramebufferDevice::cleanup() {
         fd_ = -1;
     }
     
-    // 3. 重置 BufferPool
-    buffer_pool_.reset();
+    // 3. 重置 BufferPool 指针（不拥有所有权，只重置指针）
+    buffer_pool_ = nullptr;
     
     // 4. 重置状态
     is_initialized_ = false;
@@ -365,54 +364,21 @@ void LinuxFramebufferDevice::calculateBufferAddresses() {
         buffer_count_ = safe_count;
     }
     
-    // 计算每个 buffer 的地址并使用 FramebufferAllocator 创建 BufferPool
-    std::vector<FramebufferAllocator::BufferInfo> fb_infos;
+    // 只计算每个 buffer 的地址（不创建 BufferPool）
     fb_mappings_.clear();
     fb_mappings_.reserve(buffer_count_);
     
-    printf("🔧 Creating BufferPool with %d framebuffer buffers:\n", buffer_count_);
+    printf("🔧 Calculating buffer addresses (%d buffers):\n", buffer_count_);
     
     for (int i = 0; i < buffer_count_; i++) {
         void* buffer_addr = (void*)(base + buffer_size_ * i);
         fb_mappings_.push_back(buffer_addr);
         
-        // 尝试获取物理地址（可能失败，取决于权限）
-        uint64_t phys_addr = 0;  // 暂时设为0，BufferPool会尝试自动获取
-        
-        fb_infos.push_back({
-            .virt_addr = buffer_addr,
-            .phys_addr = phys_addr,
-            .size = buffer_size_
-        });
-        
         printf("   Framebuffer[%d]: virt=%p, size=%zu\n", 
                i, buffer_addr, buffer_size_);
     }
     
-    // 生成唯一名称：FramebufferPool_FB0 或 FramebufferPool_FB1
-    std::string pool_name = "FramebufferPool_FB" + std::to_string(fb_index_);
-    std::string pool_category = "Display";
-    
-    try {
-        // 使用 FramebufferAllocator 管理外部内存
-        auto allocator = std::make_unique<FramebufferAllocator>(fb_infos);
-        buffer_pool_ = allocator->allocatePoolWithBuffers(
-            buffer_count_,
-            buffer_size_,
-            pool_name,
-            pool_category
-        );
-        
-        if (buffer_pool_) {
-            printf("✅ BufferPool created successfully (managing %d framebuffers)\n", buffer_count_);
-            buffer_pool_->printStats();
-        } else {
-            printf("❌ ERROR: Failed to create BufferPool\n");
-        }
-    } catch (const std::exception& e) {
-        printf("❌ ERROR: Failed to create BufferPool: %s\n", e.what());
-        buffer_pool_.reset();
-    }
+    printf("✅ Buffer addresses calculated (BufferPool will be created externally)\n");
 }
 
 void LinuxFramebufferDevice::unmapHardwareFramebufferMemory() {
@@ -423,6 +389,26 @@ void LinuxFramebufferDevice::unmapHardwareFramebufferMemory() {
         framebuffer_base_ = nullptr;
         framebuffer_total_size_ = 0;
     }
+}
+
+// ============ 新接口实现：信息提供和依赖注入 ============
+
+LinuxFramebufferDevice::MappedInfo LinuxFramebufferDevice::getMappedInfo() const {
+    MappedInfo info;
+    info.base_addr = framebuffer_base_;
+    info.buffer_size = buffer_size_;
+    info.buffer_count = buffer_count_;
+    return info;
+}
+
+void LinuxFramebufferDevice::setBufferPool(BufferPool* pool) {
+    if (!pool) {
+        printf("⚠️  Warning: Setting BufferPool to nullptr\n");
+    } else {
+        printf("✅ BufferPool injected to LinuxFramebufferDevice (pool: %s)\n", 
+               pool->getName().c_str());
+    }
+    buffer_pool_ = pool;
 }
 
 // ============ 新接口：displayBuffer(Buffer*) - 智能零拷贝显示 ============

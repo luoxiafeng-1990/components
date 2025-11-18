@@ -1,4 +1,4 @@
-#include "../../include/videoFile/MmapVideoReader.hpp"
+#include "../../../include/productionline/worker/MmapRawVideoFileWorker.hpp"
 #include <stdio.h>
 #include <stdlib.h>
 #include <fcntl.h>
@@ -10,7 +10,7 @@
 
 // ============ 构造函数 ============
 
-MmapVideoReader::MmapVideoReader()
+MmapRawVideoFileWorker::MmapRawVideoFileWorker()
     : fd_(-1)
     , mapped_file_(nullptr)
     , mapped_size_(0)
@@ -27,13 +27,13 @@ MmapVideoReader::MmapVideoReader()
     path_[0] = '\0';
 }
 
-MmapVideoReader::~MmapVideoReader() {
+MmapRawVideoFileWorker::~MmapRawVideoFileWorker() {
     close();
 }
 
 // ============ IVideoReader 接口实现 ============
 
-bool MmapVideoReader::open(const char* path) {
+bool MmapRawVideoFileWorker::open(const char* path) {
     if (is_open_) {
         printf("⚠️  Warning: File already opened, closing previous file\n");
         close();
@@ -44,7 +44,7 @@ bool MmapVideoReader::open(const char* path) {
     
     printf("📂 Opening video file: %s\n", path);
     printf("   Mode: Auto-detect format\n");
-    printf("   Reader: MmapVideoReader (memory-mapped I/O)\n");
+    printf("   Worker: MmapRawVideoFileWorker (memory-mapped I/O)\n");
     
     fd_ = ::open(path, O_RDONLY);
     if (fd_ < 0) {
@@ -133,7 +133,7 @@ bool MmapVideoReader::open(const char* path) {
     return true;
 }
 
-bool MmapVideoReader::openRaw(const char* path, int width, int height, int bits_per_pixel) {
+bool MmapRawVideoFileWorker::openRaw(const char* path, int width, int height, int bits_per_pixel) {
     if (is_open_) {
         printf("⚠️  Warning: File already opened, closing previous file\n");
         close();
@@ -161,7 +161,7 @@ bool MmapVideoReader::openRaw(const char* path, int width, int height, int bits_
     printf("   Format: %dx%d, %d bits per pixel\n", 
            width_, height_, bits_per_pixel_);
     printf("   Frame size: %zu bytes\n", frame_size_);
-    printf("   Reader: MmapVideoReader (memory-mapped I/O)\n");
+    printf("   Worker: MmapRawVideoFileWorker (memory-mapped I/O)\n");
     
     fd_ = ::open(path, O_RDONLY);
     if (fd_ < 0) {
@@ -191,7 +191,7 @@ bool MmapVideoReader::openRaw(const char* path, int width, int height, int bits_
     return true;
 }
 
-void MmapVideoReader::close() {
+void MmapRawVideoFileWorker::close() {
     if (!is_open_) {
         return;
     }
@@ -209,78 +209,12 @@ void MmapVideoReader::close() {
     printf("✅ Video file closed: %s\n", path_);
 }
 
-bool MmapVideoReader::isOpen() const {
+bool MmapRawVideoFileWorker::isOpen() const {
     return is_open_;
 }
 
-bool MmapVideoReader::readFrameTo(Buffer& dest_buffer) {
-    return readFrameTo(dest_buffer.data(), dest_buffer.size());
-}
 
-bool MmapVideoReader::readFrameTo(void* dest_buffer, size_t buffer_size) {
-    if (!is_open_) {
-        printf("❌ ERROR: File not opened\n");
-        return false;
-    }
-    
-    if (!dest_buffer) {
-        printf("❌ ERROR: Destination buffer is null\n");
-        return false;
-    }
-    
-    if (buffer_size < frame_size_) {
-        printf("❌ ERROR: Buffer too small (need %zu, got %zu)\n", 
-               frame_size_, buffer_size);
-        return false;
-    }
-    
-    if (current_frame_index_ >= total_frames_) {
-        printf("⚠️  Warning: Reached end of file\n");
-        return false;
-    }
-    
-    size_t frame_offset = (size_t)current_frame_index_ * frame_size_;
-    const char* frame_addr = (const char*)mapped_file_ + frame_offset;
-    
-    memcpy(dest_buffer, frame_addr, frame_size_);
-    
-    current_frame_index_++;
-    return true;
-}
-
-bool MmapVideoReader::readFrameAt(int frame_index, Buffer& dest_buffer) {
-    return readFrameAt(frame_index, dest_buffer.data(), dest_buffer.size());
-}
-
-bool MmapVideoReader::readFrameAt(int frame_index, void* dest_buffer, size_t buffer_size) {
-    if (!seek(frame_index)) {
-        return false;
-    }
-    
-    return readFrameTo(dest_buffer, buffer_size);
-}
-
-bool MmapVideoReader::readFrameAtThreadSafe(int frame_index, void* dest_buffer, size_t buffer_size) const {
-    if (!is_open_ || mapped_file_ == nullptr) {
-        return false;
-    }
-    
-    if (frame_index < 0 || frame_index >= total_frames_) {
-        return false;
-    }
-    
-    if (buffer_size < frame_size_) {
-        return false;
-    }
-    
-    size_t frame_offset = (size_t)frame_index * frame_size_;
-    const char* frame_addr = (const char*)mapped_file_ + frame_offset;
-    
-    memcpy(dest_buffer, frame_addr, frame_size_);
-    return true;
-}
-
-bool MmapVideoReader::seek(int frame_index) {
+bool MmapRawVideoFileWorker::seek(int frame_index) {
     if (!is_open_) {
         printf("❌ ERROR: File not opened\n");
         return false;
@@ -296,11 +230,11 @@ bool MmapVideoReader::seek(int frame_index) {
     return true;
 }
 
-bool MmapVideoReader::seekToBegin() {
+bool MmapRawVideoFileWorker::seekToBegin() {
     return seek(0);
 }
 
-bool MmapVideoReader::seekToEnd() {
+bool MmapRawVideoFileWorker::seekToEnd() {
     if (!is_open_) {
         printf("❌ ERROR: File not opened\n");
         return false;
@@ -310,58 +244,90 @@ bool MmapVideoReader::seekToEnd() {
     return true;
 }
 
-bool MmapVideoReader::skip(int frame_count) {
+bool MmapRawVideoFileWorker::skip(int frame_count) {
     int target_frame = current_frame_index_ + frame_count;
     return seek(target_frame);
 }
 
-int MmapVideoReader::getTotalFrames() const {
+int MmapRawVideoFileWorker::getTotalFrames() const {
     return total_frames_;
 }
 
-int MmapVideoReader::getCurrentFrameIndex() const {
+int MmapRawVideoFileWorker::getCurrentFrameIndex() const {
     return current_frame_index_;
 }
 
-size_t MmapVideoReader::getFrameSize() const {
+size_t MmapRawVideoFileWorker::getFrameSize() const {
     return frame_size_;
 }
 
-long MmapVideoReader::getFileSize() const {
+long MmapRawVideoFileWorker::getFileSize() const {
     return file_size_;
 }
 
-int MmapVideoReader::getWidth() const {
+int MmapRawVideoFileWorker::getWidth() const {
     return width_;
 }
 
-int MmapVideoReader::getHeight() const {
+int MmapRawVideoFileWorker::getHeight() const {
     return height_;
 }
 
-int MmapVideoReader::getBytesPerPixel() const {
+int MmapRawVideoFileWorker::getBytesPerPixel() const {
     return (bits_per_pixel_ + 7) / 8;
 }
 
-const char* MmapVideoReader::getPath() const {
+const char* MmapRawVideoFileWorker::getPath() const {
     return path_;
 }
 
-bool MmapVideoReader::hasMoreFrames() const {
+bool MmapRawVideoFileWorker::hasMoreFrames() const {
     return current_frame_index_ < total_frames_;
 }
 
-bool MmapVideoReader::isAtEnd() const {
+bool MmapRawVideoFileWorker::isAtEnd() const {
     return current_frame_index_ >= total_frames_;
 }
 
-const char* MmapVideoReader::getReaderType() const {
-    return "MmapVideoReader";
+// ============================================================================
+// 核心功能：填充Buffer
+// ============================================================================
+
+bool MmapRawVideoFileWorker::fillBuffer(int frame_index, Buffer* buffer) {
+    if (!buffer || !buffer->data()) {
+        printf("❌ ERROR: Invalid buffer\n");
+        return false;
+    }
+    
+    if (!is_open_) {
+        printf("❌ ERROR: Worker is not open\n");
+        return false;
+    }
+    
+    if (frame_index < 0 || frame_index >= total_frames_) {
+        printf("❌ ERROR: Invalid frame index %d (valid: 0-%d)\n",
+               frame_index, total_frames_ - 1);
+        return false;
+    }
+    
+    if (buffer->size() < frame_size_) {
+        printf("❌ ERROR: Buffer too small (need %zu, got %zu)\n", 
+               frame_size_, buffer->size());
+        return false;
+    }
+    
+    // 从mmap区域拷贝数据到buffer
+    size_t frame_offset = (size_t)frame_index * frame_size_;
+    const char* frame_addr = (const char*)mapped_file_ + frame_offset;
+    
+    memcpy(buffer->data(), frame_addr, frame_size_);
+    
+    return true;
 }
 
 // ============ 内部辅助方法 ============
 
-bool MmapVideoReader::validateFile() {
+bool MmapRawVideoFileWorker::validateFile() {
     struct stat st;
     if (fstat(fd_, &st) < 0) {
         printf("❌ ERROR: Cannot get file size: %s\n", strerror(errno));
@@ -392,7 +358,7 @@ bool MmapVideoReader::validateFile() {
     return true;
 }
 
-MmapVideoReader::FileFormat MmapVideoReader::detectFileFormat() {
+MmapRawVideoFileWorker::FileFormat MmapRawVideoFileWorker::detectFileFormat() {
     unsigned char header[32];
     ssize_t bytes_read = readFileHeader(header, sizeof(header));
     
@@ -439,7 +405,7 @@ MmapVideoReader::FileFormat MmapVideoReader::detectFileFormat() {
     return FileFormat::UNKNOWN;
 }
 
-ssize_t MmapVideoReader::readFileHeader(unsigned char* header, size_t size) {
+ssize_t MmapRawVideoFileWorker::readFileHeader(unsigned char* header, size_t size) {
     if (fd_ < 0) {
         return -1;
     }
@@ -457,19 +423,19 @@ ssize_t MmapVideoReader::readFileHeader(unsigned char* header, size_t size) {
     return bytes_read;
 }
 
-bool MmapVideoReader::parseMP4Header() {
+bool MmapRawVideoFileWorker::parseMP4Header() {
     printf("⚠️  MP4 format detected but not yet fully supported\n");
     printf("   Please use a tool to extract raw frames, or provide format info\n");
     return false;
 }
 
-bool MmapVideoReader::parseH264Header() {
+bool MmapRawVideoFileWorker::parseH264Header() {
     printf("⚠️  H.264 format detected but not yet fully supported\n");
     printf("   Please use a tool to extract raw frames, or provide format info\n");
     return false;
 }
 
-bool MmapVideoReader::mapFile() {
+bool MmapRawVideoFileWorker::mapFile() {
     if (fd_ < 0) {
         printf("❌ ERROR: Invalid file descriptor\n");
         return false;
@@ -498,7 +464,7 @@ bool MmapVideoReader::mapFile() {
     return true;
 }
 
-void MmapVideoReader::unmapFile() {
+void MmapRawVideoFileWorker::unmapFile() {
     if (mapped_file_ != nullptr && mapped_size_ > 0) {
         if (munmap(mapped_file_, mapped_size_) < 0) {
             printf("⚠️  Warning: munmap failed: %s\n", strerror(errno));

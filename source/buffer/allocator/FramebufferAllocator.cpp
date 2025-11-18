@@ -1,4 +1,5 @@
-#include "../../include/buffer/FramebufferAllocator.hpp"
+#include "../../../include/buffer/allocator/FramebufferAllocator.hpp"
+#include "../../../include/display/LinuxFramebufferDevice.hpp"
 #include <stdio.h>
 
 // ============================================================
@@ -10,6 +11,21 @@ FramebufferAllocator::FramebufferAllocator(const std::vector<BufferInfo>& extern
     , next_buffer_index_(0)
 {
     printf("🔧 FramebufferAllocator created with %zu external buffers\n", 
+           external_buffers_.size());
+}
+
+FramebufferAllocator::FramebufferAllocator(LinuxFramebufferDevice* device)
+    : next_buffer_index_(0)
+{
+    if (!device) {
+        printf("❌ ERROR: Device pointer is null\n");
+        return;
+    }
+    
+    // 调用私有方法构建 BufferInfo 列表
+    external_buffers_ = buildBufferInfosFromDevice(device);
+    
+    printf("🔧 FramebufferAllocator created from device with %zu buffers\n", 
            external_buffers_.size());
 }
 
@@ -113,5 +129,44 @@ void FramebufferAllocator::deallocateBuffer(Buffer* buffer) {
     
     // 2. 仅删除 Buffer 对象
     delete buffer;
+}
+
+// ============================================================
+// 私有辅助方法：从设备构建 BufferInfo 列表
+// ============================================================
+
+std::vector<FramebufferAllocator::BufferInfo> 
+FramebufferAllocator::buildBufferInfosFromDevice(LinuxFramebufferDevice* device)
+{
+    std::vector<BufferInfo> infos;
+    
+    if (!device) {
+        printf("❌ ERROR: Device pointer is null in buildBufferInfosFromDevice\n");
+        return infos;
+    }
+    
+    // 1. 从设备获取 mmap 信息
+    auto mapped_info = device->getMappedInfo();
+    
+    printf("📋 Building BufferInfo list from device:\n");
+    printf("   base_addr=%p, buffer_size=%zu, buffer_count=%d\n",
+           mapped_info.base_addr, mapped_info.buffer_size, mapped_info.buffer_count);
+    
+    // 2. 计算每个 buffer 的地址并构建 BufferInfo
+    unsigned char* base = (unsigned char*)mapped_info.base_addr;
+    infos.reserve(mapped_info.buffer_count);
+    
+    for (int i = 0; i < mapped_info.buffer_count; i++) {
+        infos.push_back({
+            .virt_addr = (void*)(base + i * mapped_info.buffer_size),
+            .phys_addr = 0,  // 物理地址由系统自动获取
+            .size = mapped_info.buffer_size
+        });
+        
+        printf("   Buffer[%d]: virt=%p, size=%zu\n", 
+               i, infos.back().virt_addr, infos.back().size);
+    }
+    
+    return infos;
 }
 

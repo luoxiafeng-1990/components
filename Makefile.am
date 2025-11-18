@@ -4,22 +4,22 @@ bin_PROGRAMS = display_test
 
 display_test_SOURCES = test.cpp \
                        source/display/LinuxFramebufferDevice.cpp \
-                       source/videoFile/VideoFile.cpp \
-                       source/videoFile/MmapVideoReader.cpp \
-                       source/videoFile/VideoReaderFactory.cpp \
-                       source/videoFile/RtspVideoReader.cpp \
-                       source/videoFile/FfmpegVideoReader.cpp \
+                       source/productionline/worker/BufferFillingWorker.cpp \
+                       source/productionline/worker/MmapRawVideoFileWorker.cpp \
+                       source/productionline/worker/BufferFillingWorkerFactory.cpp \
+                       source/productionline/worker/FfmpegDecodeRtspWorker.cpp \
+                       source/productionline/worker/FfmpegDecodeVideoFileWorker.cpp \
                        source/monitor/PerformanceMonitor.cpp \
                        source/monitor/Timer.cpp \
                        source/buffer/Buffer.cpp \
-                       source/buffer/BufferAllocator.cpp \
-                       source/buffer/NormalAllocator.cpp \
-                       source/buffer/FramebufferAllocator.cpp \
-                       source/buffer/AVFrameAllocator.cpp \
+                       source/buffer/allocator/BufferAllocator.cpp \
+                       source/buffer/allocator/NormalAllocator.cpp \
+                       source/buffer/allocator/FramebufferAllocator.cpp \
+                       source/buffer/allocator/AVFrameAllocator.cpp \
                        source/buffer/BufferPool.cpp \
                        source/buffer/BufferPoolRegistry.cpp \
-                       source/producer/VideoProducer.cpp \
-                       source/videoFile/IoUringVideoReader.cpp 
+                       source/productionline/VideoProductionLine.cpp \
+                       source/productionline/worker/IoUringRawVideoFileWorker.cpp 
                        
 
 AM_CPPFLAGS = -I$(top_srcdir)/include

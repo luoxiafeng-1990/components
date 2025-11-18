@@ -1,10 +1,12 @@
 #pragma once
 
-#include "BufferAllocator.hpp"
+#include "BufferAllocatorBase.hpp"
 #include <cstdlib>
 
 /**
  * @brief NormalAllocator - 普通内存分配器
+ * 
+ * 继承自 BufferAllocatorBase（抽象基类）
  * 
  * 使用标准 C++ 内存分配（malloc/posix_memalign）创建 Buffer
  * 
@@ -23,7 +25,7 @@
  * auto pool = allocator->allocatePoolWithBuffers(10, 1920*1080*3, "VideoPool", "Video");
  * @endcode
  */
-class NormalAllocator : public BufferAllocator {
+class NormalAllocator : public BufferAllocatorBase {
 public:
     /**
      * @brief 构造函数

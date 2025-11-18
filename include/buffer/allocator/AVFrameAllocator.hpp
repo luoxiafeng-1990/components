@@ -1,6 +1,6 @@
 #pragma once
 
-#include "BufferAllocator.hpp"
+#include "BufferAllocatorBase.hpp"
 
 extern "C" {
 #include <libavcodec/avcodec.h>
@@ -9,6 +9,8 @@ extern "C" {
 
 /**
  * @brief AVFrameAllocator - AVFrame 包装分配器
+ * 
+ * 继承自 BufferAllocatorBase（抽象基类）
  * 
  * 用于将 FFmpeg 解码后的 AVFrame 包装为 Buffer 对象并注入到 BufferPool
  * 
@@ -48,7 +50,7 @@ extern "C" {
  * pool->releaseFilled(filled);
  * @endcode
  */
-class AVFrameAllocator : public BufferAllocator {
+class AVFrameAllocator : public BufferAllocatorBase {
 public:
     /**
      * @brief 构造函数

@@ -1,4 +1,4 @@
-#include "../../include/videoFile/FfmpegVideoReader.hpp"
+#include "../../../include/productionline/worker/FfmpegDecodeVideoFileWorker.hpp"
 #include <cstring>
 #include <cstdio>
 
@@ -20,7 +20,7 @@ extern "C" {
 // 构造/析构
 // ============================================================================
 
-FfmpegVideoReader::FfmpegVideoReader()
+FfmpegDecodeVideoFileWorker::FfmpegDecodeVideoFileWorker()
     : format_ctx_(nullptr)
     , codec_ctx_(nullptr)
     , sws_ctx_(nullptr)
@@ -47,7 +47,7 @@ FfmpegVideoReader::FfmpegVideoReader()
     memset(file_path_, 0, sizeof(file_path_));
 }
 
-FfmpegVideoReader::~FfmpegVideoReader() {
+FfmpegDecodeVideoFileWorker::~FfmpegDecodeVideoFileWorker() {
     close();
 }
 
@@ -55,7 +55,7 @@ FfmpegVideoReader::~FfmpegVideoReader() {
 // 打开/关闭
 // ============================================================================
 
-bool FfmpegVideoReader::open(const char* path) {
+bool FfmpegDecodeVideoFileWorker::open(const char* path) {
     if (!path) {
         setError("Invalid file path (nullptr)");
         return false;
@@ -83,7 +83,7 @@ bool FfmpegVideoReader::open(const char* path) {
     decoded_frames_ = 0;
     decode_errors_ = 0;
     
-    printf("✅ FfmpegVideoReader: Opened '%s'\n", path);
+    printf("✅ FfmpegDecodeVideoFileWorker: Opened '%s'\n", path);
     printf("   Resolution: %dx%d → %dx%d\n", width_, height_, output_width_, output_height_);
     printf("   Codec: %s\n", codec_ctx_->codec->name);
     printf("   Total frames (estimated): %d\n", total_frames_);
@@ -92,22 +92,22 @@ bool FfmpegVideoReader::open(const char* path) {
     return true;
 }
 
-bool FfmpegVideoReader::openRaw(const char* path, int width, int height, int bits_per_pixel) {
+bool FfmpegDecodeVideoFileWorker::openRaw(const char* path, int width, int height, int bits_per_pixel) {
     (void)path;
     (void)width;
     (void)height;
     (void)bits_per_pixel;
-    setError("FfmpegVideoReader does not support raw video files. Use MmapVideoReader or IoUringVideoReader instead.");
+    setError("FfmpegDecodeVideoFileWorker does not support raw video files. Use MmapRawVideoFileWorker or IoUringRawVideoFileWorker instead.");
     return false;
 }
 
-void FfmpegVideoReader::close() {
+void FfmpegDecodeVideoFileWorker::close() {
     std::lock_guard<std::mutex> lock(mutex_);
     closeVideo();
     is_open_ = false;
 }
 
-bool FfmpegVideoReader::isOpen() const {
+bool FfmpegDecodeVideoFileWorker::isOpen() const {
     return is_open_;
 }
 
@@ -115,7 +115,7 @@ bool FfmpegVideoReader::isOpen() const {
 // 内部方法：打开视频
 // ============================================================================
 
-bool FfmpegVideoReader::openVideo() {
+bool FfmpegDecodeVideoFileWorker::openVideo() {
     // 1. 打开输入文件
     format_ctx_ = avformat_alloc_context();
     if (!format_ctx_) {
@@ -173,7 +173,7 @@ bool FfmpegVideoReader::openVideo() {
     return true;
 }
 
-void FfmpegVideoReader::closeVideo() {
+void FfmpegDecodeVideoFileWorker::closeVideo() {
     // 释放格式转换器
     if (sws_ctx_) {
         sws_freeContext(sws_ctx_);
@@ -202,7 +202,7 @@ void FfmpegVideoReader::closeVideo() {
     supports_zero_copy_ = false;
 }
 
-bool FfmpegVideoReader::findVideoStream() {
+bool FfmpegDecodeVideoFileWorker::findVideoStream() {
     video_stream_index_ = -1;
     
     for (unsigned int i = 0; i < format_ctx_->nb_streams; i++) {
@@ -224,7 +224,7 @@ bool FfmpegVideoReader::findVideoStream() {
     return true;
 }
 
-bool FfmpegVideoReader::initializeDecoder() {
+bool FfmpegDecodeVideoFileWorker::initializeDecoder() {
     AVCodecParameters* codecpar = format_ctx_->streams[video_stream_index_]->codecpar;
     
     // 1. 查找解码器
@@ -281,7 +281,7 @@ bool FfmpegVideoReader::initializeDecoder() {
     return true;
 }
 
-bool FfmpegVideoReader::configureSpecialDecoder() {
+bool FfmpegDecodeVideoFileWorker::configureSpecialDecoder() {
     // 配置 h264_taco 解码器（参考 ids_test_video3）
     if (!codec_ctx_->priv_data) {
         printf("⚠️  Warning: codec_ctx->priv_data is NULL, cannot set options\n");
@@ -325,7 +325,7 @@ bool FfmpegVideoReader::configureSpecialDecoder() {
     return true;
 }
 
-bool FfmpegVideoReader::initializeSwsContext() {
+bool FfmpegDecodeVideoFileWorker::initializeSwsContext() {
     // 确定输出像素格式
     AVPixelFormat dst_pix_fmt;
     if (output_bpp_ == 32) {
@@ -354,7 +354,7 @@ bool FfmpegVideoReader::initializeSwsContext() {
     return true;
 }
 
-bool FfmpegVideoReader::checkZeroCopySupport() {
+bool FfmpegDecodeVideoFileWorker::checkZeroCopySupport() {
     // 零拷贝条件：
     // 1. BufferPool 已设置
     // 2. 使用特殊硬件解码器（如 h264_taco）
@@ -373,7 +373,7 @@ bool FfmpegVideoReader::checkZeroCopySupport() {
     return true;
 }
 
-uint64_t FfmpegVideoReader::extractPhysicalAddress(AVFrame* frame) {
+uint64_t FfmpegDecodeVideoFileWorker::extractPhysicalAddress(AVFrame* frame) {
     if (!frame || !frame->metadata) {
         return 0;
     }
@@ -396,7 +396,7 @@ uint64_t FfmpegVideoReader::extractPhysicalAddress(AVFrame* frame) {
     return phys_addr;
 }
 
-Buffer* FfmpegVideoReader::createZeroCopyBuffer(AVFrame* frame) {
+Buffer* FfmpegDecodeVideoFileWorker::createZeroCopyBuffer(AVFrame* frame) {
     if (!frame) {
         return nullptr;
     }
@@ -426,7 +426,7 @@ Buffer* FfmpegVideoReader::createZeroCopyBuffer(AVFrame* frame) {
     return buffer;
 }
 
-int FfmpegVideoReader::estimateTotalFrames() {
+int FfmpegDecodeVideoFileWorker::estimateTotalFrames() {
     if (!format_ctx_ || video_stream_index_ < 0) {
         return -1;
     }
@@ -459,7 +459,7 @@ int FfmpegVideoReader::estimateTotalFrames() {
 // 读取帧（核心逻辑）
 // ============================================================================
 
-AVFrame* FfmpegVideoReader::decodeOneFrame() {
+AVFrame* FfmpegDecodeVideoFileWorker::decodeOneFrame() {
     if (!is_open_ || eof_reached_) {
         return nullptr;
     }
@@ -532,40 +532,7 @@ AVFrame* FfmpegVideoReader::decodeOneFrame() {
     }
 }
 
-bool FfmpegVideoReader::readFrameTo(Buffer& dest_buffer) {
-    return readFrameTo(dest_buffer.data(), dest_buffer.size());
-}
-
-bool FfmpegVideoReader::readFrameTo(void* dest_buffer, size_t buffer_size) {
-    if (!is_open_) {
-        setError("Reader is not open");
-        return false;
-    }
-    
-    std::lock_guard<std::mutex> lock(mutex_);
-    
-    // 零拷贝模式不应该调用这个方法
-    if (supports_zero_copy_) {
-        setError("Zero-copy mode: use BufferPool injection instead");
-        return false;
-    }
-    
-    // 解码一帧
-    AVFrame* frame = decodeOneFrame();
-    if (!frame) {
-        return false;
-    }
-    
-    // 转换并拷贝到目标buffer
-    bool success = convertFrameTo(frame, dest_buffer, buffer_size);
-    
-    // 释放 AVFrame
-    av_frame_free(&frame);
-    
-    return success;
-}
-
-bool FfmpegVideoReader::convertFrameTo(AVFrame* src_frame, void* dest, size_t dest_size) {
+bool FfmpegDecodeVideoFileWorker::convertFrameTo(AVFrame* src_frame, void* dest, size_t dest_size) {
     if (!src_frame || !dest || !sws_ctx_) {
         return false;
     }
@@ -596,34 +563,12 @@ bool FfmpegVideoReader::convertFrameTo(AVFrame* src_frame, void* dest, size_t de
     return true;
 }
 
-bool FfmpegVideoReader::readFrameAt(int frame_index, Buffer& dest_buffer) {
-    if (!seek(frame_index)) {
-        return false;
-    }
-    return readFrameTo(dest_buffer);
-}
-
-bool FfmpegVideoReader::readFrameAt(int frame_index, void* dest_buffer, size_t buffer_size) {
-    if (!seek(frame_index)) {
-        return false;
-    }
-    return readFrameTo(dest_buffer, buffer_size);
-}
-
-bool FfmpegVideoReader::readFrameAtThreadSafe(int frame_index, void* dest_buffer, size_t buffer_size) const {
-    // FfmpegVideoReader 不支持线程安全的随机访问
-    // （因为 seek 会修改内部状态）
-    (void)frame_index;
-    (void)dest_buffer;
-    (void)buffer_size;
-    return false;
-}
 
 // ============================================================================
 // 导航操作
 // ============================================================================
 
-bool FfmpegVideoReader::seek(int frame_index) {
+bool FfmpegDecodeVideoFileWorker::seek(int frame_index) {
     if (!is_open_) {
         return false;
     }
@@ -658,18 +603,18 @@ bool FfmpegVideoReader::seek(int frame_index) {
     return true;
 }
 
-bool FfmpegVideoReader::seekToBegin() {
+bool FfmpegDecodeVideoFileWorker::seekToBegin() {
     return seek(0);
 }
 
-bool FfmpegVideoReader::seekToEnd() {
+bool FfmpegDecodeVideoFileWorker::seekToEnd() {
     if (total_frames_ > 0) {
         return seek(total_frames_ - 1);
     }
     return false;
 }
 
-bool FfmpegVideoReader::skip(int frame_count) {
+bool FfmpegDecodeVideoFileWorker::skip(int frame_count) {
     return seek(current_frame_index_ + frame_count);
 }
 
@@ -677,19 +622,19 @@ bool FfmpegVideoReader::skip(int frame_count) {
 // 信息查询
 // ============================================================================
 
-int FfmpegVideoReader::getTotalFrames() const {
+int FfmpegDecodeVideoFileWorker::getTotalFrames() const {
     return total_frames_;
 }
 
-int FfmpegVideoReader::getCurrentFrameIndex() const {
+int FfmpegDecodeVideoFileWorker::getCurrentFrameIndex() const {
     return current_frame_index_;
 }
 
-size_t FfmpegVideoReader::getFrameSize() const {
+size_t FfmpegDecodeVideoFileWorker::getFrameSize() const {
     return output_width_ * output_height_ * (output_bpp_ / 8);
 }
 
-long FfmpegVideoReader::getFileSize() const {
+long FfmpegDecodeVideoFileWorker::getFileSize() const {
     if (!format_ctx_) {
         return -1;
     }
@@ -703,71 +648,115 @@ long FfmpegVideoReader::getFileSize() const {
     return -1;
 }
 
-int FfmpegVideoReader::getWidth() const {
+int FfmpegDecodeVideoFileWorker::getWidth() const {
     return output_width_;
 }
 
-int FfmpegVideoReader::getHeight() const {
+int FfmpegDecodeVideoFileWorker::getHeight() const {
     return output_height_;
 }
 
-int FfmpegVideoReader::getBytesPerPixel() const {
+int FfmpegDecodeVideoFileWorker::getBytesPerPixel() const {
     return output_bpp_ / 8;
 }
 
-const char* FfmpegVideoReader::getPath() const {
+const char* FfmpegDecodeVideoFileWorker::getPath() const {
     return file_path_;
 }
 
-bool FfmpegVideoReader::hasMoreFrames() const {
+bool FfmpegDecodeVideoFileWorker::hasMoreFrames() const {
     return !eof_reached_;
 }
 
-bool FfmpegVideoReader::isAtEnd() const {
+bool FfmpegDecodeVideoFileWorker::isAtEnd() const {
     return eof_reached_;
 }
 
-const char* FfmpegVideoReader::getReaderType() const {
-    return "FfmpegVideoReader";
+// ============================================================================
+// 核心功能：填充Buffer
+// ============================================================================
+
+bool FfmpegDecodeVideoFileWorker::fillBuffer(int frame_index, Buffer* buffer) {
+    if (!buffer || !buffer->data()) {
+        setError("Invalid buffer");
+        return false;
+    }
+    
+    if (!is_open_) {
+        setError("Worker is not open");
+        return false;
+    }
+    
+    std::lock_guard<std::mutex> lock(mutex_);
+    
+    // 零拷贝模式不应该调用这个方法
+    if (supports_zero_copy_) {
+        setError("Zero-copy mode: use BufferPool injection instead");
+        return false;
+    }
+    
+    // 如果需要seek到指定帧
+    if (frame_index != current_frame_index_) {
+        if (!seek(frame_index)) {
+            return false;
+        }
+    }
+    
+    // 解码一帧
+    AVFrame* frame = decodeOneFrame();
+    if (!frame) {
+        return false;
+    }
+    
+    // 转换并拷贝到目标buffer
+    bool success = convertFrameTo(frame, buffer->data(), buffer->size());
+    
+    // 释放 AVFrame
+    av_frame_free(&frame);
+    
+    return success;
 }
 
 // ============================================================================
-// 零拷贝模式
+// 提供原材料（BufferPool）
 // ============================================================================
 
-void FfmpegVideoReader::setBufferPool(void* pool) {
-    buffer_pool_ = static_cast<BufferPool*>(pool);
-    
-    // 重新检查零拷贝支持
-    if (is_open_) {
-        supports_zero_copy_ = checkZeroCopySupport();
-    }
+std::unique_ptr<BufferPool> FfmpegDecodeVideoFileWorker::getOutputBufferPool() {
+    // FfmpegDecodeVideoFileWorker 目前没有创建内部 BufferPool
+    // 使用外部提供的 BufferPool
+    // TODO: 如果需要在open()时自动创建BufferPool，在这里返回创建的BufferPool
+    return nullptr;
+}
+
+void* FfmpegDecodeVideoFileWorker::getOutputBufferPoolRaw() const {
+    // 向后兼容：返回nullptr
+    return nullptr;
 }
 
 // ============================================================================
 // 配置接口
 // ============================================================================
 
-void FfmpegVideoReader::setOutputResolution(int width, int height) {
+void FfmpegDecodeVideoFileWorker::setOutputResolution(int width, int height) {
     if (!is_open_) {
         output_width_ = width;
         output_height_ = height;
     }
 }
 
-void FfmpegVideoReader::setOutputBitsPerPixel(int bpp) {
+void FfmpegDecodeVideoFileWorker::setOutputBitsPerPixel(int bpp) {
     if (!is_open_) {
         output_bpp_ = bpp;
     }
 }
 
-void FfmpegVideoReader::setDecoderName(const char* decoder_name) {
+void FfmpegDecodeVideoFileWorker::setDecoderName(const char* decoder_name) {
     if (!is_open_) {
         decoder_name_ = decoder_name;
     }
 }
 
-void FfmpegVideoReader::setHardwareDecoder(bool enable) {
+void FfmpegDecodeVideoFileWorker::setHardwareDecoder(bool enable) {
     if (!is_open_) {
         use_hardware_decoder_ = enable;
     }
@@ -777,32 +766,32 @@ void FfmpegVideoReader::setHardwareDecoder(bool enable) {
 // 辅助方法
 // ============================================================================
 
-void FfmpegVideoReader::setError(const std::string& error, int ffmpeg_error) {
+void FfmpegDecodeVideoFileWorker::setError(const std::string& error, int ffmpeg_error) {
     last_error_ = error;
     last_ffmpeg_error_ = ffmpeg_error;
     
     if (ffmpeg_error != 0) {
         char err_buf[AV_ERROR_MAX_STRING_SIZE];
         av_strerror(ffmpeg_error, err_buf, sizeof(err_buf));
-        printf("❌ FfmpegVideoReader Error: %s (FFmpeg: %s)\n", error.c_str(), err_buf);
+        printf("❌ FfmpegDecodeVideoFileWorker Error: %s (FFmpeg: %s)\n", error.c_str(), err_buf);
     } else {
-        printf("❌ FfmpegVideoReader Error: %s\n", error.c_str());
+        printf("❌ FfmpegDecodeVideoFileWorker Error: %s\n", error.c_str());
     }
 }
 
-std::string FfmpegVideoReader::getLastError() const {
+std::string FfmpegDecodeVideoFileWorker::getLastError() const {
     return last_error_;
 }
 
-const char* FfmpegVideoReader::getCodecName() const {
+const char* FfmpegDecodeVideoFileWorker::getCodecName() const {
     if (codec_ctx_ && codec_ctx_->codec) {
         return codec_ctx_->codec->name;
     }
     return "unknown";
 }
 
-void FfmpegVideoReader::printStats() const {
-    printf("\n📊 FfmpegVideoReader Statistics:\n");
+void FfmpegDecodeVideoFileWorker::printStats() const {
+    printf("\n📊 FfmpegDecodeVideoFileWorker Statistics:\n");
     printf("   File: %s\n", file_path_);
     printf("   Codec: %s\n", getCodecName());
     printf("   Resolution: %dx%d → %dx%d\n", width_, height_, output_width_, output_height_);
@@ -814,7 +803,7 @@ void FfmpegVideoReader::printStats() const {
     printf("   EOF: %s\n", eof_reached_ ? "YES" : "NO");
 }
 
-void FfmpegVideoReader::printVideoInfo() const {
+void FfmpegDecodeVideoFileWorker::printVideoInfo() const {
     if (!is_open_ || !format_ctx_ || video_stream_index_ < 0) {
         printf("⚠️  Video not open\n");
         return;

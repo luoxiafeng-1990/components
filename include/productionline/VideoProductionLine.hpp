@@ -1,8 +1,7 @@
 #pragma once
 
 #include "../buffer/BufferPool.hpp"
-#include "../videoFile/VideoFile.hpp"
-#include "../monitor/PerformanceMonitor.hpp"
+#include "worker/BufferFillingWorker.hpp"
 #include <string>
 #include <vector>
 #include <thread>
@@ -11,21 +10,24 @@
 #include <functional>
 
 /**
- * @brief VideoProducer - 独立的视频生产者模块
+ * @brief VideoProductionLine - 视频生产流水线
+ * 
+ * 架构角色：ProductionLine（生产流水线）- 从Worker获取原材料（BufferPool），进行生产
  * 
  * 职责：
- * - 从视频文件读取帧数据
+ * - 从Worker获取BufferPool（原材料）
  * - 填充 BufferPool 提供的 buffer
  * - 管理多个生产者线程
  * - 性能监控和统计
  * 
  * 设计特点：
- * - 依赖注入 BufferPool（通过引用持有，不拥有所有权）
- * - 职责单一（只负责视频读取）
+ * - Worker必须创建BufferPool（通过调用Allocator）
+ * - 从Worker获取BufferPool（原材料）
+ * - 职责单一（只负责视频读取和生产）
  * - 配置驱动（通过 Config 结构体）
  * - 线程安全（支持多线程生产）
  */
-class VideoProducer {
+class VideoProductionLine {
 public:
     /**
      * @brief 视频配置结构
@@ -37,19 +39,19 @@ public:
         int bits_per_pixel;                            // 每像素位数（8/16/24/32）
         bool loop;                                     // 是否循环播放
         int thread_count;                              // 生产者线程数（默认1）
-        VideoReaderFactory::ReaderType reader_type;    // 读取器类型（默认AUTO）
+        BufferFillingWorkerFactory::WorkerType worker_type;    // Worker类型（默认AUTO）
         
         // 默认构造
         Config() 
             : width(0), height(0), bits_per_pixel(0)
             , loop(false), thread_count(1)
-            , reader_type(VideoReaderFactory::ReaderType::AUTO) {}
+            , worker_type(BufferFillingWorkerFactory::WorkerType::AUTO) {}
         
         // 便利构造
         Config(const std::string& path, int w, int h, int bpp, bool l = false, int tc = 1,
-               VideoReaderFactory::ReaderType rt = VideoReaderFactory::ReaderType::AUTO)
+               BufferFillingWorkerFactory::WorkerType wt = BufferFillingWorkerFactory::WorkerType::AUTO)
             : file_path(path), width(w), height(h), bits_per_pixel(bpp)
-            , loop(l), thread_count(tc), reader_type(rt) {}
+            , loop(l), thread_count(tc), worker_type(wt) {}
     };
     
     /**
@@ -58,31 +60,33 @@ public:
     using ErrorCallback = std::function<void(const std::string&)>;
     
     /**
-     * @brief 构造函数（依赖注入）
-     * @param pool BufferPool 引用（不拥有所有权）
+     * @brief 构造函数
+     * 
+     * 注意：Worker必须在open()时自动创建BufferPool（通过调用Allocator）
+     * ProductionLine从Worker获取BufferPool，不再需要外部注入
      */
-    explicit VideoProducer(BufferPool& pool);
+    VideoProductionLine();
     
     /**
      * @brief 析构函数 - 自动停止生产者
      */
-    ~VideoProducer();
+    ~VideoProductionLine();
     
     // 禁止拷贝和赋值
-    VideoProducer(const VideoProducer&) = delete;
-    VideoProducer& operator=(const VideoProducer&) = delete;
+    VideoProductionLine(const VideoProductionLine&) = delete;
+    VideoProductionLine& operator=(const VideoProductionLine&) = delete;
     
     // ========== 核心接口 ==========
     
     /**
-     * @brief 启动视频生产者
+     * @brief 启动视频生产流水线
      * @param config 视频配置
      * @return true 如果启动成功
      */
     bool start(const Config& config);
     
     /**
-     * @brief 停止视频生产者
+     * @brief 停止视频生产流水线
      */
     void stop();
     
@@ -102,6 +106,9 @@ public:
     
     /// 获取总帧数
     int getTotalFrames() const;
+    
+    /// 获取工作BufferPool指针（供消费者使用）
+    BufferPool* getWorkingBufferPool() const { return working_buffer_pool_; }
     
     // ========== 错误处理 ==========
     
@@ -139,14 +146,23 @@ private:
     
     // ========== 成员变量 ==========
     
-    // BufferPool 引用（依赖注入，不拥有所有权）
-    BufferPool& buffer_pool_;
+    /**
+     * Worker创建的BufferPool（Worker通过调用Allocator创建）
+     * 用途：持有Worker创建的BufferPool的所有权
+     * 
+     * 注意：Worker必须在open()时自动创建BufferPool（通过调用Allocator）
+     * 如果Worker没有创建BufferPool，start()会失败
+     */
+    std::unique_ptr<BufferPool> worker_buffer_pool_;
     
-    // 🆕 工作 BufferPool 指针（可能指向 buffer_pool_ 或 Reader 内部的 BufferPool）
-    BufferPool* buffer_pool_ptr_;
+    /**
+     * 实际工作的BufferPool指针
+     * 指向worker_buffer_pool_.get()（Worker创建的BufferPool）
+     */
+    BufferPool* working_buffer_pool_;
     
-    // 视频文件（多线程共享）
-    std::shared_ptr<VideoFile> video_file_;
+    // Worker（多线程共享）
+    std::shared_ptr<BufferFillingWorker> worker_;
     
     // 线程管理
     std::vector<std::thread> threads_;
@@ -169,5 +185,4 @@ private:
     // 性能监控
     std::chrono::steady_clock::time_point start_time_;
 };
-
 

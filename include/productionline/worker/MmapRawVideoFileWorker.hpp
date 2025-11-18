@@ -1,15 +1,21 @@
-#ifndef MMAP_VIDEO_READER_HPP
-#define MMAP_VIDEO_READER_HPP
+#ifndef MMAP_RAW_VIDEO_FILE_WORKER_HPP
+#define MMAP_RAW_VIDEO_FILE_WORKER_HPP
 
-#include "IVideoReader.hpp"
-#include "../buffer/Buffer.hpp"
+#include "IBufferFillingWorker.hpp"
+#include "IVideoFileNavigator.hpp"
+#include "../../buffer/Buffer.hpp"
 #include <stddef.h>  // For size_t
 #include <sys/types.h>  // For ssize_t
 
 #define MAX_PATH_LENGTH 512  // Maximum path length
 
 /**
- * MmapVideoReader - 基于 mmap 的视频读取器
+ * @brief MmapRawVideoFileWorker - Mmap方式打开raw视频文件Worker
+ * 
+ * 架构角色：Worker（工人）- Mmap方式打开raw视频文件类型
+ * 
+ * 功能：使用mmap内存映射方式打开raw视频文件
+ * 目的：填充Buffer，得到填充后的buffer
  * 
  * 使用内存映射（mmap）技术读取视频文件：
  * - 将整个文件映射到进程地址空间
@@ -26,7 +32,7 @@
  * - 随机访问模式
  * - 单线程或少量线程
  */
-class MmapVideoReader : public IVideoReader {
+class MmapRawVideoFileWorker : public IBufferFillingWorker, public IVideoFileNavigator {
 private:
     // ============ 文件资源 ============
     int fd_;                          // 文件描述符
@@ -100,14 +106,14 @@ private:
 public:
     // ============ 构造/析构 ============
     
-    MmapVideoReader();
-    virtual ~MmapVideoReader();
+    MmapRawVideoFileWorker();
+    virtual ~MmapRawVideoFileWorker();
     
     // 禁止拷贝（RAII资源管理）
-    MmapVideoReader(const MmapVideoReader&) = delete;
-    MmapVideoReader& operator=(const MmapVideoReader&) = delete;
+    MmapRawVideoFileWorker(const MmapRawVideoFileWorker&) = delete;
+    MmapRawVideoFileWorker& operator=(const MmapRawVideoFileWorker&) = delete;
     
-    // ============ IVideoReader 接口实现 ============
+    // ============ IBufferFillingWorker 接口实现 ============
     
     bool open(const char* path) override;
     bool openRaw(const char* path, int width, int height, int bits_per_pixel) override;
@@ -118,12 +124,15 @@ public:
         return true;  // 需要外部 buffer（从 mmap 区域拷贝到外部 buffer）
     }
     
-    bool readFrameTo(Buffer& dest_buffer) override;
-    bool readFrameTo(void* dest_buffer, size_t buffer_size) override;
-    bool readFrameAt(int frame_index, Buffer& dest_buffer) override;
-    bool readFrameAt(int frame_index, void* dest_buffer, size_t buffer_size) override;
-    bool readFrameAtThreadSafe(int frame_index, void* dest_buffer, size_t buffer_size) const override;
+    /**
+     * @brief 填充Buffer（核心功能）
+     * @param frame_index 帧索引
+     * @param buffer 输出 Buffer（从 BufferPool 获取）
+     * @return 成功返回 true
+     */
+    bool fillBuffer(int frame_index, Buffer* buffer) override;
     
+    // ============ IVideoFileNavigator 接口实现 ============
     bool seek(int frame_index) override;
     bool seekToBegin() override;
     bool seekToEnd() override;
@@ -140,14 +149,20 @@ public:
     bool hasMoreFrames() const override;
     bool isAtEnd() const override;
     
-    const char* getReaderType() const override;
+    /**
+     * @brief 获取Worker类型名称
+     */
+    const char* getWorkerType() const override {
+        return "MmapRawVideoFileWorker";
+    }
+    
+    /**
+     * @brief 获取读取器类型名称（向后兼容）
+     */
+    const char* getReaderType() const override {
+        return getWorkerType();
+    }
 };
 
-#endif // MMAP_VIDEO_READER_HPP
-
-
-
-
-
-
+#endif // MMAP_RAW_VIDEO_FILE_WORKER_HPP
 

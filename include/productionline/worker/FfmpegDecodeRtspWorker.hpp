@@ -1,8 +1,10 @@
-#ifndef RTSP_VIDEO_READER_HPP
-#define RTSP_VIDEO_READER_HPP
+#ifndef FFMPEG_DECODE_RTSP_WORKER_HPP
+#define FFMPEG_DECODE_RTSP_WORKER_HPP
 
-#include "IVideoReader.hpp"
-#include "../buffer/Buffer.hpp"
+#include "IBufferFillingWorker.hpp"
+#include "IVideoFileNavigator.hpp"
+#include "../../buffer/Buffer.hpp"
+#include "../../buffer/BufferPool.hpp"
 #include <string>
 #include <thread>
 #include <atomic>
@@ -25,13 +27,18 @@ class BufferPool;
 #define MAX_RTSP_PATH_LENGTH 512
 
 /**
- * RtspVideoReader - 基于 FFmpeg 的 RTSP 视频流读取器
+ * @brief FfmpegDecodeRtspWorker - FFmpeg解码RTSP流Worker
+ * 
+ * 架构角色：Worker（工人）- FFmpeg解码RTSP流类型
+ * 
+ * 功能：使用FFmpeg解码RTSP视频流
+ * 目的：填充Buffer，得到填充后的buffer
  * 
  * 功能：
  * - 连接 RTSP 视频流并解码
  * - 支持两种工作模式：
- *   1. 传统模式：内部缓冲 + readFrameAtThreadSafe拷贝
- *   2. 零拷贝模式：直接注入BufferPool（需调用setBufferPool）
+ *   1. 传统模式：内部缓冲 + fillBuffer拷贝
+ *   2. 零拷贝模式：直接注入BufferPool（Worker自动创建）
  * 
  * 特点：
  * - 实时流处理（无总帧数概念）
@@ -42,19 +49,19 @@ class BufferPool;
  * 使用方式：
  * ```cpp
  * // 方式1：传统模式
- * RtspVideoReader reader;
- * reader.open("rtsp://192.168.1.100:8554/stream");
+ * FfmpegDecodeRtspWorker worker;
+ * worker.openRaw("rtsp://192.168.1.100:8554/stream", width, height, bpp);
  * Buffer buffer(frame_size);
- * reader.readFrameTo(buffer);
+ * worker.fillBuffer(0, &buffer);
  * 
  * // 方式2：零拷贝模式（推荐）
- * RtspVideoReader reader;
- * reader.setBufferPool(&pool);  // 启用零拷贝
- * reader.open("rtsp://...");
- * // reader内部直接注入pool，无需手动readFrameTo
+ * FfmpegDecodeRtspWorker worker;
+ * worker.setBufferPool(&pool);  // 启用零拷贝
+ * worker.openRaw("rtsp://...", width, height, bpp);
+ * // worker内部直接注入pool，无需手动fillBuffer
  * ```
  */
-class RtspVideoReader : public IVideoReader {
+class FfmpegDecodeRtspWorker : public IBufferFillingWorker, public IVideoFileNavigator {
 private:
     // ============ FFmpeg 资源 ============
     AVFormatContext* format_ctx_;
@@ -155,14 +162,14 @@ private:
 public:
     // ============ 构造/析构 ============
     
-    RtspVideoReader();
-    virtual ~RtspVideoReader();
+    FfmpegDecodeRtspWorker();
+    virtual ~FfmpegDecodeRtspWorker();
     
     // 禁止拷贝
-    RtspVideoReader(const RtspVideoReader&) = delete;
-    RtspVideoReader& operator=(const RtspVideoReader&) = delete;
+    FfmpegDecodeRtspWorker(const FfmpegDecodeRtspWorker&) = delete;
+    FfmpegDecodeRtspWorker& operator=(const FfmpegDecodeRtspWorker&) = delete;
     
-    // ============ IVideoReader 接口实现 ============
+    // ============ IBufferFillingWorker 接口实现 ============
     
     bool open(const char* path) override;
     bool openRaw(const char* path, int width, int height, int bits_per_pixel) override;
@@ -173,12 +180,15 @@ public:
         return false;  // 不需要外部 buffer（内部解码后动态注入）
     }
     
-    bool readFrameTo(Buffer& dest_buffer) override;
-    bool readFrameTo(void* dest_buffer, size_t buffer_size) override;
-    bool readFrameAt(int frame_index, Buffer& dest_buffer) override;
-    bool readFrameAt(int frame_index, void* dest_buffer, size_t buffer_size) override;
-    bool readFrameAtThreadSafe(int frame_index, void* dest_buffer, size_t buffer_size) const override;
+    /**
+     * @brief 填充Buffer（核心功能）
+     * @param frame_index 帧索引（RTSP流中通常为0，表示最新帧）
+     * @param buffer 输出 Buffer（从 BufferPool 获取）
+     * @return 成功返回 true
+     */
+    bool fillBuffer(int frame_index, Buffer* buffer) override;
     
+    // ============ IVideoFileNavigator 接口实现 ============
     bool seek(int frame_index) override;
     bool seekToBegin() override;
     bool seekToEnd() override;
@@ -195,15 +205,36 @@ public:
     bool hasMoreFrames() const override;
     bool isAtEnd() const override;
     
-    const char* getReaderType() const override;
+    /**
+     * @brief 获取Worker类型名称
+     */
+    const char* getWorkerType() const override {
+        return "FfmpegDecodeRtspWorker";
+    }
+    
+    /**
+     * @brief 获取读取器类型名称（向后兼容）
+     */
+    const char* getReaderType() const override {
+        return getWorkerType();
+    }
     
     // ============ 零拷贝模式支持 ============
     
     /**
-     * 设置BufferPool（启用零拷贝模式）
-     * @param pool BufferPool指针（void*避免头文件依赖）
+     * @brief 获取输出 BufferPool（如果有）
+     * @return BufferPool的智能指针，如果Worker创建了内部BufferPool，返回unique_ptr；否则返回nullptr
+     * 
+     * @note FfmpegDecodeRtspWorker目前没有创建内部BufferPool，返回nullptr
+     *       如果需要零拷贝模式，Worker应该在open()时自动创建BufferPool
      */
-    void setBufferPool(void* pool) override;
+    std::unique_ptr<BufferPool> getOutputBufferPool() override;
+    
+    /**
+     * @brief 获取输出BufferPool原始指针（向后兼容）
+     * @deprecated 推荐使用getOutputBufferPool()返回智能指针
+     */
+    void* getOutputBufferPoolRaw() const override;
     
     // ============ RTSP 特有接口 ============
     
@@ -233,8 +264,5 @@ public:
     void printStats() const;
 };
 
-#endif // RTSP_VIDEO_READER_HPP
-
-
-
+#endif // FFMPEG_DECODE_RTSP_WORKER_HPP
 

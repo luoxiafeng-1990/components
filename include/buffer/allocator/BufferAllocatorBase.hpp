@@ -1,7 +1,7 @@
 #pragma once
 
-#include "Buffer.hpp"
-#include "BufferPool.hpp"
+#include "../Buffer.hpp"
+#include "../BufferPool.hpp"
 #include <memory>
 #include <unordered_map>
 #include <mutex>
@@ -23,7 +23,11 @@ enum class BufferMemoryAllocatorType {
 };
 
 /**
- * @brief BufferAllocator - Buffer 生命周期管理器（抽象基类）
+ * @brief BufferAllocatorBase - Buffer 生命周期管理器（抽象基类）
+ * 
+ * 命名规范：Google C++ Style Guide
+ * - Base 后缀：表示这是抽象基类，一眼就能看出
+ * - 子类命名：NormalAllocator, AVFrameAllocator, FramebufferAllocator（描述性名称）
  * 
  * 职责：
  * - 创建 Buffer（批量或单个）
@@ -49,9 +53,9 @@ enum class BufferMemoryAllocatorType {
  * allocator->removeBufferFromPool(buf, pool.get());
  * @endcode
  */
-class BufferAllocator {
+class BufferAllocatorBase {
 public:
-    virtual ~BufferAllocator() = default;
+    virtual ~BufferAllocatorBase() = default;
     
     // ==================== 公开接口 ====================
     
@@ -171,7 +175,7 @@ protected:
      * @param buffer Buffer 指针
      * @param allocator 所属的 Allocator
      */
-    void registerBufferOwnership(Buffer* buffer, BufferAllocator* allocator);
+    void registerBufferOwnership(Buffer* buffer, BufferAllocatorBase* allocator);
     
     /**
      * @brief 注销 Buffer 所有权
@@ -216,6 +220,6 @@ protected:
 private:
     // 所有权跟踪（buffer → allocator 映射）
     // 使用静态成员以支持跨 Allocator 实例查询
-    static std::unordered_map<Buffer*, BufferAllocator*> buffer_ownership_;
+    static std::unordered_map<Buffer*, BufferAllocatorBase*> buffer_ownership_;
     static std::mutex ownership_mutex_;
 };

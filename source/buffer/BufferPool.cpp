@@ -244,7 +244,7 @@ size_t BufferPool::getBufferSize() const {
 }
 
 // ============================================================
-// 私有接口实现（仅供 BufferAllocator 使用）
+// 私有接口实现（仅供 BufferAllocatorBase 使用）
 // ============================================================
 
 bool BufferPool::addBufferToQueue(Buffer* buffer, QueueType queue) {

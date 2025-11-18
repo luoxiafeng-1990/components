@@ -31,7 +31,7 @@ private:
     size_t framebuffer_total_size_;   // 映射的总大小
     
     // ============ Buffer管理（使用BufferPool）============
-    std::unique_ptr<BufferPool> buffer_pool_;  // BufferPool 管理 framebuffer
+    BufferPool* buffer_pool_;                 // BufferPool 指针（不拥有所有权，由外部注入）
     std::vector<void*> fb_mappings_;          // framebuffer 映射地址（用于物理地址查询）
     int buffer_count_;                        // buffer 数量
     int current_buffer_index_;                // 当前显示的buffer索引
@@ -159,45 +159,68 @@ public:
      */
     bool displayBufferByMemcpyToFramebuffer(Buffer* buffer);
     
-    // ============ 新接口：BufferPool 访问 ============
+    // ============ 新接口：信息提供和依赖注入 ============
     
     /**
-     * @brief 获取 BufferPool 引用
-     * @return BufferPool& 对内部 BufferPool 的引用
-     * @throws std::runtime_error 如果 BufferPool 未初始化
+     * @brief 获取 mmap 信息（供 FramebufferAllocator 使用）
      * 
-     * @note 生命周期：返回的引用在 LinuxFramebufferDevice 对象存活期间有效
-     * @warning 不要在 cleanup() 或析构后使用返回的引用
-     * @warning 引用的生命周期与 LinuxFramebufferDevice 绑定
+     * @return MappedInfo 包含 mmap 后的内存信息
+     * 
+     * @note 必须在 initialize() 之后调用
+     * 
+     * 使用场景：
+     * - FramebufferAllocator 需要这些信息来创建 BufferPool
      * 
      * 使用示例：
      * @code
-     * LinuxFramebufferDevice display;
-     * display.initialize(0);
-     * BufferPool& pool = display.getBufferPool();  // 注意是引用
-     * VideoProducer producer(pool);
-     * // 或直接传递：
-     * VideoProducer producer2(display.getBufferPool());
+     * auto device = std::make_unique<LinuxFramebufferDevice>();
+     * device->initialize(0);
+     * 
+     * auto info = device->getMappedInfo();
+     * // info.base_addr, info.buffer_size, info.buffer_count
      * @endcode
      */
-    BufferPool& getBufferPool() {
-        if (!buffer_pool_) {
-            throw std::runtime_error("❌ BufferPool not initialized. Call initialize() first.");
-        }
-        return *buffer_pool_;
-    }
+    struct MappedInfo {
+        void* base_addr;        // mmap 后的基地址
+        size_t buffer_size;     // 单个 buffer 大小
+        int buffer_count;       // buffer 数量
+    };
+    MappedInfo getMappedInfo() const;
     
     /**
-     * @brief 获取 BufferPool 常量引用
-     * @return const BufferPool& 对内部 BufferPool 的常量引用
-     * @throws std::runtime_error 如果 BufferPool 未初始化
+     * @brief 获取 framebuffer 索引
+     * 
+     * @return int framebuffer 索引（0 或 1）
      */
-    const BufferPool& getBufferPool() const {
-        if (!buffer_pool_) {
-            throw std::runtime_error("❌ BufferPool not initialized. Call initialize() first.");
-        }
-        return *buffer_pool_;
-    }
+    int getFbIndex() const { return fb_index_; }
+    
+    /**
+     * @brief 设置 BufferPool（依赖注入）
+     * 
+     * @param pool BufferPool 指针（不拥有所有权）
+     * 
+     * @note 使用场景：
+     * - FramebufferAllocator 创建 BufferPool 后，注入到此设备
+     * - 允许运行时更换 BufferPool
+     * 
+     * 使用示例：
+     * @code
+     * auto device = std::make_unique<LinuxFramebufferDevice>();
+     * device->initialize(0);
+     * 
+     * auto allocator = std::make_unique<FramebufferAllocator>(device.get());
+     * auto pool = allocator->allocatePoolWithBuffers(0, 0, "FBPool", "Display");
+     * device->setBufferPool(pool.get());
+     * @endcode
+     */
+    void setBufferPool(BufferPool* pool);
+    
+    /**
+     * @brief 获取 BufferPool 指针
+     * 
+     * @return BufferPool* BufferPool 指针，如果未设置返回 nullptr
+     */
+    BufferPool* getBufferPool() const { return buffer_pool_; }
 };
 
 #endif // LINUX_FRAMEBUFFER_DEVICE_HPP

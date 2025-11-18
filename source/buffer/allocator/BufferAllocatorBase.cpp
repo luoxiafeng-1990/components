@@ -1,15 +1,15 @@
-#include "../../include/buffer/BufferAllocator.hpp"
+#include "../../../include/buffer/allocator/BufferAllocatorBase.hpp"
 #include <stdio.h>
 
 // 静态成员定义
-std::unordered_map<Buffer*, BufferAllocator*> BufferAllocator::buffer_ownership_;
-std::mutex BufferAllocator::ownership_mutex_;
+std::unordered_map<Buffer*, BufferAllocatorBase*> BufferAllocatorBase::buffer_ownership_;
+std::mutex BufferAllocatorBase::ownership_mutex_;
 
 // ============================================================
 // 批量分配实现
 // ============================================================
 
-std::unique_ptr<BufferPool> BufferAllocator::allocatePoolWithBuffers(
+std::unique_ptr<BufferPool> BufferAllocatorBase::allocatePoolWithBuffers(
     int count,
     size_t size,
     const std::string& name,
@@ -60,13 +60,13 @@ std::unique_ptr<BufferPool> BufferAllocator::allocatePoolWithBuffers(
 // 单个注入实现
 // ============================================================
 
-Buffer* BufferAllocator::injectBufferToPool(
+Buffer* BufferAllocatorBase::injectBufferToPool(
     size_t size,
     BufferPool* pool,
     QueueType queue)
 {
     if (!pool) {
-        printf("❌ BufferAllocator::injectBufferToPool: pool is nullptr\n");
+        printf("❌ BufferAllocatorBase::injectBufferToPool: pool is nullptr\n");
         return nullptr;
     }
     
@@ -102,9 +102,9 @@ Buffer* BufferAllocator::injectBufferToPool(
 // Buffer 移除实现
 // ============================================================
 
-bool BufferAllocator::removeBufferFromPool(Buffer* buffer, BufferPool* pool) {
+bool BufferAllocatorBase::removeBufferFromPool(Buffer* buffer, BufferPool* pool) {
     if (!buffer || !pool) {
-        printf("❌ BufferAllocator::removeBufferFromPool: invalid parameters\n");
+        printf("❌ BufferAllocatorBase::removeBufferFromPool: invalid parameters\n");
         return false;
     }
     
@@ -131,17 +131,17 @@ bool BufferAllocator::removeBufferFromPool(Buffer* buffer, BufferPool* pool) {
 // 辅助方法实现
 // ============================================================
 
-void BufferAllocator::registerBufferOwnership(Buffer* buffer, BufferAllocator* allocator) {
+void BufferAllocatorBase::registerBufferOwnership(Buffer* buffer, BufferAllocator* allocator) {
     std::lock_guard<std::mutex> lock(ownership_mutex_);
     buffer_ownership_[buffer] = allocator;
 }
 
-void BufferAllocator::unregisterBufferOwnership(Buffer* buffer) {
+void BufferAllocatorBase::unregisterBufferOwnership(Buffer* buffer) {
     std::lock_guard<std::mutex> lock(ownership_mutex_);
     buffer_ownership_.erase(buffer);
 }
 
-void BufferAllocator::cleanupPool(BufferPool* pool) {
+void BufferAllocatorBase::cleanupPool(BufferPool* pool) {
     if (!pool) {
         return;
     }
@@ -172,7 +172,7 @@ void BufferAllocator::cleanupPool(BufferPool* pool) {
 // 友元访问辅助方法实现
 // ============================================================
 
-bool BufferAllocator::addBufferToPoolQueue(BufferPool* pool, Buffer* buffer, QueueType queue) {
+bool BufferAllocatorBase::addBufferToPoolQueue(BufferPool* pool, Buffer* buffer, QueueType queue) {
     if (!pool || !buffer) {
         return false;
     }
@@ -180,7 +180,7 @@ bool BufferAllocator::addBufferToPoolQueue(BufferPool* pool, Buffer* buffer, Que
     return pool->addBufferToQueue(buffer, queue);
 }
 
-bool BufferAllocator::removeBufferFromPoolInternal(BufferPool* pool, Buffer* buffer) {
+bool BufferAllocatorBase::removeBufferFromPoolInternal(BufferPool* pool, Buffer* buffer) {
     if (!pool || !buffer) {
         return false;
     }

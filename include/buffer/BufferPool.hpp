@@ -11,7 +11,7 @@
 #include <atomic>
 
 // 前向声明
-class BufferAllocator;
+class BufferAllocatorBase;
 
 /**
  * @brief QueueType - 队列类型枚举
@@ -31,7 +31,7 @@ enum class QueueType {
  * 
  * 设计原则：
  * - 对外：提供调度接口（acquire/submit/release）
- * - 对内：提供队列操作接口（仅供 BufferAllocator 使用）
+ * - 对内：提供队列操作接口（仅供 BufferAllocatorBase 使用）
  * - 线程安全：所有操作使用互斥锁保护
  * 
  * 使用示例：
@@ -59,7 +59,7 @@ public:
      * @brief 创建空的 BufferPool
      * 
      * BufferPool 不关心 Buffer 来源，只负责调度管理。
-     * Buffer 由 BufferAllocator 创建并注入。
+     * Buffer 由 BufferAllocatorBase 创建并注入。
      * 
      * @param name Pool 名称
      * @param category Pool 分类（如 "Display", "Video", "Network"）
@@ -207,7 +207,7 @@ public:
     BufferPool& operator=(const BufferPool&) = delete;
     
 private:
-    // ==================== 私有接口（仅供 BufferAllocator 使用）====================
+    // ==================== 私有接口（仅供 BufferAllocatorBase 使用）====================
     
     /**
      * @brief 添加 Buffer 到指定队列
@@ -263,7 +263,7 @@ private:
     bool removeFromQueue(std::queue<Buffer*>& queue, Buffer* target);
     
     // ====== 友元声明 ======
-    friend class BufferAllocator;
+    friend class BufferAllocatorBase;
     
     // ====== 私有构造函数 ======
     BufferPool(const std::string& name, const std::string& category);
