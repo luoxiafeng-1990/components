@@ -3,8 +3,12 @@
 #include "../../Buffer.hpp"
 #include "../../BufferPool.hpp"
 #include <memory>
+#include <vector>
 #include <unordered_map>
 #include <mutex>
+#include <cstdint>
+#include <cstddef>
+#include <string>
 
 /**
  * @brief Buffer 内存分配器类型枚举
@@ -75,18 +79,20 @@ public:
      * 1. 创建空的 BufferPool（CreateEmpty）
      * 2. 循环创建 Buffer（调用 createBuffer）
      * 3. 将 Buffer 添加到 pool 的 free 队列（调用 addBufferToQueue）
-     * 4. 记录所有权
+     * 4. Allocator 持有 shared_ptr（管理生命周期）
+     * 5. 自动注册到 BufferPoolRegistry
      * 
      * @param count Buffer 数量
      * @param size 每个 Buffer 大小
      * @param name BufferPool 名称
      * @param category BufferPool 分类
-     * @return unique_ptr<BufferPool> 成功返回 pool，失败返回 nullptr
+     * @return shared_ptr<BufferPool> 成功返回 pool，失败返回 nullptr
      * 
      * @note 线程安全：是（BufferPool 内部加锁）
      * @note 失败时自动清理已分配的 buffer
+     * @note Allocator 持有 shared_ptr，管理 BufferPool 的生命周期
      */
-    virtual std::unique_ptr<BufferPool> allocatePoolWithBuffers(
+    virtual std::shared_ptr<BufferPool> allocatePoolWithBuffers(
         int count,
         size_t size,
         const std::string& name,
@@ -94,16 +100,17 @@ public:
     ) = 0;
     
     /**
-     * @brief 创建单个 Buffer 并注入到指定 BufferPool
+     * @brief 创建单个 Buffer 并注入到指定 BufferPool（内部分配）
      * 
      * 适用场景：
      * - 动态扩容：向已有 pool 添加新 buffer
-     * - 动态注入：RTSP/FFmpeg 解码后注入
+     * - 内部分配：Allocator 自己分配内存
      * 
      * 工作流程：
-     * 1. 创建 Buffer（调用 createBuffer）
+     * 1. 创建 Buffer（调用 createBuffer，Allocator 内部分配内存）
      * 2. 将 Buffer 添加到 pool 的指定队列（调用 addBufferToQueue）
-     * 3. 记录所有权
+     * 3. 将 Buffer 添加到 pool 的 managed_buffers_ 集合
+     * 4. 记录所有权
      * 
      * @param size Buffer 大小
      * @param pool 目标 BufferPool
@@ -111,8 +118,43 @@ public:
      * @return Buffer* 成功返回 buffer，失败返回 nullptr
      * 
      * @note 线程安全：是（BufferPool 内部加锁）
+     * @note addBufferToQueue 会自动将 Buffer 添加到 managed_buffers_ 集合
      */
     virtual Buffer* injectBufferToPool(
+        size_t size,
+        BufferPool* pool,
+        QueueType queue = QueueType::FREE
+    ) = 0;
+    
+    /**
+     * @brief 注入外部已分配的内存到 BufferPool（外部注入）
+     * 
+     * 适用场景：
+     * - 外部内存包装：将外部已分配的内存包装为 Buffer 对象
+     * - Framebuffer 内存：将 Framebuffer 设备内存注入到 Pool
+     * - 零拷贝场景：直接使用外部内存，避免拷贝
+     * 
+     * 工作流程：
+     * 1. 创建 Buffer 对象（包装外部内存，Ownership::EXTERNAL）
+     * 2. 将 Buffer 添加到 pool 的指定队列（调用 addBufferToQueue）
+     * 3. 将 Buffer 添加到 pool 的 managed_buffers_ 集合
+     * 4. 记录所有权（如果需要）
+     * 
+     * @param virt_addr 外部内存的虚拟地址（已分配）
+     * @param phys_addr 外部内存的物理地址（如果支持，否则为 0）
+     * @param size 外部内存的大小（字节）
+     * @param pool 目标 BufferPool
+     * @param queue 注入到哪个队列（FREE 或 FILLED）
+     * @return Buffer* 成功返回 buffer，失败返回 nullptr
+     * 
+     * @note 线程安全：是（BufferPool 内部加锁）
+     * @note 外部内存的生命周期由外部管理，Allocator 只负责创建 Buffer 对象
+     * @note Buffer 对象的 ownership 为 EXTERNAL
+     * @note addBufferToQueue 会自动将 Buffer 添加到 managed_buffers_ 集合
+     */
+    virtual Buffer* injectExternalBufferToPool(
+        void* virt_addr,
+        uint64_t phys_addr,
         size_t size,
         BufferPool* pool,
         QueueType queue = QueueType::FREE
@@ -160,6 +202,26 @@ public:
     virtual bool destroyPool(BufferPool* pool) = 0;
     
 protected:
+    // ==================== Allocator 管理的 BufferPool 列表 ====================
+    
+    /**
+     * @brief Allocator 持有的所有 BufferPool（基类中实现）
+     * 
+     * 用途：
+     * - Allocator 持有所有创建的 BufferPool 的 shared_ptr
+     * - 管理 BufferPool 的生命周期
+     * - 在 destroyPool() 时从列表中移除
+     * 
+     * 线程安全：
+     * - 使用 managed_pools_mutex_ 保护
+     */
+    std::vector<std::shared_ptr<BufferPool>> managed_pools_;
+    
+    /**
+     * @brief 保护 managed_pools_ 的互斥锁
+     */
+    mutable std::mutex managed_pools_mutex_;
+    
     // ==================== 子类必须实现的核心方法 ====================
     
     /**

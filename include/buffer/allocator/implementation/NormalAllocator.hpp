@@ -45,7 +45,7 @@ public:
     /**
      * @brief 批量创建 Buffer 并构建 BufferPool
      */
-    std::unique_ptr<BufferPool> allocatePoolWithBuffers(
+    std::shared_ptr<BufferPool> allocatePoolWithBuffers(
         int count,
         size_t size,
         const std::string& name,
@@ -53,9 +53,20 @@ public:
     ) override;
     
     /**
-     * @brief 创建单个 Buffer 并注入到指定 BufferPool
+     * @brief 创建单个 Buffer 并注入到指定 BufferPool（内部分配）
      */
     Buffer* injectBufferToPool(
+        size_t size,
+        BufferPool* pool,
+        QueueType queue = QueueType::FREE
+    ) override;
+    
+    /**
+     * @brief 注入外部已分配的内存到 BufferPool（外部注入）
+     */
+    Buffer* injectExternalBufferToPool(
+        void* virt_addr,
+        uint64_t phys_addr,
         size_t size,
         BufferPool* pool,
         QueueType queue = QueueType::FREE

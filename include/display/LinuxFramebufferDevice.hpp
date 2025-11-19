@@ -88,10 +88,8 @@ public:
     int getBufferCount() const override;
     size_t getBufferSize() const override;
     
-    Buffer& getBuffer(int buffer_index) override;
-    const Buffer& getBuffer(int buffer_index) const override;
-    
-    bool displayBuffer(int buffer_index) override;
+    bool displayBuffer(Buffer* buffer) override;
+    bool displayBuffer(BufferPool* pool, int buffer_index) override;
     bool waitVerticalSync() override;
     int getCurrentDisplayBuffer() const override;
     

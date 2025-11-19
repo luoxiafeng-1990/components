@@ -164,8 +164,8 @@ static int test_4frame_loop(const char* raw_video_path) {
         for (int buf_idx = 0; buf_idx < buffer_count && g_running; buf_idx++) {
             // 等待垂直同步
             display.waitVerticalSync();
-            // 切换显示buffer
-            display.displayBuffer(buf_idx);
+            // 切换显示buffer（使用BufferPool和索引）
+            display.displayBuffer(&pool, buf_idx);
         }
         
         loop_count++;

@@ -63,9 +63,9 @@ public:
      * 
      * @param name Pool 名称
      * @param category Pool 分类（如 "Display", "Video", "Network"）
-     * @return unique_ptr<BufferPool>
+     * @return shared_ptr<BufferPool> 返回 shared_ptr，便于多组件共享所有权
      */
-    static std::unique_ptr<BufferPool> CreateEmpty(
+    static std::shared_ptr<BufferPool> CreateEmpty(
         const std::string& name,
         const std::string& category = ""
     );
@@ -155,6 +155,11 @@ public:
      * @brief 获取注册表 ID
      */
     uint64_t getRegistryId() const { return registry_id_; }
+    
+    /**
+     * @brief 设置注册表 ID（由 CreateEmpty() 调用）
+     */
+    void setRegistryId(uint64_t id) { registry_id_ = id; }
     
     /**
      * @brief 根据 ID 获取 Buffer（用于特定场景，如 framebuffer）

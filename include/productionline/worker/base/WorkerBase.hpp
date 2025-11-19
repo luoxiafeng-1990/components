@@ -84,13 +84,17 @@ public:
      * @return unique_ptr<BufferPool> 成功返回pool，失败返回nullptr
      * 
      * @note Worker必须在open()时创建BufferPool，否则返回nullptr
+     * @note 从 shared_ptr 转换为 unique_ptr（通过 release，但 Allocator 和 Registry 仍持有 shared_ptr）
      */
     virtual std::unique_ptr<BufferPool> getOutputBufferPool() override {
         if (!buffer_pool_) {
             return nullptr;
         }
-        // 转移所有权给调用者
-        return std::move(buffer_pool_);
+        // 从 shared_ptr 转换为 unique_ptr
+        // 注意：Allocator 和 Registry 仍持有 shared_ptr，所以不会销毁
+        BufferPool* raw_ptr = buffer_pool_.get();
+        buffer_pool_.reset();  // Worker 不再持有
+        return std::unique_ptr<BufferPool>(raw_ptr);  // ProductionLine 持有 unique_ptr
     }
     
     // IVideoFileNavigator 接口方法
@@ -133,15 +137,16 @@ protected:
      * @brief Worker创建的BufferPool（所有Worker子类自动继承）
      * 
      * 用途：
-     * - Worker在open()时创建并保存BufferPool
-     * - Worker通过getOutputBufferPool()返回给ProductionLine（转移所有权）
+     * - Worker在open()时创建并保存BufferPool（shared_ptr）
+     * - Worker通过getOutputBufferPool()返回给ProductionLine（转换为unique_ptr）
      * 
      * 生命周期：
-     * - 在open()时创建
-     * - 在getOutputBufferPool()时转移所有权给ProductionLine
+     * - 在open()时创建（shared_ptr，Allocator 和 Registry 也持有）
+     * - 在getOutputBufferPool()时转换为unique_ptr返回给ProductionLine
+     * - Worker不再持有，但Allocator和Registry仍持有shared_ptr
      * - 在close()时如果未转移则自动释放
      */
-    std::unique_ptr<BufferPool> buffer_pool_;
+    std::shared_ptr<BufferPool> buffer_pool_;
 };
 
 #endif // WORKER_BASE_HPP

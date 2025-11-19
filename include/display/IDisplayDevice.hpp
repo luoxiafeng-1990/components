@@ -4,6 +4,9 @@
 #include "../buffer/Buffer.hpp"
 #include <stddef.h>
 
+// 前向声明
+class BufferPool;
+
 /**
  * IDisplayDevice - 显示设备抽象接口
  * 
@@ -93,40 +96,42 @@ public:
      */
     virtual size_t getBufferSize() const = 0;
     
-    // ============ Buffer访问 ============
-    
-    /**
-     * 获取指定Buffer的引用
-     * 
-     * 返回的Buffer对象封装了内存地址和大小，上层可以直接向该Buffer写入图像数据。
-     * 
-     * 内存来源（平台相关）：
-     * - Linux FB: mmap映射的framebuffer地址
-     * - 软件实现: malloc分配的内存
-     * - GPU: 显存地址或纹理内存
-     * 
-     * @param buffer_index Buffer索引 (0 ~ buffer_count-1)
-     * @return Buffer引用
-     */
-    virtual Buffer& getBuffer(int buffer_index) = 0;
-    virtual const Buffer& getBuffer(int buffer_index) const = 0;
-    
     // ============ 显示控制 ============
     
     /**
-     * 切换当前显示的Buffer
+     * 切换当前显示的Buffer（方案A：通过Buffer对象）
      * 
      * 告诉显示系统从指定的Buffer读取数据进行显示。
+     * 
+     * 实现方式（平台相关）：
+     * - Linux FB: 通过ioctl设置yoffset（从Buffer的ID获取buffer_index）
+     * - Windows: Present()调用
+     * - OpenGL: SwapBuffers()
+     * 
+     * @param buffer 要显示的Buffer对象（必须属于当前设备的BufferPool）
+     * @return 成功返回true
+     * 
+     * @note 通过Buffer对象可以知道它属于哪个BufferPool，更直接
+     */
+    virtual bool displayBuffer(Buffer* buffer) = 0;
+    
+    /**
+     * 切换当前显示的Buffer（方案B：通过BufferPool和索引）
+     * 
+     * 告诉显示系统从指定的BufferPool的指定索引Buffer读取数据进行显示。
      * 
      * 实现方式（平台相关）：
      * - Linux FB: 通过ioctl设置yoffset
      * - Windows: Present()调用
      * - OpenGL: SwapBuffers()
      * 
-     * @param buffer_index 要显示的Buffer索引
+     * @param pool 要显示的Buffer所属的BufferPool
+     * @param buffer_index 要显示的Buffer索引（在指定BufferPool中的索引）
      * @return 成功返回true
+     * 
+     * @note 明确指定BufferPool和索引，适用于需要明确指定BufferPool的场景
      */
-    virtual bool displayBuffer(int buffer_index) = 0;
+    virtual bool displayBuffer(BufferPool* pool, int buffer_index) = 0;
     
     /**
      * 等待垂直同步信号（VSync）

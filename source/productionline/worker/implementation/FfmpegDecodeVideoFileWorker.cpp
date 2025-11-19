@@ -752,10 +752,8 @@ bool FfmpegDecodeVideoFileWorker::fillBuffer(int frame_index, Buffer* buffer) {
 // ============================================================================
 
 std::unique_ptr<BufferPool> FfmpegDecodeVideoFileWorker::getOutputBufferPool() {
-    // FfmpegDecodeVideoFileWorker 目前没有创建内部 BufferPool
-    // 使用外部提供的 BufferPool
-    // TODO: 如果需要在open()时自动创建BufferPool，在这里返回创建的BufferPool
-    return nullptr;
+    // 使用基类的实现（从 shared_ptr 转换为 unique_ptr）
+    return WorkerBase::getOutputBufferPool();
 }
 
 // ============================================================================

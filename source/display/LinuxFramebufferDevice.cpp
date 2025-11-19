@@ -158,50 +158,80 @@ size_t LinuxFramebufferDevice::getBufferSize() const {
     return buffer_size_;
 }
 
-Buffer& LinuxFramebufferDevice::getBuffer(int buffer_index) {
-    if (!buffer_pool_) {
-        static Buffer invalid_buffer(0, nullptr, 0, 0, Buffer::Ownership::EXTERNAL);
-        printf("❌ ERROR: BufferPool not initialized\n");
-        return invalid_buffer;
-    }
-    
-    Buffer* buf = buffer_pool_->getBufferById(buffer_index);
-    if (!buf) {
-        static Buffer invalid_buffer(0, nullptr, 0, 0, Buffer::Ownership::EXTERNAL);
-        printf("❌ ERROR: Invalid buffer index %d (valid range: 0-%d)\n", 
-               buffer_index, getBufferCount() - 1);
-        return invalid_buffer;
-    }
-    
-    return *buf;
-}
-
-const Buffer& LinuxFramebufferDevice::getBuffer(int buffer_index) const {
-    if (!buffer_pool_) {
-        static Buffer invalid_buffer(0, nullptr, 0, 0, Buffer::Ownership::EXTERNAL);
-        printf("❌ ERROR: BufferPool not initialized\n");
-        return invalid_buffer;
-    }
-    
-    const Buffer* buf = buffer_pool_->getBufferById(buffer_index);
-    if (!buf) {
-        static Buffer invalid_buffer(0, nullptr, 0, 0, Buffer::Ownership::EXTERNAL);
-        printf("❌ ERROR: Invalid buffer index %d (valid range: 0-%d)\n", 
-               buffer_index, getBufferCount() - 1);
-        return invalid_buffer;
-    }
-    
-    return *buf;
-}
-
-bool LinuxFramebufferDevice::displayBuffer(int buffer_index) {
+bool LinuxFramebufferDevice::displayBuffer(Buffer* buffer) {
     if (!is_initialized_) {
         printf("❌ ERROR: Device not initialized\n");
         return false;
     }
     
+    if (!buffer) {
+        printf("❌ ERROR: Null buffer pointer\n");
+        return false;
+    }
+    
+    if (!buffer_pool_) {
+        printf("❌ ERROR: BufferPool not initialized\n");
+        return false;
+    }
+    
+    // 验证Buffer是否属于当前设备的BufferPool
+    Buffer* pool_buffer = buffer_pool_->getBufferById(buffer->id());
+    if (!pool_buffer || pool_buffer != buffer) {
+        printf("❌ ERROR: Buffer (ID=%u) does not belong to device's BufferPool\n", 
+               buffer->id());
+        return false;
+    }
+    
+    // 通过Buffer的ID获取buffer_index
+    int buffer_index = static_cast<int>(buffer->id());
+    
     if (buffer_index < 0 || buffer_index >= buffer_count_) {
-        printf("❌ ERROR: Invalid buffer index %d\n", buffer_index);
+        printf("❌ ERROR: Invalid buffer index %d (from Buffer ID %u)\n", 
+               buffer_index, buffer->id());
+        return false;
+    }
+    
+    // 获取当前屏幕信息
+    struct fb_var_screeninfo var_info;
+    if (ioctl(fd_, FBIOGET_VSCREENINFO, &var_info) < 0) {
+        printf("❌ ERROR: FBIOGET_VSCREENINFO failed: %s\n", strerror(errno));
+        return false;
+    }
+    
+    // 设置yoffset（buffer索引 * 屏幕高度）
+    // 这样驱动就知道从哪个buffer读取数据显示
+    var_info.yoffset = var_info.yres * buffer_index;
+    
+    // 通过ioctl通知驱动切换buffer
+    if (ioctl(fd_, FBIOPAN_DISPLAY, &var_info) < 0) {
+        printf("❌ ERROR: FBIOPAN_DISPLAY failed: %s\n", strerror(errno));
+        return false;
+    }
+    
+    current_buffer_index_ = buffer_index;
+    return true;
+}
+
+bool LinuxFramebufferDevice::displayBuffer(BufferPool* pool, int buffer_index) {
+    if (!is_initialized_) {
+        printf("❌ ERROR: Device not initialized\n");
+        return false;
+    }
+    
+    if (!pool) {
+        printf("❌ ERROR: Null BufferPool pointer\n");
+        return false;
+    }
+    
+    // 验证BufferPool是否是当前设备的BufferPool
+    if (pool != buffer_pool_) {
+        printf("⚠️  Warning: BufferPool mismatch (provided pool != device's buffer_pool_)\n");
+        printf("   Continuing anyway...\n");
+    }
+    
+    if (buffer_index < 0 || buffer_index >= buffer_count_) {
+        printf("❌ ERROR: Invalid buffer index %d (valid range: 0-%d)\n", 
+               buffer_index, buffer_count_ - 1);
         return false;
     }
     

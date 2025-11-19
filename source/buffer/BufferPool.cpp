@@ -8,11 +8,18 @@
 // 静态工厂方法实现
 // ============================================================
 
-std::unique_ptr<BufferPool> BufferPool::CreateEmpty(
+std::shared_ptr<BufferPool> BufferPool::CreateEmpty(
     const std::string& name,
     const std::string& category)
 {
-    return std::unique_ptr<BufferPool>(new BufferPool(name, category));
+    // 创建 BufferPool（使用 shared_ptr）
+    auto pool = std::shared_ptr<BufferPool>(new BufferPool(name, category));
+    
+    // 自动注册到全局注册表（此时已经有 shared_ptr）
+    uint64_t id = BufferPoolRegistry::getInstance().registerPool(pool, name, category);
+    pool->setRegistryId(id);
+    
+    return pool;
 }
 
 // ============================================================
@@ -28,10 +35,10 @@ BufferPool::BufferPool(const std::string& name, const std::string& category)
     printf("\n📦 Initializing BufferPool '%s' (empty, managed by Allocator)...\n", 
            name_.c_str());
     
-    // 自动注册到全局注册表
-    registry_id_ = BufferPoolRegistry::getInstance().registerPool(this, name_, category_);
+    // 注意：注册在 CreateEmpty() 中完成（因为需要 shared_ptr）
+    // 构造函数中只初始化成员变量
     
-    printf("✅ BufferPool '%s' initialized (ID: %lu)\n", name_.c_str(), registry_id_);
+    printf("✅ BufferPool '%s' created (will be registered by CreateEmpty)\n", name_.c_str());
 }
 
 BufferPool::~BufferPool() {

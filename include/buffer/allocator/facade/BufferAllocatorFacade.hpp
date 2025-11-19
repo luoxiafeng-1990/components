@@ -73,9 +73,9 @@ public:
      * @param size 每个 Buffer 大小
      * @param name BufferPool 名称
      * @param category BufferPool 分类
-     * @return unique_ptr<BufferPool> 成功返回 pool，失败返回 nullptr
+     * @return shared_ptr<BufferPool> 成功返回 pool，失败返回 nullptr
      */
-    std::unique_ptr<BufferPool> allocatePoolWithBuffers(
+    std::shared_ptr<BufferPool> allocatePoolWithBuffers(
         int count,
         size_t size,
         const std::string& name,
@@ -83,7 +83,7 @@ public:
     );
     
     /**
-     * @brief 创建单个 Buffer 并注入到指定 BufferPool
+     * @brief 创建单个 Buffer 并注入到指定 BufferPool（内部分配）
      * 
      * @param size Buffer 大小
      * @param pool 目标 BufferPool
@@ -91,6 +91,24 @@ public:
      * @return Buffer* 成功返回 buffer，失败返回 nullptr
      */
     Buffer* injectBufferToPool(
+        size_t size,
+        BufferPool* pool,
+        QueueType queue = QueueType::FREE
+    );
+    
+    /**
+     * @brief 注入外部已分配的内存到 BufferPool（外部注入）
+     * 
+     * @param virt_addr 外部内存的虚拟地址（已分配）
+     * @param phys_addr 外部内存的物理地址（如果支持，否则为 0）
+     * @param size 外部内存的大小（字节）
+     * @param pool 目标 BufferPool
+     * @param queue 注入到哪个队列（FREE 或 FILLED）
+     * @return Buffer* 成功返回 buffer，失败返回 nullptr
+     */
+    Buffer* injectExternalBufferToPool(
+        void* virt_addr,
+        uint64_t phys_addr,
         size_t size,
         BufferPool* pool,
         QueueType queue = QueueType::FREE

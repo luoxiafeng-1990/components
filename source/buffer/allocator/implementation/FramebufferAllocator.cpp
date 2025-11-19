@@ -5,6 +5,7 @@
 #include <vector>
 #include <unordered_map>
 #include <mutex>
+#include <algorithm>
 
 // ============================================================
 // 构造/析构函数
@@ -49,7 +50,7 @@ FramebufferAllocator::~FramebufferAllocator() {
 // 重写批量分配（批量包装）
 // ============================================================
 
-std::unique_ptr<BufferPool> FramebufferAllocator::allocatePoolWithBuffers(
+std::shared_ptr<BufferPool> FramebufferAllocator::allocatePoolWithBuffers(
     int count,
     size_t size,
     const std::string& name,
@@ -71,7 +72,7 @@ std::unique_ptr<BufferPool> FramebufferAllocator::allocatePoolWithBuffers(
         return nullptr;
     }
     
-    // 1. 创建空池
+    // 1. 创建空池（返回 shared_ptr，自动注册到 Registry）
     auto pool = BufferPool::CreateEmpty(name, category);
     if (!pool) {
         printf("❌ Failed to create empty pool\n");
@@ -106,6 +107,12 @@ std::unique_ptr<BufferPool> FramebufferAllocator::allocatePoolWithBuffers(
         
         printf("   ✅ Buffer #%d wrapped: virt=%p, phys=0x%lx, size=%zu (EXTERNAL)\n",
                i, buffer->getVirtualAddress(), buffer->getPhysicalAddress(), buffer->size());
+    }
+    
+    // 5. Allocator 持有 shared_ptr（管理生命周期）
+    {
+        std::lock_guard<std::mutex> lock(managed_pools_mutex_);
+        managed_pools_.push_back(pool);
     }
     
     printf("✅ BufferPool '%s' created with %d external buffers by FramebufferAllocator\n", 
@@ -212,8 +219,58 @@ Buffer* FramebufferAllocator::injectBufferToPool(
 ) {
     printf("⚠️  FramebufferAllocator::injectBufferToPool: This method is not supported\n");
     printf("   FramebufferAllocator only supports wrapping pre-allocated external memory\n");
-    printf("   Use allocatePoolWithBuffers() instead\n");
+    printf("   Use allocatePoolWithBuffers() or injectExternalBufferToPool() instead\n");
     return nullptr;
+}
+
+Buffer* FramebufferAllocator::injectExternalBufferToPool(
+    void* virt_addr,
+    uint64_t phys_addr,
+    size_t size,
+    BufferPool* pool,
+    QueueType queue
+) {
+    if (!pool || !virt_addr || size == 0) {
+        printf("❌ FramebufferAllocator::injectExternalBufferToPool: invalid parameters\n");
+        return nullptr;
+    }
+    
+    // 1. 生成 Buffer ID（从 pool 的当前 buffer 数量）
+    uint32_t id = pool->getTotalCount();
+    
+    // 2. 创建 Buffer 对象（包装外部内存，Ownership::EXTERNAL）
+    Buffer* buffer = new Buffer(
+        id,
+        virt_addr,
+        phys_addr,
+        size,
+        Buffer::Ownership::EXTERNAL
+    );
+    
+    if (!buffer) {
+        printf("❌ Failed to create Buffer object #%u for external memory\n", id);
+        return nullptr;
+    }
+    
+    // 3. 通过基类静态方法添加到 pool 的指定队列（会自动添加到 managed_buffers_）
+    if (!BufferAllocatorBase::addBufferToPoolQueue(pool, buffer, queue)) {
+        printf("❌ Failed to add external buffer #%u to pool '%s'\n", 
+               id, pool->getName().c_str());
+        delete buffer;  // 只删除 Buffer 对象，不释放外部内存
+        return nullptr;
+    }
+    
+    // 4. 记录所有权（外部内存由外部管理，但 Buffer 对象由 Allocator 管理）
+    {
+        std::lock_guard<std::mutex> lock(framebuffer_ownership_mutex_);
+        framebuffer_buffer_ownership_[buffer] = this;
+    }
+    
+    printf("✅ External buffer #%u injected to pool '%s' (virt=%p, phys=0x%lx, size=%zu, queue: %s)\n",
+           id, pool->getName().c_str(), virt_addr, phys_addr, size,
+           queue == QueueType::FREE ? "FREE" : "FILLED");
+    
+    return buffer;
 }
 
 bool FramebufferAllocator::removeBufferFromPool(Buffer* buffer, BufferPool* pool) {
@@ -252,9 +309,22 @@ bool FramebufferAllocator::destroyPool(BufferPool* pool) {
     
     printf("🧹 FramebufferAllocator: Destroying pool '%s'...\n", pool->getName().c_str());
     
+    // 1. 从 managed_pools_ 中移除
+    {
+        std::lock_guard<std::mutex> lock(managed_pools_mutex_);
+        auto it = std::find_if(managed_pools_.begin(), managed_pools_.end(),
+            [pool](const std::shared_ptr<BufferPool>& p) {
+                return p.get() == pool;
+            });
+        if (it != managed_pools_.end()) {
+            managed_pools_.erase(it);
+            printf("   ✅ Removed from managed_pools_\n");
+        }
+    }
+    
     std::lock_guard<std::mutex> lock(framebuffer_ownership_mutex_);
     
-    // 找到所有属于此 allocator 的 buffer
+    // 2. 找到所有属于此 allocator 的 buffer
     std::vector<Buffer*> to_remove;
     for (auto& [buf, alloc] : framebuffer_buffer_ownership_) {
         if (alloc == this) {
@@ -262,7 +332,7 @@ bool FramebufferAllocator::destroyPool(BufferPool* pool) {
         }
     }
     
-    // 移除并销毁
+    // 3. 移除并销毁
     for (Buffer* buf : to_remove) {
         BufferAllocatorBase::removeBufferFromPoolInternal(pool, buf);
         deallocateBuffer(buf);

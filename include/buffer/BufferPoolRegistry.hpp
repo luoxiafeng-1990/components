@@ -6,9 +6,11 @@
 #include <string>
 #include <vector>
 #include <chrono>
+#include <memory>
 
 // 前向声明
 class BufferPool;
+class VideoProductionLine;  // 用于 friend 声明
 
 /**
  * @brief BufferPool 全局注册表（单例）
@@ -42,13 +44,13 @@ public:
     // ========== 注册管理接口 ==========
     
     /**
-     * @brief 注册 BufferPool（由 BufferPool 构造函数自动调用）
-     * @param pool BufferPool 指针
+     * @brief 注册 BufferPool（由 BufferPool::CreateEmpty() 自动调用）
+     * @param pool BufferPool 的 shared_ptr
      * @param name 可读名称（如 "FramebufferPool_FB0", "VideoDecodePool"）
      * @param category 分类（如 "Display", "Video", "Network"）
      * @return 唯一 ID
      */
-    uint64_t registerPool(BufferPool* pool, 
+    uint64_t registerPool(std::shared_ptr<BufferPool> pool, 
                           const std::string& name,
                           const std::string& category = "");
     
@@ -58,33 +60,72 @@ public:
      */
     void unregisterPool(uint64_t id);
     
-    // ========== 查询接口 ==========
+    // ========== 只读接口（公开，任何人都可以调用）==========
     
     /**
-     * @brief 获取所有 BufferPool
-     * @return 所有 Pool 的指针列表
+     * @brief 获取 BufferPool（只读版本）
+     * @param id Pool ID
+     * @return shared_ptr<const BufferPool> 只读版本
      */
-    std::vector<BufferPool*> getAllPools() const;
+    std::shared_ptr<const BufferPool> getPoolReadOnly(uint64_t id) const;
     
     /**
-     * @brief 按名称查找 BufferPool
+     * @brief 通过名称获取 BufferPool（只读版本）
      * @param name Pool 名称
-     * @return BufferPool* 找到返回指针，否则返回 nullptr
+     * @return shared_ptr<const BufferPool> 只读版本
      */
-    BufferPool* findByName(const std::string& name) const;
+    std::shared_ptr<const BufferPool> getPoolReadOnlyByName(const std::string& name) const;
     
     /**
-     * @brief 按分类获取所有 BufferPool
-     * @param category 分类名称（如 "Display", "Video"）
-     * @return 该分类下所有 Pool 的指针列表
+     * @brief 获取所有 BufferPool（只读版本）
+     * @return 所有 Pool 的只读版本列表
      */
-    std::vector<BufferPool*> getPoolsByCategory(const std::string& category) const;
+    std::vector<std::shared_ptr<const BufferPool>> getAllPoolsReadOnly() const;
+    
+    /**
+     * @brief 按分类获取所有 BufferPool（只读版本）
+     * @param category 分类名称（如 "Display", "Video"）
+     * @return 该分类下所有 Pool 的只读版本列表
+     */
+    std::vector<std::shared_ptr<const BufferPool>> getPoolsByCategoryReadOnly(const std::string& category) const;
+    
+    /**
+     * @brief 查询所有 Worker 创建的 BufferPool（只读版本）
+     * @return Worker 创建的 Pool 列表（只读）
+     */
+    std::vector<std::shared_ptr<const BufferPool>> getWorkerPoolsReadOnly() const;
+    
+    /**
+     * @brief 查询指定 Worker 的 BufferPool（只读版本）
+     * @param worker_name Worker 名称
+     * @return BufferPool 的只读版本
+     */
+    std::shared_ptr<const BufferPool> getWorkerPoolReadOnly(const std::string& worker_name) const;
     
     /**
      * @brief 获取注册的 BufferPool 总数
      * @return size_t Pool 数量
      */
     size_t getPoolCount() const;
+    
+    // ========== 读写接口（仅 ProductionLine 可以调用）==========
+    
+    /**
+     * @brief 获取 BufferPool（读写版本，仅 ProductionLine 使用）
+     * 
+     * 权限控制：通过 friend 类限制，只有 VideoProductionLine 可以调用
+     * 
+     * @param id Pool ID
+     * @return shared_ptr<BufferPool> 读写版本
+     */
+    std::shared_ptr<BufferPool> getPoolForProductionLine(uint64_t id);
+    
+    /**
+     * @brief 通过名称获取 BufferPool（读写版本，仅 ProductionLine 使用）
+     * @param name Pool 名称
+     * @return shared_ptr<BufferPool> 读写版本
+     */
+    std::shared_ptr<BufferPool> getPoolByNameForProductionLine(const std::string& name);
     
     // ========== 全局监控接口 ==========
     
@@ -137,7 +178,7 @@ private:
      * @brief Pool 信息结构
      */
     struct PoolInfo {
-        BufferPool* pool;                                    // Pool 指针
+        std::shared_ptr<BufferPool> pool;                    // Pool 的 shared_ptr
         uint64_t id;                                         // 唯一 ID
         std::string name;                                    // 可读名称
         std::string category;                                // 分类
@@ -149,6 +190,9 @@ private:
     std::unordered_map<uint64_t, PoolInfo> pools_;          // ID -> PoolInfo
     std::unordered_map<std::string, uint64_t> name_to_id_;  // Name -> ID（快速查找）
     uint64_t next_id_ = 1;                                  // 下一个可用 ID
+    
+    // 声明 friend 类（只有 ProductionLine 可以调用读写接口）
+    friend class VideoProductionLine;
 };
 
 

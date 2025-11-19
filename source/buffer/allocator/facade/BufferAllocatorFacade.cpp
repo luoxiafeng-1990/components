@@ -30,7 +30,7 @@ BufferAllocatorFacade::~BufferAllocatorFacade() {
 // 统一接口实现（转发到底层 Allocator）
 // ============================================================================
 
-std::unique_ptr<BufferPool> BufferAllocatorFacade::allocatePoolWithBuffers(
+std::shared_ptr<BufferPool> BufferAllocatorFacade::allocatePoolWithBuffers(
     int count,
     size_t size,
     const std::string& name,
@@ -55,6 +55,21 @@ Buffer* BufferAllocatorFacade::injectBufferToPool(
     }
     
     return allocator_->injectBufferToPool(size, pool, queue);
+}
+
+Buffer* BufferAllocatorFacade::injectExternalBufferToPool(
+    void* virt_addr,
+    uint64_t phys_addr,
+    size_t size,
+    BufferPool* pool,
+    QueueType queue
+) {
+    if (!allocator_) {
+        printf("❌ ERROR: Allocator not initialized\n");
+        return nullptr;
+    }
+    
+    return allocator_->injectExternalBufferToPool(virt_addr, phys_addr, size, pool, queue);
 }
 
 bool BufferAllocatorFacade::removeBufferFromPool(Buffer* buffer, BufferPool* pool) {

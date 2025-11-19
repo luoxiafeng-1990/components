@@ -127,7 +127,7 @@ public:
      * @param category BufferPool 分类
      * @return unique_ptr<BufferPool> 成功返回 pool，失败返回 nullptr
      */
-    std::unique_ptr<BufferPool> allocatePoolWithBuffers(
+    std::shared_ptr<BufferPool> allocatePoolWithBuffers(
         int count,
         size_t size,
         const std::string& name,
@@ -135,11 +135,24 @@ public:
     ) override;
     
     /**
-     * @brief 创建单个 Buffer 并注入到指定 BufferPool
+     * @brief 创建单个 Buffer 并注入到指定 BufferPool（内部分配）
      * 
-     * @note FramebufferAllocator 不支持动态注入，应使用 allocatePoolWithBuffers
+     * @note FramebufferAllocator 不支持内部分配，应使用 allocatePoolWithBuffers 或 injectExternalBufferToPool
      */
     Buffer* injectBufferToPool(
+        size_t size,
+        BufferPool* pool,
+        QueueType queue = QueueType::FREE
+    ) override;
+    
+    /**
+     * @brief 注入外部已分配的内存到 BufferPool（外部注入）
+     * 
+     * @note FramebufferAllocator 支持此方法，可以包装外部内存为 Buffer
+     */
+    Buffer* injectExternalBufferToPool(
+        void* virt_addr,
+        uint64_t phys_addr,
         size_t size,
         BufferPool* pool,
         QueueType queue = QueueType::FREE
