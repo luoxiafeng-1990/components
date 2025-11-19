@@ -1,6 +1,6 @@
 #pragma once
 
-#include "BufferAllocatorBase.hpp"
+#include "../base/BufferAllocatorBase.hpp"
 
 extern "C" {
 #include <libavcodec/avcodec.h>
@@ -95,6 +95,41 @@ public:
      * @note 此方法会同时释放 AVFrame 和 Buffer
      */
     bool releaseAVFrame(Buffer* buffer, BufferPool* pool);
+    
+    // ==================== 实现基类纯虚函数 ====================
+    
+    /**
+     * @brief 批量创建 Buffer 并构建 BufferPool
+     * 
+     * @note AVFrameAllocator 主要用于动态注入，此方法创建空的 BufferPool
+     */
+    std::unique_ptr<BufferPool> allocatePoolWithBuffers(
+        int count,
+        size_t size,
+        const std::string& name,
+        const std::string& category = ""
+    ) override;
+    
+    /**
+     * @brief 创建单个 Buffer 并注入到指定 BufferPool
+     * 
+     * @note AVFrameAllocator 不支持此方法，应使用 injectAVFrameToPool
+     */
+    Buffer* injectBufferToPool(
+        size_t size,
+        BufferPool* pool,
+        QueueType queue = QueueType::FREE
+    ) override;
+    
+    /**
+     * @brief 从 BufferPool 移除并销毁 Buffer
+     */
+    bool removeBufferFromPool(Buffer* buffer, BufferPool* pool) override;
+    
+    /**
+     * @brief 销毁整个 BufferPool 及其所有 Buffer
+     */
+    bool destroyPool(BufferPool* pool) override;
     
 protected:
     /**

@@ -1,10 +1,22 @@
-#include "buffer/allocator/FramebufferAllocator.hpp"
+#include "buffer/allocator/implementation/FramebufferAllocator.hpp"
+#include "buffer/BufferPool.hpp"
 #include "display/LinuxFramebufferDevice.hpp"
 #include <stdio.h>
+#include <vector>
+#include <unordered_map>
+#include <mutex>
 
 // ============================================================
 // 构造/析构函数
 // ============================================================
+
+FramebufferAllocator::FramebufferAllocator()
+    : external_buffers_()
+    , next_buffer_index_(0)
+{
+    printf("🔧 FramebufferAllocator created (empty, no external buffers)\n");
+    printf("   ⚠️  Note: allocatePoolWithBuffers() will fail until external buffers are set\n");
+}
 
 FramebufferAllocator::FramebufferAllocator(const std::vector<BufferInfo>& external_buffers)
     : external_buffers_(external_buffers)
@@ -49,6 +61,16 @@ std::unique_ptr<BufferPool> FramebufferAllocator::allocatePoolWithBuffers(
     printf("\n🏭 FramebufferAllocator: Wrapping %d external buffers to pool '%s'...\n",
            actual_count, name.c_str());
     
+    // 检查是否有外部内存信息
+    if (actual_count == 0) {
+        printf("❌ ERROR: FramebufferAllocator has no external buffers configured\n");
+        printf("   FramebufferAllocator created with default constructor has empty external_buffers_\n");
+        printf("   Please use a constructor with parameters:\n");
+        printf("   - FramebufferAllocator(std::vector<BufferInfo>&)\n");
+        printf("   - FramebufferAllocator(LinuxFramebufferDevice*)\n");
+        return nullptr;
+    }
+    
     // 1. 创建空池
     auto pool = BufferPool::CreateEmpty(name, category);
     if (!pool) {
@@ -66,16 +88,21 @@ std::unique_ptr<BufferPool> FramebufferAllocator::allocatePoolWithBuffers(
             return nullptr;
         }
         
-        // 3. 通过基类辅助方法添加到 pool 的 free 队列
-        if (!addBufferToPoolQueue(pool.get(), buffer, QueueType::FREE)) {
+        // 3. 通过基类静态方法添加到 pool 的 free 队列
+        if (!BufferAllocatorBase::addBufferToPoolQueue(pool.get(), buffer, QueueType::FREE)) {
             printf("❌ Failed to add buffer #%d to pool\n", i);
             deallocateBuffer(buffer);
             cleanupPool(pool.get());
             return nullptr;
         }
         
-        // 4. 记录所有权
-        registerBufferOwnership(buffer, this);
+        // 4. 记录所有权（使用静态所有权跟踪）
+        {
+            static std::unordered_map<Buffer*, BufferAllocatorBase*> buffer_ownership_;
+            static std::mutex ownership_mutex_;
+            std::lock_guard<std::mutex> lock(ownership_mutex_);
+            buffer_ownership_[buffer] = this;
+        }
         
         printf("   ✅ Buffer #%d wrapped: virt=%p, phys=0x%lx, size=%zu (EXTERNAL)\n",
                i, buffer->getVirtualAddress(), buffer->getPhysicalAddress(), buffer->size());
@@ -168,5 +195,111 @@ FramebufferAllocator::buildBufferInfosFromDevice(LinuxFramebufferDevice* device)
     }
     
     return infos;
+}
+
+// ============================================================
+// 实现基类纯虚函数
+// ============================================================
+
+// 所有权跟踪（静态成员，所有Allocator共享）
+static std::unordered_map<Buffer*, BufferAllocatorBase*> framebuffer_buffer_ownership_;
+static std::mutex framebuffer_ownership_mutex_;
+
+Buffer* FramebufferAllocator::injectBufferToPool(
+    size_t size,
+    BufferPool* pool,
+    QueueType queue
+) {
+    printf("⚠️  FramebufferAllocator::injectBufferToPool: This method is not supported\n");
+    printf("   FramebufferAllocator only supports wrapping pre-allocated external memory\n");
+    printf("   Use allocatePoolWithBuffers() instead\n");
+    return nullptr;
+}
+
+bool FramebufferAllocator::removeBufferFromPool(Buffer* buffer, BufferPool* pool) {
+    if (!buffer || !pool) {
+        printf("❌ FramebufferAllocator::removeBufferFromPool: invalid parameters\n");
+        return false;
+    }
+    
+    // 1. 通过基类静态方法从 pool 移除
+    if (!BufferAllocatorBase::removeBufferFromPoolInternal(pool, buffer)) {
+        printf("⚠️  Failed to remove buffer #%u from pool '%s' (in use or not in pool)\n",
+               buffer->id(), pool->getName().c_str());
+        return false;
+    }
+    
+    // 2. 销毁 Buffer（仅删除对象，不释放外部内存）
+    deallocateBuffer(buffer);
+    
+    // 3. 清除所有权记录
+    {
+        std::lock_guard<std::mutex> lock(framebuffer_ownership_mutex_);
+        framebuffer_buffer_ownership_.erase(buffer);
+    }
+    
+    printf("✅ Buffer #%u removed from pool '%s'\n",
+           buffer->id(), pool->getName().c_str());
+    
+    return true;
+}
+
+bool FramebufferAllocator::destroyPool(BufferPool* pool) {
+    if (!pool) {
+        printf("❌ FramebufferAllocator::destroyPool: pool is nullptr\n");
+        return false;
+    }
+    
+    printf("🧹 FramebufferAllocator: Destroying pool '%s'...\n", pool->getName().c_str());
+    
+    std::lock_guard<std::mutex> lock(framebuffer_ownership_mutex_);
+    
+    // 找到所有属于此 allocator 的 buffer
+    std::vector<Buffer*> to_remove;
+    for (auto& [buf, alloc] : framebuffer_buffer_ownership_) {
+        if (alloc == this) {
+            to_remove.push_back(buf);
+        }
+    }
+    
+    // 移除并销毁
+    for (Buffer* buf : to_remove) {
+        BufferAllocatorBase::removeBufferFromPoolInternal(pool, buf);
+        deallocateBuffer(buf);
+        framebuffer_buffer_ownership_.erase(buf);
+    }
+    
+    printf("✅ Pool '%s' destroyed: removed %zu buffers (external memory retained)\n", 
+           pool->getName().c_str(), to_remove.size());
+    
+    return true;
+}
+
+// 辅助方法：清理 Pool
+void FramebufferAllocator::cleanupPool(BufferPool* pool) {
+    if (!pool) {
+        return;
+    }
+    
+    printf("🧹 Cleaning up pool '%s'...\n", pool->getName().c_str());
+    
+    std::lock_guard<std::mutex> lock(framebuffer_ownership_mutex_);
+    
+    // 找到所有属于此 allocator 的 buffer
+    std::vector<Buffer*> to_remove;
+    for (auto& [buf, alloc] : framebuffer_buffer_ownership_) {
+        if (alloc == this) {
+            to_remove.push_back(buf);
+        }
+    }
+    
+    // 移除并销毁
+    for (Buffer* buf : to_remove) {
+        BufferAllocatorBase::removeBufferFromPoolInternal(pool, buf);
+        deallocateBuffer(buf);
+        framebuffer_buffer_ownership_.erase(buf);
+    }
+    
+    printf("✅ Cleanup complete: removed %zu buffers\n", to_remove.size());
 }
 

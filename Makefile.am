@@ -12,10 +12,11 @@ display_test_SOURCES = test.cpp \
                        source/monitor/PerformanceMonitor.cpp \
                        source/monitor/Timer.cpp \
                        source/buffer/Buffer.cpp \
-                       source/buffer/allocator/BufferAllocatorBase.cpp \
-                       source/buffer/allocator/NormalAllocator.cpp \
-                       source/buffer/allocator/FramebufferAllocator.cpp \
-                       source/buffer/allocator/AVFrameAllocator.cpp \
+                       source/buffer/allocator/factory/BufferAllocatorFactory.cpp \
+                       source/buffer/allocator/facade/BufferAllocatorFacade.cpp \
+                       source/buffer/allocator/implementation/NormalAllocator.cpp \
+                       source/buffer/allocator/implementation/FramebufferAllocator.cpp \
+                       source/buffer/allocator/implementation/AVFrameAllocator.cpp \
                        source/buffer/BufferPool.cpp \
                        source/buffer/BufferPoolRegistry.cpp \
                        source/productionline/VideoProductionLine.cpp \

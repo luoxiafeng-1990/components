@@ -21,7 +21,8 @@ extern "C" {
 // ============================================================================
 
 FfmpegDecodeVideoFileWorker::FfmpegDecodeVideoFileWorker()
-    : format_ctx_(nullptr)
+    : WorkerBase(BufferAllocatorFactory::AllocatorType::NORMAL)  // FFmpeg解码视频文件使用NormalAllocator（普通模式）
+    , format_ctx_(nullptr)
     , codec_ctx_(nullptr)
     , sws_ctx_(nullptr)
     , video_stream_index_(-1)
@@ -35,10 +36,10 @@ FfmpegDecodeVideoFileWorker::FfmpegDecodeVideoFileWorker()
     , current_frame_index_(0)
     , is_open_(false)
     , eof_reached_(false)
-    , buffer_pool_(nullptr)
+    , zero_copy_buffer_pool_(nullptr)
     , supports_zero_copy_(false)
     , use_hardware_decoder_(true)  // 默认启用硬件解码
-    , decoder_name_(nullptr)
+    , decoder_name_("h264_taco")
     , codec_options_(nullptr)
     , decoded_frames_(0)
     , decode_errors_(0)
@@ -77,6 +78,30 @@ bool FfmpegDecodeVideoFileWorker::open(const char* path) {
         return false;
     }
     
+    // 🎯 Worker职责：在open()时自动创建BufferPool（通过调用Allocator）
+    // 计算帧大小（在openVideo()后，output_width_和output_height_已设置）
+    size_t frame_size = output_width_ * output_height_ * (output_bpp_ / 8);
+    if (frame_size == 0) {
+        setError("Invalid frame size, cannot create BufferPool");
+        closeVideo();
+        return false;
+    }
+    
+    int buffer_count = 10;  // 默认创建10个Buffer
+    
+    buffer_pool_ = allocator_.allocatePoolWithBuffers(
+        buffer_count,
+        frame_size,
+        std::string("FfmpegDecodeVideoFileWorker_") + std::string(path),
+        "Video"
+    );
+    
+    if (!buffer_pool_) {
+        setError("Failed to create BufferPool via Allocator");
+        closeVideo();
+        return false;
+    }
+    
     is_open_ = true;
     current_frame_index_ = 0;
     eof_reached_ = false;
@@ -88,6 +113,8 @@ bool FfmpegDecodeVideoFileWorker::open(const char* path) {
     printf("   Codec: %s\n", codec_ctx_->codec->name);
     printf("   Total frames (estimated): %d\n", total_frames_);
     printf("   Zero-copy: %s\n", supports_zero_copy_ ? "YES" : "NO");
+    printf("   BufferPool: '%s' (%d buffers, %zu bytes each)\n", 
+           buffer_pool_->getName().c_str(), buffer_count, frame_size);
     
     return true;
 }
@@ -103,6 +130,10 @@ bool FfmpegDecodeVideoFileWorker::open(const char* path, int width, int height, 
 void FfmpegDecodeVideoFileWorker::close() {
     std::lock_guard<std::mutex> lock(mutex_);
     closeVideo();
+    
+    // 释放BufferPool（通过unique_ptr自动释放）
+    buffer_pool_.reset();
+    
     is_open_ = false;
 }
 
@@ -355,12 +386,12 @@ bool FfmpegDecodeVideoFileWorker::initializeSwsContext() {
 
 bool FfmpegDecodeVideoFileWorker::checkZeroCopySupport() {
     // 零拷贝条件：
-    // 1. BufferPool 已设置
+    // 1. BufferPool 已创建（通过allocator创建）
     // 2. 使用特殊硬件解码器（如 h264_taco）
     // 3. 解码器输出带物理地址的 AVFrame
     
     if (!buffer_pool_) {
-        return false;  // 未设置 BufferPool
+        return false;  // BufferPool未创建
     }
     
     if (!decoder_name_ || strcmp(decoder_name_, "h264_taco") != 0) {

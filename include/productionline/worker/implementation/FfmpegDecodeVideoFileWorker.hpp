@@ -77,8 +77,8 @@ private:
     bool eof_reached_;
     
     // ============ 零拷贝模式 ============
-    BufferPool* buffer_pool_;          // 可选：零拷贝模式的BufferPool
-    bool supports_zero_copy_;          // 解码器是否支持零拷贝
+    BufferPool* zero_copy_buffer_pool_;            // 可选：零拷贝模式的BufferPool（外部提供）
+    bool supports_zero_copy_;                      // 解码器是否支持零拷贝
     
     // ============ 解码器配置（用于特殊解码器）============
     bool use_hardware_decoder_;        // 是否使用硬件解码

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "BufferAllocatorBase.hpp"
+#include "../base/BufferAllocatorBase.hpp"
 #include <vector>
 
 // 前向声明（避免循环依赖）
@@ -60,6 +60,24 @@ public:
     };
     
     /**
+     * @brief 默认构造函数（无参）
+     * 
+     * 创建一个空的 FramebufferAllocator 实例。
+     * 
+     * 注意：
+     * - 创建的实例 external_buffers_ 为空
+     * - 调用 allocatePoolWithBuffers() 时会失败（因为没有外部内存信息）
+     * - 需要通过其他方式设置外部内存信息（如通过 setExternalBuffers() 方法，如果存在）
+     * 
+     * 使用场景：
+     * - 通过 Factory 创建时使用
+     * - 需要延迟设置外部内存信息的场景
+     * 
+     * @note 通常建议使用带参数的构造函数直接初始化
+     */
+    FramebufferAllocator();
+    
+    /**
      * @brief 构造函数 1：从预构建的 BufferInfo 列表构造
      * 
      * @param external_buffers 外部提供的 buffer 信息列表
@@ -94,8 +112,10 @@ public:
     
     ~FramebufferAllocator() override;
     
+    // ==================== 实现基类纯虚函数 ====================
+    
     /**
-     * @brief 重写：批量分配（实际上是批量包装）
+     * @brief 批量创建 Buffer 并构建 BufferPool（实际上是批量包装外部内存）
      * 
      * 注意：
      * - count 和 size 参数会被忽略
@@ -112,7 +132,28 @@ public:
         size_t size,
         const std::string& name,
         const std::string& category = ""
-    );
+    ) override;
+    
+    /**
+     * @brief 创建单个 Buffer 并注入到指定 BufferPool
+     * 
+     * @note FramebufferAllocator 不支持动态注入，应使用 allocatePoolWithBuffers
+     */
+    Buffer* injectBufferToPool(
+        size_t size,
+        BufferPool* pool,
+        QueueType queue = QueueType::FREE
+    ) override;
+    
+    /**
+     * @brief 从 BufferPool 移除并销毁 Buffer
+     */
+    bool removeBufferFromPool(Buffer* buffer, BufferPool* pool) override;
+    
+    /**
+     * @brief 销毁整个 BufferPool 及其所有 Buffer
+     */
+    bool destroyPool(BufferPool* pool) override;
     
 protected:
     /**
@@ -141,6 +182,11 @@ protected:
     void deallocateBuffer(Buffer* buffer) override;
     
 private:
+    /**
+     * @brief 清理 Pool 中所有属于此 Allocator 的 buffer（辅助方法）
+     */
+    void cleanupPool(BufferPool* pool);
+    
     /**
      * @brief 从 LinuxFramebufferDevice 构建 BufferInfo 列表（私有辅助方法）
      * 

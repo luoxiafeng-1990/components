@@ -41,36 +41,37 @@
 4. 性能优化	ARCHITECTURE.md	/^### 4. 性能优化$/;"	S	language:Markdown
 4. 构建系统清理	cpp_compile_error.md	/^### 4. 构建系统清理$/;"	S	language:Markdown
 5. BufferAllocator（分配器）	ARCHITECTURE.md	/^### 5. BufferAllocator（分配器）$/;"	S	language:Markdown
-5. BufferFillingWorker（门面）	ARCHITECTURE.md	/^### 5. BufferFillingWorker（门面）$/;"	S	language:Markdown
+5. WorkerBase（Worker基类）	ARCHITECTURE.md	/^### 5. WorkerBase（Worker基类）$/;"	S	language:Markdown
 5. 智能指针操作符	cpp_compile_error.md	/^### 5. 智能指针操作符$/;"	S	language:Markdown
 5. 生产者-消费者模式（Producer-Consumer Pattern）	ARCHITECTURE.md	/^### 5. 生产者-消费者模式（Producer-Consumer Pattern）$/;"	S	language:Markdown
 5. 线程安全注意事项	ARCHITECTURE.md	/^### 5. 线程安全注意事项$/;"	S	language:Markdown
-6. BufferFillingWorkerFactory（工厂）	ARCHITECTURE.md	/^### 6. BufferFillingWorkerFactory（工厂）$/;"	S	language:Markdown
+6. BufferFillingWorkerFacade（门面）	ARCHITECTURE.md	/^### 6. BufferFillingWorkerFacade（门面）$/;"	S	language:Markdown
 6. explicit 关键字与隐式类型转换	cpp_compile_error.md	/^### 6. explicit 关键字与隐式类型转换$/;"	S	language:Markdown
 6. 友元模式（Friend Pattern）	ARCHITECTURE.md	/^### 6. 友元模式（Friend Pattern）$/;"	S	language:Markdown
-7. 具体Allocator实现类	ARCHITECTURE.md	/^### 7. 具体Allocator实现类$/;"	S	language:Markdown
+7. BufferFillingWorkerFactory（工厂）	ARCHITECTURE.md	/^### 7. BufferFillingWorkerFactory（工厂）$/;"	S	language:Markdown
 7. 重构最佳实践	cpp_compile_error.md	/^### 7. 重构最佳实践$/;"	S	language:Markdown
+8. 具体Allocator实现类	ARCHITECTURE.md	/^### 8. 具体Allocator实现类$/;"	S	language:Markdown
 AM_CPPFLAGS	Makefile.am	/^AM_CPPFLAGS = -I$(top_srcdir)\/include$/;"	m	language:Make
 AM_CXXFLAGS	Makefile.am	/^AM_CXXFLAGS = -O2 -std=c++17$/;"	m	language:Make
 AM_CXXFLAGS	Makefile.am	/^AM_CXXFLAGS = -g -O0 -Wall -std=c++17$/;"	m	language:Make
 API参考	ARCHITECTURE.md	/^## API参考$/;"	s	language:Markdown
-AUTO	include/productionline/worker/BufferFillingWorkerFactory.hpp	/^        AUTO,          \/\/ 自动检测（默认）$/;"	e	language:C++	enum:BufferFillingWorkerFactory::WorkerType
+AUTO	include/productionline/worker/factory/BufferFillingWorkerFactory.hpp	/^        AUTO,          \/\/ 自动检测（默认）$/;"	e	language:C++	enum:BufferFillingWorkerFactory::WorkerType
 AUTOMAKE_OPTIONS	Makefile.am	/^AUTOMAKE_OPTIONS = foreign$/;"	m	language:Make
 AVFrameAllocator	include/buffer/allocator/AVFrameAllocator.hpp	/^class AVFrameAllocator : public BufferAllocatorBase {$/;"	c	language:C++
 AVFrameAllocator	source/buffer/allocator/AVFrameAllocator.cpp	/^AVFrameAllocator::AVFrameAllocator()$/;"	f	language:C++	class:AVFrameAllocator	signature:()
 AVFrameAllocator（AVFrame包装器）	ARCHITECTURE.md	/^#### AVFrameAllocator（AVFrame包装器）$/;"	t	language:Markdown
-AVI	include/productionline/worker/MmapRawVideoFileWorker.hpp	/^        AVI           \/\/ AVI容器$/;"	e	language:C++	enum:MmapRawVideoFileWorker::FileFormat
+AVI	include/productionline/worker/implementation/MmapRawVideoFileWorker.hpp	/^        AVI           \/\/ AVI容器$/;"	e	language:C++	enum:MmapRawVideoFileWorker::FileFormat
 Automake 项目	cpp_compile_error.md	/^# Automake 项目$/;"	c	language:Markdown
-BUFFER_FILLING_WORKER_FACTORY_HPP	include/productionline/worker/BufferFillingWorkerFactory.hpp	/^#define BUFFER_FILLING_WORKER_FACTORY_HPP$/;"	d	language:C++
-BUFFER_FILLING_WORKER_HPP	include/productionline/worker/BufferFillingWorker.hpp	/^#define BUFFER_FILLING_WORKER_HPP$/;"	d	language:C++
+BUFFER_FILLING_WORKER_FACADE_HPP	include/productionline/worker/facade/BufferFillingWorkerFacade.hpp	/^#define BUFFER_FILLING_WORKER_FACADE_HPP$/;"	d	language:C++
+BUFFER_FILLING_WORKER_FACTORY_HPP	include/productionline/worker/factory/BufferFillingWorkerFactory.hpp	/^#define BUFFER_FILLING_WORKER_FACTORY_HPP$/;"	d	language:C++
 Buffer	include/buffer/Buffer.hpp	/^class Buffer {$/;"	c	language:C++
 Buffer	source/buffer/Buffer.cpp	/^Buffer::Buffer(Buffer&& other) noexcept$/;"	f	language:C++	class:Buffer	signature:(Buffer && other)
 Buffer	source/buffer/Buffer.cpp	/^Buffer::Buffer(uint32_t id, $/;"	f	language:C++	class:Buffer	signature:(uint32_t id,void * virt_addr,uint64_t phys_addr,size_t size,Ownership ownership)
 BufferAllocator API	ARCHITECTURE.md	/^### BufferAllocator API$/;"	S	language:Markdown
 BufferAllocatorBase	include/buffer/allocator/BufferAllocatorBase.hpp	/^class BufferAllocatorBase {$/;"	c	language:C++
-BufferFillingWorker	include/productionline/worker/BufferFillingWorker.hpp	/^class BufferFillingWorker {$/;"	c	language:C++
-BufferFillingWorker	source/productionline/worker/BufferFillingWorker.cpp	/^BufferFillingWorker::BufferFillingWorker(BufferFillingWorkerFactory::WorkerType type)$/;"	f	language:C++	class:BufferFillingWorker	signature:(BufferFillingWorkerFactory::WorkerType type)
-BufferFillingWorkerFactory	include/productionline/worker/BufferFillingWorkerFactory.hpp	/^class BufferFillingWorkerFactory {$/;"	c	language:C++
+BufferFillingWorkerFacade	include/productionline/worker/facade/BufferFillingWorkerFacade.hpp	/^class BufferFillingWorkerFacade : public IBufferFillingWorker, public IVideoFileNavigator {$/;"	c	language:C++
+BufferFillingWorkerFacade	source/productionline/worker/facade/BufferFillingWorkerFacade.cpp	/^BufferFillingWorkerFacade::BufferFillingWorkerFacade(BufferFillingWorkerFactory::WorkerType type/;"	f	language:C++	class:BufferFillingWorkerFacade	signature:(BufferFillingWorkerFactory::WorkerType type)
+BufferFillingWorkerFactory	include/productionline/worker/factory/BufferFillingWorkerFactory.hpp	/^class BufferFillingWorkerFactory {$/;"	c	language:C++
 BufferInfo	include/buffer/allocator/FramebufferAllocator.hpp	/^    struct BufferInfo {$/;"	s	language:C++	class:FramebufferAllocator
 BufferMemoryAllocatorType	include/buffer/allocator/BufferAllocatorBase.hpp	/^enum class BufferMemoryAllocatorType {$/;"	g	language:C++
 BufferPool	include/buffer/BufferPool.hpp	/^class BufferPool {$/;"	c	language:C++
@@ -105,40 +106,40 @@ EXTERNAL	include/buffer/Buffer.hpp	/^        EXTERNAL    \/\/ 外部拥有，Buf
 ErrorCallback	include/productionline/VideoProductionLine.hpp	/^    using ErrorCallback = std::function<void(const std::string&)>;$/;"	t	language:C++	class:VideoProductionLine
 FB_IOCTL_SET_DMA_INFO	source/display/LinuxFramebufferDevice.cpp	/^#define FB_IOCTL_SET_DMA_INFO /;"	d	language:C++	file:
 FFMPEG	test.cpp	/^    FFMPEG,$/;"	e	language:C++	enum:TestMode	file:
-FFMPEG_DECODE_RTSP_WORKER_HPP	include/productionline/worker/FfmpegDecodeRtspWorker.hpp	/^#define FFMPEG_DECODE_RTSP_WORKER_HPP$/;"	d	language:C++
-FFMPEG_DECODE_VIDEO_FILE_WORKER_HPP	include/productionline/worker/FfmpegDecodeVideoFileWorker.hpp	/^#define FFMPEG_DECODE_VIDEO_FILE_WORKER_HPP$/;"	d	language:C++
-FFMPEG_RTSP	include/productionline/worker/BufferFillingWorkerFactory.hpp	/^        FFMPEG_RTSP,   \/\/ 创建 FfmpegDecodeRtspWorker$/;"	e	language:C++	enum:BufferFillingWorkerFactory::WorkerType
-FFMPEG_VIDEO_FILE	include/productionline/worker/BufferFillingWorkerFactory.hpp	/^        FFMPEG_VIDEO_FILE  \/\/ 创建 FfmpegDecodeVideoFileWorker$/;"	e	language:C++	enum:BufferFillingWorkerFactory::WorkerType
+FFMPEG_DECODE_RTSP_WORKER_HPP	include/productionline/worker/implementation/FfmpegDecodeRtspWorker.hpp	/^#define FFMPEG_DECODE_RTSP_WORKER_HPP$/;"	d	language:C++
+FFMPEG_DECODE_VIDEO_FILE_WORKER_HPP	include/productionline/worker/implementation/FfmpegDecodeVideoFileWorker.hpp	/^#define FFMPEG_DECODE_VIDEO_FILE_WORKER_HPP$/;"	d	language:C++
+FFMPEG_RTSP	include/productionline/worker/factory/BufferFillingWorkerFactory.hpp	/^        FFMPEG_RTSP,   \/\/ 创建 FfmpegDecodeRtspWorker$/;"	e	language:C++	enum:BufferFillingWorkerFactory::WorkerType
+FFMPEG_VIDEO_FILE	include/productionline/worker/factory/BufferFillingWorkerFactory.hpp	/^        FFMPEG_VIDEO_FILE  \/\/ 创建 FfmpegDecodeVideoFileWorker$/;"	e	language:C++	enum:BufferFillingWorkerFactory::WorkerType
 FILLED	include/buffer/BufferPool.hpp	/^    FILLED     \/\/ 填充队列$/;"	e	language:C++	enum:QueueType
 FREE	include/buffer/BufferPool.hpp	/^    FREE,      \/\/ 空闲队列$/;"	e	language:C++	enum:QueueType
-FfmpegDecodeRtspWorker	include/productionline/worker/FfmpegDecodeRtspWorker.hpp	/^class FfmpegDecodeRtspWorker : public IBufferFillingWorker, public IVideoFileNavigator {$/;"	c	language:C++
-FfmpegDecodeRtspWorker	source/productionline/worker/FfmpegDecodeRtspWorker.cpp	/^FfmpegDecodeRtspWorker::FfmpegDecodeRtspWorker()$/;"	f	language:C++	class:FfmpegDecodeRtspWorker	signature:()
-FfmpegDecodeVideoFileWorker	include/productionline/worker/FfmpegDecodeVideoFileWorker.hpp	/^class FfmpegDecodeVideoFileWorker : public IBufferFillingWorker, public IVideoFileNavigator {$/;"	c	language:C++
-FfmpegDecodeVideoFileWorker	source/productionline/worker/FfmpegDecodeVideoFileWorker.cpp	/^FfmpegDecodeVideoFileWorker::FfmpegDecodeVideoFileWorker()$/;"	f	language:C++	class:FfmpegDecodeVideoFileWorker	signature:()
-FileFormat	include/productionline/worker/MmapRawVideoFileWorker.hpp	/^    enum class FileFormat {$/;"	g	language:C++	class:MmapRawVideoFileWorker
-FrameSlot	include/productionline/worker/FfmpegDecodeRtspWorker.hpp	/^    struct FrameSlot {$/;"	s	language:C++	class:FfmpegDecodeRtspWorker
+FfmpegDecodeRtspWorker	include/productionline/worker/implementation/FfmpegDecodeRtspWorker.hpp	/^class FfmpegDecodeRtspWorker : public WorkerBase {$/;"	c	language:C++
+FfmpegDecodeRtspWorker	source/productionline/worker/implementation/FfmpegDecodeRtspWorker.cpp	/^FfmpegDecodeRtspWorker::FfmpegDecodeRtspWorker()$/;"	f	language:C++	class:FfmpegDecodeRtspWorker	signature:()
+FfmpegDecodeVideoFileWorker	include/productionline/worker/implementation/FfmpegDecodeVideoFileWorker.hpp	/^class FfmpegDecodeVideoFileWorker : public WorkerBase {$/;"	c	language:C++
+FfmpegDecodeVideoFileWorker	source/productionline/worker/implementation/FfmpegDecodeVideoFileWorker.cpp	/^FfmpegDecodeVideoFileWorker::FfmpegDecodeVideoFileWorker()$/;"	f	language:C++	class:FfmpegDecodeVideoFileWorker	signature:()
+FileFormat	include/productionline/worker/implementation/MmapRawVideoFileWorker.hpp	/^    enum class FileFormat {$/;"	g	language:C++	class:MmapRawVideoFileWorker
+FrameSlot	include/productionline/worker/implementation/FfmpegDecodeRtspWorker.hpp	/^    struct FrameSlot {$/;"	s	language:C++	class:FfmpegDecodeRtspWorker
 FramebufferAllocator	include/buffer/allocator/FramebufferAllocator.hpp	/^class FramebufferAllocator : public BufferAllocatorBase {$/;"	c	language:C++
 FramebufferAllocator	source/buffer/allocator/FramebufferAllocator.cpp	/^FramebufferAllocator::FramebufferAllocator(LinuxFramebufferDevice* device)$/;"	f	language:C++	class:FramebufferAllocator	signature:(LinuxFramebufferDevice * device)
 FramebufferAllocator	source/buffer/allocator/FramebufferAllocator.cpp	/^FramebufferAllocator::FramebufferAllocator(const std::vector<BufferInfo>& external_buffers)$/;"	f	language:C++	class:FramebufferAllocator	signature:(const std::vector<BufferInfo> & external_buffers)
 FramebufferAllocator（外部内存包装器）	ARCHITECTURE.md	/^#### FramebufferAllocator（外部内存包装器）$/;"	t	language:Markdown
 GCC/Clang 编译器警告	cpp_compile_error.md	/^# GCC\/Clang 编译器警告$/;"	c	language:Markdown
 GlobalStats	include/buffer/BufferPoolRegistry.hpp	/^    struct GlobalStats {$/;"	s	language:C++	class:BufferPoolRegistry
-H264	include/productionline/worker/MmapRawVideoFileWorker.hpp	/^        H264,         \/\/ H.264裸流$/;"	e	language:C++	enum:MmapRawVideoFileWorker::FileFormat
-H265	include/productionline/worker/MmapRawVideoFileWorker.hpp	/^        H265,         \/\/ H.265裸流$/;"	e	language:C++	enum:MmapRawVideoFileWorker::FileFormat
-IBUFFER_FILLING_WORKER_HPP	include/productionline/worker/IBufferFillingWorker.hpp	/^#define IBUFFER_FILLING_WORKER_HPP$/;"	d	language:C++
-IBufferFillingWorker	include/productionline/worker/IBufferFillingWorker.hpp	/^class IBufferFillingWorker {$/;"	c	language:C++
+H264	include/productionline/worker/implementation/MmapRawVideoFileWorker.hpp	/^        H264,         \/\/ H.264裸流$/;"	e	language:C++	enum:MmapRawVideoFileWorker::FileFormat
+H265	include/productionline/worker/implementation/MmapRawVideoFileWorker.hpp	/^        H265,         \/\/ H.265裸流$/;"	e	language:C++	enum:MmapRawVideoFileWorker::FileFormat
+IBUFFER_FILLING_WORKER_HPP	include/productionline/worker/interface/IBufferFillingWorker.hpp	/^#define IBUFFER_FILLING_WORKER_HPP$/;"	d	language:C++
+IBufferFillingWorker	include/productionline/worker/interface/IBufferFillingWorker.hpp	/^class IBufferFillingWorker {$/;"	c	language:C++
 IBufferFillingWorker API	ARCHITECTURE.md	/^### IBufferFillingWorker API$/;"	S	language:Markdown
 IDISPLAYDEVICE_HPP	include/display/IDisplayDevice.hpp	/^#define IDISPLAYDEVICE_HPP$/;"	d	language:C++
 IDLE	include/buffer/Buffer.hpp	/^        IDLE,                    \/\/ 空闲，等待生产者获取（在 free_queue）$/;"	e	language:C++	enum:Buffer::State
 IDisplayDevice	include/display/IDisplayDevice.hpp	/^class IDisplayDevice {$/;"	c	language:C++
 IOURING	test.cpp	/^    IOURING,$/;"	e	language:C++	enum:TestMode	file:
-IOURING_RAW	include/productionline/worker/BufferFillingWorkerFactory.hpp	/^        IOURING_RAW,   \/\/ 创建 IoUringRawVideoFileWorker$/;"	e	language:C++	enum:BufferFillingWorkerFactory::WorkerType
-IOURING_RAW_VIDEO_FILE_WORKER_HPP	include/productionline/worker/IoUringRawVideoFileWorker.hpp	/^#define IOURING_RAW_VIDEO_FILE_WORKER_HPP$/;"	d	language:C++
-IVIDEO_FILE_NAVIGATOR_HPP	include/productionline/worker/IVideoFileNavigator.hpp	/^#define IVIDEO_FILE_NAVIGATOR_HPP$/;"	d	language:C++
-IVideoFileNavigator	include/productionline/worker/IVideoFileNavigator.hpp	/^class IVideoFileNavigator {$/;"	c	language:C++
+IOURING_RAW	include/productionline/worker/factory/BufferFillingWorkerFactory.hpp	/^        IOURING_RAW,   \/\/ 创建 IoUringRawVideoFileWorker$/;"	e	language:C++	enum:BufferFillingWorkerFactory::WorkerType
+IOURING_RAW_VIDEO_FILE_WORKER_HPP	include/productionline/worker/implementation/IoUringRawVideoFileWorker.hpp	/^#define IOURING_RAW_VIDEO_FILE_WORKER_HPP$/;"	d	language:C++
+IVIDEO_FILE_NAVIGATOR_HPP	include/productionline/worker/interface/IVideoFileNavigator.hpp	/^#define IVIDEO_FILE_NAVIGATOR_HPP$/;"	d	language:C++
+IVideoFileNavigator	include/productionline/worker/interface/IVideoFileNavigator.hpp	/^class IVideoFileNavigator {$/;"	c	language:C++
 IVideoFileNavigator API	ARCHITECTURE.md	/^### IVideoFileNavigator API$/;"	S	language:Markdown
-IoUringRawVideoFileWorker	include/productionline/worker/IoUringRawVideoFileWorker.hpp	/^class IoUringRawVideoFileWorker : public IBufferFillingWorker, public IVideoFileNavigator {$/;"	c	language:C++
-IoUringRawVideoFileWorker	source/productionline/worker/IoUringRawVideoFileWorker.cpp	/^IoUringRawVideoFileWorker::IoUringRawVideoFileWorker(int queue_depth)$/;"	f	language:C++	class:IoUringRawVideoFileWorker	signature:(int queue_depth)
+IoUringRawVideoFileWorker	include/productionline/worker/implementation/IoUringRawVideoFileWorker.hpp	/^class IoUringRawVideoFileWorker : public WorkerBase {$/;"	c	language:C++
+IoUringRawVideoFileWorker	source/productionline/worker/implementation/IoUringRawVideoFileWorker.cpp	/^IoUringRawVideoFileWorker::IoUringRawVideoFileWorker(int queue_depth)$/;"	f	language:C++	class:IoUringRawVideoFileWorker	signature:(int queue_depth)
 LDADD	Makefile.am	/^LDADD = -lpthread -luring -lavformat -lavcodec -lavutil -lswscale -ltacosys$/;"	m	language:Make
 LINUX_FRAMEBUFFER_DEVICE_HPP	include/display/LinuxFramebufferDevice.hpp	/^#define LINUX_FRAMEBUFFER_DEVICE_HPP$/;"	d	language:C++
 LOCKED_BY_CONSUMER	include/buffer/Buffer.hpp	/^        LOCKED_BY_CONSUMER       \/\/ 被消费者锁定，正在使用数据$/;"	e	language:C++	enum:Buffer::State
@@ -148,16 +149,16 @@ LinuxFramebufferDevice	include/display/LinuxFramebufferDevice.hpp	/^class LinuxF
 LinuxFramebufferDevice	source/display/LinuxFramebufferDevice.cpp	/^LinuxFramebufferDevice::LinuxFramebufferDevice()$/;"	f	language:C++	class:LinuxFramebufferDevice	signature:()
 LinuxFramebufferDevice 显示方法使用指南	include/display/display_buffer_usage_guide.md	/^# LinuxFramebufferDevice 显示方法使用指南$/;"	c	language:Markdown
 MAGIC_NUMBER	include/buffer/Buffer.hpp	/^    static constexpr uint32_t MAGIC_NUMBER = 0xBEEFF123;  \/\/ 魔数：BEEF + F123$/;"	m	language:C++	class:Buffer	typeref:typename:uint32_t
-MAX_PATH_LENGTH	include/productionline/worker/MmapRawVideoFileWorker.hpp	/^#define MAX_PATH_LENGTH /;"	d	language:C++
-MAX_RTSP_PATH_LENGTH	include/productionline/worker/FfmpegDecodeRtspWorker.hpp	/^#define MAX_RTSP_PATH_LENGTH /;"	d	language:C++
-MAX_VIDEO_PATH_LENGTH	include/productionline/worker/FfmpegDecodeVideoFileWorker.hpp	/^#define MAX_VIDEO_PATH_LENGTH /;"	d	language:C++
-MMAP_RAW	include/productionline/worker/BufferFillingWorkerFactory.hpp	/^        MMAP_RAW,      \/\/ 创建 MmapRawVideoFileWorker$/;"	e	language:C++	enum:BufferFillingWorkerFactory::WorkerType
-MMAP_RAW_VIDEO_FILE_WORKER_HPP	include/productionline/worker/MmapRawVideoFileWorker.hpp	/^#define MMAP_RAW_VIDEO_FILE_WORKER_HPP$/;"	d	language:C++
-MP4	include/productionline/worker/MmapRawVideoFileWorker.hpp	/^        MP4,          \/\/ MP4容器$/;"	e	language:C++	enum:MmapRawVideoFileWorker::FileFormat
+MAX_PATH_LENGTH	include/productionline/worker/implementation/MmapRawVideoFileWorker.hpp	/^#define MAX_PATH_LENGTH /;"	d	language:C++
+MAX_RTSP_PATH_LENGTH	include/productionline/worker/implementation/FfmpegDecodeRtspWorker.hpp	/^#define MAX_RTSP_PATH_LENGTH /;"	d	language:C++
+MAX_VIDEO_PATH_LENGTH	include/productionline/worker/implementation/FfmpegDecodeVideoFileWorker.hpp	/^#define MAX_VIDEO_PATH_LENGTH /;"	d	language:C++
+MMAP_RAW	include/productionline/worker/factory/BufferFillingWorkerFactory.hpp	/^        MMAP_RAW,      \/\/ 创建 MmapRawVideoFileWorker$/;"	e	language:C++	enum:BufferFillingWorkerFactory::WorkerType
+MMAP_RAW_VIDEO_FILE_WORKER_HPP	include/productionline/worker/implementation/MmapRawVideoFileWorker.hpp	/^#define MMAP_RAW_VIDEO_FILE_WORKER_HPP$/;"	d	language:C++
+MP4	include/productionline/worker/implementation/MmapRawVideoFileWorker.hpp	/^        MP4,          \/\/ MP4容器$/;"	e	language:C++	enum:MmapRawVideoFileWorker::FileFormat
 Makefile.am	cpp_compile_error.md	/^# Makefile.am$/;"	c	language:Markdown
 MappedInfo	include/display/LinuxFramebufferDevice.hpp	/^    struct MappedInfo {$/;"	s	language:C++	class:LinuxFramebufferDevice
-MmapRawVideoFileWorker	include/productionline/worker/MmapRawVideoFileWorker.hpp	/^class MmapRawVideoFileWorker : public IBufferFillingWorker, public IVideoFileNavigator {$/;"	c	language:C++
-MmapRawVideoFileWorker	source/productionline/worker/MmapRawVideoFileWorker.cpp	/^MmapRawVideoFileWorker::MmapRawVideoFileWorker()$/;"	f	language:C++	class:MmapRawVideoFileWorker	signature:()
+MmapRawVideoFileWorker	include/productionline/worker/implementation/MmapRawVideoFileWorker.hpp	/^class MmapRawVideoFileWorker : public WorkerBase {$/;"	c	language:C++
+MmapRawVideoFileWorker	source/productionline/worker/implementation/MmapRawVideoFileWorker.cpp	/^MmapRawVideoFileWorker::MmapRawVideoFileWorker()$/;"	f	language:C++	class:MmapRawVideoFileWorker	signature:()
 NORMAL_MALLOC	include/buffer/allocator/BufferAllocatorBase.hpp	/^    NORMAL_MALLOC = 0,$/;"	e	language:C++	enum:BufferMemoryAllocatorType
 NormalAllocator	include/buffer/allocator/NormalAllocator.hpp	/^class NormalAllocator : public BufferAllocatorBase {$/;"	c	language:C++
 NormalAllocator	source/buffer/allocator/NormalAllocator.cpp	/^NormalAllocator::NormalAllocator(BufferMemoryAllocatorType type, size_t alignment)$/;"	f	language:C++	class:NormalAllocator	signature:(BufferMemoryAllocatorType type,size_t alignment)
@@ -177,10 +178,9 @@ Q3: Allocator和BufferPool的关系是什么？	ARCHITECTURE.md	/^### Q3: Alloca
 Q4: 如何选择合适的Worker类型？	ARCHITECTURE.md	/^### Q4: 如何选择合适的Worker类型？$/;"	S	language:Markdown
 Q5: 多线程生产时如何保证线程安全？	ARCHITECTURE.md	/^### Q5: 多线程生产时如何保证线程安全？$/;"	S	language:Markdown
 QueueType	include/buffer/BufferPool.hpp	/^enum class QueueType {$/;"	g	language:C++
-RAW	include/productionline/worker/MmapRawVideoFileWorker.hpp	/^        RAW,          \/\/ 原始格式$/;"	e	language:C++	enum:MmapRawVideoFileWorker::FileFormat
+RAW	include/productionline/worker/implementation/MmapRawVideoFileWorker.hpp	/^        RAW,          \/\/ 原始格式$/;"	e	language:C++	enum:MmapRawVideoFileWorker::FileFormat
 READY_FOR_CONSUME	include/buffer/Buffer.hpp	/^        READY_FOR_CONSUME,       \/\/ 数据就绪，等待消费者获取（在 filled_queue）$/;"	e	language:C++	enum:Buffer::State
 RTSP	test.cpp	/^    RTSP,$/;"	e	language:C++	enum:TestMode	file:
-ReaderType	include/productionline/worker/BufferFillingWorkerFactory.hpp	/^    using ReaderType = WorkerType;$/;"	t	language:C++	class:BufferFillingWorkerFactory	typeref:typename:WorkerType
 SEQUENTIAL	test.cpp	/^    SEQUENTIAL,$/;"	e	language:C++	enum:TestMode	file:
 State	include/buffer/Buffer.hpp	/^    enum class State {$/;"	g	language:C++	class:Buffer
 TACO_SYS	include/buffer/allocator/BufferAllocatorBase.hpp	/^    TACO_SYS = 3$/;"	e	language:C++	enum:BufferMemoryAllocatorType
@@ -190,16 +190,19 @@ TPS_FB1	source/display/LinuxFramebufferDevice.cpp	/^#define TPS_FB1 /;"	d	langua
 TestMode	test.cpp	/^enum class TestMode {$/;"	g	language:C++	file:
 Timer	include/monitor/Timer.hpp	/^class Timer {$/;"	c	language:C++
 Timer	source/monitor/Timer.cpp	/^Timer::Timer(double interval_seconds, $/;"	f	language:C++	class:Timer	signature:(double interval_seconds,void (* callback)(void *),void * user_data,double delay_seconds,double duration_seconds,void (* delay_end_callback)(void *))
-UNKNOWN	include/productionline/worker/MmapRawVideoFileWorker.hpp	/^        UNKNOWN,$/;"	e	language:C++	enum:MmapRawVideoFileWorker::FileFormat
+UNKNOWN	include/productionline/worker/implementation/MmapRawVideoFileWorker.hpp	/^        UNKNOWN,$/;"	e	language:C++	enum:MmapRawVideoFileWorker::FileFormat
 UNKNOWN	test.cpp	/^    UNKNOWN$/;"	e	language:C++	enum:TestMode	file:
 ValidationCallback	include/buffer/Buffer.hpp	/^    using ValidationCallback = std::function<bool(const Buffer*)>;$/;"	t	language:C++	class:Buffer
 VideoProductionLine	include/productionline/VideoProductionLine.hpp	/^class VideoProductionLine {$/;"	c	language:C++
 VideoProductionLine	source/productionline/VideoProductionLine.cpp	/^VideoProductionLine::VideoProductionLine()$/;"	f	language:C++	class:VideoProductionLine	signature:()
 VideoProductionLine API	ARCHITECTURE.md	/^### VideoProductionLine API$/;"	S	language:Markdown
-WorkerType	include/productionline/worker/BufferFillingWorkerFactory.hpp	/^    enum class WorkerType {$/;"	g	language:C++	class:BufferFillingWorkerFactory
+WORKER_BASE_HPP	include/productionline/worker/base/WorkerBase.hpp	/^#define WORKER_BASE_HPP$/;"	d	language:C++
+WorkerBase	include/productionline/worker/base/WorkerBase.hpp	/^class WorkerBase : public IBufferFillingWorker, public IVideoFileNavigator {$/;"	c	language:C++
+WorkerType	include/productionline/worker/factory/BufferFillingWorkerFactory.hpp	/^    enum class WorkerType {$/;"	g	language:C++	class:BufferFillingWorkerFactory
+Worker填充Buffer流程	ARCHITECTURE.md	/^#### Worker填充Buffer流程$/;"	t	language:Markdown
+__anon2d8a2b4e0102	source/productionline/worker/implementation/FfmpegDecodeRtspWorker.cpp	/^    if (!buffer_cv_.wait_for(lock, timeout, [this] {$/;"	f	language:C++	function:FfmpegDecodeRtspWorker::copyFromInternalBuffer	file:
 __anon811ce0ae0102	source/monitor/Timer.cpp	/^                         [this] { return !running_; })) {$/;"	f	language:C++	function:Timer::timerLoop	file:
 __anon811ce0ae0202	source/monitor/Timer.cpp	/^                             [this] { return !running_; })) {$/;"	f	language:C++	function:Timer::timerLoop	file:
-__anonef463c790102	source/productionline/worker/FfmpegDecodeRtspWorker.cpp	/^    if (!buffer_cv_.wait_for(lock, timeout, [this] {$/;"	f	language:C++	function:FfmpegDecodeRtspWorker::copyFromInternalBuffer	file:
 __anonfcd100560102	test.cpp	/^    producer.setErrorCallback([](const std::string& error) {$/;"	f	language:C++	function:test_4frame_loop	file:	signature:(const std::string& error) 
 __anonfcd100560202	test.cpp	/^    producer.setErrorCallback([](const std::string& error) {$/;"	f	language:C++	function:test_sequential_playback	file:	signature:(const std::string& error) 
 __anonfcd100560302	test.cpp	/^    producer.setErrorCallback([](const std::string& error) {$/;"	f	language:C++	function:test_buffermanager_producer	file:	signature:(const std::string& error) 
@@ -214,8 +217,8 @@ addRef	include/buffer/Buffer.hpp	/^    void addRef() { ref_count_.fetch_add(1); 
 alignment_	include/buffer/allocator/NormalAllocator.hpp	/^    size_t alignment_;$/;"	m	language:C++	class:NormalAllocator	typeref:typename:size_t
 allocatePoolWithBuffers	source/buffer/allocator/BufferAllocatorBase.cpp	/^std::unique_ptr<BufferPool> BufferAllocatorBase::allocatePoolWithBuffers($/;"	f	language:C++	class:BufferAllocatorBase	typeref:typename:std::unique_ptr<BufferPool>	signature:(int count,size_t size,const std::string & name,const std::string & category)
 allocatePoolWithBuffers	source/buffer/allocator/FramebufferAllocator.cpp	/^std::unique_ptr<BufferPool> FramebufferAllocator::allocatePoolWithBuffers($/;"	f	language:C++	class:FramebufferAllocator	typeref:typename:std::unique_ptr<BufferPool>	signature:(int count,size_t size,const std::string & name,const std::string & category)
-asyncProducerThread	source/productionline/worker/IoUringRawVideoFileWorker.cpp	/^void IoUringRawVideoFileWorker::asyncProducerThread(int thread_id,$/;"	f	language:C++	class:IoUringRawVideoFileWorker	typeref:typename:void	signature:(int thread_id,BufferPool * pool,const std::vector<int> & frame_indices,std::atomic<bool> & running,bool loop)
-autoDetect	source/productionline/worker/BufferFillingWorkerFactory.cpp	/^std::unique_ptr<IBufferFillingWorker> BufferFillingWorkerFactory::autoDetect() {$/;"	f	language:C++	class:BufferFillingWorkerFactory	typeref:typename:std::unique_ptr<IBufferFillingWorker>	signature:()
+asyncProducerThread	source/productionline/worker/implementation/IoUringRawVideoFileWorker.cpp	/^void IoUringRawVideoFileWorker::asyncProducerThread(int thread_id,$/;"	f	language:C++	class:IoUringRawVideoFileWorker	typeref:typename:void	signature:(int thread_id,BufferPool * pool,const std::vector<int> & frame_indices,std::atomic<bool> & running,bool loop)
+autoDetect	source/productionline/worker/factory/BufferFillingWorkerFactory.cpp	/^std::unique_ptr<WorkerBase> BufferFillingWorkerFactory::autoDetect() {$/;"	f	language:C++	class:BufferFillingWorkerFactory	typeref:typename:std::unique_ptr<WorkerBase>	signature:()
 base_addr	include/display/LinuxFramebufferDevice.hpp	/^        void* base_addr;        \/\/ mmap 后的基地址$/;"	m	language:C++	struct:LinuxFramebufferDevice::MappedInfo	typeref:typename:void *
 beginDecodeFrameTiming	source/monitor/PerformanceMonitor.cpp	/^void PerformanceMonitor::beginDecodeFrameTiming() {$/;"	f	language:C++	class:PerformanceMonitor	typeref:typename:void	signature:()
 beginDisplayFrameTiming	source/monitor/PerformanceMonitor.cpp	/^void PerformanceMonitor::beginDisplayFrameTiming() {$/;"	f	language:C++	class:PerformanceMonitor	typeref:typename:void	signature:()
@@ -223,17 +226,17 @@ beginLoadFrameTiming	source/monitor/PerformanceMonitor.cpp	/^void PerformanceMon
 bin_PROGRAMS	Makefile.am	/^bin_PROGRAMS = display_test$/;"	m	language:Make
 bits_per_pixel	include/productionline/VideoProductionLine.hpp	/^        int bits_per_pixel;                            \/\/ 每像素位数（8\/16\/24\/32）$/;"	m	language:C++	struct:VideoProductionLine::Config	typeref:typename:int
 bits_per_pixel_	include/display/LinuxFramebufferDevice.hpp	/^    int bits_per_pixel_;              \/\/ 每像素位数（可以是非整数字节，如12bit/;"	m	language:C++	class:LinuxFramebufferDevice	typeref:typename:int
-bits_per_pixel_	include/productionline/worker/IoUringRawVideoFileWorker.hpp	/^    int bits_per_pixel_;$/;"	m	language:C++	class:IoUringRawVideoFileWorker	typeref:typename:int
-bits_per_pixel_	include/productionline/worker/MmapRawVideoFileWorker.hpp	/^    int bits_per_pixel_;              \/\/ 每像素位数$/;"	m	language:C++	class:MmapRawVideoFileWorker	typeref:typename:int
+bits_per_pixel_	include/productionline/worker/implementation/IoUringRawVideoFileWorker.hpp	/^    int bits_per_pixel_;$/;"	m	language:C++	class:IoUringRawVideoFileWorker	typeref:typename:int
+bits_per_pixel_	include/productionline/worker/implementation/MmapRawVideoFileWorker.hpp	/^    int bits_per_pixel_;              \/\/ 每像素位数$/;"	m	language:C++	class:MmapRawVideoFileWorker	typeref:typename:int
 buffer_count	include/display/LinuxFramebufferDevice.hpp	/^        int buffer_count;       \/\/ buffer 数量$/;"	m	language:C++	struct:LinuxFramebufferDevice::MappedInfo	typeref:typename:int
 buffer_count_	include/display/LinuxFramebufferDevice.hpp	/^    int buffer_count_;                        \/\/ buffer 数量$/;"	m	language:C++	class:LinuxFramebufferDevice	typeref:typename:int
-buffer_cv_	include/productionline/worker/FfmpegDecodeRtspWorker.hpp	/^    std::condition_variable buffer_cv_;$/;"	m	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:std::condition_variable
-buffer_mutex_	include/productionline/worker/FfmpegDecodeRtspWorker.hpp	/^    std::mutex buffer_mutex_;$/;"	m	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:std::mutex
+buffer_cv_	include/productionline/worker/implementation/FfmpegDecodeRtspWorker.hpp	/^    std::condition_variable buffer_cv_;$/;"	m	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:std::condition_variable
+buffer_mutex_	include/productionline/worker/implementation/FfmpegDecodeRtspWorker.hpp	/^    std::mutex buffer_mutex_;$/;"	m	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:std::mutex
 buffer_ownership_	include/buffer/allocator/BufferAllocatorBase.hpp	/^    static std::unordered_map<Buffer*, BufferAllocatorBase*> buffer_ownership_;$/;"	m	language:C++	class:BufferAllocatorBase	typeref:typename:std::unordered_map<Buffer *,BufferAllocatorBase * >
 buffer_ownership_	source/buffer/allocator/BufferAllocatorBase.cpp	/^std::unordered_map<Buffer*, BufferAllocatorBase*> BufferAllocatorBase::buffer_ownership_;$/;"	m	language:C++	class:BufferAllocatorBase	typeref:typename:std::unordered_map<Buffer *,BufferAllocatorBase * >
 buffer_pool_	include/display/LinuxFramebufferDevice.hpp	/^    BufferPool* buffer_pool_;                 \/\/ BufferPool 指针（不拥有所有权，由外/;"	m	language:C++	class:LinuxFramebufferDevice	typeref:typename:BufferPool *
-buffer_pool_	include/productionline/worker/FfmpegDecodeRtspWorker.hpp	/^    BufferPool* buffer_pool_;          \/\/ 可选：零拷贝模式的BufferPool$/;"	m	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:BufferPool *
-buffer_pool_	include/productionline/worker/FfmpegDecodeVideoFileWorker.hpp	/^    BufferPool* buffer_pool_;          \/\/ 可选：零拷贝模式的BufferPool$/;"	m	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:BufferPool *
+buffer_pool_	include/productionline/worker/implementation/FfmpegDecodeRtspWorker.hpp	/^    BufferPool* buffer_pool_;          \/\/ 可选：零拷贝模式的BufferPool$/;"	m	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:BufferPool *
+buffer_pool_	include/productionline/worker/implementation/FfmpegDecodeVideoFileWorker.hpp	/^    BufferPool* buffer_pool_;          \/\/ 可选：零拷贝模式的BufferPool$/;"	m	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:BufferPool *
 buffer_size	include/display/LinuxFramebufferDevice.hpp	/^        size_t buffer_size;     \/\/ 单个 buffer 大小$/;"	m	language:C++	struct:LinuxFramebufferDevice::MappedInfo	typeref:typename:size_t
 buffer_size_	include/display/LinuxFramebufferDevice.hpp	/^    size_t buffer_size_;              \/\/ 单个buffer大小（字节）$/;"	m	language:C++	class:LinuxFramebufferDevice	typeref:typename:size_t
 buffer_to_frame_	include/buffer/allocator/AVFrameAllocator.hpp	/^    std::unordered_map<Buffer*, AVFrame*> buffer_to_frame_;$/;"	m	language:C++	class:AVFrameAllocator	typeref:typename:std::unordered_map<Buffer *,AVFrame * >
@@ -243,58 +246,58 @@ calculateBufferAddresses	source/display/LinuxFramebufferDevice.cpp	/^void LinuxF
 callback_	include/monitor/Timer.hpp	/^    void (*callback_)(void*);           \/\/ 周期性回调$/;"	m	language:C++	class:Timer	typeref:typename:void (*)(void *)
 category	include/buffer/BufferPoolRegistry.hpp	/^        std::string category;                                \/\/ 分类$/;"	m	language:C++	struct:BufferPoolRegistry::PoolInfo	typeref:typename:std::string
 category_	include/buffer/BufferPool.hpp	/^    std::string category_;$/;"	m	language:C++	class:BufferPool	typeref:typename:std::string
-checkZeroCopySupport	source/productionline/worker/FfmpegDecodeVideoFileWorker.cpp	/^bool FfmpegDecodeVideoFileWorker::checkZeroCopySupport() {$/;"	f	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:bool	signature:()
+checkZeroCopySupport	source/productionline/worker/implementation/FfmpegDecodeVideoFileWorker.cpp	/^bool FfmpegDecodeVideoFileWorker::checkZeroCopySupport() {$/;"	f	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:bool	signature:()
 cleanup	source/display/LinuxFramebufferDevice.cpp	/^void LinuxFramebufferDevice::cleanup() {$/;"	f	language:C++	class:LinuxFramebufferDevice	typeref:typename:void	signature:()
 cleanupPool	source/buffer/allocator/BufferAllocatorBase.cpp	/^void BufferAllocatorBase::cleanupPool(BufferPool* pool) {$/;"	f	language:C++	class:BufferAllocatorBase	typeref:typename:void	signature:(BufferPool * pool)
-close	source/productionline/worker/BufferFillingWorker.cpp	/^void BufferFillingWorker::close() {$/;"	f	language:C++	class:BufferFillingWorker	typeref:typename:void	signature:()
-close	source/productionline/worker/FfmpegDecodeRtspWorker.cpp	/^void FfmpegDecodeRtspWorker::close() {$/;"	f	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:void	signature:()
-close	source/productionline/worker/FfmpegDecodeVideoFileWorker.cpp	/^void FfmpegDecodeVideoFileWorker::close() {$/;"	f	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:void	signature:()
-close	source/productionline/worker/IoUringRawVideoFileWorker.cpp	/^void IoUringRawVideoFileWorker::close() {$/;"	f	language:C++	class:IoUringRawVideoFileWorker	typeref:typename:void	signature:()
-close	source/productionline/worker/MmapRawVideoFileWorker.cpp	/^void MmapRawVideoFileWorker::close() {$/;"	f	language:C++	class:MmapRawVideoFileWorker	typeref:typename:void	signature:()
-closeVideo	source/productionline/worker/FfmpegDecodeVideoFileWorker.cpp	/^void FfmpegDecodeVideoFileWorker::closeVideo() {$/;"	f	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:void	signature:()
-codec_ctx_	include/productionline/worker/FfmpegDecodeRtspWorker.hpp	/^    AVCodecContext* codec_ctx_;$/;"	m	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:AVCodecContext *
-codec_ctx_	include/productionline/worker/FfmpegDecodeVideoFileWorker.hpp	/^    AVCodecContext* codec_ctx_;$/;"	m	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:AVCodecContext *
-codec_options_	include/productionline/worker/FfmpegDecodeVideoFileWorker.hpp	/^    AVDictionary* codec_options_;      \/\/ 解码器选项（用于 h264_taco 配置）$/;"	m	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:AVDictionary *
+close	source/productionline/worker/facade/BufferFillingWorkerFacade.cpp	/^void BufferFillingWorkerFacade::close() {$/;"	f	language:C++	class:BufferFillingWorkerFacade	typeref:typename:void	signature:()
+close	source/productionline/worker/implementation/FfmpegDecodeRtspWorker.cpp	/^void FfmpegDecodeRtspWorker::close() {$/;"	f	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:void	signature:()
+close	source/productionline/worker/implementation/FfmpegDecodeVideoFileWorker.cpp	/^void FfmpegDecodeVideoFileWorker::close() {$/;"	f	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:void	signature:()
+close	source/productionline/worker/implementation/IoUringRawVideoFileWorker.cpp	/^void IoUringRawVideoFileWorker::close() {$/;"	f	language:C++	class:IoUringRawVideoFileWorker	typeref:typename:void	signature:()
+close	source/productionline/worker/implementation/MmapRawVideoFileWorker.cpp	/^void MmapRawVideoFileWorker::close() {$/;"	f	language:C++	class:MmapRawVideoFileWorker	typeref:typename:void	signature:()
+closeVideo	source/productionline/worker/implementation/FfmpegDecodeVideoFileWorker.cpp	/^void FfmpegDecodeVideoFileWorker::closeVideo() {$/;"	f	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:void	signature:()
+codec_ctx_	include/productionline/worker/implementation/FfmpegDecodeRtspWorker.hpp	/^    AVCodecContext* codec_ctx_;$/;"	m	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:AVCodecContext *
+codec_ctx_	include/productionline/worker/implementation/FfmpegDecodeVideoFileWorker.hpp	/^    AVCodecContext* codec_ctx_;$/;"	m	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:AVCodecContext *
+codec_options_	include/productionline/worker/implementation/FfmpegDecodeVideoFileWorker.hpp	/^    AVDictionary* codec_options_;      \/\/ 解码器选项（用于 h264_taco 配置）$/;"	m	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:AVDictionary *
 component	configure.ac	/^AC_INIT([component], [1.0])$/;"	p	language:Autoconf
 config_	include/productionline/VideoProductionLine.hpp	/^    Config config_;$/;"	m	language:C++	class:VideoProductionLine	typeref:typename:Config
-configureSpecialDecoder	source/productionline/worker/FfmpegDecodeVideoFileWorker.cpp	/^bool FfmpegDecodeVideoFileWorker::configureSpecialDecoder() {$/;"	f	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:bool	signature:()
-connectRTSP	source/productionline/worker/FfmpegDecodeRtspWorker.cpp	/^bool FfmpegDecodeRtspWorker::connectRTSP() {$/;"	f	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:bool	signature:()
-connected_	include/productionline/worker/FfmpegDecodeRtspWorker.hpp	/^    std::atomic<bool> connected_;$/;"	m	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:std::atomic<bool>
-convertFrameTo	source/productionline/worker/FfmpegDecodeVideoFileWorker.cpp	/^bool FfmpegDecodeVideoFileWorker::convertFrameTo(AVFrame* src_frame, void* dest, size_t dest_siz/;"	f	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:bool	signature:(AVFrame * src_frame,void * dest,size_t dest_size)
-copyFromInternalBuffer	source/productionline/worker/FfmpegDecodeRtspWorker.cpp	/^bool FfmpegDecodeRtspWorker::copyFromInternalBuffer(void* dest, size_t size) {$/;"	f	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:bool	signature:(void * dest,size_t size)
-create	source/productionline/worker/BufferFillingWorkerFactory.cpp	/^std::unique_ptr<IBufferFillingWorker> BufferFillingWorkerFactory::create(WorkerType type) {$/;"	f	language:C++	class:BufferFillingWorkerFactory	typeref:typename:std::unique_ptr<IBufferFillingWorker>	signature:(WorkerType type)
+configureSpecialDecoder	source/productionline/worker/implementation/FfmpegDecodeVideoFileWorker.cpp	/^bool FfmpegDecodeVideoFileWorker::configureSpecialDecoder() {$/;"	f	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:bool	signature:()
+connectRTSP	source/productionline/worker/implementation/FfmpegDecodeRtspWorker.cpp	/^bool FfmpegDecodeRtspWorker::connectRTSP() {$/;"	f	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:bool	signature:()
+connected_	include/productionline/worker/implementation/FfmpegDecodeRtspWorker.hpp	/^    std::atomic<bool> connected_;$/;"	m	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:std::atomic<bool>
+convertFrameTo	source/productionline/worker/implementation/FfmpegDecodeVideoFileWorker.cpp	/^bool FfmpegDecodeVideoFileWorker::convertFrameTo(AVFrame* src_frame, void* dest, size_t dest_siz/;"	f	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:bool	signature:(AVFrame * src_frame,void * dest,size_t dest_size)
+copyFromInternalBuffer	source/productionline/worker/implementation/FfmpegDecodeRtspWorker.cpp	/^bool FfmpegDecodeRtspWorker::copyFromInternalBuffer(void* dest, size_t size) {$/;"	f	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:bool	signature:(void * dest,size_t size)
+create	source/productionline/worker/factory/BufferFillingWorkerFactory.cpp	/^std::unique_ptr<WorkerBase> BufferFillingWorkerFactory::create(WorkerType type) {$/;"	f	language:C++	class:BufferFillingWorkerFactory	typeref:typename:std::unique_ptr<WorkerBase>	signature:(WorkerType type)
 createBuffer	source/buffer/allocator/AVFrameAllocator.cpp	/^Buffer* AVFrameAllocator::createBuffer(uint32_t id, size_t size) {$/;"	f	language:C++	class:AVFrameAllocator	typeref:typename:Buffer *	signature:(uint32_t id,size_t size)
 createBuffer	source/buffer/allocator/FramebufferAllocator.cpp	/^Buffer* FramebufferAllocator::createBuffer(uint32_t id, size_t size) {$/;"	f	language:C++	class:FramebufferAllocator	typeref:typename:Buffer *	signature:(uint32_t id,size_t size)
 createBuffer	source/buffer/allocator/NormalAllocator.cpp	/^Buffer* NormalAllocator::createBuffer(uint32_t id, size_t size) {$/;"	f	language:C++	class:NormalAllocator	typeref:typename:Buffer *	signature:(uint32_t id,size_t size)
-createByName	source/productionline/worker/BufferFillingWorkerFactory.cpp	/^std::unique_ptr<IBufferFillingWorker> BufferFillingWorkerFactory::createByName(const char* name)/;"	f	language:C++	class:BufferFillingWorkerFactory	typeref:typename:std::unique_ptr<IBufferFillingWorker>	signature:(const char * name)
-createByType	source/productionline/worker/BufferFillingWorkerFactory.cpp	/^std::unique_ptr<IBufferFillingWorker> BufferFillingWorkerFactory::createByType(WorkerType type) /;"	f	language:C++	class:BufferFillingWorkerFactory	typeref:typename:std::unique_ptr<IBufferFillingWorker>	signature:(WorkerType type)
-createZeroCopyBuffer	source/productionline/worker/FfmpegDecodeVideoFileWorker.cpp	/^Buffer* FfmpegDecodeVideoFileWorker::createZeroCopyBuffer(AVFrame* frame) {$/;"	f	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:Buffer *	signature:(AVFrame * frame)
+createByName	source/productionline/worker/factory/BufferFillingWorkerFactory.cpp	/^std::unique_ptr<WorkerBase> BufferFillingWorkerFactory::createByName(const char* name) {$/;"	f	language:C++	class:BufferFillingWorkerFactory	typeref:typename:std::unique_ptr<WorkerBase>	signature:(const char * name)
+createByType	source/productionline/worker/factory/BufferFillingWorkerFactory.cpp	/^std::unique_ptr<WorkerBase> BufferFillingWorkerFactory::createByType(WorkerType type) {$/;"	f	language:C++	class:BufferFillingWorkerFactory	typeref:typename:std::unique_ptr<WorkerBase>	signature:(WorkerType type)
+createZeroCopyBuffer	source/productionline/worker/implementation/FfmpegDecodeVideoFileWorker.cpp	/^Buffer* FfmpegDecodeVideoFileWorker::createZeroCopyBuffer(AVFrame* frame) {$/;"	f	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:Buffer *	signature:(AVFrame * frame)
 created_time	include/buffer/BufferPoolRegistry.hpp	/^        std::chrono::system_clock::time_point created_time;  \/\/ 创建时间$/;"	m	language:C++	struct:BufferPoolRegistry::PoolInfo	typeref:typename:std::chrono::system_clock::time_point
 current_buffer_index_	include/display/LinuxFramebufferDevice.hpp	/^    int current_buffer_index_;                \/\/ 当前显示的buffer索引$/;"	m	language:C++	class:LinuxFramebufferDevice	typeref:typename:int
-current_frame_index_	include/productionline/worker/FfmpegDecodeVideoFileWorker.hpp	/^    int current_frame_index_;          \/\/ 当前帧索引$/;"	m	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:int
-current_frame_index_	include/productionline/worker/IoUringRawVideoFileWorker.hpp	/^    int current_frame_index_;$/;"	m	language:C++	class:IoUringRawVideoFileWorker	typeref:typename:int
-current_frame_index_	include/productionline/worker/MmapRawVideoFileWorker.hpp	/^    int current_frame_index_;         \/\/ 当前帧索引$/;"	m	language:C++	class:MmapRawVideoFileWorker	typeref:typename:int
+current_frame_index_	include/productionline/worker/implementation/FfmpegDecodeVideoFileWorker.hpp	/^    int current_frame_index_;          \/\/ 当前帧索引$/;"	m	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:int
+current_frame_index_	include/productionline/worker/implementation/IoUringRawVideoFileWorker.hpp	/^    int current_frame_index_;$/;"	m	language:C++	class:IoUringRawVideoFileWorker	typeref:typename:int
+current_frame_index_	include/productionline/worker/implementation/MmapRawVideoFileWorker.hpp	/^    int current_frame_index_;         \/\/ 当前帧索引$/;"	m	language:C++	class:MmapRawVideoFileWorker	typeref:typename:int
 cv_	include/monitor/Timer.hpp	/^    std::condition_variable cv_;$/;"	m	language:C++	class:Timer	typeref:typename:std::condition_variable
 data	include/buffer/Buffer.hpp	/^    void* data() const { return virt_addr_; }$/;"	f	language:C++	class:Buffer	typeref:typename:void *	signature:() const
-data	include/productionline/worker/FfmpegDecodeRtspWorker.hpp	/^        std::vector<uint8_t> data;     \/\/ 帧数据$/;"	m	language:C++	struct:FfmpegDecodeRtspWorker::FrameSlot	typeref:typename:std::vector<uint8_t>
+data	include/productionline/worker/implementation/FfmpegDecodeRtspWorker.hpp	/^        std::vector<uint8_t> data;     \/\/ 帧数据$/;"	m	language:C++	struct:FfmpegDecodeRtspWorker::FrameSlot	typeref:typename:std::vector<uint8_t>
 deallocateBuffer	source/buffer/allocator/AVFrameAllocator.cpp	/^void AVFrameAllocator::deallocateBuffer(Buffer* buffer) {$/;"	f	language:C++	class:AVFrameAllocator	typeref:typename:void	signature:(Buffer * buffer)
 deallocateBuffer	source/buffer/allocator/FramebufferAllocator.cpp	/^void FramebufferAllocator::deallocateBuffer(Buffer* buffer) {$/;"	f	language:C++	class:FramebufferAllocator	typeref:typename:void	signature:(Buffer * buffer)
 deallocateBuffer	source/buffer/allocator/NormalAllocator.cpp	/^void NormalAllocator::deallocateBuffer(Buffer* buffer) {$/;"	f	language:C++	class:NormalAllocator	typeref:typename:void	signature:(Buffer * buffer)
 debug	configure.ac	/^AC_ARG_ENABLE([debug],$/;"	e	language:Autoconf
-decodeOneFrame	source/productionline/worker/FfmpegDecodeRtspWorker.cpp	/^AVFrame* FfmpegDecodeRtspWorker::decodeOneFrame() {$/;"	f	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:AVFrame *	signature:()
-decodeOneFrame	source/productionline/worker/FfmpegDecodeVideoFileWorker.cpp	/^AVFrame* FfmpegDecodeVideoFileWorker::decodeOneFrame() {$/;"	f	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:AVFrame *	signature:()
-decodeThreadFunc	source/productionline/worker/FfmpegDecodeRtspWorker.cpp	/^void FfmpegDecodeRtspWorker::decodeThreadFunc() {$/;"	f	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:void	signature:()
-decode_errors_	include/productionline/worker/FfmpegDecodeVideoFileWorker.hpp	/^    std::atomic<int> decode_errors_;$/;"	m	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:std::atomic<int>
+decodeOneFrame	source/productionline/worker/implementation/FfmpegDecodeRtspWorker.cpp	/^AVFrame* FfmpegDecodeRtspWorker::decodeOneFrame() {$/;"	f	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:AVFrame *	signature:()
+decodeOneFrame	source/productionline/worker/implementation/FfmpegDecodeVideoFileWorker.cpp	/^AVFrame* FfmpegDecodeVideoFileWorker::decodeOneFrame() {$/;"	f	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:AVFrame *	signature:()
+decodeThreadFunc	source/productionline/worker/implementation/FfmpegDecodeRtspWorker.cpp	/^void FfmpegDecodeRtspWorker::decodeThreadFunc() {$/;"	f	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:void	signature:()
+decode_errors_	include/productionline/worker/implementation/FfmpegDecodeVideoFileWorker.hpp	/^    std::atomic<int> decode_errors_;$/;"	m	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:std::atomic<int>
 decode_start_	include/monitor/PerformanceMonitor.hpp	/^    std::chrono::steady_clock::time_point decode_start_;$/;"	m	language:C++	class:PerformanceMonitor	typeref:typename:std::chrono::steady_clock::time_point
-decode_thread_	include/productionline/worker/FfmpegDecodeRtspWorker.hpp	/^    std::thread decode_thread_;$/;"	m	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:std::thread
-decoded_frames_	include/productionline/worker/FfmpegDecodeRtspWorker.hpp	/^    std::atomic<int> decoded_frames_;$/;"	m	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:std::atomic<int>
-decoded_frames_	include/productionline/worker/FfmpegDecodeVideoFileWorker.hpp	/^    std::atomic<int> decoded_frames_;$/;"	m	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:std::atomic<int>
-decoder_name_	include/productionline/worker/FfmpegDecodeVideoFileWorker.hpp	/^    const char* decoder_name_;         \/\/ 指定解码器名称（如 "h264_taco"）$/;"	m	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:const char *
+decode_thread_	include/productionline/worker/implementation/FfmpegDecodeRtspWorker.hpp	/^    std::thread decode_thread_;$/;"	m	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:std::thread
+decoded_frames_	include/productionline/worker/implementation/FfmpegDecodeRtspWorker.hpp	/^    std::atomic<int> decoded_frames_;$/;"	m	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:std::atomic<int>
+decoded_frames_	include/productionline/worker/implementation/FfmpegDecodeVideoFileWorker.hpp	/^    std::atomic<int> decoded_frames_;$/;"	m	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:std::atomic<int>
+decoder_name_	include/productionline/worker/implementation/FfmpegDecodeVideoFileWorker.hpp	/^    const char* decoder_name_;         \/\/ 指定解码器名称（如 "h264_taco"）$/;"	m	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:const char *
 delay_end_callback_	include/monitor/Timer.hpp	/^    void (*delay_end_callback_)(void*); \/\/ 延迟结束回调（可选）$/;"	m	language:C++	class:Timer	typeref:typename:void (*)(void *)
 delay_seconds_	include/monitor/Timer.hpp	/^    double delay_seconds_;      \/\/ 延迟启动时间$/;"	m	language:C++	class:Timer	typeref:typename:double
-detectFileFormat	source/productionline/worker/MmapRawVideoFileWorker.cpp	/^MmapRawVideoFileWorker::FileFormat MmapRawVideoFileWorker::detectFileFormat() {$/;"	f	language:C++	class:MmapRawVideoFileWorker	typeref:typename:MmapRawVideoFileWorker::FileFormat	signature:()
-detected_format_	include/productionline/worker/MmapRawVideoFileWorker.hpp	/^    FileFormat detected_format_;$/;"	m	language:C++	class:MmapRawVideoFileWorker	typeref:typename:FileFormat
-disconnectRTSP	source/productionline/worker/FfmpegDecodeRtspWorker.cpp	/^void FfmpegDecodeRtspWorker::disconnectRTSP() {$/;"	f	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:void	signature:()
+detectFileFormat	source/productionline/worker/implementation/MmapRawVideoFileWorker.cpp	/^MmapRawVideoFileWorker::FileFormat MmapRawVideoFileWorker::detectFileFormat() {$/;"	f	language:C++	class:MmapRawVideoFileWorker	typeref:typename:MmapRawVideoFileWorker::FileFormat	signature:()
+detected_format_	include/productionline/worker/implementation/MmapRawVideoFileWorker.hpp	/^    FileFormat detected_format_;$/;"	m	language:C++	class:MmapRawVideoFileWorker	typeref:typename:FileFormat
+disconnectRTSP	source/productionline/worker/implementation/FfmpegDecodeRtspWorker.cpp	/^void FfmpegDecodeRtspWorker::disconnectRTSP() {$/;"	f	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:void	signature:()
 displayBuffer	source/display/LinuxFramebufferDevice.cpp	/^bool LinuxFramebufferDevice::displayBuffer(int buffer_index) {$/;"	f	language:C++	class:LinuxFramebufferDevice	typeref:typename:bool	signature:(int buffer_index)
 displayBufferByDMA	source/display/LinuxFramebufferDevice.cpp	/^bool LinuxFramebufferDevice::displayBufferByDMA(Buffer* buffer) {$/;"	f	language:C++	class:LinuxFramebufferDevice	typeref:typename:bool	signature:(Buffer * buffer)
 displayBufferByMemcpyToFramebuffer	source/display/LinuxFramebufferDevice.cpp	/^bool LinuxFramebufferDevice::displayBufferByMemcpyToFramebuffer(Buffer* buffer) {$/;"	f	language:C++	class:LinuxFramebufferDevice	typeref:typename:bool	signature:(Buffer * buffer)
@@ -303,43 +306,43 @@ display_start_	include/monitor/PerformanceMonitor.hpp	/^    std::chrono::steady_
 display_test	Makefile.am	/^bin_PROGRAMS = display_test$/;"	P	language:Automake	directory:bin
 display_test_SOURCES	Makefile.am	/^display_test_SOURCES = test.cpp \\$/;"	m	language:Make
 dma_fd_	include/buffer/Buffer.hpp	/^    int dma_fd_;                     \/\/ DMA-BUF file descriptor$/;"	m	language:C++	class:Buffer	typeref:typename:int
-dropped_frames_	include/productionline/worker/FfmpegDecodeRtspWorker.hpp	/^    std::atomic<int> dropped_frames_;$/;"	m	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:std::atomic<int>
+dropped_frames_	include/productionline/worker/implementation/FfmpegDecodeRtspWorker.hpp	/^    std::atomic<int> dropped_frames_;$/;"	m	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:std::atomic<int>
 duration_seconds_	include/monitor/Timer.hpp	/^    double duration_seconds_;   \/\/ 总运行时长$/;"	m	language:C++	class:Timer	typeref:typename:double
 endDecodeFrameTiming	source/monitor/PerformanceMonitor.cpp	/^void PerformanceMonitor::endDecodeFrameTiming() {$/;"	f	language:C++	class:PerformanceMonitor	typeref:typename:void	signature:()
 endDisplayFrameTiming	source/monitor/PerformanceMonitor.cpp	/^void PerformanceMonitor::endDisplayFrameTiming() {$/;"	f	language:C++	class:PerformanceMonitor	typeref:typename:void	signature:()
 endLoadFrameTiming	source/monitor/PerformanceMonitor.cpp	/^void PerformanceMonitor::endLoadFrameTiming() {$/;"	f	language:C++	class:PerformanceMonitor	typeref:typename:void	signature:()
-eof_reached_	include/productionline/worker/FfmpegDecodeRtspWorker.hpp	/^    std::atomic<bool> eof_reached_;    \/\/ 流结束标志$/;"	m	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:std::atomic<bool>
-eof_reached_	include/productionline/worker/FfmpegDecodeVideoFileWorker.hpp	/^    bool eof_reached_;$/;"	m	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:bool
+eof_reached_	include/productionline/worker/implementation/FfmpegDecodeRtspWorker.hpp	/^    std::atomic<bool> eof_reached_;    \/\/ 流结束标志$/;"	m	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:std::atomic<bool>
+eof_reached_	include/productionline/worker/implementation/FfmpegDecodeVideoFileWorker.hpp	/^    bool eof_reached_;$/;"	m	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:bool
 error_callback_	include/productionline/VideoProductionLine.hpp	/^    ErrorCallback error_callback_;$/;"	m	language:C++	class:VideoProductionLine	typeref:typename:ErrorCallback
 error_mutex_	include/productionline/VideoProductionLine.hpp	/^    mutable std::mutex error_mutex_;$/;"	m	language:C++	class:VideoProductionLine	typeref:typename:std::mutex
-error_mutex_	include/productionline/worker/FfmpegDecodeRtspWorker.hpp	/^    mutable std::mutex error_mutex_;$/;"	m	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:std::mutex
-estimateTotalFrames	source/productionline/worker/FfmpegDecodeVideoFileWorker.cpp	/^int FfmpegDecodeVideoFileWorker::estimateTotalFrames() {$/;"	f	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:int	signature:()
+error_mutex_	include/productionline/worker/implementation/FfmpegDecodeRtspWorker.hpp	/^    mutable std::mutex error_mutex_;$/;"	m	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:std::mutex
+estimateTotalFrames	source/productionline/worker/implementation/FfmpegDecodeVideoFileWorker.cpp	/^int FfmpegDecodeVideoFileWorker::estimateTotalFrames() {$/;"	f	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:int	signature:()
 explicit 的适用场景	cpp_compile_error.md	/^### explicit 的适用场景$/;"	S	language:Markdown
 external_buffers_	include/buffer/allocator/FramebufferAllocator.hpp	/^    std::vector<BufferInfo> external_buffers_;  \/\/ 外部内存信息$/;"	m	language:C++	class:FramebufferAllocator	typeref:typename:std::vector<BufferInfo>
-extractPhysicalAddress	source/productionline/worker/FfmpegDecodeVideoFileWorker.cpp	/^uint64_t FfmpegDecodeVideoFileWorker::extractPhysicalAddress(AVFrame* frame) {$/;"	f	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:uint64_t	signature:(AVFrame * frame)
+extractPhysicalAddress	source/productionline/worker/implementation/FfmpegDecodeVideoFileWorker.cpp	/^uint64_t FfmpegDecodeVideoFileWorker::extractPhysicalAddress(AVFrame* frame) {$/;"	f	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:uint64_t	signature:(AVFrame * frame)
 fb_index_	include/display/LinuxFramebufferDevice.hpp	/^    int fb_index_;                    \/\/ framebuffer索引（0或1）$/;"	m	language:C++	class:LinuxFramebufferDevice	typeref:typename:int
 fb_mappings_	include/display/LinuxFramebufferDevice.hpp	/^    std::vector<void*> fb_mappings_;          \/\/ framebuffer 映射地址（用于物理地址/;"	m	language:C++	class:LinuxFramebufferDevice	typeref:typename:std::vector<void * >
 fd_	include/display/LinuxFramebufferDevice.hpp	/^    int fd_;                          \/\/ framebuffer文件描述符$/;"	m	language:C++	class:LinuxFramebufferDevice	typeref:typename:int
-fd_	include/productionline/worker/MmapRawVideoFileWorker.hpp	/^    int fd_;                          \/\/ 文件描述符$/;"	m	language:C++	class:MmapRawVideoFileWorker	typeref:typename:int
+fd_	include/productionline/worker/implementation/MmapRawVideoFileWorker.hpp	/^    int fd_;                          \/\/ 文件描述符$/;"	m	language:C++	class:MmapRawVideoFileWorker	typeref:typename:int
 file_path	include/productionline/VideoProductionLine.hpp	/^        std::string file_path;                         \/\/ 视频文件路径$/;"	m	language:C++	struct:VideoProductionLine::Config	typeref:typename:std::string
-file_path_	include/productionline/worker/FfmpegDecodeVideoFileWorker.hpp	/^    char file_path_[MAX_VIDEO_PATH_LENGTH];$/;"	m	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:char[]
-file_size_	include/productionline/worker/IoUringRawVideoFileWorker.hpp	/^    long file_size_;$/;"	m	language:C++	class:IoUringRawVideoFileWorker	typeref:typename:long
-file_size_	include/productionline/worker/MmapRawVideoFileWorker.hpp	/^    long file_size_;                  \/\/ 文件大小（字节）$/;"	m	language:C++	class:MmapRawVideoFileWorker	typeref:typename:long
-fillBuffer	source/productionline/worker/BufferFillingWorker.cpp	/^bool BufferFillingWorker::fillBuffer(int frame_index, Buffer* buffer) {$/;"	f	language:C++	class:BufferFillingWorker	typeref:typename:bool	signature:(int frame_index,Buffer * buffer)
-fillBuffer	source/productionline/worker/FfmpegDecodeRtspWorker.cpp	/^bool FfmpegDecodeRtspWorker::fillBuffer(int frame_index, Buffer* buffer) {$/;"	f	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:bool	signature:(int frame_index,Buffer * buffer)
-fillBuffer	source/productionline/worker/FfmpegDecodeVideoFileWorker.cpp	/^bool FfmpegDecodeVideoFileWorker::fillBuffer(int frame_index, Buffer* buffer) {$/;"	f	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:bool	signature:(int frame_index,Buffer * buffer)
-fillBuffer	source/productionline/worker/IoUringRawVideoFileWorker.cpp	/^bool IoUringRawVideoFileWorker::fillBuffer(int frame_index, Buffer* buffer) {$/;"	f	language:C++	class:IoUringRawVideoFileWorker	typeref:typename:bool	signature:(int frame_index,Buffer * buffer)
-fillBuffer	source/productionline/worker/MmapRawVideoFileWorker.cpp	/^bool MmapRawVideoFileWorker::fillBuffer(int frame_index, Buffer* buffer) {$/;"	f	language:C++	class:MmapRawVideoFileWorker	typeref:typename:bool	signature:(int frame_index,Buffer * buffer)
-filled	include/productionline/worker/FfmpegDecodeRtspWorker.hpp	/^        bool filled;                   \/\/ 是否已填充$/;"	m	language:C++	struct:FfmpegDecodeRtspWorker::FrameSlot	typeref:typename:bool
+file_path_	include/productionline/worker/implementation/FfmpegDecodeVideoFileWorker.hpp	/^    char file_path_[MAX_VIDEO_PATH_LENGTH];$/;"	m	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:char[]
+file_size_	include/productionline/worker/implementation/IoUringRawVideoFileWorker.hpp	/^    long file_size_;$/;"	m	language:C++	class:IoUringRawVideoFileWorker	typeref:typename:long
+file_size_	include/productionline/worker/implementation/MmapRawVideoFileWorker.hpp	/^    long file_size_;                  \/\/ 文件大小（字节）$/;"	m	language:C++	class:MmapRawVideoFileWorker	typeref:typename:long
+fillBuffer	source/productionline/worker/facade/BufferFillingWorkerFacade.cpp	/^bool BufferFillingWorkerFacade::fillBuffer(int frame_index, Buffer* buffer) {$/;"	f	language:C++	class:BufferFillingWorkerFacade	typeref:typename:bool	signature:(int frame_index,Buffer * buffer)
+fillBuffer	source/productionline/worker/implementation/FfmpegDecodeRtspWorker.cpp	/^bool FfmpegDecodeRtspWorker::fillBuffer(int frame_index, Buffer* buffer) {$/;"	f	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:bool	signature:(int frame_index,Buffer * buffer)
+fillBuffer	source/productionline/worker/implementation/FfmpegDecodeVideoFileWorker.cpp	/^bool FfmpegDecodeVideoFileWorker::fillBuffer(int frame_index, Buffer* buffer) {$/;"	f	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:bool	signature:(int frame_index,Buffer * buffer)
+fillBuffer	source/productionline/worker/implementation/IoUringRawVideoFileWorker.cpp	/^bool IoUringRawVideoFileWorker::fillBuffer(int frame_index, Buffer* buffer) {$/;"	f	language:C++	class:IoUringRawVideoFileWorker	typeref:typename:bool	signature:(int frame_index,Buffer * buffer)
+fillBuffer	source/productionline/worker/implementation/MmapRawVideoFileWorker.cpp	/^bool MmapRawVideoFileWorker::fillBuffer(int frame_index, Buffer* buffer) {$/;"	f	language:C++	class:MmapRawVideoFileWorker	typeref:typename:bool	signature:(int frame_index,Buffer * buffer)
+filled	include/productionline/worker/implementation/FfmpegDecodeRtspWorker.hpp	/^        bool filled;                   \/\/ 是否已填充$/;"	m	language:C++	struct:FfmpegDecodeRtspWorker::FrameSlot	typeref:typename:bool
 filled_cv_	include/buffer/BufferPool.hpp	/^    std::condition_variable filled_cv_;             \/\/ 填充队列条件变量$/;"	m	language:C++	class:BufferPool	typeref:typename:std::condition_variable
 filled_queue_	include/buffer/BufferPool.hpp	/^    std::queue<Buffer*> filled_queue_;              \/\/ 填充队列$/;"	m	language:C++	class:BufferPool	typeref:typename:std::queue<Buffer * >
 findByName	source/buffer/BufferPoolRegistry.cpp	/^BufferPool* BufferPoolRegistry::findByName(const std::string& name) const {$/;"	f	language:C++	class:BufferPoolRegistry	typeref:typename:BufferPool *	signature:(const std::string & name) const
 findDeviceNode	source/display/LinuxFramebufferDevice.cpp	/^const char* LinuxFramebufferDevice::findDeviceNode(int device_index) {$/;"	f	language:C++	class:LinuxFramebufferDevice	typeref:typename:const char *	signature:(int device_index)
-findVideoStream	source/productionline/worker/FfmpegDecodeVideoFileWorker.cpp	/^bool FfmpegDecodeVideoFileWorker::findVideoStream() {$/;"	f	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:bool	signature:()
-format_ctx_	include/productionline/worker/FfmpegDecodeRtspWorker.hpp	/^    AVFormatContext* format_ctx_;$/;"	m	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:AVFormatContext *
-format_ctx_	include/productionline/worker/FfmpegDecodeVideoFileWorker.hpp	/^    AVFormatContext* format_ctx_;$/;"	m	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:AVFormatContext *
-frame_size_	include/productionline/worker/IoUringRawVideoFileWorker.hpp	/^    size_t frame_size_;$/;"	m	language:C++	class:IoUringRawVideoFileWorker	typeref:typename:size_t
-frame_size_	include/productionline/worker/MmapRawVideoFileWorker.hpp	/^    size_t frame_size_;               \/\/ 单帧大小（字节）$/;"	m	language:C++	class:MmapRawVideoFileWorker	typeref:typename:size_t
+findVideoStream	source/productionline/worker/implementation/FfmpegDecodeVideoFileWorker.cpp	/^bool FfmpegDecodeVideoFileWorker::findVideoStream() {$/;"	f	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:bool	signature:()
+format_ctx_	include/productionline/worker/implementation/FfmpegDecodeRtspWorker.hpp	/^    AVFormatContext* format_ctx_;$/;"	m	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:AVFormatContext *
+format_ctx_	include/productionline/worker/implementation/FfmpegDecodeVideoFileWorker.hpp	/^    AVFormatContext* format_ctx_;$/;"	m	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:AVFormatContext *
+frame_size_	include/productionline/worker/implementation/IoUringRawVideoFileWorker.hpp	/^    size_t frame_size_;$/;"	m	language:C++	class:IoUringRawVideoFileWorker	typeref:typename:size_t
+frame_size_	include/productionline/worker/implementation/MmapRawVideoFileWorker.hpp	/^    size_t frame_size_;               \/\/ 单帧大小（字节）$/;"	m	language:C++	class:MmapRawVideoFileWorker	typeref:typename:size_t
 framebuffer_base_	include/display/LinuxFramebufferDevice.hpp	/^    void* framebuffer_base_;          \/\/ mmap返回的基地址$/;"	m	language:C++	class:LinuxFramebufferDevice	typeref:typename:void *
 framebuffer_total_size_	include/display/LinuxFramebufferDevice.hpp	/^    size_t framebuffer_total_size_;   \/\/ 映射的总大小$/;"	m	language:C++	class:LinuxFramebufferDevice	typeref:typename:size_t
 frames_decoded_	include/monitor/PerformanceMonitor.hpp	/^    int frames_decoded_;              \/\/ 解码的帧数（如果有解码）$/;"	m	language:C++	class:PerformanceMonitor	typeref:typename:int
@@ -349,7 +352,7 @@ free_cv_	include/buffer/BufferPool.hpp	/^    std::condition_variable free_cv_;  
 free_queue_	include/buffer/BufferPool.hpp	/^    std::queue<Buffer*> free_queue_;                \/\/ 空闲队列$/;"	m	language:C++	class:BufferPool	typeref:typename:std::queue<Buffer * >
 g_running	test.cpp	/^static volatile bool g_running = true;$/;"	v	language:C++	typeref:typename:volatile bool	file:
 generateReport	source/monitor/PerformanceMonitor.cpp	/^void PerformanceMonitor::generateReport(char* buffer, size_t buffer_size) const {$/;"	f	language:C++	class:PerformanceMonitor	typeref:typename:void	signature:(char * buffer,size_t buffer_size) const
-getAVFramePhysicalAddress	source/productionline/worker/FfmpegDecodeRtspWorker.cpp	/^uint64_t FfmpegDecodeRtspWorker::getAVFramePhysicalAddress(AVFrame* frame) {$/;"	f	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:uint64_t	signature:(AVFrame * frame)
+getAVFramePhysicalAddress	source/productionline/worker/implementation/FfmpegDecodeRtspWorker.cpp	/^uint64_t FfmpegDecodeRtspWorker::getAVFramePhysicalAddress(AVFrame* frame) {$/;"	f	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:uint64_t	signature:(AVFrame * frame)
 getAllPools	source/buffer/BufferPoolRegistry.cpp	/^std::vector<BufferPool*> BufferPoolRegistry::getAllPools() const {$/;"	f	language:C++	class:BufferPoolRegistry	typeref:typename:std::vector<BufferPool * >	signature:() const
 getAverageDecodeFPS	source/monitor/PerformanceMonitor.cpp	/^double PerformanceMonitor::getAverageDecodeFPS() const {$/;"	f	language:C++	class:PerformanceMonitor	typeref:typename:double	signature:() const
 getAverageDisplayFPS	source/monitor/PerformanceMonitor.cpp	/^double PerformanceMonitor::getAverageDisplayFPS() const {$/;"	f	language:C++	class:PerformanceMonitor	typeref:typename:double	signature:() const
@@ -364,214 +367,204 @@ getBufferPool	include/display/LinuxFramebufferDevice.hpp	/^    BufferPool* getBu
 getBufferSize	source/buffer/BufferPool.cpp	/^size_t BufferPool::getBufferSize() const {$/;"	f	language:C++	class:BufferPool	typeref:typename:size_t	signature:() const
 getBufferSize	source/display/LinuxFramebufferDevice.cpp	/^size_t LinuxFramebufferDevice::getBufferSize() const {$/;"	f	language:C++	class:LinuxFramebufferDevice	typeref:typename:size_t	signature:() const
 getBytesPerPixel	source/display/LinuxFramebufferDevice.cpp	/^int LinuxFramebufferDevice::getBytesPerPixel() const {$/;"	f	language:C++	class:LinuxFramebufferDevice	typeref:typename:int	signature:() const
-getBytesPerPixel	source/productionline/worker/BufferFillingWorker.cpp	/^int BufferFillingWorker::getBytesPerPixel() const {$/;"	f	language:C++	class:BufferFillingWorker	typeref:typename:int	signature:() const
-getBytesPerPixel	source/productionline/worker/FfmpegDecodeRtspWorker.cpp	/^int FfmpegDecodeRtspWorker::getBytesPerPixel() const {$/;"	f	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:int	signature:() const
-getBytesPerPixel	source/productionline/worker/FfmpegDecodeVideoFileWorker.cpp	/^int FfmpegDecodeVideoFileWorker::getBytesPerPixel() const {$/;"	f	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:int	signature:() const
-getBytesPerPixel	source/productionline/worker/IoUringRawVideoFileWorker.cpp	/^int IoUringRawVideoFileWorker::getBytesPerPixel() const {$/;"	f	language:C++	class:IoUringRawVideoFileWorker	typeref:typename:int	signature:() const
-getBytesPerPixel	source/productionline/worker/MmapRawVideoFileWorker.cpp	/^int MmapRawVideoFileWorker::getBytesPerPixel() const {$/;"	f	language:C++	class:MmapRawVideoFileWorker	typeref:typename:int	signature:() const
+getBytesPerPixel	source/productionline/worker/facade/BufferFillingWorkerFacade.cpp	/^int BufferFillingWorkerFacade::getBytesPerPixel() const {$/;"	f	language:C++	class:BufferFillingWorkerFacade	typeref:typename:int	signature:() const
+getBytesPerPixel	source/productionline/worker/implementation/FfmpegDecodeRtspWorker.cpp	/^int FfmpegDecodeRtspWorker::getBytesPerPixel() const {$/;"	f	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:int	signature:() const
+getBytesPerPixel	source/productionline/worker/implementation/FfmpegDecodeVideoFileWorker.cpp	/^int FfmpegDecodeVideoFileWorker::getBytesPerPixel() const {$/;"	f	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:int	signature:() const
+getBytesPerPixel	source/productionline/worker/implementation/IoUringRawVideoFileWorker.cpp	/^int IoUringRawVideoFileWorker::getBytesPerPixel() const {$/;"	f	language:C++	class:IoUringRawVideoFileWorker	typeref:typename:int	signature:() const
+getBytesPerPixel	source/productionline/worker/implementation/MmapRawVideoFileWorker.cpp	/^int MmapRawVideoFileWorker::getBytesPerPixel() const {$/;"	f	language:C++	class:MmapRawVideoFileWorker	typeref:typename:int	signature:() const
 getCategory	include/buffer/BufferPool.hpp	/^    const std::string& getCategory() const { return category_; }$/;"	f	language:C++	class:BufferPool	typeref:typename:const std::string &	signature:() const
-getCodecName	source/productionline/worker/FfmpegDecodeVideoFileWorker.cpp	/^const char* FfmpegDecodeVideoFileWorker::getCodecName() const {$/;"	f	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:const char *	signature:() const
+getCodecName	source/productionline/worker/implementation/FfmpegDecodeVideoFileWorker.cpp	/^const char* FfmpegDecodeVideoFileWorker::getCodecName() const {$/;"	f	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:const char *	signature:() const
 getCurrentDisplayBuffer	source/display/LinuxFramebufferDevice.cpp	/^int LinuxFramebufferDevice::getCurrentDisplayBuffer() const {$/;"	f	language:C++	class:LinuxFramebufferDevice	typeref:typename:int	signature:() const
-getCurrentFrameIndex	source/productionline/worker/BufferFillingWorker.cpp	/^int BufferFillingWorker::getCurrentFrameIndex() const {$/;"	f	language:C++	class:BufferFillingWorker	typeref:typename:int	signature:() const
-getCurrentFrameIndex	source/productionline/worker/FfmpegDecodeRtspWorker.cpp	/^int FfmpegDecodeRtspWorker::getCurrentFrameIndex() const {$/;"	f	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:int	signature:() const
-getCurrentFrameIndex	source/productionline/worker/FfmpegDecodeVideoFileWorker.cpp	/^int FfmpegDecodeVideoFileWorker::getCurrentFrameIndex() const {$/;"	f	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:int	signature:() const
-getCurrentFrameIndex	source/productionline/worker/IoUringRawVideoFileWorker.cpp	/^int IoUringRawVideoFileWorker::getCurrentFrameIndex() const {$/;"	f	language:C++	class:IoUringRawVideoFileWorker	typeref:typename:int	signature:() const
-getCurrentFrameIndex	source/productionline/worker/MmapRawVideoFileWorker.cpp	/^int MmapRawVideoFileWorker::getCurrentFrameIndex() const {$/;"	f	language:C++	class:MmapRawVideoFileWorker	typeref:typename:int	signature:() const
-getDecodeErrors	include/productionline/worker/FfmpegDecodeVideoFileWorker.hpp	/^    int getDecodeErrors() const { return decode_errors_.load(); }$/;"	f	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:int	signature:() const
-getDecodedFrames	include/productionline/worker/FfmpegDecodeRtspWorker.hpp	/^    int getDecodedFrames() const { return decoded_frames_.load(); }$/;"	f	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:int	signature:() const
-getDecodedFrames	include/productionline/worker/FfmpegDecodeVideoFileWorker.hpp	/^    int getDecodedFrames() const { return decoded_frames_.load(); }$/;"	f	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:int	signature:() const
+getCurrentFrameIndex	source/productionline/worker/facade/BufferFillingWorkerFacade.cpp	/^int BufferFillingWorkerFacade::getCurrentFrameIndex() const {$/;"	f	language:C++	class:BufferFillingWorkerFacade	typeref:typename:int	signature:() const
+getCurrentFrameIndex	source/productionline/worker/implementation/FfmpegDecodeRtspWorker.cpp	/^int FfmpegDecodeRtspWorker::getCurrentFrameIndex() const {$/;"	f	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:int	signature:() const
+getCurrentFrameIndex	source/productionline/worker/implementation/FfmpegDecodeVideoFileWorker.cpp	/^int FfmpegDecodeVideoFileWorker::getCurrentFrameIndex() const {$/;"	f	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:int	signature:() const
+getCurrentFrameIndex	source/productionline/worker/implementation/IoUringRawVideoFileWorker.cpp	/^int IoUringRawVideoFileWorker::getCurrentFrameIndex() const {$/;"	f	language:C++	class:IoUringRawVideoFileWorker	typeref:typename:int	signature:() const
+getCurrentFrameIndex	source/productionline/worker/implementation/MmapRawVideoFileWorker.cpp	/^int MmapRawVideoFileWorker::getCurrentFrameIndex() const {$/;"	f	language:C++	class:MmapRawVideoFileWorker	typeref:typename:int	signature:() const
+getDecodeErrors	include/productionline/worker/implementation/FfmpegDecodeVideoFileWorker.hpp	/^    int getDecodeErrors() const { return decode_errors_.load(); }$/;"	f	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:int	signature:() const
+getDecodedFrames	include/productionline/worker/implementation/FfmpegDecodeRtspWorker.hpp	/^    int getDecodedFrames() const { return decoded_frames_.load(); }$/;"	f	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:int	signature:() const
+getDecodedFrames	include/productionline/worker/implementation/FfmpegDecodeVideoFileWorker.hpp	/^    int getDecodedFrames() const { return decoded_frames_.load(); }$/;"	f	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:int	signature:() const
 getDecodedFrames	source/monitor/PerformanceMonitor.cpp	/^int PerformanceMonitor::getDecodedFrames() const {$/;"	f	language:C++	class:PerformanceMonitor	typeref:typename:int	signature:() const
 getDisplayedFrames	source/monitor/PerformanceMonitor.cpp	/^int PerformanceMonitor::getDisplayedFrames() const {$/;"	f	language:C++	class:PerformanceMonitor	typeref:typename:int	signature:() const
 getDmaBufFd	include/buffer/Buffer.hpp	/^    int getDmaBufFd() const { return dma_fd_; }$/;"	f	language:C++	class:Buffer	typeref:typename:int	signature:() const
-getDroppedFrames	include/productionline/worker/FfmpegDecodeRtspWorker.hpp	/^    int getDroppedFrames() const { return dropped_frames_.load(); }$/;"	f	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:int	signature:() const
+getDroppedFrames	include/productionline/worker/implementation/FfmpegDecodeRtspWorker.hpp	/^    int getDroppedFrames() const { return dropped_frames_.load(); }$/;"	f	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:int	signature:() const
 getElapsedTime	source/monitor/PerformanceMonitor.cpp	/^double PerformanceMonitor::getElapsedTime() const {$/;"	f	language:C++	class:PerformanceMonitor	typeref:typename:double	signature:() const
 getFbIndex	include/display/LinuxFramebufferDevice.hpp	/^    int getFbIndex() const { return fb_index_; }$/;"	f	language:C++	class:LinuxFramebufferDevice	typeref:typename:int	signature:() const
-getFileSize	source/productionline/worker/BufferFillingWorker.cpp	/^long BufferFillingWorker::getFileSize() const {$/;"	f	language:C++	class:BufferFillingWorker	typeref:typename:long	signature:() const
-getFileSize	source/productionline/worker/FfmpegDecodeRtspWorker.cpp	/^long FfmpegDecodeRtspWorker::getFileSize() const {$/;"	f	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:long	signature:() const
-getFileSize	source/productionline/worker/FfmpegDecodeVideoFileWorker.cpp	/^long FfmpegDecodeVideoFileWorker::getFileSize() const {$/;"	f	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:long	signature:() const
-getFileSize	source/productionline/worker/IoUringRawVideoFileWorker.cpp	/^long IoUringRawVideoFileWorker::getFileSize() const {$/;"	f	language:C++	class:IoUringRawVideoFileWorker	typeref:typename:long	signature:() const
-getFileSize	source/productionline/worker/MmapRawVideoFileWorker.cpp	/^long MmapRawVideoFileWorker::getFileSize() const {$/;"	f	language:C++	class:MmapRawVideoFileWorker	typeref:typename:long	signature:() const
+getFileSize	source/productionline/worker/facade/BufferFillingWorkerFacade.cpp	/^long BufferFillingWorkerFacade::getFileSize() const {$/;"	f	language:C++	class:BufferFillingWorkerFacade	typeref:typename:long	signature:() const
+getFileSize	source/productionline/worker/implementation/FfmpegDecodeRtspWorker.cpp	/^long FfmpegDecodeRtspWorker::getFileSize() const {$/;"	f	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:long	signature:() const
+getFileSize	source/productionline/worker/implementation/FfmpegDecodeVideoFileWorker.cpp	/^long FfmpegDecodeVideoFileWorker::getFileSize() const {$/;"	f	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:long	signature:() const
+getFileSize	source/productionline/worker/implementation/IoUringRawVideoFileWorker.cpp	/^long IoUringRawVideoFileWorker::getFileSize() const {$/;"	f	language:C++	class:IoUringRawVideoFileWorker	typeref:typename:long	signature:() const
+getFileSize	source/productionline/worker/implementation/MmapRawVideoFileWorker.cpp	/^long MmapRawVideoFileWorker::getFileSize() const {$/;"	f	language:C++	class:MmapRawVideoFileWorker	typeref:typename:long	signature:() const
 getFilledCount	source/buffer/BufferPool.cpp	/^int BufferPool::getFilledCount() const {$/;"	f	language:C++	class:BufferPool	typeref:typename:int	signature:() const
-getFrameSize	source/productionline/worker/BufferFillingWorker.cpp	/^size_t BufferFillingWorker::getFrameSize() const {$/;"	f	language:C++	class:BufferFillingWorker	typeref:typename:size_t	signature:() const
-getFrameSize	source/productionline/worker/FfmpegDecodeRtspWorker.cpp	/^size_t FfmpegDecodeRtspWorker::getFrameSize() const {$/;"	f	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:size_t	signature:() const
-getFrameSize	source/productionline/worker/FfmpegDecodeVideoFileWorker.cpp	/^size_t FfmpegDecodeVideoFileWorker::getFrameSize() const {$/;"	f	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:size_t	signature:() const
-getFrameSize	source/productionline/worker/IoUringRawVideoFileWorker.cpp	/^size_t IoUringRawVideoFileWorker::getFrameSize() const {$/;"	f	language:C++	class:IoUringRawVideoFileWorker	typeref:typename:size_t	signature:() const
-getFrameSize	source/productionline/worker/MmapRawVideoFileWorker.cpp	/^size_t MmapRawVideoFileWorker::getFrameSize() const {$/;"	f	language:C++	class:MmapRawVideoFileWorker	typeref:typename:size_t	signature:() const
+getFrameSize	source/productionline/worker/facade/BufferFillingWorkerFacade.cpp	/^size_t BufferFillingWorkerFacade::getFrameSize() const {$/;"	f	language:C++	class:BufferFillingWorkerFacade	typeref:typename:size_t	signature:() const
+getFrameSize	source/productionline/worker/implementation/FfmpegDecodeRtspWorker.cpp	/^size_t FfmpegDecodeRtspWorker::getFrameSize() const {$/;"	f	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:size_t	signature:() const
+getFrameSize	source/productionline/worker/implementation/FfmpegDecodeVideoFileWorker.cpp	/^size_t FfmpegDecodeVideoFileWorker::getFrameSize() const {$/;"	f	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:size_t	signature:() const
+getFrameSize	source/productionline/worker/implementation/IoUringRawVideoFileWorker.cpp	/^size_t IoUringRawVideoFileWorker::getFrameSize() const {$/;"	f	language:C++	class:IoUringRawVideoFileWorker	typeref:typename:size_t	signature:() const
+getFrameSize	source/productionline/worker/implementation/MmapRawVideoFileWorker.cpp	/^size_t MmapRawVideoFileWorker::getFrameSize() const {$/;"	f	language:C++	class:MmapRawVideoFileWorker	typeref:typename:size_t	signature:() const
 getFreeCount	source/buffer/BufferPool.cpp	/^int BufferPool::getFreeCount() const {$/;"	f	language:C++	class:BufferPool	typeref:typename:int	signature:() const
 getGlobalStats	source/buffer/BufferPoolRegistry.cpp	/^BufferPoolRegistry::GlobalStats BufferPoolRegistry::getGlobalStats() const {$/;"	f	language:C++	class:BufferPoolRegistry	typeref:typename:BufferPoolRegistry::GlobalStats	signature:() const
 getHeight	source/display/LinuxFramebufferDevice.cpp	/^int LinuxFramebufferDevice::getHeight() const {$/;"	f	language:C++	class:LinuxFramebufferDevice	typeref:typename:int	signature:() const
-getHeight	source/productionline/worker/BufferFillingWorker.cpp	/^int BufferFillingWorker::getHeight() const {$/;"	f	language:C++	class:BufferFillingWorker	typeref:typename:int	signature:() const
-getHeight	source/productionline/worker/FfmpegDecodeRtspWorker.cpp	/^int FfmpegDecodeRtspWorker::getHeight() const {$/;"	f	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:int	signature:() const
-getHeight	source/productionline/worker/FfmpegDecodeVideoFileWorker.cpp	/^int FfmpegDecodeVideoFileWorker::getHeight() const {$/;"	f	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:int	signature:() const
-getHeight	source/productionline/worker/IoUringRawVideoFileWorker.cpp	/^int IoUringRawVideoFileWorker::getHeight() const {$/;"	f	language:C++	class:IoUringRawVideoFileWorker	typeref:typename:int	signature:() const
-getHeight	source/productionline/worker/MmapRawVideoFileWorker.cpp	/^int MmapRawVideoFileWorker::getHeight() const {$/;"	f	language:C++	class:MmapRawVideoFileWorker	typeref:typename:int	signature:() const
+getHeight	source/productionline/worker/facade/BufferFillingWorkerFacade.cpp	/^int BufferFillingWorkerFacade::getHeight() const {$/;"	f	language:C++	class:BufferFillingWorkerFacade	typeref:typename:int	signature:() const
+getHeight	source/productionline/worker/implementation/FfmpegDecodeRtspWorker.cpp	/^int FfmpegDecodeRtspWorker::getHeight() const {$/;"	f	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:int	signature:() const
+getHeight	source/productionline/worker/implementation/FfmpegDecodeVideoFileWorker.cpp	/^int FfmpegDecodeVideoFileWorker::getHeight() const {$/;"	f	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:int	signature:() const
+getHeight	source/productionline/worker/implementation/IoUringRawVideoFileWorker.cpp	/^int IoUringRawVideoFileWorker::getHeight() const {$/;"	f	language:C++	class:IoUringRawVideoFileWorker	typeref:typename:int	signature:() const
+getHeight	source/productionline/worker/implementation/MmapRawVideoFileWorker.cpp	/^int MmapRawVideoFileWorker::getHeight() const {$/;"	f	language:C++	class:MmapRawVideoFileWorker	typeref:typename:int	signature:() const
 getInstance	source/buffer/BufferPoolRegistry.cpp	/^BufferPoolRegistry& BufferPoolRegistry::getInstance() {$/;"	f	language:C++	class:BufferPoolRegistry	typeref:typename:BufferPoolRegistry &	signature:()
 getLastError	source/productionline/VideoProductionLine.cpp	/^std::string VideoProductionLine::getLastError() const {$/;"	f	language:C++	class:VideoProductionLine	typeref:typename:std::string	signature:() const
-getLastError	source/productionline/worker/FfmpegDecodeRtspWorker.cpp	/^std::string FfmpegDecodeRtspWorker::getLastError() const {$/;"	f	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:std::string	signature:() const
-getLastError	source/productionline/worker/FfmpegDecodeVideoFileWorker.cpp	/^std::string FfmpegDecodeVideoFileWorker::getLastError() const {$/;"	f	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:std::string	signature:() const
-getLastFFmpegError	include/productionline/worker/FfmpegDecodeVideoFileWorker.hpp	/^    int getLastFFmpegError() const { return last_ffmpeg_error_; }$/;"	f	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:int	signature:() const
+getLastError	source/productionline/worker/implementation/FfmpegDecodeRtspWorker.cpp	/^std::string FfmpegDecodeRtspWorker::getLastError() const {$/;"	f	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:std::string	signature:() const
+getLastError	source/productionline/worker/implementation/FfmpegDecodeVideoFileWorker.cpp	/^std::string FfmpegDecodeVideoFileWorker::getLastError() const {$/;"	f	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:std::string	signature:() const
+getLastFFmpegError	include/productionline/worker/implementation/FfmpegDecodeVideoFileWorker.hpp	/^    int getLastFFmpegError() const { return last_ffmpeg_error_; }$/;"	f	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:int	signature:() const
 getLoadedFrames	source/monitor/PerformanceMonitor.cpp	/^int PerformanceMonitor::getLoadedFrames() const {$/;"	f	language:C++	class:PerformanceMonitor	typeref:typename:int	signature:() const
 getMappedInfo	source/display/LinuxFramebufferDevice.cpp	/^LinuxFramebufferDevice::MappedInfo LinuxFramebufferDevice::getMappedInfo() const {$/;"	f	language:C++	class:LinuxFramebufferDevice	typeref:typename:LinuxFramebufferDevice::MappedInfo	signature:() const
 getName	include/buffer/BufferPool.hpp	/^    const std::string& getName() const { return name_; }$/;"	f	language:C++	class:BufferPool	typeref:typename:const std::string &	signature:() const
-getOutputBufferPool	include/productionline/worker/IBufferFillingWorker.hpp	/^    virtual std::unique_ptr<BufferPool> getOutputBufferPool() {$/;"	f	language:C++	class:IBufferFillingWorker	typeref:typename:std::unique_ptr<BufferPool>	signature:()
-getOutputBufferPool	source/productionline/worker/BufferFillingWorker.cpp	/^std::unique_ptr<BufferPool> BufferFillingWorker::getOutputBufferPool() {$/;"	f	language:C++	class:BufferFillingWorker	typeref:typename:std::unique_ptr<BufferPool>	signature:()
-getOutputBufferPool	source/productionline/worker/FfmpegDecodeRtspWorker.cpp	/^std::unique_ptr<BufferPool> FfmpegDecodeRtspWorker::getOutputBufferPool() {$/;"	f	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:std::unique_ptr<BufferPool>	signature:()
-getOutputBufferPool	source/productionline/worker/FfmpegDecodeVideoFileWorker.cpp	/^std::unique_ptr<BufferPool> FfmpegDecodeVideoFileWorker::getOutputBufferPool() {$/;"	f	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:std::unique_ptr<BufferPool>	signature:()
-getOutputBufferPoolRaw	include/productionline/worker/IBufferFillingWorker.hpp	/^    virtual void* getOutputBufferPoolRaw() const {$/;"	f	language:C++	class:IBufferFillingWorker	typeref:typename:void *	signature:() const
-getOutputBufferPoolRaw	source/productionline/worker/BufferFillingWorker.cpp	/^void* BufferFillingWorker::getOutputBufferPoolRaw() const {$/;"	f	language:C++	class:BufferFillingWorker	typeref:typename:void *	signature:() const
-getOutputBufferPoolRaw	source/productionline/worker/FfmpegDecodeRtspWorker.cpp	/^void* FfmpegDecodeRtspWorker::getOutputBufferPoolRaw() const {$/;"	f	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:void *	signature:() const
-getOutputBufferPoolRaw	source/productionline/worker/FfmpegDecodeVideoFileWorker.cpp	/^void* FfmpegDecodeVideoFileWorker::getOutputBufferPoolRaw() const {$/;"	f	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:void *	signature:() const
-getPath	source/productionline/worker/BufferFillingWorker.cpp	/^const char* BufferFillingWorker::getPath() const {$/;"	f	language:C++	class:BufferFillingWorker	typeref:typename:const char *	signature:() const
-getPath	source/productionline/worker/FfmpegDecodeRtspWorker.cpp	/^const char* FfmpegDecodeRtspWorker::getPath() const {$/;"	f	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:const char *	signature:() const
-getPath	source/productionline/worker/FfmpegDecodeVideoFileWorker.cpp	/^const char* FfmpegDecodeVideoFileWorker::getPath() const {$/;"	f	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:const char *	signature:() const
-getPath	source/productionline/worker/IoUringRawVideoFileWorker.cpp	/^const char* IoUringRawVideoFileWorker::getPath() const {$/;"	f	language:C++	class:IoUringRawVideoFileWorker	typeref:typename:const char *	signature:() const
-getPath	source/productionline/worker/MmapRawVideoFileWorker.cpp	/^const char* MmapRawVideoFileWorker::getPath() const {$/;"	f	language:C++	class:MmapRawVideoFileWorker	typeref:typename:const char *	signature:() const
+getOutputBufferPool	include/productionline/worker/base/WorkerBase.hpp	/^    virtual std::unique_ptr<BufferPool> getOutputBufferPool() override {$/;"	f	language:C++	class:WorkerBase	typeref:typename:std::unique_ptr<BufferPool>	signature:()
+getOutputBufferPool	include/productionline/worker/interface/IBufferFillingWorker.hpp	/^    virtual std::unique_ptr<BufferPool> getOutputBufferPool() {$/;"	f	language:C++	class:IBufferFillingWorker	typeref:typename:std::unique_ptr<BufferPool>	signature:()
+getOutputBufferPool	source/productionline/worker/facade/BufferFillingWorkerFacade.cpp	/^std::unique_ptr<BufferPool> BufferFillingWorkerFacade::getOutputBufferPool() {$/;"	f	language:C++	class:BufferFillingWorkerFacade	typeref:typename:std::unique_ptr<BufferPool>	signature:()
+getOutputBufferPool	source/productionline/worker/implementation/FfmpegDecodeRtspWorker.cpp	/^std::unique_ptr<BufferPool> FfmpegDecodeRtspWorker::getOutputBufferPool() {$/;"	f	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:std::unique_ptr<BufferPool>	signature:()
+getOutputBufferPool	source/productionline/worker/implementation/FfmpegDecodeVideoFileWorker.cpp	/^std::unique_ptr<BufferPool> FfmpegDecodeVideoFileWorker::getOutputBufferPool() {$/;"	f	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:std::unique_ptr<BufferPool>	signature:()
+getPath	source/productionline/worker/facade/BufferFillingWorkerFacade.cpp	/^const char* BufferFillingWorkerFacade::getPath() const {$/;"	f	language:C++	class:BufferFillingWorkerFacade	typeref:typename:const char *	signature:() const
+getPath	source/productionline/worker/implementation/FfmpegDecodeRtspWorker.cpp	/^const char* FfmpegDecodeRtspWorker::getPath() const {$/;"	f	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:const char *	signature:() const
+getPath	source/productionline/worker/implementation/FfmpegDecodeVideoFileWorker.cpp	/^const char* FfmpegDecodeVideoFileWorker::getPath() const {$/;"	f	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:const char *	signature:() const
+getPath	source/productionline/worker/implementation/IoUringRawVideoFileWorker.cpp	/^const char* IoUringRawVideoFileWorker::getPath() const {$/;"	f	language:C++	class:IoUringRawVideoFileWorker	typeref:typename:const char *	signature:() const
+getPath	source/productionline/worker/implementation/MmapRawVideoFileWorker.cpp	/^const char* MmapRawVideoFileWorker::getPath() const {$/;"	f	language:C++	class:MmapRawVideoFileWorker	typeref:typename:const char *	signature:() const
 getPhysicalAddress	include/buffer/Buffer.hpp	/^    uint64_t getPhysicalAddress() const { return phys_addr_; }$/;"	f	language:C++	class:Buffer	typeref:typename:uint64_t	signature:() const
 getPoolCount	source/buffer/BufferPoolRegistry.cpp	/^size_t BufferPoolRegistry::getPoolCount() const {$/;"	f	language:C++	class:BufferPoolRegistry	typeref:typename:size_t	signature:() const
 getPoolsByCategory	source/buffer/BufferPoolRegistry.cpp	/^std::vector<BufferPool*> BufferPoolRegistry::getPoolsByCategory(const std::string& category) con/;"	f	language:C++	class:BufferPoolRegistry	typeref:typename:std::vector<BufferPool * >	signature:(const std::string & category) const
 getProducedFrames	include/productionline/VideoProductionLine.hpp	/^    int getProducedFrames() const { return produced_frames_.load(); }$/;"	f	language:C++	class:VideoProductionLine	typeref:typename:int	signature:() const
-getReaderType	include/productionline/worker/BufferFillingWorker.hpp	/^    const char* getReaderType() const {$/;"	f	language:C++	class:BufferFillingWorker	typeref:typename:const char *	signature:() const
-getReaderType	include/productionline/worker/FfmpegDecodeRtspWorker.hpp	/^    const char* getReaderType() const override {$/;"	f	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:const char *	signature:() const
-getReaderType	include/productionline/worker/FfmpegDecodeVideoFileWorker.hpp	/^    const char* getReaderType() const override {$/;"	f	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:const char *	signature:() const
-getReaderType	include/productionline/worker/IBufferFillingWorker.hpp	/^    virtual const char* getReaderType() const {$/;"	f	language:C++	class:IBufferFillingWorker	typeref:typename:const char *	signature:() const
-getReaderType	include/productionline/worker/IoUringRawVideoFileWorker.hpp	/^    const char* getReaderType() const override {$/;"	f	language:C++	class:IoUringRawVideoFileWorker	typeref:typename:const char *	signature:() const
-getReaderType	include/productionline/worker/MmapRawVideoFileWorker.hpp	/^    const char* getReaderType() const override {$/;"	f	language:C++	class:MmapRawVideoFileWorker	typeref:typename:const char *	signature:() const
-getRecommendedType	source/productionline/worker/BufferFillingWorkerFactory.cpp	/^BufferFillingWorkerFactory::WorkerType BufferFillingWorkerFactory::getRecommendedType() {$/;"	f	language:C++	class:BufferFillingWorkerFactory	typeref:typename:BufferFillingWorkerFactory::WorkerType	signature:()
+getRecommendedType	source/productionline/worker/factory/BufferFillingWorkerFactory.cpp	/^BufferFillingWorkerFactory::WorkerType BufferFillingWorkerFactory::getRecommendedType() {$/;"	f	language:C++	class:BufferFillingWorkerFactory	typeref:typename:BufferFillingWorkerFactory::WorkerType	signature:()
 getRegistryId	include/buffer/BufferPool.hpp	/^    uint64_t getRegistryId() const { return registry_id_; }$/;"	f	language:C++	class:BufferPool	typeref:typename:uint64_t	signature:() const
 getSkippedFrames	include/productionline/VideoProductionLine.hpp	/^    int getSkippedFrames() const { return skipped_frames_.load(); }$/;"	f	language:C++	class:VideoProductionLine	typeref:typename:int	signature:() const
 getTotalCount	source/buffer/BufferPool.cpp	/^int BufferPool::getTotalCount() const {$/;"	f	language:C++	class:BufferPool	typeref:typename:int	signature:() const
 getTotalDuration	source/monitor/PerformanceMonitor.cpp	/^double PerformanceMonitor::getTotalDuration() const {$/;"	f	language:C++	class:PerformanceMonitor	typeref:typename:double	signature:() const
 getTotalFrames	source/productionline/VideoProductionLine.cpp	/^int VideoProductionLine::getTotalFrames() const {$/;"	f	language:C++	class:VideoProductionLine	typeref:typename:int	signature:() const
-getTotalFrames	source/productionline/worker/BufferFillingWorker.cpp	/^int BufferFillingWorker::getTotalFrames() const {$/;"	f	language:C++	class:BufferFillingWorker	typeref:typename:int	signature:() const
-getTotalFrames	source/productionline/worker/FfmpegDecodeRtspWorker.cpp	/^int FfmpegDecodeRtspWorker::getTotalFrames() const {$/;"	f	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:int	signature:() const
-getTotalFrames	source/productionline/worker/FfmpegDecodeVideoFileWorker.cpp	/^int FfmpegDecodeVideoFileWorker::getTotalFrames() const {$/;"	f	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:int	signature:() const
-getTotalFrames	source/productionline/worker/IoUringRawVideoFileWorker.cpp	/^int IoUringRawVideoFileWorker::getTotalFrames() const {$/;"	f	language:C++	class:IoUringRawVideoFileWorker	typeref:typename:int	signature:() const
-getTotalFrames	source/productionline/worker/MmapRawVideoFileWorker.cpp	/^int MmapRawVideoFileWorker::getTotalFrames() const {$/;"	f	language:C++	class:MmapRawVideoFileWorker	typeref:typename:int	signature:() const
+getTotalFrames	source/productionline/worker/facade/BufferFillingWorkerFacade.cpp	/^int BufferFillingWorkerFacade::getTotalFrames() const {$/;"	f	language:C++	class:BufferFillingWorkerFacade	typeref:typename:int	signature:() const
+getTotalFrames	source/productionline/worker/implementation/FfmpegDecodeRtspWorker.cpp	/^int FfmpegDecodeRtspWorker::getTotalFrames() const {$/;"	f	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:int	signature:() const
+getTotalFrames	source/productionline/worker/implementation/FfmpegDecodeVideoFileWorker.cpp	/^int FfmpegDecodeVideoFileWorker::getTotalFrames() const {$/;"	f	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:int	signature:() const
+getTotalFrames	source/productionline/worker/implementation/IoUringRawVideoFileWorker.cpp	/^int IoUringRawVideoFileWorker::getTotalFrames() const {$/;"	f	language:C++	class:IoUringRawVideoFileWorker	typeref:typename:int	signature:() const
+getTotalFrames	source/productionline/worker/implementation/MmapRawVideoFileWorker.cpp	/^int MmapRawVideoFileWorker::getTotalFrames() const {$/;"	f	language:C++	class:MmapRawVideoFileWorker	typeref:typename:int	signature:() const
 getTotalMemoryUsage	source/buffer/BufferPoolRegistry.cpp	/^size_t BufferPoolRegistry::getTotalMemoryUsage() const {$/;"	f	language:C++	class:BufferPoolRegistry	typeref:typename:size_t	signature:() const
 getTotalTime	source/monitor/PerformanceMonitor.cpp	/^double PerformanceMonitor::getTotalTime() const {$/;"	f	language:C++	class:PerformanceMonitor	typeref:typename:double	signature:() const
-getTypeFromConfig	source/productionline/worker/BufferFillingWorkerFactory.cpp	/^BufferFillingWorkerFactory::WorkerType BufferFillingWorkerFactory::getTypeFromConfig() {$/;"	f	language:C++	class:BufferFillingWorkerFactory	typeref:typename:BufferFillingWorkerFactory::WorkerType	signature:()
-getTypeFromEnvironment	source/productionline/worker/BufferFillingWorkerFactory.cpp	/^BufferFillingWorkerFactory::WorkerType BufferFillingWorkerFactory::getTypeFromEnvironment() {$/;"	f	language:C++	class:BufferFillingWorkerFactory	typeref:typename:BufferFillingWorkerFactory::WorkerType	signature:()
+getTypeFromConfig	source/productionline/worker/factory/BufferFillingWorkerFactory.cpp	/^BufferFillingWorkerFactory::WorkerType BufferFillingWorkerFactory::getTypeFromConfig() {$/;"	f	language:C++	class:BufferFillingWorkerFactory	typeref:typename:BufferFillingWorkerFactory::WorkerType	signature:()
+getTypeFromEnvironment	source/productionline/worker/factory/BufferFillingWorkerFactory.cpp	/^BufferFillingWorkerFactory::WorkerType BufferFillingWorkerFactory::getTypeFromEnvironment() {$/;"	f	language:C++	class:BufferFillingWorkerFactory	typeref:typename:BufferFillingWorkerFactory::WorkerType	signature:()
 getVirtualAddress	include/buffer/Buffer.hpp	/^    void* getVirtualAddress() const { return virt_addr_; }$/;"	f	language:C++	class:Buffer	typeref:typename:void *	signature:() const
 getWidth	source/display/LinuxFramebufferDevice.cpp	/^int LinuxFramebufferDevice::getWidth() const {$/;"	f	language:C++	class:LinuxFramebufferDevice	typeref:typename:int	signature:() const
-getWidth	source/productionline/worker/BufferFillingWorker.cpp	/^int BufferFillingWorker::getWidth() const {$/;"	f	language:C++	class:BufferFillingWorker	typeref:typename:int	signature:() const
-getWidth	source/productionline/worker/FfmpegDecodeRtspWorker.cpp	/^int FfmpegDecodeRtspWorker::getWidth() const {$/;"	f	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:int	signature:() const
-getWidth	source/productionline/worker/FfmpegDecodeVideoFileWorker.cpp	/^int FfmpegDecodeVideoFileWorker::getWidth() const {$/;"	f	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:int	signature:() const
-getWidth	source/productionline/worker/IoUringRawVideoFileWorker.cpp	/^int IoUringRawVideoFileWorker::getWidth() const {$/;"	f	language:C++	class:IoUringRawVideoFileWorker	typeref:typename:int	signature:() const
-getWidth	source/productionline/worker/MmapRawVideoFileWorker.cpp	/^int MmapRawVideoFileWorker::getWidth() const {$/;"	f	language:C++	class:MmapRawVideoFileWorker	typeref:typename:int	signature:() const
-getWorkerType	include/productionline/worker/FfmpegDecodeRtspWorker.hpp	/^    const char* getWorkerType() const override {$/;"	f	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:const char *	signature:() const
-getWorkerType	include/productionline/worker/FfmpegDecodeVideoFileWorker.hpp	/^    const char* getWorkerType() const override {$/;"	f	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:const char *	signature:() const
-getWorkerType	include/productionline/worker/IoUringRawVideoFileWorker.hpp	/^    const char* getWorkerType() const override {$/;"	f	language:C++	class:IoUringRawVideoFileWorker	typeref:typename:const char *	signature:() const
-getWorkerType	include/productionline/worker/MmapRawVideoFileWorker.hpp	/^    const char* getWorkerType() const override {$/;"	f	language:C++	class:MmapRawVideoFileWorker	typeref:typename:const char *	signature:() const
-getWorkerType	source/productionline/worker/BufferFillingWorker.cpp	/^const char* BufferFillingWorker::getWorkerType() const {$/;"	f	language:C++	class:BufferFillingWorker	typeref:typename:const char *	signature:() const
+getWidth	source/productionline/worker/facade/BufferFillingWorkerFacade.cpp	/^int BufferFillingWorkerFacade::getWidth() const {$/;"	f	language:C++	class:BufferFillingWorkerFacade	typeref:typename:int	signature:() const
+getWidth	source/productionline/worker/implementation/FfmpegDecodeRtspWorker.cpp	/^int FfmpegDecodeRtspWorker::getWidth() const {$/;"	f	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:int	signature:() const
+getWidth	source/productionline/worker/implementation/FfmpegDecodeVideoFileWorker.cpp	/^int FfmpegDecodeVideoFileWorker::getWidth() const {$/;"	f	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:int	signature:() const
+getWidth	source/productionline/worker/implementation/IoUringRawVideoFileWorker.cpp	/^int IoUringRawVideoFileWorker::getWidth() const {$/;"	f	language:C++	class:IoUringRawVideoFileWorker	typeref:typename:int	signature:() const
+getWidth	source/productionline/worker/implementation/MmapRawVideoFileWorker.cpp	/^int MmapRawVideoFileWorker::getWidth() const {$/;"	f	language:C++	class:MmapRawVideoFileWorker	typeref:typename:int	signature:() const
+getWorkerType	include/productionline/worker/implementation/FfmpegDecodeRtspWorker.hpp	/^    const char* getWorkerType() const override {$/;"	f	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:const char *	signature:() const
+getWorkerType	include/productionline/worker/implementation/FfmpegDecodeVideoFileWorker.hpp	/^    const char* getWorkerType() const override {$/;"	f	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:const char *	signature:() const
+getWorkerType	include/productionline/worker/implementation/IoUringRawVideoFileWorker.hpp	/^    const char* getWorkerType() const override {$/;"	f	language:C++	class:IoUringRawVideoFileWorker	typeref:typename:const char *	signature:() const
+getWorkerType	include/productionline/worker/implementation/MmapRawVideoFileWorker.hpp	/^    const char* getWorkerType() const override {$/;"	f	language:C++	class:MmapRawVideoFileWorker	typeref:typename:const char *	signature:() const
+getWorkerType	source/productionline/worker/facade/BufferFillingWorkerFacade.cpp	/^const char* BufferFillingWorkerFacade::getWorkerType() const {$/;"	f	language:C++	class:BufferFillingWorkerFacade	typeref:typename:const char *	signature:() const
 getWorkingBufferPool	include/productionline/VideoProductionLine.hpp	/^    BufferPool* getWorkingBufferPool() const { return working_buffer_pool_; }$/;"	f	language:C++	class:VideoProductionLine	typeref:typename:BufferPool *	signature:() const
-hasMoreFrames	source/productionline/worker/BufferFillingWorker.cpp	/^bool BufferFillingWorker::hasMoreFrames() const {$/;"	f	language:C++	class:BufferFillingWorker	typeref:typename:bool	signature:() const
-hasMoreFrames	source/productionline/worker/FfmpegDecodeRtspWorker.cpp	/^bool FfmpegDecodeRtspWorker::hasMoreFrames() const {$/;"	f	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:bool	signature:() const
-hasMoreFrames	source/productionline/worker/FfmpegDecodeVideoFileWorker.cpp	/^bool FfmpegDecodeVideoFileWorker::hasMoreFrames() const {$/;"	f	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:bool	signature:() const
-hasMoreFrames	source/productionline/worker/IoUringRawVideoFileWorker.cpp	/^bool IoUringRawVideoFileWorker::hasMoreFrames() const {$/;"	f	language:C++	class:IoUringRawVideoFileWorker	typeref:typename:bool	signature:() const
-hasMoreFrames	source/productionline/worker/MmapRawVideoFileWorker.cpp	/^bool MmapRawVideoFileWorker::hasMoreFrames() const {$/;"	f	language:C++	class:MmapRawVideoFileWorker	typeref:typename:bool	signature:() const
+hasMoreFrames	source/productionline/worker/facade/BufferFillingWorkerFacade.cpp	/^bool BufferFillingWorkerFacade::hasMoreFrames() const {$/;"	f	language:C++	class:BufferFillingWorkerFacade	typeref:typename:bool	signature:() const
+hasMoreFrames	source/productionline/worker/implementation/FfmpegDecodeRtspWorker.cpp	/^bool FfmpegDecodeRtspWorker::hasMoreFrames() const {$/;"	f	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:bool	signature:() const
+hasMoreFrames	source/productionline/worker/implementation/FfmpegDecodeVideoFileWorker.cpp	/^bool FfmpegDecodeVideoFileWorker::hasMoreFrames() const {$/;"	f	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:bool	signature:() const
+hasMoreFrames	source/productionline/worker/implementation/IoUringRawVideoFileWorker.cpp	/^bool IoUringRawVideoFileWorker::hasMoreFrames() const {$/;"	f	language:C++	class:IoUringRawVideoFileWorker	typeref:typename:bool	signature:() const
+hasMoreFrames	source/productionline/worker/implementation/MmapRawVideoFileWorker.cpp	/^bool MmapRawVideoFileWorker::hasMoreFrames() const {$/;"	f	language:C++	class:MmapRawVideoFileWorker	typeref:typename:bool	signature:() const
 height	include/productionline/VideoProductionLine.hpp	/^        int height;                                    \/\/ 分辨率高度$/;"	m	language:C++	struct:VideoProductionLine::Config	typeref:typename:int
 height_	include/display/LinuxFramebufferDevice.hpp	/^    int height_;                      \/\/ 显示高度（像素）$/;"	m	language:C++	class:LinuxFramebufferDevice	typeref:typename:int
-height_	include/productionline/worker/FfmpegDecodeRtspWorker.hpp	/^    int height_;                       \/\/ 输出高度$/;"	m	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:int
-height_	include/productionline/worker/FfmpegDecodeVideoFileWorker.hpp	/^    int height_;                       \/\/ 视频原始高度$/;"	m	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:int
-height_	include/productionline/worker/IoUringRawVideoFileWorker.hpp	/^    int height_;$/;"	m	language:C++	class:IoUringRawVideoFileWorker	typeref:typename:int
-height_	include/productionline/worker/MmapRawVideoFileWorker.hpp	/^    int height_;                      \/\/ 视频高度（像素）$/;"	m	language:C++	class:MmapRawVideoFileWorker	typeref:typename:int
+height_	include/productionline/worker/implementation/FfmpegDecodeRtspWorker.hpp	/^    int height_;                       \/\/ 输出高度$/;"	m	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:int
+height_	include/productionline/worker/implementation/FfmpegDecodeVideoFileWorker.hpp	/^    int height_;                       \/\/ 视频原始高度$/;"	m	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:int
+height_	include/productionline/worker/implementation/IoUringRawVideoFileWorker.hpp	/^    int height_;$/;"	m	language:C++	class:IoUringRawVideoFileWorker	typeref:typename:int
+height_	include/productionline/worker/implementation/MmapRawVideoFileWorker.hpp	/^    int height_;                      \/\/ 视频高度（像素）$/;"	m	language:C++	class:MmapRawVideoFileWorker	typeref:typename:int
 id	include/buffer/Buffer.hpp	/^    uint32_t id() const { return id_; }$/;"	f	language:C++	class:Buffer	typeref:typename:uint32_t	signature:() const
 id	include/buffer/BufferPoolRegistry.hpp	/^        uint64_t id;                                         \/\/ 唯一 ID$/;"	m	language:C++	struct:BufferPoolRegistry::PoolInfo	typeref:typename:uint64_t
 id_	include/buffer/Buffer.hpp	/^    uint32_t id_;                    \/\/ 唯一标识$/;"	m	language:C++	class:Buffer	typeref:typename:uint32_t
 initialize	source/display/LinuxFramebufferDevice.cpp	/^bool LinuxFramebufferDevice::initialize(int device_index) {$/;"	f	language:C++	class:LinuxFramebufferDevice	typeref:typename:bool	signature:(int device_index)
-initializeDecoder	source/productionline/worker/FfmpegDecodeVideoFileWorker.cpp	/^bool FfmpegDecodeVideoFileWorker::initializeDecoder() {$/;"	f	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:bool	signature:()
-initializeSwsContext	source/productionline/worker/FfmpegDecodeVideoFileWorker.cpp	/^bool FfmpegDecodeVideoFileWorker::initializeSwsContext() {$/;"	f	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:bool	signature:()
-initialized_	include/productionline/worker/IoUringRawVideoFileWorker.hpp	/^    bool initialized_;$/;"	m	language:C++	class:IoUringRawVideoFileWorker	typeref:typename:bool
+initializeDecoder	source/productionline/worker/implementation/FfmpegDecodeVideoFileWorker.cpp	/^bool FfmpegDecodeVideoFileWorker::initializeDecoder() {$/;"	f	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:bool	signature:()
+initializeSwsContext	source/productionline/worker/implementation/FfmpegDecodeVideoFileWorker.cpp	/^bool FfmpegDecodeVideoFileWorker::initializeSwsContext() {$/;"	f	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:bool	signature:()
+initialized_	include/productionline/worker/implementation/IoUringRawVideoFileWorker.hpp	/^    bool initialized_;$/;"	m	language:C++	class:IoUringRawVideoFileWorker	typeref:typename:bool
 injectAVFrameToPool	source/buffer/allocator/AVFrameAllocator.cpp	/^Buffer* AVFrameAllocator::injectAVFrameToPool(AVFrame* frame, BufferPool* pool) {$/;"	f	language:C++	class:AVFrameAllocator	typeref:typename:Buffer *	signature:(AVFrame * frame,BufferPool * pool)
 injectBufferToPool	source/buffer/allocator/BufferAllocatorBase.cpp	/^Buffer* BufferAllocatorBase::injectBufferToPool($/;"	f	language:C++	class:BufferAllocatorBase	typeref:typename:Buffer *	signature:(size_t size,BufferPool * pool,QueueType queue)
-internal_buffer_	include/productionline/worker/FfmpegDecodeRtspWorker.hpp	/^    std::vector<FrameSlot> internal_buffer_;  \/\/ 环形缓冲区（默认30帧）$/;"	m	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:std::vector<FrameSlot>
+internal_buffer_	include/productionline/worker/implementation/FfmpegDecodeRtspWorker.hpp	/^    std::vector<FrameSlot> internal_buffer_;  \/\/ 环形缓冲区（默认30帧）$/;"	m	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:std::vector<FrameSlot>
 interval_seconds_	include/monitor/Timer.hpp	/^    double interval_seconds_;   \/\/ 触发间隔$/;"	m	language:C++	class:Timer	typeref:typename:double
-isAtEnd	source/productionline/worker/BufferFillingWorker.cpp	/^bool BufferFillingWorker::isAtEnd() const {$/;"	f	language:C++	class:BufferFillingWorker	typeref:typename:bool	signature:() const
-isAtEnd	source/productionline/worker/FfmpegDecodeRtspWorker.cpp	/^bool FfmpegDecodeRtspWorker::isAtEnd() const {$/;"	f	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:bool	signature:() const
-isAtEnd	source/productionline/worker/FfmpegDecodeVideoFileWorker.cpp	/^bool FfmpegDecodeVideoFileWorker::isAtEnd() const {$/;"	f	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:bool	signature:() const
-isAtEnd	source/productionline/worker/IoUringRawVideoFileWorker.cpp	/^bool IoUringRawVideoFileWorker::isAtEnd() const {$/;"	f	language:C++	class:IoUringRawVideoFileWorker	typeref:typename:bool	signature:() const
-isAtEnd	source/productionline/worker/MmapRawVideoFileWorker.cpp	/^bool MmapRawVideoFileWorker::isAtEnd() const {$/;"	f	language:C++	class:MmapRawVideoFileWorker	typeref:typename:bool	signature:() const
-isConnected	include/productionline/worker/FfmpegDecodeRtspWorker.hpp	/^    bool isConnected() const { return connected_.load(); }$/;"	f	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:bool	signature:() const
-isIoUringAvailable	source/productionline/worker/BufferFillingWorkerFactory.cpp	/^bool BufferFillingWorkerFactory::isIoUringAvailable() {$/;"	f	language:C++	class:BufferFillingWorkerFactory	typeref:typename:bool	signature:()
-isIoUringSuitable	source/productionline/worker/BufferFillingWorkerFactory.cpp	/^bool BufferFillingWorkerFactory::isIoUringSuitable() {$/;"	f	language:C++	class:BufferFillingWorkerFactory	typeref:typename:bool	signature:()
-isMmapAvailable	source/productionline/worker/BufferFillingWorkerFactory.cpp	/^bool BufferFillingWorkerFactory::isMmapAvailable() {$/;"	f	language:C++	class:BufferFillingWorkerFactory	typeref:typename:bool	signature:()
-isOpen	source/productionline/worker/BufferFillingWorker.cpp	/^bool BufferFillingWorker::isOpen() const {$/;"	f	language:C++	class:BufferFillingWorker	typeref:typename:bool	signature:() const
-isOpen	source/productionline/worker/FfmpegDecodeRtspWorker.cpp	/^bool FfmpegDecodeRtspWorker::isOpen() const {$/;"	f	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:bool	signature:() const
-isOpen	source/productionline/worker/FfmpegDecodeVideoFileWorker.cpp	/^bool FfmpegDecodeVideoFileWorker::isOpen() const {$/;"	f	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:bool	signature:() const
-isOpen	source/productionline/worker/IoUringRawVideoFileWorker.cpp	/^bool IoUringRawVideoFileWorker::isOpen() const {$/;"	f	language:C++	class:IoUringRawVideoFileWorker	typeref:typename:bool	signature:() const
-isOpen	source/productionline/worker/MmapRawVideoFileWorker.cpp	/^bool MmapRawVideoFileWorker::isOpen() const {$/;"	f	language:C++	class:MmapRawVideoFileWorker	typeref:typename:bool	signature:() const
+isAtEnd	source/productionline/worker/facade/BufferFillingWorkerFacade.cpp	/^bool BufferFillingWorkerFacade::isAtEnd() const {$/;"	f	language:C++	class:BufferFillingWorkerFacade	typeref:typename:bool	signature:() const
+isAtEnd	source/productionline/worker/implementation/FfmpegDecodeRtspWorker.cpp	/^bool FfmpegDecodeRtspWorker::isAtEnd() const {$/;"	f	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:bool	signature:() const
+isAtEnd	source/productionline/worker/implementation/FfmpegDecodeVideoFileWorker.cpp	/^bool FfmpegDecodeVideoFileWorker::isAtEnd() const {$/;"	f	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:bool	signature:() const
+isAtEnd	source/productionline/worker/implementation/IoUringRawVideoFileWorker.cpp	/^bool IoUringRawVideoFileWorker::isAtEnd() const {$/;"	f	language:C++	class:IoUringRawVideoFileWorker	typeref:typename:bool	signature:() const
+isAtEnd	source/productionline/worker/implementation/MmapRawVideoFileWorker.cpp	/^bool MmapRawVideoFileWorker::isAtEnd() const {$/;"	f	language:C++	class:MmapRawVideoFileWorker	typeref:typename:bool	signature:() const
+isConnected	include/productionline/worker/implementation/FfmpegDecodeRtspWorker.hpp	/^    bool isConnected() const { return connected_.load(); }$/;"	f	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:bool	signature:() const
+isIoUringAvailable	source/productionline/worker/factory/BufferFillingWorkerFactory.cpp	/^bool BufferFillingWorkerFactory::isIoUringAvailable() {$/;"	f	language:C++	class:BufferFillingWorkerFactory	typeref:typename:bool	signature:()
+isIoUringSuitable	source/productionline/worker/factory/BufferFillingWorkerFactory.cpp	/^bool BufferFillingWorkerFactory::isIoUringSuitable() {$/;"	f	language:C++	class:BufferFillingWorkerFactory	typeref:typename:bool	signature:()
+isMmapAvailable	source/productionline/worker/factory/BufferFillingWorkerFactory.cpp	/^bool BufferFillingWorkerFactory::isMmapAvailable() {$/;"	f	language:C++	class:BufferFillingWorkerFactory	typeref:typename:bool	signature:()
+isOpen	source/productionline/worker/facade/BufferFillingWorkerFacade.cpp	/^bool BufferFillingWorkerFacade::isOpen() const {$/;"	f	language:C++	class:BufferFillingWorkerFacade	typeref:typename:bool	signature:() const
+isOpen	source/productionline/worker/implementation/FfmpegDecodeRtspWorker.cpp	/^bool FfmpegDecodeRtspWorker::isOpen() const {$/;"	f	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:bool	signature:() const
+isOpen	source/productionline/worker/implementation/FfmpegDecodeVideoFileWorker.cpp	/^bool FfmpegDecodeVideoFileWorker::isOpen() const {$/;"	f	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:bool	signature:() const
+isOpen	source/productionline/worker/implementation/IoUringRawVideoFileWorker.cpp	/^bool IoUringRawVideoFileWorker::isOpen() const {$/;"	f	language:C++	class:IoUringRawVideoFileWorker	typeref:typename:bool	signature:() const
+isOpen	source/productionline/worker/implementation/MmapRawVideoFileWorker.cpp	/^bool MmapRawVideoFileWorker::isOpen() const {$/;"	f	language:C++	class:MmapRawVideoFileWorker	typeref:typename:bool	signature:() const
 isRunning	include/productionline/VideoProductionLine.hpp	/^    bool isRunning() const { return running_.load(); }$/;"	f	language:C++	class:VideoProductionLine	typeref:typename:bool	signature:() const
 isRunning	source/monitor/Timer.cpp	/^bool Timer::isRunning() const {$/;"	f	language:C++	class:Timer	typeref:typename:bool	signature:() const
 isValid	include/buffer/Buffer.hpp	/^    bool isValid() const { $/;"	f	language:C++	class:Buffer	typeref:typename:bool	signature:() const
 is_initialized_	include/display/LinuxFramebufferDevice.hpp	/^    bool is_initialized_;$/;"	m	language:C++	class:LinuxFramebufferDevice	typeref:typename:bool
-is_open_	include/productionline/worker/FfmpegDecodeRtspWorker.hpp	/^    bool is_open_;$/;"	m	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:bool
-is_open_	include/productionline/worker/FfmpegDecodeVideoFileWorker.hpp	/^    bool is_open_;$/;"	m	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:bool
-is_open_	include/productionline/worker/IoUringRawVideoFileWorker.hpp	/^    bool is_open_;$/;"	m	language:C++	class:IoUringRawVideoFileWorker	typeref:typename:bool
-is_open_	include/productionline/worker/MmapRawVideoFileWorker.hpp	/^    bool is_open_;$/;"	m	language:C++	class:MmapRawVideoFileWorker	typeref:typename:bool
+is_open_	include/productionline/worker/implementation/FfmpegDecodeRtspWorker.hpp	/^    bool is_open_;$/;"	m	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:bool
+is_open_	include/productionline/worker/implementation/FfmpegDecodeVideoFileWorker.hpp	/^    bool is_open_;$/;"	m	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:bool
+is_open_	include/productionline/worker/implementation/IoUringRawVideoFileWorker.hpp	/^    bool is_open_;$/;"	m	language:C++	class:IoUringRawVideoFileWorker	typeref:typename:bool
+is_open_	include/productionline/worker/implementation/MmapRawVideoFileWorker.hpp	/^    bool is_open_;$/;"	m	language:C++	class:MmapRawVideoFileWorker	typeref:typename:bool
 is_paused_	include/monitor/PerformanceMonitor.hpp	/^    bool is_paused_;$/;"	m	language:C++	class:PerformanceMonitor	typeref:typename:bool
 is_started_	include/monitor/PerformanceMonitor.hpp	/^    bool is_started_;$/;"	m	language:C++	class:PerformanceMonitor	typeref:typename:bool
 last_error_	include/productionline/VideoProductionLine.hpp	/^    std::string last_error_;$/;"	m	language:C++	class:VideoProductionLine	typeref:typename:std::string
-last_error_	include/productionline/worker/FfmpegDecodeRtspWorker.hpp	/^    std::string last_error_;$/;"	m	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:std::string
-last_error_	include/productionline/worker/FfmpegDecodeVideoFileWorker.hpp	/^    std::string last_error_;$/;"	m	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:std::string
-last_ffmpeg_error_	include/productionline/worker/FfmpegDecodeVideoFileWorker.hpp	/^    int last_ffmpeg_error_;$/;"	m	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:int
+last_error_	include/productionline/worker/implementation/FfmpegDecodeRtspWorker.hpp	/^    std::string last_error_;$/;"	m	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:std::string
+last_error_	include/productionline/worker/implementation/FfmpegDecodeVideoFileWorker.hpp	/^    std::string last_error_;$/;"	m	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:std::string
+last_ffmpeg_error_	include/productionline/worker/implementation/FfmpegDecodeVideoFileWorker.hpp	/^    int last_ffmpeg_error_;$/;"	m	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:int
 last_report_time_	include/monitor/PerformanceMonitor.hpp	/^    std::chrono::steady_clock::time_point last_report_time_;$/;"	m	language:C++	class:PerformanceMonitor	typeref:typename:std::chrono::steady_clock::time_point
 load_start_	include/monitor/PerformanceMonitor.hpp	/^    std::chrono::steady_clock::time_point load_start_;$/;"	m	language:C++	class:PerformanceMonitor	typeref:typename:std::chrono::steady_clock::time_point
 loop	include/productionline/VideoProductionLine.hpp	/^        bool loop;                                     \/\/ 是否循环播放$/;"	m	language:C++	struct:VideoProductionLine::Config	typeref:typename:bool
 main	test.cpp	/^int main(int argc, char* argv[]) {$/;"	f	language:C++	typeref:typename:int	signature:(int argc,char * argv[])
 managed_buffers_	include/buffer/BufferPool.hpp	/^    std::unordered_set<Buffer*> managed_buffers_;  \/\/ 所有托管的 Buffer$/;"	m	language:C++	class:BufferPool	typeref:typename:std::unordered_set<Buffer * >
-mapFile	source/productionline/worker/MmapRawVideoFileWorker.cpp	/^bool MmapRawVideoFileWorker::mapFile() {$/;"	f	language:C++	class:MmapRawVideoFileWorker	typeref:typename:bool	signature:()
+mapFile	source/productionline/worker/implementation/MmapRawVideoFileWorker.cpp	/^bool MmapRawVideoFileWorker::mapFile() {$/;"	f	language:C++	class:MmapRawVideoFileWorker	typeref:typename:bool	signature:()
 mapHardwareFramebufferMemory	source/display/LinuxFramebufferDevice.cpp	/^bool LinuxFramebufferDevice::mapHardwareFramebufferMemory() {$/;"	f	language:C++	class:LinuxFramebufferDevice	typeref:typename:bool	signature:()
-mapped_file_	include/productionline/worker/MmapRawVideoFileWorker.hpp	/^    void* mapped_file_;               \/\/ mmap映射的文件地址$/;"	m	language:C++	class:MmapRawVideoFileWorker	typeref:typename:void *
-mapped_size_	include/productionline/worker/MmapRawVideoFileWorker.hpp	/^    size_t mapped_size_;              \/\/ 映射的文件大小$/;"	m	language:C++	class:MmapRawVideoFileWorker	typeref:typename:size_t
+mapped_file_	include/productionline/worker/implementation/MmapRawVideoFileWorker.hpp	/^    void* mapped_file_;               \/\/ mmap映射的文件地址$/;"	m	language:C++	class:MmapRawVideoFileWorker	typeref:typename:void *
+mapped_size_	include/productionline/worker/implementation/MmapRawVideoFileWorker.hpp	/^    size_t mapped_size_;              \/\/ 映射的文件大小$/;"	m	language:C++	class:MmapRawVideoFileWorker	typeref:typename:size_t
 mapping_mutex_	include/buffer/allocator/AVFrameAllocator.hpp	/^    std::mutex mapping_mutex_;$/;"	m	language:C++	class:AVFrameAllocator	typeref:typename:std::mutex
 mutex_	include/buffer/BufferPool.hpp	/^    mutable std::mutex mutex_;                      \/\/ 保护所有队列和状态$/;"	m	language:C++	class:BufferPool	typeref:typename:std::mutex
 mutex_	include/buffer/BufferPoolRegistry.hpp	/^    mutable std::mutex mutex_;                              \/\/ 保护所有成员变量$/;"	m	language:C++	class:BufferPoolRegistry	typeref:typename:std::mutex
 mutex_	include/monitor/PerformanceMonitor.hpp	/^    mutable std::mutex mutex_;$/;"	m	language:C++	class:PerformanceMonitor	typeref:typename:std::mutex
 mutex_	include/monitor/Timer.hpp	/^    std::mutex mutex_;$/;"	m	language:C++	class:Timer	typeref:typename:std::mutex
-mutex_	include/productionline/worker/FfmpegDecodeVideoFileWorker.hpp	/^    mutable std::mutex mutex_;$/;"	m	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:std::mutex
+mutex_	include/productionline/worker/implementation/FfmpegDecodeVideoFileWorker.hpp	/^    mutable std::mutex mutex_;$/;"	m	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:std::mutex
 name	include/buffer/BufferPoolRegistry.hpp	/^        std::string name;                                    \/\/ 可读名称$/;"	m	language:C++	struct:BufferPoolRegistry::PoolInfo	typeref:typename:std::string
 name_	include/buffer/BufferPool.hpp	/^    std::string name_;$/;"	m	language:C++	class:BufferPool	typeref:typename:std::string
 name_to_id_	include/buffer/BufferPoolRegistry.hpp	/^    std::unordered_map<std::string, uint64_t> name_to_id_;  \/\/ Name -> ID（快速查找）$/;"	m	language:C++	class:BufferPoolRegistry	typeref:typename:std::unordered_map<std::string,uint64_t>
-navigator_	include/productionline/worker/BufferFillingWorker.hpp	/^    IVideoFileNavigator* navigator_;  \/\/ 文件导航接口（指向同一对象）$/;"	m	language:C++	class:BufferFillingWorker	typeref:typename:IVideoFileNavigator *
 next_buffer_id_	include/buffer/allocator/AVFrameAllocator.hpp	/^    std::atomic<uint32_t> next_buffer_id_;$/;"	m	language:C++	class:AVFrameAllocator	typeref:typename:std::atomic<uint32_t>
 next_buffer_index_	include/buffer/allocator/FramebufferAllocator.hpp	/^    size_t next_buffer_index_;                   \/\/ 下一个可用索引$/;"	m	language:C++	class:FramebufferAllocator	typeref:typename:size_t
 next_frame_index_	include/productionline/VideoProductionLine.hpp	/^    std::atomic<int> next_frame_index_;  \/\/ 下一个要读取的帧索引（原子递增）$/;"	m	language:C++	class:VideoProductionLine	typeref:typename:std::atomic<int>
 next_id_	include/buffer/BufferPoolRegistry.hpp	/^    uint64_t next_id_ = 1;                                  \/\/ 下一个可用 ID$/;"	m	language:C++	class:BufferPoolRegistry	typeref:typename:uint64_t
 note: 'std::runtime_error' is defined in header '<stdexcept>';	cpp_compile_error.md	/^# note: 'std::runtime_error' is defined in header '<stdexcept>'; $/;"	c	language:Markdown
-open	source/productionline/worker/BufferFillingWorker.cpp	/^bool BufferFillingWorker::open(const char* path, int width, int height, int bits_per_pixel) {$/;"	f	language:C++	class:BufferFillingWorker	typeref:typename:bool	signature:(const char * path,int width,int height,int bits_per_pixel)
-open	source/productionline/worker/FfmpegDecodeRtspWorker.cpp	/^bool FfmpegDecodeRtspWorker::open(const char* path) {$/;"	f	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:bool	signature:(const char * path)
-open	source/productionline/worker/FfmpegDecodeVideoFileWorker.cpp	/^bool FfmpegDecodeVideoFileWorker::open(const char* path) {$/;"	f	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:bool	signature:(const char * path)
-open	source/productionline/worker/IoUringRawVideoFileWorker.cpp	/^bool IoUringRawVideoFileWorker::open(const char* path) {$/;"	f	language:C++	class:IoUringRawVideoFileWorker	typeref:typename:bool	signature:(const char * path)
-open	source/productionline/worker/MmapRawVideoFileWorker.cpp	/^bool MmapRawVideoFileWorker::open(const char* path) {$/;"	f	language:C++	class:MmapRawVideoFileWorker	typeref:typename:bool	signature:(const char * path)
-openRaw	source/productionline/worker/BufferFillingWorker.cpp	/^bool BufferFillingWorker::openRaw(const char* path, int width, int height, int bits_per_pixel) {$/;"	f	language:C++	class:BufferFillingWorker	typeref:typename:bool	signature:(const char * path,int width,int height,int bits_per_pixel)
-openRaw	source/productionline/worker/FfmpegDecodeRtspWorker.cpp	/^bool FfmpegDecodeRtspWorker::openRaw(const char* path, int width, int height, int bits_per_pixel/;"	f	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:bool	signature:(const char * path,int width,int height,int bits_per_pixel)
-openRaw	source/productionline/worker/FfmpegDecodeVideoFileWorker.cpp	/^bool FfmpegDecodeVideoFileWorker::openRaw(const char* path, int width, int height, int bits_per_/;"	f	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:bool	signature:(const char * path,int width,int height,int bits_per_pixel)
-openRaw	source/productionline/worker/IoUringRawVideoFileWorker.cpp	/^bool IoUringRawVideoFileWorker::openRaw(const char* path, int width, int height, int bits_per_pi/;"	f	language:C++	class:IoUringRawVideoFileWorker	typeref:typename:bool	signature:(const char * path,int width,int height,int bits_per_pixel)
-openRaw	source/productionline/worker/MmapRawVideoFileWorker.cpp	/^bool MmapRawVideoFileWorker::openRaw(const char* path, int width, int height, int bits_per_pixel/;"	f	language:C++	class:MmapRawVideoFileWorker	typeref:typename:bool	signature:(const char * path,int width,int height,int bits_per_pixel)
-openVideo	source/productionline/worker/FfmpegDecodeVideoFileWorker.cpp	/^bool FfmpegDecodeVideoFileWorker::openVideo() {$/;"	f	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:bool	signature:()
+open	source/productionline/worker/facade/BufferFillingWorkerFacade.cpp	/^bool BufferFillingWorkerFacade::open(const char* path) {$/;"	f	language:C++	class:BufferFillingWorkerFacade	typeref:typename:bool	signature:(const char * path)
+open	source/productionline/worker/facade/BufferFillingWorkerFacade.cpp	/^bool BufferFillingWorkerFacade::open(const char* path, int width, int height, int bits_per_pixel/;"	f	language:C++	class:BufferFillingWorkerFacade	typeref:typename:bool	signature:(const char * path,int width,int height,int bits_per_pixel)
+open	source/productionline/worker/implementation/FfmpegDecodeRtspWorker.cpp	/^bool FfmpegDecodeRtspWorker::open(const char* path) {$/;"	f	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:bool	signature:(const char * path)
+open	source/productionline/worker/implementation/FfmpegDecodeRtspWorker.cpp	/^bool FfmpegDecodeRtspWorker::open(const char* path, int width, int height, int bits_per_pixel) {$/;"	f	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:bool	signature:(const char * path,int width,int height,int bits_per_pixel)
+open	source/productionline/worker/implementation/FfmpegDecodeVideoFileWorker.cpp	/^bool FfmpegDecodeVideoFileWorker::open(const char* path) {$/;"	f	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:bool	signature:(const char * path)
+open	source/productionline/worker/implementation/FfmpegDecodeVideoFileWorker.cpp	/^bool FfmpegDecodeVideoFileWorker::open(const char* path, int width, int height, int bits_per_pix/;"	f	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:bool	signature:(const char * path,int width,int height,int bits_per_pixel)
+open	source/productionline/worker/implementation/IoUringRawVideoFileWorker.cpp	/^bool IoUringRawVideoFileWorker::open(const char* path) {$/;"	f	language:C++	class:IoUringRawVideoFileWorker	typeref:typename:bool	signature:(const char * path)
+open	source/productionline/worker/implementation/IoUringRawVideoFileWorker.cpp	/^bool IoUringRawVideoFileWorker::open(const char* path, int width, int height, int bits_per_pixel/;"	f	language:C++	class:IoUringRawVideoFileWorker	typeref:typename:bool	signature:(const char * path,int width,int height,int bits_per_pixel)
+open	source/productionline/worker/implementation/MmapRawVideoFileWorker.cpp	/^bool MmapRawVideoFileWorker::open(const char* path) {$/;"	f	language:C++	class:MmapRawVideoFileWorker	typeref:typename:bool	signature:(const char * path)
+open	source/productionline/worker/implementation/MmapRawVideoFileWorker.cpp	/^bool MmapRawVideoFileWorker::open(const char* path, int width, int height, int bits_per_pixel) {$/;"	f	language:C++	class:MmapRawVideoFileWorker	typeref:typename:bool	signature:(const char * path,int width,int height,int bits_per_pixel)
+openVideo	source/productionline/worker/implementation/FfmpegDecodeVideoFileWorker.cpp	/^bool FfmpegDecodeVideoFileWorker::openVideo() {$/;"	f	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:bool	signature:()
 operator =	source/buffer/Buffer.cpp	/^Buffer& Buffer::operator=(Buffer&& other) noexcept {$/;"	f	language:C++	class:Buffer	typeref:typename:Buffer &	signature:(Buffer && other)
-output_bpp_	include/productionline/worker/FfmpegDecodeVideoFileWorker.hpp	/^    int output_bpp_;                   \/\/ 输出位深（如 32 for ARGB888）$/;"	m	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:int
-output_height_	include/productionline/worker/FfmpegDecodeVideoFileWorker.hpp	/^    int output_height_;                 \/\/ 输出高度（可能缩放）$/;"	m	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:int
-output_pixel_format_	include/productionline/worker/FfmpegDecodeRtspWorker.hpp	/^    int output_pixel_format_;          \/\/ 输出像素格式（如AV_PIX_FMT_BGRA）$/;"	m	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:int
-output_pixel_format_	include/productionline/worker/FfmpegDecodeVideoFileWorker.hpp	/^    int output_pixel_format_;          \/\/ 输出像素格式（如 AV_PIX_FMT_BGRA）$/;"	m	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:int
-output_width_	include/productionline/worker/FfmpegDecodeVideoFileWorker.hpp	/^    int output_width_;                 \/\/ 输出宽度（可能缩放）$/;"	m	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:int
+output_bpp_	include/productionline/worker/implementation/FfmpegDecodeVideoFileWorker.hpp	/^    int output_bpp_;                   \/\/ 输出位深（如 32 for ARGB888）$/;"	m	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:int
+output_height_	include/productionline/worker/implementation/FfmpegDecodeVideoFileWorker.hpp	/^    int output_height_;                 \/\/ 输出高度（可能缩放）$/;"	m	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:int
+output_pixel_format_	include/productionline/worker/implementation/FfmpegDecodeRtspWorker.hpp	/^    int output_pixel_format_;          \/\/ 输出像素格式（如AV_PIX_FMT_BGRA）$/;"	m	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:int
+output_pixel_format_	include/productionline/worker/implementation/FfmpegDecodeVideoFileWorker.hpp	/^    int output_pixel_format_;          \/\/ 输出像素格式（如 AV_PIX_FMT_BGRA）$/;"	m	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:int
+output_width_	include/productionline/worker/implementation/FfmpegDecodeVideoFileWorker.hpp	/^    int output_width_;                 \/\/ 输出宽度（可能缩放）$/;"	m	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:int
 ovl_idx	source/display/LinuxFramebufferDevice.cpp	/^    uint32_t ovl_idx;      \/\/ overlay 索引$/;"	m	language:C++	struct:tpsfb_dma_info	typeref:typename:uint32_t	file:
 ownership	include/buffer/Buffer.hpp	/^    Ownership ownership() const { return ownership_; }$/;"	f	language:C++	class:Buffer	typeref:typename:Ownership	signature:() const
 ownershipToString	source/buffer/Buffer.cpp	/^const char* Buffer::ownershipToString(Ownership ownership) {$/;"	f	language:C++	class:Buffer	typeref:typename:const char *	signature:(Ownership ownership)
 ownership_	include/buffer/Buffer.hpp	/^    Ownership ownership_;            \/\/ 所有权类型$/;"	m	language:C++	class:Buffer	typeref:typename:Ownership
 ownership_mutex_	include/buffer/allocator/BufferAllocatorBase.hpp	/^    static std::mutex ownership_mutex_;$/;"	m	language:C++	class:BufferAllocatorBase	typeref:typename:std::mutex
 ownership_mutex_	source/buffer/allocator/BufferAllocatorBase.cpp	/^std::mutex BufferAllocatorBase::ownership_mutex_;$/;"	m	language:C++	class:BufferAllocatorBase	typeref:typename:std::mutex
-parseH264Header	source/productionline/worker/MmapRawVideoFileWorker.cpp	/^bool MmapRawVideoFileWorker::parseH264Header() {$/;"	f	language:C++	class:MmapRawVideoFileWorker	typeref:typename:bool	signature:()
-parseMP4Header	source/productionline/worker/MmapRawVideoFileWorker.cpp	/^bool MmapRawVideoFileWorker::parseMP4Header() {$/;"	f	language:C++	class:MmapRawVideoFileWorker	typeref:typename:bool	signature:()
+parseH264Header	source/productionline/worker/implementation/MmapRawVideoFileWorker.cpp	/^bool MmapRawVideoFileWorker::parseH264Header() {$/;"	f	language:C++	class:MmapRawVideoFileWorker	typeref:typename:bool	signature:()
+parseMP4Header	source/productionline/worker/implementation/MmapRawVideoFileWorker.cpp	/^bool MmapRawVideoFileWorker::parseMP4Header() {$/;"	f	language:C++	class:MmapRawVideoFileWorker	typeref:typename:bool	signature:()
 parse_test_mode	test.cpp	/^static TestMode parse_test_mode(const char* mode_str) {$/;"	f	language:C++	typeref:typename:TestMode	file:	signature:(const char * mode_str)
-path_	include/productionline/worker/MmapRawVideoFileWorker.hpp	/^    char path_[MAX_PATH_LENGTH];     \/\/ 文件路径$/;"	m	language:C++	class:MmapRawVideoFileWorker	typeref:typename:char[]
+path_	include/productionline/worker/implementation/MmapRawVideoFileWorker.hpp	/^    char path_[MAX_PATH_LENGTH];     \/\/ 文件路径$/;"	m	language:C++	class:MmapRawVideoFileWorker	typeref:typename:char[]
 pause	source/monitor/PerformanceMonitor.cpp	/^void PerformanceMonitor::pause() {$/;"	f	language:C++	class:PerformanceMonitor	typeref:typename:void	signature:()
 phys_addr	include/buffer/allocator/FramebufferAllocator.hpp	/^        uint64_t phys_addr;    \/\/ 物理地址（可选，0 表示无）$/;"	m	language:C++	struct:FramebufferAllocator::BufferInfo	typeref:typename:uint64_t
 phys_addr	source/display/LinuxFramebufferDevice.cpp	/^    uint64_t phys_addr;    \/\/ 物理地址$/;"	m	language:C++	struct:tpsfb_dma_info	typeref:typename:uint64_t	file:
 phys_addr_	include/buffer/Buffer.hpp	/^    uint64_t phys_addr_;             \/\/ 物理地址（硬件\/DMA）$/;"	m	language:C++	class:Buffer	typeref:typename:uint64_t
 pool	include/buffer/BufferPoolRegistry.hpp	/^        BufferPool* pool;                                    \/\/ Pool 指针$/;"	m	language:C++	struct:BufferPoolRegistry::PoolInfo	typeref:typename:BufferPool *
 pools_	include/buffer/BufferPoolRegistry.hpp	/^    std::unordered_map<uint64_t, PoolInfo> pools_;          \/\/ ID -> PoolInfo$/;"	m	language:C++	class:BufferPoolRegistry	typeref:typename:std::unordered_map<uint64_t,PoolInfo>
-preferred_type_	include/productionline/worker/BufferFillingWorker.hpp	/^    BufferFillingWorkerFactory::WorkerType preferred_type_;  \/\/ 用户偏好的类型$/;"	m	language:C++	class:BufferFillingWorker	typeref:typename:BufferFillingWorkerFactory::WorkerType
+preferred_type_	include/productionline/worker/facade/BufferFillingWorkerFacade.hpp	/^    BufferFillingWorkerFactory::WorkerType preferred_type_;  \/\/ 用户偏好的类型$/;"	m	language:C++	class:BufferFillingWorkerFacade	typeref:typename:BufferFillingWorkerFactory::WorkerType
 printAllBuffers	source/buffer/BufferPool.cpp	/^void BufferPool::printAllBuffers() const {$/;"	f	language:C++	class:BufferPool	typeref:typename:void	signature:() const
 printAllStats	source/buffer/BufferPoolRegistry.cpp	/^void BufferPoolRegistry::printAllStats() const {$/;"	f	language:C++	class:BufferPoolRegistry	typeref:typename:void	signature:() const
 printInfo	source/buffer/Buffer.cpp	/^void Buffer::printInfo() const {$/;"	f	language:C++	class:Buffer	typeref:typename:void	signature:() const
@@ -579,23 +572,22 @@ printRealTimeStats	source/monitor/PerformanceMonitor.cpp	/^void PerformanceMonit
 printStatistics	source/monitor/PerformanceMonitor.cpp	/^void PerformanceMonitor::printStatistics() const {$/;"	f	language:C++	class:PerformanceMonitor	typeref:typename:void	signature:() const
 printStats	source/buffer/BufferPool.cpp	/^void BufferPool::printStats() const {$/;"	f	language:C++	class:BufferPool	typeref:typename:void	signature:() const
 printStats	source/productionline/VideoProductionLine.cpp	/^void VideoProductionLine::printStats() const {$/;"	f	language:C++	class:VideoProductionLine	typeref:typename:void	signature:() const
-printStats	source/productionline/worker/FfmpegDecodeRtspWorker.cpp	/^void FfmpegDecodeRtspWorker::printStats() const {$/;"	f	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:void	signature:() const
-printStats	source/productionline/worker/FfmpegDecodeVideoFileWorker.cpp	/^void FfmpegDecodeVideoFileWorker::printStats() const {$/;"	f	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:void	signature:() const
-printVideoInfo	source/productionline/worker/FfmpegDecodeVideoFileWorker.cpp	/^void FfmpegDecodeVideoFileWorker::printVideoInfo() const {$/;"	f	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:void	signature:() const
+printStats	source/productionline/worker/implementation/FfmpegDecodeRtspWorker.cpp	/^void FfmpegDecodeRtspWorker::printStats() const {$/;"	f	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:void	signature:() const
+printStats	source/productionline/worker/implementation/FfmpegDecodeVideoFileWorker.cpp	/^void FfmpegDecodeVideoFileWorker::printStats() const {$/;"	f	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:void	signature:() const
+printVideoInfo	source/productionline/worker/implementation/FfmpegDecodeVideoFileWorker.cpp	/^void FfmpegDecodeVideoFileWorker::printVideoInfo() const {$/;"	f	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:void	signature:() const
 print_usage	test.cpp	/^static void print_usage(const char* prog_name) {$/;"	f	language:C++	typeref:typename:void	file:	signature:(const char * prog_name)
 produced_frames_	include/productionline/VideoProductionLine.hpp	/^    std::atomic<int> produced_frames_;$/;"	m	language:C++	class:VideoProductionLine	typeref:typename:std::atomic<int>
 producerThreadFunc	source/productionline/VideoProductionLine.cpp	/^void VideoProductionLine::producerThreadFunc(int thread_id) {$/;"	f	language:C++	class:VideoProductionLine	typeref:typename:void	signature:(int thread_id)
 queryHardwareDisplayParameters	source/display/LinuxFramebufferDevice.cpp	/^bool LinuxFramebufferDevice::queryHardwareDisplayParameters() {$/;"	f	language:C++	class:LinuxFramebufferDevice	typeref:typename:bool	signature:()
-queue_depth_	include/productionline/worker/IoUringRawVideoFileWorker.hpp	/^    int queue_depth_;$/;"	m	language:C++	class:IoUringRawVideoFileWorker	typeref:typename:int
-readFileHeader	source/productionline/worker/MmapRawVideoFileWorker.cpp	/^ssize_t MmapRawVideoFileWorker::readFileHeader(unsigned char* header, size_t size) {$/;"	f	language:C++	class:MmapRawVideoFileWorker	typeref:typename:ssize_t	signature:(unsigned char * header,size_t size)
-readFrame	include/productionline/worker/BufferFillingWorker.hpp	/^    bool readFrame(int frame_index, Buffer* buffer) {$/;"	f	language:C++	class:BufferFillingWorker	typeref:typename:bool	signature:(int frame_index,Buffer * buffer)
-read_index_	include/productionline/worker/FfmpegDecodeRtspWorker.hpp	/^    int read_index_;                   \/\/ 读取索引$/;"	m	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:int
+queue_depth_	include/productionline/worker/implementation/IoUringRawVideoFileWorker.hpp	/^    int queue_depth_;$/;"	m	language:C++	class:IoUringRawVideoFileWorker	typeref:typename:int
+readFileHeader	source/productionline/worker/implementation/MmapRawVideoFileWorker.cpp	/^ssize_t MmapRawVideoFileWorker::readFileHeader(unsigned char* header, size_t size) {$/;"	f	language:C++	class:MmapRawVideoFileWorker	typeref:typename:ssize_t	signature:(unsigned char * header,size_t size)
+read_index_	include/productionline/worker/implementation/FfmpegDecodeRtspWorker.hpp	/^    int read_index_;                   \/\/ 读取索引$/;"	m	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:int
 recordFrameDecoded	source/monitor/PerformanceMonitor.cpp	/^void PerformanceMonitor::recordFrameDecoded() {$/;"	f	language:C++	class:PerformanceMonitor	typeref:typename:void	signature:()
 recordFrameDisplayed	source/monitor/PerformanceMonitor.cpp	/^void PerformanceMonitor::recordFrameDisplayed() {$/;"	f	language:C++	class:PerformanceMonitor	typeref:typename:void	signature:()
 recordFrameLoaded	source/monitor/PerformanceMonitor.cpp	/^void PerformanceMonitor::recordFrameLoaded() {$/;"	f	language:C++	class:PerformanceMonitor	typeref:typename:void	signature:()
 refCount	include/buffer/Buffer.hpp	/^    int refCount() const { return ref_count_.load(); }$/;"	f	language:C++	class:Buffer	typeref:typename:int	signature:() const
 ref_count_	include/buffer/Buffer.hpp	/^    std::atomic<int> ref_count_;     \/\/ 引用计数（外部buffer检测）$/;"	m	language:C++	class:Buffer	typeref:typename:std::atomic<int>
-registerBufferOwnership	source/buffer/allocator/BufferAllocatorBase.cpp	/^void BufferAllocatorBase::registerBufferOwnership(Buffer* buffer, BufferAllocator* allocator) {$/;"	f	language:C++	class:BufferAllocatorBase	typeref:typename:void	signature:(Buffer * buffer,BufferAllocator * allocator)
+registerBufferOwnership	source/buffer/allocator/BufferAllocatorBase.cpp	/^void BufferAllocatorBase::registerBufferOwnership(Buffer* buffer, BufferAllocatorBase* allocator/;"	f	language:C++	class:BufferAllocatorBase	typeref:typename:void	signature:(Buffer * buffer,BufferAllocatorBase * allocator)
 registerPool	source/buffer/BufferPoolRegistry.cpp	/^uint64_t BufferPoolRegistry::registerPool(BufferPool* pool, $/;"	f	language:C++	class:BufferPoolRegistry	typeref:typename:uint64_t	signature:(BufferPool * pool,const std::string & name,const std::string & category)
 registry_id_	include/buffer/BufferPool.hpp	/^    uint64_t registry_id_;$/;"	m	language:C++	class:BufferPool	typeref:typename:uint64_t
 releaseAVFrame	source/buffer/allocator/AVFrameAllocator.cpp	/^bool AVFrameAllocator::releaseAVFrame(Buffer* buffer, BufferPool* pool) {$/;"	f	language:C++	class:AVFrameAllocator	typeref:typename:bool	signature:(Buffer * buffer,BufferPool * pool)
@@ -606,59 +598,53 @@ removeBufferFromPool	source/buffer/allocator/BufferAllocatorBase.cpp	/^bool Buff
 removeBufferFromPoolInternal	source/buffer/allocator/BufferAllocatorBase.cpp	/^bool BufferAllocatorBase::removeBufferFromPoolInternal(BufferPool* pool, Buffer* buffer) {$/;"	f	language:C++	class:BufferAllocatorBase	typeref:typename:bool	signature:(BufferPool * pool,Buffer * buffer)
 removeFromQueue	source/buffer/BufferPool.cpp	/^bool BufferPool::removeFromQueue(std::queue<Buffer*>& queue, Buffer* target) {$/;"	f	language:C++	class:BufferPool	typeref:typename:bool	signature:(std::queue<Buffer * > & queue,Buffer * target)
 report_interval_ms_	include/monitor/PerformanceMonitor.hpp	/^    int report_interval_ms_;          \/\/ 报告间隔（毫秒）$/;"	m	language:C++	class:PerformanceMonitor	typeref:typename:int
-requiresExternalBuffer	include/productionline/worker/FfmpegDecodeRtspWorker.hpp	/^    bool requiresExternalBuffer() const override {$/;"	f	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:bool	signature:() const
-requiresExternalBuffer	include/productionline/worker/FfmpegDecodeVideoFileWorker.hpp	/^    bool requiresExternalBuffer() const override {$/;"	f	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:bool	signature:() const
-requiresExternalBuffer	include/productionline/worker/IoUringRawVideoFileWorker.hpp	/^    bool requiresExternalBuffer() const override {$/;"	f	language:C++	class:IoUringRawVideoFileWorker	typeref:typename:bool	signature:() const
-requiresExternalBuffer	include/productionline/worker/MmapRawVideoFileWorker.hpp	/^    bool requiresExternalBuffer() const override {$/;"	f	language:C++	class:MmapRawVideoFileWorker	typeref:typename:bool	signature:() const
-requiresExternalBuffer	source/productionline/worker/BufferFillingWorker.cpp	/^bool BufferFillingWorker::requiresExternalBuffer() const {$/;"	f	language:C++	class:BufferFillingWorker	typeref:typename:bool	signature:() const
 reset	source/monitor/PerformanceMonitor.cpp	/^void PerformanceMonitor::reset() {$/;"	f	language:C++	class:PerformanceMonitor	typeref:typename:void	signature:()
 resume	source/monitor/PerformanceMonitor.cpp	/^void PerformanceMonitor::resume() {$/;"	f	language:C++	class:PerformanceMonitor	typeref:typename:void	signature:()
-ring_	include/productionline/worker/IoUringRawVideoFileWorker.hpp	/^    struct io_uring ring_;$/;"	m	language:C++	class:IoUringRawVideoFileWorker	typeref:struct:io_uring
-rtsp_url_	include/productionline/worker/FfmpegDecodeRtspWorker.hpp	/^    char rtsp_url_[MAX_RTSP_PATH_LENGTH];$/;"	m	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:char[]
+ring_	include/productionline/worker/implementation/IoUringRawVideoFileWorker.hpp	/^    struct io_uring ring_;$/;"	m	language:C++	class:IoUringRawVideoFileWorker	typeref:struct:io_uring
+rtsp_url_	include/productionline/worker/implementation/FfmpegDecodeRtspWorker.hpp	/^    char rtsp_url_[MAX_RTSP_PATH_LENGTH];$/;"	m	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:char[]
 running_	include/buffer/BufferPool.hpp	/^    std::atomic<bool> running_;                     \/\/ 运行状态（用于停止等待）$/;"	m	language:C++	class:BufferPool	typeref:typename:std::atomic<bool>
 running_	include/monitor/Timer.hpp	/^    std::atomic<bool> running_;$/;"	m	language:C++	class:Timer	typeref:typename:std::atomic<bool>
 running_	include/productionline/VideoProductionLine.hpp	/^    std::atomic<bool> running_;$/;"	m	language:C++	class:VideoProductionLine	typeref:typename:std::atomic<bool>
-running_	include/productionline/worker/FfmpegDecodeRtspWorker.hpp	/^    std::atomic<bool> running_;$/;"	m	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:std::atomic<bool>
-seek	source/productionline/worker/BufferFillingWorker.cpp	/^bool BufferFillingWorker::seek(int frame_index) {$/;"	f	language:C++	class:BufferFillingWorker	typeref:typename:bool	signature:(int frame_index)
-seek	source/productionline/worker/FfmpegDecodeRtspWorker.cpp	/^bool FfmpegDecodeRtspWorker::seek(int frame_index) {$/;"	f	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:bool	signature:(int frame_index)
-seek	source/productionline/worker/FfmpegDecodeVideoFileWorker.cpp	/^bool FfmpegDecodeVideoFileWorker::seek(int frame_index) {$/;"	f	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:bool	signature:(int frame_index)
-seek	source/productionline/worker/IoUringRawVideoFileWorker.cpp	/^bool IoUringRawVideoFileWorker::seek(int frame_index) {$/;"	f	language:C++	class:IoUringRawVideoFileWorker	typeref:typename:bool	signature:(int frame_index)
-seek	source/productionline/worker/MmapRawVideoFileWorker.cpp	/^bool MmapRawVideoFileWorker::seek(int frame_index) {$/;"	f	language:C++	class:MmapRawVideoFileWorker	typeref:typename:bool	signature:(int frame_index)
-seekToBegin	source/productionline/worker/BufferFillingWorker.cpp	/^bool BufferFillingWorker::seekToBegin() {$/;"	f	language:C++	class:BufferFillingWorker	typeref:typename:bool	signature:()
-seekToBegin	source/productionline/worker/FfmpegDecodeRtspWorker.cpp	/^bool FfmpegDecodeRtspWorker::seekToBegin() {$/;"	f	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:bool	signature:()
-seekToBegin	source/productionline/worker/FfmpegDecodeVideoFileWorker.cpp	/^bool FfmpegDecodeVideoFileWorker::seekToBegin() {$/;"	f	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:bool	signature:()
-seekToBegin	source/productionline/worker/IoUringRawVideoFileWorker.cpp	/^bool IoUringRawVideoFileWorker::seekToBegin() {$/;"	f	language:C++	class:IoUringRawVideoFileWorker	typeref:typename:bool	signature:()
-seekToBegin	source/productionline/worker/MmapRawVideoFileWorker.cpp	/^bool MmapRawVideoFileWorker::seekToBegin() {$/;"	f	language:C++	class:MmapRawVideoFileWorker	typeref:typename:bool	signature:()
-seekToEnd	source/productionline/worker/BufferFillingWorker.cpp	/^bool BufferFillingWorker::seekToEnd() {$/;"	f	language:C++	class:BufferFillingWorker	typeref:typename:bool	signature:()
-seekToEnd	source/productionline/worker/FfmpegDecodeRtspWorker.cpp	/^bool FfmpegDecodeRtspWorker::seekToEnd() {$/;"	f	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:bool	signature:()
-seekToEnd	source/productionline/worker/FfmpegDecodeVideoFileWorker.cpp	/^bool FfmpegDecodeVideoFileWorker::seekToEnd() {$/;"	f	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:bool	signature:()
-seekToEnd	source/productionline/worker/IoUringRawVideoFileWorker.cpp	/^bool IoUringRawVideoFileWorker::seekToEnd() {$/;"	f	language:C++	class:IoUringRawVideoFileWorker	typeref:typename:bool	signature:()
-seekToEnd	source/productionline/worker/MmapRawVideoFileWorker.cpp	/^bool MmapRawVideoFileWorker::seekToEnd() {$/;"	f	language:C++	class:MmapRawVideoFileWorker	typeref:typename:bool	signature:()
+running_	include/productionline/worker/implementation/FfmpegDecodeRtspWorker.hpp	/^    std::atomic<bool> running_;$/;"	m	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:std::atomic<bool>
+seek	source/productionline/worker/facade/BufferFillingWorkerFacade.cpp	/^bool BufferFillingWorkerFacade::seek(int frame_index) {$/;"	f	language:C++	class:BufferFillingWorkerFacade	typeref:typename:bool	signature:(int frame_index)
+seek	source/productionline/worker/implementation/FfmpegDecodeRtspWorker.cpp	/^bool FfmpegDecodeRtspWorker::seek(int frame_index) {$/;"	f	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:bool	signature:(int frame_index)
+seek	source/productionline/worker/implementation/FfmpegDecodeVideoFileWorker.cpp	/^bool FfmpegDecodeVideoFileWorker::seek(int frame_index) {$/;"	f	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:bool	signature:(int frame_index)
+seek	source/productionline/worker/implementation/IoUringRawVideoFileWorker.cpp	/^bool IoUringRawVideoFileWorker::seek(int frame_index) {$/;"	f	language:C++	class:IoUringRawVideoFileWorker	typeref:typename:bool	signature:(int frame_index)
+seek	source/productionline/worker/implementation/MmapRawVideoFileWorker.cpp	/^bool MmapRawVideoFileWorker::seek(int frame_index) {$/;"	f	language:C++	class:MmapRawVideoFileWorker	typeref:typename:bool	signature:(int frame_index)
+seekToBegin	source/productionline/worker/facade/BufferFillingWorkerFacade.cpp	/^bool BufferFillingWorkerFacade::seekToBegin() {$/;"	f	language:C++	class:BufferFillingWorkerFacade	typeref:typename:bool	signature:()
+seekToBegin	source/productionline/worker/implementation/FfmpegDecodeRtspWorker.cpp	/^bool FfmpegDecodeRtspWorker::seekToBegin() {$/;"	f	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:bool	signature:()
+seekToBegin	source/productionline/worker/implementation/FfmpegDecodeVideoFileWorker.cpp	/^bool FfmpegDecodeVideoFileWorker::seekToBegin() {$/;"	f	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:bool	signature:()
+seekToBegin	source/productionline/worker/implementation/IoUringRawVideoFileWorker.cpp	/^bool IoUringRawVideoFileWorker::seekToBegin() {$/;"	f	language:C++	class:IoUringRawVideoFileWorker	typeref:typename:bool	signature:()
+seekToBegin	source/productionline/worker/implementation/MmapRawVideoFileWorker.cpp	/^bool MmapRawVideoFileWorker::seekToBegin() {$/;"	f	language:C++	class:MmapRawVideoFileWorker	typeref:typename:bool	signature:()
+seekToEnd	source/productionline/worker/facade/BufferFillingWorkerFacade.cpp	/^bool BufferFillingWorkerFacade::seekToEnd() {$/;"	f	language:C++	class:BufferFillingWorkerFacade	typeref:typename:bool	signature:()
+seekToEnd	source/productionline/worker/implementation/FfmpegDecodeRtspWorker.cpp	/^bool FfmpegDecodeRtspWorker::seekToEnd() {$/;"	f	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:bool	signature:()
+seekToEnd	source/productionline/worker/implementation/FfmpegDecodeVideoFileWorker.cpp	/^bool FfmpegDecodeVideoFileWorker::seekToEnd() {$/;"	f	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:bool	signature:()
+seekToEnd	source/productionline/worker/implementation/IoUringRawVideoFileWorker.cpp	/^bool IoUringRawVideoFileWorker::seekToEnd() {$/;"	f	language:C++	class:IoUringRawVideoFileWorker	typeref:typename:bool	signature:()
+seekToEnd	source/productionline/worker/implementation/MmapRawVideoFileWorker.cpp	/^bool MmapRawVideoFileWorker::seekToEnd() {$/;"	f	language:C++	class:MmapRawVideoFileWorker	typeref:typename:bool	signature:()
 setBufferPool	source/display/LinuxFramebufferDevice.cpp	/^void LinuxFramebufferDevice::setBufferPool(BufferPool* pool) {$/;"	f	language:C++	class:LinuxFramebufferDevice	typeref:typename:void	signature:(BufferPool * pool)
-setDecoderName	source/productionline/worker/FfmpegDecodeVideoFileWorker.cpp	/^void FfmpegDecodeVideoFileWorker::setDecoderName(const char* decoder_name) {$/;"	f	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:void	signature:(const char * decoder_name)
+setDecoderName	source/productionline/worker/implementation/FfmpegDecodeVideoFileWorker.cpp	/^void FfmpegDecodeVideoFileWorker::setDecoderName(const char* decoder_name) {$/;"	f	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:void	signature:(const char * decoder_name)
 setDmaBufFd	include/buffer/Buffer.hpp	/^    void setDmaBufFd(int fd) { dma_fd_ = fd; }$/;"	f	language:C++	class:Buffer	typeref:typename:void	signature:(int fd)
 setError	source/productionline/VideoProductionLine.cpp	/^void VideoProductionLine::setError(const std::string& error_msg) {$/;"	f	language:C++	class:VideoProductionLine	typeref:typename:void	signature:(const std::string & error_msg)
-setError	source/productionline/worker/FfmpegDecodeRtspWorker.cpp	/^void FfmpegDecodeRtspWorker::setError(const std::string& error) {$/;"	f	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:void	signature:(const std::string & error)
-setError	source/productionline/worker/FfmpegDecodeVideoFileWorker.cpp	/^void FfmpegDecodeVideoFileWorker::setError(const std::string& error, int ffmpeg_error) {$/;"	f	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:void	signature:(const std::string & error,int ffmpeg_error)
+setError	source/productionline/worker/implementation/FfmpegDecodeRtspWorker.cpp	/^void FfmpegDecodeRtspWorker::setError(const std::string& error) {$/;"	f	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:void	signature:(const std::string & error)
+setError	source/productionline/worker/implementation/FfmpegDecodeVideoFileWorker.cpp	/^void FfmpegDecodeVideoFileWorker::setError(const std::string& error, int ffmpeg_error) {$/;"	f	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:void	signature:(const std::string & error,int ffmpeg_error)
 setErrorCallback	include/productionline/VideoProductionLine.hpp	/^    void setErrorCallback(ErrorCallback callback) {$/;"	f	language:C++	class:VideoProductionLine	typeref:typename:void	signature:(ErrorCallback callback)
-setHardwareDecoder	source/productionline/worker/FfmpegDecodeVideoFileWorker.cpp	/^void FfmpegDecodeVideoFileWorker::setHardwareDecoder(bool enable) {$/;"	f	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:void	signature:(bool enable)
-setOutputBitsPerPixel	source/productionline/worker/FfmpegDecodeVideoFileWorker.cpp	/^void FfmpegDecodeVideoFileWorker::setOutputBitsPerPixel(int bpp) {$/;"	f	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:void	signature:(int bpp)
-setOutputResolution	source/productionline/worker/FfmpegDecodeVideoFileWorker.cpp	/^void FfmpegDecodeVideoFileWorker::setOutputResolution(int width, int height) {$/;"	f	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:void	signature:(int width,int height)
-setReaderType	include/productionline/worker/BufferFillingWorker.hpp	/^    void setReaderType(BufferFillingWorkerFactory::WorkerType type) {$/;"	f	language:C++	class:BufferFillingWorker	typeref:typename:void	signature:(BufferFillingWorkerFactory::WorkerType type)
+setHardwareDecoder	source/productionline/worker/implementation/FfmpegDecodeVideoFileWorker.cpp	/^void FfmpegDecodeVideoFileWorker::setHardwareDecoder(bool enable) {$/;"	f	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:void	signature:(bool enable)
+setOutputBitsPerPixel	source/productionline/worker/implementation/FfmpegDecodeVideoFileWorker.cpp	/^void FfmpegDecodeVideoFileWorker::setOutputBitsPerPixel(int bpp) {$/;"	f	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:void	signature:(int bpp)
+setOutputResolution	source/productionline/worker/implementation/FfmpegDecodeVideoFileWorker.cpp	/^void FfmpegDecodeVideoFileWorker::setOutputResolution(int width, int height) {$/;"	f	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:void	signature:(int width,int height)
 setReportInterval	source/monitor/PerformanceMonitor.cpp	/^void PerformanceMonitor::setReportInterval(int interval_ms) {$/;"	f	language:C++	class:PerformanceMonitor	typeref:typename:void	signature:(int interval_ms)
 setState	include/buffer/Buffer.hpp	/^    void setState(State state) { state_.store(state); }$/;"	f	language:C++	class:Buffer	typeref:typename:void	signature:(State state)
 setValidationCallback	include/buffer/Buffer.hpp	/^    void setValidationCallback(ValidationCallback cb) {$/;"	f	language:C++	class:Buffer	typeref:typename:void	signature:(ValidationCallback cb)
-setWorkerType	source/productionline/worker/BufferFillingWorker.cpp	/^void BufferFillingWorker::setWorkerType(BufferFillingWorkerFactory::WorkerType type) {$/;"	f	language:C++	class:BufferFillingWorker	typeref:typename:void	signature:(BufferFillingWorkerFactory::WorkerType type)
+setWorkerType	source/productionline/worker/facade/BufferFillingWorkerFacade.cpp	/^void BufferFillingWorkerFacade::setWorkerType(BufferFillingWorkerFactory::WorkerType type) {$/;"	f	language:C++	class:BufferFillingWorkerFacade	typeref:typename:void	signature:(BufferFillingWorkerFactory::WorkerType type)
 shutdown	source/buffer/BufferPool.cpp	/^void BufferPool::shutdown() {$/;"	f	language:C++	class:BufferPool	typeref:typename:void	signature:()
 signal_handler	test.cpp	/^static void signal_handler(int signum) {$/;"	f	language:C++	typeref:typename:void	file:	signature:(int signum)
 size	include/buffer/Buffer.hpp	/^    size_t size() const { return size_; }$/;"	f	language:C++	class:Buffer	typeref:typename:size_t	signature:() const
 size	include/buffer/allocator/FramebufferAllocator.hpp	/^        size_t size;           \/\/ Buffer 大小$/;"	m	language:C++	struct:FramebufferAllocator::BufferInfo	typeref:typename:size_t
 size_	include/buffer/Buffer.hpp	/^    size_t size_;                    \/\/ Buffer 大小$/;"	m	language:C++	class:Buffer	typeref:typename:size_t
-skip	source/productionline/worker/BufferFillingWorker.cpp	/^bool BufferFillingWorker::skip(int frame_count) {$/;"	f	language:C++	class:BufferFillingWorker	typeref:typename:bool	signature:(int frame_count)
-skip	source/productionline/worker/FfmpegDecodeRtspWorker.cpp	/^bool FfmpegDecodeRtspWorker::skip(int frame_count) {$/;"	f	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:bool	signature:(int frame_count)
-skip	source/productionline/worker/FfmpegDecodeVideoFileWorker.cpp	/^bool FfmpegDecodeVideoFileWorker::skip(int frame_count) {$/;"	f	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:bool	signature:(int frame_count)
-skip	source/productionline/worker/IoUringRawVideoFileWorker.cpp	/^bool IoUringRawVideoFileWorker::skip(int frame_count) {$/;"	f	language:C++	class:IoUringRawVideoFileWorker	typeref:typename:bool	signature:(int frame_count)
-skip	source/productionline/worker/MmapRawVideoFileWorker.cpp	/^bool MmapRawVideoFileWorker::skip(int frame_count) {$/;"	f	language:C++	class:MmapRawVideoFileWorker	typeref:typename:bool	signature:(int frame_count)
+skip	source/productionline/worker/facade/BufferFillingWorkerFacade.cpp	/^bool BufferFillingWorkerFacade::skip(int frame_count) {$/;"	f	language:C++	class:BufferFillingWorkerFacade	typeref:typename:bool	signature:(int frame_count)
+skip	source/productionline/worker/implementation/FfmpegDecodeRtspWorker.cpp	/^bool FfmpegDecodeRtspWorker::skip(int frame_count) {$/;"	f	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:bool	signature:(int frame_count)
+skip	source/productionline/worker/implementation/FfmpegDecodeVideoFileWorker.cpp	/^bool FfmpegDecodeVideoFileWorker::skip(int frame_count) {$/;"	f	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:bool	signature:(int frame_count)
+skip	source/productionline/worker/implementation/IoUringRawVideoFileWorker.cpp	/^bool IoUringRawVideoFileWorker::skip(int frame_count) {$/;"	f	language:C++	class:IoUringRawVideoFileWorker	typeref:typename:bool	signature:(int frame_count)
+skip	source/productionline/worker/implementation/MmapRawVideoFileWorker.cpp	/^bool MmapRawVideoFileWorker::skip(int frame_count) {$/;"	f	language:C++	class:MmapRawVideoFileWorker	typeref:typename:bool	signature:(int frame_count)
 skipped_frames_	include/productionline/VideoProductionLine.hpp	/^    std::atomic<int> skipped_frames_;$/;"	m	language:C++	class:VideoProductionLine	typeref:typename:std::atomic<int>
 start	source/monitor/PerformanceMonitor.cpp	/^void PerformanceMonitor::start() {$/;"	f	language:C++	class:PerformanceMonitor	typeref:typename:void	signature:()
 start	source/monitor/Timer.cpp	/^void Timer::start() {$/;"	f	language:C++	class:Timer	typeref:typename:void	signature:()
@@ -670,14 +656,14 @@ stateToString	source/buffer/Buffer.cpp	/^const char* Buffer::stateToString(State
 state_	include/buffer/Buffer.hpp	/^    std::atomic<State> state_;       \/\/ 当前状态（线程安全）$/;"	m	language:C++	class:Buffer	typeref:typename:std::atomic<State>
 stop	source/monitor/Timer.cpp	/^void Timer::stop() {$/;"	f	language:C++	class:Timer	typeref:typename:void	signature:()
 stop	source/productionline/VideoProductionLine.cpp	/^void VideoProductionLine::stop() {$/;"	f	language:C++	class:VideoProductionLine	typeref:typename:void	signature:()
-storeToInternalBuffer	source/productionline/worker/FfmpegDecodeRtspWorker.cpp	/^void FfmpegDecodeRtspWorker::storeToInternalBuffer(AVFrame* frame) {$/;"	f	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:void	signature:(AVFrame * frame)
-submitBatchReads	source/productionline/worker/IoUringRawVideoFileWorker.cpp	/^int IoUringRawVideoFileWorker::submitBatchReads(BufferPool* pool, $/;"	f	language:C++	class:IoUringRawVideoFileWorker	typeref:typename:int	signature:(BufferPool * pool,const std::vector<int> & frame_indices)
+storeToInternalBuffer	source/productionline/worker/implementation/FfmpegDecodeRtspWorker.cpp	/^void FfmpegDecodeRtspWorker::storeToInternalBuffer(AVFrame* frame) {$/;"	f	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:void	signature:(AVFrame * frame)
+submitBatchReads	source/productionline/worker/implementation/IoUringRawVideoFileWorker.cpp	/^int IoUringRawVideoFileWorker::submitBatchReads(BufferPool* pool, $/;"	f	language:C++	class:IoUringRawVideoFileWorker	typeref:typename:int	signature:(BufferPool * pool,const std::vector<int> & frame_indices)
 submitFilled	source/buffer/BufferPool.cpp	/^void BufferPool::submitFilled(Buffer* buffer) {$/;"	f	language:C++	class:BufferPool	typeref:typename:void	signature:(Buffer * buffer)
-submitReadRequest	source/productionline/worker/IoUringRawVideoFileWorker.cpp	/^bool IoUringRawVideoFileWorker::submitReadRequest(int frame_index, void* buffer, size_t buffer_s/;"	f	language:C++	class:IoUringRawVideoFileWorker	typeref:typename:bool	signature:(int frame_index,void * buffer,size_t buffer_size)
-supportsZeroCopy	include/productionline/worker/FfmpegDecodeVideoFileWorker.hpp	/^    bool supportsZeroCopy() const { return supports_zero_copy_; }$/;"	f	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:bool	signature:() const
-supports_zero_copy_	include/productionline/worker/FfmpegDecodeVideoFileWorker.hpp	/^    bool supports_zero_copy_;          \/\/ 解码器是否支持零拷贝$/;"	m	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:bool
-sws_ctx_	include/productionline/worker/FfmpegDecodeRtspWorker.hpp	/^    SwsContext* sws_ctx_;              \/\/ 图像格式转换$/;"	m	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:SwsContext *
-sws_ctx_	include/productionline/worker/FfmpegDecodeVideoFileWorker.hpp	/^    SwsContext* sws_ctx_;              \/\/ 图像格式转换$/;"	m	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:SwsContext *
+submitReadRequest	source/productionline/worker/implementation/IoUringRawVideoFileWorker.cpp	/^bool IoUringRawVideoFileWorker::submitReadRequest(int frame_index, void* buffer, size_t buffer_s/;"	f	language:C++	class:IoUringRawVideoFileWorker	typeref:typename:bool	signature:(int frame_index,void * buffer,size_t buffer_size)
+supportsZeroCopy	include/productionline/worker/implementation/FfmpegDecodeVideoFileWorker.hpp	/^    bool supportsZeroCopy() const { return supports_zero_copy_; }$/;"	f	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:bool	signature:() const
+supports_zero_copy_	include/productionline/worker/implementation/FfmpegDecodeVideoFileWorker.hpp	/^    bool supports_zero_copy_;          \/\/ 解码器是否支持零拷贝$/;"	m	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:bool
+sws_ctx_	include/productionline/worker/implementation/FfmpegDecodeRtspWorker.hpp	/^    SwsContext* sws_ctx_;              \/\/ 图像格式转换$/;"	m	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:SwsContext *
+sws_ctx_	include/productionline/worker/implementation/FfmpegDecodeVideoFileWorker.hpp	/^    SwsContext* sws_ctx_;              \/\/ 图像格式转换$/;"	m	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:SwsContext *
 test_4frame_loop	test.cpp	/^static int test_4frame_loop(const char* raw_video_path) {$/;"	f	language:C++	typeref:typename:int	file:	signature:(const char * raw_video_path)
 test_buffermanager_iouring	test.cpp	/^static int test_buffermanager_iouring(const char* raw_video_path) {$/;"	f	language:C++	typeref:typename:int	file:	signature:(const char * raw_video_path)
 test_buffermanager_producer	test.cpp	/^static int test_buffermanager_producer(const char* raw_video_path) {$/;"	f	language:C++	typeref:typename:int	file:	signature:(const char * raw_video_path)
@@ -689,66 +675,70 @@ thread_	include/monitor/Timer.hpp	/^    std::thread thread_;$/;"	m	language:C++	
 thread_count	include/productionline/VideoProductionLine.hpp	/^        int thread_count;                              \/\/ 生产者线程数（默认1）$/;"	m	language:C++	struct:VideoProductionLine::Config	typeref:typename:int
 threads_	include/productionline/VideoProductionLine.hpp	/^    std::vector<std::thread> threads_;$/;"	m	language:C++	class:VideoProductionLine	typeref:typename:std::vector<std::thread>
 timerLoop	source/monitor/Timer.cpp	/^void Timer::timerLoop() {$/;"	f	language:C++	class:Timer	typeref:typename:void	signature:()
-timestamp	include/productionline/worker/FfmpegDecodeRtspWorker.hpp	/^        uint64_t timestamp;            \/\/ 时间戳$/;"	m	language:C++	struct:FfmpegDecodeRtspWorker::FrameSlot	typeref:typename:uint64_t
+timestamp	include/productionline/worker/implementation/FfmpegDecodeRtspWorker.hpp	/^        uint64_t timestamp;            \/\/ 时间戳$/;"	m	language:C++	struct:FfmpegDecodeRtspWorker::FrameSlot	typeref:typename:uint64_t
 total_buffers	include/buffer/BufferPoolRegistry.hpp	/^        int total_buffers;       \/\/ 总 Buffer 数量$/;"	m	language:C++	struct:BufferPoolRegistry::GlobalStats	typeref:typename:int
 total_decode_time_us_	include/monitor/PerformanceMonitor.hpp	/^    long long total_decode_time_us_;  \/\/ 总解码时间（微秒）$/;"	m	language:C++	class:PerformanceMonitor	typeref:typename:long long
 total_display_time_us_	include/monitor/PerformanceMonitor.hpp	/^    long long total_display_time_us_; \/\/ 总显示时间（微秒）$/;"	m	language:C++	class:PerformanceMonitor	typeref:typename:long long
 total_filled	include/buffer/BufferPoolRegistry.hpp	/^        int total_filled;        \/\/ 总已填充 Buffer 数量$/;"	m	language:C++	struct:BufferPoolRegistry::GlobalStats	typeref:typename:int
 total_frames_	include/productionline/VideoProductionLine.hpp	/^    int total_frames_;$/;"	m	language:C++	class:VideoProductionLine	typeref:typename:int
-total_frames_	include/productionline/worker/FfmpegDecodeVideoFileWorker.hpp	/^    int total_frames_;                 \/\/ 总帧数（估算）$/;"	m	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:int
-total_frames_	include/productionline/worker/IoUringRawVideoFileWorker.hpp	/^    int total_frames_;$/;"	m	language:C++	class:IoUringRawVideoFileWorker	typeref:typename:int
-total_frames_	include/productionline/worker/MmapRawVideoFileWorker.hpp	/^    int total_frames_;                \/\/ 总帧数$/;"	m	language:C++	class:MmapRawVideoFileWorker	typeref:typename:int
+total_frames_	include/productionline/worker/implementation/FfmpegDecodeVideoFileWorker.hpp	/^    int total_frames_;                 \/\/ 总帧数（估算）$/;"	m	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:int
+total_frames_	include/productionline/worker/implementation/IoUringRawVideoFileWorker.hpp	/^    int total_frames_;$/;"	m	language:C++	class:IoUringRawVideoFileWorker	typeref:typename:int
+total_frames_	include/productionline/worker/implementation/MmapRawVideoFileWorker.hpp	/^    int total_frames_;                \/\/ 总帧数$/;"	m	language:C++	class:MmapRawVideoFileWorker	typeref:typename:int
 total_free	include/buffer/BufferPoolRegistry.hpp	/^        int total_free;          \/\/ 总空闲 Buffer 数量$/;"	m	language:C++	struct:BufferPoolRegistry::GlobalStats	typeref:typename:int
 total_load_time_us_	include/monitor/PerformanceMonitor.hpp	/^    long long total_load_time_us_;    \/\/ 总加载时间（微秒）$/;"	m	language:C++	class:PerformanceMonitor	typeref:typename:long long
 total_memory	include/buffer/BufferPoolRegistry.hpp	/^        size_t total_memory;     \/\/ 总内存使用量（字节）$/;"	m	language:C++	struct:BufferPoolRegistry::GlobalStats	typeref:typename:size_t
 total_pools	include/buffer/BufferPoolRegistry.hpp	/^        int total_pools;         \/\/ 总 Pool 数量$/;"	m	language:C++	struct:BufferPoolRegistry::GlobalStats	typeref:typename:int
 tpsfb_dma_info	source/display/LinuxFramebufferDevice.cpp	/^struct tpsfb_dma_info {$/;"	s	language:C++	file:
-typeToString	source/productionline/worker/BufferFillingWorkerFactory.cpp	/^const char* BufferFillingWorkerFactory::typeToString(WorkerType type) {$/;"	f	language:C++	class:BufferFillingWorkerFactory	typeref:typename:const char *	signature:(WorkerType type)
+typeToString	source/productionline/worker/factory/BufferFillingWorkerFactory.cpp	/^const char* BufferFillingWorkerFactory::typeToString(WorkerType type) {$/;"	f	language:C++	class:BufferFillingWorkerFactory	typeref:typename:const char *	signature:(WorkerType type)
 type_	include/buffer/allocator/NormalAllocator.hpp	/^    BufferMemoryAllocatorType type_;$/;"	m	language:C++	class:NormalAllocator	typeref:typename:BufferMemoryAllocatorType
 unique_ptr 的简化实现（伪代码）	cpp_compile_error.md	/^### unique_ptr 的简化实现（伪代码）$/;"	S	language:Markdown
-unmapFile	source/productionline/worker/MmapRawVideoFileWorker.cpp	/^void MmapRawVideoFileWorker::unmapFile() {$/;"	f	language:C++	class:MmapRawVideoFileWorker	typeref:typename:void	signature:()
+unmapFile	source/productionline/worker/implementation/MmapRawVideoFileWorker.cpp	/^void MmapRawVideoFileWorker::unmapFile() {$/;"	f	language:C++	class:MmapRawVideoFileWorker	typeref:typename:void	signature:()
 unmapHardwareFramebufferMemory	source/display/LinuxFramebufferDevice.cpp	/^void LinuxFramebufferDevice::unmapHardwareFramebufferMemory() {$/;"	f	language:C++	class:LinuxFramebufferDevice	typeref:typename:void	signature:()
 unregisterBufferOwnership	source/buffer/allocator/BufferAllocatorBase.cpp	/^void BufferAllocatorBase::unregisterBufferOwnership(Buffer* buffer) {$/;"	f	language:C++	class:BufferAllocatorBase	typeref:typename:void	signature:(Buffer * buffer)
 unregisterPool	source/buffer/BufferPoolRegistry.cpp	/^void BufferPoolRegistry::unregisterPool(uint64_t id) {$/;"	f	language:C++	class:BufferPoolRegistry	typeref:typename:void	signature:(uint64_t id)
-use_hardware_decoder_	include/productionline/worker/FfmpegDecodeVideoFileWorker.hpp	/^    bool use_hardware_decoder_;        \/\/ 是否使用硬件解码$/;"	m	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:bool
+use_hardware_decoder_	include/productionline/worker/implementation/FfmpegDecodeVideoFileWorker.hpp	/^    bool use_hardware_decoder_;        \/\/ 是否使用硬件解码$/;"	m	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:bool
 user_data_	include/monitor/Timer.hpp	/^    void* user_data_;$/;"	m	language:C++	class:Timer	typeref:typename:void *
 validate	source/buffer/Buffer.cpp	/^bool Buffer::validate() const {$/;"	f	language:C++	class:Buffer	typeref:typename:bool	signature:() const
-validateFile	source/productionline/worker/MmapRawVideoFileWorker.cpp	/^bool MmapRawVideoFileWorker::validateFile() {$/;"	f	language:C++	class:MmapRawVideoFileWorker	typeref:typename:bool	signature:()
+validateFile	source/productionline/worker/implementation/MmapRawVideoFileWorker.cpp	/^bool MmapRawVideoFileWorker::validateFile() {$/;"	f	language:C++	class:MmapRawVideoFileWorker	typeref:typename:bool	signature:()
 validation_callback_	include/buffer/Buffer.hpp	/^    ValidationCallback validation_callback_;$/;"	m	language:C++	class:Buffer	typeref:typename:ValidationCallback
 validation_magic_	include/buffer/Buffer.hpp	/^    uint32_t validation_magic_;      \/\/ 魔数，用于检测野指针$/;"	m	language:C++	class:Buffer	typeref:typename:uint32_t
-video_fd_	include/productionline/worker/IoUringRawVideoFileWorker.hpp	/^    int video_fd_;$/;"	m	language:C++	class:IoUringRawVideoFileWorker	typeref:typename:int
-video_path_	include/productionline/worker/IoUringRawVideoFileWorker.hpp	/^    std::string video_path_;$/;"	m	language:C++	class:IoUringRawVideoFileWorker	typeref:typename:std::string
-video_stream_index_	include/productionline/worker/FfmpegDecodeRtspWorker.hpp	/^    int video_stream_index_;$/;"	m	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:int
-video_stream_index_	include/productionline/worker/FfmpegDecodeVideoFileWorker.hpp	/^    int video_stream_index_;$/;"	m	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:int
+video_fd_	include/productionline/worker/implementation/IoUringRawVideoFileWorker.hpp	/^    int video_fd_;$/;"	m	language:C++	class:IoUringRawVideoFileWorker	typeref:typename:int
+video_path_	include/productionline/worker/implementation/IoUringRawVideoFileWorker.hpp	/^    std::string video_path_;$/;"	m	language:C++	class:IoUringRawVideoFileWorker	typeref:typename:std::string
+video_stream_index_	include/productionline/worker/implementation/FfmpegDecodeRtspWorker.hpp	/^    int video_stream_index_;$/;"	m	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:int
+video_stream_index_	include/productionline/worker/implementation/FfmpegDecodeVideoFileWorker.hpp	/^    int video_stream_index_;$/;"	m	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:int
 virt_addr	include/buffer/allocator/FramebufferAllocator.hpp	/^        void* virt_addr;       \/\/ 虚拟地址（已 mmap）$/;"	m	language:C++	struct:FramebufferAllocator::BufferInfo	typeref:typename:void *
 virt_addr_	include/buffer/Buffer.hpp	/^    void* virt_addr_;                \/\/ 虚拟地址（用户空间）$/;"	m	language:C++	class:Buffer	typeref:typename:void *
-waitForCompletion	source/productionline/worker/IoUringRawVideoFileWorker.cpp	/^bool IoUringRawVideoFileWorker::waitForCompletion() {$/;"	f	language:C++	class:IoUringRawVideoFileWorker	typeref:typename:bool	signature:()
+waitForCompletion	source/productionline/worker/implementation/IoUringRawVideoFileWorker.cpp	/^bool IoUringRawVideoFileWorker::waitForCompletion() {$/;"	f	language:C++	class:IoUringRawVideoFileWorker	typeref:typename:bool	signature:()
 waitVerticalSync	source/display/LinuxFramebufferDevice.cpp	/^bool LinuxFramebufferDevice::waitVerticalSync() {$/;"	f	language:C++	class:LinuxFramebufferDevice	typeref:typename:bool	signature:()
 width	include/productionline/VideoProductionLine.hpp	/^        int width;                                     \/\/ 分辨率宽度$/;"	m	language:C++	struct:VideoProductionLine::Config	typeref:typename:int
 width_	include/display/LinuxFramebufferDevice.hpp	/^    int width_;                       \/\/ 显示宽度（像素）$/;"	m	language:C++	class:LinuxFramebufferDevice	typeref:typename:int
-width_	include/productionline/worker/FfmpegDecodeRtspWorker.hpp	/^    int width_;                        \/\/ 输出宽度$/;"	m	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:int
-width_	include/productionline/worker/FfmpegDecodeVideoFileWorker.hpp	/^    int width_;                        \/\/ 视频原始宽度$/;"	m	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:int
-width_	include/productionline/worker/IoUringRawVideoFileWorker.hpp	/^    int width_;$/;"	m	language:C++	class:IoUringRawVideoFileWorker	typeref:typename:int
-width_	include/productionline/worker/MmapRawVideoFileWorker.hpp	/^    int width_;                       \/\/ 视频宽度（像素）$/;"	m	language:C++	class:MmapRawVideoFileWorker	typeref:typename:int
-worker_	include/productionline/VideoProductionLine.hpp	/^    std::shared_ptr<BufferFillingWorker> worker_;$/;"	m	language:C++	class:VideoProductionLine	typeref:typename:std::shared_ptr<BufferFillingWorker>
-worker_	include/productionline/worker/BufferFillingWorker.hpp	/^    std::unique_ptr<IBufferFillingWorker> worker_;  \/\/ 实际的Worker实现（Buffer填充接/;"	m	language:C++	class:BufferFillingWorker	typeref:typename:std::unique_ptr<IBufferFillingWorker>
+width_	include/productionline/worker/implementation/FfmpegDecodeRtspWorker.hpp	/^    int width_;                        \/\/ 输出宽度$/;"	m	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:int
+width_	include/productionline/worker/implementation/FfmpegDecodeVideoFileWorker.hpp	/^    int width_;                        \/\/ 视频原始宽度$/;"	m	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:int
+width_	include/productionline/worker/implementation/IoUringRawVideoFileWorker.hpp	/^    int width_;$/;"	m	language:C++	class:IoUringRawVideoFileWorker	typeref:typename:int
+width_	include/productionline/worker/implementation/MmapRawVideoFileWorker.hpp	/^    int width_;                       \/\/ 视频宽度（像素）$/;"	m	language:C++	class:MmapRawVideoFileWorker	typeref:typename:int
+worker_	include/productionline/VideoProductionLine.hpp	/^    std::shared_ptr<BufferFillingWorkerFacade> worker_;$/;"	m	language:C++	class:VideoProductionLine	typeref:typename:std::shared_ptr<BufferFillingWorkerFacade>
+worker_	include/productionline/worker/facade/BufferFillingWorkerFacade.hpp	/^    std::unique_ptr<WorkerBase> worker_;  \/\/ 实际的Worker实现（统一基类）$/;"	m	language:C++	class:BufferFillingWorkerFacade	typeref:typename:std::unique_ptr<WorkerBase>
 worker_buffer_pool_	include/productionline/VideoProductionLine.hpp	/^    std::unique_ptr<BufferPool> worker_buffer_pool_;$/;"	m	language:C++	class:VideoProductionLine	typeref:typename:std::unique_ptr<BufferPool>
 worker_type	include/productionline/VideoProductionLine.hpp	/^        BufferFillingWorkerFactory::WorkerType worker_type;    \/\/ Worker类型（默认AUTO）$/;"	m	language:C++	struct:VideoProductionLine::Config	typeref:typename:BufferFillingWorkerFactory::WorkerType
 working_buffer_pool_	include/productionline/VideoProductionLine.hpp	/^    BufferPool* working_buffer_pool_;$/;"	m	language:C++	class:VideoProductionLine	typeref:typename:BufferPool *
-write_index_	include/productionline/worker/FfmpegDecodeRtspWorker.hpp	/^    int write_index_;                  \/\/ 写入索引$/;"	m	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:int
+write_index_	include/productionline/worker/implementation/FfmpegDecodeRtspWorker.hpp	/^    int write_index_;                  \/\/ 写入索引$/;"	m	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:int
 ~AVFrameAllocator	source/buffer/allocator/AVFrameAllocator.cpp	/^AVFrameAllocator::~AVFrameAllocator() {$/;"	f	language:C++	class:AVFrameAllocator	signature:()
-~BufferFillingWorker	source/productionline/worker/BufferFillingWorker.cpp	/^BufferFillingWorker::~BufferFillingWorker() {$/;"	f	language:C++	class:BufferFillingWorker	signature:()
+~BufferFillingWorkerFacade	source/productionline/worker/facade/BufferFillingWorkerFacade.cpp	/^BufferFillingWorkerFacade::~BufferFillingWorkerFacade() {$/;"	f	language:C++	class:BufferFillingWorkerFacade	signature:()
 ~BufferPool	source/buffer/BufferPool.cpp	/^BufferPool::~BufferPool() {$/;"	f	language:C++	class:BufferPool	signature:()
-~FfmpegDecodeRtspWorker	source/productionline/worker/FfmpegDecodeRtspWorker.cpp	/^FfmpegDecodeRtspWorker::~FfmpegDecodeRtspWorker() {$/;"	f	language:C++	class:FfmpegDecodeRtspWorker	signature:()
-~FfmpegDecodeVideoFileWorker	source/productionline/worker/FfmpegDecodeVideoFileWorker.cpp	/^FfmpegDecodeVideoFileWorker::~FfmpegDecodeVideoFileWorker() {$/;"	f	language:C++	class:FfmpegDecodeVideoFileWorker	signature:()
+~FfmpegDecodeRtspWorker	source/productionline/worker/implementation/FfmpegDecodeRtspWorker.cpp	/^FfmpegDecodeRtspWorker::~FfmpegDecodeRtspWorker() {$/;"	f	language:C++	class:FfmpegDecodeRtspWorker	signature:()
+~FfmpegDecodeVideoFileWorker	source/productionline/worker/implementation/FfmpegDecodeVideoFileWorker.cpp	/^FfmpegDecodeVideoFileWorker::~FfmpegDecodeVideoFileWorker() {$/;"	f	language:C++	class:FfmpegDecodeVideoFileWorker	signature:()
 ~FramebufferAllocator	source/buffer/allocator/FramebufferAllocator.cpp	/^FramebufferAllocator::~FramebufferAllocator() {$/;"	f	language:C++	class:FramebufferAllocator	signature:()
-~IoUringRawVideoFileWorker	source/productionline/worker/IoUringRawVideoFileWorker.cpp	/^IoUringRawVideoFileWorker::~IoUringRawVideoFileWorker() {$/;"	f	language:C++	class:IoUringRawVideoFileWorker	signature:()
+~IoUringRawVideoFileWorker	source/productionline/worker/implementation/IoUringRawVideoFileWorker.cpp	/^IoUringRawVideoFileWorker::~IoUringRawVideoFileWorker() {$/;"	f	language:C++	class:IoUringRawVideoFileWorker	signature:()
 ~LinuxFramebufferDevice	source/display/LinuxFramebufferDevice.cpp	/^LinuxFramebufferDevice::~LinuxFramebufferDevice() {$/;"	f	language:C++	class:LinuxFramebufferDevice	signature:()
-~MmapRawVideoFileWorker	source/productionline/worker/MmapRawVideoFileWorker.cpp	/^MmapRawVideoFileWorker::~MmapRawVideoFileWorker() {$/;"	f	language:C++	class:MmapRawVideoFileWorker	signature:()
+~MmapRawVideoFileWorker	source/productionline/worker/implementation/MmapRawVideoFileWorker.cpp	/^MmapRawVideoFileWorker::~MmapRawVideoFileWorker() {$/;"	f	language:C++	class:MmapRawVideoFileWorker	signature:()
 ~NormalAllocator	source/buffer/allocator/NormalAllocator.cpp	/^NormalAllocator::~NormalAllocator() {$/;"	f	language:C++	class:NormalAllocator	signature:()
 ~PerformanceMonitor	source/monitor/PerformanceMonitor.cpp	/^PerformanceMonitor::~PerformanceMonitor() {$/;"	f	language:C++	class:PerformanceMonitor	signature:()
 ~Timer	source/monitor/Timer.cpp	/^Timer::~Timer() {$/;"	f	language:C++	class:Timer	signature:()
 ~VideoProductionLine	source/productionline/VideoProductionLine.cpp	/^VideoProductionLine::~VideoProductionLine() {$/;"	f	language:C++	class:VideoProductionLine	signature:()
+✅ BufferAllocatorBase 及其子类（抽象工厂模式）	ARCHITECTURE.md	/^#### ✅ BufferAllocatorBase 及其子类（抽象工厂模式）$/;"	t	language:Markdown
+✅ BufferFillingWorkerFacade（门面类）	ARCHITECTURE.md	/^#### ✅ BufferFillingWorkerFacade（门面类）$/;"	t	language:Markdown
+✅ BufferFillingWorkerFactory（工厂类）	ARCHITECTURE.md	/^#### ✅ BufferFillingWorkerFactory（工厂类）$/;"	t	language:Markdown
+✅ BufferPool::CreateEmpty（静态工厂方法）	ARCHITECTURE.md	/^#### ✅ BufferPool::CreateEmpty（静态工厂方法）$/;"	t	language:Markdown
 ✅ 应该使用 explicit 的场景	cpp_compile_error.md	/^#### ✅ 应该使用 explicit 的场景$/;"	t	language:Markdown
 ✅ 总结	cpp_compile_error.md	/^## ✅ 总结$/;"	s	language:Markdown
 ✅ 推荐做法	cpp_compile_error.md	/^#### ✅ 推荐做法$/;"	t	language:Markdown
@@ -773,6 +763,7 @@ write_index_	include/productionline/worker/FfmpegDecodeRtspWorker.hpp	/^    int 
 使用示例	ARCHITECTURE.md	/^## 使用示例$/;"	s	language:Markdown
 使用要求	include/display/display_buffer_usage_guide.md	/^### 使用要求$/;"	S	language:Markdown
 关联方式	ARCHITECTURE.md	/^### 关联方式$/;"	S	language:Markdown
+关键关系总结	ARCHITECTURE.md	/^### 关键关系总结$/;"	S	language:Markdown
 关键区别 1：访问权限限制	cpp_compile_error.md	/^### 关键区别 1：访问权限限制$/;"	S	language:Markdown
 关键区别 2：内存分配次数	cpp_compile_error.md	/^### 关键区别 2：内存分配次数$/;"	S	language:Markdown
 内存结构示意	cpp_compile_error.md	/^### 内存结构示意$/;"	S	language:Markdown
@@ -781,6 +772,7 @@ write_index_	include/productionline/worker/FfmpegDecodeRtspWorker.hpp	/^    int 
 功能描述	include/display/display_buffer_usage_guide.md	/^### 功能描述$/;"	S	language:Markdown
 协作关系图	ARCHITECTURE.md	/^### 协作关系图$/;"	S	language:Markdown
 参考代码位置	cpp_compile_error.md	/^### 参考代码位置$/;"	S	language:Markdown
+可视化图表	ARCHITECTURE.md	/^### 可视化图表$/;"	S	language:Markdown
 图解对比（核心理解）	cpp_compile_error.md	/^### 图解对比（核心理解）$/;"	S	language:Markdown
 场景 1：基本使用	cpp_compile_error.md	/^#### 场景 1：基本使用$/;"	t	language:Markdown
 场景 2：函数参数传递	cpp_compile_error.md	/^#### 场景 2：函数参数传递$/;"	t	language:Markdown
@@ -789,6 +781,7 @@ write_index_	include/productionline/worker/FfmpegDecodeRtspWorker.hpp	/^    int 
 实际代码对比	cpp_compile_error.md	/^### 实际代码对比$/;"	S	language:Markdown
 实际代码示例	cpp_compile_error.md	/^### 实际代码示例$/;"	S	language:Markdown
 实际案例：Decoder 类	cpp_compile_error.md	/^### 实际案例：Decoder 类$/;"	S	language:Markdown
+工厂模式识别	ARCHITECTURE.md	/^### 工厂模式识别$/;"	S	language:Markdown
 常见困惑	cpp_compile_error.md	/^### 常见困惑$/;"	S	language:Markdown
 常见错误	cpp_compile_error.md	/^### 常见错误$/;"	S	language:Markdown
 常见错误和解决方案	cpp_compile_error.md	/^### 常见错误和解决方案$/;"	S	language:Markdown
@@ -819,8 +812,7 @@ write_index_	include/productionline/worker/FfmpegDecodeRtspWorker.hpp	/^    int 
 核心类职责	ARCHITECTURE.md	/^## 核心类职责$/;"	s	language:Markdown
 核心类详解	ARCHITECTURE.md	/^## 核心类详解$/;"	s	language:Markdown
 核心设计理念	include/display/display_buffer_usage_guide.md	/^### 核心设计理念$/;"	S	language:Markdown
-模式1：预分配模式（requiresExternalBuffer() == true）	ARCHITECTURE.md	/^#### 模式1：预分配模式（requiresExternalBuffer() == true）$/;"	t	language:Markdown
-模式2：动态注入模式（requiresExternalBuffer() == false）	ARCHITECTURE.md	/^#### 模式2：动态注入模式（requiresExternalBuffer() == false）$/;"	t	language:Markdown
+概述	ARCHITECTURE.md	/^### 概述$/;"	S	language:Markdown
 现代编译器通常会提示：	cpp_compile_error.md	/^# 现代编译器通常会提示：$/;"	c	language:Markdown
 生活比喻	cpp_compile_error.md	/^### 生活比喻$/;"	S	language:Markdown
 相关 C++ 标准	cpp_compile_error.md	/^### 相关 C++ 标准$/;"	S	language:Markdown
@@ -838,6 +830,8 @@ write_index_	include/productionline/worker/FfmpegDecodeRtspWorker.hpp	/^    int 
 背景	cpp_compile_error.md	/^### 背景$/;"	S	language:Markdown
 解决方案	cpp_compile_error.md	/^### 解决方案$/;"	S	language:Markdown
 设计模式	ARCHITECTURE.md	/^## 设计模式$/;"	s	language:Markdown
+设计模式组合优势	ARCHITECTURE.md	/^#### 设计模式组合优势$/;"	t	language:Markdown
+设计模式统计表	ARCHITECTURE.md	/^### 设计模式统计表$/;"	S	language:Markdown
 设计考虑	cpp_compile_error.md	/^### 设计考虑$/;"	S	language:Markdown
 详细协作流程	ARCHITECTURE.md	/^### 详细协作流程$/;"	S	language:Markdown
 详细数据流（两种模式）	ARCHITECTURE.md	/^### 详细数据流（两种模式）$/;"	S	language:Markdown
@@ -860,16 +854,27 @@ write_index_	include/productionline/worker/FfmpegDecodeRtspWorker.hpp	/^    int 
 错误信息	cpp_compile_error.md	/^### 错误信息$/;"	S	language:Markdown
 错误原因	cpp_compile_error.md	/^### 错误原因$/;"	S	language:Markdown
 错误处理	include/display/display_buffer_usage_guide.md	/^### 错误处理$/;"	S	language:Markdown
+门面模式与工厂模式详细分析	ARCHITECTURE.md	/^## 门面模式与工厂模式详细分析$/;"	s	language:Markdown
+门面类使用工厂模式	ARCHITECTURE.md	/^#### 门面类使用工厂模式$/;"	t	language:Markdown
+门面类使用工厂模式的关系	ARCHITECTURE.md	/^### 门面类使用工厂模式的关系$/;"	S	language:Markdown
+门面类识别	ARCHITECTURE.md	/^### 门面类识别$/;"	S	language:Markdown
 隐式类型转换的工作原理	cpp_compile_error.md	/^### 隐式类型转换的工作原理$/;"	S	language:Markdown
 🎓 关键知识点总结	cpp_compile_error.md	/^## 🎓 关键知识点总结$/;"	s	language:Markdown
+🎭 门面模式详细关系图	ARCHITECTURE.md	/^#### 🎭 门面模式详细关系图$/;"	t	language:Markdown
 🎯 三种显示方法对比	include/display/display_buffer_usage_guide.md	/^## 🎯 三种显示方法对比$/;"	s	language:Markdown
+🏗️ 抽象工厂模式关系图	ARCHITECTURE.md	/^#### 🏗️ 抽象工厂模式关系图$/;"	t	language:Markdown
+🏭 工厂模式详细关系图	ARCHITECTURE.md	/^#### 🏭 工厂模式详细关系图$/;"	t	language:Markdown
+📁 完整文件依赖关系图	ARCHITECTURE.md	/^#### 📁 完整文件依赖关系图$/;"	t	language:Markdown
 📊 性能对比	include/display/display_buffer_usage_guide.md	/^## 📊 性能对比$/;"	s	language:Markdown
 📊 错误类型统计	cpp_compile_error.md	/^## 📊 错误类型统计$/;"	s	language:Markdown
+📊 门面模式 + 工厂模式组合关系图	ARCHITECTURE.md	/^#### 📊 门面模式 + 工厂模式组合关系图$/;"	t	language:Markdown
 📋 目录	ARCHITECTURE.md	/^## 📋 目录$/;"	s	language:Markdown
 📚 参考资源	cpp_compile_error.md	/^## 📚 参考资源$/;"	s	language:Markdown
 📚 概述	include/display/display_buffer_usage_guide.md	/^## 📚 概述$/;"	s	language:Markdown
 📚 目录	cpp_compile_error.md	/^## 📚 目录$/;"	s	language:Markdown
 📝 总结	include/display/display_buffer_usage_guide.md	/^## 📝 总结$/;"	s	language:Markdown
+🔄 数据流和调用关系图	ARCHITECTURE.md	/^#### 🔄 数据流和调用关系图$/;"	t	language:Markdown
 🔄 迁移指南：从旧 API 迁移	include/display/display_buffer_usage_guide.md	/^## 🔄 迁移指南：从旧 API 迁移$/;"	s	language:Markdown
+🔗 BufferFillingWorkerFacade（门面）→ BufferFillingWorkerFactory（工厂）	ARCHITECTURE.md	/^#### 🔗 BufferFillingWorkerFacade（门面）→ BufferFillingWorkerFactory（工厂）$/;"	t	language:Markdown
 🛠️ 调试技巧	cpp_compile_error.md	/^## 🛠️ 调试技巧$/;"	s	language:Markdown
 🛡️ 错误处理最佳实践	include/display/display_buffer_usage_guide.md	/^## 🛡️ 错误处理最佳实践$/;"	s	language:Markdown

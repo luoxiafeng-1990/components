@@ -9,7 +9,8 @@
 // ============ 构造/析构 ============
 
 IoUringRawVideoFileWorker::IoUringRawVideoFileWorker(int queue_depth)
-    : queue_depth_(queue_depth)
+    : WorkerBase(BufferAllocatorFactory::AllocatorType::NORMAL)  // Raw视频文件使用NormalAllocator
+    , queue_depth_(queue_depth)
     , initialized_(false)
     , video_fd_(-1)
     , frame_size_(0)

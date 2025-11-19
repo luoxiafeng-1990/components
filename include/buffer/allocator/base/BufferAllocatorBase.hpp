@@ -1,7 +1,7 @@
 #pragma once
 
-#include "../Buffer.hpp"
-#include "../BufferPool.hpp"
+#include "../../Buffer.hpp"
+#include "../../BufferPool.hpp"
 #include <memory>
 #include <unordered_map>
 #include <mutex>
@@ -23,27 +23,33 @@ enum class BufferMemoryAllocatorType {
 };
 
 /**
- * @brief BufferAllocatorBase - Buffer 生命周期管理器（抽象基类）
+ * @brief BufferAllocatorBase - Buffer分配器基类（纯抽象接口类）
  * 
- * 命名规范：Google C++ Style Guide
- * - Base 后缀：表示这是抽象基类，一眼就能看出
- * - 子类命名：NormalAllocator, AVFrameAllocator, FramebufferAllocator（描述性名称）
+ * 架构角色：抽象基类（Abstract Base Class / Interface）
+ * 
+ * 设计模式：接口隔离原则（ISP）
  * 
  * 职责：
- * - 创建 Buffer（批量或单个）
- * - 销毁 Buffer
- * - 将 Buffer 注入到 BufferPool（调用 BufferPool 私有方法）
- * - 从 BufferPool 移除 Buffer（调用 BufferPool 私有方法）
+ * - 定义所有Allocator必须实现的接口
+ * - 保证接口的完整性和一致性
+ * - 作为所有Allocator实现类的统一基类
  * 
  * 设计原则：
+ * - 纯抽象基类：所有方法都是纯虚函数（= 0）
+ * - 子类必须实现所有纯虚函数
  * - 作为 BufferPool 的友元，可以调用其私有方法
  * - 不持有长期锁（避免死锁）
  * - 所有队列操作委托给 BufferPool（BufferPool 内部加锁）
  * 
+ * 子类实现：
+ * - NormalAllocator: 普通内存分配器
+ * - AVFrameAllocator: AVFrame包装分配器
+ * - FramebufferAllocator: Framebuffer内存包装分配器
+ * 
  * 使用示例：
  * @code
- * // 批量分配
- * auto allocator = std::make_unique<NormalAllocator>(BufferMemoryAllocatorType::NORMAL_MALLOC);
+ * // 通过Factory创建
+ * auto allocator = BufferAllocatorFactory::create(BufferAllocatorFactory::AllocatorType::NORMAL);
  * auto pool = allocator->allocatePoolWithBuffers(10, 1024*1024, "MyPool", "Video");
  * 
  * // 单个注入（扩容）
@@ -51,15 +57,16 @@ enum class BufferMemoryAllocatorType {
  * 
  * // 移除（缩容）
  * allocator->removeBufferFromPool(buf, pool.get());
+ * 
+ * // 销毁Pool
+ * allocator->destroyPool(pool.get());
  * @endcode
  */
 class BufferAllocatorBase {
 public:
     virtual ~BufferAllocatorBase() = default;
     
-    // ==================== 公开接口 ====================
-    
-    // ====== 批量分配 ======
+    // ==================== 纯虚函数接口（子类必须实现）====================
     
     /**
      * @brief 批量创建 Buffer 并构建 BufferPool
@@ -79,14 +86,12 @@ public:
      * @note 线程安全：是（BufferPool 内部加锁）
      * @note 失败时自动清理已分配的 buffer
      */
-    std::unique_ptr<BufferPool> allocatePoolWithBuffers(
+    virtual std::unique_ptr<BufferPool> allocatePoolWithBuffers(
         int count,
         size_t size,
         const std::string& name,
         const std::string& category = ""
-    );
-    
-    // ====== 单个注入（扩容/动态注入）======
+    ) = 0;
     
     /**
      * @brief 创建单个 Buffer 并注入到指定 BufferPool
@@ -107,13 +112,11 @@ public:
      * 
      * @note 线程安全：是（BufferPool 内部加锁）
      */
-    Buffer* injectBufferToPool(
+    virtual Buffer* injectBufferToPool(
         size_t size,
         BufferPool* pool,
         QueueType queue = QueueType::FREE
-    );
-    
-    // ====== Buffer 移除（缩容）======
+    ) = 0;
     
     /**
      * @brief 从 BufferPool 移除并销毁 Buffer
@@ -133,10 +136,31 @@ public:
      * @note 线程安全：是（BufferPool 内部加锁）
      * @note 只能移除 IDLE 状态的 buffer
      */
-    bool removeBufferFromPool(Buffer* buffer, BufferPool* pool);
+    virtual bool removeBufferFromPool(Buffer* buffer, BufferPool* pool) = 0;
+    
+    /**
+     * @brief 销毁整个 BufferPool 及其所有 Buffer
+     * 
+     * 适用场景：
+     * - 清理资源：销毁不再使用的 BufferPool
+     * - 析构时清理：Allocator 析构时清理所有创建的 Pool
+     * 
+     * 工作流程：
+     * 1. 从 pool 移除所有 Buffer
+     * 2. 销毁所有 Buffer（调用 deallocateBuffer）
+     * 3. 清除所有权记录
+     * 4. 销毁 BufferPool 对象（如果由 Allocator 创建）
+     * 
+     * @param pool 要销毁的 BufferPool
+     * @return true 成功，false 失败
+     * 
+     * @note 线程安全：是（BufferPool 内部加锁）
+     * @note 只能销毁所有 Buffer 都处于 IDLE 状态的 pool
+     */
+    virtual bool destroyPool(BufferPool* pool) = 0;
     
 protected:
-    // ==================== 子类必须实现 ====================
+    // ==================== 子类必须实现的核心方法 ====================
     
     /**
      * @brief 创建单个 Buffer（核心分配逻辑）
@@ -163,40 +187,8 @@ protected:
      */
     virtual void deallocateBuffer(Buffer* buffer) = 0;
     
-    // ==================== 辅助方法 ====================
-    
-    /**
-     * @brief 注册 Buffer 所有权
-     * 
-     * 用途：
-     * - 跟踪哪些 buffer 属于哪个 allocator
-     * - 用于清理时查找所有相关 buffer
-     * 
-     * @param buffer Buffer 指针
-     * @param allocator 所属的 Allocator
-     */
-    void registerBufferOwnership(Buffer* buffer, BufferAllocatorBase* allocator);
-    
-    /**
-     * @brief 注销 Buffer 所有权
-     * 
-     * @param buffer Buffer 指针
-     */
-    void unregisterBufferOwnership(Buffer* buffer);
-    
-    /**
-     * @brief 清理 Pool 中所有属于此 Allocator 的 buffer
-     * 
-     * 用途：
-     * - allocatePoolWithBuffers 失败时清理
-     * - 避免内存泄漏
-     * 
-     * @param pool 要清理的 BufferPool
-     */
-    void cleanupPool(BufferPool* pool);
-    
-    // ==================== 友元访问辅助方法 ====================
-    // 这些方法通过友元关系访问 BufferPool 的私有方法，供子类使用
+    // ==================== 友元访问辅助方法（供子类使用）====================
+    // 这些方法通过友元关系访问 BufferPool 的私有方法
     
     /**
      * @brief 将 Buffer 添加到 BufferPool 的指定队列
@@ -206,7 +198,13 @@ protected:
      * @param queue 队列类型
      * @return bool 成功返回 true
      */
-    bool addBufferToPoolQueue(BufferPool* pool, Buffer* buffer, QueueType queue);
+    static bool addBufferToPoolQueue(BufferPool* pool, Buffer* buffer, QueueType queue) {
+        if (!pool || !buffer) {
+            return false;
+        }
+        // 通过友元关系访问 BufferPool 的私有方法
+        return pool->addBufferToQueue(buffer, queue);
+    }
     
     /**
      * @brief 从 BufferPool 移除 Buffer
@@ -215,11 +213,11 @@ protected:
      * @param buffer Buffer 指针
      * @return bool 成功返回 true
      */
-    bool removeBufferFromPoolInternal(BufferPool* pool, Buffer* buffer);
-    
-private:
-    // 所有权跟踪（buffer → allocator 映射）
-    // 使用静态成员以支持跨 Allocator 实例查询
-    static std::unordered_map<Buffer*, BufferAllocatorBase*> buffer_ownership_;
-    static std::mutex ownership_mutex_;
+    static bool removeBufferFromPoolInternal(BufferPool* pool, Buffer* buffer) {
+        if (!pool || !buffer) {
+            return false;
+        }
+        // 通过友元关系访问 BufferPool 的私有方法
+        return pool->removeBufferFromPool(buffer);
+    }
 };

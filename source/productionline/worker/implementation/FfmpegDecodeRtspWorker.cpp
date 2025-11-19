@@ -1,6 +1,6 @@
 #include "productionline/worker/implementation/FfmpegDecodeRtspWorker.hpp"
 #include "buffer/BufferPool.hpp"
-#include "buffer/allocator/NormalAllocator.hpp"
+#include "buffer/allocator/implementation/NormalAllocator.hpp"
 #include <stdio.h>
 #include <string.h>
 #include <chrono>
@@ -18,7 +18,8 @@ extern "C" {
 // ============ 构造/析构 ============
 
 FfmpegDecodeRtspWorker::FfmpegDecodeRtspWorker()
-    : format_ctx_(nullptr)
+    : WorkerBase(BufferAllocatorFactory::AllocatorType::AVFRAME)  // RTSP流使用AVFrameAllocator（动态注入模式）
+    , format_ctx_(nullptr)
     , codec_ctx_(nullptr)
     , sws_ctx_(nullptr)
     , video_stream_index_(-1)

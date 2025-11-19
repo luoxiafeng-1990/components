@@ -1,6 +1,6 @@
 #pragma once
 
-#include "BufferAllocatorBase.hpp"
+#include "../base/BufferAllocatorBase.hpp"
 #include <cstdlib>
 
 /**
@@ -39,6 +39,43 @@ public:
     );
     
     ~NormalAllocator() override;
+    
+    // ==================== 实现基类纯虚函数 ====================
+    
+    /**
+     * @brief 批量创建 Buffer 并构建 BufferPool
+     */
+    std::unique_ptr<BufferPool> allocatePoolWithBuffers(
+        int count,
+        size_t size,
+        const std::string& name,
+        const std::string& category = ""
+    ) override;
+    
+    /**
+     * @brief 创建单个 Buffer 并注入到指定 BufferPool
+     */
+    Buffer* injectBufferToPool(
+        size_t size,
+        BufferPool* pool,
+        QueueType queue = QueueType::FREE
+    ) override;
+    
+    /**
+     * @brief 从 BufferPool 移除并销毁 Buffer
+     */
+    bool removeBufferFromPool(Buffer* buffer, BufferPool* pool) override;
+    
+    /**
+     * @brief 销毁整个 BufferPool 及其所有 Buffer
+     */
+    bool destroyPool(BufferPool* pool) override;
+    
+private:
+    /**
+     * @brief 清理 Pool 中所有属于此 Allocator 的 buffer（辅助方法）
+     */
+    void cleanupPool(BufferPool* pool);
     
 protected:
     /**

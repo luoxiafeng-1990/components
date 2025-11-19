@@ -11,7 +11,8 @@
 // ============ 构造函数 ============
 
 MmapRawVideoFileWorker::MmapRawVideoFileWorker()
-    : fd_(-1)
+    : WorkerBase(BufferAllocatorFactory::AllocatorType::NORMAL)  // Raw视频文件使用NormalAllocator
+    , fd_(-1)
     , mapped_file_(nullptr)
     , mapped_size_(0)
     , width_(0)
