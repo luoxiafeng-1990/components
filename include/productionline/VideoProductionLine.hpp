@@ -1,7 +1,7 @@
 #pragma once
 
 #include "../buffer/BufferPool.hpp"
-#include "worker/BufferFillingWorker.hpp"
+#include "worker/facade/BufferFillingWorkerFacade.hpp"
 #include <string>
 #include <vector>
 #include <thread>
@@ -162,7 +162,7 @@ private:
     BufferPool* working_buffer_pool_;
     
     // Worker（多线程共享）
-    std::shared_ptr<BufferFillingWorker> worker_;
+    std::shared_ptr<BufferFillingWorkerFacade> worker_;
     
     // 线程管理
     std::vector<std::thread> threads_;

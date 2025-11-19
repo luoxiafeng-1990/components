@@ -1,5 +1,5 @@
-#include "../../../include/buffer/allocator/FramebufferAllocator.hpp"
-#include "../../../include/display/LinuxFramebufferDevice.hpp"
+#include "buffer/allocator/FramebufferAllocator.hpp"
+#include "display/LinuxFramebufferDevice.hpp"
 #include <stdio.h>
 
 // ============================================================

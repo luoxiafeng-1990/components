@@ -1,4 +1,4 @@
-#include "../../../include/productionline/worker/FfmpegDecodeVideoFileWorker.hpp"
+#include "productionline/worker/implementation/FfmpegDecodeVideoFileWorker.hpp"
 #include <cstring>
 #include <cstdio>
 
@@ -92,13 +92,12 @@ bool FfmpegDecodeVideoFileWorker::open(const char* path) {
     return true;
 }
 
-bool FfmpegDecodeVideoFileWorker::openRaw(const char* path, int width, int height, int bits_per_pixel) {
-    (void)path;
+bool FfmpegDecodeVideoFileWorker::open(const char* path, int width, int height, int bits_per_pixel) {
+    // FfmpegDecodeVideoFileWorker 忽略 width/height/bpp 参数，自动检测格式
     (void)width;
     (void)height;
     (void)bits_per_pixel;
-    setError("FfmpegDecodeVideoFileWorker does not support raw video files. Use MmapRawVideoFileWorker or IoUringRawVideoFileWorker instead.");
-    return false;
+    return open(path);
 }
 
 void FfmpegDecodeVideoFileWorker::close() {
@@ -725,11 +724,6 @@ std::unique_ptr<BufferPool> FfmpegDecodeVideoFileWorker::getOutputBufferPool() {
     // FfmpegDecodeVideoFileWorker 目前没有创建内部 BufferPool
     // 使用外部提供的 BufferPool
     // TODO: 如果需要在open()时自动创建BufferPool，在这里返回创建的BufferPool
-    return nullptr;
-}
-
-void* FfmpegDecodeVideoFileWorker::getOutputBufferPoolRaw() const {
-    // 向后兼容：返回nullptr
     return nullptr;
 }
 

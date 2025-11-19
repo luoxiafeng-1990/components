@@ -1,6 +1,6 @@
-#include "../../../include/productionline/worker/FfmpegDecodeRtspWorker.hpp"
-#include "../../../include/buffer/BufferPool.hpp"
-#include "../../../include/buffer/allocator/NormalAllocator.hpp"
+#include "productionline/worker/implementation/FfmpegDecodeRtspWorker.hpp"
+#include "buffer/BufferPool.hpp"
+#include "buffer/allocator/NormalAllocator.hpp"
 #include <stdio.h>
 #include <string.h>
 #include <chrono>
@@ -56,11 +56,11 @@ FfmpegDecodeRtspWorker::~FfmpegDecodeRtspWorker() {
 
 bool FfmpegDecodeRtspWorker::open(const char* path) {
     printf("❌ ERROR: RTSP stream requires explicit format specification\n");
-    printf("   Please use: openRaw(rtsp_url, width, height, bits_per_pixel)\n");
+    printf("   Please use: open(rtsp_url, width, height, bits_per_pixel)\n");
     return false;
 }
 
-bool FfmpegDecodeRtspWorker::openRaw(const char* path, int width, int height, int bits_per_pixel) {
+bool FfmpegDecodeRtspWorker::open(const char* path, int width, int height, int bits_per_pixel) {
     if (is_open_) {
         printf("⚠️  Warning: Stream already open, closing previous stream\n");
         close();
@@ -245,11 +245,6 @@ std::unique_ptr<BufferPool> FfmpegDecodeRtspWorker::getOutputBufferPool() {
     // FfmpegDecodeRtspWorker 目前没有创建内部 BufferPool
     // 使用外部提供的 BufferPool
     // TODO: 如果需要在open()时自动创建BufferPool，在这里返回创建的BufferPool
-    return nullptr;
-}
-
-void* FfmpegDecodeRtspWorker::getOutputBufferPoolRaw() const {
-    // 向后兼容：返回nullptr
     return nullptr;
 }
 

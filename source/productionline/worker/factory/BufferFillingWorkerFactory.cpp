@@ -1,8 +1,8 @@
-#include "../../../include/productionline/worker/BufferFillingWorkerFactory.hpp"
-#include "../../../include/productionline/worker/MmapRawVideoFileWorker.hpp"
-#include "../../../include/productionline/worker/IoUringRawVideoFileWorker.hpp"
-#include "../../../include/productionline/worker/FfmpegDecodeRtspWorker.hpp"
-#include "../../../include/productionline/worker/FfmpegDecodeVideoFileWorker.hpp"
+#include "productionline/worker/factory/BufferFillingWorkerFactory.hpp"
+#include "productionline/worker/implementation/MmapRawVideoFileWorker.hpp"
+#include "productionline/worker/implementation/IoUringRawVideoFileWorker.hpp"
+#include "productionline/worker/implementation/FfmpegDecodeRtspWorker.hpp"
+#include "productionline/worker/implementation/FfmpegDecodeVideoFileWorker.hpp"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -10,7 +10,7 @@
 
 // ============ 公共接口 ============
 
-std::unique_ptr<IBufferFillingWorker> BufferFillingWorkerFactory::create(WorkerType type) {
+std::unique_ptr<WorkerBase> BufferFillingWorkerFactory::create(WorkerType type) {
     // 1️⃣ 用户显式指定（最高优先级）
     if (type != WorkerType::AUTO) {
         printf("🏭 BufferFillingWorkerFactory: User specified type: %s\n", typeToString(type));
@@ -36,7 +36,7 @@ std::unique_ptr<IBufferFillingWorker> BufferFillingWorkerFactory::create(WorkerT
     return autoDetect();
 }
 
-std::unique_ptr<IBufferFillingWorker> BufferFillingWorkerFactory::createByName(const char* name) {
+std::unique_ptr<WorkerBase> BufferFillingWorkerFactory::createByName(const char* name) {
     if (strcmp(name, "mmap") == 0 || strcmp(name, "mmap_raw") == 0) {
         return std::make_unique<MmapRawVideoFileWorker>();
     } else if (strcmp(name, "iouring") == 0 || strcmp(name, "iouring_raw") == 0) {
@@ -88,7 +88,7 @@ const char* BufferFillingWorkerFactory::typeToString(WorkerType type) {
 
 // ============ 私有辅助方法 ============
 
-std::unique_ptr<IBufferFillingWorker> BufferFillingWorkerFactory::autoDetect() {
+std::unique_ptr<WorkerBase> BufferFillingWorkerFactory::autoDetect() {
     printf("🔍 Detecting system capabilities:\n");
     
     // 检查 io_uring
@@ -115,7 +115,7 @@ std::unique_ptr<IBufferFillingWorker> BufferFillingWorkerFactory::autoDetect() {
     return std::make_unique<MmapRawVideoFileWorker>();
 }
 
-std::unique_ptr<IBufferFillingWorker> BufferFillingWorkerFactory::createByType(WorkerType type) {
+std::unique_ptr<WorkerBase> BufferFillingWorkerFactory::createByType(WorkerType type) {
     switch (type) {
         case WorkerType::MMAP_RAW:
             return std::make_unique<MmapRawVideoFileWorker>();

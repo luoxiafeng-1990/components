@@ -1,4 +1,4 @@
-#include "../../include/buffer/Buffer.hpp"
+#include "buffer/Buffer.hpp"
 #include <stdio.h>
 
 // ========== 构造函数 ==========

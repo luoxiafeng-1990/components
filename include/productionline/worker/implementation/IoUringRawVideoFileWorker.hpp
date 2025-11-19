@@ -1,10 +1,9 @@
 #ifndef IOURING_RAW_VIDEO_FILE_WORKER_HPP
 #define IOURING_RAW_VIDEO_FILE_WORKER_HPP
 
-#include "IBufferFillingWorker.hpp"
-#include "IVideoFileNavigator.hpp"
-#include "../../buffer/Buffer.hpp"
-#include "../../buffer/BufferPool.hpp"
+#include "../base/WorkerBase.hpp"
+#include "../../../buffer/Buffer.hpp"
+#include "../../../buffer/BufferPool.hpp"
 #include <liburing.h>
 #include <string>
 #include <vector>
@@ -30,7 +29,7 @@
  * - 性能敏感的应用
  * - 大文件（>1GB）高并发读取
  */
-class IoUringRawVideoFileWorker : public IBufferFillingWorker, public IVideoFileNavigator {
+class IoUringRawVideoFileWorker : public WorkerBase {
 public:
     /**
      * 构造函数（默认）
@@ -48,22 +47,10 @@ public:
     IoUringRawVideoFileWorker& operator=(const IoUringRawVideoFileWorker&) = delete;
     
     // ============ IBufferFillingWorker 接口实现 ============
-    
     bool open(const char* path) override;
-    bool openRaw(const char* path, int width, int height, int bits_per_pixel) override;
+    bool open(const char* path, int width, int height, int bits_per_pixel) override;
     void close() override;
     bool isOpen() const override;
-    
-    bool requiresExternalBuffer() const override {
-        return true;  // 需要外部 buffer（异步读取到外部 buffer）
-    }
-    
-    /**
-     * @brief 填充Buffer（核心功能）
-     * @param frame_index 帧索引
-     * @param buffer 输出 Buffer（从 BufferPool 获取）
-     * @return 成功返回 true
-     */
     bool fillBuffer(int frame_index, Buffer* buffer) override;
     
     // ============ IVideoFileNavigator 接口实现 ============
@@ -71,7 +58,6 @@ public:
     bool seekToBegin() override;
     bool seekToEnd() override;
     bool skip(int frame_count) override;
-    
     int getTotalFrames() const override;
     int getCurrentFrameIndex() const override;
     size_t getFrameSize() const override;
@@ -82,19 +68,8 @@ public:
     const char* getPath() const override;
     bool hasMoreFrames() const override;
     bool isAtEnd() const override;
-    
-    /**
-     * @brief 获取Worker类型名称
-     */
     const char* getWorkerType() const override {
         return "IoUringRawVideoFileWorker";
-    }
-    
-    /**
-     * @brief 获取读取器类型名称（向后兼容）
-     */
-    const char* getReaderType() const override {
-        return getWorkerType();
     }
     
     // ============ IoUring 专有接口（保留原有功能） ============

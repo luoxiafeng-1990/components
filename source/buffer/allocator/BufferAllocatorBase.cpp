@@ -1,4 +1,4 @@
-#include "../../../include/buffer/allocator/BufferAllocatorBase.hpp"
+#include "buffer/allocator/BufferAllocatorBase.hpp"
 #include <stdio.h>
 
 // 静态成员定义
@@ -131,7 +131,7 @@ bool BufferAllocatorBase::removeBufferFromPool(Buffer* buffer, BufferPool* pool)
 // 辅助方法实现
 // ============================================================
 
-void BufferAllocatorBase::registerBufferOwnership(Buffer* buffer, BufferAllocator* allocator) {
+void BufferAllocatorBase::registerBufferOwnership(Buffer* buffer, BufferAllocatorBase* allocator) {
     std::lock_guard<std::mutex> lock(ownership_mutex_);
     buffer_ownership_[buffer] = allocator;
 }

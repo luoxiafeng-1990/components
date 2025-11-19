@@ -7,7 +7,7 @@
  * 架构角色：文件操作接口 - 负责所有文件相关操作
  * 
  * 职责：
- * - 文件打开/关闭操作（open、openRaw、close、isOpen）
+ * - 文件打开/关闭操作（open的两个重载版本、close、isOpen）
  * - 文件导航操作（seek、skip等）
  * - 文件状态查询（getTotalFrames、getCurrentFrameIndex等）
  * 
@@ -36,14 +36,18 @@ public:
     virtual bool open(const char* path) = 0;
     
     /**
-     * 打开原始视频文件（需手动指定格式）
+     * 打开视频文件（统一智能接口）
      * @param path 文件路径
-     * @param width 视频宽度（像素）
-     * @param height 视频高度（像素）
-     * @param bits_per_pixel 每像素位数
+     * @param width 视频宽度（可选，用于raw视频）
+     * @param height 视频高度（可选，用于raw视频）
+     * @param bits_per_pixel 每像素位数（可选，用于raw视频）
      * @return 成功返回true
+     * 
+     * @note 实现类应根据Worker类型自动判断：
+     *       - 编码视频Worker（FFMPEG_VIDEO_FILE, FFMPEG_RTSP）：忽略 width/height/bpp，自动检测格式
+     *       - Raw视频Worker（MMAP_RAW, IOURING_RAW）：使用传入的 width/height/bpp 参数
      */
-    virtual bool openRaw(const char* path, int width, int height, int bits_per_pixel) = 0;
+    virtual bool open(const char* path, int width, int height, int bits_per_pixel) = 0;
     
     /**
      * 关闭视频文件

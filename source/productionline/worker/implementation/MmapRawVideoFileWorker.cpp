@@ -1,4 +1,4 @@
-#include "../../../include/productionline/worker/MmapRawVideoFileWorker.hpp"
+#include "productionline/worker/implementation/MmapRawVideoFileWorker.hpp"
 #include <stdio.h>
 #include <stdlib.h>
 #include <fcntl.h>
@@ -93,7 +93,7 @@ bool MmapRawVideoFileWorker::open(const char* path) {
             printf("   This file may be raw format or unsupported encoded format\n");
             printf("   \n");
             printf("   💡 For raw format, please use:\n");
-            printf("      openRaw(path, width, height, bits_per_pixel)\n");
+            printf("      open(path, width, height, bits_per_pixel)\n");
             ::close(fd_);
             fd_ = -1;
             return false;
@@ -133,7 +133,7 @@ bool MmapRawVideoFileWorker::open(const char* path) {
     return true;
 }
 
-bool MmapRawVideoFileWorker::openRaw(const char* path, int width, int height, int bits_per_pixel) {
+bool MmapRawVideoFileWorker::open(const char* path, int width, int height, int bits_per_pixel) {
     if (is_open_) {
         printf("⚠️  Warning: File already opened, closing previous file\n");
         close();

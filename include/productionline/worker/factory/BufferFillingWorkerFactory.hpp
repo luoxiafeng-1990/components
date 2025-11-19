@@ -1,7 +1,7 @@
 #ifndef BUFFER_FILLING_WORKER_FACTORY_HPP
 #define BUFFER_FILLING_WORKER_FACTORY_HPP
 
-#include "IBufferFillingWorker.hpp"
+#include "../base/WorkerBase.hpp"
 #include <memory>
 
 /**
@@ -40,9 +40,6 @@ public:
         FFMPEG_VIDEO_FILE  // 创建 FfmpegDecodeVideoFileWorker
     };
     
-    // 向后兼容：保留ReaderType别名
-    using ReaderType = WorkerType;
-    
     /**
      * 创建填充Buffer的Worker（工厂方法）
      * 
@@ -55,14 +52,14 @@ public:
      * @param type Worker类型（默认AUTO）
      * @return Worker实例（智能指针）
      */
-    static std::unique_ptr<IBufferFillingWorker> create(WorkerType type = WorkerType::AUTO);
+    static std::unique_ptr<WorkerBase> create(WorkerType type = WorkerType::AUTO);
     
     /**
      * 从名称创建Worker
      * @param name 类型名称（"mmap_raw", "iouring_raw", "ffmpeg_rtsp", "ffmpeg_video_file"）
      * @return Worker实例
      */
-    static std::unique_ptr<IBufferFillingWorker> createByName(const char* name);
+    static std::unique_ptr<WorkerBase> createByName(const char* name);
     
     /**
      * 检查 io_uring 是否可用
@@ -93,12 +90,12 @@ private:
     /**
      * 自动检测并创建最优Worker
      */
-    static std::unique_ptr<IBufferFillingWorker> autoDetect();
+    static std::unique_ptr<WorkerBase> autoDetect();
     
     /**
      * 根据类型创建Worker
      */
-    static std::unique_ptr<IBufferFillingWorker> createByType(WorkerType type);
+    static std::unique_ptr<WorkerBase> createByType(WorkerType type);
     
     /**
      * 从环境变量读取类型

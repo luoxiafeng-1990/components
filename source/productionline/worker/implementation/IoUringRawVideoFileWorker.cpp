@@ -1,4 +1,4 @@
-#include "../../../include/productionline/worker/IoUringRawVideoFileWorker.hpp"
+#include "productionline/worker/implementation/IoUringRawVideoFileWorker.hpp"
 #include <fcntl.h>
 #include <unistd.h>
 #include <sys/stat.h>
@@ -21,7 +21,7 @@ IoUringRawVideoFileWorker::IoUringRawVideoFileWorker(int queue_depth)
     , bits_per_pixel_(0)
     , is_open_(false)
 {
-    // io_uring 延迟初始化，在 open/openRaw 时初始化
+    // io_uring 延迟初始化，在 open() 时初始化
 }
 
 IoUringRawVideoFileWorker::~IoUringRawVideoFileWorker() {
@@ -32,11 +32,11 @@ IoUringRawVideoFileWorker::~IoUringRawVideoFileWorker() {
 
 bool IoUringRawVideoFileWorker::open(const char* path) {
     printf("❌ ERROR: IoUringVideoReader does not support auto-detect format\n");
-    printf("   Please use openRaw() for raw video files\n");
+    printf("   Please use open(path, width, height, bits_per_pixel) for raw video files\n");
     return false;
 }
 
-bool IoUringRawVideoFileWorker::openRaw(const char* path, int width, int height, int bits_per_pixel) {
+bool IoUringRawVideoFileWorker::open(const char* path, int width, int height, int bits_per_pixel) {
     if (is_open_) {
         printf("⚠️  Warning: File already opened, closing previous file\n");
         close();

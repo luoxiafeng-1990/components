@@ -1,9 +1,8 @@
 #ifndef MMAP_RAW_VIDEO_FILE_WORKER_HPP
 #define MMAP_RAW_VIDEO_FILE_WORKER_HPP
 
-#include "IBufferFillingWorker.hpp"
-#include "IVideoFileNavigator.hpp"
-#include "../../buffer/Buffer.hpp"
+#include "../base/WorkerBase.hpp"
+#include "../../../buffer/Buffer.hpp"
 #include <stddef.h>  // For size_t
 #include <sys/types.h>  // For ssize_t
 
@@ -32,7 +31,7 @@
  * - 随机访问模式
  * - 单线程或少量线程
  */
-class MmapRawVideoFileWorker : public IBufferFillingWorker, public IVideoFileNavigator {
+class MmapRawVideoFileWorker : public WorkerBase {
 private:
     // ============ 文件资源 ============
     int fd_;                          // 文件描述符
@@ -114,22 +113,10 @@ public:
     MmapRawVideoFileWorker& operator=(const MmapRawVideoFileWorker&) = delete;
     
     // ============ IBufferFillingWorker 接口实现 ============
-    
     bool open(const char* path) override;
-    bool openRaw(const char* path, int width, int height, int bits_per_pixel) override;
+    bool open(const char* path, int width, int height, int bits_per_pixel) override;
     void close() override;
     bool isOpen() const override;
-    
-    bool requiresExternalBuffer() const override {
-        return true;  // 需要外部 buffer（从 mmap 区域拷贝到外部 buffer）
-    }
-    
-    /**
-     * @brief 填充Buffer（核心功能）
-     * @param frame_index 帧索引
-     * @param buffer 输出 Buffer（从 BufferPool 获取）
-     * @return 成功返回 true
-     */
     bool fillBuffer(int frame_index, Buffer* buffer) override;
     
     // ============ IVideoFileNavigator 接口实现 ============
@@ -137,7 +124,6 @@ public:
     bool seekToBegin() override;
     bool seekToEnd() override;
     bool skip(int frame_count) override;
-    
     int getTotalFrames() const override;
     int getCurrentFrameIndex() const override;
     size_t getFrameSize() const override;
@@ -148,19 +134,8 @@ public:
     const char* getPath() const override;
     bool hasMoreFrames() const override;
     bool isAtEnd() const override;
-    
-    /**
-     * @brief 获取Worker类型名称
-     */
     const char* getWorkerType() const override {
         return "MmapRawVideoFileWorker";
-    }
-    
-    /**
-     * @brief 获取读取器类型名称（向后兼容）
-     */
-    const char* getReaderType() const override {
-        return getWorkerType();
     }
 };
 

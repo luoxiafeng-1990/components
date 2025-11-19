@@ -1,4 +1,4 @@
-#include "../../include/monitor/PerformanceMonitor.hpp"
+#include "monitor/PerformanceMonitor.hpp"
 #include <stdio.h>
 #include <string.h>
 

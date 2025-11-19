@@ -1,4 +1,4 @@
-#include "../../include/productionline/VideoProductionLine.hpp"
+#include "productionline/VideoProductionLine.hpp"
 #include <stdio.h>
 #include <chrono>
 
@@ -56,8 +56,8 @@ bool VideoProductionLine::start(const Config& config) {
     // 保存配置
     config_ = config;
     
-    // 创建共享的 BufferFillingWorker 对象
-    worker_ = std::make_shared<BufferFillingWorker>(config.worker_type);
+    // 创建共享的 BufferFillingWorkerFacade 对象
+    worker_ = std::make_shared<BufferFillingWorkerFacade>(config.worker_type);
     printf("   Worker type: %s\n", worker_->getWorkerType());
     
     // 🎯 统一的open接口（传入所有参数，门面类内部智能判断）

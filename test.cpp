@@ -1,12 +1,12 @@
 /**
  * Display Framework Test Program
  * 
- * 测试 LinuxFramebufferDevice, BufferFillingWorker, PerformanceMonitor, BufferManager 四个类的功能
+ * 测试 LinuxFramebufferDevice, BufferFillingWorkerFacade, PerformanceMonitor, BufferManager 四个类的功能
  * 
  * 编译命令：
  *   g++ -o test test.cpp \
  *       source/LinuxFramebufferDevice.cpp \
- *       source/BufferFillingWorker.cpp \
+ *       source/productionline/worker/facade/BufferFillingWorkerFacade.cpp \
  *       source/PerformanceMonitor.cpp \
  *       source/BufferManager.cpp \
  *       -I./include -std=c++17 -pthread
@@ -27,10 +27,10 @@
 #include <string>
 #include <vector>
 #include <memory>
-#include "include/display/LinuxFramebufferDevice.hpp"
-#include "include/productionline/worker/BufferFillingWorker.hpp"
-#include "include/buffer/BufferPool.hpp"
-#include "include/productionline/VideoProductionLine.hpp"
+#include "display/LinuxFramebufferDevice.hpp"
+#include "productionline/worker/facade/BufferFillingWorkerFacade.hpp"
+#include "buffer/BufferPool.hpp"
+#include "productionline/VideoProductionLine.hpp"
 
 // FFmpeg头文件（解码器测试使用）
 extern "C" {

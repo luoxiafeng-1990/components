@@ -1,8 +1,8 @@
 #ifndef IBUFFER_FILLING_WORKER_HPP
 #define IBUFFER_FILLING_WORKER_HPP
 
-#include "../../buffer/Buffer.hpp"
-#include "../../buffer/BufferPool.hpp"
+#include "../../../buffer/Buffer.hpp"
+#include "../../../buffer/BufferPool.hpp"
 #include <stddef.h>  // For size_t
 #include <sys/types.h>  // For ssize_t
 #include <memory>  // For std::unique_ptr
@@ -45,25 +45,6 @@ class IBufferFillingWorker {
 public:
     virtual ~IBufferFillingWorker() = default;
     
-    // ============ 能力查询 ============
-    
-    /**
-     * 查询此 Worker 是否需要外部提供 buffer
-     * 
-     * @return true - 需要外部提供 buffer（预分配模式）
-     *               示例：MmapRawVideoFileWorker、IoUringRawVideoFileWorker、FfmpegDecodeVideoFileWorker
-     *               使用场景：从文件读取或解码后需要 memcpy 到外部 buffer
-     * 
-     *         false - 不需要外部 buffer（动态注入模式）
-     *               示例：FfmpegDecodeRtspWorker
-     *               使用场景：内部解码后直接注入 buffer 到 BufferPool
-     * 
-     * @note 此方法用于 VideoProductionLine 判断使用哪种生产流程：
-     *       - true: 获取空闲 buffer → 填充 → 提交填充
-     *       - false: 直接填充（Worker 内部注入 buffer）
-     */
-    virtual bool requiresExternalBuffer() const = 0;
-    
     // ============ 核心功能：填充Buffer ============
     
     /**
@@ -95,14 +76,6 @@ public:
      */
     virtual const char* getWorkerType() const = 0;
     
-    /**
-     * 获取读取器类型名称（向后兼容）
-     * @deprecated 推荐使用 getWorkerType()
-     */
-    virtual const char* getReaderType() const {
-        return getWorkerType();
-    }
-    
     // ============ 提供原材料（BufferPool）============
     
     /**
@@ -127,15 +100,6 @@ public:
      * 默认实现：返回nullptr（普通Worker没有内部BufferPool）
      */
     virtual std::unique_ptr<BufferPool> getOutputBufferPool() {
-        return nullptr;
-    }
-    
-    /**
-     * 获取输出BufferPool原始指针（向后兼容）
-     * @deprecated 推荐使用getOutputBufferPool()返回智能指针
-     * @return BufferPool原始指针，如果Worker没有创建BufferPool，返回nullptr
-     */
-    virtual void* getOutputBufferPoolRaw() const {
         return nullptr;
     }
 };

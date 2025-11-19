@@ -1,5 +1,5 @@
-#include "../../include/buffer/BufferPool.hpp"
-#include "../../include/buffer/BufferPoolRegistry.hpp"
+#include "buffer/BufferPool.hpp"
+#include "buffer/BufferPoolRegistry.hpp"
 #include <stdio.h>
 #include <stdexcept>
 #include <chrono>
