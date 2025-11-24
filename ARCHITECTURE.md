@@ -108,6 +108,7 @@
 - ✅ **线程安全**：提供线程安全的Buffer获取和提交接口
 - ✅ **状态管理**：跟踪Buffer的状态（IDLE、LOCKED_BY_PRODUCER、READY_FOR_CONSUME、LOCKED_BY_CONSUMER）
 - ✅ **注册管理**：自动注册到BufferPoolRegistry，支持全局查询和监控
+- ✅ **创建权限控制**：通过 Passkey Idiom 限制创建权限，只有 Allocator 可以创建 BufferPool
 
 **不负责：**
 - ❌ Buffer创建/销毁（由Allocator负责）
@@ -171,7 +172,7 @@
 **职责：**
 - ✅ **Buffer创建**：创建Buffer实例（调用子类的`createBuffer()`）
 - ✅ **Buffer销毁**：销毁Buffer实例（调用子类的`deallocateBuffer()`）
-- ✅ **BufferPool创建**：创建BufferPool实例（通过`allocatePoolWithBuffers()`）
+- ✅ **BufferPool创建**：通过 Passkey Token 创建 BufferPool 实例（使用 `token()` 方法获取通行证）
 - ✅ **Buffer注入**：将Buffer注入到BufferPool的队列中（通过友元关系访问BufferPool的私有方法）
 - ✅ **Buffer移除**：从BufferPool移除Buffer（通过友元关系）
 
@@ -257,8 +258,10 @@
    │       │   └─ FramebufferAllocator（外部内存，用于Framebuffer显示）
    │       ├─ Worker调用 allocator->allocatePoolWithBuffers(...)
    │       │   │
-   │       │   ├─ Allocator创建空的BufferPool
-   │       │   │   └─ BufferPool::CreateEmpty(name, category)
+   │       │   ├─ Allocator 通过 Passkey Token 创建空的 BufferPool
+   │       │   │   └─ std::make_shared<BufferPool>(token(), name, category)
+   │       │   │       ├─ token() 从 BufferAllocatorBase 基类获取通行证
+   │       │   │       └─ 只有 Allocator 可以创建 PrivateToken
    │       │   │
    │       │   ├─ Allocator创建Buffer（调用子类的createBuffer）
    │       │   │   └─ NormalAllocator::createBuffer(id, size)
@@ -390,7 +393,7 @@ Worker内部解码循环（适用于RTSP流等）：
 
 ### 2. 工厂模式（Factory Pattern）
 
-**应用位置**：`BufferFillingWorkerFactory`、`BufferPool::CreateEmpty`、`BufferAllocatorBase`
+**应用位置**：`BufferFillingWorkerFactory`、`BufferAllocatorBase`
 
 **设计意图**：封装对象的创建逻辑，根据环境和配置创建合适的实例。
 
@@ -404,11 +407,12 @@ Worker内部解码循环（适用于RTSP流等）：
 
 **工厂模式类型**：
 1. **工厂模式**：`BufferFillingWorkerFactory` - 创建Worker实现类
-2. **静态工厂方法**：`BufferPool::CreateEmpty` - 创建BufferPool实例
-3. **抽象工厂模式**：`BufferAllocatorBase` - 创建Buffer和BufferPool，有3个具体实现：
+2. **抽象工厂模式**：`BufferAllocatorBase` - 创建Buffer和BufferPool，有3个具体实现：
    - `NormalAllocator` - 普通内存分配器
    - `FramebufferAllocator` - Framebuffer分配器
    - `AVFrameAllocator` - AVFrame分配器
+
+**注意**：`BufferPool` 不再使用静态工厂方法 `CreateEmpty()`，改用 **Passkey Idiom** 控制创建权限。
 
 ### 3. 门面模式（Facade Pattern）
 
@@ -467,6 +471,68 @@ Worker内部解码循环（适用于RTSP流等）：
 - Allocator可以访问BufferPool的私有方法：
   - `addBufferToQueue()`：添加Buffer到队列
   - `removeBufferFromPool()`：从Pool移除Buffer
+
+### 7. Passkey Idiom（通行证模式）
+
+**应用位置**：`BufferPool` 和 `BufferAllocatorBase`
+
+**设计意图**：限制类的实例化权限，只有特定的类（Allocator）可以创建 BufferPool 实例，提供比 friend 更精细的访问控制。
+
+**实现方式**：
+- `BufferPool` 有一个嵌套类 `PrivateToken`，其构造函数是 `private`
+- 只有 `BufferAllocatorBase` 是 `PrivateToken` 的 `friend`，可以创建 Token
+- `BufferAllocatorBase` 提供 `protected static token()` 方法供子类获取 Token
+- 子类通过 `token()` 获取 PrivateToken，然后调用 BufferPool 构造函数
+
+**代码示例**：
+```cpp
+// BufferPool.hpp
+class BufferPool {
+public:
+    // 嵌套的 PrivateToken 类
+    class PrivateToken {
+    private:
+        PrivateToken() = default;
+        // 只有 BufferAllocatorBase 可以创建 Token
+        friend class BufferAllocatorBase;
+    };
+    
+    // 构造函数需要 Token（虽然是 public，但外部无法创建 Token）
+    BufferPool(
+        PrivateToken token,
+        const std::string& name,
+        const std::string& category
+    );
+};
+
+// BufferAllocatorBase.hpp
+class BufferAllocatorBase {
+protected:
+    // 提供 Token 给子类使用
+    static BufferPool::PrivateToken token() {
+        return BufferPool::PrivateToken();
+    }
+};
+
+// 子类使用示例（NormalAllocator.cpp）
+auto pool = std::make_shared<BufferPool>(
+    token(),    // 从基类获取通行证
+    name,
+    category
+);
+```
+
+**优势**：
+- ✅ **精细控制**：比 friend 更精细，只授权创建权限，不授权访问所有私有成员
+- ✅ **类型安全**：编译期类型检查，Token 无法伪造
+- ✅ **代码简洁**：不需要额外的 bridge 函数或工厂方法
+- ✅ **语义清晰**：通过 Token 明确表达"持有通行证才能创建"的语义
+- ✅ **易于维护**：所有创建逻辑在子类中，无需在基类中实现
+
+**与其他方案对比**：
+- **vs. Public 静态工厂方法**：Passkey 更严格，外部无法创建
+- **vs. Private 构造 + Friend**：Passkey 更灵活，子类可以直接使用
+- **vs. 基类 Bridge 函数**：Passkey 更简洁，无需额外函数
 
 ---
 
@@ -558,29 +624,6 @@ private:
 - `IoUringRawVideoFileWorker`
 - `FfmpegDecodeRtspWorker`
 - `FfmpegDecodeVideoFileWorker`
-
-#### ✅ BufferPool::CreateEmpty（静态工厂方法）
-
-**文件位置**:
-- 头文件: `include/buffer/BufferPool.hpp`
-- 源文件: `source/buffer/BufferPool.cpp`
-
-**设计模式**: 静态工厂方法（Static Factory Method）
-
-**职责**:
-- 创建空的 BufferPool 实例
-- 不关心 Buffer 来源，只负责调度管理
-
-**工厂方法**:
-```cpp
-class BufferPool {
-public:
-    static std::unique_ptr<BufferPool> CreateEmpty(
-        const std::string& name,
-        const std::string& category = ""
-    );
-};
-```
 
 #### ✅ BufferAllocatorBase（Allocator接口，纯抽象基类）
 
@@ -1083,13 +1126,14 @@ sequenceDiagram
 | **接口层** | IVideoFileNavigator | `productionline/worker/interface/` | 接口层 | 定义契约 |
 | **接口层** | BufferAllocatorBase | `buffer/allocator/base/` | 接口层（纯抽象） | 定义契约 |
 | **基类层** | WorkerBase | `productionline/worker/base/` | 基类层 | 统一基类 |
-| **静态工厂方法** | BufferPool::CreateEmpty | `buffer/BufferPool.hpp` | 工厂方法 | 创建 BufferPool |
+| **Passkey Idiom** | BufferPool::PrivateToken | `buffer/BufferPool.hpp` | 通行证模式 | 限制 BufferPool 创建权限 |
 
 **关键设计**：
 - ✅ **接口定义契约**：所有接口类定义必须实现的方法
 - ✅ **基类统一类型**：`WorkerBase` 统一所有 Worker 实现类的类型
 - ✅ **工厂返回接口/基类**：Factory 返回接口或基类指针，不返回具体实现类
 - ✅ **实现类透明**：具体实现类对上层透明，通过接口/基类访问
+- ✅ **Passkey 控制**：通过 PrivateToken 限制 BufferPool 创建权限，只有 Allocator 可以创建
 
 ### 关键关系总结（基于接口和基类）
 
@@ -1257,7 +1301,7 @@ ProductionLine（生产管理）
 - `uint64_t registry_id_`：在BufferPoolRegistry中的注册ID
 
 **核心方法**：
-- `CreateEmpty(name, category)`：创建空的BufferPool（唯一工厂方法）
+- `BufferPool(PrivateToken, name, category)`：构造函数（需要 Passkey Token，只有 Allocator 可以创建）
 - `acquireFree(blocking, timeout_ms)`：获取空闲Buffer（生产者使用）
 - `submitFilled(buffer)`：提交填充后的Buffer（生产者使用）
 - `acquireFilled(blocking, timeout_ms)`：获取填充后的Buffer（消费者使用）
@@ -1269,6 +1313,7 @@ ProductionLine（生产管理）
 - `removeBufferFromPool(buffer)`：从Pool移除Buffer
 
 **设计特点**：
+- **Passkey Idiom**：通过 PrivateToken 限制创建权限，只有 Allocator 可以创建 BufferPool
 - 纯调度器：只负责Buffer的调度，不负责创建和销毁
 - 线程安全：所有操作使用互斥锁保护
 - 注册机制：所有BufferPool都注册到`BufferPoolRegistry`，可通过ID查找
@@ -1351,16 +1396,33 @@ ProductionLine（生产管理）
 - `createBuffer(id, size)`：创建单个Buffer（核心分配逻辑）
 - `deallocateBuffer(buffer)`：销毁Buffer（核心释放逻辑）
 
+**友元访问辅助方法**（供子类使用）：
+- `static BufferPool::PrivateToken token()`：获取 Passkey Token，用于创建 BufferPool
+  - 子类通过 `token()` 获取通行证
+  - 调用 `std::make_shared<BufferPool>(token(), name, category)` 创建 BufferPool
+
+**子类创建 BufferPool 的方式**：
+```cpp
+// 在子类的 allocatePoolWithBuffers() 中
+auto pool = std::make_shared<BufferPool>(
+    token(),    // 从基类获取通行证（Passkey Token）
+    name,       // Pool 名称
+    category    // Pool 分类
+);
+```
+
 **设计特点**：
 - ✅ **纯抽象接口**：所有方法都是纯虚函数（`= 0`），只有头文件，无实现文件
 - ✅ **接口契约**：定义所有Allocator必须实现的完整接口
 - ✅ **依赖倒置**：上层代码依赖 `BufferAllocatorBase` 接口，不依赖具体实现
-- ✅ **友元关系**：是BufferPool的friend类，可以访问BufferPool的私有方法
+- ✅ **友元关系**：是 BufferPool::PrivateToken 的 friend，可以创建通行证
+- ✅ **Passkey 控制**：通过 `token()` 方法向子类提供创建 BufferPool 的能力
 - ✅ **实现透明**：具体实现类对上层完全透明
 
 **注意**：
 - Worker在`open()`时通过`BufferAllocatorFacade`调用Allocator创建BufferPool
 - Allocator是唯一可以创建和销毁Buffer的组件
+- BufferPool 只能通过 Allocator（持有 Token）创建，外部无法直接创建
 
 ### 6. WorkerBase（Worker统一基类）
 
@@ -1685,7 +1747,7 @@ pool->submitFilled(buf);
 
 | 方法 | 说明 | 参数 | 返回值 |
 |------|------|------|--------|
-| `CreateEmpty(name, category)` | 创建空的BufferPool | `name`: Pool名称<br>`category`: Pool分类 | `unique_ptr<BufferPool>` |
+| `BufferPool(token, name, category)` | 构造函数（需要 Passkey Token） | `token`: PrivateToken 通行证<br>`name`: Pool名称<br>`category`: Pool分类 | 无 |
 | `acquireFree(blocking, timeout_ms)` | 获取空闲buffer | `blocking`: 是否阻塞<br>`timeout_ms`: 超时（毫秒） | `Buffer*`（失败返回nullptr） |
 | `submitFilled(buffer)` | 提交填充buffer | `buffer`: 已填充的buffer | 无 |
 | `acquireFilled(blocking, timeout_ms)` | 获取就绪buffer | `blocking`: 是否阻塞<br>`timeout_ms`: 超时（毫秒） | `Buffer*`（失败返回nullptr） |
@@ -1693,6 +1755,8 @@ pool->submitFilled(buf);
 | `getFreeCount()` | 获取空闲buffer数量 | 无 | `int` |
 | `getFilledCount()` | 获取就绪buffer数量 | 无 | `int` |
 | `getTotalCount()` | 获取总buffer数量 | 无 | `int` |
+
+**注意**：BufferPool 只能通过 Allocator（持有 Passkey Token）创建，外部无法直接实例化。
 
 ### BufferAllocator API
 
@@ -1760,7 +1824,12 @@ pool->submitFilled(buf);
      - Framebuffer显示：使用FramebufferAllocator
   3. Worker调用`allocator->allocatePoolWithBuffers(count, size, name, category)`
   4. Allocator内部：
-     - 创建空的BufferPool：`BufferPool::CreateEmpty(name, category)`
+     - 使用 Passkey Token 创建空的 BufferPool：
+       ```cpp
+       auto pool = std::make_shared<BufferPool>(token(), name, category);
+       ```
+       - `token()` 从 `BufferAllocatorBase` 基类获取通行证
+       - 只有 Allocator 可以创建 `PrivateToken`
      - 循环创建Buffer：调用子类的`createBuffer(id, size)`
      - 注入Buffer到Pool：通过友元关系调用`BufferPool::addBufferToQueue(buffer, FREE)`
   5. Worker保存创建的BufferPool（内部成员）
@@ -1817,8 +1886,14 @@ ProductionLine架构通过清晰的职责划分和设计模式应用，实现了
 - Worker实现类通过继承 `WorkerBase` 基类同时实现两个接口，职责清晰，符合接口分离原则（ISP）
 - `BufferFillingWorkerFacade` 门面类也继承两个接口，确保API统一性和类型安全
 
+**BufferPool 创建权限控制**：
+- 采用 **Passkey Idiom**（通行证模式）限制 BufferPool 的创建权限
+- 只有 Allocator（持有 PrivateToken）可以创建 BufferPool 实例
+- 提供比 friend 更精细的访问控制，更加安全和优雅
+- 子类通过 `BufferAllocatorBase::token()` 获取通行证，调用 `std::make_shared<BufferPool>(token(), name, category)` 创建
+
 ---
 
 **文档维护：** AI SDK Team  
-**最后更新：** 2025-01-XX  
-**架构版本：** v3.4（基于接口和基类的架构设计 - 强调接口层和基类层的设计，实现层对上层透明）
+**最后更新：** 2025-01-24  
+**架构版本：** v3.5（基于接口和基类的架构设计 + Passkey Idiom - 添加 BufferPool 创建权限控制）

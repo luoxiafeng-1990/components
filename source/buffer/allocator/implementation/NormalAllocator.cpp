@@ -1,5 +1,6 @@
 #include "buffer/allocator/implementation/NormalAllocator.hpp"
 #include "buffer/BufferPool.hpp"
+#include "buffer/BufferPoolRegistry.hpp"
 #include <cstdlib>
 #include <cstring>
 #include <stdio.h>
@@ -17,6 +18,9 @@ NormalAllocator::NormalAllocator(BufferMemoryAllocatorType type, size_t alignmen
     , alignment_(alignment)
 {
     printf("🔧 NormalAllocator created (alignment=%zu)\n", alignment_);
+    
+    // 注意：不在构造函数中创建 BufferPool
+    // BufferPool 应该由 Worker 在 open() 时通过调用 allocatePoolWithBuffers() 创建
 }
 
 NormalAllocator::~NormalAllocator() {
@@ -97,27 +101,39 @@ std::shared_ptr<BufferPool> NormalAllocator::allocatePoolWithBuffers(
     const std::string& name,
     const std::string& category
 ) {
-    printf("\n🏭 NormalAllocator: Creating pool '%s' with %d buffers...\n",
-           name.c_str(), count);
+    printf("\n🏭 NormalAllocator: Creating BufferPool with %d buffers...\n", count);
     
-    // 1. 创建空池（返回 shared_ptr，自动注册到 Registry）
-    auto pool = BufferPool::CreateEmpty(name, category);
-    if (!pool) {
-        printf("❌ Failed to create empty pool\n");
-        return nullptr;
+    // 1. 检查是否已经创建过 pool
+    {
+        std::lock_guard<std::mutex> lock(managed_pool_mutex_);
+        if (managed_pool_) {
+            printf("⚠️  Warning: BufferPool already exists, returning existing pool\n");
+            return managed_pool_;
+        }
     }
     
-    // 2. 批量创建 Buffer 并注入
+    // 2. 使用 Passkey Token 创建 BufferPool
+    auto pool = std::make_shared<BufferPool>(
+        token(),    // 从基类获取通行证
+        name,
+        category
+    );
+    
+    // 3. 注册到 BufferPoolRegistry（name 和 category 从 pool 对象自动获取）
+    uint64_t id = BufferPoolRegistry::getInstance().registerPool(pool);
+    pool->setRegistryId(id);
+    
+    printf("   ℹ️  Created empty pool '%s' (ID: %lu)\n", pool->getName().c_str(), id);
+    
+    // 4. 批量创建 Buffer 并注入到 pool
     for (int i = 0; i < count; i++) {
         Buffer* buffer = createBuffer(i, size);
         if (!buffer) {
             printf("❌ Failed to create buffer #%d\n", i);
-            // 失败：清理已分配的 buffer
             cleanupPool(pool.get());
             return nullptr;
         }
         
-        // 3. 通过基类静态方法添加到 pool 的 free 队列
         if (!BufferAllocatorBase::addBufferToPoolQueue(pool.get(), buffer, QueueType::FREE)) {
             printf("❌ Failed to add buffer #%d to pool\n", i);
             deallocateBuffer(buffer);
@@ -125,7 +141,6 @@ std::shared_ptr<BufferPool> NormalAllocator::allocatePoolWithBuffers(
             return nullptr;
         }
         
-        // 4. 记录所有权
         {
             std::lock_guard<std::mutex> lock(ownership_mutex_);
             buffer_ownership_[buffer] = this;
@@ -135,14 +150,13 @@ std::shared_ptr<BufferPool> NormalAllocator::allocatePoolWithBuffers(
                i, buffer->getVirtualAddress(), buffer->getPhysicalAddress(), size);
     }
     
-    // 5. Allocator 持有 shared_ptr（管理生命周期）
+    // 5. 存储到 managed_pool_（基类成员）
     {
-        std::lock_guard<std::mutex> lock(managed_pools_mutex_);
-        managed_pools_.push_back(pool);
+        std::lock_guard<std::mutex> lock(managed_pool_mutex_);
+        managed_pool_ = pool;
     }
     
-    printf("✅ BufferPool '%s' created with %d buffers by NormalAllocator\n", 
-           name.c_str(), count);
+    printf("✅ BufferPool '%s' created with %d buffers\n", pool->getName().c_str(), count);
     
     return pool;
 }
@@ -274,16 +288,13 @@ bool NormalAllocator::destroyPool(BufferPool* pool) {
     
     printf("🧹 NormalAllocator: Destroying pool '%s'...\n", pool->getName().c_str());
     
-    // 1. 从 managed_pools_ 中移除
+    // 1. 检查是否是管理的 pool
     {
-        std::lock_guard<std::mutex> lock(managed_pools_mutex_);
-        auto it = std::find_if(managed_pools_.begin(), managed_pools_.end(),
-            [pool](const std::shared_ptr<BufferPool>& p) {
-                return p.get() == pool;
-            });
-        if (it != managed_pools_.end()) {
-            managed_pools_.erase(it);
-            printf("   ✅ Removed from managed_pools_\n");
+        std::lock_guard<std::mutex> lock(managed_pool_mutex_);
+        if (managed_pool_ && managed_pool_.get() == pool) {
+            printf("   ✅ Pool matches managed_pool_\n");
+        } else {
+            printf("   ⚠️  Warning: Pool does not match managed_pool_\n");
         }
     }
     
@@ -293,8 +304,6 @@ bool NormalAllocator::destroyPool(BufferPool* pool) {
     std::vector<Buffer*> to_remove;
     for (auto& [buf, alloc] : buffer_ownership_) {
         if (alloc == this) {
-            // 检查 buffer 是否属于这个 pool
-            // 这里简化处理，移除所有属于此 allocator 的 buffer
             to_remove.push_back(buf);
         }
     }

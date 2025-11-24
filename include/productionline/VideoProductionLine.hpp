@@ -161,8 +161,8 @@ private:
      */
     BufferPool* working_buffer_pool_;
     
-    // Worker（多线程共享）
-    std::shared_ptr<BufferFillingWorkerFacade> worker_;
+    // Worker Facade（多线程共享）
+    std::shared_ptr<BufferFillingWorkerFacade> worker_facade_;
     
     // 线程管理
     std::vector<std::thread> threads_;

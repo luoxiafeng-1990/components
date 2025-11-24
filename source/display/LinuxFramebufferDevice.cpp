@@ -1,4 +1,7 @@
 #include "display/LinuxFramebufferDevice.hpp"
+#include "buffer/allocator/facade/BufferAllocatorFacade.hpp"
+#include "buffer/allocator/factory/BufferAllocatorFactory.hpp"
+#include "buffer/allocator/implementation/FramebufferAllocator.hpp"
 #include <stdio.h>
 #include <fcntl.h>
 #include <unistd.h>
@@ -34,7 +37,7 @@ LinuxFramebufferDevice::LinuxFramebufferDevice()
     , fb_index_(-1)
     , framebuffer_base_(nullptr)
     , framebuffer_total_size_(0)
-    , buffer_pool_(nullptr)  // 由外部通过 setBufferPool() 注入
+    , allocator_facade_(nullptr), buffer_pool_(nullptr)  // 在 initialize() 中自动创建
     , buffer_count_(0)
     , current_buffer_index_(0)
     , width_(0)
@@ -43,7 +46,6 @@ LinuxFramebufferDevice::LinuxFramebufferDevice()
     , buffer_size_(0)
     , is_initialized_(false)
 {
-    // BufferPool 由外部通过 setBufferPool() 注入，不在内部创建
 }
 
 LinuxFramebufferDevice::~LinuxFramebufferDevice() {
@@ -90,15 +92,75 @@ bool LinuxFramebufferDevice::initialize(int device_index) {
         return false;
     }
     
-    // 5. 计算每个buffer的虚拟地址并创建Buffer对象
-    calculateBufferAddresses();
+    // 5. 创建 allocator_facade_（通过 Factory 创建 FRAMEBUFFER 类型）
+    allocator_facade_ = std::make_unique<BufferAllocatorFacade>(
+        BufferAllocatorFactory::AllocatorType::FRAMEBUFFER
+    );
+    if (!allocator_facade_) {
+        printf("❌ ERROR: Failed to create allocator_facade_\n");
+        munmap(framebuffer_base_, framebuffer_total_size_);
+        close(fd_);
+        fd_ = -1;
+        return false;
+    }
+    printf("✅ allocator_facade_ created for FRAMEBUFFER type\n");
+    
+    // 6. 通过 allocator 创建空的 BufferPool
+    std::string pool_name = "LinuxFramebufferDevice_fb" + std::to_string(fb_index_);
+    buffer_pool_ = allocator_facade_->allocatePoolWithBuffers(
+        0,  // count = 0，创建空 pool（稍后动态注入）
+        0,  // size = 0，不使用
+        pool_name,
+        "Display"
+    );
+    
+    if (!buffer_pool_) {
+        printf("❌ ERROR: Failed to create BufferPool through allocator\n");
+        allocator_facade_.reset();
+        munmap(framebuffer_base_, framebuffer_total_size_);
+        close(fd_);
+        fd_ = -1;
+        return false;
+    }
+    
+    printf("✅ Empty BufferPool '%s' created\n", buffer_pool_->getName().c_str());
+    
+    // 7. 动态注入 framebuffer buffers 到 BufferPool
+    unsigned char* base = (unsigned char*)framebuffer_base_;
+    for (int i = 0; i < buffer_count_; i++) {
+        void* virt_addr = (void*)(base + buffer_size_ * i);
+        uint64_t phys_addr = 0;  // TODO: 获取实际物理地址
+        
+        Buffer* buffer = allocator_facade_->injectExternalBufferToPool(
+            virt_addr,
+            phys_addr,
+            buffer_size_,
+            buffer_pool_.get(),
+            QueueType::FREE
+        );
+        
+        if (!buffer) {
+            printf("❌ ERROR: Failed to inject buffer #%d to BufferPool\n", i);
+            buffer_pool_.reset();
+            allocator_facade_.reset();
+            munmap(framebuffer_base_, framebuffer_total_size_);
+            close(fd_);
+            fd_ = -1;
+            return false;
+        }
+        
+        printf("   ✅ Framebuffer[%d] injected (virt=%p, size=%zu)\n", i, virt_addr, buffer_size_);
+    }
+    
+    printf("✅ All %d framebuffer buffers injected to BufferPool '%s'\n",
+           buffer_count_, buffer_pool_->getName().c_str());
     
     is_initialized_ = true;
     current_buffer_index_ = 0;
     
     // 打印初始化成功的总结信息
     printf("✅ Display initialized: %dx%d, %d buffers, %d bits/pixel\n",
-           width_, height_, buffer_count_, bits_per_pixel_);
+           width_, height_, buffer_pool_->getTotalCount(), bits_per_pixel_);
     
     return true;
 }
@@ -108,19 +170,23 @@ void LinuxFramebufferDevice::cleanup() {
         return;
     }
     
-    // 1. 解除硬件framebuffer内存映射
+    // 1. 重置 BufferPool 指针（不拥有所有权，只重置指针）
+    // BufferPool 的生命周期由 allocator 管理
+    buffer_pool_.reset();
+    
+    // 2. 重置 allocator_facade_（会自动销毁底层 allocator 和 BufferPool）
+    allocator_facade_.reset();
+    
+    // 3. 解除硬件framebuffer内存映射
     unmapHardwareFramebufferMemory();
     
-    // 2. 关闭文件描述符
+    // 4. 关闭文件描述符
     if (fd_ >= 0) {
         close(fd_);
         fd_ = -1;
     }
     
-    // 3. 重置 BufferPool 指针（不拥有所有权，只重置指针）
-    buffer_pool_ = nullptr;
-    
-    // 4. 重置状态
+    // 5. 重置状态
     is_initialized_ = false;
     current_buffer_index_ = 0;
     buffer_count_ = 0;
@@ -224,7 +290,7 @@ bool LinuxFramebufferDevice::displayBuffer(BufferPool* pool, int buffer_index) {
     }
     
     // 验证BufferPool是否是当前设备的BufferPool
-    if (pool != buffer_pool_) {
+    if (pool != buffer_pool_.get()) {
         printf("⚠️  Warning: BufferPool mismatch (provided pool != device's buffer_pool_)\n");
         printf("   Continuing anyway...\n");
     }
@@ -376,40 +442,6 @@ bool LinuxFramebufferDevice::mapHardwareFramebufferMemory() {
     return true;
 }
 
-void LinuxFramebufferDevice::calculateBufferAddresses() {
-    unsigned char* base = (unsigned char*)framebuffer_base_;
-    
-    // 检查并调整到安全的 buffer 数量
-    size_t required_size = buffer_size_ * buffer_count_;
-    if (required_size > framebuffer_total_size_) {
-        int safe_count = framebuffer_total_size_ / buffer_size_;
-        printf("⚠️  WARNING: Adjusted buffer_count from %d to %d (max safe value)\n", 
-               buffer_count_, safe_count);
-        
-        if (safe_count <= 0) {
-            printf("❌ ERROR: Cannot fit even one buffer in mapped memory!\n");
-            return;
-        }
-        
-        buffer_count_ = safe_count;
-    }
-    
-    // 只计算每个 buffer 的地址（不创建 BufferPool）
-    fb_mappings_.clear();
-    fb_mappings_.reserve(buffer_count_);
-    
-    printf("🔧 Calculating buffer addresses (%d buffers):\n", buffer_count_);
-    
-    for (int i = 0; i < buffer_count_; i++) {
-        void* buffer_addr = (void*)(base + buffer_size_ * i);
-        fb_mappings_.push_back(buffer_addr);
-        
-        printf("   Framebuffer[%d]: virt=%p, size=%zu\n", 
-               i, buffer_addr, buffer_size_);
-    }
-    
-    printf("✅ Buffer addresses calculated (BufferPool will be created externally)\n");
-}
 
 void LinuxFramebufferDevice::unmapHardwareFramebufferMemory() {
     if (framebuffer_base_ != nullptr) {
@@ -429,16 +461,6 @@ LinuxFramebufferDevice::MappedInfo LinuxFramebufferDevice::getMappedInfo() const
     info.buffer_size = buffer_size_;
     info.buffer_count = buffer_count_;
     return info;
-}
-
-void LinuxFramebufferDevice::setBufferPool(BufferPool* pool) {
-    if (!pool) {
-        printf("⚠️  Warning: Setting BufferPool to nullptr\n");
-    } else {
-        printf("✅ BufferPool injected to LinuxFramebufferDevice (pool: %s)\n", 
-               pool->getName().c_str());
-    }
-    buffer_pool_ = pool;
 }
 
 // ============ 新接口：displayBuffer(Buffer*) - 智能零拷贝显示 ============

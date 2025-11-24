@@ -149,6 +149,7 @@ public:
      * @brief 注入外部已分配的内存到 BufferPool（外部注入）
      * 
      * @note FramebufferAllocator 支持此方法，可以包装外部内存为 Buffer
+     * @note 这是 LinuxFramebufferDevice 使用的主要方法（逐个注入）
      */
     Buffer* injectExternalBufferToPool(
         void* virt_addr,

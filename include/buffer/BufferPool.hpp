@@ -53,21 +53,44 @@ enum class QueueType {
  */
 class BufferPool {
 public:
-    // ==================== 公开接口 ====================
+    // ==================== PrivateToken（通行证）====================
     
     /**
-     * @brief 创建空的 BufferPool
+     * @brief 私有通行证（Passkey Idiom）
      * 
-     * BufferPool 不关心 Buffer 来源，只负责调度管理。
-     * Buffer 由 BufferAllocatorBase 创建并注入。
+     * 设计模式：
+     * - 构造函数是 private
+     * - 只有 BufferAllocatorBase 是 friend，可以创建
+     * - 外部无法创建此 Token
+     * - 持有 Token 才能调用 BufferPool 构造函数
      * 
-     * @param name Pool 名称
-     * @param category Pool 分类（如 "Display", "Video", "Network"）
-     * @return shared_ptr<BufferPool> 返回 shared_ptr，便于多组件共享所有权
+     * 用途：
+     * - 控制 BufferPool 的创建权限
+     * - 只有 Allocator 子类可以创建 BufferPool
      */
-    static std::shared_ptr<BufferPool> CreateEmpty(
+    class PrivateToken {
+    private:
+        PrivateToken() = default;
+        
+        // 只有 BufferAllocatorBase 可以创建 PrivateToken
+        friend class BufferAllocatorBase;
+    };
+    
+    // ==================== 构造函数（需要 PrivateToken）====================
+    
+    /**
+     * @brief 构造函数（需要通行证）
+     * 
+     * @param token 通行证（只有持有 Token 才能创建）
+     * @param name Pool 名称
+     * @param category Pool 分类
+     * 
+     * @note 虽然是 public，但外部无法创建 PrivateToken，因此无法调用
+     */
+    BufferPool(
+        PrivateToken token,
         const std::string& name,
-        const std::string& category = ""
+        const std::string& category
     );
     
     /**
@@ -75,6 +98,7 @@ public:
      */
     ~BufferPool();
     
+public:
     // ====== 生产者接口 ======
     
     /**
@@ -212,6 +236,11 @@ public:
     BufferPool& operator=(const BufferPool&) = delete;
     
 private:
+    // ==================== 友元声明 ====================
+    
+    // 允许 BufferAllocatorBase 访问私有方法 addBufferToQueue() 和 removeBufferFromPool()
+    friend class BufferAllocatorBase;
+    
     // ==================== 私有接口（仅供 BufferAllocatorBase 使用）====================
     
     /**
@@ -266,12 +295,6 @@ private:
      * @return true 成功，false buffer 不在队列中
      */
     bool removeFromQueue(std::queue<Buffer*>& queue, Buffer* target);
-    
-    // ====== 友元声明 ======
-    friend class BufferAllocatorBase;
-    
-    // ====== 私有构造函数 ======
-    BufferPool(const std::string& name, const std::string& category);
     
     // ==================== 成员变量 ====================
     

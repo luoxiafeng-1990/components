@@ -57,26 +57,26 @@ bool VideoProductionLine::start(const Config& config) {
     config_ = config;
     
     // 创建共享的 BufferFillingWorkerFacade 对象
-    worker_ = std::make_shared<BufferFillingWorkerFacade>(config.worker_type);
-    printf("   Worker type: %s\n", worker_->getWorkerType());
+    worker_facade_ = std::make_shared<BufferFillingWorkerFacade>(config.worker_type);
+    printf("   Worker type: %s\n", worker_facade_->getWorkerType());
     
     // 🎯 统一的open接口（传入所有参数，门面类内部智能判断）
     // - 对于编码视频（FFMPEG, RTSP）：自动检测格式，width/height/bpp 被忽略
     // - 对于raw视频（MMAP, IOURING）：使用 width/height/bpp 参数
-    if (!worker_->open(config.file_path.c_str(), 
+    if (!worker_facade_->open(config.file_path.c_str(), 
                            config.width, 
                            config.height, 
                            config.bits_per_pixel)) {
         setError("Failed to open video file: " + config.file_path);
-        worker_.reset();
+        worker_facade_.reset();
         return false;
     }
     
     // 🎯 Worker必须在open()时自动创建BufferPool（通过调用Allocator）
-    worker_buffer_pool_ = worker_->getOutputBufferPool();
+    worker_buffer_pool_ = worker_facade_->getOutputBufferPool();
     if (!worker_buffer_pool_) {
         setError("Worker failed to create BufferPool. Worker must create BufferPool in open() method by calling Allocator.");
-        worker_.reset();
+        worker_facade_.reset();
         return false;
     }
     
@@ -85,8 +85,8 @@ bool VideoProductionLine::start(const Config& config) {
     printf("   ✅ Using Worker's BufferPool: '%s' (created by Worker via Allocator)\n", 
            working_buffer_pool_->getName().c_str());
     
-    total_frames_ = worker_->getTotalFrames();
-    size_t frame_size = worker_->getFrameSize();
+    total_frames_ = worker_facade_->getTotalFrames();
+    size_t frame_size = worker_facade_->getFrameSize();
     
     printf("   Total frames: %d\n", total_frames_);
     printf("   Frame size: %zu bytes (%.2f MB)\n", frame_size, frame_size / (1024.0 * 1024.0));
@@ -117,7 +117,7 @@ bool VideoProductionLine::start(const Config& config) {
                 }
             }
             threads_.clear();
-            worker_.reset();
+            worker_facade_.reset();
             setError(std::string("Failed to start producer thread: ") + e.what());
             return false;
         }
@@ -147,8 +147,8 @@ void VideoProductionLine::stop() {
     threads_.clear();
     
     // 关闭视频文件
-    if (worker_) {
-        worker_.reset();
+    if (worker_facade_) {
+        worker_facade_.reset();
     }
     
     printf("✅ VideoProductionLine stopped\n");
@@ -250,7 +250,7 @@ void VideoProductionLine::producerThreadFunc(int thread_id) {
         }
         
         // 4. 🎯 统一的接口：调用 Worker 填充 buffer（使用fillBuffer）
-        bool fill_success = worker_->fillBuffer(frame_index, buffer);
+        bool fill_success = worker_facade_->fillBuffer(frame_index, buffer);
         
         // 5. 🎯 统一的处理：提交或归还
         if (fill_success) {

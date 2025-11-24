@@ -5,40 +5,21 @@
 #include <chrono>
 
 // ============================================================
-// 静态工厂方法实现
+// 构造函数实现
 // ============================================================
 
-std::shared_ptr<BufferPool> BufferPool::CreateEmpty(
+BufferPool::BufferPool(
+    PrivateToken token,
     const std::string& name,
-    const std::string& category)
-{
-    // 创建 BufferPool（使用 shared_ptr）
-    auto pool = std::shared_ptr<BufferPool>(new BufferPool(name, category));
-    
-    // 自动注册到全局注册表（此时已经有 shared_ptr）
-    uint64_t id = BufferPoolRegistry::getInstance().registerPool(pool, name, category);
-    pool->setRegistryId(id);
-    
-    return pool;
-}
-
-// ============================================================
-// 构造函数和析构函数
-// ============================================================
-
-BufferPool::BufferPool(const std::string& name, const std::string& category)
+    const std::string& category
+)
     : name_(name)
     , category_(category)
     , registry_id_(0)
     , running_(true)
 {
-    printf("\n📦 Initializing BufferPool '%s' (empty, managed by Allocator)...\n", 
-           name_.c_str());
-    
-    // 注意：注册在 CreateEmpty() 中完成（因为需要 shared_ptr）
-    // 构造函数中只初始化成员变量
-    
-    printf("✅ BufferPool '%s' created (will be registered by CreateEmpty)\n", name_.c_str());
+    (void)token;  // 标记 token 已使用
+    printf("📦 BufferPool '%s' (category: %s) created\n", name_.c_str(), category_.c_str());
 }
 
 BufferPool::~BufferPool() {
@@ -48,7 +29,9 @@ BufferPool::~BufferPool() {
     shutdown();
     
     // 注销
-    BufferPoolRegistry::getInstance().unregisterPool(registry_id_);
+    if (registry_id_ != 0) {
+        BufferPoolRegistry::getInstance().unregisterPool(registry_id_);
+    }
     
     printf("✅ BufferPool '%s' destroyed\n", name_.c_str());
 }

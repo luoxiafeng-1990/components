@@ -650,7 +650,7 @@ static int test_rtsp_stream(const char* rtsp_url) {
  * 参数：
  * @param video_path 视频文件路径（如 "video.mp4"）
  */
-static int test_ffmpeg_video(const char* video_path) {
+static int test_h264_taco_video(const char* video_path) {
     printf("\n═══════════════════════════════════════════════════════\n");
     printf("  Test: FFmpeg Encoded Video Playback\n");
     printf("  File: %s\n", video_path);
@@ -872,7 +872,7 @@ int main(int argc, char* argv[]) {
             break;
         
         case TestMode::FFMPEG:
-            result = test_ffmpeg_video(raw_video_path);
+            result = test_h264_taco_video(raw_video_path);
             break;
         
         case TestMode::UNKNOWN:

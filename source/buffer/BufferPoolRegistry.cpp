@@ -14,10 +14,17 @@ BufferPoolRegistry& BufferPoolRegistry::getInstance() {
 
 // ========== 注册管理接口实现 ==========
 
-uint64_t BufferPoolRegistry::registerPool(std::shared_ptr<BufferPool> pool, 
-                                          const std::string& name,
-                                          const std::string& category) {
+uint64_t BufferPoolRegistry::registerPool(std::shared_ptr<BufferPool> pool) {
+    if (!pool) {
+        printf("⚠️  Error: Cannot register null BufferPool\n");
+        return 0;
+    }
+    
     std::lock_guard<std::mutex> lock(mutex_);
+    
+    // 从 pool 对象获取 name 和 category
+    const std::string& name = pool->getName();
+    const std::string& category = pool->getCategory();
     
     // 检查名称是否已存在
     if (name_to_id_.find(name) != name_to_id_.end()) {

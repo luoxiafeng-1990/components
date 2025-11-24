@@ -90,3 +90,12 @@ bool BufferAllocatorFacade::destroyPool(BufferPool* pool) {
     return allocator_->destroyPool(pool);
 }
 
+std::shared_ptr<BufferPool> BufferAllocatorFacade::getManagedBufferPool() const {
+    if (!allocator_) {
+        printf("❌ ERROR: Allocator not initialized\n");
+        return nullptr;
+    }
+    
+    return allocator_->getManagedBufferPool();
+}
+

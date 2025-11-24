@@ -44,15 +44,11 @@ public:
     // ========== 注册管理接口 ==========
     
     /**
-     * @brief 注册 BufferPool（由 BufferPool::CreateEmpty() 自动调用）
-     * @param pool BufferPool 的 shared_ptr
-     * @param name 可读名称（如 "FramebufferPool_FB0", "VideoDecodePool"）
-     * @param category 分类（如 "Display", "Video", "Network"）
+     * @brief 注册 BufferPool（由 Allocator 创建 pool 后自动调用）
+     * @param pool BufferPool 的 shared_ptr（从 pool 对象自动获取 name 和 category）
      * @return 唯一 ID
      */
-    uint64_t registerPool(std::shared_ptr<BufferPool> pool, 
-                          const std::string& name,
-                          const std::string& category = "");
+    uint64_t registerPool(std::shared_ptr<BufferPool> pool);
     
     /**
      * @brief 注销 BufferPool（由 BufferPool 析构函数自动调用）

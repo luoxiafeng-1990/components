@@ -61,7 +61,7 @@
 class BufferFillingWorkerFacade : public IBufferFillingWorker, public IVideoFileNavigator {
 private:
     // ============ 门面模式：持有具体实现 ============
-    std::unique_ptr<WorkerBase> worker_;  // 实际的Worker实现（统一基类）
+    std::unique_ptr<WorkerBase> worker_base_;  // 实际的Worker实现（统一基类）
     BufferFillingWorkerFactory::WorkerType preferred_type_;  // 用户偏好的类型
 
 public:

@@ -1,5 +1,6 @@
 #include "buffer/allocator/implementation/AVFrameAllocator.hpp"
 #include "buffer/BufferPool.hpp"
+#include "buffer/BufferPoolRegistry.hpp"
 #include <stdio.h>
 #include <vector>
 #include <unordered_map>
@@ -14,6 +15,7 @@ AVFrameAllocator::AVFrameAllocator()
     : next_buffer_id_(0)
 {
     printf("🔧 AVFrameAllocator created\n");
+    // 不在构造函数中创建 BufferPool
 }
 
 AVFrameAllocator::~AVFrameAllocator() {
@@ -195,23 +197,37 @@ std::shared_ptr<BufferPool> AVFrameAllocator::allocatePoolWithBuffers(
     const std::string& name,
     const std::string& category
 ) {
-    printf("\n🏭 AVFrameAllocator: Creating empty pool '%s' (AVFrameAllocator主要用于动态注入)\n",
-           name.c_str());
+    printf("\n🏭 AVFrameAllocator: Creating BufferPool (empty, for AVFrame injection)...\n");
     
-    // AVFrameAllocator 主要用于动态注入，所以创建空的 Pool
-    auto pool = BufferPool::CreateEmpty(name, category);
-    if (!pool) {
-        printf("❌ Failed to create empty pool\n");
-        return nullptr;
-    }
-    
-    // Allocator 持有 shared_ptr（管理生命周期）
+    // 1. 检查是否已经创建过 pool
     {
-        std::lock_guard<std::mutex> lock(managed_pools_mutex_);
-        managed_pools_.push_back(pool);
+        std::lock_guard<std::mutex> lock(managed_pool_mutex_);
+        if (managed_pool_) {
+            printf("⚠️  Warning: BufferPool already exists, returning existing pool\n");
+            return managed_pool_;
+        }
     }
     
-    printf("✅ BufferPool '%s' created (empty, ready for AVFrame injection)\n", name.c_str());
+    // 2. 使用 Passkey Token 创建 BufferPool
+    auto pool = std::make_shared<BufferPool>(
+        token(),    // 从基类获取通行证
+        name,
+        category
+    );
+    
+    // 3. 注册到 BufferPoolRegistry（name 和 category 从 pool 对象自动获取）
+    uint64_t id = BufferPoolRegistry::getInstance().registerPool(pool);
+    pool->setRegistryId(id);
+    
+    printf("   ℹ️  Created empty pool '%s' (ID: %lu)\n", pool->getName().c_str(), id);
+    
+    // 4. 存储到 managed_pool_
+    {
+        std::lock_guard<std::mutex> lock(managed_pool_mutex_);
+        managed_pool_ = pool;
+    }
+    
+    printf("✅ BufferPool '%s' ready for AVFrame injection\n", pool->getName().c_str());
     
     return pool;
 }
@@ -314,16 +330,13 @@ bool AVFrameAllocator::destroyPool(BufferPool* pool) {
     
     printf("🧹 AVFrameAllocator: Destroying pool '%s'...\n", pool->getName().c_str());
     
-    // 1. 从 managed_pools_ 中移除
+    // 1. 检查是否是管理的 pool
     {
-        std::lock_guard<std::mutex> lock(managed_pools_mutex_);
-        auto it = std::find_if(managed_pools_.begin(), managed_pools_.end(),
-            [pool](const std::shared_ptr<BufferPool>& p) {
-                return p.get() == pool;
-            });
-        if (it != managed_pools_.end()) {
-            managed_pools_.erase(it);
-            printf("   ✅ Removed from managed_pools_\n");
+        std::lock_guard<std::mutex> lock(managed_pool_mutex_);
+        if (managed_pool_ && managed_pool_.get() == pool) {
+            printf("   ✅ Pool matches managed_pool_\n");
+        } else {
+            printf("   ⚠️  Warning: Pool does not match managed_pool_\n");
         }
     }
     

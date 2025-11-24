@@ -202,25 +202,56 @@ public:
     virtual bool destroyPool(BufferPool* pool) = 0;
     
 protected:
-    // ==================== Allocator 管理的 BufferPool 列表 ====================
+    // ==================== Allocator 管理的 BufferPool ====================
     
     /**
-     * @brief Allocator 持有的所有 BufferPool（基类中实现）
+     * @brief Allocator 持有的 BufferPool
      * 
-     * 用途：
-     * - Allocator 持有所有创建的 BufferPool 的 shared_ptr
-     * - 管理 BufferPool 的生命周期
-     * - 在 destroyPool() 时从列表中移除
+     * 设计原则：
+     * - 一个 Allocator 只管理一个 BufferPool（YAGNI 原则）
+     * - 通过 allocatePoolWithBuffers() 创建并存储
      * 
      * 线程安全：
-     * - 使用 managed_pools_mutex_ 保护
+     * - 使用 managed_pool_mutex_ 保护
      */
-    std::vector<std::shared_ptr<BufferPool>> managed_pools_;
+    std::shared_ptr<BufferPool> managed_pool_;
     
     /**
-     * @brief 保护 managed_pools_ 的互斥锁
+     * @brief 保护 managed_pool_ 的互斥锁
      */
-    mutable std::mutex managed_pools_mutex_;
+    mutable std::mutex managed_pool_mutex_;
+    
+    /**
+     * @brief 创建 BufferPool（供子类使用）
+     * 
+     * 设计原则：
+     * - 通过 friend 访问 BufferPool 的 private 构造函数
+     * - 自动注册到 BufferPoolRegistry
+     * - 子类在 allocatePoolWithBuffers() 中调用此方法
+     * 
+     * @param name Pool 名称
+     * @param category Pool 分类
+     * @return shared_ptr<BufferPool> 创建的 BufferPool
+     * 
+     * @note 此方法是 protected static，只能被子类调用
+     */
+    static std::shared_ptr<BufferPool> createBufferPool(
+        const std::string& name,
+        const std::string& category
+    );
+    
+public:
+    /**
+     * @brief 获取当前管理的 BufferPool
+     * 
+     * @return shared_ptr<BufferPool> 返回 managed_pool_，如果未创建则返回 nullptr
+     * 
+     * @note 线程安全：是（内部加锁）
+     */
+    std::shared_ptr<BufferPool> getManagedBufferPool() const {
+        std::lock_guard<std::mutex> lock(managed_pool_mutex_);
+        return managed_pool_;
+    }
     
     // ==================== 子类必须实现的核心方法 ====================
     
@@ -281,5 +312,33 @@ protected:
         }
         // 通过友元关系访问 BufferPool 的私有方法
         return pool->removeBufferFromPool(buffer);
+    }
+    
+    // ==================== Passkey Token（供子类创建 BufferPool）====================
+    
+    /**
+     * @brief 创建 BufferPool 的通行证 Token
+     * 
+     * 设计模式：Passkey Idiom
+     * 
+     * 原理：
+     * - BufferAllocatorBase 是 BufferPool::PrivateToken 的 friend
+     * - 子类可以通过这个 protected static 方法获取 Token
+     * - 外部无法获取 Token
+     * 
+     * 使用示例：
+     * @code
+     * // 在子类的 allocatePoolWithBuffers() 中：
+     * auto pool = std::make_shared<BufferPool>(
+     *     token(),              // 从基类获取通行证
+     *     name,                 // Pool 名称
+     *     category              // Pool 分类
+     * );
+     * @endcode
+     * 
+     * @return BufferPool::PrivateToken 通行证
+     */
+    static BufferPool::PrivateToken token() {
+        return BufferPool::PrivateToken();
     }
 };

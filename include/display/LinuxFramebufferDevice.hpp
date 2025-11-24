@@ -4,6 +4,8 @@
 #include "IDisplayDevice.hpp"
 #include "../buffer/Buffer.hpp"
 #include "../buffer/BufferPool.hpp"
+#include "../buffer/allocator/facade/BufferAllocatorFacade.hpp"
+#include "../buffer/allocator/factory/BufferAllocatorFactory.hpp"
 #include <vector>
 #include <memory>
 #include <stdexcept>
@@ -31,7 +33,8 @@ private:
     size_t framebuffer_total_size_;   // 映射的总大小
     
     // ============ Buffer管理（使用BufferPool）============
-    BufferPool* buffer_pool_;                 // BufferPool 指针（不拥有所有权，由外部注入）
+    std::unique_ptr<BufferAllocatorFacade> allocator_facade_;  // 门面类对象
+    std::shared_ptr<BufferPool> buffer_pool_;                  // BufferPool（智能指针管理）
     std::vector<void*> fb_mappings_;          // framebuffer 映射地址（用于物理地址查询）
     int buffer_count_;                        // buffer 数量
     int current_buffer_index_;                // 当前显示的buffer索引
@@ -193,33 +196,13 @@ public:
     int getFbIndex() const { return fb_index_; }
     
     /**
-     * @brief 设置 BufferPool（依赖注入）
+     * @brief 获取当前的 BufferPool
      * 
-     * @param pool BufferPool 指针（不拥有所有权）
+     * @return BufferPool* BufferPool 指针（可能为 nullptr）
      * 
-     * @note 使用场景：
-     * - FramebufferAllocator 创建 BufferPool 后，注入到此设备
-     * - 允许运行时更换 BufferPool
-     * 
-     * 使用示例：
-     * @code
-     * auto device = std::make_unique<LinuxFramebufferDevice>();
-     * device->initialize(0);
-     * 
-     * auto allocator = std::make_unique<FramebufferAllocator>(device.get());
-     * auto pool = allocator->allocatePoolWithBuffers(0, 0, "FBPool", "Display");
-     * device->setBufferPool(pool.get());
-     * @endcode
+     * @note BufferPool 在 initialize() 中自动创建，无需手动设置
      */
-    void setBufferPool(BufferPool* pool);
-    
-    /**
-     * @brief 获取 BufferPool 指针
-     * 
-     * @return BufferPool* BufferPool 指针，如果未设置返回 nullptr
-     */
-    BufferPool* getBufferPool() const { return buffer_pool_; }
+    BufferPool* getBufferPool() const { return buffer_pool_.get(); }
 };
 
 #endif // LINUX_FRAMEBUFFER_DEVICE_HPP
-

@@ -115,6 +115,19 @@ public:
     );
     
     /**
+     * @brief 获取底层 Allocator 管理的 BufferPool
+     * 
+     * 使用场景：
+     * - Worker 需要获取 BufferPool
+     * - LinuxFramebufferDevice 需要获取 BufferPool
+     * 
+     * @return shared_ptr<BufferPool> 返回 managed_pool_，如果未创建则返回 nullptr
+     * 
+     * @note 这是门面类提供的便利方法，内部转发到底层 Allocator
+     */
+    std::shared_ptr<BufferPool> getManagedBufferPool() const;
+    
+    /**
      * @brief 从 BufferPool 移除并销毁 Buffer
      * 
      * @param buffer 要移除的 Buffer
