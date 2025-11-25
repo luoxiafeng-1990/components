@@ -13,9 +13,9 @@
 
 AVFrameAllocator::AVFrameAllocator()
     : next_buffer_id_(0)
+    , managed_pool_sptr_(nullptr)  // 显式初始化为空（延迟初始化模式）
 {
-    printf("🔧 AVFrameAllocator created\n");
-    // 不在构造函数中创建 BufferPool
+    printf("🔧 AVFrameAllocator created (BufferPool will be lazy-initialized)\n");
 }
 
 AVFrameAllocator::~AVFrameAllocator() {
