@@ -106,9 +106,9 @@ std::shared_ptr<BufferPool> NormalAllocator::allocatePoolWithBuffers(
     // 1. 检查是否已经创建过 pool
     {
         std::lock_guard<std::mutex> lock(managed_pool_mutex_);
-        if (managed_pool_) {
+        if (managed_pool_sptr_) {
             printf("⚠️  Warning: BufferPool already exists, returning existing pool\n");
-            return managed_pool_;
+            return managed_pool_sptr_;
         }
     }
     
@@ -150,10 +150,10 @@ std::shared_ptr<BufferPool> NormalAllocator::allocatePoolWithBuffers(
                i, buffer->getVirtualAddress(), buffer->getPhysicalAddress(), size);
     }
     
-    // 5. 存储到 managed_pool_（基类成员）
+    // 5. 存储到 managed_pool_sptr_（基类成员）
     {
         std::lock_guard<std::mutex> lock(managed_pool_mutex_);
-        managed_pool_ = pool;
+        managed_pool_sptr_ = pool;
     }
     
     printf("✅ BufferPool '%s' created with %d buffers\n", pool->getName().c_str(), count);
@@ -291,10 +291,10 @@ bool NormalAllocator::destroyPool(BufferPool* pool) {
     // 1. 检查是否是管理的 pool
     {
         std::lock_guard<std::mutex> lock(managed_pool_mutex_);
-        if (managed_pool_ && managed_pool_.get() == pool) {
-            printf("   ✅ Pool matches managed_pool_\n");
+        if (managed_pool_sptr_ && managed_pool_sptr_.get() == pool) {
+            printf("   ✅ Pool matches managed_pool_sptr_\n");
         } else {
-            printf("   ⚠️  Warning: Pool does not match managed_pool_\n");
+            printf("   ⚠️  Warning: Pool does not match managed_pool_sptr_\n");
         }
     }
     

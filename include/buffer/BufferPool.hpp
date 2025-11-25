@@ -118,9 +118,9 @@ public:
      * 
      * 线程安全：是
      * 
-     * @param buffer 填充好的 buffer
+     * @param buffer_ptr 填充好的 buffer
      */
-    void submitFilled(Buffer* buffer);
+    void submitFilled(Buffer* buffer_ptr);
     
     // ====== 消费者接口 ======
     
@@ -141,9 +141,9 @@ public:
      * 
      * 线程安全：是
      * 
-     * @param buffer 已使用的 buffer
+     * @param buffer_ptr 已使用的 buffer
      */
-    void releaseFilled(Buffer* buffer);
+    void releaseFilled(Buffer* buffer_ptr);
     
     // ====== 查询接口 ======
     

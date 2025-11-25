@@ -93,8 +93,8 @@ Buffer* BufferPool::acquireFree(bool blocking, int timeout_ms) {
     return buffer;
 }
 
-void BufferPool::submitFilled(Buffer* buffer) {
-    if (!buffer) {
+void BufferPool::submitFilled(Buffer* buffer_ptr) {
+    if (!buffer_ptr) {
         return;
     }
     
@@ -102,15 +102,15 @@ void BufferPool::submitFilled(Buffer* buffer) {
         std::lock_guard<std::mutex> lock(mutex_);
         
         // 验证 buffer 属于此 pool
-        if (managed_buffers_.find(buffer) == managed_buffers_.end()) {
+        if (managed_buffers_.find(buffer_ptr) == managed_buffers_.end()) {
             printf("⚠️  Buffer #%u does not belong to pool '%s'\n",
-                   buffer->id(), name_.c_str());
+                   buffer_ptr->id(), name_.c_str());
             return;
         }
         
         // 添加到 filled 队列
-        filled_queue_.push(buffer);
-        buffer->setState(Buffer::State::READY_FOR_CONSUME);
+        filled_queue_.push(buffer_ptr);
+        buffer_ptr->setState(Buffer::State::READY_FOR_CONSUME);
     }
     
     // 通知消费者（锁外通知）

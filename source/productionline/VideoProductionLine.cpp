@@ -7,7 +7,7 @@
 // ============================================================
 
 VideoProductionLine::VideoProductionLine()
-    : working_buffer_pool_(nullptr)
+    : working_buffer_pool_ptr_(nullptr)
     , running_(false)
     , produced_frames_(0)
     , skipped_frames_(0)
@@ -57,36 +57,36 @@ bool VideoProductionLine::start(const Config& config) {
     config_ = config;
     
     // 创建共享的 BufferFillingWorkerFacade 对象
-    worker_facade_ = std::make_shared<BufferFillingWorkerFacade>(config.worker_type);
-    printf("   Worker type: %s\n", worker_facade_->getWorkerType());
+    worker_facade_sptr_ = std::make_shared<BufferFillingWorkerFacade>(config.worker_type);
+    printf("   Worker type: %s\n", worker_facade_sptr_->getWorkerType());
     
     // 🎯 统一的open接口（传入所有参数，门面类内部智能判断）
     // - 对于编码视频（FFMPEG, RTSP）：自动检测格式，width/height/bpp 被忽略
     // - 对于raw视频（MMAP, IOURING）：使用 width/height/bpp 参数
-    if (!worker_facade_->open(config.file_path.c_str(), 
+    if (!worker_facade_sptr_->open(config.file_path.c_str(), 
                            config.width, 
                            config.height, 
                            config.bits_per_pixel)) {
         setError("Failed to open video file: " + config.file_path);
-        worker_facade_.reset();
+        worker_facade_sptr_.reset();
         return false;
     }
     
     // 🎯 Worker必须在open()时自动创建BufferPool（通过调用Allocator）
-    worker_buffer_pool_ = worker_facade_->getOutputBufferPool();
-    if (!worker_buffer_pool_) {
+    worker_buffer_pool_uptr_ = worker_facade_sptr_->getOutputBufferPool();
+    if (!worker_buffer_pool_uptr_) {
         setError("Worker failed to create BufferPool. Worker must create BufferPool in open() method by calling Allocator.");
-        worker_facade_.reset();
+        worker_facade_sptr_.reset();
         return false;
     }
     
     // 使用Worker创建的BufferPool
-    working_buffer_pool_ = worker_buffer_pool_.get();
+    working_buffer_pool_ptr_ = worker_buffer_pool_uptr_.get();
     printf("   ✅ Using Worker's BufferPool: '%s' (created by Worker via Allocator)\n", 
-           working_buffer_pool_->getName().c_str());
+           working_buffer_pool_ptr_->getName().c_str());
     
-    total_frames_ = worker_facade_->getTotalFrames();
-    size_t frame_size = worker_facade_->getFrameSize();
+    total_frames_ = worker_facade_sptr_->getTotalFrames();
+    size_t frame_size = worker_facade_sptr_->getFrameSize();
     
     printf("   Total frames: %d\n", total_frames_);
     printf("   Frame size: %zu bytes (%.2f MB)\n", frame_size, frame_size / (1024.0 * 1024.0));
@@ -117,7 +117,7 @@ bool VideoProductionLine::start(const Config& config) {
                 }
             }
             threads_.clear();
-            worker_facade_.reset();
+            worker_facade_sptr_.reset();
             setError(std::string("Failed to start producer thread: ") + e.what());
             return false;
         }
@@ -147,8 +147,8 @@ void VideoProductionLine::stop() {
     threads_.clear();
     
     // 关闭视频文件
-    if (worker_facade_) {
-        worker_facade_.reset();
+    if (worker_facade_sptr_) {
+        worker_facade_sptr_.reset();
     }
     
     printf("✅ VideoProductionLine stopped\n");
@@ -205,7 +205,7 @@ void VideoProductionLine::printStats() const {
 
 void VideoProductionLine::producerThreadFunc(int thread_id) {
     printf("🚀 Thread #%d: Starting unified producer loop\n", thread_id);
-    printf("   Working BufferPool: '%s'\n", working_buffer_pool_->getName().c_str());
+    printf("   Working BufferPool: '%s'\n", working_buffer_pool_ptr_->getName().c_str());
     
     int thread_produced = 0;
     int thread_skipped = 0;
@@ -237,7 +237,7 @@ void VideoProductionLine::producerThreadFunc(int thread_id) {
         // 3. 🎯 统一的流程：从工作 BufferPool 获取 buffer
         Buffer* buffer = nullptr;
         while (running_ && buffer == nullptr) {
-            buffer = working_buffer_pool_->acquireFree(true, 100);  // 100ms 超时
+            buffer = working_buffer_pool_ptr_->acquireFree(true, 100);  // 100ms 超时
             if (buffer == nullptr && running_) {
                 // 超时但仍在运行，继续等待
                 // printf("   [Thread #%d] Waiting for free buffer...\n", thread_id);
@@ -250,16 +250,16 @@ void VideoProductionLine::producerThreadFunc(int thread_id) {
         }
         
         // 4. 🎯 统一的接口：调用 Worker 填充 buffer（使用fillBuffer）
-        bool fill_success = worker_facade_->fillBuffer(frame_index, buffer);
+        bool fill_success = worker_facade_sptr_->fillBuffer(frame_index, buffer);
         
         // 5. 🎯 统一的处理：提交或归还
         if (fill_success) {
-            working_buffer_pool_->submitFilled(buffer);
+            working_buffer_pool_ptr_->submitFilled(buffer);
             produced_frames_.fetch_add(1);
             thread_produced++;
             consecutive_failures = 0;  // 重置失败计数
         } else {
-            working_buffer_pool_->releaseFilled(buffer);
+            working_buffer_pool_ptr_->releaseFilled(buffer);
             skipped_frames_.fetch_add(1);
             thread_skipped++;
             

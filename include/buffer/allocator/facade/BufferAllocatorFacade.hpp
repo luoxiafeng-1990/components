@@ -161,7 +161,7 @@ public:
      * @note 特殊场景下可能需要（如 AVFrameAllocator 的 injectAVFrameToPool）
      */
     BufferAllocatorBase* getUnderlyingAllocator() const {
-        return allocator_base_.get();
+        return allocator_base_uptr_.get();
     }
     
     /**
@@ -174,7 +174,7 @@ public:
     }
 
 private:
-    std::unique_ptr<BufferAllocatorBase> allocator_base_;  // 底层 Allocator 基类指针（通过 Factory 创建）
+    std::unique_ptr<BufferAllocatorBase> allocator_base_uptr_;  // 底层 Allocator 基类指针（通过 Factory 创建）
     BufferAllocatorFactory::AllocatorType type_;           // 当前使用的类型
 };
 
