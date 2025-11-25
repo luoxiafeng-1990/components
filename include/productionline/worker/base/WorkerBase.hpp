@@ -54,32 +54,6 @@ public:
     /**
      * @brief 构造函数
      * 
-     * 设计理念：
-     * - 子类通过初始化列表传递 AllocatorType 参数
-     * - 父类在构造函数中创建对应类型的 Allocator
-     * - 配置细节（mem_type, alignment）由 Factory 内部决定
-     * 
-     * 子类使用方式：
-     * ```cpp
-     * // FFmpeg解码Worker
-     * FfmpegDecodeVideoFileWorker::FfmpegDecodeVideoFileWorker()
-     *     : WorkerBase(BufferAllocatorFactory::AllocatorType::AVFRAME)  // 只需传递类型
-     *     , format_ctx_(nullptr)
-     *     // ...
-     * {
-     *     // allocator_facade_ 已经可用，无需任何初始化代码
-     * }
-     * 
-     * // Raw视频文件Worker
-     * MmapRawVideoFileWorker::MmapRawVideoFileWorker()
-     *     : WorkerBase(BufferAllocatorFactory::AllocatorType::NORMAL)  // 只需传递类型
-     *     , fd_(-1)
-     *     // ...
-     * {
-     *     // allocator_facade_ 已经可用
-     * }
-     * ```
-     * 
      * Allocator类型选择建议：
      * - NORMAL: Raw视频文件Worker（需要内部分配内存）
      * - AVFRAME: FFmpeg解码Worker（需要动态注入AVFrame）
@@ -152,35 +126,11 @@ public:
 protected:
     /**
      * @brief Allocator门面（所有Worker子类自动继承）
-     * 
-     * 用途：
-     * - Worker在open()时通过allocator_facade_创建BufferPool
-     * - 子类直接调用：allocator_facade_.allocatePoolWithBuffers(...)
-     * 
-     * 生命周期：
-     * - 在父类 WorkerBase 构造时创建（根据子类传递的类型）
-     * - 子类构造函数体执行时，allocator_facade_ 已经可用
-     * - 随对象销毁自动释放
-     * 
-     * 注意：
-     * - 直接包含对象（不是指针），生命周期由对象管理
-     * - 通过成员访问：allocator_facade_.allocatePoolWithBuffers(...)
-     * - 构造时已初始化，使用时无需检查nullptr
      */
     BufferAllocatorFacade allocator_facade_;
     
     /**
      * @brief Worker创建的BufferPool（所有Worker子类自动继承）
-     * 
-     * 用途：
-     * - Worker在open()时创建并保存BufferPool（shared_ptr）
-     * - Worker通过getOutputBufferPool()返回给ProductionLine（转换为unique_ptr）
-     * 
-     * 生命周期：
-     * - 在open()时创建（shared_ptr，Allocator 和 Registry 也持有）
-     * - 在getOutputBufferPool()时转换为unique_ptr返回给ProductionLine
-     * - Worker不再持有，但Allocator和Registry仍持有shared_ptr
-     * - 在close()时如果未转移则自动释放
      */
     std::shared_ptr<BufferPool> buffer_pool_sptr_;
 };

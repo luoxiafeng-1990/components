@@ -15,23 +15,23 @@
 FramebufferAllocator::FramebufferAllocator()
     : external_buffers_()
     , next_buffer_index_(0)
+    , managed_pool_sptr_(nullptr)  // 显式初始化为空（延迟初始化模式）
 {
-   printf("🔧 FramebufferAllocator created\n");
+   printf("🔧 FramebufferAllocator created (BufferPool will be lazy-initialized)\n");
 }
 
 FramebufferAllocator::FramebufferAllocator(const std::vector<BufferInfo>& external_buffers)
     : external_buffers_(external_buffers)
     , next_buffer_index_(0)
+    , managed_pool_sptr_(nullptr)  // 显式初始化为空（延迟初始化模式）
 {
-    printf("🔧 FramebufferAllocator created with %zu external buffers\n", 
+    printf("🔧 FramebufferAllocator created with %zu external buffers (BufferPool will be lazy-initialized)\n", 
            external_buffers_.size());
-    
-    // 注意：不在构造函数中创建 BufferPool
-    // BufferPool 应该由 Worker 在 open() 时通过调用 allocatePoolWithBuffers() 创建
 }
 
 FramebufferAllocator::FramebufferAllocator(LinuxFramebufferDevice* device)
     : next_buffer_index_(0)
+    , managed_pool_sptr_(nullptr)  // 显式初始化为空（延迟初始化模式）
 {
     if (!device) {
         printf("❌ ERROR: Device pointer is null\n");
@@ -41,11 +41,8 @@ FramebufferAllocator::FramebufferAllocator(LinuxFramebufferDevice* device)
     // 调用私有方法构建 BufferInfo 列表
     external_buffers_ = buildBufferInfosFromDevice(device);
     
-    printf("🔧 FramebufferAllocator created from device with %zu buffers\n", 
+    printf("🔧 FramebufferAllocator created from device with %zu buffers (BufferPool will be lazy-initialized)\n", 
            external_buffers_.size());
-    
-    // 注意：不在构造函数中创建 BufferPool
-    // BufferPool 应该由 Worker 在 open() 时通过调用 allocatePoolWithBuffers() 创建
 }
 
 FramebufferAllocator::~FramebufferAllocator() {

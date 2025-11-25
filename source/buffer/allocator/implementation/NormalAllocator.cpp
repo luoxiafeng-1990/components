@@ -16,11 +16,9 @@
 NormalAllocator::NormalAllocator(BufferMemoryAllocatorType type, size_t alignment)
     : type_(type)
     , alignment_(alignment)
+    , managed_pool_sptr_(nullptr)  // 显式初始化为空（延迟初始化模式）
 {
-    printf("🔧 NormalAllocator created (alignment=%zu)\n", alignment_);
-    
-    // 注意：不在构造函数中创建 BufferPool
-    // BufferPool 应该由 Worker 在 open() 时通过调用 allocatePoolWithBuffers() 创建
+    printf("🔧 NormalAllocator created (alignment=%zu, BufferPool will be lazy-initialized)\n", alignment_);
 }
 
 NormalAllocator::~NormalAllocator() {
