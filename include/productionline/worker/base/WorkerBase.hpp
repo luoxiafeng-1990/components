@@ -20,6 +20,7 @@
  * - 避免在门面类中使用dynamic_cast进行类型转换
  * - 提供统一的类型标识，便于工厂模式和门面模式使用
  * - 提供统一的Allocator和BufferPool管理（所有Worker的共同职责）
+ * - 采用构造函数参数传递模式，父类统一管理Allocator创建逻辑
  * 
  * 职责：
  * - 作为所有Worker实现类的统一基类
@@ -27,6 +28,7 @@
  * - 提供统一的类型系统，便于多态使用
  * - 提供统一的Allocator门面（所有Worker都需要创建BufferPool）
  * - 管理Worker创建的BufferPool（通过Allocator创建）
+ * - 统一决策：根据子类传递的AllocatorType，创建合适的Allocator
  * 
  * 继承关系：
  * - WorkerBase 继承 IBufferFillingWorker 和 IVideoFileNavigator
@@ -38,34 +40,64 @@
  * - 架构清晰：明确的继承层次，符合面向对象设计原则
  * - 易于维护：统一的基类便于扩展和维护
  * - 统一管理：所有Worker自动继承allocator_和buffer_pool_，无需每个子类重复定义
+ * - 责任明确：子类只需传递类型参数，父类统一管理Allocator创建逻辑
+ * - 符合单一职责原则：子类关注业务逻辑，父类关注Allocator管理
+ * 
+ * 构造函数参数传递模式：
+ * - 子类通过初始化列表向父类传递 AllocatorType
+ * - 父类在构造函数中统一创建 Allocator
+ * - 所有Allocator配置细节封装在Factory中
+ * - 子类无需关心Allocator内部实现
  */
 class WorkerBase : public IBufferFillingWorker, public IVideoFileNavigator {
 public:
     /**
      * @brief 构造函数
      * 
-     * @param allocator_type Allocator类型（默认AUTO，自动选择NormalAllocator）
+     * 设计理念：
+     * - 子类通过初始化列表传递 AllocatorType 参数
+     * - 父类在构造函数中创建对应类型的 Allocator
+     * - 配置细节（mem_type, alignment）由 Factory 内部决定
      * 
      * 子类使用方式：
      * ```cpp
-     * // 在子类构造函数初始化列表中传递 AllocatorType
+     * // FFmpeg解码Worker
      * FfmpegDecodeVideoFileWorker::FfmpegDecodeVideoFileWorker()
-     *     : WorkerBase(BufferAllocatorFactory::AllocatorType::NORMAL)  // 指定类型
+     *     : WorkerBase(BufferAllocatorFactory::AllocatorType::AVFRAME)  // 只需传递类型
      *     , format_ctx_(nullptr)
-     *     , ...
+     *     // ...
      * {
+     *     // allocator_facade_ 已经可用，无需任何初始化代码
+     * }
+     * 
+     * // Raw视频文件Worker
+     * MmapRawVideoFileWorker::MmapRawVideoFileWorker()
+     *     : WorkerBase(BufferAllocatorFactory::AllocatorType::NORMAL)  // 只需传递类型
+     *     , fd_(-1)
+     *     // ...
+     * {
+     *     // allocator_facade_ 已经可用
      * }
      * ```
      * 
      * Allocator类型选择建议：
-     * - NORMAL: Raw视频文件（MmapRawVideoFileWorker, IoUringRawVideoFileWorker）
-     * - AVFRAME: FFmpeg解码，需要动态注入（FfmpegDecodeRtspWorker）
-     * - FRAMEBUFFER: Framebuffer内存包装
-     * - AUTO: 默认使用NormalAllocator
+     * - NORMAL: Raw视频文件Worker（需要内部分配内存）
+     * - AVFRAME: FFmpeg解码Worker（需要动态注入AVFrame）
+     * - FRAMEBUFFER: Framebuffer设备Worker（需要包装外部内存）
+     * - AUTO: 默认使用NORMAL（不推荐，子类应明确指定）
+     * 
+     * 构造顺序：
+     * 1. 父类 WorkerBase 构造（创建 allocator_facade_）
+     * 2. 子类成员变量初始化
+     * 3. 子类构造函数体执行
+     * 
+     * @param allocator_type Allocator类型（子类传递）
      */
     explicit WorkerBase(
-        BufferAllocatorFactory::AllocatorType allocator_type = BufferAllocatorFactory::AllocatorType::AUTO
-    ) : allocator_(allocator_type) {
+        BufferAllocatorFactory::AllocatorType allocator_type
+    ) : allocator_facade_(allocator_type)  // 🎯 父类直接创建Allocator门面
+      , buffer_pool_(nullptr) 
+    {
     }
     
     virtual ~WorkerBase() = default;
@@ -122,16 +154,20 @@ protected:
      * @brief Allocator门面（所有Worker子类自动继承）
      * 
      * 用途：
-     * - Worker在open()时通过allocator_创建BufferPool
-     * - 子类直接调用：allocator_.allocatePoolWithBuffers(...)
+     * - Worker在open()时通过allocator_facade_创建BufferPool
+     * - 子类直接调用：allocator_facade_.allocatePoolWithBuffers(...)
+     * 
+     * 生命周期：
+     * - 在父类 WorkerBase 构造时创建（根据子类传递的类型）
+     * - 子类构造函数体执行时，allocator_facade_ 已经可用
+     * - 随对象销毁自动释放
      * 
      * 注意：
-     * - Allocator类型在构造函数中确定（通过基类构造函数参数）
-     * - 子类在构造函数初始化列表中指定：WorkerBase(AllocatorType::NORMAL)
-     * - 如果子类需要不同的Allocator类型，只需在构造函数中传递不同的类型即可
-     * - 通常不需要在运行时更换Allocator类型（类型在构造时确定）
+     * - 直接包含对象（不是指针），生命周期由对象管理
+     * - 通过成员访问：allocator_facade_.allocatePoolWithBuffers(...)
+     * - 构造时已初始化，使用时无需检查nullptr
      */
-    BufferAllocatorFacade allocator_;
+    BufferAllocatorFacade allocator_facade_;
     
     /**
      * @brief Worker创建的BufferPool（所有Worker子类自动继承）

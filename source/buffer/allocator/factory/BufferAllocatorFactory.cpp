@@ -9,7 +9,49 @@
 // 公共接口
 // ============================================================================
 
+/**
+ * @brief 简化版create - 推荐使用
+ * 
+ * 工厂内部决定每种类型的最优配置
+ */
 std::unique_ptr<BufferAllocatorBase> BufferAllocatorFactory::create(
+    AllocatorType type
+) {
+    // AUTO 类型默认使用 NormalAllocator
+    if (type == AllocatorType::AUTO) {
+        type = AllocatorType::NORMAL;
+    }
+    
+    // 🎯 根据类型选择最优配置（工厂策略）
+    switch (type) {
+        case AllocatorType::NORMAL:
+            printf("🏭 BufferAllocatorFactory: Creating NormalAllocator (MALLOC + 64-byte aligned)\n");
+            return std::make_unique<NormalAllocator>(
+                BufferMemoryAllocatorType::NORMAL_MALLOC,  // 工厂决定
+                64                                          // 工厂决定
+            );
+            
+        case AllocatorType::AVFRAME:
+            printf("🏭 BufferAllocatorFactory: Creating AVFrameAllocator (default config)\n");
+            return std::make_unique<AVFrameAllocator>();
+            
+        case AllocatorType::FRAMEBUFFER:
+            printf("🏭 BufferAllocatorFactory: Creating FramebufferAllocator (default config)\n");
+            return std::make_unique<FramebufferAllocator>();
+            
+        default:
+            printf("⚠️  Warning: Unknown AllocatorType, using NormalAllocator\n");
+            return std::make_unique<NormalAllocator>(
+                BufferMemoryAllocatorType::NORMAL_MALLOC,
+                64
+            );
+    }
+}
+
+/**
+ * @brief 完整版create - 用于特殊配置需求
+ */
+std::unique_ptr<BufferAllocatorBase> BufferAllocatorFactory::createWithConfig(
     AllocatorType type,
     BufferMemoryAllocatorType mem_type,
     size_t alignment
@@ -39,7 +81,7 @@ std::unique_ptr<BufferAllocatorBase> BufferAllocatorFactory::createByName(
     } else if (strcmp(name, "framebuffer") == 0) {
         return createByType(AllocatorType::FRAMEBUFFER, mem_type, alignment);
     } else if (strcmp(name, "auto") == 0) {
-        return create(AllocatorType::AUTO, mem_type, alignment);
+        return createWithConfig(AllocatorType::AUTO, mem_type, alignment);
     }
     
     printf("⚠️  Warning: Unknown allocator type: %s, using NormalAllocator\n", name);

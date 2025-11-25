@@ -11,7 +11,7 @@
 // ============ 构造函数 ============
 
 MmapRawVideoFileWorker::MmapRawVideoFileWorker()
-    : WorkerBase(BufferAllocatorFactory::AllocatorType::NORMAL)  // Raw视频文件使用NormalAllocator
+    : WorkerBase(BufferAllocatorFactory::AllocatorType::NORMAL)  // 🎯 只需传递类型！
     , fd_(-1)
     , mapped_file_(nullptr)
     , mapped_size_(0)
@@ -26,6 +26,7 @@ MmapRawVideoFileWorker::MmapRawVideoFileWorker()
     , detected_format_(FileFormat::UNKNOWN)
 {
     path_[0] = '\0';
+    // 🎯 父类已经创建好 NORMAL 类型的 allocator_facade_，无需任何初始化代码
 }
 
 MmapRawVideoFileWorker::~MmapRawVideoFileWorker() {

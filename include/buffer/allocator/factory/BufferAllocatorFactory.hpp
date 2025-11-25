@@ -52,17 +52,40 @@ public:
     };
     
     /**
-     * @brief 创建Buffer分配器（工厂方法）
+     * @brief 创建Buffer分配器（简化版工厂方法） - 推荐使用
+     * 
+     * 设计理念：
+     * - 上层只需指定Allocator类型
+     * - 配置细节（mem_type, alignment）由工厂内部决定
+     * - 每种类型使用最优的默认配置
+     * 
+     * 配置策略（工厂内部决定）：
+     * - NORMAL: NORMAL_MALLOC + 64字节对齐
+     * - AVFRAME: AVFrameAllocator默认配置
+     * - FRAMEBUFFER: FramebufferAllocator默认配置
+     * - AUTO: 默认使用NORMAL
      * 
      * @param type Allocator类型（默认AUTO）
-     * @param mem_type 内存分配器类型（用于NormalAllocator，默认NORMAL_MALLOC）
-     * @param alignment 内存对齐（用于NormalAllocator，默认64字节）
      * @return Allocator实例（智能指针）
      */
     static std::unique_ptr<BufferAllocatorBase> create(
-        AllocatorType type = AllocatorType::AUTO,
-        BufferMemoryAllocatorType mem_type = BufferMemoryAllocatorType::NORMAL_MALLOC,
-        size_t alignment = 64
+        AllocatorType type = AllocatorType::AUTO
+    );
+    
+    /**
+     * @brief 创建Buffer分配器（完整版，用于特殊配置需求）
+     * 
+     * @deprecated 推荐使用简化版 create(AllocatorType)
+     * 
+     * @param type Allocator类型
+     * @param mem_type 内存分配器类型（仅用于NormalAllocator）
+     * @param alignment 内存对齐（仅用于NormalAllocator）
+     * @return Allocator实例（智能指针）
+     */
+    static std::unique_ptr<BufferAllocatorBase> createWithConfig(
+        AllocatorType type,
+        BufferMemoryAllocatorType mem_type,
+        size_t alignment
     );
     
     /**

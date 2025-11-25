@@ -18,7 +18,7 @@ extern "C" {
 // ============ 构造/析构 ============
 
 FfmpegDecodeRtspWorker::FfmpegDecodeRtspWorker()
-    : WorkerBase(BufferAllocatorFactory::AllocatorType::AVFRAME)  // RTSP流使用AVFrameAllocator（动态注入模式）
+    : WorkerBase(BufferAllocatorFactory::AllocatorType::AVFRAME)  // 🎯 只需传递类型！
     , format_ctx_(nullptr)
     , codec_ctx_(nullptr)
     , sws_ctx_(nullptr)
@@ -37,6 +37,8 @@ FfmpegDecodeRtspWorker::FfmpegDecodeRtspWorker()
     , eof_reached_(false)
 {
     rtsp_url_[0] = '\0';
+    
+    // 🎯 父类已经创建好 AVFRAME 类型的 allocator_facade_，无需任何初始化代码
     
     // 初始化内部缓冲区（30帧）
     internal_buffer_.resize(30);

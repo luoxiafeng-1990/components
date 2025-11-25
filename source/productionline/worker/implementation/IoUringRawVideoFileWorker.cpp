@@ -9,7 +9,7 @@
 // ============ 构造/析构 ============
 
 IoUringRawVideoFileWorker::IoUringRawVideoFileWorker(int queue_depth)
-    : WorkerBase(BufferAllocatorFactory::AllocatorType::NORMAL)  // Raw视频文件使用NormalAllocator
+    : WorkerBase(BufferAllocatorFactory::AllocatorType::NORMAL)  // 🎯 只需传递类型！
     , queue_depth_(queue_depth)
     , initialized_(false)
     , video_fd_(-1)
@@ -22,6 +22,7 @@ IoUringRawVideoFileWorker::IoUringRawVideoFileWorker(int queue_depth)
     , bits_per_pixel_(0)
     , is_open_(false)
 {
+    // 🎯 父类已经创建好 NORMAL 类型的 allocator_facade_，无需任何初始化代码
     // io_uring 延迟初始化，在 open() 时初始化
 }
 

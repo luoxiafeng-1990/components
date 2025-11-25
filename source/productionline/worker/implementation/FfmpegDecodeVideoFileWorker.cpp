@@ -21,7 +21,7 @@ extern "C" {
 // ============================================================================
 
 FfmpegDecodeVideoFileWorker::FfmpegDecodeVideoFileWorker()
-    : WorkerBase(BufferAllocatorFactory::AllocatorType::NORMAL)  // FFmpeg解码视频文件使用NormalAllocator（普通模式）
+    : WorkerBase(BufferAllocatorFactory::AllocatorType::AVFRAME)  // 🎯 只需传递类型！
     , format_ctx_(nullptr)
     , codec_ctx_(nullptr)
     , sws_ctx_(nullptr)
@@ -46,6 +46,7 @@ FfmpegDecodeVideoFileWorker::FfmpegDecodeVideoFileWorker()
     , last_ffmpeg_error_(0)
 {
     memset(file_path_, 0, sizeof(file_path_));
+    // 🎯 父类已经创建好 AVFRAME 类型的 allocator_facade_，无需任何初始化代码
 }
 
 FfmpegDecodeVideoFileWorker::~FfmpegDecodeVideoFileWorker() {
@@ -89,7 +90,7 @@ bool FfmpegDecodeVideoFileWorker::open(const char* path) {
     
     int buffer_count = 10;  // 默认创建10个Buffer
     
-    buffer_pool_ = allocator_.allocatePoolWithBuffers(
+    buffer_pool_ = allocator_facade_.allocatePoolWithBuffers(
         buffer_count,
         frame_size,
         std::string("FfmpegDecodeVideoFileWorker_") + std::string(path),
@@ -842,7 +843,7 @@ void FfmpegDecodeVideoFileWorker::printVideoInfo() const {
     printf("   Resolution: %dx%d\n", codecpar->width, codecpar->height);
     printf("   FPS: %.2f\n", av_q2d(stream->avg_frame_rate));
     printf("   Duration: %.2f seconds\n", stream->duration * av_q2d(stream->time_base));
-    printf("   Bit rate: %lld kbps\n", codecpar->bit_rate / 1000);
+    printf("   Bit rate: %ld kbps\n", (long)(codecpar->bit_rate / 1000));
     printf("   Pixel format: %s\n", av_get_pix_fmt_name((AVPixelFormat)codecpar->format));
 }
 

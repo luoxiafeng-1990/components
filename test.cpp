@@ -201,6 +201,7 @@ static int test_sequential_playback(const char* raw_video_path) {
     
     // 2. 获取 display 的 BufferPool（framebuffer 已托管）
     BufferPool& pool = *display.getBufferPool();
+    (void)pool;  // 消除未使用警告
     
     // 3. 创建 VideoProductionLine（Worker会在open()时自动创建BufferPool）
     VideoProductionLine producer;

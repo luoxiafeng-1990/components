@@ -21,10 +21,10 @@
  * 使用方式：
  * ```cpp
  * // Worker 中只需要一行创建
- * BufferAllocatorFacade allocator_(BufferAllocatorFactory::AllocatorType::AUTO);
+ * BufferAllocatorFacade allocator_facade(BufferAllocatorFactory::AllocatorType::AUTO);
  * 
  * // 直接调用，无需关心底层实现
- * auto pool = allocator_.allocatePoolWithBuffers(count, size, name, category);
+ * auto pool = allocator_facade.allocatePoolWithBuffers(count, size, name, category);
  * ```
  * 
  * 注意：
@@ -43,16 +43,24 @@ public:
     /**
      * @brief 构造函数
      * 
-     * @param type Allocator类型（默认 AUTO，使用 Factory 的枚举类型）
-     * @param mem_type 内存分配器类型（用于 NormalAllocator，默认 NORMAL_MALLOC）
-     * @param alignment 内存对齐（用于 NormalAllocator，默认 64 字节）
+     * 设计理念：
+     * - Worker层只需要指定Allocator类型
+     * - 具体的内存分配器类型、对齐大小等配置细节由Factory内部决定
+     * - 符合"高层不依赖底层实现细节"的设计原则
+     * 
+     * @param type Allocator类型（默认 AUTO）
+     * 
+     * 配置策略（由Factory内部决定）：
+     * - NORMAL: 使用 NORMAL_MALLOC + 64字节对齐
+     * - AVFRAME: 使用 AVFrameAllocator 的默认配置
+     * - FRAMEBUFFER: 使用 FramebufferAllocator 的默认配置
+     * - AUTO: 默认使用 NORMAL 类型
      * 
      * @note 构造函数内部通过 Factory 创建底层 Allocator 实例
+     * @note Factory 封装了所有配置细节，上层无需关心
      */
     explicit BufferAllocatorFacade(
-        BufferAllocatorFactory::AllocatorType type = BufferAllocatorFactory::AllocatorType::AUTO,
-        BufferMemoryAllocatorType mem_type = BufferMemoryAllocatorType::NORMAL_MALLOC,
-        size_t alignment = 64
+        BufferAllocatorFactory::AllocatorType type = BufferAllocatorFactory::AllocatorType::AUTO
     );
     
     /**
@@ -153,7 +161,7 @@ public:
      * @note 特殊场景下可能需要（如 AVFrameAllocator 的 injectAVFrameToPool）
      */
     BufferAllocatorBase* getUnderlyingAllocator() const {
-        return allocator_.get();
+        return allocator_base_.get();
     }
     
     /**
@@ -166,7 +174,7 @@ public:
     }
 
 private:
-    std::unique_ptr<BufferAllocatorBase> allocator_;  // 底层 Allocator 实例（通过 Factory 创建）
-    BufferAllocatorFactory::AllocatorType type_;      // 当前使用的类型
+    std::unique_ptr<BufferAllocatorBase> allocator_base_;  // 底层 Allocator 基类指针（通过 Factory 创建）
+    BufferAllocatorFactory::AllocatorType type_;           // 当前使用的类型
 };
 
