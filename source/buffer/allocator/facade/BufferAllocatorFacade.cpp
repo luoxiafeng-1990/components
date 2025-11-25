@@ -10,8 +10,8 @@ BufferAllocatorFacade::BufferAllocatorFacade(
     BufferAllocatorFactory::AllocatorType type
 ) : type_(type) {
     // 🎯 使用 Factory 创建底层 Allocator（配置细节由Factory内部决定）
-    allocator_base_ = BufferAllocatorFactory::create(type);
-    if (!allocator_base_) {
+    allocator_base_uptr_ = BufferAllocatorFactory::create(type);
+    if (!allocator_base_uptr_) {
         printf("❌ ERROR: Failed to create Allocator (type=%s)\n", 
                BufferAllocatorFactory::typeToString(type));
     } else {
@@ -21,7 +21,7 @@ BufferAllocatorFacade::BufferAllocatorFacade(
 }
 
 BufferAllocatorFacade::~BufferAllocatorFacade() {
-    // allocator_base_ 通过 unique_ptr 自动释放
+    // allocator_base_uptr_ 通过 unique_ptr 自动释放
 }
 
 // ============================================================================
@@ -34,12 +34,12 @@ std::shared_ptr<BufferPool> BufferAllocatorFacade::allocatePoolWithBuffers(
     const std::string& name,
     const std::string& category
 ) {
-    if (!allocator_base_) {
+    if (!allocator_base_uptr_) {
         printf("❌ ERROR: Allocator not initialized\n");
         return nullptr;
     }
     
-    return allocator_base_->allocatePoolWithBuffers(count, size, name, category);
+    return allocator_base_uptr_->allocatePoolWithBuffers(count, size, name, category);
 }
 
 Buffer* BufferAllocatorFacade::injectBufferToPool(
@@ -47,12 +47,12 @@ Buffer* BufferAllocatorFacade::injectBufferToPool(
     BufferPool* pool,
     QueueType queue
 ) {
-    if (!allocator_base_) {
+    if (!allocator_base_uptr_) {
         printf("❌ ERROR: Allocator not initialized\n");
         return nullptr;
     }
     
-    return allocator_base_->injectBufferToPool(size, pool, queue);
+    return allocator_base_uptr_->injectBufferToPool(size, pool, queue);
 }
 
 Buffer* BufferAllocatorFacade::injectExternalBufferToPool(
@@ -62,38 +62,38 @@ Buffer* BufferAllocatorFacade::injectExternalBufferToPool(
     BufferPool* pool,
     QueueType queue
 ) {
-    if (!allocator_base_) {
+    if (!allocator_base_uptr_) {
         printf("❌ ERROR: Allocator not initialized\n");
         return nullptr;
     }
     
-    return allocator_base_->injectExternalBufferToPool(virt_addr, phys_addr, size, pool, queue);
+    return allocator_base_uptr_->injectExternalBufferToPool(virt_addr, phys_addr, size, pool, queue);
 }
 
 bool BufferAllocatorFacade::removeBufferFromPool(Buffer* buffer, BufferPool* pool) {
-    if (!allocator_base_) {
+    if (!allocator_base_uptr_) {
         printf("❌ ERROR: Allocator not initialized\n");
         return false;
     }
     
-    return allocator_base_->removeBufferFromPool(buffer, pool);
+    return allocator_base_uptr_->removeBufferFromPool(buffer, pool);
 }
 
 bool BufferAllocatorFacade::destroyPool(BufferPool* pool) {
-    if (!allocator_base_) {
+    if (!allocator_base_uptr_) {
         printf("❌ ERROR: Allocator not initialized\n");
         return false;
     }
     
-    return allocator_base_->destroyPool(pool);
+    return allocator_base_uptr_->destroyPool(pool);
 }
 
 std::shared_ptr<BufferPool> BufferAllocatorFacade::getManagedBufferPool() const {
-    if (!allocator_base_) {
+    if (!allocator_base_uptr_) {
         printf("❌ ERROR: Allocator not initialized\n");
         return nullptr;
     }
     
-    return allocator_base_->getManagedBufferPool();
+    return allocator_base_uptr_->getManagedBufferPool();
 }
 

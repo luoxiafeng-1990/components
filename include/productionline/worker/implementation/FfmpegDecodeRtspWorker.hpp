@@ -58,9 +58,9 @@ class BufferPool;
 class FfmpegDecodeRtspWorker : public WorkerBase {
 private:
     // ============ FFmpeg 资源 ============
-    AVFormatContext* format_ctx_;
-    AVCodecContext* codec_ctx_;
-    SwsContext* sws_ctx_;              // 图像格式转换
+    AVFormatContext* format_ctx_ptr_;
+    AVCodecContext* codec_ctx_ptr_;
+    SwsContext* sws_ctx_ptr_;              // 图像格式转换
     int video_stream_index_;
     
     // ============ RTSP 连接信息 ============
@@ -87,7 +87,7 @@ private:
     std::condition_variable buffer_cv_;
     
     // ============ 零拷贝模式 ============
-    BufferPool* buffer_pool_;          // 可选：零拷贝模式的BufferPool
+    BufferPool* buffer_pool_ptr_;          // 可选：零拷贝模式的BufferPool
     
     // ============ 统计信息 ============
     std::atomic<int> decoded_frames_;

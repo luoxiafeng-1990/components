@@ -214,7 +214,7 @@ protected:
      * 线程安全：
      * - 使用 managed_pool_mutex_ 保护
      */
-    std::shared_ptr<BufferPool> managed_pool_;
+    std::shared_ptr<BufferPool> managed_pool_sptr_;
     
     /**
      * @brief 保护 managed_pool_ 的互斥锁
@@ -250,7 +250,7 @@ public:
      */
     std::shared_ptr<BufferPool> getManagedBufferPool() const {
         std::lock_guard<std::mutex> lock(managed_pool_mutex_);
-        return managed_pool_;
+        return managed_pool_sptr_;
     }
     
     // ==================== 子类必须实现的核心方法 ====================

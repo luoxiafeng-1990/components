@@ -108,7 +108,7 @@ public:
     int getTotalFrames() const;
     
     /// 获取工作BufferPool指针（供消费者使用）
-    BufferPool* getWorkingBufferPool() const { return working_buffer_pool_; }
+    BufferPool* getWorkingBufferPool() const { return working_buffer_pool_ptr_; }
     
     // ========== 错误处理 ==========
     
@@ -153,16 +153,16 @@ private:
      * 注意：Worker必须在open()时自动创建BufferPool（通过调用Allocator）
      * 如果Worker没有创建BufferPool，start()会失败
      */
-    std::unique_ptr<BufferPool> worker_buffer_pool_;
+    std::unique_ptr<BufferPool> worker_buffer_pool_uptr_;
     
     /**
      * 实际工作的BufferPool指针
-     * 指向worker_buffer_pool_.get()（Worker创建的BufferPool）
+     * 指向worker_buffer_pool_uptr_.get()（Worker创建的BufferPool）
      */
-    BufferPool* working_buffer_pool_;
+    BufferPool* working_buffer_pool_ptr_;
     
     // Worker Facade（多线程共享）
-    std::shared_ptr<BufferFillingWorkerFacade> worker_facade_;
+    std::shared_ptr<BufferFillingWorkerFacade> worker_facade_sptr_;
     
     // 线程管理
     std::vector<std::thread> threads_;

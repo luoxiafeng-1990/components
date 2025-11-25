@@ -35,7 +35,7 @@ struct tpsfb_dma_info {
 LinuxFramebufferDevice::LinuxFramebufferDevice()
     : fd_(-1)
     , fb_index_(-1)
-    , framebuffer_base_(nullptr)
+    , framebuffer_base_ptr_(nullptr)
     , framebuffer_total_size_(0)
     , allocator_facade_(nullptr), buffer_pool_(nullptr)  // 在 initialize() 中自动创建
     , buffer_count_(0)
@@ -98,7 +98,7 @@ bool LinuxFramebufferDevice::initialize(int device_index) {
     );
     if (!allocator_facade_) {
         printf("❌ ERROR: Failed to create allocator_facade_\n");
-        munmap(framebuffer_base_, framebuffer_total_size_);
+        munmap(framebuffer_base_ptr_, framebuffer_total_size_);
         close(fd_);
         fd_ = -1;
         return false;
@@ -117,7 +117,7 @@ bool LinuxFramebufferDevice::initialize(int device_index) {
     if (!buffer_pool_) {
         printf("❌ ERROR: Failed to create BufferPool through allocator\n");
         allocator_facade_.reset();
-        munmap(framebuffer_base_, framebuffer_total_size_);
+        munmap(framebuffer_base_ptr_, framebuffer_total_size_);
         close(fd_);
         fd_ = -1;
         return false;
@@ -126,7 +126,7 @@ bool LinuxFramebufferDevice::initialize(int device_index) {
     printf("✅ Empty BufferPool '%s' created\n", buffer_pool_->getName().c_str());
     
     // 7. 动态注入 framebuffer buffers 到 BufferPool
-    unsigned char* base = (unsigned char*)framebuffer_base_;
+    unsigned char* base = (unsigned char*)framebuffer_base_ptr_;
     for (int i = 0; i < buffer_count_; i++) {
         void* virt_addr = (void*)(base + buffer_size_ * i);
         uint64_t phys_addr = 0;  // TODO: 获取实际物理地址
@@ -143,7 +143,7 @@ bool LinuxFramebufferDevice::initialize(int device_index) {
             printf("❌ ERROR: Failed to inject buffer #%d to BufferPool\n", i);
             buffer_pool_.reset();
             allocator_facade_.reset();
-            munmap(framebuffer_base_, framebuffer_total_size_);
+            munmap(framebuffer_base_ptr_, framebuffer_total_size_);
             close(fd_);
             fd_ = -1;
             return false;
@@ -425,30 +425,30 @@ bool LinuxFramebufferDevice::mapHardwareFramebufferMemory() {
            framebuffer_total_size_, buffer_count_, buffer_size_);
     
     // 执行mmap映射
-    framebuffer_base_ = mmap(0, framebuffer_total_size_,
+    framebuffer_base_ptr_ = mmap(0, framebuffer_total_size_,
                             PROT_READ | PROT_WRITE,
                             MAP_SHARED,
                             fd_,
                             0);
     
-    if (framebuffer_base_ == MAP_FAILED) {
+    if (framebuffer_base_ptr_ == MAP_FAILED) {
         printf("❌ ERROR: mmap failed: %s\n", strerror(errno));
-        framebuffer_base_ = nullptr;
+        framebuffer_base_ptr_ = nullptr;
         return false;
     }
     
-    printf("✅ mmap successful: base_address=%p\n", framebuffer_base_);
+    printf("✅ mmap successful: base_address=%p\n", framebuffer_base_ptr_);
     
     return true;
 }
 
 
 void LinuxFramebufferDevice::unmapHardwareFramebufferMemory() {
-    if (framebuffer_base_ != nullptr) {
-        if (munmap(framebuffer_base_, framebuffer_total_size_) < 0) {
+    if (framebuffer_base_ptr_ != nullptr) {
+        if (munmap(framebuffer_base_ptr_, framebuffer_total_size_) < 0) {
             printf("⚠️  Warning: munmap failed: %s\n", strerror(errno));
         }
-        framebuffer_base_ = nullptr;
+        framebuffer_base_ptr_ = nullptr;
         framebuffer_total_size_ = 0;
     }
 }
@@ -457,7 +457,7 @@ void LinuxFramebufferDevice::unmapHardwareFramebufferMemory() {
 
 LinuxFramebufferDevice::MappedInfo LinuxFramebufferDevice::getMappedInfo() const {
     MappedInfo info;
-    info.base_addr = framebuffer_base_;
+    info.base_addr = framebuffer_base_ptr_;
     info.buffer_size = buffer_size_;
     info.buffer_count = buffer_count_;
     return info;

@@ -36,7 +36,7 @@ private:
     // ============ 文件资源 ============
     int fd_;                          // 文件描述符
     char path_[MAX_PATH_LENGTH];     // 文件路径
-    void* mapped_file_;               // mmap映射的文件地址
+    void* mapped_file_ptr_;               // mmap映射的文件地址
     size_t mapped_size_;              // 映射的文件大小
     
     // ============ 视频属性 ============

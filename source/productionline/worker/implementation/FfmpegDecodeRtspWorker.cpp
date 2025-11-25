@@ -19,9 +19,9 @@ extern "C" {
 
 FfmpegDecodeRtspWorker::FfmpegDecodeRtspWorker()
     : WorkerBase(BufferAllocatorFactory::AllocatorType::AVFRAME)  // 🎯 只需传递类型！
-    , format_ctx_(nullptr)
-    , codec_ctx_(nullptr)
-    , sws_ctx_(nullptr)
+    , format_ctx_ptr_(nullptr)
+    , codec_ctx_ptr_(nullptr)
+    , sws_ctx_ptr_(nullptr)
     , video_stream_index_(-1)
     , width_(0)
     , height_(0)
@@ -30,7 +30,7 @@ FfmpegDecodeRtspWorker::FfmpegDecodeRtspWorker()
     , connected_(false)
     , write_index_(0)
     , read_index_(0)
-    , buffer_pool_(nullptr)
+    , buffer_pool_ptr_(nullptr)
     , decoded_frames_(0)
     , dropped_frames_(0)
     , is_open_(false)
@@ -261,15 +261,15 @@ void FfmpegDecodeRtspWorker::printStats() const {
     printf("   Connected: %s\n", connected_.load() ? "Yes" : "No");
     printf("   Decoded frames: %d\n", decoded_frames_.load());
     printf("   Dropped frames: %d\n", dropped_frames_.load());
-    printf("   Zero-copy mode: %s\n", buffer_pool_ ? "Enabled" : "Disabled");
+    printf("   Zero-copy mode: %s\n", buffer_pool_ptr_ ? "Enabled" : "Disabled");
 }
 
 // ============ 内部实现 ============
 
 bool FfmpegDecodeRtspWorker::connectRTSP() {
     // 1. 分配格式上下文
-    format_ctx_ = avformat_alloc_context();
-    if (!format_ctx_) {
+    format_ctx_ptr_ = avformat_alloc_context();
+    if (!format_ctx_ptr_) {
         setError("Failed to allocate AVFormatContext");
         return false;
     }
@@ -281,30 +281,30 @@ bool FfmpegDecodeRtspWorker::connectRTSP() {
     av_dict_set(&options, "max_delay", "500000", 0);    // 最大延迟0.5秒
     
     // 3. 打开RTSP流
-    int ret = avformat_open_input(&format_ctx_, rtsp_url_, nullptr, &options);
+    int ret = avformat_open_input(&format_ctx_ptr_, rtsp_url_, nullptr, &options);
     av_dict_free(&options);
     
     if (ret < 0) {
         char errbuf[128];
         av_strerror(ret, errbuf, sizeof(errbuf));
         setError(std::string("Failed to open RTSP stream: ") + errbuf);
-        avformat_free_context(format_ctx_);
-        format_ctx_ = nullptr;
+        avformat_free_context(format_ctx_ptr_);
+        format_ctx_ptr_ = nullptr;
         return false;
     }
     
     // 4. 获取流信息
-    ret = avformat_find_stream_info(format_ctx_, nullptr);
+    ret = avformat_find_stream_info(format_ctx_ptr_, nullptr);
     if (ret < 0) {
         setError("Failed to find stream information");
-        avformat_close_input(&format_ctx_);
+        avformat_close_input(&format_ctx_ptr_);
         return false;
     }
     
     // 5. 查找视频流
     video_stream_index_ = -1;
-    for (unsigned int i = 0; i < format_ctx_->nb_streams; i++) {
-        if (format_ctx_->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_VIDEO) {
+    for (unsigned int i = 0; i < format_ctx_ptr_->nb_streams; i++) {
+        if (format_ctx_ptr_->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_VIDEO) {
             video_stream_index_ = i;
             break;
         }
@@ -312,56 +312,56 @@ bool FfmpegDecodeRtspWorker::connectRTSP() {
     
     if (video_stream_index_ == -1) {
         setError("No video stream found in RTSP source");
-        avformat_close_input(&format_ctx_);
+        avformat_close_input(&format_ctx_ptr_);
         return false;
     }
     
     // 6. 获取解码器
-    AVCodecParameters* codecpar = format_ctx_->streams[video_stream_index_]->codecpar;
+    AVCodecParameters* codecpar = format_ctx_ptr_->streams[video_stream_index_]->codecpar;
     const AVCodec* codec = avcodec_find_decoder(codecpar->codec_id);
     if (!codec) {
         setError("Codec not found");
-        avformat_close_input(&format_ctx_);
+        avformat_close_input(&format_ctx_ptr_);
         return false;
     }
     
     // 7. 分配解码器上下文
-    codec_ctx_ = avcodec_alloc_context3(codec);
-    if (!codec_ctx_) {
+    codec_ctx_ptr_ = avcodec_alloc_context3(codec);
+    if (!codec_ctx_ptr_) {
         setError("Failed to allocate codec context");
-        avformat_close_input(&format_ctx_);
+        avformat_close_input(&format_ctx_ptr_);
         return false;
     }
     
     // 8. 复制编解码器参数
-    ret = avcodec_parameters_to_context(codec_ctx_, codecpar);
+    ret = avcodec_parameters_to_context(codec_ctx_ptr_, codecpar);
     if (ret < 0) {
         setError("Failed to copy codec parameters");
-        avcodec_free_context(&codec_ctx_);
-        avformat_close_input(&format_ctx_);
+        avcodec_free_context(&codec_ctx_ptr_);
+        avformat_close_input(&format_ctx_ptr_);
         return false;
     }
     
     // 9. 打开解码器
-    ret = avcodec_open2(codec_ctx_, codec, nullptr);
+    ret = avcodec_open2(codec_ctx_ptr_, codec, nullptr);
     if (ret < 0) {
         setError("Failed to open codec");
-        avcodec_free_context(&codec_ctx_);
-        avformat_close_input(&format_ctx_);
+        avcodec_free_context(&codec_ctx_ptr_);
+        avformat_close_input(&format_ctx_ptr_);
         return false;
     }
     
     // 10. 初始化格式转换上下文
-    sws_ctx_ = sws_getContext(
-        codec_ctx_->width, codec_ctx_->height, codec_ctx_->pix_fmt,
+    sws_ctx_ptr_ = sws_getContext(
+        codec_ctx_ptr_->width, codec_ctx_ptr_->height, codec_ctx_ptr_->pix_fmt,
         width_, height_, (AVPixelFormat)output_pixel_format_,
         SWS_BILINEAR, nullptr, nullptr, nullptr
     );
     
-    if (!sws_ctx_) {
+    if (!sws_ctx_ptr_) {
         setError("Failed to initialize SwsContext");
-        avcodec_free_context(&codec_ctx_);
-        avformat_close_input(&format_ctx_);
+        avcodec_free_context(&codec_ctx_ptr_);
+        avformat_close_input(&format_ctx_ptr_);
         return false;
     }
     
@@ -369,26 +369,26 @@ bool FfmpegDecodeRtspWorker::connectRTSP() {
     
     printf("✅ Connected to RTSP stream\n");
     printf("   Codec: %s\n", codec->long_name);
-    printf("   Stream resolution: %dx%d\n", codec_ctx_->width, codec_ctx_->height);
+    printf("   Stream resolution: %dx%d\n", codec_ctx_ptr_->width, codec_ctx_ptr_->height);
     printf("   Output resolution: %dx%d\n", width_, height_);
     
     return true;
 }
 
 void FfmpegDecodeRtspWorker::disconnectRTSP() {
-    if (sws_ctx_) {
-        sws_freeContext(sws_ctx_);
-        sws_ctx_ = nullptr;
+    if (sws_ctx_ptr_) {
+        sws_freeContext(sws_ctx_ptr_);
+        sws_ctx_ptr_ = nullptr;
     }
     
-    if (codec_ctx_) {
-        avcodec_free_context(&codec_ctx_);
-        codec_ctx_ = nullptr;
+    if (codec_ctx_ptr_) {
+        avcodec_free_context(&codec_ctx_ptr_);
+        codec_ctx_ptr_ = nullptr;
     }
     
-    if (format_ctx_) {
-        avformat_close_input(&format_ctx_);
-        format_ctx_ = nullptr;
+    if (format_ctx_ptr_) {
+        avformat_close_input(&format_ctx_ptr_);
+        format_ctx_ptr_ = nullptr;
     }
     
     video_stream_index_ = -1;
@@ -407,7 +407,7 @@ void FfmpegDecodeRtspWorker::decodeThreadFunc() {
             continue;
         }
         
-        if (buffer_pool_) {
+        if (buffer_pool_ptr_) {
             // ✨ 零拷贝模式：直接注入BufferPool
             // TODO: 实现 NormalAllocator 动态注入逻辑
             // 临时方案：使用传统模式
@@ -440,7 +440,7 @@ AVFrame* FfmpegDecodeRtspWorker::decodeOneFrame() {
     }
     
     // 读取包
-    int ret = av_read_frame(format_ctx_, packet);
+    int ret = av_read_frame(format_ctx_ptr_, packet);
     if (ret < 0) {
         if (ret == AVERROR_EOF) {
             eof_reached_ = true;
@@ -458,7 +458,7 @@ AVFrame* FfmpegDecodeRtspWorker::decodeOneFrame() {
     }
     
     // 发送包到解码器
-    ret = avcodec_send_packet(codec_ctx_, packet);
+    ret = avcodec_send_packet(codec_ctx_ptr_, packet);
     av_packet_free(&packet);
     
     if (ret < 0) {
@@ -467,7 +467,7 @@ AVFrame* FfmpegDecodeRtspWorker::decodeOneFrame() {
     }
     
     // 接收解码后的帧
-    ret = avcodec_receive_frame(codec_ctx_, frame);
+    ret = avcodec_receive_frame(codec_ctx_ptr_, frame);
     if (ret < 0) {
         av_frame_free(&frame);
         return nullptr;
@@ -485,7 +485,7 @@ void FfmpegDecodeRtspWorker::storeToInternalBuffer(AVFrame* frame) {
     uint8_t* dest_data[1] = { slot.data.data() };
     int dest_linesize[1] = { width_ * getBytesPerPixel() };
     
-    sws_scale(sws_ctx_,
+    sws_scale(sws_ctx_ptr_,
              frame->data, frame->linesize, 0, frame->height,
              dest_data, dest_linesize);
     

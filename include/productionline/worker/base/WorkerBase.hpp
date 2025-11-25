@@ -96,7 +96,7 @@ public:
     explicit WorkerBase(
         BufferAllocatorFactory::AllocatorType allocator_type
     ) : allocator_facade_(allocator_type)  // 🎯 父类直接创建Allocator门面
-      , buffer_pool_(nullptr) 
+      , buffer_pool_sptr_(nullptr) 
     {
     }
     
@@ -119,13 +119,13 @@ public:
      * @note 从 shared_ptr 转换为 unique_ptr（通过 release，但 Allocator 和 Registry 仍持有 shared_ptr）
      */
     virtual std::unique_ptr<BufferPool> getOutputBufferPool() override {
-        if (!buffer_pool_) {
+        if (!buffer_pool_sptr_) {
             return nullptr;
         }
         // 从 shared_ptr 转换为 unique_ptr
         // 注意：Allocator 和 Registry 仍持有 shared_ptr，所以不会销毁
-        BufferPool* raw_ptr = buffer_pool_.get();
-        buffer_pool_.reset();  // Worker 不再持有
+        BufferPool* raw_ptr = buffer_pool_sptr_.get();
+        buffer_pool_sptr_.reset();  // Worker 不再持有
         return std::unique_ptr<BufferPool>(raw_ptr);  // ProductionLine 持有 unique_ptr
     }
     
@@ -182,7 +182,7 @@ protected:
      * - Worker不再持有，但Allocator和Registry仍持有shared_ptr
      * - 在close()时如果未转移则自动释放
      */
-    std::shared_ptr<BufferPool> buffer_pool_;
+    std::shared_ptr<BufferPool> buffer_pool_sptr_;
 };
 
 #endif // WORKER_BASE_HPP

@@ -29,7 +29,7 @@ private:
     int fb_index_;                    // framebuffer索引（0或1）
     
     // ============ mmap映射管理 ============
-    void* framebuffer_base_;          // mmap返回的基地址
+    void* framebuffer_base_ptr_;          // mmap返回的基地址
     size_t framebuffer_total_size_;   // 映射的总大小
     
     // ============ Buffer管理（使用BufferPool）============

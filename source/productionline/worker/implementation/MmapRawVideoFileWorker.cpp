@@ -13,7 +13,7 @@
 MmapRawVideoFileWorker::MmapRawVideoFileWorker()
     : WorkerBase(BufferAllocatorFactory::AllocatorType::NORMAL)  // 🎯 只需传递类型！
     , fd_(-1)
-    , mapped_file_(nullptr)
+    , mapped_file_ptr_(nullptr)
     , mapped_size_(0)
     , width_(0)
     , height_(0)
@@ -320,7 +320,7 @@ bool MmapRawVideoFileWorker::fillBuffer(int frame_index, Buffer* buffer) {
     
     // 从mmap区域拷贝数据到buffer
     size_t frame_offset = (size_t)frame_index * frame_size_;
-    const char* frame_addr = (const char*)mapped_file_ + frame_offset;
+    const char* frame_addr = (const char*)mapped_file_ptr_ + frame_offset;
     
     memcpy(buffer->data(), frame_addr, frame_size_);
     
@@ -448,30 +448,30 @@ bool MmapRawVideoFileWorker::mapFile() {
         return false;
     }
     
-    mapped_file_ = mmap(NULL, file_size_, 
+    mapped_file_ptr_ = mmap(NULL, file_size_, 
                         PROT_READ, MAP_PRIVATE, 
                         fd_, 0);
     
-    if (mapped_file_ == MAP_FAILED) {
+    if (mapped_file_ptr_ == MAP_FAILED) {
         printf("❌ ERROR: mmap failed: %s\n", strerror(errno));
-        mapped_file_ = nullptr;
+        mapped_file_ptr_ = nullptr;
         return false;
     }
     
     mapped_size_ = file_size_;
     
     printf("🗺️  File mapped to memory: address=%p, size=%zu bytes\n", 
-           mapped_file_, mapped_size_);
+           mapped_file_ptr_, mapped_size_);
     
     return true;
 }
 
 void MmapRawVideoFileWorker::unmapFile() {
-    if (mapped_file_ != nullptr && mapped_size_ > 0) {
-        if (munmap(mapped_file_, mapped_size_) < 0) {
+    if (mapped_file_ptr_ != nullptr && mapped_size_ > 0) {
+        if (munmap(mapped_file_ptr_, mapped_size_) < 0) {
             printf("⚠️  Warning: munmap failed: %s\n", strerror(errno));
         }
-        mapped_file_ = nullptr;
+        mapped_file_ptr_ = nullptr;
         mapped_size_ = 0;
     }
 }

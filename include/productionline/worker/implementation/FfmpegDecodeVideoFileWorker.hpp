@@ -56,9 +56,9 @@ struct AVDictionary;
 class FfmpegDecodeVideoFileWorker : public WorkerBase {
 private:
     // ============ FFmpeg 资源 ============
-    AVFormatContext* format_ctx_;
-    AVCodecContext* codec_ctx_;
-    SwsContext* sws_ctx_;              // 图像格式转换
+    AVFormatContext* format_ctx_ptr_;
+    AVCodecContext* codec_ctx_ptr_;
+    SwsContext* sws_ctx_ptr_;              // 图像格式转换
     int video_stream_index_;
     
     // ============ 文件信息 ============
@@ -77,13 +77,13 @@ private:
     bool eof_reached_;
     
     // ============ 零拷贝模式 ============
-    BufferPool* zero_copy_buffer_pool_;            // 可选：零拷贝模式的BufferPool（外部提供）
+    BufferPool* zero_copy_buffer_pool_ptr_;            // 可选：零拷贝模式的BufferPool（外部提供）
     bool supports_zero_copy_;                      // 解码器是否支持零拷贝
     
     // ============ 解码器配置（用于特殊解码器）============
     bool use_hardware_decoder_;        // 是否使用硬件解码
-    const char* decoder_name_;         // 指定解码器名称（如 "h264_taco"）
-    AVDictionary* codec_options_;      // 解码器选项（用于 h264_taco 配置）
+    const char* decoder_name_ptr_;         // 指定解码器名称（如 "h264_taco"）
+    AVDictionary* codec_options_ptr_;      // 解码器选项（用于 h264_taco 配置）
     
     // ============ 线程安全 ============
     mutable std::mutex mutex_;
