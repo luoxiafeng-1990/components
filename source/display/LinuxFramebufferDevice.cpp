@@ -148,8 +148,6 @@ bool LinuxFramebufferDevice::initialize(int device_index) {
             fd_ = -1;
             return false;
         }
-        
-        printf("   ✅ Framebuffer[%d] injected (virt=%p, size=%zu)\n", i, virt_addr, buffer_size_);
     }
     
     printf("✅ All %d framebuffer buffers injected to BufferPool '%s'\n",

@@ -13,9 +13,13 @@
 1. 初始化阶段（ProductionLine::start()）	ARCHITECTURE.md	/^#### 1. 初始化阶段（ProductionLine::start()）$/;"	t	language:Markdown
 1. 快速定位缺少头文件	cpp_compile_error.md	/^### 1. 快速定位缺少头文件$/;"	S	language:Markdown
 1. 提高代码可读性	cpp_compile_error.md	/^#### 1. 提高代码可读性$/;"	t	language:Markdown
+1. 概述	include/buffer/Buffer-subsystem-architecture.md	/^## 1. 概述$/;"	s	language:Markdown
 1. 策略模式（Strategy Pattern）	ARCHITECTURE.md	/^### 1. 策略模式（Strategy Pattern）$/;"	S	language:Markdown
 1. 选择正确的Worker类型	ARCHITECTURE.md	/^### 1. 选择正确的Worker类型$/;"	S	language:Markdown
 1. 逐级降级策略	include/display/display_buffer_usage_guide.md	/^### 1. 逐级降级策略$/;"	S	language:Markdown
+1.1 系统定位	include/buffer/Buffer-subsystem-architecture.md	/^### 1.1 系统定位$/;"	S	language:Markdown
+1.2 核心价值	include/buffer/Buffer-subsystem-architecture.md	/^### 1.2 核心价值$/;"	S	language:Markdown
+1.3 设计原则	include/buffer/Buffer-subsystem-architecture.md	/^### 1.3 设计原则$/;"	S	language:Markdown
 1️⃣ displayBufferByDMA - DMA 零拷贝显示	include/display/display_buffer_usage_guide.md	/^## 1️⃣ displayBufferByDMA - DMA 零拷贝显示$/;"	s	language:Markdown
 2. BufferPool创建策略	ARCHITECTURE.md	/^### 2. BufferPool创建策略$/;"	S	language:Markdown
 2. BufferPool（缓冲区池）	ARCHITECTURE.md	/^### 2. BufferPool（缓冲区池）$/;"	S	language:Markdown
@@ -25,9 +29,14 @@
 2. 工厂模式（Factory Pattern）	ARCHITECTURE.md	/^### 2. 工厂模式（Factory Pattern）$/;"	S	language:Markdown
 2. 所有 Allocator 实现类	BUFFERPOOL_OWNERSHIP_ANALYSIS.md	/^### 2. 所有 Allocator 实现类$/;"	S	language:Markdown
 2. 显式错误检查	include/display/display_buffer_usage_guide.md	/^### 2. 显式错误检查$/;"	S	language:Markdown
+2. 架构设计	include/buffer/Buffer-subsystem-architecture.md	/^## 2. 架构设计$/;"	s	language:Markdown
 2. 检查是否为聚合类型	cpp_compile_error.md	/^### 2. 检查是否为聚合类型$/;"	S	language:Markdown
 2. 生产阶段（ProductionLine::producerThreadFunc()）	ARCHITECTURE.md	/^#### 2. 生产阶段（ProductionLine::producerThreadFunc()）$/;"	t	language:Markdown
 2. 防止意外的类型转换	cpp_compile_error.md	/^#### 2. 防止意外的类型转换$/;"	t	language:Markdown
+2.1 三层架构图	include/buffer/Buffer-subsystem-architecture.md	/^### 2.1 三层架构图$/;"	S	language:Markdown
+2.2 职责划分	include/buffer/Buffer-subsystem-architecture.md	/^### 2.2 职责划分$/;"	S	language:Markdown
+2.3 依赖关系	include/buffer/Buffer-subsystem-architecture.md	/^### 2.3 依赖关系$/;"	S	language:Markdown
+2.4 设计模式应用	include/buffer/Buffer-subsystem-architecture.md	/^### 2.4 设计模式应用$/;"	S	language:Markdown
 2️⃣ displayFilledFramebuffer - 显示已填充的 Framebuffer	include/display/display_buffer_usage_guide.md	/^## 2️⃣ displayFilledFramebuffer - 显示已填充的 Framebuffer$/;"	s	language:Markdown
 3. BufferAllocatorFacade	BUFFERPOOL_OWNERSHIP_ANALYSIS.md	/^### 3. BufferAllocatorFacade$/;"	S	language:Markdown
 3. IBufferFillingWorker（Worker填充接口）	ARCHITECTURE.md	/^### 3. IBufferFillingWorker（Worker填充接口）$/;"	S	language:Markdown
@@ -36,38 +45,79 @@
 3. Worker扩展BufferPool（动态注入模式）	ARCHITECTURE.md	/^#### 3. Worker扩展BufferPool（动态注入模式）$/;"	t	language:Markdown
 3. `*` 操作符 - 解引用，获取对象引用	cpp_compile_error.md	/^#### 3. `*` 操作符 - 解引用，获取对象引用$/;"	t	language:Markdown
 3. 查看模板实例化错误	cpp_compile_error.md	/^### 3. 查看模板实例化错误$/;"	S	language:Markdown
+3. 类详细设计	include/buffer/Buffer-subsystem-architecture.md	/^## 3. 类详细设计$/;"	s	language:Markdown
 3. 超时保护	include/display/display_buffer_usage_guide.md	/^### 3. 超时保护$/;"	S	language:Markdown
 3. 避免函数重载时的歧义	cpp_compile_error.md	/^#### 3. 避免函数重载时的歧义$/;"	t	language:Markdown
 3. 错误处理	ARCHITECTURE.md	/^### 3. 错误处理$/;"	S	language:Markdown
 3. 门面模式（Facade Pattern）	ARCHITECTURE.md	/^### 3. 门面模式（Facade Pattern）$/;"	S	language:Markdown
 3. 默认参数限制	cpp_compile_error.md	/^### 3. 默认参数限制$/;"	S	language:Markdown
+3.1 Buffer类	include/buffer/Buffer-subsystem-architecture.md	/^### 3.1 Buffer类$/;"	S	language:Markdown
+3.1.1 类概述	include/buffer/Buffer-subsystem-architecture.md	/^#### 3.1.1 类概述$/;"	t	language:Markdown
+3.1.2 成员属性	include/buffer/Buffer-subsystem-architecture.md	/^#### 3.1.2 成员属性$/;"	t	language:Markdown
+3.1.3 状态机	include/buffer/Buffer-subsystem-architecture.md	/^#### 3.1.3 状态机$/;"	t	language:Markdown
+3.1.4 所有权类型	include/buffer/Buffer-subsystem-architecture.md	/^#### 3.1.4 所有权类型$/;"	t	language:Markdown
+3.1.5 成员方法	include/buffer/Buffer-subsystem-architecture.md	/^#### 3.1.5 成员方法$/;"	t	language:Markdown
+3.2 BufferPool类	include/buffer/Buffer-subsystem-architecture.md	/^### 3.2 BufferPool类$/;"	S	language:Markdown
+3.2.1 类概述	include/buffer/Buffer-subsystem-architecture.md	/^#### 3.2.1 类概述$/;"	t	language:Markdown
+3.2.2 成员属性	include/buffer/Buffer-subsystem-architecture.md	/^#### 3.2.2 成员属性$/;"	t	language:Markdown
+3.2.3 Passkey模式（权限控制）	include/buffer/Buffer-subsystem-architecture.md	/^#### 3.2.3 Passkey模式（权限控制）$/;"	t	language:Markdown
+3.2.4 成员方法	include/buffer/Buffer-subsystem-architecture.md	/^#### 3.2.4 成员方法$/;"	t	language:Markdown
+3.3 BufferPoolRegistry类	include/buffer/Buffer-subsystem-architecture.md	/^### 3.3 BufferPoolRegistry类$/;"	S	language:Markdown
+3.3.1 类概述	include/buffer/Buffer-subsystem-architecture.md	/^#### 3.3.1 类概述$/;"	t	language:Markdown
+3.3.2 成员属性	include/buffer/Buffer-subsystem-architecture.md	/^#### 3.3.2 成员属性$/;"	t	language:Markdown
+3.3.3 成员方法	include/buffer/Buffer-subsystem-architecture.md	/^#### 3.3.3 成员方法$/;"	t	language:Markdown
 3️⃣ displayBufferByMemcpyToFramebuffer - 拷贝显示	include/display/display_buffer_usage_guide.md	/^## 3️⃣ displayBufferByMemcpyToFramebuffer - 拷贝显示$/;"	s	language:Markdown
 4. BufferPool	BUFFERPOOL_OWNERSHIP_ANALYSIS.md	/^### 4. BufferPool$/;"	S	language:Markdown
 4. Display（使用者，只读权限）	BUFFERPOOL_OWNERSHIP_ANALYSIS.md	/^### 4. Display（使用者，只读权限）$/;"	S	language:Markdown
 4. IVideoFileNavigator（Worker文件导航接口）	ARCHITECTURE.md	/^### 4. IVideoFileNavigator（Worker文件导航接口）$/;"	S	language:Markdown
 4. IVideoFileNavigator（文件导航接口）	ARCHITECTURE.md	/^### 4. IVideoFileNavigator（文件导航接口）$/;"	S	language:Markdown
+4. UML图集	include/buffer/Buffer-subsystem-architecture.md	/^## 4. UML图集$/;"	s	language:Markdown
 4. 依赖注入（Dependency Injection）	ARCHITECTURE.md	/^### 4. 依赖注入（Dependency Injection）$/;"	S	language:Markdown
 4. 头文件依赖	cpp_compile_error.md	/^### 4. 头文件依赖$/;"	S	language:Markdown
 4. 性能优化	ARCHITECTURE.md	/^### 4. 性能优化$/;"	S	language:Markdown
 4. 构建系统清理	cpp_compile_error.md	/^### 4. 构建系统清理$/;"	S	language:Markdown
+4.1 类图（Class Diagram）	include/buffer/Buffer-subsystem-architecture.md	/^### 4.1 类图（Class Diagram）$/;"	S	language:Markdown
+4.2 时序图（Sequence Diagrams）	include/buffer/Buffer-subsystem-architecture.md	/^### 4.2 时序图（Sequence Diagrams）$/;"	S	language:Markdown
+4.3 状态图（State Diagram）	include/buffer/Buffer-subsystem-architecture.md	/^### 4.3 状态图（State Diagram）$/;"	S	language:Markdown
+4.4 对象生命周期图	include/buffer/Buffer-subsystem-architecture.md	/^### 4.4 对象生命周期图$/;"	S	language:Markdown
 5. BufferAllocatorBase（Allocator接口，纯抽象基类）	ARCHITECTURE.md	/^### 5. BufferAllocatorBase（Allocator接口，纯抽象基类）$/;"	S	language:Markdown
 5. BufferAllocator（分配器）	ARCHITECTURE.md	/^### 5. BufferAllocator（分配器）$/;"	S	language:Markdown
 5. BufferPoolRegistry	BUFFERPOOL_OWNERSHIP_ANALYSIS.md	/^### 5. BufferPoolRegistry$/;"	S	language:Markdown
 5. Consumer（使用者，只读权限）	BUFFERPOOL_OWNERSHIP_ANALYSIS.md	/^### 5. Consumer（使用者，只读权限）$/;"	S	language:Markdown
+5. 典型使用场景	include/buffer/Buffer-subsystem-architecture.md	/^## 5. 典型使用场景$/;"	s	language:Markdown
 5. 智能指针操作符	cpp_compile_error.md	/^### 5. 智能指针操作符$/;"	S	language:Markdown
 5. 生产者-消费者模式（Producer-Consumer Pattern）	ARCHITECTURE.md	/^### 5. 生产者-消费者模式（Producer-Consumer Pattern）$/;"	S	language:Markdown
 5. 线程安全注意事项	ARCHITECTURE.md	/^### 5. 线程安全注意事项$/;"	S	language:Markdown
+5.1 场景：视频解码器（生产者）	include/buffer/Buffer-subsystem-architecture.md	/^### 5.1 场景：视频解码器（生产者）$/;"	S	language:Markdown
+5.2 场景：显示模块（消费者）	include/buffer/Buffer-subsystem-architecture.md	/^### 5.2 场景：显示模块（消费者）$/;"	S	language:Markdown
+5.3 场景：DMA零拷贝（硬件加速）	include/buffer/Buffer-subsystem-architecture.md	/^### 5.3 场景：DMA零拷贝（硬件加速）$/;"	S	language:Markdown
+5.4 场景：外部Buffer托管（Framebuffer）	include/buffer/Buffer-subsystem-architecture.md	/^### 5.4 场景：外部Buffer托管（Framebuffer）$/;"	S	language:Markdown
+5.5 场景：全局监控和调试	include/buffer/Buffer-subsystem-architecture.md	/^### 5.5 场景：全局监控和调试$/;"	S	language:Markdown
 6. BufferPoolRegistry（统一管理器，只读权限）	BUFFERPOOL_OWNERSHIP_ANALYSIS.md	/^### 6. BufferPoolRegistry（统一管理器，只读权限）$/;"	S	language:Markdown
 6. WorkerBase	BUFFERPOOL_OWNERSHIP_ANALYSIS.md	/^### 6. WorkerBase$/;"	S	language:Markdown
 6. WorkerBase（Worker统一基类）	ARCHITECTURE.md	/^### 6. WorkerBase（Worker统一基类）$/;"	S	language:Markdown
 6. explicit 关键字与隐式类型转换	cpp_compile_error.md	/^### 6. explicit 关键字与隐式类型转换$/;"	S	language:Markdown
 6. 友元模式（Friend Pattern）	ARCHITECTURE.md	/^### 6. 友元模式（Friend Pattern）$/;"	S	language:Markdown
+6. 线程安全分析	include/buffer/Buffer-subsystem-architecture.md	/^## 6. 线程安全分析$/;"	s	language:Markdown
+6.1 锁策略	include/buffer/Buffer-subsystem-architecture.md	/^### 6.1 锁策略$/;"	S	language:Markdown
+6.2 条件变量使用	include/buffer/Buffer-subsystem-architecture.md	/^### 6.2 条件变量使用$/;"	S	language:Markdown
+6.3 原子操作	include/buffer/Buffer-subsystem-architecture.md	/^### 6.3 原子操作$/;"	S	language:Markdown
+6.4 死锁预防	include/buffer/Buffer-subsystem-architecture.md	/^### 6.4 死锁预防$/;"	S	language:Markdown
 7. BufferFillingWorkerFacade（Worker门面）	ARCHITECTURE.md	/^### 7. BufferFillingWorkerFacade（Worker门面）$/;"	S	language:Markdown
 7. BufferFillingWorkerFactory（工厂）	ARCHITECTURE.md	/^### 7. BufferFillingWorkerFactory（工厂）$/;"	S	language:Markdown
 7. Passkey Idiom（通行证模式）	ARCHITECTURE.md	/^### 7. Passkey Idiom（通行证模式）$/;"	S	language:Markdown
 7. Worker 实现类	BUFFERPOOL_OWNERSHIP_ANALYSIS.md	/^### 7. Worker 实现类$/;"	S	language:Markdown
+7. 扩展性与最佳实践	include/buffer/Buffer-subsystem-architecture.md	/^## 7. 扩展性与最佳实践$/;"	s	language:Markdown
 7. 重构最佳实践	cpp_compile_error.md	/^### 7. 重构最佳实践$/;"	S	language:Markdown
+7.1 如何扩展新的Allocator	include/buffer/Buffer-subsystem-architecture.md	/^### 7.1 如何扩展新的Allocator$/;"	S	language:Markdown
+7.2 性能优化建议	include/buffer/Buffer-subsystem-architecture.md	/^### 7.2 性能优化建议$/;"	S	language:Markdown
+7.3 常见陷阱	include/buffer/Buffer-subsystem-architecture.md	/^### 7.3 常见陷阱$/;"	S	language:Markdown
+7.4 调试技巧	include/buffer/Buffer-subsystem-architecture.md	/^### 7.4 调试技巧$/;"	S	language:Markdown
 8. Allocator实现类（Implementation Layer）	ARCHITECTURE.md	/^### 8. Allocator实现类（Implementation Layer）$/;"	S	language:Markdown
+8. 总结	include/buffer/Buffer-subsystem-architecture.md	/^## 8. 总结$/;"	s	language:Markdown
+8.1 核心概念回顾	include/buffer/Buffer-subsystem-architecture.md	/^### 8.1 核心概念回顾$/;"	S	language:Markdown
+8.2 最佳实践清单	include/buffer/Buffer-subsystem-architecture.md	/^### 8.2 最佳实践清单$/;"	S	language:Markdown
+8.3 下一步学习	include/buffer/Buffer-subsystem-architecture.md	/^### 8.3 下一步学习$/;"	S	language:Markdown
 AM_CPPFLAGS	Makefile.am	/^AM_CPPFLAGS = -I$(top_srcdir)\/include$/;"	m	language:Make
 AM_CXXFLAGS	Makefile.am	/^AM_CXXFLAGS = -O2 -std=c++17$/;"	m	language:Make
 AM_CXXFLAGS	Makefile.am	/^AM_CXXFLAGS = -g -O0 -Wall -std=c++17$/;"	m	language:Make
@@ -103,7 +153,14 @@ BufferPool	source/buffer/BufferPool.cpp	/^BufferPool::BufferPool($/;"	f	language
 BufferPool API	ARCHITECTURE.md	/^### BufferPool API$/;"	S	language:Markdown
 BufferPool 所有权和使用需求分析	BUFFERPOOL_OWNERSHIP_ANALYSIS.md	/^# BufferPool 所有权和使用需求分析$/;"	c	language:Markdown
 BufferPoolRegistry	include/buffer/BufferPoolRegistry.hpp	/^class BufferPoolRegistry {$/;"	c	language:C++
+BufferPoolRegistry的锁粒度	include/buffer/Buffer-subsystem-architecture.md	/^#### BufferPoolRegistry的锁粒度$/;"	t	language:Markdown
 BufferPool工作流程	ARCHITECTURE.md	/^### BufferPool工作流程$/;"	S	language:Markdown
+BufferPool生命周期图	include/buffer/Buffer-subsystem-architecture.md	/^#### BufferPool生命周期图$/;"	t	language:Markdown
+BufferPool的锁粒度	include/buffer/Buffer-subsystem-architecture.md	/^#### BufferPool的锁粒度$/;"	t	language:Markdown
+BufferPool运行标志（atomic）	include/buffer/Buffer-subsystem-architecture.md	/^#### BufferPool运行标志（atomic）$/;"	t	language:Markdown
+Buffer子系统设计文档	include/buffer/Buffer-subsystem-architecture.md	/^# Buffer子系统设计文档$/;"	c	language:Markdown
+Buffer状态转换图	include/buffer/Buffer-subsystem-architecture.md	/^#### Buffer状态转换图$/;"	t	language:Markdown
+Buffer状态（atomic）	include/buffer/Buffer-subsystem-architecture.md	/^#### Buffer状态（atomic）$/;"	t	language:Markdown
 C++ 标准库文档	cpp_compile_error.md	/^### C++ 标准库文档$/;"	S	language:Markdown
 C++ 标准演进	cpp_compile_error.md	/^### C++ 标准演进$/;"	S	language:Markdown
 C++ 编译错误汇总文档	cpp_compile_error.md	/^# C++ 编译错误汇总文档$/;"	c	language:Markdown
@@ -148,6 +205,8 @@ FramebufferAllocator	source/buffer/allocator/implementation/FramebufferAllocator
 FramebufferAllocator	source/buffer/allocator/implementation/FramebufferAllocator.cpp	/^FramebufferAllocator::FramebufferAllocator(LinuxFramebufferDevice* device)$/;"	f	language:C++	class:FramebufferAllocator	signature:(LinuxFramebufferDevice * device)
 FramebufferAllocator	source/buffer/allocator/implementation/FramebufferAllocator.cpp	/^FramebufferAllocator::FramebufferAllocator(const std::vector<BufferInfo>& external_buffers)$/;"	f	language:C++	class:FramebufferAllocator	signature:(const std::vector<BufferInfo> & external_buffers)
 GCC/Clang 编译器警告	cpp_compile_error.md	/^# GCC\/Clang 编译器警告$/;"	c	language:Markdown
+GDB命令	include/buffer/Buffer-subsystem-architecture.md	/^# GDB命令$/;"	c	language:Markdown
+Getters（只读接口）	include/buffer/Buffer-subsystem-architecture.md	/^##### Getters（只读接口）$/;"	T	language:Markdown
 GlobalStats	include/buffer/BufferPoolRegistry.hpp	/^    struct GlobalStats {$/;"	s	language:C++	class:BufferPoolRegistry
 H264	include/productionline/worker/implementation/MmapRawVideoFileWorker.hpp	/^        H264,         \/\/ H.264裸流$/;"	e	language:C++	enum:MmapRawVideoFileWorker::FileFormat
 H265	include/productionline/worker/implementation/MmapRawVideoFileWorker.hpp	/^        H265,         \/\/ H.265裸流$/;"	e	language:C++	enum:MmapRawVideoFileWorker::FileFormat
@@ -208,6 +267,7 @@ RAW	include/productionline/worker/implementation/MmapRawVideoFileWorker.hpp	/^  
 READY_FOR_CONSUME	include/buffer/Buffer.hpp	/^        READY_FOR_CONSUME,       \/\/ 数据就绪，等待消费者获取（在 filled_queue）$/;"	e	language:C++	enum:Buffer::State
 RTSP	test.cpp	/^    RTSP,$/;"	e	language:C++	enum:TestMode	file:
 SEQUENTIAL	test.cpp	/^    SEQUENTIAL,$/;"	e	language:C++	enum:TestMode	file:
+Setters（写接口）	include/buffer/Buffer-subsystem-architecture.md	/^##### Setters（写接口）$/;"	T	language:Markdown
 State	include/buffer/Buffer.hpp	/^    enum class State {$/;"	g	language:C++	class:Buffer
 TACO_SYS	include/buffer/allocator/base/BufferAllocatorBase.hpp	/^    TACO_SYS = 3$/;"	e	language:C++	enum:BufferMemoryAllocatorType
 TIMER_HPP	include/monitor/Timer.hpp	/^#define TIMER_HPP$/;"	d	language:C++
@@ -247,7 +307,7 @@ allocatePoolWithBuffers	source/buffer/allocator/facade/BufferAllocatorFacade.cpp
 allocatePoolWithBuffers	source/buffer/allocator/implementation/AVFrameAllocator.cpp	/^std::shared_ptr<BufferPool> AVFrameAllocator::allocatePoolWithBuffers($/;"	f	language:C++	class:AVFrameAllocator	typeref:typename:std::shared_ptr<BufferPool>	signature:(int count,size_t size,const std::string & name,const std::string & category)
 allocatePoolWithBuffers	source/buffer/allocator/implementation/FramebufferAllocator.cpp	/^std::shared_ptr<BufferPool> FramebufferAllocator::allocatePoolWithBuffers($/;"	f	language:C++	class:FramebufferAllocator	typeref:typename:std::shared_ptr<BufferPool>	signature:(int count,size_t size,const std::string & name,const std::string & category)
 allocatePoolWithBuffers	source/buffer/allocator/implementation/NormalAllocator.cpp	/^std::shared_ptr<BufferPool> NormalAllocator::allocatePoolWithBuffers($/;"	f	language:C++	class:NormalAllocator	typeref:typename:std::shared_ptr<BufferPool>	signature:(int count,size_t size,const std::string & name,const std::string & category)
-allocator_base_	include/buffer/allocator/facade/BufferAllocatorFacade.hpp	/^    std::unique_ptr<BufferAllocatorBase> allocator_base_;  \/\/ 底层 Allocator 基类指针（/;"	m	language:C++	class:BufferAllocatorFacade	typeref:typename:std::unique_ptr<BufferAllocatorBase>
+allocator_base_uptr_	include/buffer/allocator/facade/BufferAllocatorFacade.hpp	/^    std::unique_ptr<BufferAllocatorBase> allocator_base_uptr_;  \/\/ 底层 Allocator 基类指针/;"	m	language:C++	class:BufferAllocatorFacade	typeref:typename:std::unique_ptr<BufferAllocatorBase>
 allocator_facade_	include/display/LinuxFramebufferDevice.hpp	/^    std::unique_ptr<BufferAllocatorFacade> allocator_facade_;  \/\/ 门面类对象$/;"	m	language:C++	class:LinuxFramebufferDevice	typeref:typename:std::unique_ptr<BufferAllocatorFacade>
 allocator_facade_	include/productionline/worker/base/WorkerBase.hpp	/^    BufferAllocatorFacade allocator_facade_;$/;"	m	language:C++	class:WorkerBase	typeref:typename:BufferAllocatorFacade
 asyncProducerThread	source/productionline/worker/implementation/IoUringRawVideoFileWorker.cpp	/^void IoUringRawVideoFileWorker::asyncProducerThread(int thread_id,$/;"	f	language:C++	class:IoUringRawVideoFileWorker	typeref:typename:void	signature:(int thread_id,BufferPool * pool,const std::vector<int> & frame_indices,std::atomic<bool> & running,bool loop)
@@ -269,8 +329,8 @@ buffer_cv_	include/productionline/worker/implementation/FfmpegDecodeRtspWorker.h
 buffer_mutex_	include/productionline/worker/implementation/FfmpegDecodeRtspWorker.hpp	/^    std::mutex buffer_mutex_;$/;"	m	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:std::mutex
 buffer_ownership_	source/buffer/allocator/implementation/NormalAllocator.cpp	/^static std::unordered_map<Buffer*, BufferAllocatorBase*> buffer_ownership_;$/;"	v	language:C++	typeref:typename:std::unordered_map<Buffer *,BufferAllocatorBase * >	file:
 buffer_pool_	include/display/LinuxFramebufferDevice.hpp	/^    std::shared_ptr<BufferPool> buffer_pool_;                  \/\/ BufferPool（智能指针管/;"	m	language:C++	class:LinuxFramebufferDevice	typeref:typename:std::shared_ptr<BufferPool>
-buffer_pool_	include/productionline/worker/base/WorkerBase.hpp	/^    std::shared_ptr<BufferPool> buffer_pool_;$/;"	m	language:C++	class:WorkerBase	typeref:typename:std::shared_ptr<BufferPool>
-buffer_pool_	include/productionline/worker/implementation/FfmpegDecodeRtspWorker.hpp	/^    BufferPool* buffer_pool_;          \/\/ 可选：零拷贝模式的BufferPool$/;"	m	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:BufferPool *
+buffer_pool_ptr_	include/productionline/worker/implementation/FfmpegDecodeRtspWorker.hpp	/^    BufferPool* buffer_pool_ptr_;          \/\/ 可选：零拷贝模式的BufferPool$/;"	m	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:BufferPool *
+buffer_pool_sptr_	include/productionline/worker/base/WorkerBase.hpp	/^    std::shared_ptr<BufferPool> buffer_pool_sptr_;$/;"	m	language:C++	class:WorkerBase	typeref:typename:std::shared_ptr<BufferPool>
 buffer_size	include/display/LinuxFramebufferDevice.hpp	/^        size_t buffer_size;     \/\/ 单个 buffer 大小$/;"	m	language:C++	struct:LinuxFramebufferDevice::MappedInfo	typeref:typename:size_t
 buffer_size_	include/display/LinuxFramebufferDevice.hpp	/^    size_t buffer_size_;              \/\/ 单个buffer大小（字节）$/;"	m	language:C++	class:LinuxFramebufferDevice	typeref:typename:size_t
 buffer_to_frame_	include/buffer/allocator/implementation/AVFrameAllocator.hpp	/^    std::unordered_map<Buffer*, AVFrame*> buffer_to_frame_;$/;"	m	language:C++	class:AVFrameAllocator	typeref:typename:std::unordered_map<Buffer *,AVFrame * >
@@ -279,7 +339,6 @@ calculateAverageFPS	source/monitor/PerformanceMonitor.cpp	/^double PerformanceMo
 callback_	include/monitor/Timer.hpp	/^    void (*callback_)(void*);           \/\/ 周期性回调$/;"	m	language:C++	class:Timer	typeref:typename:void (*)(void *)
 category	include/buffer/BufferPoolRegistry.hpp	/^        std::string category;                                \/\/ 分类$/;"	m	language:C++	struct:BufferPoolRegistry::PoolInfo	typeref:typename:std::string
 category_	include/buffer/BufferPool.hpp	/^    std::string category_;$/;"	m	language:C++	class:BufferPool	typeref:typename:std::string
-checkZeroCopySupport	source/productionline/worker/implementation/FfmpegDecodeVideoFileWorker.cpp	/^bool FfmpegDecodeVideoFileWorker::checkZeroCopySupport() {$/;"	f	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:bool	signature:()
 cleanup	source/display/LinuxFramebufferDevice.cpp	/^void LinuxFramebufferDevice::cleanup() {$/;"	f	language:C++	class:LinuxFramebufferDevice	typeref:typename:void	signature:()
 cleanupPool	source/buffer/allocator/implementation/FramebufferAllocator.cpp	/^void FramebufferAllocator::cleanupPool(BufferPool* pool) {$/;"	f	language:C++	class:FramebufferAllocator	typeref:typename:void	signature:(BufferPool * pool)
 cleanupPool	source/buffer/allocator/implementation/NormalAllocator.cpp	/^void NormalAllocator::cleanupPool(BufferPool* pool) {$/;"	f	language:C++	class:NormalAllocator	typeref:typename:void	signature:(BufferPool * pool)
@@ -289,9 +348,9 @@ close	source/productionline/worker/implementation/FfmpegDecodeVideoFileWorker.cp
 close	source/productionline/worker/implementation/IoUringRawVideoFileWorker.cpp	/^void IoUringRawVideoFileWorker::close() {$/;"	f	language:C++	class:IoUringRawVideoFileWorker	typeref:typename:void	signature:()
 close	source/productionline/worker/implementation/MmapRawVideoFileWorker.cpp	/^void MmapRawVideoFileWorker::close() {$/;"	f	language:C++	class:MmapRawVideoFileWorker	typeref:typename:void	signature:()
 closeVideo	source/productionline/worker/implementation/FfmpegDecodeVideoFileWorker.cpp	/^void FfmpegDecodeVideoFileWorker::closeVideo() {$/;"	f	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:void	signature:()
-codec_ctx_	include/productionline/worker/implementation/FfmpegDecodeRtspWorker.hpp	/^    AVCodecContext* codec_ctx_;$/;"	m	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:AVCodecContext *
-codec_ctx_	include/productionline/worker/implementation/FfmpegDecodeVideoFileWorker.hpp	/^    AVCodecContext* codec_ctx_;$/;"	m	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:AVCodecContext *
-codec_options_	include/productionline/worker/implementation/FfmpegDecodeVideoFileWorker.hpp	/^    AVDictionary* codec_options_;      \/\/ 解码器选项（用于 h264_taco 配置）$/;"	m	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:AVDictionary *
+codec_ctx_ptr_	include/productionline/worker/implementation/FfmpegDecodeRtspWorker.hpp	/^    AVCodecContext* codec_ctx_ptr_;$/;"	m	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:AVCodecContext *
+codec_ctx_ptr_	include/productionline/worker/implementation/FfmpegDecodeVideoFileWorker.hpp	/^    AVCodecContext* codec_ctx_ptr_;$/;"	m	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:AVCodecContext *
+codec_options_ptr_	include/productionline/worker/implementation/FfmpegDecodeVideoFileWorker.hpp	/^    AVDictionary* codec_options_ptr_;      \/\/ 解码器选项（用于 h264_taco 配置）$/;"	m	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:AVDictionary *
 component	configure.ac	/^AC_INIT([component], [1.0])$/;"	p	language:Autoconf
 config_	include/productionline/VideoProductionLine.hpp	/^    Config config_;$/;"	m	language:C++	class:VideoProductionLine	typeref:typename:Config
 configureSpecialDecoder	source/productionline/worker/implementation/FfmpegDecodeVideoFileWorker.cpp	/^bool FfmpegDecodeVideoFileWorker::configureSpecialDecoder() {$/;"	f	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:bool	signature:()
@@ -330,7 +389,7 @@ decode_start_	include/monitor/PerformanceMonitor.hpp	/^    std::chrono::steady_c
 decode_thread_	include/productionline/worker/implementation/FfmpegDecodeRtspWorker.hpp	/^    std::thread decode_thread_;$/;"	m	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:std::thread
 decoded_frames_	include/productionline/worker/implementation/FfmpegDecodeRtspWorker.hpp	/^    std::atomic<int> decoded_frames_;$/;"	m	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:std::atomic<int>
 decoded_frames_	include/productionline/worker/implementation/FfmpegDecodeVideoFileWorker.hpp	/^    std::atomic<int> decoded_frames_;$/;"	m	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:std::atomic<int>
-decoder_name_	include/productionline/worker/implementation/FfmpegDecodeVideoFileWorker.hpp	/^    const char* decoder_name_;         \/\/ 指定解码器名称（如 "h264_taco"）$/;"	m	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:const char *
+decoder_name_ptr_	include/productionline/worker/implementation/FfmpegDecodeVideoFileWorker.hpp	/^    const char* decoder_name_ptr_;         \/\/ 指定解码器名称（如 "h264_taco"）$/;"	m	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:const char *
 delay_end_callback_	include/monitor/Timer.hpp	/^    void (*delay_end_callback_)(void*); \/\/ 延迟结束回调（可选）$/;"	m	language:C++	class:Timer	typeref:typename:void (*)(void *)
 delay_seconds_	include/monitor/Timer.hpp	/^    double delay_seconds_;      \/\/ 延迟启动时间$/;"	m	language:C++	class:Timer	typeref:typename:double
 destroyPool	source/buffer/allocator/facade/BufferAllocatorFacade.cpp	/^bool BufferAllocatorFacade::destroyPool(BufferPool* pool) {$/;"	f	language:C++	class:BufferAllocatorFacade	typeref:typename:bool	signature:(BufferPool * pool)
@@ -381,11 +440,12 @@ filled_cv_	include/buffer/BufferPool.hpp	/^    std::condition_variable filled_cv
 filled_queue_	include/buffer/BufferPool.hpp	/^    std::queue<Buffer*> filled_queue_;              \/\/ 填充队列$/;"	m	language:C++	class:BufferPool	typeref:typename:std::queue<Buffer * >
 findDeviceNode	source/display/LinuxFramebufferDevice.cpp	/^const char* LinuxFramebufferDevice::findDeviceNode(int device_index) {$/;"	f	language:C++	class:LinuxFramebufferDevice	typeref:typename:const char *	signature:(int device_index)
 findVideoStream	source/productionline/worker/implementation/FfmpegDecodeVideoFileWorker.cpp	/^bool FfmpegDecodeVideoFileWorker::findVideoStream() {$/;"	f	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:bool	signature:()
-format_ctx_	include/productionline/worker/implementation/FfmpegDecodeRtspWorker.hpp	/^    AVFormatContext* format_ctx_;$/;"	m	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:AVFormatContext *
-format_ctx_	include/productionline/worker/implementation/FfmpegDecodeVideoFileWorker.hpp	/^    AVFormatContext* format_ctx_;$/;"	m	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:AVFormatContext *
+format_ctx_ptr_	include/productionline/worker/implementation/FfmpegDecodeRtspWorker.hpp	/^    AVFormatContext* format_ctx_ptr_;$/;"	m	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:AVFormatContext *
+format_ctx_ptr_	include/productionline/worker/implementation/FfmpegDecodeVideoFileWorker.hpp	/^    AVFormatContext* format_ctx_ptr_;$/;"	m	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:AVFormatContext *
+frame_packet_map_	include/productionline/worker/implementation/FfmpegDecodeVideoFileWorker.hpp	/^    std::map<int, std::pair<AVFrame*, AVPacket*>> frame_packet_map_;    \/\/ 用于存储解码后/;"	m	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:std::map<int,std::pair<AVFrame *,AVPacket * >>
 frame_size_	include/productionline/worker/implementation/IoUringRawVideoFileWorker.hpp	/^    size_t frame_size_;$/;"	m	language:C++	class:IoUringRawVideoFileWorker	typeref:typename:size_t
 frame_size_	include/productionline/worker/implementation/MmapRawVideoFileWorker.hpp	/^    size_t frame_size_;               \/\/ 单帧大小（字节）$/;"	m	language:C++	class:MmapRawVideoFileWorker	typeref:typename:size_t
-framebuffer_base_	include/display/LinuxFramebufferDevice.hpp	/^    void* framebuffer_base_;          \/\/ mmap返回的基地址$/;"	m	language:C++	class:LinuxFramebufferDevice	typeref:typename:void *
+framebuffer_base_ptr_	include/display/LinuxFramebufferDevice.hpp	/^    void* framebuffer_base_ptr_;          \/\/ mmap返回的基地址$/;"	m	language:C++	class:LinuxFramebufferDevice	typeref:typename:void *
 framebuffer_buffer_ownership_	source/buffer/allocator/implementation/FramebufferAllocator.cpp	/^static std::unordered_map<Buffer*, BufferAllocatorBase*> framebuffer_buffer_ownership_;$/;"	v	language:C++	typeref:typename:std::unordered_map<Buffer *,BufferAllocatorBase * >	file:
 framebuffer_ownership_mutex_	source/buffer/allocator/implementation/FramebufferAllocator.cpp	/^static std::mutex framebuffer_ownership_mutex_;$/;"	v	language:C++	typeref:typename:std::mutex	file:
 framebuffer_total_size_	include/display/LinuxFramebufferDevice.hpp	/^    size_t framebuffer_total_size_;   \/\/ 映射的总大小$/;"	m	language:C++	class:LinuxFramebufferDevice	typeref:typename:size_t
@@ -509,7 +569,7 @@ getWorkerType	include/productionline/worker/implementation/FfmpegDecodeVideoFile
 getWorkerType	include/productionline/worker/implementation/IoUringRawVideoFileWorker.hpp	/^    const char* getWorkerType() const override {$/;"	f	language:C++	class:IoUringRawVideoFileWorker	typeref:typename:const char *	signature:() const
 getWorkerType	include/productionline/worker/implementation/MmapRawVideoFileWorker.hpp	/^    const char* getWorkerType() const override {$/;"	f	language:C++	class:MmapRawVideoFileWorker	typeref:typename:const char *	signature:() const
 getWorkerType	source/productionline/worker/facade/BufferFillingWorkerFacade.cpp	/^const char* BufferFillingWorkerFacade::getWorkerType() const {$/;"	f	language:C++	class:BufferFillingWorkerFacade	typeref:typename:const char *	signature:() const
-getWorkingBufferPool	include/productionline/VideoProductionLine.hpp	/^    BufferPool* getWorkingBufferPool() const { return working_buffer_pool_; }$/;"	f	language:C++	class:VideoProductionLine	typeref:typename:BufferPool *	signature:() const
+getWorkingBufferPool	include/productionline/VideoProductionLine.hpp	/^    BufferPool* getWorkingBufferPool() const { return working_buffer_pool_ptr_; }$/;"	f	language:C++	class:VideoProductionLine	typeref:typename:BufferPool *	signature:() const
 hasMoreFrames	source/productionline/worker/facade/BufferFillingWorkerFacade.cpp	/^bool BufferFillingWorkerFacade::hasMoreFrames() const {$/;"	f	language:C++	class:BufferFillingWorkerFacade	typeref:typename:bool	signature:() const
 hasMoreFrames	source/productionline/worker/implementation/FfmpegDecodeRtspWorker.cpp	/^bool FfmpegDecodeRtspWorker::hasMoreFrames() const {$/;"	f	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:bool	signature:() const
 hasMoreFrames	source/productionline/worker/implementation/FfmpegDecodeVideoFileWorker.cpp	/^bool FfmpegDecodeVideoFileWorker::hasMoreFrames() const {$/;"	f	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:bool	signature:() const
@@ -572,11 +632,11 @@ load_start_	include/monitor/PerformanceMonitor.hpp	/^    std::chrono::steady_clo
 loop	include/productionline/VideoProductionLine.hpp	/^        bool loop;                                     \/\/ 是否循环播放$/;"	m	language:C++	struct:VideoProductionLine::Config	typeref:typename:bool
 main	test.cpp	/^int main(int argc, char* argv[]) {$/;"	f	language:C++	typeref:typename:int	signature:(int argc,char * argv[])
 managed_buffers_	include/buffer/BufferPool.hpp	/^    std::unordered_set<Buffer*> managed_buffers_;  \/\/ 所有托管的 Buffer$/;"	m	language:C++	class:BufferPool	typeref:typename:std::unordered_set<Buffer * >
-managed_pool_	include/buffer/allocator/base/BufferAllocatorBase.hpp	/^    std::shared_ptr<BufferPool> managed_pool_;$/;"	m	language:C++	class:BufferAllocatorBase	typeref:typename:std::shared_ptr<BufferPool>
 managed_pool_mutex_	include/buffer/allocator/base/BufferAllocatorBase.hpp	/^    mutable std::mutex managed_pool_mutex_;$/;"	m	language:C++	class:BufferAllocatorBase	typeref:typename:std::mutex
+managed_pool_sptr_	include/buffer/allocator/base/BufferAllocatorBase.hpp	/^    std::shared_ptr<BufferPool> managed_pool_sptr_;$/;"	m	language:C++	class:BufferAllocatorBase	typeref:typename:std::shared_ptr<BufferPool>
 mapFile	source/productionline/worker/implementation/MmapRawVideoFileWorker.cpp	/^bool MmapRawVideoFileWorker::mapFile() {$/;"	f	language:C++	class:MmapRawVideoFileWorker	typeref:typename:bool	signature:()
 mapHardwareFramebufferMemory	source/display/LinuxFramebufferDevice.cpp	/^bool LinuxFramebufferDevice::mapHardwareFramebufferMemory() {$/;"	f	language:C++	class:LinuxFramebufferDevice	typeref:typename:bool	signature:()
-mapped_file_	include/productionline/worker/implementation/MmapRawVideoFileWorker.hpp	/^    void* mapped_file_;               \/\/ mmap映射的文件地址$/;"	m	language:C++	class:MmapRawVideoFileWorker	typeref:typename:void *
+mapped_file_ptr_	include/productionline/worker/implementation/MmapRawVideoFileWorker.hpp	/^    void* mapped_file_ptr_;               \/\/ mmap映射的文件地址$/;"	m	language:C++	class:MmapRawVideoFileWorker	typeref:typename:void *
 mapped_size_	include/productionline/worker/implementation/MmapRawVideoFileWorker.hpp	/^    size_t mapped_size_;              \/\/ 映射的文件大小$/;"	m	language:C++	class:MmapRawVideoFileWorker	typeref:typename:size_t
 mapping_mutex_	include/buffer/allocator/implementation/AVFrameAllocator.hpp	/^    std::mutex mapping_mutex_;$/;"	m	language:C++	class:AVFrameAllocator	typeref:typename:std::mutex
 mutex_	include/buffer/BufferPool.hpp	/^    mutable std::mutex mutex_;                      \/\/ 保护所有队列和状态$/;"	m	language:C++	class:BufferPool	typeref:typename:std::mutex
@@ -614,6 +674,7 @@ ownership	include/buffer/Buffer.hpp	/^    Ownership ownership() const { return o
 ownershipToString	source/buffer/Buffer.cpp	/^const char* Buffer::ownershipToString(Ownership ownership) {$/;"	f	language:C++	class:Buffer	typeref:typename:const char *	signature:(Ownership ownership)
 ownership_	include/buffer/Buffer.hpp	/^    Ownership ownership_;            \/\/ 所有权类型$/;"	m	language:C++	class:Buffer	typeref:typename:Ownership
 ownership_mutex_	source/buffer/allocator/implementation/NormalAllocator.cpp	/^static std::mutex ownership_mutex_;$/;"	v	language:C++	typeref:typename:std::mutex	file:
+packet_ptr_	include/productionline/worker/implementation/FfmpegDecodeVideoFileWorker.hpp	/^    AVPacket* packet_ptr_;                 \/\/ 用于 fillBuffer 的 packet$/;"	m	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:AVPacket *
 parseH264Header	source/productionline/worker/implementation/MmapRawVideoFileWorker.cpp	/^bool MmapRawVideoFileWorker::parseH264Header() {$/;"	f	language:C++	class:MmapRawVideoFileWorker	typeref:typename:bool	signature:()
 parseMP4Header	source/productionline/worker/implementation/MmapRawVideoFileWorker.cpp	/^bool MmapRawVideoFileWorker::parseMP4Header() {$/;"	f	language:C++	class:MmapRawVideoFileWorker	typeref:typename:bool	signature:()
 parse_test_mode	test.cpp	/^static TestMode parse_test_mode(const char* mode_str) {$/;"	f	language:C++	typeref:typename:TestMode	file:	signature:(const char * mode_str)
@@ -692,6 +753,7 @@ setErrorCallback	include/productionline/VideoProductionLine.hpp	/^    void setEr
 setHardwareDecoder	source/productionline/worker/implementation/FfmpegDecodeVideoFileWorker.cpp	/^void FfmpegDecodeVideoFileWorker::setHardwareDecoder(bool enable) {$/;"	f	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:void	signature:(bool enable)
 setOutputBitsPerPixel	source/productionline/worker/implementation/FfmpegDecodeVideoFileWorker.cpp	/^void FfmpegDecodeVideoFileWorker::setOutputBitsPerPixel(int bpp) {$/;"	f	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:void	signature:(int bpp)
 setOutputResolution	source/productionline/worker/implementation/FfmpegDecodeVideoFileWorker.cpp	/^void FfmpegDecodeVideoFileWorker::setOutputResolution(int width, int height) {$/;"	f	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:void	signature:(int width,int height)
+setPhysicalAddress	include/buffer/Buffer.hpp	/^    void setPhysicalAddress(uint64_t phys_addr) { phys_addr_ = phys_addr; }$/;"	f	language:C++	class:Buffer	typeref:typename:void	signature:(uint64_t phys_addr)
 setRegistryId	include/buffer/BufferPool.hpp	/^    void setRegistryId(uint64_t id) { registry_id_ = id; }$/;"	f	language:C++	class:BufferPool	typeref:typename:void	signature:(uint64_t id)
 setReportInterval	source/monitor/PerformanceMonitor.cpp	/^void PerformanceMonitor::setReportInterval(int interval_ms) {$/;"	f	language:C++	class:PerformanceMonitor	typeref:typename:void	signature:(int interval_ms)
 setState	include/buffer/Buffer.hpp	/^    void setState(State state) { state_.store(state); }$/;"	f	language:C++	class:Buffer	typeref:typename:void	signature:(State state)
@@ -720,12 +782,10 @@ stop	source/monitor/Timer.cpp	/^void Timer::stop() {$/;"	f	language:C++	class:Ti
 stop	source/productionline/VideoProductionLine.cpp	/^void VideoProductionLine::stop() {$/;"	f	language:C++	class:VideoProductionLine	typeref:typename:void	signature:()
 storeToInternalBuffer	source/productionline/worker/implementation/FfmpegDecodeRtspWorker.cpp	/^void FfmpegDecodeRtspWorker::storeToInternalBuffer(AVFrame* frame) {$/;"	f	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:void	signature:(AVFrame * frame)
 submitBatchReads	source/productionline/worker/implementation/IoUringRawVideoFileWorker.cpp	/^int IoUringRawVideoFileWorker::submitBatchReads(BufferPool* pool, $/;"	f	language:C++	class:IoUringRawVideoFileWorker	typeref:typename:int	signature:(BufferPool * pool,const std::vector<int> & frame_indices)
-submitFilled	source/buffer/BufferPool.cpp	/^void BufferPool::submitFilled(Buffer* buffer) {$/;"	f	language:C++	class:BufferPool	typeref:typename:void	signature:(Buffer * buffer)
+submitFilled	source/buffer/BufferPool.cpp	/^void BufferPool::submitFilled(Buffer* buffer_ptr) {$/;"	f	language:C++	class:BufferPool	typeref:typename:void	signature:(Buffer * buffer_ptr)
 submitReadRequest	source/productionline/worker/implementation/IoUringRawVideoFileWorker.cpp	/^bool IoUringRawVideoFileWorker::submitReadRequest(int frame_index, void* buffer, size_t buffer_s/;"	f	language:C++	class:IoUringRawVideoFileWorker	typeref:typename:bool	signature:(int frame_index,void * buffer,size_t buffer_size)
-supportsZeroCopy	include/productionline/worker/implementation/FfmpegDecodeVideoFileWorker.hpp	/^    bool supportsZeroCopy() const { return supports_zero_copy_; }$/;"	f	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:bool	signature:() const
-supports_zero_copy_	include/productionline/worker/implementation/FfmpegDecodeVideoFileWorker.hpp	/^    bool supports_zero_copy_;                      \/\/ 解码器是否支持零拷贝$/;"	m	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:bool
-sws_ctx_	include/productionline/worker/implementation/FfmpegDecodeRtspWorker.hpp	/^    SwsContext* sws_ctx_;              \/\/ 图像格式转换$/;"	m	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:SwsContext *
-sws_ctx_	include/productionline/worker/implementation/FfmpegDecodeVideoFileWorker.hpp	/^    SwsContext* sws_ctx_;              \/\/ 图像格式转换$/;"	m	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:SwsContext *
+sws_ctx_ptr_	include/productionline/worker/implementation/FfmpegDecodeRtspWorker.hpp	/^    SwsContext* sws_ctx_ptr_;              \/\/ 图像格式转换$/;"	m	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:SwsContext *
+sws_ctx_ptr_	include/productionline/worker/implementation/FfmpegDecodeVideoFileWorker.hpp	/^    SwsContext* sws_ctx_ptr_;              \/\/ 图像格式转换$/;"	m	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:SwsContext *
 test_4frame_loop	test.cpp	/^static int test_4frame_loop(const char* raw_video_path) {$/;"	f	language:C++	typeref:typename:int	file:	signature:(const char * raw_video_path)
 test_buffermanager_iouring	test.cpp	/^static int test_buffermanager_iouring(const char* raw_video_path) {$/;"	f	language:C++	typeref:typename:int	file:	signature:(const char * raw_video_path)
 test_buffermanager_producer	test.cpp	/^static int test_buffermanager_producer(const char* raw_video_path) {$/;"	f	language:C++	typeref:typename:int	file:	signature:(const char * raw_video_path)
@@ -780,13 +840,13 @@ width_	include/productionline/worker/implementation/FfmpegDecodeRtspWorker.hpp	/
 width_	include/productionline/worker/implementation/FfmpegDecodeVideoFileWorker.hpp	/^    int width_;                        \/\/ 视频原始宽度$/;"	m	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:int
 width_	include/productionline/worker/implementation/IoUringRawVideoFileWorker.hpp	/^    int width_;$/;"	m	language:C++	class:IoUringRawVideoFileWorker	typeref:typename:int
 width_	include/productionline/worker/implementation/MmapRawVideoFileWorker.hpp	/^    int width_;                       \/\/ 视频宽度（像素）$/;"	m	language:C++	class:MmapRawVideoFileWorker	typeref:typename:int
-worker_base_	include/productionline/worker/facade/BufferFillingWorkerFacade.hpp	/^    std::unique_ptr<WorkerBase> worker_base_;  \/\/ 实际的Worker实现（统一基类）$/;"	m	language:C++	class:BufferFillingWorkerFacade	typeref:typename:std::unique_ptr<WorkerBase>
-worker_buffer_pool_	include/productionline/VideoProductionLine.hpp	/^    std::unique_ptr<BufferPool> worker_buffer_pool_;$/;"	m	language:C++	class:VideoProductionLine	typeref:typename:std::unique_ptr<BufferPool>
-worker_facade_	include/productionline/VideoProductionLine.hpp	/^    std::shared_ptr<BufferFillingWorkerFacade> worker_facade_;$/;"	m	language:C++	class:VideoProductionLine	typeref:typename:std::shared_ptr<BufferFillingWorkerFacade>
+worker_base_uptr_	include/productionline/worker/facade/BufferFillingWorkerFacade.hpp	/^    std::unique_ptr<WorkerBase> worker_base_uptr_;  \/\/ 实际的Worker实现（统一基类）$/;"	m	language:C++	class:BufferFillingWorkerFacade	typeref:typename:std::unique_ptr<WorkerBase>
+worker_buffer_pool_uptr_	include/productionline/VideoProductionLine.hpp	/^    std::unique_ptr<BufferPool> worker_buffer_pool_uptr_;$/;"	m	language:C++	class:VideoProductionLine	typeref:typename:std::unique_ptr<BufferPool>
+worker_facade_sptr_	include/productionline/VideoProductionLine.hpp	/^    std::shared_ptr<BufferFillingWorkerFacade> worker_facade_sptr_;$/;"	m	language:C++	class:VideoProductionLine	typeref:typename:std::shared_ptr<BufferFillingWorkerFacade>
 worker_type	include/productionline/VideoProductionLine.hpp	/^        BufferFillingWorkerFactory::WorkerType worker_type;    \/\/ Worker类型（默认AUTO）$/;"	m	language:C++	struct:VideoProductionLine::Config	typeref:typename:BufferFillingWorkerFactory::WorkerType
-working_buffer_pool_	include/productionline/VideoProductionLine.hpp	/^    BufferPool* working_buffer_pool_;$/;"	m	language:C++	class:VideoProductionLine	typeref:typename:BufferPool *
+working_buffer_pool_ptr_	include/productionline/VideoProductionLine.hpp	/^    BufferPool* working_buffer_pool_ptr_;$/;"	m	language:C++	class:VideoProductionLine	typeref:typename:BufferPool *
 write_index_	include/productionline/worker/implementation/FfmpegDecodeRtspWorker.hpp	/^    int write_index_;                  \/\/ 写入索引$/;"	m	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:int
-zero_copy_buffer_pool_	include/productionline/worker/implementation/FfmpegDecodeVideoFileWorker.hpp	/^    BufferPool* zero_copy_buffer_pool_;            \/\/ 可选：零拷贝模式的BufferPool（/;"	m	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:BufferPool *
+zero_copy_buffer_pool_ptr_	include/productionline/worker/implementation/FfmpegDecodeVideoFileWorker.hpp	/^    BufferPool* zero_copy_buffer_pool_ptr_;            \/\/ 可选：零拷贝模式的BufferPoo/;"	m	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:BufferPool *
 ~AVFrameAllocator	source/buffer/allocator/implementation/AVFrameAllocator.cpp	/^AVFrameAllocator::~AVFrameAllocator() {$/;"	f	language:C++	class:AVFrameAllocator	signature:()
 ~BufferAllocatorFacade	source/buffer/allocator/facade/BufferAllocatorFacade.cpp	/^BufferAllocatorFacade::~BufferAllocatorFacade() {$/;"	f	language:C++	class:BufferAllocatorFacade	signature:()
 ~BufferFillingWorkerFacade	source/productionline/worker/facade/BufferFillingWorkerFacade.cpp	/^BufferFillingWorkerFacade::~BufferFillingWorkerFacade() {$/;"	f	language:C++	class:BufferFillingWorkerFacade	signature:()
@@ -822,7 +882,11 @@ zero_copy_buffer_pool_	include/productionline/worker/implementation/FfmpegDecode
 代码示例	include/display/display_buffer_usage_guide.md	/^### 代码示例$/;"	S	language:Markdown
 优势	BUFFERPOOL_OWNERSHIP_ANALYSIS.md	/^### 优势$/;"	S	language:Markdown
 优化1：避免频繁加锁	ARCHITECTURE.md	/^#### 优化1：避免频繁加锁$/;"	t	language:Markdown
+优化1：预分配足够的Buffer	include/buffer/Buffer-subsystem-architecture.md	/^#### 优化1：预分配足够的Buffer$/;"	t	language:Markdown
+优化2：使用非阻塞模式避免丢帧	include/buffer/Buffer-subsystem-architecture.md	/^#### 优化2：使用非阻塞模式避免丢帧$/;"	t	language:Markdown
 优化2：预分配足够的buffer	ARCHITECTURE.md	/^#### 优化2：预分配足够的buffer$/;"	t	language:Markdown
+优化3：避免大内存拷贝	include/buffer/Buffer-subsystem-architecture.md	/^#### 优化3：避免大内存拷贝$/;"	t	language:Markdown
+优化4：使用DMA-BUF避免CPU拷贝	include/buffer/Buffer-subsystem-architecture.md	/^#### 优化4：使用DMA-BUF避免CPU拷贝$/;"	t	language:Markdown
 使用 -ftemplate-backtrace-limit=0 查看完整模板错误	cpp_compile_error.md	/^# 使用 -ftemplate-backtrace-limit=0 查看完整模板错误$/;"	c	language:Markdown
 使用 explicit 后的效果	cpp_compile_error.md	/^#### 使用 explicit 后的效果$/;"	t	language:Markdown
 使用 static_assert 验证	cpp_compile_error.md	/^#### 使用 static_assert 验证$/;"	t	language:Markdown
@@ -830,22 +894,29 @@ zero_copy_buffer_pool_	include/productionline/worker/implementation/FfmpegDecode
 使用场景总结	cpp_compile_error.md	/^### 使用场景总结$/;"	S	language:Markdown
 使用示例	ARCHITECTURE.md	/^## 使用示例$/;"	s	language:Markdown
 使用要求	include/display/display_buffer_usage_guide.md	/^### 使用要求$/;"	S	language:Markdown
+全局监控接口	include/buffer/Buffer-subsystem-architecture.md	/^##### 全局监控接口$/;"	T	language:Markdown
 关联方式	ARCHITECTURE.md	/^### 关联方式$/;"	S	language:Markdown
 关键关系总结（基于接口和基类）	ARCHITECTURE.md	/^### 关键关系总结（基于接口和基类）$/;"	S	language:Markdown
 关键区别 1：访问权限限制	cpp_compile_error.md	/^### 关键区别 1：访问权限限制$/;"	S	language:Markdown
 关键区别 2：内存分配次数	cpp_compile_error.md	/^### 关键区别 2：内存分配次数$/;"	S	language:Markdown
 内存结构示意	cpp_compile_error.md	/^### 内存结构示意$/;"	S	language:Markdown
 函数签名	include/display/display_buffer_usage_guide.md	/^### 函数签名$/;"	S	language:Markdown
+创建BufferPool	include/buffer/Buffer-subsystem-architecture.md	/^### 创建BufferPool$/;"	S	language:Markdown
 删除旧的编译产物	cpp_compile_error.md	/^# 删除旧的编译产物$/;"	c	language:Markdown
 功能描述	include/display/display_buffer_usage_guide.md	/^### 功能描述$/;"	S	language:Markdown
 协作关系图（基于接口和基类）	ARCHITECTURE.md	/^### 协作关系图（基于接口和基类）$/;"	S	language:Markdown
+单例接口	include/buffer/Buffer-subsystem-architecture.md	/^##### 单例接口$/;"	T	language:Markdown
 参考代码位置	cpp_compile_error.md	/^### 参考代码位置$/;"	S	language:Markdown
 只读接口（公开，任何人都可以调用）	BUFFERPOOL_OWNERSHIP_ANALYSIS.md	/^#### 只读接口（公开，任何人都可以调用）$/;"	t	language:Markdown
+只读接口（公开，任何人都可以调用）	include/buffer/Buffer-subsystem-architecture.md	/^##### 只读接口（公开，任何人都可以调用）$/;"	T	language:Markdown
 可视化图表	ARCHITECTURE.md	/^### 可视化图表$/;"	S	language:Markdown
 图解对比（核心理解）	cpp_compile_error.md	/^### 图解对比（核心理解）$/;"	S	language:Markdown
 场景 1：基本使用	cpp_compile_error.md	/^#### 场景 1：基本使用$/;"	t	language:Markdown
 场景 2：函数参数传递	cpp_compile_error.md	/^#### 场景 2：函数参数传递$/;"	t	language:Markdown
 场景 3：返回值	cpp_compile_error.md	/^#### 场景 3：返回值$/;"	t	language:Markdown
+场景1：创建BufferPool并注册	include/buffer/Buffer-subsystem-architecture.md	/^#### 场景1：创建BufferPool并注册$/;"	t	language:Markdown
+场景2：生产者-消费者正常流程	include/buffer/Buffer-subsystem-architecture.md	/^#### 场景2：生产者-消费者正常流程$/;"	t	language:Markdown
+场景3：超时处理	include/buffer/Buffer-subsystem-architecture.md	/^#### 场景3：超时处理$/;"	t	language:Markdown
 实测数据（1920x1080 @ 30fps）	include/display/display_buffer_usage_guide.md	/^### 实测数据（1920x1080 @ 30fps）$/;"	S	language:Markdown
 实际代码对比	cpp_compile_error.md	/^### 实际代码对比$/;"	S	language:Markdown
 实际代码示例	cpp_compile_error.md	/^### 实际代码示例$/;"	S	language:Markdown
@@ -860,6 +931,9 @@ zero_copy_buffer_pool_	include/productionline/worker/implementation/FfmpegDecode
 总结	cpp_compile_error.md	/^### 总结$/;"	S	language:Markdown
 或完全清理	cpp_compile_error.md	/^# 或完全清理$/;"	c	language:Markdown
 所有权关系	ARCHITECTURE.md	/^### 所有权关系$/;"	S	language:Markdown
+技巧1：启用详细日志	include/buffer/Buffer-subsystem-architecture.md	/^#### 技巧1：启用详细日志$/;"	t	language:Markdown
+技巧2：定期检查Pool健康度	include/buffer/Buffer-subsystem-architecture.md	/^#### 技巧2：定期检查Pool健康度$/;"	t	language:Markdown
+技巧3：使用GDB打印Buffer状态	include/buffer/Buffer-subsystem-architecture.md	/^#### 技巧3：使用GDB打印Buffer状态$/;"	t	language:Markdown
 推荐阅读	cpp_compile_error.md	/^### 推荐阅读$/;"	S	language:Markdown
 搜索类型定义	cpp_compile_error.md	/^# 搜索类型定义$/;"	c	language:Markdown
 操作符总结表	cpp_compile_error.md	/^### 操作符总结表$/;"	S	language:Markdown
@@ -875,6 +949,9 @@ zero_copy_buffer_pool_	include/productionline/worker/implementation/FfmpegDecode
 查找所有单参数构造函数	cpp_compile_error.md	/^# 查找所有单参数构造函数$/;"	c	language:Markdown
 查找隐式转换问题	cpp_compile_error.md	/^#### 查找隐式转换问题$/;"	t	language:Markdown
 查看编译器提示	cpp_compile_error.md	/^# 查看编译器提示$/;"	c	language:Markdown
+查询接口（Query）	include/buffer/Buffer-subsystem-architecture.md	/^##### 查询接口（Query）$/;"	T	language:Markdown
+标准等待模式	include/buffer/Buffer-subsystem-architecture.md	/^#### 标准等待模式$/;"	t	language:Markdown
+校验接口	include/buffer/Buffer-subsystem-architecture.md	/^##### 校验接口$/;"	T	language:Markdown
 核心总结	cpp_compile_error.md	/^### 核心总结$/;"	S	language:Markdown
 核心概念：隐式类型转换	cpp_compile_error.md	/^### 核心概念：隐式类型转换$/;"	S	language:Markdown
 核心理念	ARCHITECTURE.md	/^### 核心理念$/;"	S	language:Markdown
@@ -884,9 +961,19 @@ zero_copy_buffer_pool_	include/productionline/worker/implementation/FfmpegDecode
 核心设计	BUFFERPOOL_OWNERSHIP_ANALYSIS.md	/^### 核心设计$/;"	S	language:Markdown
 核心设计理念	include/display/display_buffer_usage_guide.md	/^### 核心设计理念$/;"	S	language:Markdown
 概述	ARCHITECTURE.md	/^### 概述$/;"	S	language:Markdown
+步骤1：继承BufferAllocatorBase	include/buffer/Buffer-subsystem-architecture.md	/^#### 步骤1：继承BufferAllocatorBase$/;"	t	language:Markdown
+步骤2：在Factory中注册	include/buffer/Buffer-subsystem-architecture.md	/^#### 步骤2：在Factory中注册$/;"	t	language:Markdown
+步骤3：使用	include/buffer/Buffer-subsystem-architecture.md	/^#### 步骤3：使用$/;"	t	language:Markdown
+注册管理（自动调用）	include/buffer/Buffer-subsystem-architecture.md	/^##### 注册管理（自动调用）$/;"	T	language:Markdown
+消费者代码模板	include/buffer/Buffer-subsystem-architecture.md	/^### 消费者代码模板$/;"	S	language:Markdown
+消费者接口（Consumer）	include/buffer/Buffer-subsystem-architecture.md	/^##### 消费者接口（Consumer）$/;"	T	language:Markdown
 现代编译器通常会提示：	cpp_compile_error.md	/^# 现代编译器通常会提示：$/;"	c	language:Markdown
+生产者代码模板	include/buffer/Buffer-subsystem-architecture.md	/^### 生产者代码模板$/;"	S	language:Markdown
+生产者接口（Producer）	include/buffer/Buffer-subsystem-architecture.md	/^##### 生产者接口（Producer）$/;"	T	language:Markdown
 生命周期管理	BUFFERPOOL_OWNERSHIP_ANALYSIS.md	/^### 生命周期管理$/;"	S	language:Markdown
+生命周期管理	include/buffer/Buffer-subsystem-architecture.md	/^##### 生命周期管理$/;"	T	language:Markdown
 生活比喻	cpp_compile_error.md	/^### 生活比喻$/;"	S	language:Markdown
+监控代码模板	include/buffer/Buffer-subsystem-architecture.md	/^### 监控代码模板$/;"	S	language:Markdown
 相关 C++ 标准	cpp_compile_error.md	/^### 相关 C++ 标准$/;"	S	language:Markdown
 知识点	cpp_compile_error.md	/^### 知识点$/;"	S	language:Markdown
 知识点 #10: std::unique_ptr 的解引用和访问操作符	cpp_compile_error.md	/^## 知识点 #10: std::unique_ptr 的解引用和访问操作符$/;"	s	language:Markdown
@@ -899,12 +986,17 @@ zero_copy_buffer_pool_	include/productionline/worker/implementation/FfmpegDecode
 示例2：RTSP流（零拷贝模式）	ARCHITECTURE.md	/^### 示例2：RTSP流（零拷贝模式）$/;"	S	language:Markdown
 示例3：用户通过 Registry 查询 BufferPool	BUFFERPOOL_OWNERSHIP_ANALYSIS.md	/^### 示例3：用户通过 Registry 查询 BufferPool$/;"	S	language:Markdown
 示例4：ProductionLine 通过 Registry 获取 BufferPool（读写）	BUFFERPOOL_OWNERSHIP_ANALYSIS.md	/^### 示例4：ProductionLine 通过 Registry 获取 BufferPool（读写）$/;"	S	language:Markdown
+私有接口（仅BufferAllocatorBase使用）	include/buffer/Buffer-subsystem-architecture.md	/^##### 私有接口（仅BufferAllocatorBase使用）$/;"	T	language:Markdown
 简单示例：没有 explicit 的问题	cpp_compile_error.md	/^#### 简单示例：没有 explicit 的问题$/;"	t	language:Markdown
 类协作关系	ARCHITECTURE.md	/^## 类协作关系$/;"	s	language:Markdown
 编译器文档	cpp_compile_error.md	/^### 编译器文档$/;"	S	language:Markdown
 编译器的转换步骤	cpp_compile_error.md	/^#### 编译器的转换步骤$/;"	t	language:Markdown
 职责划分	BUFFERPOOL_OWNERSHIP_ANALYSIS.md	/^### 职责划分$/;"	S	language:Markdown
 背景	cpp_compile_error.md	/^### 背景$/;"	S	language:Markdown
+虚假唤醒（Spurious Wakeup）	include/buffer/Buffer-subsystem-architecture.md	/^#### 虚假唤醒（Spurious Wakeup）$/;"	t	language:Markdown
+规则1：固定加锁顺序	include/buffer/Buffer-subsystem-architecture.md	/^#### 规则1：固定加锁顺序$/;"	t	language:Markdown
+规则2：锁外调用外部代码	include/buffer/Buffer-subsystem-architecture.md	/^#### 规则2：锁外调用外部代码$/;"	t	language:Markdown
+规则3：使用shutdown优雅退出	include/buffer/Buffer-subsystem-architecture.md	/^#### 规则3：使用shutdown优雅退出$/;"	t	language:Markdown
 解决方案	cpp_compile_error.md	/^### 解决方案$/;"	S	language:Markdown
 设计模式	ARCHITECTURE.md	/^## 设计模式$/;"	s	language:Markdown
 设计模式组合优势	ARCHITECTURE.md	/^#### 设计模式组合优势$/;"	t	language:Markdown
@@ -913,7 +1005,10 @@ zero_copy_buffer_pool_	include/productionline/worker/implementation/FfmpegDecode
 详细协作流程	ARCHITECTURE.md	/^### 详细协作流程$/;"	S	language:Markdown
 详细数据流（两种模式）	ARCHITECTURE.md	/^### 详细数据流（两种模式）$/;"	S	language:Markdown
 读写接口（仅 ProductionLine 可以调用）	BUFFERPOOL_OWNERSHIP_ANALYSIS.md	/^#### 读写接口（仅 ProductionLine 可以调用）$/;"	t	language:Markdown
+读写接口（仅ProductionLine可以调用）	include/buffer/Buffer-subsystem-architecture.md	/^##### 读写接口（仅ProductionLine可以调用）$/;"	T	language:Markdown
 调试技巧	cpp_compile_error.md	/^### 调试技巧$/;"	S	language:Markdown
+调试接口	include/buffer/Buffer-subsystem-architecture.md	/^##### 调试接口$/;"	T	language:Markdown
+输出	include/buffer/Buffer-subsystem-architecture.md	/^# 输出$/;"	c	language:Markdown
 迁移步骤	include/display/display_buffer_usage_guide.md	/^### 迁移步骤$/;"	S	language:Markdown
 选择建议	include/display/display_buffer_usage_guide.md	/^### 选择建议$/;"	S	language:Markdown
 重构策略	cpp_compile_error.md	/^### 重构策略$/;"	S	language:Markdown
@@ -935,6 +1030,12 @@ zero_copy_buffer_pool_	include/productionline/worker/implementation/FfmpegDecode
 门面模式与工厂模式详细分析	ARCHITECTURE.md	/^## 门面模式与工厂模式详细分析$/;"	s	language:Markdown
 门面类使用工厂模式的关系	ARCHITECTURE.md	/^### 门面类使用工厂模式的关系$/;"	S	language:Markdown
 门面类识别	ARCHITECTURE.md	/^### 门面类识别$/;"	S	language:Markdown
+附录A：快速参考	include/buffer/Buffer-subsystem-architecture.md	/^## 附录A：快速参考$/;"	s	language:Markdown
+附录B：常见问题FAQ	include/buffer/Buffer-subsystem-architecture.md	/^## 附录B：常见问题FAQ$/;"	s	language:Markdown
+陷阱1：忘记归还Buffer	include/buffer/Buffer-subsystem-architecture.md	/^#### 陷阱1：忘记归还Buffer$/;"	t	language:Markdown
+陷阱2：在析构中阻塞等待	include/buffer/Buffer-subsystem-architecture.md	/^#### 陷阱2：在析构中阻塞等待$/;"	t	language:Markdown
+陷阱3：混淆OWNED和EXTERNAL	include/buffer/Buffer-subsystem-architecture.md	/^#### 陷阱3：混淆OWNED和EXTERNAL$/;"	t	language:Markdown
+陷阱4：跨Pool传递Buffer	include/buffer/Buffer-subsystem-architecture.md	/^#### 陷阱4：跨Pool传递Buffer$/;"	t	language:Markdown
 隐式类型转换的工作原理	cpp_compile_error.md	/^### 隐式类型转换的工作原理$/;"	S	language:Markdown
 🎓 关键知识点总结	cpp_compile_error.md	/^## 🎓 关键知识点总结$/;"	s	language:Markdown
 🎭 门面模式详细关系图（基于接口）	ARCHITECTURE.md	/^#### 🎭 门面模式详细关系图（基于接口）$/;"	t	language:Markdown
@@ -954,6 +1055,7 @@ zero_copy_buffer_pool_	include/productionline/worker/implementation/FfmpegDecode
 📚 参考资源	cpp_compile_error.md	/^## 📚 参考资源$/;"	s	language:Markdown
 📚 概述	include/display/display_buffer_usage_guide.md	/^## 📚 概述$/;"	s	language:Markdown
 📚 目录	cpp_compile_error.md	/^## 📚 目录$/;"	s	language:Markdown
+📚 目录	include/buffer/Buffer-subsystem-architecture.md	/^## 📚 目录$/;"	s	language:Markdown
 📝 使用示例	BUFFERPOOL_OWNERSHIP_ANALYSIS.md	/^## 📝 使用示例$/;"	s	language:Markdown
 📝 总结	include/display/display_buffer_usage_guide.md	/^## 📝 总结$/;"	s	language:Markdown
 🔄 数据流和调用关系	BUFFERPOOL_OWNERSHIP_ANALYSIS.md	/^## 🔄 数据流和调用关系$/;"	s	language:Markdown
@@ -961,5 +1063,8 @@ zero_copy_buffer_pool_	include/productionline/worker/implementation/FfmpegDecode
 🔄 迁移指南：从旧 API 迁移	include/display/display_buffer_usage_guide.md	/^## 🔄 迁移指南：从旧 API 迁移$/;"	s	language:Markdown
 🔍 详细分析	BUFFERPOOL_OWNERSHIP_ANALYSIS.md	/^## 🔍 详细分析$/;"	s	language:Markdown
 🔗 BufferFillingWorkerFacade（门面）→ BufferFillingWorkerFactory（工厂）	ARCHITECTURE.md	/^#### 🔗 BufferFillingWorkerFacade（门面）→ BufferFillingWorkerFactory（工厂）$/;"	t	language:Markdown
+🔹 Buffer - 元数据容器	include/buffer/Buffer-subsystem-architecture.md	/^#### 🔹 Buffer - 元数据容器$/;"	t	language:Markdown
+🔹 BufferPool - 调度器	include/buffer/Buffer-subsystem-architecture.md	/^#### 🔹 BufferPool - 调度器$/;"	t	language:Markdown
+🔹 BufferPoolRegistry - 全局管理器	include/buffer/Buffer-subsystem-architecture.md	/^#### 🔹 BufferPoolRegistry - 全局管理器$/;"	t	language:Markdown
 🛠️ 调试技巧	cpp_compile_error.md	/^## 🛠️ 调试技巧$/;"	s	language:Markdown
 🛡️ 错误处理最佳实践	include/display/display_buffer_usage_guide.md	/^## 🛡️ 错误处理最佳实践$/;"	s	language:Markdown

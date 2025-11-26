@@ -7,7 +7,8 @@
 // ============================================================
 
 VideoProductionLine::VideoProductionLine()
-    : working_buffer_pool_ptr_(nullptr)
+    : worker_buffer_pool_uptr_(nullptr)
+    , working_buffer_pool_ptr_(nullptr)
     , running_(false)
     , produced_frames_(0)
     , skipped_frames_(0)
@@ -240,7 +241,7 @@ void VideoProductionLine::producerThreadFunc(int thread_id) {
             buffer = working_buffer_pool_ptr_->acquireFree(true, 100);  // 100ms 超时
             if (buffer == nullptr && running_) {
                 // 超时但仍在运行，继续等待
-                // printf("   [Thread #%d] Waiting for free buffer...\n", thread_id);
+                printf("   [Thread #%d] Waiting for free buffer...\n", thread_id);
             }
         }
         
