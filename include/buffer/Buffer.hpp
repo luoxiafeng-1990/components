@@ -87,6 +87,9 @@ public:
     /// 设置状态
     void setState(State state) { state_.store(state); }
     
+    /// 设置物理地址（用于延迟获取物理地址的场景，如零拷贝解码）
+    void setPhysicalAddress(uint64_t phys_addr) { phys_addr_ = phys_addr; }
+    
     /// 设置 DMA-BUF fd（用于共享/导出）
     void setDmaBufFd(int fd) { dma_fd_ = fd; }
     

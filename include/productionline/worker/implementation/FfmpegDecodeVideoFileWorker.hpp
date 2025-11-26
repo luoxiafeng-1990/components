@@ -8,6 +8,7 @@
 #include <memory>
 #include <atomic>
 #include <mutex>
+#include <map>
 
 // FFmpeg 前向声明
 struct AVFormatContext;
@@ -58,6 +59,8 @@ private:
     // ============ FFmpeg 资源 ============
     AVFormatContext* format_ctx_ptr_;
     AVCodecContext* codec_ctx_ptr_;
+    AVPacket* packet_ptr_;                 // 用于 fillBuffer 的 packet
+    std::map<int, std::pair<AVFrame*, AVPacket*>> frame_packet_map_;    // 用于存储解码后的帧和对应的packet
     SwsContext* sws_ctx_ptr_;              // 图像格式转换
     int video_stream_index_;
     
@@ -78,7 +81,6 @@ private:
     
     // ============ 零拷贝模式 ============
     BufferPool* zero_copy_buffer_pool_ptr_;            // 可选：零拷贝模式的BufferPool（外部提供）
-    bool supports_zero_copy_;                      // 解码器是否支持零拷贝
     
     // ============ 解码器配置（用于特殊解码器）============
     bool use_hardware_decoder_;        // 是否使用硬件解码
@@ -143,10 +145,6 @@ private:
      */
     bool convertFrameTo(AVFrame* src_frame, void* dest, size_t dest_size);
     
-    /**
-     * @brief 检查解码器是否支持零拷贝
-     */
-    bool checkZeroCopySupport();
     
     /**
      * @brief 从AVFrame提取物理地址（零拷贝模式）
@@ -242,11 +240,6 @@ public:
      * @brief 获取解码错误数
      */
     int getDecodeErrors() const { return decode_errors_.load(); }
-    
-    /**
-     * @brief 检查是否支持零拷贝
-     */
-    bool supportsZeroCopy() const { return supports_zero_copy_; }
     
     /**
      * @brief 获取最后错误信息

@@ -24,6 +24,7 @@ FfmpegDecodeVideoFileWorker::FfmpegDecodeVideoFileWorker()
     : WorkerBase(BufferAllocatorFactory::AllocatorType::AVFRAME)  // 🎯 只需传递类型！
     , format_ctx_ptr_(nullptr)
     , codec_ctx_ptr_(nullptr)
+    , packet_ptr_(nullptr)          // 🎯 新增：packet 指针
     , sws_ctx_ptr_(nullptr)
     , video_stream_index_(-1)
     , width_(0)
@@ -37,7 +38,6 @@ FfmpegDecodeVideoFileWorker::FfmpegDecodeVideoFileWorker()
     , is_open_(false)
     , eof_reached_(false)
     , zero_copy_buffer_pool_ptr_(nullptr)
-    , supports_zero_copy_(false)
     , use_hardware_decoder_(true)  // 默认启用硬件解码
     , decoder_name_ptr_("h264_taco")
     , codec_options_ptr_(nullptr)
@@ -88,7 +88,7 @@ bool FfmpegDecodeVideoFileWorker::open(const char* path) {
         return false;
     }
     
-    int buffer_count = 10;  // 默认创建10个Buffer
+    int buffer_count = 4;  // 默认创建4个Buffer
     
     buffer_pool_sptr_ = allocator_facade_.allocatePoolWithBuffers(
         buffer_count,
@@ -113,7 +113,6 @@ bool FfmpegDecodeVideoFileWorker::open(const char* path) {
     printf("   Resolution: %dx%d → %dx%d\n", width_, height_, output_width_, output_height_);
     printf("   Codec: %s\n", codec_ctx_ptr_->codec->name);
     printf("   Total frames (estimated): %d\n", total_frames_);
-    printf("   Zero-copy: %s\n", supports_zero_copy_ ? "YES" : "NO");
     printf("   BufferPool: '%s' (%d buffers, %zu bytes each)\n", 
            buffer_pool_sptr_->getName().c_str(), buffer_count, frame_size);
     
@@ -189,22 +188,25 @@ bool FfmpegDecodeVideoFileWorker::openVideo() {
         output_width_ = width_;
         output_height_ = height_;
     }
-    
-    // 7. 检查零拷贝支持
-    supports_zero_copy_ = checkZeroCopySupport();
-    
-    // 8. 初始化格式转换器（普通模式需要）
-    if (!supports_zero_copy_) {
-        if (!initializeSwsContext()) {
-            closeVideo();
-            return false;
-        }
+   
+    // 8. 🎯 分配 AVPacket（用于 fillBuffer）
+    packet_ptr_ = av_packet_alloc();
+    if (!packet_ptr_) {
+        setError("Failed to allocate AVPacket");
+        closeVideo();
+        return false;
     }
     
     return true;
 }
 
 void FfmpegDecodeVideoFileWorker::closeVideo() {
+    // 释放 AVPacket
+    if (packet_ptr_) {
+        av_packet_free(&packet_ptr_);
+        packet_ptr_ = nullptr;
+    }
+    
     // 释放格式转换器
     if (sws_ctx_ptr_) {
         sws_freeContext(sws_ctx_ptr_);
@@ -230,7 +232,6 @@ void FfmpegDecodeVideoFileWorker::closeVideo() {
     }
     
     video_stream_index_ = -1;
-    supports_zero_copy_ = false;
 }
 
 bool FfmpegDecodeVideoFileWorker::findVideoStream() {
@@ -385,24 +386,6 @@ bool FfmpegDecodeVideoFileWorker::initializeSwsContext() {
     return true;
 }
 
-bool FfmpegDecodeVideoFileWorker::checkZeroCopySupport() {
-    // 零拷贝条件：
-    // 1. BufferPool 已创建（通过allocator创建）
-    // 2. 使用特殊硬件解码器（如 h264_taco）
-    // 3. 解码器输出带物理地址的 AVFrame
-    
-    if (!buffer_pool_sptr_) {
-        return false;  // BufferPool未创建
-    }
-    
-    if (!decoder_name_ptr_ || strcmp(decoder_name_ptr_, "h264_taco") != 0) {
-        return false;  // 非 h264_taco 解码器
-    }
-    
-    // h264_taco 支持零拷贝
-    printf("✅ Zero-copy mode enabled (h264_taco + BufferPool)\n");
-    return true;
-}
 
 uint64_t FfmpegDecodeVideoFileWorker::extractPhysicalAddress(AVFrame* frame) {
     if (!frame || !frame->metadata) {
@@ -708,44 +691,111 @@ bool FfmpegDecodeVideoFileWorker::isAtEnd() const {
 // ============================================================================
 
 bool FfmpegDecodeVideoFileWorker::fillBuffer(int frame_index, Buffer* buffer) {
-    if (!buffer || !buffer->data()) {
-        setError("Invalid buffer");
+    if (!buffer) {
+        printf("❌ ERROR: buffer is nullptr\n");
         return false;
     }
     
     if (!is_open_) {
-        setError("Worker is not open");
+        printf("❌ ERROR: Worker is not open\n");
         return false;
     }
     
     std::lock_guard<std::mutex> lock(mutex_);
     
-    // 零拷贝模式不应该调用这个方法
-    if (supports_zero_copy_) {
-        setError("Zero-copy mode: use BufferPool injection instead");
+    // 步骤1: 从 Buffer 获取预分配的 AVFrame*
+    AVFrame* frame_ptr = (AVFrame*)buffer->getVirtualAddress();
+    if (!frame_ptr) {
+        printf("❌ ERROR: buffer->getVirtualAddress() is nullptr\n");
         return false;
     }
     
-    // 如果需要seek到指定帧
-    if (frame_index != current_frame_index_) {
-        if (!seek(frame_index)) {
+    // 步骤2: 读取一个 packet（参考 ids_test_video3:2240）
+    int read_ret = av_read_frame(format_ctx_ptr_, packet_ptr_);
+    
+    if (read_ret < 0) {
+        if (read_ret == AVERROR_EOF) {
+            printf("🔄 EOF reached, restarting...\n");
+            av_seek_frame(format_ctx_ptr_, video_stream_index_, 0, AVSEEK_FLAG_BACKWARD);
+            avcodec_flush_buffers(codec_ctx_ptr_);
+            eof_reached_ = true;
+            return false;
+        } else {
+            printf("❌ ERROR: av_read_frame failed: %d\n", read_ret);
             return false;
         }
     }
     
-    // 解码一帧
-    AVFrame* frame = decodeOneFrame();
-    if (!frame) {
+    // 步骤3: 检查是否是视频流
+    if (packet_ptr_->stream_index != video_stream_index_) {
+        av_packet_unref(packet_ptr_);
         return false;
     }
     
-    // 转换并拷贝到目标buffer
-    bool success = convertFrameTo(frame, buffer->data(), buffer->size());
+    // 步骤4: 发送 packet 到解码器（参考 ids_test_video3:2270）
+    int ret = avcodec_send_packet(codec_ctx_ptr_, packet_ptr_);
     
-    // 释放 AVFrame
-    av_frame_free(&frame);
+    if (ret < 0) {
+        printf("❌ ERROR: avcodec_send_packet failed: %d\n", ret);
+        av_packet_unref(packet_ptr_);
+        return false;
+    }
     
-    return success;
+    // 步骤5: 🎯 循环调用 receive_frame，直到成功或需要更多数据（参考 ids_test_video3:2276-2354）
+    while (true) {
+        ret = avcodec_receive_frame(codec_ctx_ptr_, frame_ptr);
+        if (ret == AVERROR(EAGAIN)) {
+            av_packet_unref(packet_ptr_);  // 🎯 unref packet
+            return false;
+        } 
+        if (ret == AVERROR_EOF) {
+            printf("🔄 Decoder EOF\n");
+            av_packet_unref(packet_ptr_);  // 🎯 unref packet
+            return false;
+        }
+        if (ret < 0) {
+            printf("❌ ERROR: avcodec_receive_frame failed: %d\n", ret);
+            av_packet_unref(packet_ptr_);  // 🎯 unref packet
+            return false;
+        }
+
+        {
+            // ✅ 成功！提取物理地址（参考 ids_test_video3:2314-2338）
+            uint64_t phys_addr = 0;
+            uint32_t blk_id = 0;
+            
+            if (frame_ptr->metadata) {
+                AVDictionaryEntry* entry = av_dict_get(frame_ptr->metadata, "pool_blk_id", NULL, 0);
+                if (entry) {
+                    blk_id = (uint32_t)atoi(entry->value);
+                    phys_addr = taco_sys_handle2_phys_addr(blk_id);
+                    
+                    // 🎯 保存物理地址到 Buffer
+                    buffer->setPhysicalAddress(phys_addr);
+                    
+                    printf("✅ [%d] Decoded: Buffer #%u, blk_id=%u, phys=0x%lx\n",
+                           frame_index, buffer->id(), blk_id, phys_addr);
+                }
+            }
+            
+            if (phys_addr == 0) {
+                printf("⚠️  Warning: Failed to extract physical address\n");
+                av_frame_unref(frame_ptr);
+                av_packet_unref(packet_ptr_);  // 🎯 unref packet（参考 ids_test_video3:2355）
+                return false;
+            }
+            
+            decoded_frames_++;
+            current_frame_index_++;
+            
+            // 🎯 unref packet（参考 ids_test_video3:2355，在内层循环之后）
+            av_packet_unref(packet_ptr_);
+            
+            return true;
+        }
+        
+       
+    }
 }
 
 // ============================================================================
@@ -823,7 +873,6 @@ void FfmpegDecodeVideoFileWorker::printStats() const {
     printf("   Current frame: %d\n", current_frame_index_);
     printf("   Decoded frames: %d\n", decoded_frames_.load());
     printf("   Decode errors: %d\n", decode_errors_.load());
-    printf("   Zero-copy: %s\n", supports_zero_copy_ ? "YES" : "NO");
     printf("   EOF: %s\n", eof_reached_ ? "YES" : "NO");
 }
 
