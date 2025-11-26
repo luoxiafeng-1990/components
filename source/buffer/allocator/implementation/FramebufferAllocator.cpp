@@ -15,7 +15,7 @@
 FramebufferAllocator::FramebufferAllocator()
     : external_buffers_()
     , next_buffer_index_(0)
-    , managed_pool_sptr_(nullptr)  // 显式初始化为空（延迟初始化模式）
+    // managed_pool_sptr_ 是父类成员，会被 std::shared_ptr 自动初始化为 nullptr
 {
    printf("🔧 FramebufferAllocator created (BufferPool will be lazy-initialized)\n");
 }
@@ -23,7 +23,7 @@ FramebufferAllocator::FramebufferAllocator()
 FramebufferAllocator::FramebufferAllocator(const std::vector<BufferInfo>& external_buffers)
     : external_buffers_(external_buffers)
     , next_buffer_index_(0)
-    , managed_pool_sptr_(nullptr)  // 显式初始化为空（延迟初始化模式）
+    // managed_pool_sptr_ 是父类成员，会被 std::shared_ptr 自动初始化为 nullptr
 {
     printf("🔧 FramebufferAllocator created with %zu external buffers (BufferPool will be lazy-initialized)\n", 
            external_buffers_.size());
@@ -31,7 +31,7 @@ FramebufferAllocator::FramebufferAllocator(const std::vector<BufferInfo>& extern
 
 FramebufferAllocator::FramebufferAllocator(LinuxFramebufferDevice* device)
     : next_buffer_index_(0)
-    , managed_pool_sptr_(nullptr)  // 显式初始化为空（延迟初始化模式）
+    // managed_pool_sptr_ 是父类成员，会被 std::shared_ptr 自动初始化为 nullptr
 {
     if (!device) {
         printf("❌ ERROR: Device pointer is null\n");
@@ -114,7 +114,7 @@ std::shared_ptr<BufferPool> FramebufferAllocator::allocatePoolWithBuffers(
         managed_pool_sptr_ = pool;
     }
     
-    printf("✅ BufferPool '%s' created with %d external buffers\n", 
+    printf("✅ BufferPool '%s' created with %d buffers\n", 
            pool->getName().c_str(), count);
     
     return pool;

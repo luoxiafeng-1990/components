@@ -13,7 +13,7 @@
 
 AVFrameAllocator::AVFrameAllocator()
     : next_buffer_id_(0)
-    , managed_pool_sptr_(nullptr)  // 显式初始化为空（延迟初始化模式）
+    // managed_pool_sptr_ 是父类成员，会被 std::shared_ptr 自动初始化为 nullptr
 {
     printf("🔧 AVFrameAllocator created (BufferPool will be lazy-initialized)\n");
 }
@@ -197,7 +197,8 @@ std::shared_ptr<BufferPool> AVFrameAllocator::allocatePoolWithBuffers(
     const std::string& name,
     const std::string& category
 ) {
-    printf("\n🏭 AVFrameAllocator: Creating BufferPool (empty, for AVFrame injection)...\n");
+    printf("🔧 AVFrameAllocator::allocatePoolWithBuffers: name='%s', category='%s', count=%d, size=%zu\n", 
+           name.c_str(), category.c_str(), count, size);
     
     // 1. 检查是否已经创建过 pool
     {
@@ -210,24 +211,88 @@ std::shared_ptr<BufferPool> AVFrameAllocator::allocatePoolWithBuffers(
     
     // 2. 使用 Passkey Token 创建 BufferPool
     auto pool = std::make_shared<BufferPool>(
-        token(),    // 从基类获取通行证
+        token(),
         name,
         category
     );
     
-    // 3. 注册到 BufferPoolRegistry（name 和 category 从 pool 对象自动获取）
-    uint64_t id = BufferPoolRegistry::getInstance().registerPool(pool);
-    pool->setRegistryId(id);
+    // 3. 注册到 BufferPoolRegistry
+    uint64_t pool_id = BufferPoolRegistry::getInstance().registerPool(pool);
+    pool->setRegistryId(pool_id);
     
-    printf("   ℹ️  Created empty pool '%s' (ID: %lu)\n", pool->getName().c_str(), id);
+    printf("✅ Created BufferPool '%s' (ID: %lu)\n", pool->getName().c_str(), pool_id);
     
-    // 4. 存储到 managed_pool_sptr_
+    // 4. 🎯 核心逻辑：提前分配 count 个 AVFrame* "壳子"，包装成 Buffer
+    printf("🔧 Pre-allocating %d AVFrame shells...\n", count);
+    
+    for (int i = 0; i < count; i++) {
+        // 4.1 分配 AVFrame* "壳子"（只是 AVFrame 结构体，内部 data/buf 都是空的）
+        AVFrame* frame_ptr = av_frame_alloc();
+        if (!frame_ptr) {
+            printf("❌ ERROR: Failed to allocate AVFrame[%d]\n", i);
+            // TODO: 清理已分配的 frames 和 buffers
+            return nullptr;
+        }
+        
+        printf("   ✅ Allocated AVFrame[%d] at %p (shell only, no physical memory yet)\n", i, frame_ptr);
+        
+        // 4.2 生成唯一 Buffer ID
+        uint32_t buffer_id = next_buffer_id_.fetch_add(1);
+        
+        // 4.3 🎯 关键：将 AVFrame* 包装成 Buffer 对象
+        //     - virt_addr: 存储 AVFrame* 指针（作为"标识符"）
+        //     - phys_addr: 初始化为 0（延迟获取）
+        //     - size: Worker 期望的 buffer 大小
+        //     - ownership: EXTERNAL（物理内存由 h264_taco 管理）
+        Buffer* buffer = new Buffer(
+            buffer_id,
+            (void*)frame_ptr,  // virt_addr 存储 AVFrame* 指针
+            0,                 // phys_addr 初始为 0，在 avcodec_receive_frame 后提取
+            size,
+            Buffer::Ownership::EXTERNAL
+        );
+        
+        if (!buffer) {
+            printf("❌ ERROR: Failed to create Buffer #%u for AVFrame[%d]\n", buffer_id, i);
+            av_frame_free(&frame_ptr);
+            return nullptr;
+        }
+        
+        // 4.4 记录 Buffer -> AVFrame* 的映射
+        {
+            std::lock_guard<std::mutex> lock(mapping_mutex_);
+            buffer_to_frame_[buffer] = frame_ptr;
+        }
+        
+        // 4.5 🎯 关键：将 Buffer 添加到 BufferPool 的 FREE 队列
+        if (!BufferAllocatorBase::addBufferToPoolQueue(pool.get(), buffer, QueueType::FREE)) {
+            printf("❌ ERROR: Failed to add Buffer #%u to FREE queue\n", buffer_id);
+            delete buffer;
+            av_frame_free(&frame_ptr);
+            {
+                std::lock_guard<std::mutex> lock(mapping_mutex_);
+                buffer_to_frame_.erase(buffer);
+            }
+            return nullptr;
+        }
+        
+        printf("   ✅ Buffer #%u (wraps AVFrame* %p) → added to FREE queue\n", buffer_id, frame_ptr);
+    }
+    
+    // 5. 存储到 managed_pool_sptr_
     {
         std::lock_guard<std::mutex> lock(managed_pool_mutex_);
         managed_pool_sptr_ = pool;
     }
     
-    printf("✅ BufferPool '%s' ready for AVFrame injection\n", pool->getName().c_str());
+    printf("\n");
+    printf("╔══════════════════════════════════════════════════════════════════╗\n");
+    printf("║  ✅ AVFrameAllocator: BufferPool Ready                          ║\n");
+    printf("╚══════════════════════════════════════════════════════════════════╝\n");
+    printf("   Pool name: %s\n", pool->getName().c_str());
+    printf("   Buffers in FREE queue: %d\n", count);
+    printf("   Each Buffer wraps: AVFrame* shell (physical memory not yet allocated)\n");
+    printf("╚══════════════════════════════════════════════════════════════════╝\n\n");
     
     return pool;
 }

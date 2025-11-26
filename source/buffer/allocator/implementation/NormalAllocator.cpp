@@ -16,7 +16,7 @@
 NormalAllocator::NormalAllocator(BufferMemoryAllocatorType type, size_t alignment)
     : type_(type)
     , alignment_(alignment)
-    , managed_pool_sptr_(nullptr)  // 显式初始化为空（延迟初始化模式）
+    // managed_pool_sptr_ 是父类成员，会被 std::shared_ptr 自动初始化为 nullptr
 {
     printf("🔧 NormalAllocator created (alignment=%zu, BufferPool will be lazy-initialized)\n", alignment_);
 }
