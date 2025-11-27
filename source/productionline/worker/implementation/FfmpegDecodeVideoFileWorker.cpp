@@ -520,26 +520,44 @@ bool FfmpegDecodeVideoFileWorker::seek(int frame_index) {
         frame_index = 0;
     }
     
-    // 计算时间戳
+    // 计算目标时间戳
+    int64_t timestamp = 0;
     AVStream* stream = format_ctx_ptr_->streams[video_stream_index_];
-    int64_t timestamp = av_rescale_q(
-        frame_index,
-        av_make_q(1, (int)av_q2d(stream->avg_frame_rate)),
-        stream->time_base
-    );
     
-    // 执行 seek
+    if (frame_index > 0 && stream->avg_frame_rate.num > 0) {
+        // 根据帧索引计算时间戳
+        timestamp = av_rescale_q(
+            frame_index,
+            av_make_q(1, (int)av_q2d(stream->avg_frame_rate)),
+            stream->time_base
+        );
+    }
+    // 如果 frame_index == 0，timestamp 保持为 0，seek 到开头
+    
+    printf("🔍 Seeking to frame %d (timestamp: %ld)...\n", frame_index, timestamp);
+    
+    // 执行 seek（AVSEEK_FLAG_BACKWARD 会 seek 到最近的关键帧）
     int ret = av_seek_frame(format_ctx_ptr_, video_stream_index_, timestamp, AVSEEK_FLAG_BACKWARD);
     if (ret < 0) {
+        char err_buf[AV_ERROR_MAX_STRING_SIZE];
+        av_strerror(ret, err_buf, sizeof(err_buf));
+        printf("❌ ERROR: av_seek_frame failed: %s (ret=%d)\n", err_buf, ret);
         setError("Seek failed", ret);
         return false;
     }
     
-    // 刷新解码器缓冲区
+    // 🔧 关键修复：必须刷新解码器缓冲区，清除旧的缓存帧
     avcodec_flush_buffers(codec_ctx_ptr_);
+    
+    // 🔧 重要：清理当前的 packet 状态
+    if (packet_ptr_) {
+        av_packet_unref(packet_ptr_);
+    }
     
     current_frame_index_ = frame_index;
     eof_reached_ = false;
+    
+    printf("✅ Seek completed successfully\n");
     
     return true;
 }
@@ -643,7 +661,13 @@ bool FfmpegDecodeVideoFileWorker::fillBuffer(int frame_index, Buffer* buffer) {
     if (read_ret < 0) {
         if (read_ret == AVERROR_EOF) {
             printf("🔄 EOF reached, restarting...\n");
-            seek(0);
+            // 在 seek 前先清理 packet 状态
+            av_packet_unref(packet_ptr_);
+            // 重新 seek 到开头
+            if (!seek(0)) {
+                printf("❌ ERROR: seek to begin failed\n");
+                return false;
+            }
             eof_reached_ = true;
             return false;
         } else {
@@ -654,15 +678,20 @@ bool FfmpegDecodeVideoFileWorker::fillBuffer(int frame_index, Buffer* buffer) {
     
     // 步骤3: 检查是否是视频流
     if (packet_ptr_->stream_index != video_stream_index_) {
-        return false;
+        // 🔧 修复：不是视频流的packet需要释放，然后继续读取下一个
+        av_packet_unref(packet_ptr_);
+        return false;  // 让调用者再次调用以读取下一个packet
     }
     
     // 步骤4: 发送 packet 到解码器（参考 ids_test_video3:2270）
     int ret = avcodec_send_packet(codec_ctx_ptr_, packet_ptr_);
     
+    // 🔧 修复：无论成功与否，都要释放packet引用
+    // avcodec_send_packet 会复制数据，不再需要原始packet
+    av_packet_unref(packet_ptr_);
+    
     if (ret < 0) {
         printf("❌ ERROR: avcodec_send_packet failed: %d\n", ret);
-        av_packet_unref(packet_ptr_);
         return false;
     }
     bool recv_frm = false;

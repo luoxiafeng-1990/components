@@ -59,6 +59,7 @@ private:
     // ============ FFmpeg 资源 ============
     AVFormatContext* format_ctx_ptr_;
     AVCodecContext* codec_ctx_ptr_;
+    AVPacket* packet_ptr_;                 // 用于读取和解码的数据包
     std::map<int, std::pair<AVFrame*, AVPacket*>> frame_packet_map_;    // 用于存储解码后的帧和对应的packet
     SwsContext* sws_ctx_ptr_;              // 图像格式转换
     int video_stream_index_;
