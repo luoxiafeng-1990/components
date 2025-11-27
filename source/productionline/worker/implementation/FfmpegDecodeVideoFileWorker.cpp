@@ -63,7 +63,7 @@ bool FfmpegDecodeVideoFileWorker::open(const char* path) {
         return false;
     }
     
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     
     // 如果已经打开，先关闭
     if (is_open_) {
@@ -128,7 +128,7 @@ bool FfmpegDecodeVideoFileWorker::open(const char* path, int width, int height, 
 }
 
 void FfmpegDecodeVideoFileWorker::close() {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     closeVideo();
     
     // 释放BufferPool（通过unique_ptr自动释放）
@@ -473,83 +473,6 @@ int FfmpegDecodeVideoFileWorker::estimateTotalFrames() {
     return -1;  // 无法估算
 }
 
-// ============================================================================
-// 读取帧（核心逻辑）
-// ============================================================================
-
-AVFrame* FfmpegDecodeVideoFileWorker::decodeOneFrame() {
-    if (!is_open_ || eof_reached_) {
-        return nullptr;
-    }
-    
-    AVPacket* packet = av_packet_alloc();
-    AVFrame* frame = av_frame_alloc();
-    
-    if (!packet || !frame) {
-        if (packet) av_packet_free(&packet);
-        if (frame) av_frame_free(&frame);
-        return nullptr;
-    }
-    
-    // 读取并解码一帧
-    while (true) {
-        int ret = av_read_frame(format_ctx_ptr_, packet);
-        
-        if (ret < 0) {
-            if (ret == AVERROR_EOF) {
-                eof_reached_ = true;
-            } else {
-                setError("Failed to read frame", ret);
-                decode_errors_++;
-            }
-            av_packet_free(&packet);
-            av_frame_free(&frame);
-            return nullptr;
-        }
-        
-        // 只处理视频流
-        if (packet->stream_index != video_stream_index_) {
-            av_packet_unref(packet);
-            continue;
-        }
-        
-        // 发送数据包到解码器
-        ret = avcodec_send_packet(codec_ctx_ptr_, packet);
-        av_packet_unref(packet);
-        
-        if (ret < 0) {
-            setError("Failed to send packet to decoder", ret);
-            decode_errors_++;
-            continue;
-        }
-        
-        // 接收解码后的帧
-        ret = avcodec_receive_frame(codec_ctx_ptr_, frame);
-        
-        if (ret == AVERROR(EAGAIN)) {
-            // 需要更多数据
-            continue;
-        } else if (ret == AVERROR_EOF) {
-            eof_reached_ = true;
-            av_packet_free(&packet);
-            av_frame_free(&frame);
-            return nullptr;
-        } else if (ret < 0) {
-            setError("Failed to receive frame from decoder", ret);
-            decode_errors_++;
-            av_packet_free(&packet);
-            av_frame_free(&frame);
-            return nullptr;
-        }
-        
-        // 解码成功
-        decoded_frames_++;
-        current_frame_index_++;
-        av_packet_free(&packet);
-        return frame;  // 调用者负责释放
-    }
-}
-
 bool FfmpegDecodeVideoFileWorker::convertFrameTo(AVFrame* src_frame, void* dest, size_t dest_size) {
     if (!src_frame || !dest || !sws_ctx_ptr_) {
         return false;
@@ -591,7 +514,7 @@ bool FfmpegDecodeVideoFileWorker::seek(int frame_index) {
         return false;
     }
     
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     
     if (frame_index < 0) {
         frame_index = 0;
@@ -705,7 +628,7 @@ bool FfmpegDecodeVideoFileWorker::fillBuffer(int frame_index, Buffer* buffer) {
         return false;
     }
     
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     
     // 步骤1: 从 Buffer 获取预分配的 AVFrame*
     AVFrame* frame_ptr = (AVFrame*)buffer->getVirtualAddress();
@@ -720,17 +643,11 @@ bool FfmpegDecodeVideoFileWorker::fillBuffer(int frame_index, Buffer* buffer) {
     if (read_ret < 0) {
         if (read_ret == AVERROR_EOF) {
             printf("🔄 EOF reached, restarting...\n");
-            if (av_seek_frame(format_ctx_ptr_, video_stream_index_, 0, AVSEEK_FLAG_BACKWARD) < 0) {
-                //TODO:set producer running -> false
-                printf("ERROR: av_read_frame seek to begain failed\n");
-                return false;
-            }
-            avcodec_flush_buffers(codec_ctx_ptr_);
+            seek(0);
             eof_reached_ = true;
             return false;
         } else {
             printf("❌ ERROR: av_read_frame failed: %d\n", read_ret);
-            //TODO:set producer running -> false
             return false;
         }
     }
@@ -755,35 +672,29 @@ bool FfmpegDecodeVideoFileWorker::fillBuffer(int frame_index, Buffer* buffer) {
         if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF || ret < 0) {
             break;
         } 
-
-        {
-            // ✅ 成功！提取物理地址（参考 ids_test_video3:2314-2338）
-            uint64_t phys_addr = 0;
-            uint32_t blk_id = 0;
-            
-            if (frame_ptr->metadata) {
-                AVDictionaryEntry* entry = av_dict_get(frame_ptr->metadata, "pool_blk_id", NULL, 0);
-                if (entry) {
-                    blk_id = (uint32_t)atoi(entry->value);
-                    phys_addr = taco_sys_handle2_phys_addr(blk_id);
-                    
-                    // 🎯 保存物理地址到 Buffer
-                    buffer->setPhysicalAddress(phys_addr);
-                    
-                    printf("✅ [%d] Decoded: Buffer #%u, blk_id=%u, phys=0x%lx\n",
-                           frame_index, buffer->id(), blk_id, phys_addr);
-                }
+        // ✅ 成功！提取物理地址（参考 ids_test_video3:2314-2338）
+        uint64_t phys_addr = 0;
+        uint32_t blk_id = 0;
+        
+        if (frame_ptr->metadata) {
+            AVDictionaryEntry* entry = av_dict_get(frame_ptr->metadata, "pool_blk_id", NULL, 0);
+            if (entry) {
+                blk_id = (uint32_t)atoi(entry->value);
+                phys_addr = taco_sys_handle2_phys_addr(blk_id);
+                
+                // 🎯 保存物理地址到 Buffer
+                buffer->setPhysicalAddress(phys_addr);
             }
-            
-            if (phys_addr == 0) {
-                printf("⚠️  Warning: Failed to extract physical address\n");
-                return false;
-            }
-            
-            decoded_frames_++;
-            current_frame_index_++;
-            recv_frm = true;
         }
+        
+        if (phys_addr == 0) {
+            printf("⚠️  Warning: Failed to extract physical address\n");
+            return false;
+        }
+        
+        decoded_frames_++;
+        current_frame_index_++;
+        recv_frm = true;
     }
     return recv_frm;
 }
