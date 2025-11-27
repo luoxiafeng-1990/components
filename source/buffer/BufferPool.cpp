@@ -108,6 +108,14 @@ void BufferPool::submitFilled(Buffer* buffer_ptr) {
             return;
         }
         
+        // 🛡️ 状态检查：确保 buffer 由生产者持有
+        if (buffer_ptr->state() != Buffer::State::LOCKED_BY_PRODUCER) {
+            printf("❌ ERROR: submitFilled() called with wrong state: %s (expected LOCKED_BY_PRODUCER)\n",
+                   Buffer::stateToString(buffer_ptr->state()));
+            printf("   Buffer #%u in pool '%s'\n", buffer_ptr->id(), name_.c_str());
+            return;
+        }
+        
         // 添加到 filled 队列
         filled_queue_.push(buffer_ptr);
         buffer_ptr->setState(Buffer::State::READY_FOR_CONSUME);
@@ -115,6 +123,38 @@ void BufferPool::submitFilled(Buffer* buffer_ptr) {
     
     // 通知消费者（锁外通知）
     filled_cv_.notify_one();
+}
+
+void BufferPool::releaseFree(Buffer* buffer_ptr) {
+    if (!buffer_ptr) {
+        return;
+    }
+    
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        
+        // 验证 buffer 属于此 pool
+        if (managed_buffers_.find(buffer_ptr) == managed_buffers_.end()) {
+            printf("⚠️  Buffer #%u does not belong to pool '%s'\n",
+                   buffer_ptr->id(), name_.c_str());
+            return;
+        }
+        
+        // 🛡️ 状态检查：确保 buffer 由生产者持有（填充失败的场景）
+        if (buffer_ptr->state() != Buffer::State::LOCKED_BY_PRODUCER) {
+            printf("❌ ERROR: releaseFree() called with wrong state: %s (expected LOCKED_BY_PRODUCER)\n",
+                   Buffer::stateToString(buffer_ptr->state()));
+            printf("   Buffer #%u in pool '%s'\n", buffer_ptr->id(), name_.c_str());
+            return;
+        }
+        
+        // 归还到 free 队列
+        free_queue_.push(buffer_ptr);
+        buffer_ptr->setState(Buffer::State::IDLE);
+    }
+    
+    // 通知生产者（锁外通知）
+    free_cv_.notify_one();
 }
 
 // ============================================================
@@ -175,6 +215,14 @@ void BufferPool::releaseFilled(Buffer* buffer) {
         if (managed_buffers_.find(buffer) == managed_buffers_.end()) {
             printf("⚠️  Buffer #%u does not belong to pool '%s'\n",
                    buffer->id(), name_.c_str());
+            return;
+        }
+        
+        // 🛡️ 状态检查：确保 buffer 由消费者持有
+        if (buffer->state() != Buffer::State::LOCKED_BY_CONSUMER) {
+            printf("❌ ERROR: releaseFilled() called with wrong state: %s (expected LOCKED_BY_CONSUMER)\n",
+                   Buffer::stateToString(buffer->state()));
+            printf("   Buffer #%u in pool '%s'\n", buffer->id(), name_.c_str());
             return;
         }
         

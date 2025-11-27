@@ -88,7 +88,7 @@ bool FfmpegDecodeVideoFileWorker::open(const char* path) {
         return false;
     }
     
-    int buffer_count = 4;  // 默认创建4个Buffer
+    int buffer_count = 1;  // 默认创建4个Buffer
     
     buffer_pool_sptr_ = allocator_facade_.allocatePoolWithBuffers(
         buffer_count,
@@ -292,6 +292,7 @@ bool FfmpegDecodeVideoFileWorker::initializeDecoder() {
     int ret = avcodec_parameters_to_context(codec_ctx_ptr_, codecpar);
     if (ret < 0) {
         setError("Failed to copy codec parameters", ret);
+        avcodec_free_context(&codec_ctx_ptr_);
         return false;
     }
     
@@ -300,6 +301,7 @@ bool FfmpegDecodeVideoFileWorker::initializeDecoder() {
         if (!configureSpecialDecoder()) {
             // 配置失败不是致命错误，继续使用默认配置
             printf("⚠️  Warning: Failed to configure special decoder options\n");
+            avcodec_free_context(&codec_ctx_ptr_);
         }
     }
     
@@ -307,6 +309,7 @@ bool FfmpegDecodeVideoFileWorker::initializeDecoder() {
     ret = avcodec_open2(codec_ctx_ptr_, codec, codec_options_ptr_ ? &codec_options_ptr_ : nullptr);
     if (ret < 0) {
         setError("Failed to open codec", ret);
+        avcodec_free_context(&codec_ctx_ptr_);
         return false;
     }
     
@@ -317,6 +320,7 @@ bool FfmpegDecodeVideoFileWorker::configureSpecialDecoder() {
     // 配置 h264_taco 解码器（参考 ids_test_video3）
     if (!codec_ctx_ptr_->priv_data) {
         printf("⚠️  Warning: codec_ctx->priv_data is NULL, cannot set options\n");
+        avcodec_free_context(&codec_ctx_ptr_);
         return false;
     }
     
@@ -716,19 +720,23 @@ bool FfmpegDecodeVideoFileWorker::fillBuffer(int frame_index, Buffer* buffer) {
     if (read_ret < 0) {
         if (read_ret == AVERROR_EOF) {
             printf("🔄 EOF reached, restarting...\n");
-            av_seek_frame(format_ctx_ptr_, video_stream_index_, 0, AVSEEK_FLAG_BACKWARD);
+            if (av_seek_frame(format_ctx_ptr_, video_stream_index_, 0, AVSEEK_FLAG_BACKWARD) < 0) {
+                //TODO:set producer running -> false
+                printf("ERROR: av_read_frame seek to begain failed\n");
+                return false;
+            }
             avcodec_flush_buffers(codec_ctx_ptr_);
             eof_reached_ = true;
             return false;
         } else {
             printf("❌ ERROR: av_read_frame failed: %d\n", read_ret);
+            //TODO:set producer running -> false
             return false;
         }
     }
     
     // 步骤3: 检查是否是视频流
     if (packet_ptr_->stream_index != video_stream_index_) {
-        av_packet_unref(packet_ptr_);
         return false;
     }
     
@@ -740,24 +748,13 @@ bool FfmpegDecodeVideoFileWorker::fillBuffer(int frame_index, Buffer* buffer) {
         av_packet_unref(packet_ptr_);
         return false;
     }
-    
+    bool recv_frm = false;
     // 步骤5: 🎯 循环调用 receive_frame，直到成功或需要更多数据（参考 ids_test_video3:2276-2354）
     while (true) {
         ret = avcodec_receive_frame(codec_ctx_ptr_, frame_ptr);
-        if (ret == AVERROR(EAGAIN)) {
-            av_packet_unref(packet_ptr_);  // 🎯 unref packet
-            return false;
+        if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF || ret < 0) {
+            break;
         } 
-        if (ret == AVERROR_EOF) {
-            printf("🔄 Decoder EOF\n");
-            av_packet_unref(packet_ptr_);  // 🎯 unref packet
-            return false;
-        }
-        if (ret < 0) {
-            printf("❌ ERROR: avcodec_receive_frame failed: %d\n", ret);
-            av_packet_unref(packet_ptr_);  // 🎯 unref packet
-            return false;
-        }
 
         {
             // ✅ 成功！提取物理地址（参考 ids_test_video3:2314-2338）
@@ -780,22 +777,15 @@ bool FfmpegDecodeVideoFileWorker::fillBuffer(int frame_index, Buffer* buffer) {
             
             if (phys_addr == 0) {
                 printf("⚠️  Warning: Failed to extract physical address\n");
-                av_frame_unref(frame_ptr);
-                av_packet_unref(packet_ptr_);  // 🎯 unref packet（参考 ids_test_video3:2355）
                 return false;
             }
             
             decoded_frames_++;
             current_frame_index_++;
-            
-            // 🎯 unref packet（参考 ids_test_video3:2355，在内层循环之后）
-            av_packet_unref(packet_ptr_);
-            
-            return true;
+            recv_frm = true;
         }
-        
-       
     }
+    return recv_frm;
 }
 
 // ============================================================================
