@@ -442,10 +442,7 @@ findDeviceNode	source/display/LinuxFramebufferDevice.cpp	/^const char* LinuxFram
 findVideoStream	source/productionline/worker/implementation/FfmpegDecodeVideoFileWorker.cpp	/^bool FfmpegDecodeVideoFileWorker::findVideoStream() {$/;"	f	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:bool	signature:()
 format_ctx_ptr_	include/productionline/worker/implementation/FfmpegDecodeRtspWorker.hpp	/^    AVFormatContext* format_ctx_ptr_;$/;"	m	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:AVFormatContext *
 format_ctx_ptr_	include/productionline/worker/implementation/FfmpegDecodeVideoFileWorker.hpp	/^    AVFormatContext* format_ctx_ptr_;$/;"	m	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:AVFormatContext *
-<<<<<<< HEAD
 frame_packet_map_	include/productionline/worker/implementation/FfmpegDecodeVideoFileWorker.hpp	/^    std::map<int, std::pair<AVFrame*, AVPacket*>> frame_packet_map_;    \/\/ 用于存储解码后/;"	m	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:std::map<int,std::pair<AVFrame *,AVPacket * >>
-=======
->>>>>>> c96fdbedc1ad8a0bbfc64da896d8243ad310843e
 frame_size_	include/productionline/worker/implementation/IoUringRawVideoFileWorker.hpp	/^    size_t frame_size_;$/;"	m	language:C++	class:IoUringRawVideoFileWorker	typeref:typename:size_t
 frame_size_	include/productionline/worker/implementation/MmapRawVideoFileWorker.hpp	/^    size_t frame_size_;               \/\/ 单帧大小（字节）$/;"	m	language:C++	class:MmapRawVideoFileWorker	typeref:typename:size_t
 framebuffer_base_ptr_	include/display/LinuxFramebufferDevice.hpp	/^    void* framebuffer_base_ptr_;          \/\/ mmap返回的基地址$/;"	m	language:C++	class:LinuxFramebufferDevice	typeref:typename:void *
@@ -787,11 +784,6 @@ storeToInternalBuffer	source/productionline/worker/implementation/FfmpegDecodeRt
 submitBatchReads	source/productionline/worker/implementation/IoUringRawVideoFileWorker.cpp	/^int IoUringRawVideoFileWorker::submitBatchReads(BufferPool* pool, $/;"	f	language:C++	class:IoUringRawVideoFileWorker	typeref:typename:int	signature:(BufferPool * pool,const std::vector<int> & frame_indices)
 submitFilled	source/buffer/BufferPool.cpp	/^void BufferPool::submitFilled(Buffer* buffer_ptr) {$/;"	f	language:C++	class:BufferPool	typeref:typename:void	signature:(Buffer * buffer_ptr)
 submitReadRequest	source/productionline/worker/implementation/IoUringRawVideoFileWorker.cpp	/^bool IoUringRawVideoFileWorker::submitReadRequest(int frame_index, void* buffer, size_t buffer_s/;"	f	language:C++	class:IoUringRawVideoFileWorker	typeref:typename:bool	signature:(int frame_index,void * buffer,size_t buffer_size)
-<<<<<<< HEAD
-=======
-supportsZeroCopy	include/productionline/worker/implementation/FfmpegDecodeVideoFileWorker.hpp	/^    bool supportsZeroCopy() const { return supports_zero_copy_; }$/;"	f	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:bool	signature:() const
-supports_zero_copy_	include/productionline/worker/implementation/FfmpegDecodeVideoFileWorker.hpp	/^    bool supports_zero_copy_;                      \/\/ 解码器是否支持零拷贝$/;"	m	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:bool
->>>>>>> c96fdbedc1ad8a0bbfc64da896d8243ad310843e
 sws_ctx_ptr_	include/productionline/worker/implementation/FfmpegDecodeRtspWorker.hpp	/^    SwsContext* sws_ctx_ptr_;              \/\/ 图像格式转换$/;"	m	language:C++	class:FfmpegDecodeRtspWorker	typeref:typename:SwsContext *
 sws_ctx_ptr_	include/productionline/worker/implementation/FfmpegDecodeVideoFileWorker.hpp	/^    SwsContext* sws_ctx_ptr_;              \/\/ 图像格式转换$/;"	m	language:C++	class:FfmpegDecodeVideoFileWorker	typeref:typename:SwsContext *
 test_4frame_loop	test.cpp	/^static int test_4frame_loop(const char* raw_video_path) {$/;"	f	language:C++	typeref:typename:int	file:	signature:(const char * raw_video_path)

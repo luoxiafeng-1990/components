@@ -59,7 +59,6 @@ private:
     // ============ FFmpeg 资源 ============
     AVFormatContext* format_ctx_ptr_;
     AVCodecContext* codec_ctx_ptr_;
-    AVPacket* packet_ptr_;                 // 用于 fillBuffer 的 packet
     std::map<int, std::pair<AVFrame*, AVPacket*>> frame_packet_map_;    // 用于存储解码后的帧和对应的packet
     SwsContext* sws_ctx_ptr_;              // 图像格式转换
     int video_stream_index_;
@@ -88,7 +87,8 @@ private:
     AVDictionary* codec_options_ptr_;      // 解码器选项（用于 h264_taco 配置）
     
     // ============ 线程安全 ============
-    mutable std::mutex mutex_;
+    // 使用递归锁避免同一线程重入时死锁（例如 fillBuffer -> seek）
+    mutable std::recursive_mutex mutex_;
     
     // ============ 统计信息 ============
     std::atomic<int> decoded_frames_;
