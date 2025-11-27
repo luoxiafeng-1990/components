@@ -71,13 +71,6 @@ static TestMode parse_test_mode(const char* mode_str) {
     }
 }
 
-// 信号处理函数
-static void signal_handler(int signum) {
-    if (signum == SIGINT) {
-        printf("\n\n🛑 Received Ctrl+C, stopping playback...\n");
-        g_running = false;
-    }
-}
 /**
  * 测试1：多缓冲循环播放测试
  * 
@@ -155,9 +148,6 @@ static int test_4frame_loop(const char* raw_video_path) {
         worker_pool->releaseFilled(filled_buffer);
     }
 
-    // 注册信号处理
-    signal(SIGINT, signal_handler);
-    
     // 6. 循环显示已加载的帧
     int loop_count = 0;
     while (g_running) {
@@ -230,8 +220,6 @@ static int test_sequential_playback(const char* raw_video_path) {
     
     // 5. 开始播放
     printf("\n🎬 Starting sequential playback (Ctrl+C to stop)...\n\n");
-    
-    signal(SIGINT, signal_handler);
     
     // 6. 消费者循环：从 BufferPool 获取 buffer 并显示
     int frame_count = 0;
@@ -325,8 +313,6 @@ static int test_buffermanager_producer(const char* raw_video_path) {
         printf("❌ Failed to start video producer\n");
         return -1;
     }
-    // 注册信号处理
-    signal(SIGINT, signal_handler);
     
     // 5. 消费者循环：从 BufferPool 获取 buffer 并显示（零拷贝）
     int frame_count = 0;
@@ -420,8 +406,6 @@ static int test_buffermanager_iouring(const char* raw_video_path) {
     
     printf("✅ Video producer started\n");
     printf("\n🎥 Starting display loop (Ctrl+C to stop)...\n\n");
-    
-    signal(SIGINT, signal_handler);
     
     // 4. 消费者循环
     int frame_count = 0;
@@ -564,9 +548,6 @@ static int test_rtsp_stream(const char* rtsp_url) {
     printf("   Press Ctrl+C to stop\n");
     printf("   Watch for '[DMA Display]' messages below\n\n");
     
-    // 注册信号处理
-    signal(SIGINT, signal_handler);
-    
     // 7. 获取工作BufferPool（Worker创建的或fallback的）
     BufferPool* working_pool = producer.getWorkingBufferPool();
     if (!working_pool) {
@@ -696,9 +677,6 @@ static int test_h264_taco_video(const char* video_path) {
     
     printf("\n✅ Video decoding started, starting playback...\n");
     printf("   Press Ctrl+C to stop\n\n");
-    
-    // 注册信号处理
-    signal(SIGINT, signal_handler);
     
     // 7. 获取工作BufferPool（Worker创建的或fallback的）
     BufferPool* working_pool = producer.getWorkingBufferPool();

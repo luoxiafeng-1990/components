@@ -122,6 +122,26 @@ public:
      */
     void submitFilled(Buffer* buffer_ptr);
     
+    /**
+     * @brief 归还未填充的 Buffer（生产者填充失败时使用）
+     * 
+     * 使用场景：
+     * - 生产者通过 acquireFree() 获取 Buffer 后
+     * - fillBuffer() 失败，Buffer 未填充数据
+     * - 需要将 Buffer 归还到 free_queue_
+     * 
+     * 工作流程：
+     * 1. 验证 buffer 属于此 pool
+     * 2. 将 buffer 归还到 free_queue_
+     * 3. 设置状态为 IDLE
+     * 4. 唤醒等待的生产者
+     * 
+     * 线程安全：是
+     * 
+     * @param buffer_ptr 未填充的 buffer
+     */
+    void releaseFree(Buffer* buffer_ptr);
+    
     // ====== 消费者接口 ======
     
     /**

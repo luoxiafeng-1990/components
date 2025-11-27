@@ -1,4 +1,5 @@
 #include "productionline/VideoProductionLine.hpp"
+#include "monitor/Timer.hpp"
 #include <stdio.h>
 #include <chrono>
 
@@ -212,6 +213,39 @@ void VideoProductionLine::producerThreadFunc(int thread_id) {
     int thread_skipped = 0;
     int consecutive_failures = 0;
     
+    // 🎯 创建 Timer 上下文（用于定时打印连续失败次数和进度）
+    struct TimerContext {
+        int thread_id;
+        int* consecutive_failures_ptr;
+        int* thread_produced_ptr;
+        VideoProductionLine* self_ptr;
+    } timer_context = { 
+        thread_id, 
+        &consecutive_failures,
+        &thread_produced,
+        this
+    };
+    
+    // 🎯 定义 Timer 回调函数（同时打印失败次数和进度）
+    auto timer_callback = [](void* user_data) {
+        auto* ctx = static_cast<TimerContext*>(user_data);
+        printf("🔔 [Timer] Thread #%d: consecutive_failures=%d, produced=%d, fps=%.1f\n", 
+               ctx->thread_id, 
+               *ctx->consecutive_failures_ptr,
+               *ctx->thread_produced_ptr,
+               ctx->self_ptr->getAverageFPS());
+    };
+    
+    // 🎯 创建并启动定时器（每2秒打印一次）
+    Timer failure_monitor_timer(
+        2.0,              // interval_seconds: 每2秒触发一次
+        timer_callback,   // callback: 回调函数
+        &timer_context,   // user_data: 上下文数据
+        0.0,              // delay_seconds: 立即开始
+        0.0               // duration_seconds: 无限期运行
+    );
+    //failure_monitor_timer.start();
+    
     while (running_) {
         // 1. 原子地获取下一个帧索引
         int frame_index = next_frame_index_.fetch_add(1);
@@ -255,40 +289,25 @@ void VideoProductionLine::producerThreadFunc(int thread_id) {
         
         // 5. 🎯 统一的处理：提交或归还
         if (fill_success) {
+            // ✅ 填充成功：提交到 filled 队列（供消费者使用）
             working_buffer_pool_ptr_->submitFilled(buffer);
             produced_frames_.fetch_add(1);
             thread_produced++;
             consecutive_failures = 0;  // 重置失败计数
         } else {
-            working_buffer_pool_ptr_->releaseFilled(buffer);
+            // ⚠️ 填充失败：归还到 free 队列（Buffer 未填充数据，状态为 LOCKED_BY_PRODUCER）
+            working_buffer_pool_ptr_->releaseFree(buffer);
             skipped_frames_.fetch_add(1);
             thread_skipped++;
-            
-            printf("⚠️  Thread #%d: Failed to read frame %d/%d\n",
-                   thread_id, frame_index, total_frames_);
-            
-            // 连续失败检测
+            // 🎯 累加连续失败次数（Timer 会每2秒自动打印）
             consecutive_failures++;
-            if (consecutive_failures > 10) {
-                char error_msg[256];
-                snprintf(error_msg, sizeof(error_msg),
-                        "Thread #%d: Too many consecutive read failures (%d)",
-                        thread_id, consecutive_failures);
-                setError(error_msg);
-                break;
-            }
-        }
-        
-        // 定期打印进度（每100帧）
-        if (thread_produced % 100 == 0 && thread_produced > 0) {
-            printf("   [Thread #%d] Produced %d frames (%.1f fps)\n",
-                   thread_id, thread_produced, getAverageFPS());
         }
     }
     
+    // 🎯 Timer 会在析构时自动调用 stop()
     // 线程结束
-    printf("🏁 Thread #%d finished: produced=%d, skipped=%d\n",
-           thread_id, thread_produced, thread_skipped);
+    printf("🏁 Thread #%d finished: produced=%d, skipped=%d, final_consecutive_failures=%d\n",
+           thread_id, thread_produced, thread_skipped, consecutive_failures);
 }
 
 void VideoProductionLine::setError(const std::string& error_msg) {
