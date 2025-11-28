@@ -44,8 +44,10 @@ public:
     
     /**
      * @brief 批量创建 Buffer 并构建 BufferPool
+     * 
+     * @return unique_ptr<BufferPool> 返回 BufferPool，所有权转移给调用者
      */
-    std::shared_ptr<BufferPool> allocatePoolWithBuffers(
+    std::unique_ptr<BufferPool> allocatePoolWithBuffers(
         int count,
         size_t size,
         const std::string& name,

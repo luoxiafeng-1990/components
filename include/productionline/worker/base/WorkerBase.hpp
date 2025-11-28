@@ -70,7 +70,7 @@ public:
     explicit WorkerBase(
         BufferAllocatorFactory::AllocatorType allocator_type
     ) : allocator_facade_(allocator_type)  // 🎯 父类直接创建Allocator门面
-      , buffer_pool_sptr_(nullptr) 
+      , buffer_pool_uptr_(nullptr) 
     {
     }
     
@@ -85,22 +85,20 @@ public:
     /**
      * @brief 获取Worker创建的BufferPool（默认实现）
      * 
-     * 子类可以重写此方法，但通常不需要（直接使用基类的buffer_pool_即可）
+     * 子类可以重写此方法，但通常不需要（直接使用基类的buffer_pool_uptr_即可）
      * 
      * @return unique_ptr<BufferPool> 成功返回pool，失败返回nullptr
      * 
      * @note Worker必须在open()时创建BufferPool，否则返回nullptr
-     * @note 从 shared_ptr 转换为 unique_ptr（通过 release，但 Allocator 和 Registry 仍持有 shared_ptr）
+     * @note 转移所有权给调用者（移动语义）
+     * @note 调用者负责释放 BufferPool（RAII 原则）
      */
     virtual std::unique_ptr<BufferPool> getOutputBufferPool() override {
-        if (!buffer_pool_sptr_) {
+        if (!buffer_pool_uptr_) {
             return nullptr;
         }
-        // 从 shared_ptr 转换为 unique_ptr
-        // 注意：Allocator 和 Registry 仍持有 shared_ptr，所以不会销毁
-        BufferPool* raw_ptr = buffer_pool_sptr_.get();
-        buffer_pool_sptr_.reset();  // Worker 不再持有
-        return std::unique_ptr<BufferPool>(raw_ptr);  // ProductionLine 持有 unique_ptr
+        // 转移所有权（移动语义）
+        return std::move(buffer_pool_uptr_);
     }
     
     // IVideoFileNavigator 接口方法
@@ -131,8 +129,13 @@ protected:
     
     /**
      * @brief Worker创建的BufferPool（所有Worker子类自动继承）
+     * 
+     * 设计变更：
+     * - 使用 unique_ptr（独占所有权）
+     * - Worker 持有并负责释放，或通过 getOutputBufferPool() 转移所有权
+     * - 符合 RAII 原则：谁持有谁释放
      */
-    std::shared_ptr<BufferPool> buffer_pool_sptr_;
+    std::unique_ptr<BufferPool> buffer_pool_uptr_;
 };
 
 #endif // WORKER_BASE_HPP

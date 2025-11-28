@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <cstddef>
 #include <string>
+#include <cstddef>  // for size_t
 
 /**
  * @brief Buffer 内存分配器类型枚举
@@ -76,23 +77,24 @@ public:
      * @brief 批量创建 Buffer 并构建 BufferPool
      * 
      * 工作流程：
-     * 1. 创建空的 BufferPool（CreateEmpty）
+     * 1. 创建空的 BufferPool（unique_ptr）
      * 2. 循环创建 Buffer（调用 createBuffer）
      * 3. 将 Buffer 添加到 pool 的 free 队列（调用 addBufferToQueue）
-     * 4. Allocator 持有 shared_ptr（管理生命周期）
-     * 5. 自动注册到 BufferPoolRegistry
+     * 4. 注册到 BufferPoolRegistry（使用 weak_ptr，不持有所有权）
+     * 5. 返回 unique_ptr（转移所有权给调用者）
      * 
      * @param count Buffer 数量
      * @param size 每个 Buffer 大小
      * @param name BufferPool 名称
      * @param category BufferPool 分类
-     * @return shared_ptr<BufferPool> 成功返回 pool，失败返回 nullptr
+     * @return unique_ptr<BufferPool> 成功返回 pool，失败返回 nullptr
      * 
      * @note 线程安全：是（BufferPool 内部加锁）
      * @note 失败时自动清理已分配的 buffer
-     * @note Allocator 持有 shared_ptr，管理 BufferPool 的生命周期
+     * @note Allocator 不持有 BufferPool，所有权转移给调用者
+     * @note 调用者负责释放 BufferPool（RAII 原则）
      */
-    virtual std::shared_ptr<BufferPool> allocatePoolWithBuffers(
+    virtual std::unique_ptr<BufferPool> allocatePoolWithBuffers(
         int count,
         size_t size,
         const std::string& name,
@@ -202,56 +204,18 @@ public:
     virtual bool destroyPool(BufferPool* pool) = 0;
     
 protected:
-    // ==================== Allocator 管理的 BufferPool ====================
-    
-    /**
-     * @brief Allocator 持有的 BufferPool
-     * 
-     * 设计原则：
-     * - 一个 Allocator 只管理一个 BufferPool（YAGNI 原则）
-     * - 通过 allocatePoolWithBuffers() 创建并存储
-     * 
-     * 线程安全：
-     * - 使用 managed_pool_mutex_ 保护
-     */
-    std::shared_ptr<BufferPool> managed_pool_sptr_;
-    
-    /**
-     * @brief 保护 managed_pool_ 的互斥锁
-     */
-    mutable std::mutex managed_pool_mutex_;
-    
-    /**
-     * @brief 创建 BufferPool（供子类使用）
-     * 
-     * 设计原则：
-     * - 通过 friend 访问 BufferPool 的 private 构造函数
-     * - 自动注册到 BufferPoolRegistry
-     * - 子类在 allocatePoolWithBuffers() 中调用此方法
-     * 
-     * @param name Pool 名称
-     * @param category Pool 分类
-     * @return shared_ptr<BufferPool> 创建的 BufferPool
-     * 
-     * @note 此方法是 protected static，只能被子类调用
-     */
-    static std::shared_ptr<BufferPool> createBufferPool(
-        const std::string& name,
-        const std::string& category
-    );
-    
-public:
-    /**
-     * @brief 获取当前管理的 BufferPool
-     * 
-     * @return shared_ptr<BufferPool> 返回 managed_pool_，如果未创建则返回 nullptr
-     * 
-     * @note 线程安全：是（内部加锁）
-     */
-    std::shared_ptr<BufferPool> getManagedBufferPool() const {
-        std::lock_guard<std::mutex> lock(managed_pool_mutex_);
-        return managed_pool_sptr_;
-    }
+    // ==================== 注意：Allocator 不再持有 BufferPool ====================
+    // 
+    // 设计变更：
+    // - Allocator 创建 BufferPool 后立即返回 unique_ptr（转移所有权）
+    // - 调用者负责释放 BufferPool（RAII 原则）
+    // - Registry 使用 weak_ptr 观察，不持有所有权
+    // 
+    // 已删除的成员：
+    // - managed_pool_sptr_（不再持有）
+    // - managed_pool_mutex_（不再需要）
+    // - getManagedBufferPool()（不再需要）
+    // - createBufferPool()（不再需要，子类直接创建 unique_ptr）
     
     // ==================== 子类必须实现的核心方法 ====================
     
@@ -329,7 +293,7 @@ public:
      * 使用示例：
      * @code
      * // 在子类的 allocatePoolWithBuffers() 中：
-     * auto pool = std::make_shared<BufferPool>(
+     * auto pool = std::make_unique<BufferPool>(
      *     token(),              // 从基类获取通行证
      *     name,                 // Pool 名称
      *     category              // Pool 分类
