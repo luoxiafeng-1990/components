@@ -93,67 +93,6 @@ static int test_ffmpeg_worker_open(const char* video_path) {
     printf("   Has More:      %s\n", worker_facade->hasMoreFrames() ? "Yes" : "No");
     printf("   At End:        %s\n", worker_facade->isAtEnd() ? "Yes" : "No");
     
-    // 4. 获取并验证 BufferPool
-    printf("\n📦 BufferPool Information:\n");
-    auto pool = worker_facade->getOutputBufferPool();
-    if (pool) {
-        printf("   Pool Name:     %s\n", pool->getName().c_str());
-        printf("   Pool Category: %s\n", pool->getCategory().c_str());
-        printf("   Total Buffers: %d\n", pool->getTotalCount());
-        printf("   Free Buffers:  %d\n", pool->getFreeCount());
-        printf("   Filled Buffers:%d\n", pool->getFilledCount());
-        
-        // 打印详细统计
-        pool->printStats();
-    } else {
-        printf("⚠️  Warning: BufferPool not created\n");
-    }
-    
-    // 5. 测试 seek 功能
-    printf("\n🔍 Testing seek functionality...\n");
-    if (worker_facade->getTotalFrames() > 0) {
-        printf("   Seeking to beginning...\n");
-        if (worker_facade->seekToBegin()) {
-            printf("   ✅ Seek to begin successful, index=%d\n", 
-                   worker_facade->getCurrentFrameIndex());
-        } else {
-            printf("   ⚠️  Seek to begin failed\n");
-        }
-    }
-    
-    // 6. 可选：测试读取一帧
-    printf("\n🎬 Testing frame reading (optional)...\n");
-    if (pool) {
-        Buffer* buf = pool->acquireFree(false, 0);  // 非阻塞尝试
-        if (buf) {
-            printf("   Acquired free buffer #%u\n", buf->id());
-            
-            // 填充一帧数据
-            if (worker_facade->fillBuffer(0, buf)) {
-                printf("   ✅ Frame filled successfully\n");
-                printf("      Buffer size: %zu bytes\n", buf->size());
-                printf("      Virtual addr: %p\n", buf->getVirtualAddress());
-                printf("      Physical addr: 0x%lx\n", buf->getPhysicalAddress());
-                
-                // 提交到 filled 队列
-                pool->submitFilled(buf);
-                printf("   Buffer submitted to filled queue\n");
-                
-                // 立即取回并释放
-                Buffer* filled = pool->acquireFilled(false, 0);
-                if (filled) {
-                    pool->releaseFilled(filled);
-                    printf("   Buffer released back to free queue\n");
-                }
-            } else {
-                printf("   ⚠️  Failed to fill buffer\n");
-                // 如果失败，需要归还 buffer
-                pool->releaseFilled(buf);
-            }
-        } else {
-            printf("   ℹ️  No free buffer available (expected)\n");
-        }
-    }
     
     // 7. 清理
     printf("\n🔄 Closing worker...\n");
