@@ -293,15 +293,18 @@ bool FfmpegDecodeVideoFileWorker::initializeDecoder() {
     if (ret < 0) {
         setError("Failed to copy codec parameters", ret);
         avcodec_free_context(&codec_ctx_ptr_);
+        codec_ctx_ptr_ = nullptr;  // 🔧 置空防止 double free
         return false;
     }
     
     // 4. 配置特殊解码器（如 h264_taco）
     if (decoder_name_ptr_ && strcmp(decoder_name_ptr_, "h264_taco") == 0) {
         if (!configureSpecialDecoder()) {
-            // 配置失败不是致命错误，继续使用默认配置
-            printf("⚠️  Warning: Failed to configure special decoder options\n");
+            // 🔧 修复：配置失败是致命错误，必须返回
+            printf("❌ ERROR: Failed to configure special decoder options\n");
             avcodec_free_context(&codec_ctx_ptr_);
+            codec_ctx_ptr_ = nullptr;  // 🔧 置空防止 double free
+            return false;
         }
     }
     
@@ -310,6 +313,7 @@ bool FfmpegDecodeVideoFileWorker::initializeDecoder() {
     if (ret < 0) {
         setError("Failed to open codec", ret);
         avcodec_free_context(&codec_ctx_ptr_);
+        codec_ctx_ptr_ = nullptr;  // 🔧 置空防止 double free
         return false;
     }
     
@@ -320,7 +324,8 @@ bool FfmpegDecodeVideoFileWorker::configureSpecialDecoder() {
     // 配置 h264_taco 解码器（参考 ids_test_video3）
     if (!codec_ctx_ptr_->priv_data) {
         printf("⚠️  Warning: codec_ctx->priv_data is NULL, cannot set options\n");
-        avcodec_free_context(&codec_ctx_ptr_);
+        // 🔧 修复：不要在这里释放，由调用者处理
+        // avcodec_free_context(&codec_ctx_ptr_);  // ❌ 删除，由调用者处理
         return false;
     }
     
@@ -510,55 +515,9 @@ bool FfmpegDecodeVideoFileWorker::convertFrameTo(AVFrame* src_frame, void* dest,
 // ============================================================================
 
 bool FfmpegDecodeVideoFileWorker::seek(int frame_index) {
-    if (!is_open_) {
-        return false;
-    }
-    
     std::lock_guard<std::recursive_mutex> lock(mutex_);
-    
-    if (frame_index < 0) {
-        frame_index = 0;
-    }
-    
-    // 计算目标时间戳
-    int64_t timestamp = 0;
-    AVStream* stream = format_ctx_ptr_->streams[video_stream_index_];
-    
-    if (frame_index > 0 && stream->avg_frame_rate.num > 0) {
-        // 根据帧索引计算时间戳
-        timestamp = av_rescale_q(
-            frame_index,
-            av_make_q(1, (int)av_q2d(stream->avg_frame_rate)),
-            stream->time_base
-        );
-    }
-    // 如果 frame_index == 0，timestamp 保持为 0，seek 到开头
-    
-    printf("🔍 Seeking to frame %d (timestamp: %ld)...\n", frame_index, timestamp);
-    
-    // 执行 seek（AVSEEK_FLAG_BACKWARD 会 seek 到最近的关键帧）
-    int ret = av_seek_frame(format_ctx_ptr_, video_stream_index_, timestamp, AVSEEK_FLAG_BACKWARD);
-    if (ret < 0) {
-        char err_buf[AV_ERROR_MAX_STRING_SIZE];
-        av_strerror(ret, err_buf, sizeof(err_buf));
-        printf("❌ ERROR: av_seek_frame failed: %s (ret=%d)\n", err_buf, ret);
-        setError("Seek failed", ret);
-        return false;
-    }
-    
-    // 🔧 关键修复：必须刷新解码器缓冲区，清除旧的缓存帧
-    avcodec_flush_buffers(codec_ctx_ptr_);
-    
-    // 🔧 重要：清理当前的 packet 状态
-    if (packet_ptr_) {
-        av_packet_unref(packet_ptr_);
-    }
-    
-    current_frame_index_ = frame_index;
-    eof_reached_ = false;
-    
-    printf("✅ Seek completed successfully\n");
-    
+    closeVideo();
+    openVideo();
     return true;
 }
 
