@@ -127,7 +127,7 @@ public:
      * @param category BufferPool 分类
      * @return unique_ptr<BufferPool> 成功返回 pool，失败返回 nullptr
      */
-    std::shared_ptr<BufferPool> allocatePoolWithBuffers(
+    std::unique_ptr<BufferPool> allocatePoolWithBuffers(
         int count,
         size_t size,
         const std::string& name,

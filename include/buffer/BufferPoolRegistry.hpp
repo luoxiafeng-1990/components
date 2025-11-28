@@ -45,10 +45,16 @@ public:
     
     /**
      * @brief 注册 BufferPool（由 Allocator 创建 pool 后自动调用）
-     * @param pool BufferPool 的 shared_ptr（从 pool 对象自动获取 name 和 category）
+     * 
+     * 设计变更：
+     * - 使用 weak_ptr 存储，不持有所有权（观察者模式）
+     * - 调用者需要提供临时 shared_ptr 用于创建 weak_ptr
+     * - Registry 不影响 BufferPool 的生命周期
+     * 
+     * @param temp_shared 临时 shared_ptr（用于创建 weak_ptr，注册后可以释放）
      * @return 唯一 ID
      */
-    uint64_t registerPool(std::shared_ptr<BufferPool> pool);
+    uint64_t registerPoolWeak(std::shared_ptr<BufferPool> temp_shared);
     
     /**
      * @brief 注销 BufferPool（由 BufferPool 析构函数自动调用）
@@ -60,8 +66,11 @@ public:
     
     /**
      * @brief 获取 BufferPool（只读版本）
+     * 
+     * 注意：如果 BufferPool 已被销毁，返回 nullptr
+     * 
      * @param id Pool ID
-     * @return shared_ptr<const BufferPool> 只读版本
+     * @return shared_ptr<const BufferPool> 只读版本，如果 Pool 已销毁则返回 nullptr
      */
     std::shared_ptr<const BufferPool> getPoolReadOnly(uint64_t id) const;
     
@@ -111,17 +120,30 @@ public:
      * 
      * 权限控制：通过 friend 类限制，只有 VideoProductionLine 可以调用
      * 
+     * 注意：如果 BufferPool 已被销毁，返回 nullptr
+     * 
      * @param id Pool ID
-     * @return shared_ptr<BufferPool> 读写版本
+     * @return shared_ptr<BufferPool> 读写版本，如果 Pool 已销毁则返回 nullptr
      */
     std::shared_ptr<BufferPool> getPoolForProductionLine(uint64_t id);
     
     /**
      * @brief 通过名称获取 BufferPool（读写版本，仅 ProductionLine 使用）
+     * 
+     * 注意：如果 BufferPool 已被销毁，返回 nullptr
+     * 
      * @param name Pool 名称
-     * @return shared_ptr<BufferPool> 读写版本
+     * @return shared_ptr<BufferPool> 读写版本，如果 Pool 已销毁则返回 nullptr
      */
     std::shared_ptr<BufferPool> getPoolByNameForProductionLine(const std::string& name);
+    
+    /**
+     * @brief 清理已失效的 weak_ptr（定期调用，可选）
+     * 
+     * 当 BufferPool 被销毁后，Registry 中的 weak_ptr 会失效
+     * 此方法用于清理这些失效的条目
+     */
+    void cleanupExpiredPools();
     
     // ========== 全局监控接口 ==========
     
@@ -174,11 +196,11 @@ private:
      * @brief Pool 信息结构
      */
     struct PoolInfo {
-        std::shared_ptr<BufferPool> pool;                    // Pool 的 shared_ptr
+        std::weak_ptr<BufferPool> pool;                      // Pool 的 weak_ptr（观察者，不持有所有权）
         uint64_t id;                                         // 唯一 ID
         std::string name;                                    // 可读名称
         std::string category;                                // 分类
-        std::chrono::system_clock::time_point created_time;  // 创建时间
+        std::chrono::system_clock::time_point created_time; // 创建时间
     };
     
     // ========== 成员变量 ==========

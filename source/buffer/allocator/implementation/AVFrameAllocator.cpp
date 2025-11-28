@@ -13,9 +13,8 @@
 
 AVFrameAllocator::AVFrameAllocator()
     : next_buffer_id_(0)
-    // managed_pool_sptr_ 是父类成员，会被 std::shared_ptr 自动初始化为 nullptr
 {
-    printf("🔧 AVFrameAllocator created (BufferPool will be lazy-initialized)\n");
+    printf("🔧 AVFrameAllocator created\n");
 }
 
 AVFrameAllocator::~AVFrameAllocator() {
@@ -191,7 +190,7 @@ void AVFrameAllocator::deallocateBuffer(Buffer* buffer) {
 static std::unordered_map<Buffer*, BufferAllocatorBase*> avframe_buffer_ownership_;
 static std::mutex avframe_ownership_mutex_;
 
-std::shared_ptr<BufferPool> AVFrameAllocator::allocatePoolWithBuffers(
+std::unique_ptr<BufferPool> AVFrameAllocator::allocatePoolWithBuffers(
     int count,
     size_t size,
     const std::string& name,
@@ -200,25 +199,25 @@ std::shared_ptr<BufferPool> AVFrameAllocator::allocatePoolWithBuffers(
     printf("🔧 AVFrameAllocator::allocatePoolWithBuffers: name='%s', category='%s', count=%d, size=%zu\n", 
            name.c_str(), category.c_str(), count, size);
     
-    // 1. 检查是否已经创建过 pool
-    {
-        std::lock_guard<std::mutex> lock(managed_pool_mutex_);
-        if (managed_pool_sptr_) {
-            printf("⚠️  Warning: BufferPool already exists, returning existing pool\n");
-            return managed_pool_sptr_;
-        }
-    }
-    
-    // 2. 使用 Passkey Token 创建 BufferPool
-    auto pool = std::make_shared<BufferPool>(
+    // 1. 使用 Passkey Token 创建 BufferPool（unique_ptr）
+    auto pool = std::make_unique<BufferPool>(
         token(),
         name,
         category
     );
     
-    // 3. 注册到 BufferPoolRegistry
-    uint64_t pool_id = BufferPoolRegistry::getInstance().registerPool(pool);
+    // 2. 创建临时 shared_ptr（用于注册 weak_ptr）
+    std::shared_ptr<BufferPool> temp_shared = std::shared_ptr<BufferPool>(
+        pool.get(),
+        [](BufferPool*) {}  // 空删除器（不实际删除，unique_ptr会删除）
+    );
+    
+    // 3. 注册到 BufferPoolRegistry（使用 weak_ptr，不持有所有权）
+    uint64_t pool_id = BufferPoolRegistry::getInstance().registerPoolWeak(temp_shared);
     pool->setRegistryId(pool_id);
+    
+    // 4. 释放临时 shared_ptr（不影响 unique_ptr）
+    temp_shared.reset();
     
     printf("✅ Created BufferPool '%s' (ID: %lu)\n", pool->getName().c_str(), pool_id);
     
@@ -279,12 +278,6 @@ std::shared_ptr<BufferPool> AVFrameAllocator::allocatePoolWithBuffers(
         printf("   ✅ Buffer #%u (wraps AVFrame* %p) → added to FREE queue\n", buffer_id, frame_ptr);
     }
     
-    // 5. 存储到 managed_pool_sptr_
-    {
-        std::lock_guard<std::mutex> lock(managed_pool_mutex_);
-        managed_pool_sptr_ = pool;
-    }
-    
     printf("\n");
     printf("╔══════════════════════════════════════════════════════════════════╗\n");
     printf("║  ✅ AVFrameAllocator: BufferPool Ready                          ║\n");
@@ -294,6 +287,7 @@ std::shared_ptr<BufferPool> AVFrameAllocator::allocatePoolWithBuffers(
     printf("   Each Buffer wraps: AVFrame* shell (physical memory not yet allocated)\n");
     printf("╚══════════════════════════════════════════════════════════════════╝\n\n");
     
+    // 6. 返回 unique_ptr（转移所有权）
     return pool;
 }
 
@@ -394,16 +388,6 @@ bool AVFrameAllocator::destroyPool(BufferPool* pool) {
     }
     
     printf("🧹 AVFrameAllocator: Destroying pool '%s'...\n", pool->getName().c_str());
-    
-    // 1. 检查是否是管理的 pool
-    {
-        std::lock_guard<std::mutex> lock(managed_pool_mutex_);
-        if (managed_pool_sptr_ && managed_pool_sptr_.get() == pool) {
-            printf("   ✅ Pool matches managed_pool_sptr_\n");
-        } else {
-            printf("   ⚠️  Warning: Pool does not match managed_pool_sptr_\n");
-        }
-    }
     
     std::lock_guard<std::mutex> lock(avframe_ownership_mutex_);
     

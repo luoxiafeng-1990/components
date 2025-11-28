@@ -90,14 +90,14 @@ bool FfmpegDecodeVideoFileWorker::open(const char* path) {
     
     int buffer_count = 1;  // 默认创建4个Buffer
     
-    buffer_pool_sptr_ = allocator_facade_.allocatePoolWithBuffers(
+    buffer_pool_uptr_ = allocator_facade_.allocatePoolWithBuffers(
         buffer_count,
         frame_size,
         std::string("FfmpegDecodeVideoFileWorker_") + std::string(path),
         "Video"
     );
     
-    if (!buffer_pool_sptr_) {
+    if (!buffer_pool_uptr_) {
         setError("Failed to create BufferPool via Allocator");
         closeVideo();
         return false;
@@ -114,7 +114,7 @@ bool FfmpegDecodeVideoFileWorker::open(const char* path) {
     printf("   Codec: %s\n", codec_ctx_ptr_->codec->name);
     printf("   Total frames (estimated): %d\n", total_frames_);
     printf("   BufferPool: '%s' (%d buffers, %zu bytes each)\n", 
-           buffer_pool_sptr_->getName().c_str(), buffer_count, frame_size);
+           buffer_pool_uptr_->getName().c_str(), buffer_count, frame_size);
     
     return true;
 }
@@ -132,7 +132,7 @@ void FfmpegDecodeVideoFileWorker::close() {
     closeVideo();
     
     // 释放BufferPool（通过unique_ptr自动释放）
-    buffer_pool_sptr_.reset();
+    buffer_pool_uptr_.reset();
     
     is_open_ = false;
 }

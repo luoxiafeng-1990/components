@@ -14,8 +14,8 @@ BufferPoolRegistry& BufferPoolRegistry::getInstance() {
 
 // ========== 注册管理接口实现 ==========
 
-uint64_t BufferPoolRegistry::registerPool(std::shared_ptr<BufferPool> pool) {
-    if (!pool) {
+uint64_t BufferPoolRegistry::registerPoolWeak(std::shared_ptr<BufferPool> temp_shared) {
+    if (!temp_shared) {
         printf("⚠️  Error: Cannot register null BufferPool\n");
         return 0;
     }
@@ -23,8 +23,8 @@ uint64_t BufferPoolRegistry::registerPool(std::shared_ptr<BufferPool> pool) {
     std::lock_guard<std::mutex> lock(mutex_);
     
     // 从 pool 对象获取 name 和 category
-    const std::string& name = pool->getName();
-    const std::string& category = pool->getCategory();
+    const std::string& name = temp_shared->getName();
+    const std::string& category = temp_shared->getCategory();
     
     // 检查名称是否已存在
     if (name_to_id_.find(name) != name_to_id_.end()) {
@@ -35,9 +35,9 @@ uint64_t BufferPoolRegistry::registerPool(std::shared_ptr<BufferPool> pool) {
     // 分配 ID
     uint64_t id = next_id_++;
     
-    // 创建 PoolInfo
+    // 创建 PoolInfo（使用 weak_ptr，不持有所有权）
     PoolInfo info;
-    info.pool = pool;  // 存储 shared_ptr
+    info.pool = temp_shared;  // 转为 weak_ptr（不增加引用计数）
     info.id = id;
     info.name = name;
     info.category = category;
@@ -47,7 +47,7 @@ uint64_t BufferPoolRegistry::registerPool(std::shared_ptr<BufferPool> pool) {
     pools_[id] = info;
     name_to_id_[name] = id;
     
-    printf("📦 [Registry] BufferPool registered: '%s' (ID: %lu, Category: %s)\n",
+    printf("📦 [Registry] BufferPool registered (weak_ptr): '%s' (ID: %lu, Category: %s)\n",
            name.c_str(), id, category.empty() ? "None" : category.c_str());
     
     return id;
@@ -83,8 +83,14 @@ std::shared_ptr<const BufferPool> BufferPoolRegistry::getPoolReadOnly(uint64_t i
         return nullptr;
     }
     
+    // 尝试提升 weak_ptr 为 shared_ptr（如果 Pool 已销毁，返回 nullptr）
+    auto pool = it->second.pool.lock();
+    if (!pool) {
+        return nullptr;  // Pool 已销毁
+    }
+    
     // 返回只读版本（const shared_ptr）
-    return std::const_pointer_cast<const BufferPool>(it->second.pool);
+    return std::const_pointer_cast<const BufferPool>(pool);
 }
 
 std::shared_ptr<const BufferPool> BufferPoolRegistry::getPoolReadOnlyByName(const std::string& name) const {
@@ -101,8 +107,14 @@ std::shared_ptr<const BufferPool> BufferPoolRegistry::getPoolReadOnlyByName(cons
         return nullptr;
     }
     
+    // 尝试提升 weak_ptr 为 shared_ptr（如果 Pool 已销毁，返回 nullptr）
+    auto pool = pool_it->second.pool.lock();
+    if (!pool) {
+        return nullptr;  // Pool 已销毁
+    }
+    
     // 返回只读版本（const shared_ptr）
-    return std::const_pointer_cast<const BufferPool>(pool_it->second.pool);
+    return std::const_pointer_cast<const BufferPool>(pool);
 }
 
 std::vector<std::shared_ptr<const BufferPool>> BufferPoolRegistry::getAllPoolsReadOnly() const {
@@ -112,8 +124,11 @@ std::vector<std::shared_ptr<const BufferPool>> BufferPoolRegistry::getAllPoolsRe
     result.reserve(pools_.size());
     
     for (const auto& pair : pools_) {
-        // 返回只读版本（const shared_ptr）
-        result.push_back(std::const_pointer_cast<const BufferPool>(pair.second.pool));
+        // 尝试提升 weak_ptr 为 shared_ptr（跳过已销毁的 Pool）
+        auto pool = pair.second.pool.lock();
+        if (pool) {
+            result.push_back(std::const_pointer_cast<const BufferPool>(pool));
+        }
     }
     
     return result;
@@ -126,8 +141,11 @@ std::vector<std::shared_ptr<const BufferPool>> BufferPoolRegistry::getPoolsByCat
     
     for (const auto& pair : pools_) {
         if (pair.second.category == category) {
-            // 返回只读版本（const shared_ptr）
-            result.push_back(std::const_pointer_cast<const BufferPool>(pair.second.pool));
+            // 尝试提升 weak_ptr 为 shared_ptr（跳过已销毁的 Pool）
+            auto pool = pair.second.pool.lock();
+            if (pool) {
+                result.push_back(std::const_pointer_cast<const BufferPool>(pool));
+            }
         }
     }
     
@@ -141,8 +159,11 @@ std::vector<std::shared_ptr<const BufferPool>> BufferPoolRegistry::getWorkerPool
     
     for (const auto& pair : pools_) {
         if (pair.second.category == "Worker") {
-            // 返回只读版本（const shared_ptr）
-            result.push_back(std::const_pointer_cast<const BufferPool>(pair.second.pool));
+            // 尝试提升 weak_ptr 为 shared_ptr（跳过已销毁的 Pool）
+            auto pool = pair.second.pool.lock();
+            if (pool) {
+                result.push_back(std::const_pointer_cast<const BufferPool>(pool));
+            }
         }
     }
     
@@ -166,8 +187,14 @@ std::shared_ptr<const BufferPool> BufferPoolRegistry::getWorkerPoolReadOnly(cons
         return nullptr;
     }
     
+    // 尝试提升 weak_ptr 为 shared_ptr（如果 Pool 已销毁，返回 nullptr）
+    auto pool = pool_it->second.pool.lock();
+    if (!pool) {
+        return nullptr;  // Pool 已销毁
+    }
+    
     // 返回只读版本（const shared_ptr）
-    return std::const_pointer_cast<const BufferPool>(pool_it->second.pool);
+    return std::const_pointer_cast<const BufferPool>(pool);
 }
 
 size_t BufferPoolRegistry::getPoolCount() const {
@@ -185,8 +212,8 @@ std::shared_ptr<BufferPool> BufferPoolRegistry::getPoolForProductionLine(uint64_
         return nullptr;
     }
     
-    // 返回读写版本（shared_ptr）
-    return it->second.pool;
+    // 尝试提升 weak_ptr 为 shared_ptr（如果 Pool 已销毁，返回 nullptr）
+    return it->second.pool.lock();
 }
 
 std::shared_ptr<BufferPool> BufferPoolRegistry::getPoolByNameForProductionLine(const std::string& name) {
@@ -203,8 +230,22 @@ std::shared_ptr<BufferPool> BufferPoolRegistry::getPoolByNameForProductionLine(c
         return nullptr;
     }
     
-    // 返回读写版本（shared_ptr）
-    return pool_it->second.pool;
+    // 尝试提升 weak_ptr 为 shared_ptr（如果 Pool 已销毁，返回 nullptr）
+    return pool_it->second.pool.lock();
+}
+
+void BufferPoolRegistry::cleanupExpiredPools() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    
+    for (auto it = pools_.begin(); it != pools_.end(); ) {
+        if (it->second.pool.expired()) {
+            // Pool 已销毁，清理条目
+            name_to_id_.erase(it->second.name);
+            it = pools_.erase(it);
+        } else {
+            ++it;
+        }
+    }
 }
 
 // ========== 全局监控接口实现 ==========
@@ -236,7 +277,12 @@ void BufferPoolRegistry::printAllStats() const {
     
     for (uint64_t id : ids) {
         const PoolInfo& info = pools_.at(id);
-        std::shared_ptr<BufferPool> pool = info.pool;
+        std::shared_ptr<BufferPool> pool = info.pool.lock();  // 提升 weak_ptr
+        
+        if (!pool) {
+            // Pool 已销毁，跳过
+            continue;
+        }
         
         // 格式化时间
         auto time_t_val = std::chrono::system_clock::to_time_t(info.created_time);
@@ -273,8 +319,10 @@ size_t BufferPoolRegistry::getTotalMemoryUsage() const {
     size_t total = 0;
     
     for (const auto& pair : pools_) {
-        std::shared_ptr<BufferPool> pool = pair.second.pool;
-        total += pool->getTotalCount() * pool->getBufferSize();
+        std::shared_ptr<BufferPool> pool = pair.second.pool.lock();  // 提升 weak_ptr
+        if (pool) {
+            total += pool->getTotalCount() * pool->getBufferSize();
+        }
     }
     
     return total;
@@ -291,12 +339,13 @@ BufferPoolRegistry::GlobalStats BufferPoolRegistry::getGlobalStats() const {
     stats.total_memory = 0;
     
     for (const auto& pair : pools_) {
-        std::shared_ptr<BufferPool> pool = pair.second.pool;
-        
-        stats.total_buffers += pool->getTotalCount();
-        stats.total_free += pool->getFreeCount();
-        stats.total_filled += pool->getFilledCount();
-        stats.total_memory += pool->getTotalCount() * pool->getBufferSize();
+        std::shared_ptr<BufferPool> pool = pair.second.pool.lock();  // 提升 weak_ptr
+        if (pool) {
+            stats.total_buffers += pool->getTotalCount();
+            stats.total_free += pool->getFreeCount();
+            stats.total_filled += pool->getFilledCount();
+            stats.total_memory += pool->getTotalCount() * pool->getBufferSize();
+        }
     }
     
     return stats;

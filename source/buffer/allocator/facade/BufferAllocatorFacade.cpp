@@ -28,7 +28,7 @@ BufferAllocatorFacade::~BufferAllocatorFacade() {
 // 统一接口实现（转发到底层 Allocator）
 // ============================================================================
 
-std::shared_ptr<BufferPool> BufferAllocatorFacade::allocatePoolWithBuffers(
+std::unique_ptr<BufferPool> BufferAllocatorFacade::allocatePoolWithBuffers(
     int count,
     size_t size,
     const std::string& name,
@@ -88,12 +88,10 @@ bool BufferAllocatorFacade::destroyPool(BufferPool* pool) {
     return allocator_base_uptr_->destroyPool(pool);
 }
 
-std::shared_ptr<BufferPool> BufferAllocatorFacade::getManagedBufferPool() const {
-    if (!allocator_base_uptr_) {
-        printf("❌ ERROR: Allocator not initialized\n");
-        return nullptr;
-    }
-    
-    return allocator_base_uptr_->getManagedBufferPool();
-}
+// ==================== 已删除 getManagedBufferPool() ====================
+// 
+// 设计变更：
+// - Allocator 不再持有 BufferPool
+// - allocatePoolWithBuffers() 返回 unique_ptr，所有权转移给调用者
+// - 不再需要 getManagedBufferPool() 方法
 

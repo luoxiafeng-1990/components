@@ -81,9 +81,9 @@ public:
      * @param size 每个 Buffer 大小
      * @param name BufferPool 名称
      * @param category BufferPool 分类
-     * @return shared_ptr<BufferPool> 成功返回 pool，失败返回 nullptr
+     * @return unique_ptr<BufferPool> 成功返回 pool，失败返回 nullptr（所有权转移给调用者）
      */
-    std::shared_ptr<BufferPool> allocatePoolWithBuffers(
+    std::unique_ptr<BufferPool> allocatePoolWithBuffers(
         int count,
         size_t size,
         const std::string& name,
@@ -122,18 +122,12 @@ public:
         QueueType queue = QueueType::FREE
     );
     
-    /**
-     * @brief 获取底层 Allocator 管理的 BufferPool
-     * 
-     * 使用场景：
-     * - Worker 需要获取 BufferPool
-     * - LinuxFramebufferDevice 需要获取 BufferPool
-     * 
-     * @return shared_ptr<BufferPool> 返回 managed_pool_，如果未创建则返回 nullptr
-     * 
-     * @note 这是门面类提供的便利方法，内部转发到底层 Allocator
-     */
-    std::shared_ptr<BufferPool> getManagedBufferPool() const;
+    // ==================== 注意：已删除 getManagedBufferPool() ====================
+    // 
+    // 设计变更：
+    // - Allocator 不再持有 BufferPool（allocatePoolWithBuffers 返回 unique_ptr）
+    // - 调用者负责持有和释放 BufferPool
+    // - 不再需要 getManagedBufferPool() 方法
     
     /**
      * @brief 从 BufferPool 移除并销毁 Buffer

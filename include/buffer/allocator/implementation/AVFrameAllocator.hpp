@@ -102,8 +102,9 @@ public:
      * @brief 批量创建 Buffer 并构建 BufferPool
      * 
      * @note AVFrameAllocator 主要用于动态注入，此方法创建空的 BufferPool
+     * @return unique_ptr<BufferPool> 返回 BufferPool，所有权转移给调用者
      */
-    std::shared_ptr<BufferPool> allocatePoolWithBuffers(
+    std::unique_ptr<BufferPool> allocatePoolWithBuffers(
         int count,
         size_t size,
         const std::string& name,
