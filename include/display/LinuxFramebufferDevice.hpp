@@ -34,7 +34,7 @@ private:
     
     // ============ Buffer管理（使用BufferPool）============
     std::unique_ptr<BufferAllocatorFacade> allocator_facade_;  // 门面类对象
-    std::shared_ptr<BufferPool> buffer_pool_;                  // BufferPool（智能指针管理）
+    uint64_t buffer_pool_id_;                                  // v2.0: BufferPool ID（从 Registry 获取）
     std::vector<void*> fb_mappings_;          // framebuffer 映射地址（用于物理地址查询）
     int buffer_count_;                        // buffer 数量
     int current_buffer_index_;                // 当前显示的buffer索引
@@ -196,13 +196,14 @@ public:
     int getFbIndex() const { return fb_index_; }
     
     /**
-     * @brief 获取当前的 BufferPool
+     * @brief 获取当前的 BufferPool ID
      * 
-     * @return BufferPool* BufferPool 指针（可能为 nullptr）
+     * @return uint64_t BufferPool ID，如果未初始化返回 0
      * 
-     * @note BufferPool 在 initialize() 中自动创建，无需手动设置
+     * @note BufferPool 在 initialize() 中自动创建并注册到 Registry
+     * @note 使用 BufferPoolRegistry::getInstance().getPool(pool_id) 获取 Pool
      */
-    BufferPool* getBufferPool() const { return buffer_pool_.get(); }
+    uint64_t getBufferPoolId() const { return buffer_pool_id_; }
 };
 
 #endif // LINUX_FRAMEBUFFER_DEVICE_HPP

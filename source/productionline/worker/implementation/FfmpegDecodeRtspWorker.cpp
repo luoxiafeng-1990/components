@@ -244,9 +244,9 @@ bool FfmpegDecodeRtspWorker::fillBuffer(int frame_index, Buffer* buffer) {
 // 提供原材料（BufferPool）
 // ============================================================================
 
-std::unique_ptr<BufferPool> FfmpegDecodeRtspWorker::getOutputBufferPool() {
-    // 使用基类的实现（从 shared_ptr 转换为 unique_ptr）
-    return WorkerBase::getOutputBufferPool();
+uint64_t FfmpegDecodeRtspWorker::getOutputBufferPoolId() {
+    // 使用基类的实现（返回 pool_id）
+    return WorkerBase::getOutputBufferPoolId();
 }
 
 // ============ RTSP 特有接口 ============

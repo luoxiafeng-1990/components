@@ -75,111 +75,16 @@ void BufferPoolRegistry::unregisterPool(uint64_t id) {
 
 // ========== 公开接口实现 ==========
 
-std::shared_ptr<BufferPool> BufferPoolRegistry::getPool(uint64_t id) const {
+std::weak_ptr<BufferPool> BufferPoolRegistry::getPool(uint64_t id) const {
     std::lock_guard<std::mutex> lock(mutex_);
     
     auto it = pools_.find(id);
     if (it == pools_.end()) {
-        return nullptr;
+        return std::weak_ptr<BufferPool>();  // 返回空的 weak_ptr
     }
     
-    // v2.0: 直接返回 shared_ptr（拷贝，引用计数临时 +1）
+    // v2.0: 返回 weak_ptr（观察者模式，不持有所有权）
     return it->second.pool;
-}
-
-std::shared_ptr<const BufferPool> BufferPoolRegistry::getPoolReadOnly(uint64_t id) const {
-    std::lock_guard<std::mutex> lock(mutex_);
-    
-    auto it = pools_.find(id);
-    if (it == pools_.end()) {
-        return nullptr;
-    }
-    
-    // v2.0: 返回只读版本
-    return std::const_pointer_cast<const BufferPool>(it->second.pool);
-}
-
-std::shared_ptr<const BufferPool> BufferPoolRegistry::getPoolReadOnlyByName(const std::string& name) const {
-    std::lock_guard<std::mutex> lock(mutex_);
-    
-    auto it = name_to_id_.find(name);
-    if (it == name_to_id_.end()) {
-        return nullptr;
-    }
-    
-    uint64_t id = it->second;
-    auto pool_it = pools_.find(id);
-    if (pool_it == pools_.end()) {
-        return nullptr;
-    }
-    
-    // v2.0: 直接返回只读版本
-    return std::const_pointer_cast<const BufferPool>(pool_it->second.pool);
-}
-
-std::vector<std::shared_ptr<const BufferPool>> BufferPoolRegistry::getAllPoolsReadOnly() const {
-    std::lock_guard<std::mutex> lock(mutex_);
-    
-    std::vector<std::shared_ptr<const BufferPool>> result;
-    result.reserve(pools_.size());
-    
-    for (const auto& pair : pools_) {
-        // v2.0: 直接添加（不需要 lock weak_ptr）
-        result.push_back(std::const_pointer_cast<const BufferPool>(pair.second.pool));
-    }
-    
-    return result;
-}
-
-std::vector<std::shared_ptr<const BufferPool>> BufferPoolRegistry::getPoolsByCategoryReadOnly(const std::string& category) const {
-    std::lock_guard<std::mutex> lock(mutex_);
-    
-    std::vector<std::shared_ptr<const BufferPool>> result;
-    
-    for (const auto& pair : pools_) {
-        if (pair.second.category == category) {
-            // v2.0: 直接添加
-            result.push_back(std::const_pointer_cast<const BufferPool>(pair.second.pool));
-        }
-    }
-    
-    return result;
-}
-
-std::vector<std::shared_ptr<const BufferPool>> BufferPoolRegistry::getWorkerPoolsReadOnly() const {
-    std::lock_guard<std::mutex> lock(mutex_);
-    
-    std::vector<std::shared_ptr<const BufferPool>> result;
-    
-    for (const auto& pair : pools_) {
-        if (pair.second.category == "Worker") {
-            // v2.0: 直接添加
-            result.push_back(std::const_pointer_cast<const BufferPool>(pair.second.pool));
-        }
-    }
-    
-    return result;
-}
-
-std::shared_ptr<const BufferPool> BufferPoolRegistry::getWorkerPoolReadOnly(const std::string& worker_name) const {
-    std::lock_guard<std::mutex> lock(mutex_);
-    
-    // Worker Pool 名称格式：WorkerPool_<WorkerName>
-    std::string pool_name = "WorkerPool_" + worker_name;
-    
-    auto it = name_to_id_.find(pool_name);
-    if (it == name_to_id_.end()) {
-        return nullptr;
-    }
-    
-    uint64_t id = it->second;
-    auto pool_it = pools_.find(id);
-    if (pool_it == pools_.end()) {
-        return nullptr;
-    }
-    
-    // v2.0: 直接返回只读版本
-    return std::const_pointer_cast<const BufferPool>(pool_it->second.pool);
 }
 
 size_t BufferPoolRegistry::getPoolCount() const {
@@ -187,9 +92,13 @@ size_t BufferPoolRegistry::getPoolCount() const {
     return pools_.size();
 }
 
-// ========== 读写接口实现（仅 ProductionLine 可以调用）==========
+// ========== v2.0 新增：Allocator 友元方法 ==========
 
-std::shared_ptr<BufferPool> BufferPoolRegistry::getPoolForProductionLine(uint64_t id) {
+std::shared_ptr<BufferPool> BufferPoolRegistry::getPoolForAllocatorCleanup(uint64_t id) {
+    // 🔑 私有方法，只有友元 BufferAllocatorBase 可以调用
+    // 用于 Allocator 析构时获取 Pool 并清理 Buffer
+    // 返回 shared_ptr（不是 weak_ptr），保证清理期间 Pool 不被销毁
+    
     std::lock_guard<std::mutex> lock(mutex_);
     
     auto it = pools_.find(id);
@@ -197,34 +106,8 @@ std::shared_ptr<BufferPool> BufferPoolRegistry::getPoolForProductionLine(uint64_
         return nullptr;
     }
     
-    // v2.0: 直接返回 shared_ptr（临时 +1）
+    // 返回 shared_ptr（临时持有，用于清理）
     return it->second.pool;
-}
-
-std::shared_ptr<BufferPool> BufferPoolRegistry::getPoolByNameForProductionLine(const std::string& name) {
-    std::lock_guard<std::mutex> lock(mutex_);
-    
-    auto it = name_to_id_.find(name);
-    if (it == name_to_id_.end()) {
-        return nullptr;
-    }
-    
-    uint64_t id = it->second;
-    auto pool_it = pools_.find(id);
-    if (pool_it == pools_.end()) {
-        return nullptr;
-    }
-    
-    // v2.0: 直接返回 shared_ptr（临时 +1）
-    return pool_it->second.pool;
-}
-
-// ========== v2.0 新增：Allocator 友元方法 ==========
-
-std::shared_ptr<BufferPool> BufferPoolRegistry::getPoolForAllocatorCleanup(uint64_t id) {
-    // 🔑 私有方法，只有友元 BufferAllocatorBase 可以调用
-    // 用于 Allocator 析构时获取 Pool 并清理 Buffer
-    return getPool(id);  // 复用 getPool() 实现
 }
 
 // ========== 全局监控接口实现 ==========

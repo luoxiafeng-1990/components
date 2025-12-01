@@ -105,8 +105,9 @@ bool FfmpegDecodeVideoFileWorker::open(const char* path) {
         return false;
     }
     
-    // v2.0: 从 Registry 获取 Pool 名称（临时访问）
-    auto pool = BufferPoolRegistry::getInstance().getPool(buffer_pool_id_);
+    // v2.0: 从 Registry 获取 Pool 名称（返回 weak_ptr）
+    auto pool_weak = BufferPoolRegistry::getInstance().getPool(buffer_pool_id_);
+    auto pool = pool_weak.lock();
     std::string pool_name = pool ? pool->getName() : "Unknown";
     
     is_open_ = true;

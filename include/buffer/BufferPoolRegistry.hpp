@@ -32,9 +32,10 @@ class BufferAllocatorBase;  // 用于 friend 声明（v2.0 新增）
  * 线程安全：所有接口内部使用 mutex 保护
  * 
  * v2.0 变更：
- * - 从 weak_ptr 改为 shared_ptr（独占持有）
+ * - Registry 独占持有 BufferPool（shared_ptr，引用计数=1）
+ * - 公开接口返回 weak_ptr（观察者模式）
  * - 新增 Allocator 友元（访问私有清理方法）
- * - registerPoolWeak() 改为 registerPool()
+ * - 精简接口：只保留一个 getPool() 方法，统一使用 ID 获取
  */
 class BufferPoolRegistry {
 public:
@@ -77,91 +78,35 @@ public:
     // ========== 公开接口（所有人都可以调用）==========
     
     /**
-     * @brief 获取 BufferPool（返回临时 shared_ptr）
+     * @brief 获取 BufferPool（返回 weak_ptr，观察者模式）
      * 
      * v2.0 设计：
-     * - 返回临时 shared_ptr（拷贝，引用计数临时 +1）
-     * - 使用者离开作用域后，引用计数 -1
-     * - 在持有期间，BufferPool 不会被销毁
+     * - 返回 weak_ptr<BufferPool>，不持有所有权（观察者模式）
+     * - 所有人（包括友元类）都用这个方法获取 Pool
+     * - 调用者必须使用 weak_ptr::lock() 获取临时 shared_ptr
+     * - 如果 Pool 已销毁，lock() 返回 nullptr
      * 
      * @param id Pool ID
-     * @return shared_ptr<BufferPool> 临时持有的 Pool，如果不存在返回 nullptr
+     * @return weak_ptr<BufferPool> 如果不存在返回空的 weak_ptr
      * 
      * @note 线程安全：是
-     * @note 使用 RAII 确保及时释放
+     * @note 使用示例：
+     * @code
+     * auto pool_weak = registry.getPool(pool_id);
+     * if (auto pool = pool_weak.lock()) {
+     *     // 使用 pool
+     * } else {
+     *     // Pool 已销毁
+     * }
+     * @endcode
      */
-    std::shared_ptr<BufferPool> getPool(uint64_t id) const;
-    
-    /**
-     * @brief 获取 BufferPool（只读版本）
-     * 
-     * @param id Pool ID
-     * @return shared_ptr<const BufferPool> 只读版本，如果不存在返回 nullptr
-     */
-    std::shared_ptr<const BufferPool> getPoolReadOnly(uint64_t id) const;
-    
-    /**
-     * @brief 通过名称获取 BufferPool（只读版本）
-     * @param name Pool 名称
-     * @return shared_ptr<const BufferPool> 只读版本
-     */
-    std::shared_ptr<const BufferPool> getPoolReadOnlyByName(const std::string& name) const;
-    
-    /**
-     * @brief 获取所有 BufferPool（只读版本）
-     * @return 所有 Pool 的只读版本列表
-     */
-    std::vector<std::shared_ptr<const BufferPool>> getAllPoolsReadOnly() const;
-    
-    /**
-     * @brief 按分类获取所有 BufferPool（只读版本）
-     * @param category 分类名称（如 "Display", "Video"）
-     * @return 该分类下所有 Pool 的只读版本列表
-     */
-    std::vector<std::shared_ptr<const BufferPool>> getPoolsByCategoryReadOnly(const std::string& category) const;
-    
-    /**
-     * @brief 查询所有 Worker 创建的 BufferPool（只读版本）
-     * @return Worker 创建的 Pool 列表（只读）
-     */
-    std::vector<std::shared_ptr<const BufferPool>> getWorkerPoolsReadOnly() const;
-    
-    /**
-     * @brief 查询指定 Worker 的 BufferPool（只读版本）
-     * @param worker_name Worker 名称
-     * @return BufferPool 的只读版本
-     */
-    std::shared_ptr<const BufferPool> getWorkerPoolReadOnly(const std::string& worker_name) const;
+    std::weak_ptr<BufferPool> getPool(uint64_t id) const;
     
     /**
      * @brief 获取注册的 BufferPool 总数
      * @return size_t Pool 数量
      */
     size_t getPoolCount() const;
-    
-    // ========== 读写接口（仅 ProductionLine 可以调用）==========
-    
-    /**
-     * @brief 获取 BufferPool（读写版本，仅 ProductionLine 使用）
-     * 
-     * 权限控制：通过 friend 类限制，只有 VideoProductionLine 可以调用
-     * 
-     * 注意：如果 BufferPool 已被销毁，返回 nullptr
-     * 
-     * @param id Pool ID
-     * @return shared_ptr<BufferPool> 读写版本，如果 Pool 已销毁则返回 nullptr
-     */
-    std::shared_ptr<BufferPool> getPoolForProductionLine(uint64_t id);
-    
-    /**
-     * @brief 通过名称获取 BufferPool（读写版本，仅 ProductionLine 使用）
-     * 
-     * 注意：如果 BufferPool 已被销毁，返回 nullptr
-     * 
-     * @param name Pool 名称
-     * @return shared_ptr<BufferPool> 读写版本，如果 Pool 已销毁则返回 nullptr
-     */
-    std::shared_ptr<BufferPool> getPoolByNameForProductionLine(const std::string& name);
     
     
     // ========== 全局监控接口 ==========
@@ -219,12 +164,16 @@ private:
      * v2.0 设计：
      * - Allocator 通过友元访问此方法
      * - 用于在 Allocator 析构时获取 Pool 并清理 Buffer
-     * - 返回临时 shared_ptr，Allocator 使用完毕后自动释放
+     * - 返回 shared_ptr（不是 weak_ptr），保证清理期间 Pool 不被销毁
+     * - 公开接口返回 weak_ptr，但 Allocator 清理时需要 shared_ptr
      * 
      * @param id Pool ID
      * @return shared_ptr<BufferPool> 临时持有，用于清理
      * 
      * @note 只有 friend class BufferAllocatorBase 可以调用
+     * @note 与公开接口 getPool() 的区别：
+     *       - getPool() 返回 weak_ptr（观察者模式）
+     *       - getPoolForAllocatorCleanup() 返回 shared_ptr（用于清理操作）
      */
     std::shared_ptr<BufferPool> getPoolForAllocatorCleanup(uint64_t id);
     
@@ -246,7 +195,6 @@ private:
     uint64_t next_id_ = 1;                                  // 下一个可用 ID
     
     // ========== 友元声明 ==========
-    friend class VideoProductionLine;    // ProductionLine 可以调用读写接口
     friend class BufferAllocatorBase;    // v2.0 新增：Allocator 可以调用清理方法
 };
 

@@ -30,6 +30,7 @@
 #include "display/LinuxFramebufferDevice.hpp"
 #include "productionline/worker/facade/BufferFillingWorkerFacade.hpp"
 #include "buffer/BufferPool.hpp"
+#include "buffer/BufferPoolRegistry.hpp"
 #include "productionline/VideoProductionLine.hpp"
 
 // FFmpeg头文件（解码器测试使用）
@@ -93,8 +94,19 @@ static int test_4frame_loop(const char* raw_video_path) {
     
     int buffer_count = display.getBufferCount();
     
-    // 2. 获取 display 的 BufferPool（framebuffer 已托管）
-    BufferPool& pool = *display.getBufferPool();
+    // 2. 获取 display 的 BufferPool（framebuffer 已托管，v2.0: 通过 Registry 获取）
+    uint64_t pool_id = display.getBufferPoolId();
+    if (pool_id == 0) {
+        printf("❌ ERROR: Display BufferPool not initialized\n");
+        return -1;
+    }
+    auto pool_weak = BufferPoolRegistry::getInstance().getPool(pool_id);
+    auto pool_sptr = pool_weak.lock();
+    if (!pool_sptr) {
+        printf("❌ ERROR: Display BufferPool (ID: %lu) not found or already destroyed\n", pool_id);
+        return -1;
+    }
+    BufferPool& pool = *pool_sptr;
     
     // 3. 创建 VideoProductionLine（Worker会在open()时自动创建BufferPool）
     VideoProductionLine producer;
@@ -189,8 +201,19 @@ static int test_sequential_playback(const char* raw_video_path) {
         return -1;
     }
     
-    // 2. 获取 display 的 BufferPool（framebuffer 已托管）
-    BufferPool& pool = *display.getBufferPool();
+    // 2. 获取 display 的 BufferPool（framebuffer 已托管，v2.0: 通过 Registry 获取）
+    uint64_t pool_id = display.getBufferPoolId();
+    if (pool_id == 0) {
+        printf("❌ ERROR: Display BufferPool not initialized\n");
+        return -1;
+    }
+    auto pool_weak = BufferPoolRegistry::getInstance().getPool(pool_id);
+    auto pool_sptr = pool_weak.lock();
+    if (!pool_sptr) {
+        printf("❌ ERROR: Display BufferPool (ID: %lu) not found or already destroyed\n", pool_id);
+        return -1;
+    }
+    BufferPool& pool = *pool_sptr;
     (void)pool;  // 消除未使用警告
     
     // 3. 创建 VideoProductionLine（Worker会在open()时自动创建BufferPool）
@@ -284,8 +307,19 @@ static int test_buffermanager_producer(const char* raw_video_path) {
         return -1;
     }
     
-    // 2. 获取 display 的 BufferPool（framebuffer 已托管）
-    BufferPool& pool = *display.getBufferPool();
+    // 2. 获取 display 的 BufferPool（framebuffer 已托管，v2.0: 通过 Registry 获取）
+    uint64_t pool_id = display.getBufferPoolId();
+    if (pool_id == 0) {
+        printf("❌ ERROR: Display BufferPool not initialized\n");
+        return -1;
+    }
+    auto pool_weak = BufferPoolRegistry::getInstance().getPool(pool_id);
+    auto pool_sptr = pool_weak.lock();
+    if (!pool_sptr) {
+        printf("❌ ERROR: Display BufferPool (ID: %lu) not found or already destroyed\n", pool_id);
+        return -1;
+    }
+    BufferPool& pool = *pool_sptr;
     pool.printStats();
     
     // 3. 创建 VideoProductionLine（Worker会自动创建BufferPool）
@@ -372,8 +406,19 @@ static int test_buffermanager_iouring(const char* raw_video_path) {
     printf("   Bits per pixel: %d\n", display.getBitsPerPixel());
     printf("   Buffer count: %d\n", display.getBufferCount());
     
-    // 2. 获取 display 的 BufferPool
-    BufferPool& pool = *display.getBufferPool();
+    // 2. 获取 display 的 BufferPool（v2.0: 通过 Registry 获取）
+    uint64_t pool_id = display.getBufferPoolId();
+    if (pool_id == 0) {
+        printf("❌ ERROR: Display BufferPool not initialized\n");
+        return -1;
+    }
+    auto pool_weak = BufferPoolRegistry::getInstance().getPool(pool_id);
+    auto pool_sptr = pool_weak.lock();
+    if (!pool_sptr) {
+        printf("❌ ERROR: Display BufferPool (ID: %lu) not found or already destroyed\n", pool_id);
+        return -1;
+    }
+    BufferPool& pool = *pool_sptr;
     
     printf("\n📦 Using LinuxFramebufferDevice's BufferPool\n");
     pool.printStats();
