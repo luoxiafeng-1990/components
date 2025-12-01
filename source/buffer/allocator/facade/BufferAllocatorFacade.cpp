@@ -15,7 +15,7 @@ BufferAllocatorFacade::BufferAllocatorFacade(
         printf("❌ ERROR: Failed to create Allocator (type=%s)\n", 
                BufferAllocatorFactory::typeToString(type));
     } else {
-        printf("✅ BufferAllocatorFacade: Created %s\n", 
+        printf("✅ [BufferAllocatorFacade] Created %s\n", 
                BufferAllocatorFactory::typeToString(type));
     }
 }
@@ -25,10 +25,10 @@ BufferAllocatorFacade::~BufferAllocatorFacade() {
 }
 
 // ============================================================================
-// 统一接口实现（转发到底层 Allocator）
+// v2.0 统一接口实现（转发到底层 Allocator）
 // ============================================================================
 
-std::unique_ptr<BufferPool> BufferAllocatorFacade::allocatePoolWithBuffers(
+uint64_t BufferAllocatorFacade::allocatePoolWithBuffers(
     int count,
     size_t size,
     const std::string& name,
@@ -36,15 +36,15 @@ std::unique_ptr<BufferPool> BufferAllocatorFacade::allocatePoolWithBuffers(
 ) {
     if (!allocator_base_uptr_) {
         printf("❌ ERROR: Allocator not initialized\n");
-        return nullptr;
+        return 0;
     }
     
     return allocator_base_uptr_->allocatePoolWithBuffers(count, size, name, category);
 }
 
 Buffer* BufferAllocatorFacade::injectBufferToPool(
+    uint64_t pool_id,
     size_t size,
-    BufferPool* pool,
     QueueType queue
 ) {
     if (!allocator_base_uptr_) {
@@ -52,14 +52,14 @@ Buffer* BufferAllocatorFacade::injectBufferToPool(
         return nullptr;
     }
     
-    return allocator_base_uptr_->injectBufferToPool(size, pool, queue);
+    return allocator_base_uptr_->injectBufferToPool(pool_id, size, queue);
 }
 
 Buffer* BufferAllocatorFacade::injectExternalBufferToPool(
+    uint64_t pool_id,
     void* virt_addr,
     uint64_t phys_addr,
     size_t size,
-    BufferPool* pool,
     QueueType queue
 ) {
     if (!allocator_base_uptr_) {
@@ -67,31 +67,31 @@ Buffer* BufferAllocatorFacade::injectExternalBufferToPool(
         return nullptr;
     }
     
-    return allocator_base_uptr_->injectExternalBufferToPool(virt_addr, phys_addr, size, pool, queue);
+    return allocator_base_uptr_->injectExternalBufferToPool(pool_id, virt_addr, phys_addr, size, queue);
 }
 
-bool BufferAllocatorFacade::removeBufferFromPool(Buffer* buffer, BufferPool* pool) {
+bool BufferAllocatorFacade::removeBufferFromPool(uint64_t pool_id, Buffer* buffer) {
     if (!allocator_base_uptr_) {
         printf("❌ ERROR: Allocator not initialized\n");
         return false;
     }
     
-    return allocator_base_uptr_->removeBufferFromPool(buffer, pool);
+    return allocator_base_uptr_->removeBufferFromPool(pool_id, buffer);
 }
 
-bool BufferAllocatorFacade::destroyPool(BufferPool* pool) {
+bool BufferAllocatorFacade::destroyPool(uint64_t pool_id) {
     if (!allocator_base_uptr_) {
         printf("❌ ERROR: Allocator not initialized\n");
         return false;
     }
     
-    return allocator_base_uptr_->destroyPool(pool);
+    return allocator_base_uptr_->destroyPool(pool_id);
 }
 
-// ==================== 已删除 getManagedBufferPool() ====================
+// ==================== v2.0 已删除 getManagedBufferPool() ====================
 // 
 // 设计变更：
 // - Allocator 不再持有 BufferPool
-// - allocatePoolWithBuffers() 返回 unique_ptr，所有权转移给调用者
+// - allocatePoolWithBuffers() 返回 pool_id，Registry 持有 Pool
+// - 使用者从 Registry 获取临时访问（getPool(pool_id)）
 // - 不再需要 getManagedBufferPool() 方法
-

@@ -1,4 +1,5 @@
 #include "productionline/worker/implementation/FfmpegDecodeVideoFileWorker.hpp"
+#include "buffer/BufferPoolRegistry.hpp"
 #include <cstring>
 #include <cstdio>
 
@@ -90,18 +91,23 @@ bool FfmpegDecodeVideoFileWorker::open(const char* path) {
     
     int buffer_count = 1;  // 默认创建4个Buffer
     
-    buffer_pool_uptr_ = allocator_facade_.allocatePoolWithBuffers(
+    // v2.0: allocatePoolWithBuffers 返回 pool_id
+    buffer_pool_id_ = allocator_facade_.allocatePoolWithBuffers(
         buffer_count,
         frame_size,
         std::string("FfmpegDecodeVideoFileWorker_") + std::string(path),
         "Video"
     );
     
-    if (!buffer_pool_uptr_) {
+    if (buffer_pool_id_ == 0) {
         setError("Failed to create BufferPool via Allocator");
         closeVideo();
         return false;
     }
+    
+    // v2.0: 从 Registry 获取 Pool 名称（临时访问）
+    auto pool = BufferPoolRegistry::getInstance().getPool(buffer_pool_id_);
+    std::string pool_name = pool ? pool->getName() : "Unknown";
     
     is_open_ = true;
     current_frame_index_ = 0;
@@ -113,8 +119,8 @@ bool FfmpegDecodeVideoFileWorker::open(const char* path) {
     printf("   Resolution: %dx%d → %dx%d\n", width_, height_, output_width_, output_height_);
     printf("   Codec: %s\n", codec_ctx_ptr_->codec->name);
     printf("   Total frames (estimated): %d\n", total_frames_);
-    printf("   BufferPool: '%s' (%d buffers, %zu bytes each)\n", 
-           buffer_pool_uptr_->getName().c_str(), buffer_count, frame_size);
+    printf("   BufferPool: '%s' (ID: %lu, %d buffers, %zu bytes each)\n", 
+           pool_name.c_str(), buffer_pool_id_, buffer_count, frame_size);
     
     return true;
 }
@@ -131,8 +137,9 @@ void FfmpegDecodeVideoFileWorker::close() {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
     closeVideo();
     
-    // 释放BufferPool（通过unique_ptr自动释放）
-    buffer_pool_uptr_.reset();
+    // v2.0: 不需要手动释放 BufferPool（Registry 管理）
+    // Allocator 析构时会自动清理
+    buffer_pool_id_ = 0;
     
     is_open_ = false;
 }
@@ -691,9 +698,9 @@ bool FfmpegDecodeVideoFileWorker::fillBuffer(int frame_index, Buffer* buffer) {
 // 提供原材料（BufferPool）
 // ============================================================================
 
-std::unique_ptr<BufferPool> FfmpegDecodeVideoFileWorker::getOutputBufferPool() {
-    // 使用基类的实现（从 shared_ptr 转换为 unique_ptr）
-    return WorkerBase::getOutputBufferPool();
+uint64_t FfmpegDecodeVideoFileWorker::getOutputBufferPoolId() {
+    // v2.0: 使用基类的实现（返回 pool_id）
+    return WorkerBase::getOutputBufferPoolId();
 }
 
 // ============================================================================

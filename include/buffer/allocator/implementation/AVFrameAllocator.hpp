@@ -102,9 +102,9 @@ public:
      * @brief 批量创建 Buffer 并构建 BufferPool
      * 
      * @note AVFrameAllocator 主要用于动态注入，此方法创建空的 BufferPool
-     * @return unique_ptr<BufferPool> 返回 BufferPool，所有权转移给调用者
+     * v2.0: @return uint64_t 返回 pool_id，Registry 持有 Pool
      */
-    std::unique_ptr<BufferPool> allocatePoolWithBuffers(
+    uint64_t allocatePoolWithBuffers(
         int count,
         size_t size,
         const std::string& name,
@@ -114,36 +114,42 @@ public:
     /**
      * @brief 创建单个 Buffer 并注入到指定 BufferPool（内部分配）
      * 
+     * v2.0: @param pool_id BufferPool ID（从 Registry 获取）
      * @note AVFrameAllocator 不支持此方法，应使用 injectAVFrameToPool
      */
     Buffer* injectBufferToPool(
+        uint64_t pool_id,
         size_t size,
-        BufferPool* pool,
         QueueType queue = QueueType::FREE
     ) override;
     
     /**
      * @brief 注入外部已分配的内存到 BufferPool（外部注入）
      * 
+     * v2.0: @param pool_id BufferPool ID（从 Registry 获取）
      * @note AVFrameAllocator 支持此方法，可以包装外部内存为 Buffer
      */
     Buffer* injectExternalBufferToPool(
+        uint64_t pool_id,
         void* virt_addr,
         uint64_t phys_addr,
         size_t size,
-        BufferPool* pool,
         QueueType queue = QueueType::FREE
     ) override;
     
     /**
      * @brief 从 BufferPool 移除并销毁 Buffer
+     * 
+     * v2.0: @param pool_id BufferPool ID
      */
-    bool removeBufferFromPool(Buffer* buffer, BufferPool* pool) override;
+    bool removeBufferFromPool(uint64_t pool_id, Buffer* buffer) override;
     
     /**
      * @brief 销毁整个 BufferPool 及其所有 Buffer
+     * 
+     * v2.0: @param pool_id BufferPool ID
      */
-    bool destroyPool(BufferPool* pool) override;
+    bool destroyPool(uint64_t pool_id) override;
     
 protected:
     /**

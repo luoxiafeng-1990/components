@@ -11,21 +11,30 @@
 // 前向声明
 class BufferPool;
 class VideoProductionLine;  // 用于 friend 声明
+class BufferAllocatorBase;  // 用于 friend 声明（v2.0 新增）
 
 /**
  * @brief BufferPool 全局注册表（单例）
  * 
+ * v2.0 架构：Registry 中心化资源管理器
+ * 
  * 职责：
- * - 跟踪系统中所有 BufferPool 实例
+ * - 独占持有所有 BufferPool 实例（shared_ptr，引用计数=1）
  * - 提供全局查询和监控接口
  * - 支持命名和分类管理
- * - 自动化生命周期管理
+ * - 协调 Allocator 的清理操作（通过友元）
  * 
  * 设计模式：
  * - 单例模式（全局唯一）
  * - 注册表模式（集中管理）
+ * - 友元模式（Allocator 访问私有清理方法）
  * 
  * 线程安全：所有接口内部使用 mutex 保护
+ * 
+ * v2.0 变更：
+ * - 从 weak_ptr 改为 shared_ptr（独占持有）
+ * - 新增 Allocator 友元（访问私有清理方法）
+ * - registerPoolWeak() 改为 registerPool()
  */
 class BufferPoolRegistry {
 public:
@@ -46,15 +55,18 @@ public:
     /**
      * @brief 注册 BufferPool（由 Allocator 创建 pool 后自动调用）
      * 
-     * 设计变更：
-     * - 使用 weak_ptr 存储，不持有所有权（观察者模式）
-     * - 调用者需要提供临时 shared_ptr 用于创建 weak_ptr
-     * - Registry 不影响 BufferPool 的生命周期
+     * v2.0 设计：
+     * - Registry 独占持有 BufferPool（shared_ptr，引用计数=1）
+     * - Allocator 立即转移所有权给 Registry
+     * - Registry 负责 BufferPool 的生命周期管理
      * 
-     * @param temp_shared 临时 shared_ptr（用于创建 weak_ptr，注册后可以释放）
+     * @param pool BufferPool 的 shared_ptr（所有权转移给 Registry）
      * @return 唯一 ID
+     * 
+     * @note 线程安全：是
+     * @note 注册后，Registry 成为唯一持有者（引用计数=1）
      */
-    uint64_t registerPoolWeak(std::shared_ptr<BufferPool> temp_shared);
+    uint64_t registerPool(std::shared_ptr<BufferPool> pool);
     
     /**
      * @brief 注销 BufferPool（由 BufferPool 析构函数自动调用）
@@ -62,15 +74,29 @@ public:
      */
     void unregisterPool(uint64_t id);
     
-    // ========== 只读接口（公开，任何人都可以调用）==========
+    // ========== 公开接口（所有人都可以调用）==========
+    
+    /**
+     * @brief 获取 BufferPool（返回临时 shared_ptr）
+     * 
+     * v2.0 设计：
+     * - 返回临时 shared_ptr（拷贝，引用计数临时 +1）
+     * - 使用者离开作用域后，引用计数 -1
+     * - 在持有期间，BufferPool 不会被销毁
+     * 
+     * @param id Pool ID
+     * @return shared_ptr<BufferPool> 临时持有的 Pool，如果不存在返回 nullptr
+     * 
+     * @note 线程安全：是
+     * @note 使用 RAII 确保及时释放
+     */
+    std::shared_ptr<BufferPool> getPool(uint64_t id) const;
     
     /**
      * @brief 获取 BufferPool（只读版本）
      * 
-     * 注意：如果 BufferPool 已被销毁，返回 nullptr
-     * 
      * @param id Pool ID
-     * @return shared_ptr<const BufferPool> 只读版本，如果 Pool 已销毁则返回 nullptr
+     * @return shared_ptr<const BufferPool> 只读版本，如果不存在返回 nullptr
      */
     std::shared_ptr<const BufferPool> getPoolReadOnly(uint64_t id) const;
     
@@ -137,13 +163,6 @@ public:
      */
     std::shared_ptr<BufferPool> getPoolByNameForProductionLine(const std::string& name);
     
-    /**
-     * @brief 清理已失效的 weak_ptr（定期调用，可选）
-     * 
-     * 当 BufferPool 被销毁后，Registry 中的 weak_ptr 会失效
-     * 此方法用于清理这些失效的条目
-     */
-    void cleanupExpiredPools();
     
     // ========== 全局监控接口 ==========
     
@@ -192,11 +211,28 @@ private:
     BufferPoolRegistry() = default;
     ~BufferPoolRegistry() = default;
     
+    // ========== v2.0 新增：Allocator 友元访问 ==========
+    
+    /**
+     * @brief 供 Allocator 清理时使用（私有方法，只有友元可调用）
+     * 
+     * v2.0 设计：
+     * - Allocator 通过友元访问此方法
+     * - 用于在 Allocator 析构时获取 Pool 并清理 Buffer
+     * - 返回临时 shared_ptr，Allocator 使用完毕后自动释放
+     * 
+     * @param id Pool ID
+     * @return shared_ptr<BufferPool> 临时持有，用于清理
+     * 
+     * @note 只有 friend class BufferAllocatorBase 可以调用
+     */
+    std::shared_ptr<BufferPool> getPoolForAllocatorCleanup(uint64_t id);
+    
     /**
      * @brief Pool 信息结构
      */
     struct PoolInfo {
-        std::weak_ptr<BufferPool> pool;                      // Pool 的 weak_ptr（观察者，不持有所有权）
+        std::shared_ptr<BufferPool> pool;                    // v2.0: Pool 的 shared_ptr（独占持有）
         uint64_t id;                                         // 唯一 ID
         std::string name;                                    // 可读名称
         std::string category;                                // 分类
@@ -209,8 +245,9 @@ private:
     std::unordered_map<std::string, uint64_t> name_to_id_;  // Name -> ID（快速查找）
     uint64_t next_id_ = 1;                                  // 下一个可用 ID
     
-    // 声明 friend 类（只有 ProductionLine 可以调用读写接口）
-    friend class VideoProductionLine;
+    // ========== 友元声明 ==========
+    friend class VideoProductionLine;    // ProductionLine 可以调用读写接口
+    friend class BufferAllocatorBase;    // v2.0 新增：Allocator 可以调用清理方法
 };
 
 

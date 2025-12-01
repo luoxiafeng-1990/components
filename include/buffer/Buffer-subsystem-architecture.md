@@ -1,9 +1,10 @@
 # Buffer子系统设计文档
 
 > **面向人群**: 新入职开发者  
-> **文档版本**: v1.0  
-> **最后更新**: 2025-11-26  
-> **维护者**: AI SDK Team
+> **文档版本**: v2.0  
+> **最后更新**: 2025-11-30  
+> **维护者**: AI SDK Team  
+> **架构变更**: v2.0 重大变更 - Registry 中心化 + Allocator 友元模式
 
 ---
 
@@ -16,6 +17,8 @@
 5. [典型使用场景](#5-典型使用场景)
 6. [线程安全分析](#6-线程安全分析)
 7. [扩展性与最佳实践](#7-扩展性与最佳实践)
+8. [架构演进与所有权管理](#8-架构演进与所有权管理) ⭐ **v2.0 新增**
+9. [总结](#9-总结)
 
 ---
 
@@ -136,25 +139,42 @@
 - 权限控制（只读 vs 读写访问）
 - 全局监控（统计所有Pool的状态）
 
-### 2.3 依赖关系
+### 2.3 依赖关系（v2.0 新架构）
 
 ```
-BufferAllocatorBase (抽象基类)
+BufferAllocatorBase (创建者和销毁者)
     ├── 创建 → BufferPool (通过 PrivateToken)
+    ├── 注册 → BufferPoolRegistry (立即转移所有权)
+    ├── 记录 → pool_id_ (不持有指针)
+    ├── 友元访问 → Registry::getPoolForAllocatorCleanup() (仅在清理时)
     ├── 管理 → Buffer 对象生命周期
-    └── 注册 → BufferPoolRegistry
+    └── 销毁 → unregisterPool() → 触发 BufferPool 析构
 
 BufferPool
     ├── 管理 → Buffer* (指针，不拥有对象)
     ├── 友元 → BufferAllocatorBase (访问私有方法)
-    └── 自动注册/注销 → BufferPoolRegistry
+    └── 被持有 → BufferPoolRegistry (独占所有权)
 
 Buffer
     └── 独立类（无外部依赖）
 
-BufferPoolRegistry (单例)
-    └── 跟踪 → shared_ptr<BufferPool>
+BufferPoolRegistry (单例，中心化资源管理器)
+    ├── 独占持有 → shared_ptr<BufferPool> (引用计数 = 1)
+    ├── 提供访问 → getPool() 返回临时 shared_ptr
+    ├── 提供观察 → getPoolWeak() 返回 weak_ptr
+    ├── 友元方法 → getPoolForAllocatorCleanup() (仅 Allocator 可调用)
+    └── 友元声明 → friend class BufferAllocatorBase
+
+Worker/ProductionLine/Consumer (使用者)
+    ├── 记录 → pool_id_ (不持有指针)
+    └── 临时访问 → Registry::getPool(pool_id_) (使用时获取)
 ```
+
+**关键变更（v2.0）：**
+- ✅ Registry **独占持有** BufferPool（shared_ptr，引用计数=1）
+- ✅ Allocator **不持有指针**（只记录 pool_id）
+- ✅ Allocator 通过**友元**访问清理方法
+- ✅ 所有使用者从 Registry 获取（临时 shared_ptr）
 
 ### 2.4 设计模式应用
 
@@ -1906,9 +1926,1811 @@ void monitorThread() {
 
 ---
 
-## 8. 总结
+## 8. 架构演进与所有权管理
 
-### 8.1 核心概念回顾
+> **架构版本**: v2.0  
+> **变更日期**: 2025-11-30  
+> **不兼容变更**: 是（需要迁移）  
+> **维护者**: AI SDK Team
+
+---
+
+### 8.1 架构演进历史
+
+#### 8.1.1 旧架构（v1.0）：shared_ptr 共同持有模式
+
+**时间范围**: 2024-01 ~ 2025-06
+
+**设计思路**:
+```
+Allocator 持有 shared_ptr → Registry 持有 shared_ptr → Worker 持有 shared_ptr
+                ↓                    ↓                        ↓
+          引用计数 = 3（多方共同持有）
+```
+
+**存在的问题**:
+
+| 问题类型 | 具体表现 | 影响 |
+|---------|---------|------|
+| ❌ **所有权不清晰** | Allocator、Registry、Worker 都持有 | 销毁责任模糊 |
+| ❌ **内存泄漏风险** | 循环引用可能导致无法释放 | 内存占用持续增长 |
+| ❌ **销毁时序混乱** | 谁先析构不确定 | Buffer 可能泄漏 |
+| ❌ **代码复杂** | 需要仔细管理 shared_ptr 生命周期 | 维护成本高 |
+
+**旧代码示例**:
+```cpp
+// ❌ 旧架构：多方持有
+class BufferAllocatorBase {
+    std::shared_ptr<BufferPool> managed_pool_sptr_;  // Allocator 持有
+};
+
+class BufferPoolRegistry {
+    std::shared_ptr<BufferPool> pool;  // Registry 也持有
+};
+
+class WorkerBase {
+    std::shared_ptr<BufferPool> buffer_pool_sptr_;  // Worker 也持有
+};
+
+// 引用计数 = 3，销毁责任不清晰
+```
+
+---
+
+#### 8.1.2 中期架构（v1.5）：unique_ptr 独占所有权模式
+
+**时间范围**: 2025-06 ~ 2025-11
+
+**设计思路**:
+```
+Allocator 创建 unique_ptr → 转移给 Worker → Worker 转移给 ProductionLine
+                ↓                ↓                      ↓
+          创建者不持有      临时持有           最终持有者
+```
+
+**commit 信息**:
+```
+commit 040e8a1
+change buffer_pool pointer owner management.
+Only one owner at the whole life, who owned it and will responsible for release it
+```
+
+**存在的问题**:
+
+| 问题类型 | 具体表现 | 影响 |
+|---------|---------|------|
+| ❌ **无法多方访问** | unique_ptr 只能有一个持有者 | 消费者无法访问 |
+| ❌ **Registry weak_ptr 失效** | 注册后立即 reset()，weak_ptr 失效 | Registry 所有 getPool() 返回 nullptr |
+| ❌ **生命周期不安全** | ProductionLine 暴露裸指针 | 消费者持有悬空指针风险 |
+| ❌ **违背生产者-消费者模式** | BufferPool 需要多方共享访问 | 架构设计根本性冲突 |
+
+**问题代码示例**:
+```cpp
+// ❌ 问题1：Registry 的 weak_ptr 立即失效
+auto pool = std::make_unique<BufferPool>(...);
+
+std::shared_ptr<BufferPool> temp_shared(
+    pool.get(),
+    [](BufferPool*) {}  // 空删除器
+);
+
+uint64_t id = Registry::registerPoolWeak(temp_shared);
+temp_shared.reset();  // ❌ weak_ptr 立即失效！
+
+// ❌ 问题2：消费者无法安全访问
+class VideoProductionLine {
+    std::unique_ptr<BufferPool> worker_buffer_pool_uptr_;  // 独占持有
+    
+    BufferPool* getWorkingBufferPool() const {
+        return worker_buffer_pool_uptr_.get();  // ❌ 返回裸指针，不安全
+    }
+};
+
+// 消费者线程
+BufferPool* pool = producer.getWorkingBufferPool();  // ❌ 裸指针
+Buffer* buf = pool->acquireFilled();  // 如果 producer 销毁，崩溃！
+```
+
+---
+
+#### 8.1.3 新架构（v2.0）：Registry 中心化 + Allocator 友元模式 ⭐
+
+**时间范围**: 2025-11 ~
+
+**设计思路**:
+```
+Allocator 创建 shared_ptr
+    ↓
+立即注册到 Registry（转移所有权）
+    ↓
+Registry 独占持有（引用计数 = 1）
+    ↓
+Allocator 只记录 pool_id（不持有指针）
+    ↓
+使用者从 Registry 获取（临时 shared_ptr）
+    ↓
+Allocator 析构时，通过友元清理并 unregister
+```
+
+**核心设计原则**:
+
+```
+🎯 单一持有者原则
+   Registry 是 BufferPool 的唯一持有者（shared_ptr 引用计数 = 1）
+
+🔑 友元访问模式
+   Allocator 是 Registry 的友元，可以访问私有清理方法
+
+♻️ 谁创建谁负责销毁
+   Allocator 创建 BufferPool，Allocator 析构时清理 Buffer 并 unregister
+
+🔒 中心化资源管理
+   所有访问都通过 Registry，统一管理和监控
+```
+
+**解决的问题**:
+
+| 问题 | 旧架构 | 新架构 |
+|-----|--------|--------|
+| **所有权管理** | ❌ 多方持有，不清晰 | ✅ Registry 独占持有 |
+| **多方访问** | ❌ unique_ptr 无法共享 | ✅ 从 Registry 获取临时 shared_ptr |
+| **生命周期安全** | ❌ 裸指针悬空风险 | ✅ 临时 shared_ptr 保证安全 |
+| **销毁控制** | ❌ 销毁时序不确定 | ✅ Allocator 通过友元控制 |
+| **Registry 可用性** | ❌ weak_ptr 失效 | ✅ shared_ptr 始终有效 |
+
+**新架构代码示例**:
+```cpp
+// ✅ 新架构：Registry 独占持有 + Allocator 友元访问
+
+class BufferPoolRegistry {
+    friend class BufferAllocatorBase;  // 🔑 友元
+    
+public:
+    uint64_t registerPool(std::shared_ptr<BufferPool> pool);
+    void unregisterPool(uint64_t id);
+    std::shared_ptr<BufferPool> getPool(uint64_t id) const;  // 返回临时 shared_ptr
+    
+private:
+    // 🔒 私有方法：只有友元 Allocator 可调用
+    std::shared_ptr<BufferPool> getPoolForAllocatorCleanup(uint64_t id);
+    
+    // ✅ Registry 独占持有（引用计数 = 1）
+    std::unordered_map<uint64_t, std::shared_ptr<BufferPool>> pools_;
+};
+
+class BufferAllocatorBase {
+    uint64_t pool_id_;  // ✅ 只记录 ID，不持有指针
+    
+public:
+    uint64_t allocatePoolWithBuffers(...) {
+        auto pool = std::make_shared<BufferPool>(...);
+        pool_id_ = Registry::getInstance().registerPool(pool);  // ✅ 转移所有权
+        return pool_id_;
+    }
+    
+    ~BufferAllocatorBase() {
+        // 🔑 通过友元获取 Pool（临时访问）
+        auto pool = Registry::getInstance().getPoolForAllocatorCleanup(pool_id_);
+        // 清理 Buffer...
+        Registry::getInstance().unregisterPool(pool_id_);  // ✅ 触发 Pool 析构
+    }
+};
+
+class WorkerBase {
+    uint64_t buffer_pool_id_;  // ✅ 只记录 ID
+    
+    uint64_t getOutputBufferPoolId() const {
+        return buffer_pool_id_;
+    }
+};
+
+// ✅ 使用者从 Registry 获取（临时 shared_ptr）
+auto pool = Registry::getInstance().getPool(pool_id);  // 临时持有
+if (!pool) return;  // Pool 已销毁
+
+Buffer* buf = pool->acquireFilled();
+// ... 使用
+pool->releaseFilled(buf);
+// pool 离开作用域，shared_ptr 析构
+```
+
+---
+
+### 8.2 所有权管理详解
+
+#### 8.2.1 核心原则：谁创建谁负责销毁
+
+**为什么 Allocator 必须负责销毁？**
+
+BufferPool 销毁时需要：
+1. 销毁所有 Buffer 对象
+2. 释放 Buffer 的内存
+3. **释放策略取决于分配方式**（只有 Allocator 知道）
+
+**不同 Allocator 的内存释放方式：**
+
+| Allocator 类型 | 内存分配方式 | 内存释放方式 | 说明 |
+|---------------|-------------|-------------|------|
+| `NormalAllocator` | `malloc()` / `posix_memalign()` | `free(virt_addr)` | 普通堆内存 |
+| `DmaAllocator` | `dma_alloc()` / `ioctl(DMA_BUF_IOCTL_ALLOC)` | `close(dma_fd)` | DMA 缓冲区 |
+| `FramebufferAllocator` | `mmap(/dev/fb0)` | `munmap(virt_addr)` | 帧缓冲设备内存 |
+| `CudaAllocator` | `cudaMalloc()` | `cudaFree(device_ptr)` | GPU 显存 |
+| `CmaAllocator` | CMA 预留内存 | 释放到 CMA pool | 连续物理内存 |
+
+**代码示例：不同 Allocator 的 deallocateBuffer 实现**
+
+```cpp
+// NormalAllocator
+void NormalAllocator::deallocateBuffer(Buffer* buffer) {
+    void* virt_addr = buffer->getVirtualAddress();
+    if (virt_addr) {
+        free(virt_addr);  // 使用 free
+    }
+    delete buffer;
+}
+
+// DmaAllocator
+void DmaAllocator::deallocateBuffer(Buffer* buffer) {
+    int dma_fd = buffer->getDmaBufFd();
+    if (dma_fd >= 0) {
+        close(dma_fd);  // 关闭 DMA-BUF fd
+    }
+    delete buffer;
+}
+
+// FramebufferAllocator
+void FramebufferAllocator::deallocateBuffer(Buffer* buffer) {
+    void* virt_addr = buffer->getVirtualAddress();
+    size_t size = buffer->size();
+    if (virt_addr && buffer->ownership() == Buffer::Ownership::OWNED) {
+        munmap(virt_addr, size);  // 使用 munmap
+    }
+    delete buffer;
+}
+```
+
+**结论**:
+✅ 只有 Allocator 知道如何正确释放内存  
+✅ 因此 Allocator 必须控制 BufferPool 的销毁  
+✅ 通过友元模式，Allocator 可以在不持有指针的情况下控制销毁
+
+---
+
+#### 8.2.2 Registry 的角色：中心化资源管理器
+
+**Registry 的三重职责：**
+
+```
+┌─────────────────────────────────────────────┐
+│   BufferPoolRegistry (单例，中心化管理)      │
+├─────────────────────────────────────────────┤
+│                                             │
+│  角色1: 持有者 (Owner)                       │
+│    └─ 独占持有所有 BufferPool (shared_ptr)  │
+│    └─ 引用计数 = 1（唯一持有者）             │
+│                                             │
+│  角色2: 访问点 (Access Point)                │
+│    └─ 对外提供统一的获取接口                  │
+│    └─ getPool() → 返回临时 shared_ptr        │
+│    └─ getPoolWeak() → 返回 weak_ptr 观察者   │
+│                                             │
+│  角色3: 协调者 (Coordinator)                 │
+│    └─ 协调 Allocator 的清理操作（通过友元）  │
+│    └─ getPoolForAllocatorCleanup() 私有方法  │
+│    └─ unregisterPool() 触发 Pool 析构       │
+│                                             │
+└─────────────────────────────────────────────┘
+```
+
+**Mermaid 图：Registry 的三重角色**
+
+```mermaid
+graph TB
+    subgraph Registry[BufferPoolRegistry - 中心化管理器]
+        Owner[角色1: 持有者<br/>独占持有 shared_ptr]
+        Access[角色2: 访问点<br/>提供统一获取接口]
+        Coord[角色3: 协调者<br/>协调 Allocator 清理]
+    end
+    
+    Allocator[Allocator<br/>创建和销毁] -->|友元访问| Coord
+    Worker[Worker/Consumer<br/>使用者] -->|公开访问| Access
+    
+    Owner -.持有.-> Pool[BufferPool<br/>引用计数=1]
+    Access -.返回临时.-> Pool
+    Coord -.协调清理.-> Pool
+    
+    style Registry fill:#e1f5ff
+    style Owner fill:#b3e5fc
+    style Access fill:#b3e5fc
+    style Coord fill:#b3e5fc
+```
+
+**代码实现：**
+
+```cpp
+class BufferPoolRegistry {
+    friend class BufferAllocatorBase;  // 协调者角色：友元访问
+    
+public:
+    // 角色1：持有者
+    uint64_t registerPool(std::shared_ptr<BufferPool> pool) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        uint64_t id = next_id_++;
+        pools_[id] = pool;  // ✅ 独占持有（引用计数 = 1）
+        return id;
+    }
+    
+    void unregisterPool(uint64_t id) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        pools_.erase(id);  // ✅ 释放 shared_ptr，触发 Pool 析构
+    }
+    
+    // 角色2：访问点
+    std::shared_ptr<BufferPool> getPool(uint64_t id) const {
+        std::lock_guard<std::mutex> lock(mutex_);
+        auto it = pools_.find(id);
+        if (it != pools_.end()) {
+            return it->second;  // ✅ 返回临时 shared_ptr（引用计数临时 +1）
+        }
+        return nullptr;
+    }
+    
+private:
+    // 角色3：协调者（私有方法，只有友元可调用）
+    std::shared_ptr<BufferPool> getPoolForAllocatorCleanup(uint64_t id) {
+        return getPool(id);  // 友元可以访问，用于清理
+    }
+    
+    std::unordered_map<uint64_t, std::shared_ptr<BufferPool>> pools_;
+};
+```
+
+---
+
+#### 8.2.3 Allocator 的职责：创建、注册、销毁
+
+**完整生命周期：**
+
+```cpp
+class BufferAllocatorBase {
+public:
+    // ==================== 阶段1：创建和注册 ====================
+    uint64_t allocatePoolWithBuffers(
+        int count,
+        size_t size,
+        const std::string& name,
+        const std::string& category = ""
+    ) {
+        printf("\n🏭 Allocator: Creating BufferPool '%s'...\n", name.c_str());
+        
+        // 1. 创建 BufferPool
+        auto pool = std::make_shared<BufferPool>(token(), name, category);
+        
+        // 2. 批量创建 Buffer 对象
+        for (int i = 0; i < count; i++) {
+            Buffer* buffer = createBuffer(i, size);  // 纯虚函数，子类实现
+            if (!buffer) {
+                printf("❌ Failed to create buffer #%d\n", i);
+                return 0;
+            }
+            
+            // 添加到 Pool
+            pool->addBufferToQueue(buffer, QueueType::FREE);
+            
+            // 记录所有权（用于析构时清理）
+            buffer_objects_.push_back(std::unique_ptr<Buffer>(buffer));
+        }
+        
+        // 3. 立即注册到 Registry（✅ 转移所有权）
+        auto& registry = BufferPoolRegistry::getInstance();
+        uint64_t id = registry.registerPool(pool);  // pool 离开作用域，引用计数保持=1
+        
+        // 4. Allocator 只记录 ID（不持有指针）
+        pool_id_ = id;
+        
+        printf("✅ BufferPool '%s' created and registered (ID: %lu)\n", name.c_str(), id);
+        
+        return id;  // 返回 ID 而不是 Pool
+    }
+    
+    // ==================== 阶段2：使用阶段（Allocator 不参与）====================
+    // Worker/ProductionLine/Consumer 从 Registry 获取 Pool
+    
+    // ==================== 阶段3：销毁 ====================
+    virtual ~BufferAllocatorBase() {
+        if (pool_id_ == 0) {
+            return;  // 没有创建 Pool
+        }
+        
+        printf("\n🧹 Allocator: Cleaning up pool (ID: %lu)...\n", pool_id_);
+        
+        auto& registry = BufferPoolRegistry::getInstance();
+        
+        // 1. 🔑 通过友元获取 Pool（临时访问）
+        auto pool = registry.getPoolForAllocatorCleanup(pool_id_);
+        
+        if (pool) {
+            // 2. 停止 BufferPool（唤醒所有等待线程）
+            pool->shutdown();
+            printf("   ✅ BufferPool shutdown\n");
+            
+            // 3. 销毁所有 Buffer 对象和内存
+            for (auto& buffer_uptr : buffer_objects_) {
+                Buffer* buffer = buffer_uptr.get();
+                
+                // 从 Pool 中移除（友元方法）
+                pool->removeBufferFromPool(buffer);
+                
+                // 释放内存（纯虚函数，子类实现）
+                deallocateBuffer(buffer);
+            }
+            buffer_objects_.clear();
+            
+            printf("   ✅ All buffers destroyed (%zu buffers)\n", buffer_objects_.size());
+        }
+        
+        // 4. 从 Registry 注销（✅ 释放 shared_ptr，引用计数 -1 → 0 → Pool 析构）
+        registry.unregisterPool(pool_id_);
+        
+        printf("   ✅ BufferPool unregistered and destroyed\n");
+    }
+    
+protected:
+    uint64_t pool_id_ = 0;  // 只记录 ID（不持有指针）
+    std::vector<std::unique_ptr<Buffer>> buffer_objects_;  // 持有 Buffer 对象
+    
+    // 纯虚函数：子类实现具体的分配/释放逻辑
+    virtual Buffer* createBuffer(uint32_t id, size_t size) = 0;
+    virtual void deallocateBuffer(Buffer* buffer) = 0;
+};
+```
+
+**时序图：Allocator 的完整生命周期**
+
+```mermaid
+sequenceDiagram
+    participant App as 应用代码
+    participant Alloc as BufferAllocator
+    participant Pool as BufferPool
+    participant Reg as Registry
+    participant Buf as Buffer对象
+    
+    Note over App,Buf: ==================== 阶段1：创建和注册 ====================
+    
+    App->>Alloc: allocatePoolWithBuffers(10, 1MB, "MyPool")
+    activate Alloc
+    
+    Alloc->>Pool: new BufferPool(token, name, category)
+    activate Pool
+    Pool-->>Alloc: pool (shared_ptr)
+    deactivate Pool
+    
+    loop 10次
+        Alloc->>Alloc: createBuffer(id, size)
+        Alloc->>Buf: new Buffer(...)
+        activate Buf
+        Buf-->>Alloc: buffer*
+        deactivate Buf
+        
+        Alloc->>Pool: addBufferToQueue(buffer, FREE)
+        Alloc->>Alloc: buffer_objects_.push_back(buffer)
+    end
+    
+    Alloc->>Reg: registerPool(pool)
+    activate Reg
+    Note over Reg: pools_[id] = pool<br/>引用计数 = 1
+    Reg-->>Alloc: pool_id
+    deactivate Reg
+    
+    Alloc->>Alloc: pool_id_ = pool_id
+    Note over Alloc: pool 离开作用域<br/>但 Registry 持有，引用计数仍=1
+    
+    Alloc-->>App: pool_id
+    deactivate Alloc
+    
+    Note over App,Buf: ==================== 阶段2：使用阶段 ====================
+    Note over App: Worker/Consumer 从 Registry 获取 Pool
+    
+    Note over App,Buf: ==================== 阶段3：销毁 ====================
+    
+    App->>Alloc: ~BufferAllocatorBase()
+    activate Alloc
+    
+    Alloc->>Reg: getPoolForAllocatorCleanup(pool_id)
+    activate Reg
+    Note over Reg: 🔑 友元方法
+    Reg-->>Alloc: pool (临时 shared_ptr)
+    deactivate Reg
+    
+    Alloc->>Pool: shutdown()
+    Note over Pool: 唤醒所有等待线程
+    
+    loop 每个 Buffer
+        Alloc->>Pool: removeBufferFromPool(buffer)
+        Alloc->>Alloc: deallocateBuffer(buffer)
+        Note over Alloc: free() / close() / munmap()
+        Alloc->>Buf: delete buffer
+    end
+    
+    Alloc->>Reg: unregisterPool(pool_id)
+    activate Reg
+    Reg->>Reg: pools_.erase(id)
+    Note over Reg: 释放 shared_ptr<br/>引用计数 -1 → 0
+    Reg->>Pool: ~BufferPool()
+    destroy Pool
+    deactivate Reg
+    
+    deactivate Alloc
+```
+
+---
+
+#### 8.2.4 友元模式的应用
+
+**为什么使用友元而不是公开方法？**
+
+| 方案 | 优点 | 缺点 | 选择 |
+|------|------|------|------|
+| **方案A：公开清理方法** | 简单 | ❌ 任何人都可以调用<br/>❌ 可能误用 | ❌ 不采用 |
+| **方案B：传递 Allocator 指针** | 不用友元 | ❌ 循环依赖<br/>❌ 指针可能失效 | ❌ 不采用 |
+| **方案C：友元模式** | ✅ 限制访问权限<br/>✅ 无循环依赖<br/>✅ 类型安全 | 稍微复杂 | ✅ 采用 |
+
+**友元模式实现：**
+
+```cpp
+// ==================== BufferPoolRegistry.hpp ====================
+class BufferPoolRegistry {
+    // 🔑 声明友元类
+    friend class BufferAllocatorBase;
+    
+public:
+    // 公开接口：任何人都可以调用
+    uint64_t registerPool(std::shared_ptr<BufferPool> pool);
+    void unregisterPool(uint64_t id);
+    std::shared_ptr<BufferPool> getPool(uint64_t id) const;
+    std::weak_ptr<BufferPool> getPoolWeak(uint64_t id) const;
+    
+private:
+    // 🔒 私有接口：只有友元 BufferAllocatorBase 可以调用
+    std::shared_ptr<BufferPool> getPoolForAllocatorCleanup(uint64_t id);
+    
+    std::unordered_map<uint64_t, std::shared_ptr<BufferPool>> pools_;
+};
+
+// ==================== BufferAllocatorBase.hpp ====================
+class BufferAllocatorBase {
+    // BufferAllocatorBase 是 Registry 的友元，可以调用私有方法
+    
+public:
+    virtual ~BufferAllocatorBase() {
+        auto& registry = BufferPoolRegistry::getInstance();
+        
+        // ✅ 友元可以调用私有方法
+        auto pool = registry.getPoolForAllocatorCleanup(pool_id_);
+        
+        // 清理 Buffer...
+        registry.unregisterPool(pool_id_);
+    }
+};
+
+// ==================== 普通用户代码 ====================
+class Consumer {
+    void use() {
+        auto& registry = BufferPoolRegistry::getInstance();
+        
+        // ✅ 可以调用公开方法
+        auto pool = registry.getPool(pool_id_);
+        
+        // ❌ 编译错误：无法调用私有方法
+        // auto pool = registry.getPoolForAllocatorCleanup(pool_id_);
+        //             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        //             error: 'getPoolForAllocatorCleanup' is a private member
+    }
+};
+```
+
+**友元模式的优势：**
+
+1. **✅ 访问控制精确**
+   - 只有 Allocator 可以访问清理方法
+   - 普通用户无法误用
+
+2. **✅ 无循环依赖**
+   - Registry 不需要包含 Allocator 头文件
+   - 只需前向声明：`friend class BufferAllocatorBase;`
+
+3. **✅ 类型安全**
+   - 编译期检查
+   - 如果错误调用，编译直接报错
+
+4. **✅ API 简洁**
+   - 对外公开接口简单
+   - 内部协调逻辑隐藏
+
+**友元模式 vs 回调模式：**
+
+```cpp
+// ❌ 方案：回调模式（不采用）
+class BufferPoolRegistry {
+    using CleanupCallback = std::function<void(BufferPool*)>;
+    
+    void registerPool(std::shared_ptr<BufferPool> pool, CleanupCallback cb) {
+        // 存储回调...
+    }
+};
+
+// 问题：
+// 1. 回调可能捕获 this，导致悬空指针
+// 2. 存储回调增加内存开销
+// 3. 回调执行时机不确定
+
+// ✅ 方案：友元模式（采用）
+class BufferPoolRegistry {
+    friend class BufferAllocatorBase;  // 简单清晰
+};
+
+// 优势：
+// 1. 无额外内存开销
+// 2. 编译期类型检查
+// 3. 访问控制精确
+```
+
+---
+
+### 8.3 BufferPool 接口审计
+
+#### 8.3.1 接口暴露情况总览
+
+**审计目的：**
+- 识别所有暴露 BufferPool 获取接口的类
+- 分析所有权传递链路
+- 标注需要修改的接口
+
+**审计范围：**
+- Allocator 子系统
+- Worker 子系统
+- ProductionLine
+- Display 设备
+- BufferPoolRegistry
+
+**审计结论：**
+
+| 状态 | 数量 | 说明 |
+|------|------|------|
+| ✅ **正确** | 6 | Registry 的接口设计正确 |
+| ⚠️ **需修改** | 5 | Worker/ProductionLine 需改为返回 ID |
+| ❌ **已废弃** | 5 | Allocator 的 `getManagedBufferPool()` 已删除 |
+
+---
+
+#### 8.3.2 核心接口定义与实现链路
+
+**表1：Worker 子系统的接口链路**
+
+| 层级 | 类名 | 方法签名 | 实现方式 | BufferPool 持有情况 | 调用链路 | v2.0 状态 |
+|------|------|---------|---------|------------------|---------|---------|
+| **接口层** | `IBufferFillingWorker` | `virtual unique_ptr<BufferPool> getOutputBufferPool()` | 默认实现：返回 `nullptr` | ❌ 不持有 | - | ⚠️ **需废弃**<br/>改为 `getOutputBufferPoolId()` |
+| **基类层** | `WorkerBase` | `virtual unique_ptr<BufferPool> getOutputBufferPool() override` | **真正实现**：<br>`return std::move(buffer_pool_uptr_);` | ~~✅ 持有~~<br>`unique_ptr<BufferPool> buffer_pool_uptr_` | - | ⚠️ **需修改**<br/>改为记录 `pool_id_`<br/>返回 `uint64_t` |
+| **子类层** | 所有 Worker 子类<br>(`FfmpegDecodeVideoFileWorker`<br>`FfmpegDecodeRtspWorker`<br>等) | `unique_ptr<BufferPool> getOutputBufferPool() override` | **调用基类**：<br>`return WorkerBase::getOutputBufferPool();` | ❌ 不持有<br/>（使用基类的 `buffer_pool_uptr_`） | 子类 → `WorkerBase::getOutputBufferPool()` → 返回基类的 `buffer_pool_uptr_` | ⚠️ **需修改**<br/>调用基类的 `getOutputBufferPoolId()` |
+| **门面层** | `BufferFillingWorkerFacade` | `unique_ptr<BufferPool> getOutputBufferPool() override` | **转发调用**：<br>`return worker_base_uptr_->getOutputBufferPool();` | ❌ 不持有<br/>（持有 Worker 的 `unique_ptr`） | Facade → Worker → `WorkerBase::getOutputBufferPool()` | ⚠️ **需修改**<br/>改为返回 ID |
+
+**关键说明：**
+- ✅ 只有 `WorkerBase` 真正持有 ~~`unique_ptr<BufferPool>`~~ → 改为记录 `pool_id_`
+- ✅ 所有子类都调用基类方法，没有重写实现
+- ✅ Facade 只是转发调用
+- ⚠️ **v2.0 需要修改**：将所有 `getOutputBufferPool()` 改为 `getOutputBufferPoolId()`
+
+---
+
+**表2：ProductionLine 和 Display 的接口**
+
+| 类名 | 方法签名 | 实现方式 | BufferPool 持有情况 | 当前用途 | 问题 | v2.0 状态 |
+|------|---------|---------|------------------|---------|------|---------|
+| `VideoProductionLine` | `BufferPool* getWorkingBufferPool() const` | 返回裸指针：<br>`return working_buffer_pool_ptr_;` | ~~✅ 持有~~<br>`unique_ptr<BufferPool> worker_buffer_pool_uptr_` | **🚨 消费者通过此接口获取 Pool** | ❌ 裸指针不安全<br/>❌ 绕过 Registry<br/>❌ 生命周期不可控 | ❌ **删除**<br/>改为 `getWorkingBufferPoolId()`<br/>消费者从 Registry 获取 |
+| `LinuxFramebufferDevice` | `BufferPool* getBufferPool() const` | 返回裸指针：<br>`return buffer_pool_.get();` | ~~✅ 持有~~<br>`unique_ptr<BufferPool> buffer_pool_` | Display 设备的 BufferPool | ❌ 裸指针不安全<br/>❌ 未注册到 Registry | ⚠️ **需修改**<br/>注册到 Registry<br/>返回 ID |
+
+**关键说明：**
+- ✅ `VideoProductionLine` 从 Worker 获取 Pool 后，用 ~~`unique_ptr`~~ 持有 → 改为记录 `pool_id_`
+- ✅ 然后暴露裸指针 `working_buffer_pool_ptr_` 给消费者 → **删除此方法**
+- 🚨 **这是最严重的问题**：消费者直接访问，不经过 Registry
+- ⚠️ **v2.0 修改**：消费者必须从 Registry 获取
+
+---
+
+**表3：BufferPoolRegistry 的接口（设计正确，无需修改）**
+
+| 方法签名 | 返回类型 | 访问权限 | 当前实现 | v2.0 状态 | 说明 |
+|---------|---------|---------|---------|-----------|------|
+| `registerPool(shared_ptr<BufferPool>)` | `uint64_t` | public | 存储到 `pools_` | ✅ **正确** | 任何人都可以注册 |
+| `unregisterPool(uint64_t id)` | `void` | public | 从 `pools_` 删除 | ✅ **正确** | 触发 Pool 析构 |
+| `getPool(uint64_t id)` | `shared_ptr<BufferPool>` | public | 返回临时 `shared_ptr` | ✅ **正确** | 对外公开，临时持有 |
+| `getPoolWeak(uint64_t id)` | `weak_ptr<BufferPool>` | public | 返回 `weak_ptr` | ✅ **正确** | 用户自己 lock |
+| `getPoolForAllocatorCleanup(id)` | `shared_ptr<BufferPool>` | **private**<br/>friend | 返回 `shared_ptr` | ✅ **新增** | 只有 Allocator 可调用 |
+
+**关键说明：**
+- ✅ Registry 的接口设计完全正确
+- ✅ 对外提供 `shared_ptr`（临时持有）和 `weak_ptr`（观察者）
+- ✅ 私有方法通过友元限制访问
+- ✅ v2.0 新增友元方法，供 Allocator 清理时使用
+
+---
+
+**表4：Allocator 的接口（v1.5 已删除，v2.0 确认正确）**
+
+| 类名 | 方法名 | v1.0 状态 | v1.5 状态 | v2.0 状态 |
+|------|--------|----------|----------|----------|
+| `BufferAllocatorBase` | `getManagedBufferPool()` | ✅ 存在 | ✅ **已删除** | ✅ **确认删除** |
+| `BufferAllocatorBase` | `managed_pool_sptr_` | ✅ 持有 | ❌ **已删除** | ✅ **确认删除**<br/>改为 `pool_id_` |
+| `BufferAllocatorFacade` | `getManagedBufferPool()` | ✅ 存在 | ✅ **已删除** | ✅ **确认删除** |
+| 所有 Allocator 子类 | `allocatePoolWithBuffers()` | 返回 `shared_ptr` | 返回 `unique_ptr` | ⚠️ **需修改**<br/>改为返回 `uint64_t` |
+
+**关键说明：**
+- ✅ v1.5 已删除 `getManagedBufferPool()`，正确
+- ✅ Allocator 不再持有 BufferPool 指针
+- ⚠️ v2.0 需要修改：`allocatePoolWithBuffers()` 返回 `uint64_t` 而不是 `unique_ptr`
+
+---
+
+### 8.4 生命周期完整流程
+
+#### 8.4.1 创建流程（Allocator → Registry）
+
+**时序图：**
+
+```mermaid
+sequenceDiagram
+    participant App as 应用代码
+    participant Alloc as BufferAllocator
+    participant Pool as BufferPool
+    participant Reg as BufferPoolRegistry
+    participant Buf as Buffer对象
+    
+    App->>Alloc: allocatePoolWithBuffers(10, 1MB, "VideoPool")
+    activate Alloc
+    
+    Note over Alloc: 1. 创建 BufferPool
+    Alloc->>Pool: make_shared<BufferPool>(token, name, category)
+    activate Pool
+    Pool-->>Alloc: pool (shared_ptr, 引用计数=1)
+    deactivate Pool
+    
+    Note over Alloc: 2. 批量创建 Buffer
+    loop 10 次
+        Alloc->>Alloc: createBuffer(id, size)
+        Alloc->>Buf: new Buffer(id, virt_addr, phys_addr, size)
+        activate Buf
+        Buf-->>Alloc: buffer*
+        deactivate Buf
+        
+        Alloc->>Pool: addBufferToQueue(buffer, QueueType::FREE)
+        Alloc->>Alloc: buffer_objects_.push_back(unique_ptr(buffer))
+    end
+    
+    Note over Alloc: 3. 注册到 Registry（转移所有权）
+    Alloc->>Reg: registerPool(pool)
+    activate Reg
+    Reg->>Reg: pools_[id] = pool
+    Note over Reg: ✅ Registry 持有 shared_ptr<br/>引用计数 = 1
+    Reg->>Pool: setRegistryId(id)
+    Reg-->>Alloc: pool_id
+    deactivate Reg
+    
+    Note over Alloc: pool 离开作用域<br/>但 Registry 持有，引用计数仍=1
+    
+    Alloc->>Alloc: pool_id_ = pool_id
+    Note over Alloc: ✅ Allocator 只记录 ID<br/>不持有指针
+    
+    Alloc-->>App: pool_id (返回 ID 而不是 Pool)
+    deactivate Alloc
+    
+    Note over App,Buf: ✅ 创建完成：<br/>- Registry 持有 shared_ptr (引用计数=1)<br/>- Allocator 记录 pool_id<br/>- App 得到 pool_id
+```
+
+**代码实现：**
+
+```cpp
+// NormalAllocator::allocatePoolWithBuffers()
+uint64_t NormalAllocator::allocatePoolWithBuffers(
+    int count,
+    size_t size,
+    const std::string& name,
+    const std::string& category
+) {
+    printf("\n🏭 NormalAllocator: Creating BufferPool '%s' with %d buffers...\n", 
+           name.c_str(), count);
+    
+    // 1. 创建 BufferPool (shared_ptr)
+    auto pool = std::make_shared<BufferPool>(
+        token(),    // Passkey token
+        name,
+        category
+    );
+    printf("   ✅ BufferPool created (shared_ptr, ref_count=1)\n");
+    
+    // 2. 批量创建 Buffer
+    for (int i = 0; i < count; i++) {
+        Buffer* buffer = createBuffer(i, size);
+        if (!buffer) {
+            printf("❌ Failed to create buffer #%d\n", i);
+            return 0;  // 失败，Pool 会自动析构
+        }
+        
+        // 添加到 Pool 的 free 队列
+        if (!pool->addBufferToQueue(buffer, QueueType::FREE)) {
+            printf("❌ Failed to add buffer #%d to pool\n", i);
+            deallocateBuffer(buffer);
+            return 0;
+        }
+        
+        // 记录 Buffer 对象所有权
+        buffer_objects_.push_back(std::unique_ptr<Buffer>(buffer));
+        
+        printf("   ✅ Buffer #%d created: virt_addr=%p, size=%zu\n",
+               i, buffer->getVirtualAddress(), size);
+    }
+    
+    // 3. 注册到 Registry（✅ 转移所有权）
+    auto& registry = BufferPoolRegistry::getInstance();
+    uint64_t id = registry.registerPool(pool);
+    // pool 离开作用域，但 Registry 持有，引用计数仍然=1
+    
+    pool->setRegistryId(id);
+    
+    // 4. Allocator 只记录 ID（不持有指针）
+    pool_id_ = id;
+    
+    printf("✅ BufferPool '%s' registered (ID: %lu, ref_count=1)\n\n", name.c_str(), id);
+    
+    return id;  // ✅ 返回 ID 而不是 Pool
+}
+```
+
+---
+
+#### 8.4.2 使用流程（从 Registry 获取）
+
+**时序图：**
+
+```mermaid
+sequenceDiagram
+    participant Worker as Worker/Consumer
+    participant Reg as BufferPoolRegistry
+    participant Pool as BufferPool
+    participant Buf as Buffer
+    
+    Note over Worker: Worker 只记录 pool_id
+    
+    Worker->>Reg: getPool(pool_id)
+    activate Reg
+    Reg->>Reg: find(pool_id)
+    Reg-->>Worker: shared_ptr<BufferPool> (临时持有)
+    Note over Reg: 引用计数 +1 (临时)
+    deactivate Reg
+    
+    Note over Worker: 检查 Pool 是否有效
+    alt Pool 已销毁
+        Worker->>Worker: if (!pool) return;
+    else Pool 有效
+        Worker->>Pool: acquireBufferBlocking(QueueType::FILLED)
+        activate Pool
+        Pool->>Pool: wait on filled_cv
+        Pool->>Buf: setState(LOCKED_BY_CONSUMER)
+        Pool-->>Worker: Buffer*
+        deactivate Pool
+        
+        Note over Worker: 使用 Buffer
+        Worker->>Worker: process(buf->data(), buf->size())
+        
+        Worker->>Pool: releaseBuffer(buf, QueueType::FREE)
+        activate Pool
+        Pool->>Pool: push to free_queue
+        Pool->>Buf: setState(IDLE)
+        Pool->>Pool: free_cv.notify_one()
+        deactivate Pool
+    end
+    
+    Note over Worker: shared_ptr 离开作用域
+    Note over Reg: 引用计数 -1 (恢复为1)
+```
+
+**代码实现：**
+
+```cpp
+// ✅ Worker 使用（v2.0 新方式）
+class Worker {
+    uint64_t buffer_pool_id_;  // 只记录 ID
+    
+public:
+    void processFrame() {
+        // 1. 从 Registry 获取 Pool（临时 shared_ptr）
+        auto& registry = BufferPoolRegistry::getInstance();
+        auto pool = registry.getPool(buffer_pool_id_);
+        
+        // 2. 检查 Pool 是否有效
+        if (!pool) {
+            printf("⚠️  BufferPool already destroyed\n");
+            return;
+        }
+        
+        // 3. 使用 Pool（在 pool 有效期间操作）
+        Buffer* buf = pool->acquireBufferBlocking(QueueType::FILLED);
+        if (!buf) {
+            return;  // Pool 已 shutdown
+        }
+        
+        // 4. 处理数据
+        processData(buf->data(), buf->size());
+        
+        // 5. 归还 Buffer
+        pool->releaseBuffer(buf, QueueType::FREE);
+        
+        // 6. pool 离开作用域，shared_ptr 析构，引用计数 -1
+    }
+};
+
+// ✅ Consumer 使用（v2.0 新方式）
+class Consumer {
+    uint64_t pool_id_;  // 只记录 ID
+    
+public:
+    void consumeLoop() {
+        while (running_) {
+            // 每次循环都从 Registry 获取（临时持有）
+            auto pool = BufferPoolRegistry::getInstance().getPool(pool_id_);
+            if (!pool) {
+                printf("⚠️  BufferPool destroyed, exiting...\n");
+                break;
+            }
+            
+            Buffer* buf = pool->acquireFilled(true, -1);
+            if (!buf) {
+                break;  // Pool shutdown
+            }
+            
+            display(buf->data(), buf->size());
+            pool->releaseFilled(buf);
+            
+            // pool 自动析构
+        }
+    }
+};
+
+// ❌ 旧方式（v1.5，不要使用）
+class Consumer_OLD {
+    BufferPool* pool_;  // ❌ 裸指针，不安全
+    
+public:
+    void consumeLoop() {
+        // ❌ 如果 ProductionLine 先析构，pool_ 变成悬空指针
+        Buffer* buf = pool_->acquireFilled(true, -1);  // 崩溃！
+    }
+};
+```
+
+---
+
+#### 8.4.3 销毁流程（Allocator 析构）
+
+**时序图：**
+
+```mermaid
+sequenceDiagram
+    participant App as 应用代码
+    participant Alloc as BufferAllocator
+    participant Reg as BufferPoolRegistry
+    participant Pool as BufferPool
+    participant Buf as Buffer对象
+    
+    Note over App: Allocator 生命周期结束
+    
+    App->>Alloc: ~BufferAllocatorBase()
+    activate Alloc
+    
+    Note over Alloc: 1. 通过友元获取 Pool
+    Alloc->>Reg: getPoolForAllocatorCleanup(pool_id)
+    activate Reg
+    Note over Reg: 🔑 私有方法，只有友元可调用
+    Reg-->>Alloc: shared_ptr<BufferPool> (临时)
+    Note over Reg: 引用计数 +1 (临时)
+    deactivate Reg
+    
+    alt Pool 仍然存在
+        Note over Alloc: 2. 停止 Pool
+        Alloc->>Pool: shutdown()
+        activate Pool
+        Pool->>Pool: running_ = false
+        Pool->>Pool: free_cv.notify_all()
+        Pool->>Pool: filled_cv.notify_all()
+        Note over Pool: 唤醒所有等待线程
+        deactivate Pool
+        
+        Note over Alloc: 3. 销毁所有 Buffer
+        loop 每个 Buffer
+            Alloc->>Pool: removeBufferFromPool(buffer)
+            Note over Pool: 从 managed_buffers_ 移除
+            
+            Alloc->>Alloc: deallocateBuffer(buffer)
+            Note over Alloc: free() / close() / munmap()
+            
+            Alloc->>Buf: delete buffer
+            destroy Buf
+        end
+        
+        Alloc->>Alloc: buffer_objects_.clear()
+        Note over Alloc: ✅ 所有 Buffer 已销毁
+    end
+    
+    Note over Alloc: pool 临时 shared_ptr 离开作用域
+    Note over Reg: 引用计数 -1 (恢复为1)
+    
+    Note over Alloc: 4. 从 Registry 注销
+    Alloc->>Reg: unregisterPool(pool_id)
+    activate Reg
+    Reg->>Reg: pools_.erase(pool_id)
+    Note over Reg: ✅ 释放 shared_ptr<br/>引用计数 -1 → 0
+    
+    Reg->>Pool: ~BufferPool()
+    activate Pool
+    Note over Pool: BufferPool 析构
+    Pool->>Reg: unregisterPool(registry_id_)
+    Note over Reg: 从 Registry 注销（如果还没注销）
+    destroy Pool
+    deactivate Pool
+    
+    Reg-->>Alloc: (完成)
+    deactivate Reg
+    
+    deactivate Alloc
+    
+    Note over App,Buf: ✅ 销毁完成：<br/>- 所有 Buffer 已释放<br/>- BufferPool 已析构<br/>- Registry 已清理
+```
+
+**代码实现：**
+
+```cpp
+BufferAllocatorBase::~BufferAllocatorBase() {
+    if (pool_id_ == 0) {
+        return;  // 没有创建 Pool
+    }
+    
+    printf("\n🧹 BufferAllocatorBase: Cleaning up pool (ID: %lu)...\n", pool_id_);
+    
+    auto& registry = BufferPoolRegistry::getInstance();
+    
+    // 1. 🔑 通过友元获取 Pool（临时访问）
+    auto pool = registry.getPoolForAllocatorCleanup(pool_id_);
+    
+    if (pool) {
+        printf("   ✅ Pool found (ref_count temporarily +1)\n");
+        
+        // 2. 停止 BufferPool（唤醒所有等待线程）
+        pool->shutdown();
+        printf("   ✅ BufferPool shutdown (all threads woken up)\n");
+        
+        // 3. 销毁所有 Buffer 对象和内存
+        size_t count = buffer_objects_.size();
+        for (auto& buffer_uptr : buffer_objects_) {
+            Buffer* buffer = buffer_uptr.get();
+            
+            // 从 Pool 中移除（友元方法）
+            bool removed = pool->removeBufferFromPool(buffer);
+            if (!removed) {
+                printf("⚠️  Warning: Buffer #%u not in pool or in use\n", buffer->id());
+            }
+            
+            // 释放内存（纯虚函数，子类实现）
+            deallocateBuffer(buffer);
+            
+            printf("   ✅ Buffer #%u destroyed and memory freed\n", buffer->id());
+        }
+        buffer_objects_.clear();
+        
+        printf("   ✅ All buffers destroyed (%zu buffers)\n", count);
+        
+        // pool 离开作用域，临时 shared_ptr 析构，引用计数 -1
+    } else {
+        printf("   ⚠️  Pool already destroyed\n");
+    }
+    
+    // 4. 从 Registry 注销（✅ 释放 shared_ptr，引用计数 -1 → 0 → Pool 析构）
+    registry.unregisterPool(pool_id_);
+    
+    printf("   ✅ BufferPool unregistered and destroyed\n\n");
+}
+```
+
+---
+
+#### 8.4.4 异常处理和边界情况
+
+**情况1：Allocator 提前析构，但 Worker 仍在使用**
+
+```cpp
+// 场景：Allocator 先销毁，Worker 后销毁
+
+{
+    NormalAllocator allocator;
+    uint64_t pool_id = allocator.allocatePoolWithBuffers(10, 1MB, "Pool", "Video");
+    
+    // Worker 记录 pool_id
+    worker.setBufferPoolId(pool_id);
+    
+    // ... 使用 ...
+    
+}  // ← Allocator 析构，BufferPool 被销毁
+
+// Worker 仍在运行
+worker.processFrame();  // 调用 registry.getPool(pool_id)
+
+// 结果：registry.getPool() 返回 nullptr
+// Worker 检查后安全退出，不会崩溃 ✅
+```
+
+**情况2：多个使用者同时访问**
+
+```cpp
+// 场景：生产者和消费者同时访问
+
+// 生产者线程
+void producer() {
+    auto pool = registry.getPool(pool_id);  // 临时 shared_ptr
+    Buffer* buf = pool->acquireFree();
+    fillData(buf);
+    pool->submitFilled(buf);
+    // pool 析构，引用计数 -1
+}
+
+// 消费者线程（同时进行）
+void consumer() {
+    auto pool = registry.getPool(pool_id);  // 临时 shared_ptr
+    Buffer* buf = pool->acquireFilled();
+    processData(buf);
+    pool->releaseFilled(buf);
+    // pool 析构，引用计数 -1
+}
+
+// 结果：
+// - Registry 持有 shared_ptr（引用计数 = 1）
+// - 生产者获取时：引用计数 +1 = 2
+// - 消费者获取时：引用计数 +1 = 3 (或 2，如果生产者已释放)
+// - BufferPool 不会被提前销毁 ✅
+```
+
+**情况3：循环获取 Pool**
+
+```cpp
+// ❌ 不推荐：每次循环都获取（性能开销）
+void worker_BAD() {
+    while (running) {
+        auto pool = registry.getPool(pool_id);  // 每次都获取
+        if (!pool) break;
+        
+        Buffer* buf = pool->acquireFilled();
+        // ... 处理 ...
+        pool->releaseFilled(buf);
+    }
+}
+
+// ✅ 推荐：循环外获取一次（减少开销）
+void worker_GOOD() {
+    auto pool = registry.getPool(pool_id);  // 只获取一次
+    if (!pool) return;
+    
+    while (running) {
+        Buffer* buf = pool->acquireFilled();
+        if (!buf) break;  // Pool shutdown
+        
+        // ... 处理 ...
+        pool->releaseFilled(buf);
+    }
+    // pool 离开作用域
+}
+```
+
+**情况4：Registry 清理已销毁的 Pool**
+
+```cpp
+// BufferPoolRegistry 定期清理（可选）
+void BufferPoolRegistry::cleanupDestroyedPools() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    
+    // 遍历查找引用计数为 1 且没有使用者的 Pool
+    for (auto it = pools_.begin(); it != pools_.end(); ) {
+        if (it->second.use_count() == 1) {
+            // 只有 Registry 持有，可以安全清理
+            printf("🧹 Cleaning up unused pool (ID: %lu)\n", it->first);
+            it = pools_.erase(it);
+        } else {
+            ++it;
+        }
+    }
+}
+```
+
+---
+
+### 8.5 多线程并发访问
+
+#### 8.5.1 并发访问场景分析
+
+**典型场景：生产者-消费者模式**
+
+```
+┌─────────────────────────────────────────────────┐
+│           BufferPool (shared_ptr, ref=1)        │
+│   ┌─────────────┐         ┌──────────────┐     │
+│   │ free_queue  │         │ filled_queue │     │
+│   └─────────────┘         └──────────────┘     │
+│         ↑  ↓                    ↑  ↓            │
+└─────────┼──┼────────────────────┼──┼────────────┘
+          │  │                    │  │
+    ┌─────┘  └─────┐        ┌─────┘  └─────┐
+    │               │        │               │
+┌───┴───┐       ┌───┴────┐ ┌┴────────┐ ┌────┴──────┐
+│生产者1│       │生产者2 │ │消费者1  │ │消费者2    │
+│Thread1│       │Thread2 │ │Thread3  │ │Thread4    │
+└───────┘       └────────┘ └─────────┘ └───────────┘
+    ↓               ↓          ↓             ↓
+registry.getPool()  临时 shared_ptr (ref +1)
+```
+
+**并发操作分析：**
+
+| 操作 | 线程A（生产者） | 线程B（消费者） | 并发安全性 |
+|------|---------------|---------------|-----------|
+| **获取 Pool** | `registry.getPool(id)` | `registry.getPool(id)` | ✅ Registry 内部加锁 |
+| **acquireFree** | `pool->acquireFree()` | - | ✅ Pool 内部加锁 |
+| **acquireFilled** | - | `pool->acquireFilled()` | ✅ Pool 内部加锁 |
+| **submitFilled** | `pool->submitFilled(buf)` | - | ✅ Pool 内部加锁 |
+| **releaseFilled** | - | `pool->releaseFilled(buf)` | ✅ Pool 内部加锁 |
+| **Buffer 状态** | `buf->setState(LOCKED)` | `buf->state()` | ✅ atomic 操作 |
+
+---
+
+#### 8.5.2 线程安全保证
+
+**1. Registry 的线程安全**
+
+```cpp
+class BufferPoolRegistry {
+    mutable std::mutex mutex_;  // 保护所有成员
+    
+public:
+    std::shared_ptr<BufferPool> getPool(uint64_t id) const {
+        std::lock_guard<std::mutex> lock(mutex_);  // ✅ 加锁
+        
+        auto it = pools_.find(id);
+        if (it != pools_.end()) {
+            return it->second;  // 返回 shared_ptr（拷贝，引用计数 +1）
+        }
+        return nullptr;
+    }
+    // 锁在这里释放
+};
+
+// 使用
+// 线程A
+auto pool = registry.getPool(pool_id);  // 加锁 → 查找 → 拷贝 → 解锁
+
+// 线程B（同时进行）
+auto pool = registry.getPool(pool_id);  // 等待锁 → 加锁 → 查找 → 拷贝 → 解锁
+
+// ✅ 两个线程都安全获取到 shared_ptr
+```
+
+**2. BufferPool 的线程安全**
+
+```cpp
+class BufferPool {
+    std::mutex mutex_;  // 保护队列
+    std::condition_variable free_cv_;
+    std::condition_variable filled_cv_;
+    
+public:
+    Buffer* acquireFree(bool blocking, int timeout_ms) {
+        std::unique_lock<std::mutex> lock(mutex_);  // ✅ 加锁
+        
+        if (blocking) {
+            while (free_queue_.empty() && running_) {
+                free_cv_.wait(lock);  // 等待时自动释放锁
+            }
+        }
+        
+        if (free_queue_.empty() || !running_) {
+            return nullptr;
+        }
+        
+        Buffer* buf = free_queue_.front();
+        free_queue_.pop();
+        buf->setState(Buffer::State::LOCKED_BY_PRODUCER);
+        
+        return buf;
+        // 锁在这里释放
+    }
+    
+    void submitFilled(Buffer* buffer_ptr) {
+        {
+            std::lock_guard<std::mutex> lock(mutex_);  // ✅ 加锁
+            filled_queue_.push(buffer_ptr);
+            buffer_ptr->setState(Buffer::State::READY_FOR_CONSUME);
+        }  // 锁在这里释放
+        
+        filled_cv_.notify_one();  // ✅ 锁外通知（避免惊群）
+    }
+};
+```
+
+**3. Buffer 的线程安全**
+
+```cpp
+class Buffer {
+    std::atomic<State> state_;  // ✅ 原子状态
+    std::atomic<int> ref_count_;  // ✅ 原子引用计数
+    
+public:
+    void setState(State state) {
+        state_.store(state, std::memory_order_release);  // ✅ 原子写
+    }
+    
+    State state() const {
+        return state_.load(std::memory_order_acquire);  // ✅ 原子读
+    }
+};
+```
+
+---
+
+#### 8.5.3 性能优化建议
+
+**优化1：减少 Registry 访问频率**
+
+```cpp
+// ❌ 不好：每次操作都获取 Pool（频繁加锁）
+void worker_BAD() {
+    while (running) {
+        auto pool = registry.getPool(pool_id);  // 每次都加锁
+        Buffer* buf = pool->acquireFree();
+        // ... 处理 ...
+    }
+}
+
+// ✅ 更好：循环外获取一次（减少加锁）
+void worker_GOOD() {
+    auto pool = registry.getPool(pool_id);  // 只加锁一次
+    if (!pool) return;
+    
+    while (running) {
+        Buffer* buf = pool->acquireFree();  // 不再访问 Registry
+        if (!buf) break;
+        // ... 处理 ...
+    }
+}
+```
+
+**优化2：避免持有锁时做耗时操作**
+
+```cpp
+// ❌ 错误：在锁内做耗时操作
+void BufferPool::submitFilled_BAD(Buffer* buffer_ptr) {
+    std::lock_guard<std::mutex> lock(mutex_);  // 加锁
+    
+    filled_queue_.push(buffer_ptr);
+    buffer_ptr->setState(Buffer::State::READY_FOR_CONSUME);
+    
+    filled_cv_.notify_one();  // ❌ 锁内通知（性能差）
+}  // 锁在这里释放
+
+// ✅ 正确：锁外通知
+void BufferPool::submitFilled_GOOD(Buffer* buffer_ptr) {
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        filled_queue_.push(buffer_ptr);
+        buffer_ptr->setState(Buffer::State::READY_FOR_CONSUME);
+    }  // 锁在这里释放
+    
+    filled_cv_.notify_one();  // ✅ 锁外通知（性能好）
+}
+```
+
+**优化3：使用非阻塞模式避免死锁**
+
+```cpp
+// 场景：编码器，宁可丢帧也不要阻塞
+void encoder() {
+    auto pool = registry.getPool(pool_id);
+    if (!pool) return;
+    
+    while (running) {
+        // ✅ 非阻塞模式：如果没有 free buffer，立即返回
+        Buffer* buf = pool->acquireFree(false, 0);  // blocking=false
+        if (!buf) {
+            dropped_frames_++;
+            printf("⚠️  No free buffer, frame dropped\n");
+            continue;
+        }
+        
+        encodeFrame(buf);
+        pool->submitFilled(buf);
+    }
+}
+```
+
+---
+
+### 8.6 最佳实践与反模式
+
+#### 8.6.1 推荐做法（✅ DO）
+
+**DO #1：从 Registry 获取 Pool（临时持有）**
+
+```cpp
+// ✅ 推荐
+void processFrame(uint64_t pool_id) {
+    auto pool = BufferPoolRegistry::getInstance().getPool(pool_id);
+    if (!pool) {
+        printf("⚠️  Pool not found or destroyed\n");
+        return;
+    }
+    
+    Buffer* buf = pool->acquireFilled();
+    // ... 处理 ...
+    pool->releaseFilled(buf);
+    
+    // pool 自动析构，引用计数 -1
+}
+```
+
+**DO #2：使用 RAII 确保 shared_ptr 及时释放**
+
+```cpp
+// ✅ 推荐：使用作用域控制生命周期
+void worker() {
+    while (running) {
+        {
+            auto pool = registry.getPool(pool_id);  // 临时持有
+            if (!pool) break;
+            
+            Buffer* buf = pool->acquireFilled();
+            if (!buf) break;
+            
+            processData(buf->data(), buf->size());
+            pool->releaseFilled(buf);
+            
+        }  // ← pool 自动析构，引用计数 -1
+        
+        // 其他处理...
+    }
+}
+```
+
+**DO #3：检查 Pool 是否有效**
+
+```cpp
+// ✅ 推荐：始终检查 nullptr
+auto pool = registry.getPool(pool_id);
+if (!pool) {
+    // Pool 已销毁或不存在
+    handleError();
+    return;
+}
+
+// 安全使用 pool
+```
+
+**DO #4：Allocator 负责销毁**
+
+```cpp
+// ✅ 推荐：Allocator 的析构函数清理
+class MyAllocator : public BufferAllocatorBase {
+public:
+    ~MyAllocator() {
+        // 基类析构会自动清理 Buffer 和 unregister
+        // 无需额外操作
+    }
+};
+```
+
+**DO #5：使用 weak_ptr 观察**
+
+```cpp
+// ✅ 推荐：长期观察但不持有
+class Monitor {
+    std::weak_ptr<BufferPool> pool_weak_;
+    
+    void checkStatus() {
+        auto pool = pool_weak_.lock();  // 尝试提升
+        if (pool) {
+            printf("Pool still alive: free=%d, filled=%d\n",
+                   pool->getFreeCount(), pool->getFilledCount());
+        } else {
+            printf("Pool destroyed\n");
+        }
+    }
+};
+```
+
+---
+
+#### 8.6.2 常见错误（❌ DON'T）
+
+**DON'T #1：直接持有 BufferPool 指针**
+
+```cpp
+// ❌ 错误：长期持有 shared_ptr
+class Worker_BAD {
+    std::shared_ptr<BufferPool> pool_;  // ❌ 长期持有
+    
+    void init(uint64_t pool_id) {
+        pool_ = registry.getPool(pool_id);  // 引用计数 +1
+    }
+    
+    // 问题：
+    // 1. Worker 销毁前，Pool 无法被销毁（引用计数 ≥ 2）
+    // 2. 如果 Allocator 先析构，Buffer 可能已释放，但 Pool 仍存在
+};
+
+// ✅ 正确：只记录 ID
+class Worker_GOOD {
+    uint64_t pool_id_;  // ✅ 只记录 ID
+    
+    void process() {
+        auto pool = registry.getPool(pool_id_);  // 临时持有
+        if (!pool) return;
+        // ... 使用 ...
+    }
+};
+```
+
+**DON'T #2：绕过 Registry 访问 Pool**
+
+```cpp
+// ❌ 错误：通过裸指针访问
+class ProductionLine_BAD {
+    std::unique_ptr<BufferPool> pool_;  // ❌ 绕过 Registry
+    
+    BufferPool* getPool() {
+        return pool_.get();  // ❌ 返回裸指针
+    }
+};
+
+// 消费者
+BufferPool* pool = producer.getPool();  // ❌ 裸指针，不安全
+Buffer* buf = pool->acquireFilled();  // 如果 producer 销毁，崩溃！
+
+// ✅ 正确：通过 Registry 访问
+class ProductionLine_GOOD {
+    uint64_t pool_id_;  // ✅ 只记录 ID
+    
+    uint64_t getPoolId() const {
+        return pool_id_;
+    }
+};
+
+// 消费者
+uint64_t pool_id = producer.getPoolId();
+auto pool = registry.getPool(pool_id);  // ✅ 安全
+if (!pool) return;
+Buffer* buf = pool->acquireFilled();
+```
+
+**DON'T #3：忘记检查 nullptr**
+
+```cpp
+// ❌ 错误：未检查 nullptr
+auto pool = registry.getPool(pool_id);
+Buffer* buf = pool->acquireFilled();  // ❌ 如果 pool 为 nullptr，崩溃！
+
+// ✅ 正确：始终检查
+auto pool = registry.getPool(pool_id);
+if (!pool) {
+    printf("⚠️  Pool not found\n");
+    return;
+}
+Buffer* buf = pool->acquireFilled();  // ✅ 安全
+```
+
+**DON'T #4：在析构中阻塞等待**
+
+```cpp
+// ❌ 错误：析构函数中阻塞等待 Pool
+class Worker_BAD {
+    ~Worker_BAD() {
+        auto pool = registry.getPool(pool_id_);
+        Buffer* buf = pool->acquireFilled(true, -1);  // ❌ 可能永远阻塞！
+        // 如果 Pool 已 shutdown，永远等不到
+    }
+};
+
+// ✅ 正确：析构前先停止，或使用非阻塞模式
+class Worker_GOOD {
+    ~Worker_GOOD() {
+        auto pool = registry.getPool(pool_id_);
+        if (pool) {
+            pool->shutdown();  // ✅ 先停止
+        }
+        // 然后清理资源
+    }
+};
+```
+
+**DON'T #5：在锁内调用外部代码**
+
+```cpp
+// ❌ 错误：在持有 Pool 锁时调用回调
+void BufferPool::submitFilled_BAD(Buffer* buffer_ptr) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    
+    filled_queue_.push(buffer_ptr);
+    
+    // ❌ 回调可能做耗时操作或加其他锁，导致死锁
+    if (on_buffer_filled_callback_) {
+        on_buffer_filled_callback_(buffer_ptr);
+    }
+}
+
+// ✅ 正确：锁外调用回调
+void BufferPool::submitFilled_GOOD(Buffer* buffer_ptr) {
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        filled_queue_.push(buffer_ptr);
+    }  // 锁在这里释放
+    
+    // ✅ 锁外调用回调
+    if (on_buffer_filled_callback_) {
+        on_buffer_filled_callback_(buffer_ptr);
+    }
+}
+```
+
+---
+
+#### 8.6.3 迁移指南（从旧架构到新架构）
+
+**步骤1：修改 Allocator 代码**
+
+```cpp
+// ❌ 旧代码（v1.5）
+class BufferAllocatorBase {
+    std::unique_ptr<BufferPool> managed_pool_uptr_;  // 持有指针
+    
+    std::unique_ptr<BufferPool> allocatePoolWithBuffers(...) {
+        managed_pool_uptr_ = std::make_unique<BufferPool>(...);
+        // ...
+        return std::move(managed_pool_uptr_);  // 转移所有权
+    }
+};
+
+// ✅ 新代码（v2.0）
+class BufferAllocatorBase {
+    uint64_t pool_id_ = 0;  // 只记录 ID
+    
+    uint64_t allocatePoolWithBuffers(...) {
+        auto pool = std::make_shared<BufferPool>(...);
+        // ...
+        pool_id_ = registry.registerPool(pool);  // 注册并转移所有权
+        return pool_id_;  // 返回 ID
+    }
+    
+    ~BufferAllocatorBase() {
+        // 通过友元清理
+        auto pool = registry.getPoolForAllocatorCleanup(pool_id_);
+        // ... 清理 Buffer ...
+        registry.unregisterPool(pool_id_);
+    }
+};
+```
+
+**步骤2：修改 Worker 代码**
+
+```cpp
+// ❌ 旧代码（v1.5）
+class WorkerBase {
+    std::unique_ptr<BufferPool> buffer_pool_uptr_;  // 持有指针
+    
+    std::unique_ptr<BufferPool> getOutputBufferPool() {
+        return std::move(buffer_pool_uptr_);  // 转移所有权
+    }
+};
+
+// ✅ 新代码（v2.0）
+class WorkerBase {
+    uint64_t buffer_pool_id_ = 0;  // 只记录 ID
+    
+    uint64_t getOutputBufferPoolId() const {
+        return buffer_pool_id_;  // 返回 ID
+    }
+};
+```
+
+**步骤3：修改 ProductionLine 代码**
+
+```cpp
+// ❌ 旧代码（v1.5）
+class VideoProductionLine {
+    std::unique_ptr<BufferPool> worker_buffer_pool_uptr_;  // 持有指针
+    BufferPool* working_buffer_pool_ptr_;  // 裸指针
+    
+    bool start(const Config& config) {
+        worker_buffer_pool_uptr_ = worker->getOutputBufferPool();  // 获取所有权
+        working_buffer_pool_ptr_ = worker_buffer_pool_uptr_.get();  // 暴露裸指针
+        return true;
+    }
+    
+    BufferPool* getWorkingBufferPool() const {
+        return working_buffer_pool_ptr_;  // ❌ 返回裸指针给消费者
+    }
+};
+
+// ✅ 新代码（v2.0）
+class VideoProductionLine {
+    uint64_t worker_buffer_pool_id_ = 0;  // 只记录 ID
+    
+    bool start(const Config& config) {
+        worker_buffer_pool_id_ = worker->getOutputBufferPoolId();  // 获取 ID
+        return true;
+    }
+    
+    uint64_t getWorkingBufferPoolId() const {
+        return worker_buffer_pool_id_;  // ✅ 返回 ID
+    }
+};
+```
+
+**步骤4：修改 Consumer 代码**
+
+```cpp
+// ❌ 旧代码（v1.5）
+void consumer() {
+    BufferPool* pool = producer.getWorkingBufferPool();  // ❌ 裸指针
+    
+    while (running) {
+        Buffer* buf = pool->acquireFilled();  // 不安全
+        processData(buf->data(), buf->size());
+        pool->releaseFilled(buf);
+    }
+}
+
+// ✅ 新代码（v2.0）
+void consumer() {
+    uint64_t pool_id = producer.getWorkingBufferPoolId();  // ✅ 获取 ID
+    
+    auto pool = BufferPoolRegistry::getInstance().getPool(pool_id);  // ✅ 从 Registry 获取
+    if (!pool) {
+        printf("⚠️  Pool not found\n");
+        return;
+    }
+    
+    while (running) {
+        Buffer* buf = pool->acquireFilled();
+        if (!buf) break;
+        
+        processData(buf->data(), buf->size());
+        pool->releaseFilled(buf);
+    }
+}
+```
+
+**步骤5：修改 Registry 友元声明**
+
+```cpp
+// BufferPoolRegistry.hpp
+class BufferPoolRegistry {
+    friend class BufferAllocatorBase;  // ✅ 新增友元声明
+    
+public:
+    // ... 公开接口不变 ...
+    
+private:
+    // ✅ 新增私有方法
+    std::shared_ptr<BufferPool> getPoolForAllocatorCleanup(uint64_t id);
+};
+```
+
+---
+
+## 9. 总结
+
+### 9.1 核心概念回顾
 
 | 概念 | 说明 |
 |-----|------|
