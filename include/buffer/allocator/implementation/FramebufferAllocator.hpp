@@ -117,6 +117,11 @@ public:
     /**
      * @brief 批量创建 Buffer 并构建 BufferPool（实际上是批量包装外部内存）
      * 
+     * v2.0 设计：
+     * - 返回 pool_id 而不是 unique_ptr
+     * - Registry 独占持有 BufferPool（shared_ptr，引用计数=1）
+     * - Allocator 只记录 pool_id，不持有指针
+     * 
      * 注意：
      * - count 和 size 参数会被忽略
      * - 使用构造时传入的 external_buffers_ 数量和大小
@@ -125,9 +130,9 @@ public:
      * @param size 忽略（使用 external_buffers_[i].size）
      * @param name BufferPool 名称
      * @param category BufferPool 分类
-     * @return unique_ptr<BufferPool> 成功返回 pool，失败返回 nullptr
+     * @return uint64_t 成功返回 pool_id，失败返回 0
      */
-    std::unique_ptr<BufferPool> allocatePoolWithBuffers(
+    uint64_t allocatePoolWithBuffers(
         int count,
         size_t size,
         const std::string& name,
@@ -137,37 +142,45 @@ public:
     /**
      * @brief 创建单个 Buffer 并注入到指定 BufferPool（内部分配）
      * 
+     * v2.0: @param pool_id BufferPool ID（从 Registry 获取）
+     * 
      * @note FramebufferAllocator 不支持内部分配，应使用 allocatePoolWithBuffers 或 injectExternalBufferToPool
      */
     Buffer* injectBufferToPool(
+        uint64_t pool_id,
         size_t size,
-        BufferPool* pool,
         QueueType queue = QueueType::FREE
     ) override;
     
     /**
      * @brief 注入外部已分配的内存到 BufferPool（外部注入）
      * 
+     * v2.0: @param pool_id BufferPool ID（从 Registry 获取）
+     * 
      * @note FramebufferAllocator 支持此方法，可以包装外部内存为 Buffer
      * @note 这是 LinuxFramebufferDevice 使用的主要方法（逐个注入）
      */
     Buffer* injectExternalBufferToPool(
+        uint64_t pool_id,
         void* virt_addr,
         uint64_t phys_addr,
         size_t size,
-        BufferPool* pool,
         QueueType queue = QueueType::FREE
     ) override;
     
     /**
      * @brief 从 BufferPool 移除并销毁 Buffer
+     * 
+     * v2.0: @param pool_id BufferPool ID
      */
-    bool removeBufferFromPool(Buffer* buffer, BufferPool* pool) override;
+    bool removeBufferFromPool(uint64_t pool_id, Buffer* buffer) override;
     
     /**
      * @brief 销毁整个 BufferPool 及其所有 Buffer
+     * 
+     * v2.0: @param pool_id BufferPool ID
      */
-    bool destroyPool(BufferPool* pool) override;
+    bool destroyPool(uint64_t pool_id) override;
     
 protected:
     /**
@@ -196,10 +209,6 @@ protected:
     void deallocateBuffer(Buffer* buffer) override;
     
 private:
-    /**
-     * @brief 清理 Pool 中所有属于此 Allocator 的 buffer（辅助方法）
-     */
-    void cleanupPool(BufferPool* pool);
     
     /**
      * @brief 从 LinuxFramebufferDevice 构建 BufferInfo 列表（私有辅助方法）

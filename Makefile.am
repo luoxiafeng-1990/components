@@ -17,6 +17,7 @@ libcomponents_la_SOURCES = \
     source/buffer/Buffer.cpp \
     source/buffer/allocator/factory/BufferAllocatorFactory.cpp \
     source/buffer/allocator/facade/BufferAllocatorFacade.cpp \
+    source/buffer/allocator/base/BufferAllocatorBase.cpp \
     source/buffer/allocator/implementation/NormalAllocator.cpp \
     source/buffer/allocator/implementation/FramebufferAllocator.cpp \
     source/buffer/allocator/implementation/AVFrameAllocator.cpp \
@@ -46,4 +47,3 @@ AM_CXXFLAGS = -g -O0 -Wall -std=c++17
 else
 AM_CXXFLAGS = -O2 -std=c++17
 endif
-

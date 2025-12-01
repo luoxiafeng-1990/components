@@ -1,4 +1,5 @@
 #include "productionline/VideoProductionLine.hpp"
+#include "buffer/BufferPoolRegistry.hpp"
 #include "monitor/Timer.hpp"
 #include <stdio.h>
 #include <chrono>
@@ -83,11 +84,12 @@ bool VideoProductionLine::start(const Config& config) {
         return false;
     }
     
-    // v2.0: 记录 pool_id 并从 Registry 获取临时访问
+    // v2.0: 记录 pool_id 并从 Registry 获取临时访问（返回 weak_ptr）
     working_buffer_pool_id_ = worker_pool_id;
-    auto working_buffer_pool_sptr = BufferPoolRegistry::getInstance().getPool(worker_pool_id);
+    auto working_buffer_pool_weak = BufferPoolRegistry::getInstance().getPool(worker_pool_id);
+    auto working_buffer_pool_sptr = working_buffer_pool_weak.lock();
     if (!working_buffer_pool_sptr) {
-        setError("Failed to get BufferPool from Registry");
+        setError("Failed to get BufferPool from Registry (pool may have been destroyed)");
         worker_facade_sptr_.reset();
         return false;
     }

@@ -122,7 +122,7 @@ public:
     const char* getPath() const override;
     bool hasMoreFrames() const override;
     bool isAtEnd() const override;
-    std::unique_ptr<BufferPool> getOutputBufferPool() override;
+    uint64_t getOutputBufferPoolId() override;
 };
 
 #endif // BUFFER_FILLING_WORKER_FACADE_HPP

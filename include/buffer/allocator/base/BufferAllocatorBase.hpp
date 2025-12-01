@@ -230,6 +230,22 @@ protected:
      */
     uint64_t pool_id_ = 0;
     
+    /**
+     * @brief 供子类清理时使用（通过友元访问 Registry）
+     * 
+     * v2.0 设计：
+     * - BufferAllocatorBase 是 BufferPoolRegistry 的友元
+     * - 子类可以通过此方法访问 Registry 的私有清理方法
+     * - 返回 shared_ptr（不是 weak_ptr），保证清理期间 Pool 不被销毁
+     * 
+     * @param pool_id BufferPool ID
+     * @return shared_ptr<BufferPool> 临时持有，用于清理
+     * 
+     * @note 只有子类在 destroyPool() 实现中使用
+     * @note 实现位于 BufferAllocatorBase.cpp 中（避免头文件依赖）
+     */
+    std::shared_ptr<BufferPool> getPoolForCleanup(uint64_t pool_id);
+    
     // ==================== 注意：以下成员已删除 ====================
     // 
     // 设计变更（v2.0）：

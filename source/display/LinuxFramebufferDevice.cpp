@@ -2,6 +2,7 @@
 #include "buffer/allocator/facade/BufferAllocatorFacade.hpp"
 #include "buffer/allocator/factory/BufferAllocatorFactory.hpp"
 #include "buffer/allocator/implementation/FramebufferAllocator.hpp"
+#include "buffer/BufferPoolRegistry.hpp"
 #include <stdio.h>
 #include <fcntl.h>
 #include <unistd.h>
@@ -37,7 +38,8 @@ LinuxFramebufferDevice::LinuxFramebufferDevice()
     , fb_index_(-1)
     , framebuffer_base_ptr_(nullptr)
     , framebuffer_total_size_(0)
-    , allocator_facade_(nullptr), buffer_pool_(nullptr)  // 在 initialize() 中自动创建
+    , allocator_facade_(nullptr)
+    , buffer_pool_id_(0)  // v2.0: 在 initialize() 中自动创建并注册
     , buffer_count_(0)
     , current_buffer_index_(0)
     , width_(0)
@@ -105,16 +107,16 @@ bool LinuxFramebufferDevice::initialize(int device_index) {
     }
     printf("✅ allocator_facade_ created for FRAMEBUFFER type\n");
     
-    // 6. 通过 allocator 创建空的 BufferPool
+    // 6. 通过 allocator 创建空的 BufferPool（v2.0: 返回 pool_id）
     std::string pool_name = "LinuxFramebufferDevice_fb" + std::to_string(fb_index_);
-    buffer_pool_ = allocator_facade_->allocatePoolWithBuffers(
+    buffer_pool_id_ = allocator_facade_->allocatePoolWithBuffers(
         0,  // count = 0，创建空 pool（稍后动态注入）
         0,  // size = 0，不使用
         pool_name,
         "Display"
     );
     
-    if (!buffer_pool_) {
+    if (buffer_pool_id_ == 0) {
         printf("❌ ERROR: Failed to create BufferPool through allocator\n");
         allocator_facade_.reset();
         munmap(framebuffer_base_ptr_, framebuffer_total_size_);
@@ -123,25 +125,32 @@ bool LinuxFramebufferDevice::initialize(int device_index) {
         return false;
     }
     
-    printf("✅ Empty BufferPool '%s' created\n", buffer_pool_->getName().c_str());
+    // v2.0: 从 Registry 获取 Pool 以获取名称
+    auto pool_weak = BufferPoolRegistry::getInstance().getPool(buffer_pool_id_);
+    auto pool = pool_weak.lock();
+    if (pool) {
+        printf("✅ Empty BufferPool '%s' created (ID: %lu)\n", pool->getName().c_str(), buffer_pool_id_);
+    } else {
+        printf("✅ Empty BufferPool created (ID: %lu)\n", buffer_pool_id_);
+    }
     
-    // 7. 动态注入 framebuffer buffers 到 BufferPool
+    // 7. 动态注入 framebuffer buffers 到 BufferPool（v2.0: 使用 pool_id）
     unsigned char* base = (unsigned char*)framebuffer_base_ptr_;
     for (int i = 0; i < buffer_count_; i++) {
         void* virt_addr = (void*)(base + buffer_size_ * i);
         uint64_t phys_addr = 0;  // TODO: 获取实际物理地址
         
         Buffer* buffer = allocator_facade_->injectExternalBufferToPool(
-            virt_addr,
-            phys_addr,
-            buffer_size_,
-            buffer_pool_.get(),
+            buffer_pool_id_,  // v2.0: 第一个参数是 pool_id
+            virt_addr,        // v2.0: 第二个参数是 virt_addr
+            phys_addr,        // v2.0: 第三个参数是 phys_addr
+            buffer_size_,     // v2.0: 第四个参数是 size
             QueueType::FREE
         );
         
         if (!buffer) {
             printf("❌ ERROR: Failed to inject buffer #%d to BufferPool\n", i);
-            buffer_pool_.reset();
+            buffer_pool_id_ = 0;
             allocator_facade_.reset();
             munmap(framebuffer_base_ptr_, framebuffer_total_size_);
             close(fd_);
@@ -150,15 +159,28 @@ bool LinuxFramebufferDevice::initialize(int device_index) {
         }
     }
     
-    printf("✅ All %d framebuffer buffers injected to BufferPool '%s'\n",
-           buffer_count_, buffer_pool_->getName().c_str());
+    // v2.0: 从 Registry 获取 Pool 以获取名称
+    pool = pool_weak.lock();
+    if (pool) {
+        printf("✅ All %d framebuffer buffers injected to BufferPool '%s'\n",
+               buffer_count_, pool->getName().c_str());
+    } else {
+        printf("✅ All %d framebuffer buffers injected to BufferPool (ID: %lu)\n",
+               buffer_count_, buffer_pool_id_);
+    }
     
     is_initialized_ = true;
     current_buffer_index_ = 0;
     
     // 打印初始化成功的总结信息
-    printf("✅ Display initialized: %dx%d, %d buffers, %d bits/pixel\n",
-           width_, height_, buffer_pool_->getTotalCount(), bits_per_pixel_);
+    pool = pool_weak.lock();
+    if (pool) {
+        printf("✅ Display initialized: %dx%d, %d buffers, %d bits/pixel\n",
+               width_, height_, pool->getTotalCount(), bits_per_pixel_);
+    } else {
+        printf("✅ Display initialized: %dx%d, %d buffers, %d bits/pixel\n",
+               width_, height_, buffer_count_, bits_per_pixel_);
+    }
     
     return true;
 }
@@ -168,9 +190,8 @@ void LinuxFramebufferDevice::cleanup() {
         return;
     }
     
-    // 1. 重置 BufferPool 指针（不拥有所有权，只重置指针）
-    // BufferPool 的生命周期由 allocator 管理
-    buffer_pool_.reset();
+    // v2.0: 重置 pool_id（BufferPool 的生命周期由 Registry 和 Allocator 管理）
+    buffer_pool_id_ = 0;
     
     // 2. 重置 allocator_facade_（会自动销毁底层 allocator 和 BufferPool）
     allocator_facade_.reset();
@@ -212,10 +233,13 @@ int LinuxFramebufferDevice::getBitsPerPixel() const {
 }
 
 int LinuxFramebufferDevice::getBufferCount() const {
-    if (buffer_pool_) {
-        return buffer_pool_->getTotalCount();
+    if (buffer_pool_id_ != 0) {
+        auto pool_weak = BufferPoolRegistry::getInstance().getPool(buffer_pool_id_);
+        if (auto pool = pool_weak.lock()) {
+            return pool->getTotalCount();
+        }
     }
-    return 0;
+    return buffer_count_;  // 返回硬件 buffer 数量
 }
 
 size_t LinuxFramebufferDevice::getBufferSize() const {
@@ -233,13 +257,21 @@ bool LinuxFramebufferDevice::displayBuffer(Buffer* buffer) {
         return false;
     }
     
-    if (!buffer_pool_) {
+    if (buffer_pool_id_ == 0) {
         printf("❌ ERROR: BufferPool not initialized\n");
         return false;
     }
     
+    // v2.0: 从 Registry 获取 Pool
+    auto pool_weak = BufferPoolRegistry::getInstance().getPool(buffer_pool_id_);
+    auto pool = pool_weak.lock();
+    if (!pool) {
+        printf("❌ ERROR: BufferPool (ID: %lu) not found or already destroyed\n", buffer_pool_id_);
+        return false;
+    }
+    
     // 验证Buffer是否属于当前设备的BufferPool
-    Buffer* pool_buffer = buffer_pool_->getBufferById(buffer->id());
+    Buffer* pool_buffer = pool->getBufferById(buffer->id());
     if (!pool_buffer || pool_buffer != buffer) {
         printf("❌ ERROR: Buffer (ID=%u) does not belong to device's BufferPool\n", 
                buffer->id());
@@ -287,10 +319,14 @@ bool LinuxFramebufferDevice::displayBuffer(BufferPool* pool, int buffer_index) {
         return false;
     }
     
-    // 验证BufferPool是否是当前设备的BufferPool
-    if (pool != buffer_pool_.get()) {
-        printf("⚠️  Warning: BufferPool mismatch (provided pool != device's buffer_pool_)\n");
-        printf("   Continuing anyway...\n");
+    // v2.0: 验证BufferPool是否是当前设备的BufferPool
+    if (buffer_pool_id_ != 0) {
+        auto pool_weak = BufferPoolRegistry::getInstance().getPool(buffer_pool_id_);
+        auto device_pool = pool_weak.lock();
+        if (device_pool && pool != device_pool.get()) {
+            printf("⚠️  Warning: BufferPool mismatch (provided pool != device's buffer_pool_)\n");
+            printf("   Continuing anyway...\n");
+        }
     }
     
     if (buffer_index < 0 || buffer_index >= buffer_count_) {
@@ -540,8 +576,16 @@ bool LinuxFramebufferDevice::displayFilledFramebuffer(Buffer* buffer) {
         return false;
     }
     
-    if (!buffer_pool_) {
+    if (buffer_pool_id_ == 0) {
         printf("❌ ERROR: BufferPool not initialized\n");
+        return false;
+    }
+    
+    // v2.0: 从 Registry 获取 Pool
+    auto pool_weak = BufferPoolRegistry::getInstance().getPool(buffer_pool_id_);
+    auto pool = pool_weak.lock();
+    if (!pool) {
+        printf("❌ ERROR: BufferPool (ID: %lu) not found or already destroyed\n", buffer_pool_id_);
         return false;
     }
     
@@ -557,7 +601,7 @@ bool LinuxFramebufferDevice::displayFilledFramebuffer(Buffer* buffer) {
     }
     
     // 可选：验证这个 buffer 是否确实属于我们的 BufferPool
-    Buffer* pool_buffer = buffer_pool_->getBufferById(buffer_id);
+    Buffer* pool_buffer = pool->getBufferById(buffer_id);
     if (pool_buffer != buffer) {
         printf("❌ ERROR: Buffer (id=%u) does not belong to this framebuffer's BufferPool\n", 
                buffer_id);
@@ -606,8 +650,16 @@ bool LinuxFramebufferDevice::displayBufferByMemcpyToFramebuffer(Buffer* buffer) 
         return false;
     }
     
-    if (!buffer_pool_) {
+    if (buffer_pool_id_ == 0) {
         printf("❌ ERROR: BufferPool not initialized\n");
+        return false;
+    }
+    
+    // v2.0: 从 Registry 获取 Pool
+    auto pool_weak = BufferPoolRegistry::getInstance().getPool(buffer_pool_id_);
+    auto pool = pool_weak.lock();
+    if (!pool) {
+        printf("❌ ERROR: BufferPool (ID: %lu) not found or already destroyed\n", buffer_pool_id_);
         return false;
     }
     
@@ -615,7 +667,7 @@ bool LinuxFramebufferDevice::displayBufferByMemcpyToFramebuffer(Buffer* buffer) 
     static int display_count = 0;
     
     // 获取一个空闲的 framebuffer buffer 来接收数据
-    Buffer* fb_buffer = buffer_pool_->acquireFree(false, 0);  // 非阻塞获取
+    Buffer* fb_buffer = pool->acquireFree(false, 0);  // 非阻塞获取
     if (!fb_buffer) {
         printf("❌ ERROR: No free framebuffer buffer available\n");
         printf("   Hint: All framebuffer buffers are busy, try again later\n");
@@ -642,7 +694,7 @@ bool LinuxFramebufferDevice::displayBufferByMemcpyToFramebuffer(Buffer* buffer) 
     struct fb_var_screeninfo var_info;
     if (ioctl(fd_, FBIOGET_VSCREENINFO, &var_info) < 0) {
         printf("❌ ERROR: FBIOGET_VSCREENINFO failed: %s\n", strerror(errno));
-        buffer_pool_->releaseFilled(fb_buffer);  // 归还 buffer
+        pool->releaseFilled(fb_buffer);  // 归还 buffer
         return false;
     }
     
@@ -652,7 +704,7 @@ bool LinuxFramebufferDevice::displayBufferByMemcpyToFramebuffer(Buffer* buffer) 
     // 通过ioctl通知驱动切换buffer
     if (ioctl(fd_, FBIOPAN_DISPLAY, &var_info) < 0) {
         printf("❌ ERROR: FBIOPAN_DISPLAY failed: %s\n", strerror(errno));
-        buffer_pool_->releaseFilled(fb_buffer);  // 归还 buffer
+        pool->releaseFilled(fb_buffer);  // 归还 buffer
         return false;
     }
     
@@ -667,7 +719,7 @@ bool LinuxFramebufferDevice::displayBufferByMemcpyToFramebuffer(Buffer* buffer) 
     // 这是安全的，因为：
     // 1. 硬件会继续显示这个 buffer（直到下次切换）
     // 2. 有多个 framebuffer（通常4个），足够轮转
-    buffer_pool_->releaseFilled(fb_buffer);
+    pool->releaseFilled(fb_buffer);
     
     current_buffer_index_ = fb_buffer_id;
     return true;

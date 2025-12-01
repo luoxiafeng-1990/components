@@ -21,6 +21,12 @@ NormalAllocator::NormalAllocator(BufferMemoryAllocatorType type, size_t alignmen
 }
 
 NormalAllocator::~NormalAllocator() {
+    // v2.0: 在子类析构中清理 BufferPool
+    // 此时对象还是 NormalAllocator 类型，可以正确调用子类的 destroyPool()
+    if (pool_id_ != 0) {
+        printf("🧹 [NormalAllocator] Cleaning up BufferPool (ID: %lu)...\n", pool_id_);
+        destroyPool(pool_id_);  // 调用子类的 destroyPool() 实现
+    }
     printf("🧹 NormalAllocator destroyed\n");
 }
 
@@ -151,10 +157,11 @@ Buffer* NormalAllocator::injectBufferToPool(
     size_t size,
     QueueType queue
 ) {
-    // v2.0: 从 Registry 获取 Pool（临时访问）
-    auto pool = BufferPoolRegistry::getInstance().getPool(pool_id);
+    // v2.0: 从 Registry 获取 Pool（返回 weak_ptr）
+    auto pool_weak = BufferPoolRegistry::getInstance().getPool(pool_id);
+    auto pool = pool_weak.lock();
     if (!pool) {
-        printf("❌ [NormalAllocator] injectBufferToPool: pool_id %lu not found\n", pool_id);
+        printf("❌ [NormalAllocator] injectBufferToPool: pool_id %lu not found or already destroyed\n", pool_id);
         return nullptr;
     }
     
@@ -201,10 +208,11 @@ Buffer* NormalAllocator::injectExternalBufferToPool(
         return nullptr;
     }
     
-    // v2.0: 从 Registry 获取 Pool（临时访问）
-    auto pool = BufferPoolRegistry::getInstance().getPool(pool_id);
+    // v2.0: 从 Registry 获取 Pool（返回 weak_ptr）
+    auto pool_weak = BufferPoolRegistry::getInstance().getPool(pool_id);
+    auto pool = pool_weak.lock();
     if (!pool) {
-        printf("❌ [NormalAllocator] injectExternalBufferToPool: pool_id %lu not found\n", pool_id);
+        printf("❌ [NormalAllocator] injectExternalBufferToPool: pool_id %lu not found or already destroyed\n", pool_id);
         return nullptr;
     }
     
@@ -252,10 +260,11 @@ bool NormalAllocator::removeBufferFromPool(uint64_t pool_id, Buffer* buffer) {
         return false;
     }
     
-    // v2.0: 从 Registry 获取 Pool（临时访问）
-    auto pool = BufferPoolRegistry::getInstance().getPool(pool_id);
+    // v2.0: 从 Registry 获取 Pool（返回 weak_ptr）
+    auto pool_weak = BufferPoolRegistry::getInstance().getPool(pool_id);
+    auto pool = pool_weak.lock();
     if (!pool) {
-        printf("❌ [NormalAllocator] removeBufferFromPool: pool_id %lu not found\n", pool_id);
+        printf("❌ [NormalAllocator] removeBufferFromPool: pool_id %lu not found or already destroyed\n", pool_id);
         return false;
     }
     
@@ -287,8 +296,8 @@ bool NormalAllocator::destroyPool(uint64_t pool_id) {
         return false;
     }
     
-    // v2.0: 通过友元从 Registry 获取 Pool（临时访问）
-    auto pool = BufferPoolRegistry::getInstance().getPoolForAllocatorCleanup(pool_id);
+    // v2.0: 通过基类辅助方法从 Registry 获取 Pool（临时访问）
+    auto pool = getPoolForCleanup(pool_id);
     if (!pool) {
         printf("⚠️  [NormalAllocator] destroyPool: pool_id %lu not found (already destroyed?)\n", pool_id);
         return false;

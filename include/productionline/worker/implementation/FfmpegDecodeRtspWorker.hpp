@@ -188,7 +188,7 @@ public:
     const char* getWorkerType() const override {
         return "FfmpegDecodeRtspWorker";
     }
-    std::unique_ptr<BufferPool> getOutputBufferPool() override;
+    uint64_t getOutputBufferPoolId() override;
     
     // ============ RTSP 特有接口 ============
     

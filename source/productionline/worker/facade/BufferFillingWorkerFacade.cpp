@@ -188,12 +188,12 @@ bool BufferFillingWorkerFacade::isAtEnd() const {
     return worker_base_uptr_ && worker_base_uptr_->isAtEnd();
 }
 
-// ============ 提供原材料（BufferPool）============
+// ============ 提供原材料（BufferPool ID）============
 
-std::unique_ptr<BufferPool> BufferFillingWorkerFacade::getOutputBufferPool() {
+uint64_t BufferFillingWorkerFacade::getOutputBufferPoolId() {
     if (worker_base_uptr_) {
-        return worker_base_uptr_->getOutputBufferPool();
+        return worker_base_uptr_->getOutputBufferPoolId();
     }
-    return nullptr;
+    return 0;
 }
 
