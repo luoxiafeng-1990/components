@@ -8,7 +8,7 @@
 // ============================================================
 
 VideoProductionLine::VideoProductionLine()
-    : worker_buffer_pool_uptr_(nullptr)
+    : working_buffer_pool_id_(0)
     , working_buffer_pool_ptr_(nullptr)
     , running_(false)
     , produced_frames_(0)
@@ -16,7 +16,7 @@ VideoProductionLine::VideoProductionLine()
     , next_frame_index_(0)
     , total_frames_(0)
 {
-    printf("🎬 VideoProductionLine created (Worker will create BufferPool)\n");
+    printf("🎬 VideoProductionLine created (v2.0: Registry持有BufferPool)\n");
 }
 
 VideoProductionLine::~VideoProductionLine() {
@@ -74,18 +74,28 @@ bool VideoProductionLine::start(const Config& config) {
         return false;
     }
     
-    // 🎯 Worker必须在open()时自动创建BufferPool（通过调用Allocator）
-    worker_buffer_pool_uptr_ = worker_facade_sptr_->getOutputBufferPool();
-    if (!worker_buffer_pool_uptr_) {
+    // v2.0: Worker必须在open()时自动创建BufferPool（通过调用Allocator）
+    // 获取 BufferPool ID
+    uint64_t worker_pool_id = worker_facade_sptr_->getOutputBufferPoolId();
+    if (worker_pool_id == 0) {
         setError("Worker failed to create BufferPool. Worker must create BufferPool in open() method by calling Allocator.");
         worker_facade_sptr_.reset();
         return false;
     }
     
-    // 使用Worker创建的BufferPool
-    working_buffer_pool_ptr_ = worker_buffer_pool_uptr_.get();
-    printf("   ✅ Using Worker's BufferPool: '%s' (created by Worker via Allocator)\n", 
-           working_buffer_pool_ptr_->getName().c_str());
+    // v2.0: 记录 pool_id 并从 Registry 获取临时访问
+    working_buffer_pool_id_ = worker_pool_id;
+    auto working_buffer_pool_sptr = BufferPoolRegistry::getInstance().getPool(worker_pool_id);
+    if (!working_buffer_pool_sptr) {
+        setError("Failed to get BufferPool from Registry");
+        worker_facade_sptr_.reset();
+        return false;
+    }
+    
+    // 缓存原始指针用于快速访问（在ProductionLine运行期间有效）
+    working_buffer_pool_ptr_ = working_buffer_pool_sptr.get();
+    printf("   ✅ Using Worker's BufferPool: '%s' (ID: %lu, created by Worker via Allocator)\n", 
+           working_buffer_pool_ptr_->getName().c_str(), worker_pool_id);
     
     total_frames_ = worker_facade_sptr_->getTotalFrames();
     size_t frame_size = worker_facade_sptr_->getFrameSize();
@@ -184,6 +194,11 @@ double VideoProductionLine::getAverageFPS() const {
 
 int VideoProductionLine::getTotalFrames() const {
     return total_frames_;
+}
+
+BufferPool* VideoProductionLine::getWorkingBufferPool() const {
+    // v2.0: 从缓存的指针返回（在start()时从Registry获取并缓存）
+    return working_buffer_pool_ptr_;
 }
 
 std::string VideoProductionLine::getLastError() const {

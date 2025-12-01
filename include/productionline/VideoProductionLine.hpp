@@ -108,7 +108,11 @@ public:
     int getTotalFrames() const;
     
     /// 获取工作BufferPool指针（供消费者使用）
-    BufferPool* getWorkingBufferPool() const { return working_buffer_pool_ptr_; }
+    /// v2.0: 从Registry获取临时访问
+    BufferPool* getWorkingBufferPool() const;
+    
+    /// v2.0: 获取工作BufferPool ID
+    uint64_t getWorkingBufferPoolId() const { return working_buffer_pool_id_; }
     
     // ========== 错误处理 ==========
     
@@ -147,17 +151,23 @@ private:
     // ========== 成员变量 ==========
     
     /**
-     * Worker创建的BufferPool（Worker通过调用Allocator创建）
-     * 用途：持有Worker创建的BufferPool的所有权
+     * v2.0: Worker创建的BufferPool ID（Registry持有）
+     * 
+     * 用途：记录Worker创建的BufferPool的ID
      * 
      * 注意：Worker必须在open()时自动创建BufferPool（通过调用Allocator）
      * 如果Worker没有创建BufferPool，start()会失败
+     * 
+     * Registry独占持有BufferPool（shared_ptr，引用计数=1）
+     * ProductionLine从Registry获取临时访问
      */
-    std::unique_ptr<BufferPool> worker_buffer_pool_uptr_;
+    uint64_t working_buffer_pool_id_;
     
     /**
-     * 实际工作的BufferPool指针
-     * 指向worker_buffer_pool_uptr_.get()（Worker创建的BufferPool）
+     * v2.0: 实际工作的BufferPool指针（缓存的临时访问）
+     * 
+     * 警告：此指针在ProductionLine运行期间有效
+     * 如果Pool被销毁（Allocator析构），此指针会失效
      */
     BufferPool* working_buffer_pool_ptr_;
     

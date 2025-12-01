@@ -79,28 +79,29 @@ public:
     // ============ 提供原材料（BufferPool）============
     
     /**
-     * 获取输出 BufferPool（如果有）
-     * @return BufferPool的智能指针，如果Worker创建了内部BufferPool，返回unique_ptr；否则返回nullptr
+     * @brief v2.0: 获取输出 BufferPool ID（如果有）
+     * 
+     * @return uint64_t pool_id（成功），0（失败或未创建）
      * 
      * 职责：
      * - Worker在open()时自动调用allocator创建BufferPool（如果需要）
-     * - 如果Worker创建了BufferPool，通过此方法返回，转移所有权给调用者
-     * - 如果Worker没有创建BufferPool，返回nullptr，调用者使用外部BufferPool
+     * - 如果Worker创建了BufferPool，通过此方法返回pool_id
+     * - 如果Worker没有创建BufferPool，返回0，调用者使用外部BufferPool
      * 
      * 使用场景：
-     * - 硬件解码器Worker：返回内部创建的overlay BufferPool
-     * - MmapRawVideoFileWorker：返回nullptr（使用外部BufferPool）
-     * - VideoProductionLine：通过此方法获取Worker的BufferPool（如果有）
+     * - 硬件解码器Worker：返回内部创建的overlay BufferPool ID
+     * - MmapRawVideoFileWorker：返回0（使用外部BufferPool）
+     * - VideoProductionLine：通过此方法获取Worker的BufferPool ID（如果有）
      * 
-     * 设计：
-     * - 返回智能指针，明确所有权转移
-     * - 如果Worker创建了BufferPool，转移所有权给调用者
-     * - 如果Worker没有创建BufferPool，返回nullptr
+     * v2.0 设计：
+     * - 返回pool_id而不是指针
+     * - Registry独占持有BufferPool（shared_ptr，引用计数=1）
+     * - 调用者从Registry获取临时访问（getPool(pool_id)）
      * 
-     * 默认实现：返回nullptr（普通Worker没有内部BufferPool）
+     * 默认实现：返回0（普通Worker没有内部BufferPool）
      */
-    virtual std::unique_ptr<BufferPool> getOutputBufferPool() {
-        return nullptr;
+    virtual uint64_t getOutputBufferPoolId() {
+        return 0;
     }
 };
 

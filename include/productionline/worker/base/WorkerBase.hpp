@@ -70,7 +70,7 @@ public:
     explicit WorkerBase(
         BufferAllocatorFactory::AllocatorType allocator_type
     ) : allocator_facade_(allocator_type)  // 🎯 父类直接创建Allocator门面
-      , buffer_pool_uptr_(nullptr) 
+      , buffer_pool_id_(0)  // v2.0: 记录 pool_id 而不是指针
     {
     }
     
@@ -83,22 +83,17 @@ public:
     virtual bool fillBuffer(int frame_index, Buffer* buffer) override = 0;
     virtual const char* getWorkerType() const override = 0;
     /**
-     * @brief 获取Worker创建的BufferPool（默认实现）
+     * @brief 获取Worker创建的BufferPool ID（v2.0 默认实现）
      * 
-     * 子类可以重写此方法，但通常不需要（直接使用基类的buffer_pool_uptr_即可）
+     * 子类可以重写此方法，但通常不需要（直接使用基类的buffer_pool_id_即可）
      * 
-     * @return unique_ptr<BufferPool> 成功返回pool，失败返回nullptr
+     * @return uint64_t 成功返回 pool_id，失败返回 0
      * 
-     * @note Worker必须在open()时创建BufferPool，否则返回nullptr
-     * @note 转移所有权给调用者（移动语义）
-     * @note 调用者负责释放 BufferPool（RAII 原则）
+     * @note Worker必须在open()时创建BufferPool，否则返回 0
+     * @note 调用者从 Registry 获取临时访问（getPool(pool_id)）
      */
-    virtual std::unique_ptr<BufferPool> getOutputBufferPool() override {
-        if (!buffer_pool_uptr_) {
-            return nullptr;
-        }
-        // 转移所有权（移动语义）
-        return std::move(buffer_pool_uptr_);
+    virtual uint64_t getOutputBufferPoolId() override {
+        return buffer_pool_id_;
     }
     
     // IVideoFileNavigator 接口方法
@@ -128,14 +123,15 @@ protected:
     BufferAllocatorFacade allocator_facade_;
     
     /**
-     * @brief Worker创建的BufferPool（所有Worker子类自动继承）
+     * @brief Worker创建的BufferPool ID（v2.0 所有Worker子类自动继承）
      * 
-     * 设计变更：
-     * - 使用 unique_ptr（独占所有权）
-     * - Worker 持有并负责释放，或通过 getOutputBufferPool() 转移所有权
-     * - 符合 RAII 原则：谁持有谁释放
+     * v2.0 设计变更：
+     * - 使用 pool_id 而不是指针
+     * - Registry 独占持有 BufferPool（shared_ptr，引用计数=1）
+     * - Worker 只记录 pool_id，从 Registry 临时访问
+     * - 符合中心化资源管理原则
      */
-    std::unique_ptr<BufferPool> buffer_pool_uptr_;
+    uint64_t buffer_pool_id_;
 };
 
 #endif // WORKER_BASE_HPP

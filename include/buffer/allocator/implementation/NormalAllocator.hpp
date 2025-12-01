@@ -45,9 +45,9 @@ public:
     /**
      * @brief 批量创建 Buffer 并构建 BufferPool
      * 
-     * @return unique_ptr<BufferPool> 返回 BufferPool，所有权转移给调用者
+     * v2.0: @return uint64_t 返回 pool_id，Registry 持有 Pool
      */
-    std::unique_ptr<BufferPool> allocatePoolWithBuffers(
+    uint64_t allocatePoolWithBuffers(
         int count,
         size_t size,
         const std::string& name,
@@ -56,39 +56,47 @@ public:
     
     /**
      * @brief 创建单个 Buffer 并注入到指定 BufferPool（内部分配）
+     * 
+     * v2.0: @param pool_id BufferPool ID（从 Registry 获取 Pool）
      */
     Buffer* injectBufferToPool(
+        uint64_t pool_id,
         size_t size,
-        BufferPool* pool,
         QueueType queue = QueueType::FREE
     ) override;
     
     /**
      * @brief 注入外部已分配的内存到 BufferPool（外部注入）
+     * 
+     * v2.0: @param pool_id BufferPool ID（从 Registry 获取 Pool）
      */
     Buffer* injectExternalBufferToPool(
+        uint64_t pool_id,
         void* virt_addr,
         uint64_t phys_addr,
         size_t size,
-        BufferPool* pool,
         QueueType queue = QueueType::FREE
     ) override;
     
     /**
      * @brief 从 BufferPool 移除并销毁 Buffer
+     * 
+     * v2.0: @param pool_id BufferPool ID（从 Registry 获取 Pool）
      */
-    bool removeBufferFromPool(Buffer* buffer, BufferPool* pool) override;
+    bool removeBufferFromPool(uint64_t pool_id, Buffer* buffer) override;
     
     /**
      * @brief 销毁整个 BufferPool 及其所有 Buffer
+     * 
+     * v2.0: @param pool_id BufferPool ID
      */
-    bool destroyPool(BufferPool* pool) override;
+    bool destroyPool(uint64_t pool_id) override;
     
 private:
     /**
-     * @brief 清理 Pool 中所有属于此 Allocator 的 buffer（辅助方法）
+     * @brief v2.0: 清理临时 Pool 中所有属于此 Allocator 的 buffer（创建失败时使用）
      */
-    void cleanupPool(BufferPool* pool);
+    void cleanupPoolTemp(BufferPool* pool);
     
 protected:
     /**

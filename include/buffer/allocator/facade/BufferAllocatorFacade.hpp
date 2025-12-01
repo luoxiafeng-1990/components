@@ -77,13 +77,14 @@ public:
     /**
      * @brief 批量创建 Buffer 并构建 BufferPool
      * 
+     * v2.0: @return uint64_t 成功返回 pool_id，失败返回 0（Registry 持有 Pool）
+     * 
      * @param count Buffer 数量
      * @param size 每个 Buffer 大小
      * @param name BufferPool 名称
      * @param category BufferPool 分类
-     * @return unique_ptr<BufferPool> 成功返回 pool，失败返回 nullptr（所有权转移给调用者）
      */
-    std::unique_ptr<BufferPool> allocatePoolWithBuffers(
+    uint64_t allocatePoolWithBuffers(
         int count,
         size_t size,
         const std::string& name,
@@ -93,58 +94,63 @@ public:
     /**
      * @brief 创建单个 Buffer 并注入到指定 BufferPool（内部分配）
      * 
+     * v2.0: @param pool_id BufferPool ID（从 Registry 获取）
+     * 
      * @param size Buffer 大小
-     * @param pool 目标 BufferPool
      * @param queue 注入到哪个队列（FREE 或 FILLED）
      * @return Buffer* 成功返回 buffer，失败返回 nullptr
      */
     Buffer* injectBufferToPool(
+        uint64_t pool_id,
         size_t size,
-        BufferPool* pool,
         QueueType queue = QueueType::FREE
     );
     
     /**
      * @brief 注入外部已分配的内存到 BufferPool（外部注入）
      * 
+     * v2.0: @param pool_id BufferPool ID（从 Registry 获取）
+     * 
      * @param virt_addr 外部内存的虚拟地址（已分配）
      * @param phys_addr 外部内存的物理地址（如果支持，否则为 0）
      * @param size 外部内存的大小（字节）
-     * @param pool 目标 BufferPool
      * @param queue 注入到哪个队列（FREE 或 FILLED）
      * @return Buffer* 成功返回 buffer，失败返回 nullptr
      */
     Buffer* injectExternalBufferToPool(
+        uint64_t pool_id,
         void* virt_addr,
         uint64_t phys_addr,
         size_t size,
-        BufferPool* pool,
         QueueType queue = QueueType::FREE
     );
     
-    // ==================== 注意：已删除 getManagedBufferPool() ====================
+    // ==================== v2.0 注意：已删除 getManagedBufferPool() ====================
     // 
     // 设计变更：
-    // - Allocator 不再持有 BufferPool（allocatePoolWithBuffers 返回 unique_ptr）
-    // - 调用者负责持有和释放 BufferPool
+    // - Allocator 不再持有 BufferPool（allocatePoolWithBuffers 返回 pool_id）
+    // - Registry 独占持有 BufferPool（shared_ptr，引用计数=1）
+    // - 使用者从 Registry 获取临时访问（getPool(pool_id)）
     // - 不再需要 getManagedBufferPool() 方法
     
     /**
      * @brief 从 BufferPool 移除并销毁 Buffer
      * 
+     * v2.0: @param pool_id BufferPool ID
+     * 
      * @param buffer 要移除的 Buffer
-     * @param pool 所属的 BufferPool
      * @return true 成功，false 失败
      */
-    bool removeBufferFromPool(Buffer* buffer, BufferPool* pool);
+    bool removeBufferFromPool(uint64_t pool_id, Buffer* buffer);
     
     /**
      * @brief 销毁整个 BufferPool 及其所有 Buffer
      * 
-     * @param pool 要销毁的 BufferPool
+     * v2.0: @param pool_id BufferPool ID
+     * 
      * @return true 成功，false 失败
      */
-    bool destroyPool(BufferPool* pool);
+    bool destroyPool(uint64_t pool_id);
     
     /**
      * @brief 获取底层 Allocator 指针（用于特殊操作）

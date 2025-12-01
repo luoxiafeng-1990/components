@@ -48,8 +48,10 @@ struct AVDictionary;
  * ```cpp
  * FfmpegDecodeVideoFileWorker worker;
  * worker.open("video.mp4");
- * // Worker在open()时自动创建BufferPool（如果需要）
- * std::unique_ptr<BufferPool> pool = worker.getOutputBufferPool();
+ * // v2.0: Worker在open()时自动创建BufferPool并注册到Registry
+ * uint64_t pool_id = worker.getOutputBufferPoolId();
+ * // 从Registry获取Pool
+ * auto pool = BufferPoolRegistry::getInstance().getPool(pool_id);
  * Buffer buffer(frame_size);
  * worker.fillBuffer(0, &buffer);  // 填充buffer
  * ```
@@ -206,7 +208,7 @@ public:
     const char* getWorkerType() const override {
         return "FfmpegDecodeVideoFileWorker";
     }
-    std::unique_ptr<BufferPool> getOutputBufferPool() override;
+    uint64_t getOutputBufferPoolId() override;  // v2.0: 返回 pool_id
     
     // ============ 扩展配置接口 ============
     
