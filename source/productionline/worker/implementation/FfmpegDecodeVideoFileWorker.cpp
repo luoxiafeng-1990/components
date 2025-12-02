@@ -136,12 +136,14 @@ bool FfmpegDecodeVideoFileWorker::open(const char* path, int width, int height, 
 
 void FfmpegDecodeVideoFileWorker::close() {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
+    
+    // v2.0: 主动清理 BufferPool
+    if (buffer_pool_id_ != 0) {
+        allocator_facade_.destroyPool(buffer_pool_id_);
+        buffer_pool_id_ = 0;
+    }
+    
     closeVideo();
-    
-    // v2.0: 不需要手动释放 BufferPool（Registry 管理）
-    // Allocator 析构时会自动清理
-    buffer_pool_id_ = 0;
-    
     is_open_ = false;
 }
 

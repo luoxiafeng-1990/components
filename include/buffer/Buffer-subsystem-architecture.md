@@ -144,11 +144,11 @@
 ```
 BufferAllocatorBase (创建者和销毁者)
     ├── 创建 → BufferPool (通过 PrivateToken)
-    ├── 注册 → BufferPoolRegistry (立即转移所有权)
-    ├── 记录 → pool_id_ (不持有指针)
+    ├── 注册 → BufferPoolRegistry (立即转移所有权，传入 Allocator ID)
+    ├── 唯一标识 → allocator_id_ (全局唯一 ID)
     ├── 友元访问 → Registry::getPoolForAllocatorCleanup() (仅在清理时)
     ├── 管理 → Buffer 对象生命周期
-    └── 销毁 → unregisterPool() → 触发 BufferPool 析构
+    └── 销毁 → 查询 Registry 获取所有 Pool → 逐个调用 destroyPool()
 
 BufferPool
     ├── 管理 → Buffer* (指针，不拥有对象)
@@ -166,8 +166,9 @@ BufferPoolRegistry (单例，中心化资源管理器)
     └── 友元声明 → friend class BufferAllocatorBase
 
 Worker/ProductionLine/Consumer (使用者)
-    ├── 记录 → pool_id_ (不持有指针)
-    └── 临时访问 → Registry::getPool(pool_id_) (使用时获取)
+    ├── 记录 → buffer_pool_id_ (不持有指针)
+    ├── 临时访问 → Registry::getPool(buffer_pool_id_) (使用时获取)
+    └── 关闭清理 → Worker::close() 调用 destroyPool() 主动清理
 ```
 
 **关键变更（v2.0）：**
@@ -1047,7 +1048,7 @@ stateDiagram-v2
     
     Running --> Shutting_Down : shutdown()调用<br/>running_=false
     
-    Shutting_Down --> Destroyed : 析构函数<br/>自动unregisterPool()
+    Shutting_Down --> Destroyed : Allocator::destroyPool()<br/>清理Buffer后unregisterPool()
     
     Destroyed --> [*]
     
@@ -1087,13 +1088,13 @@ graph TD
     end
     
     subgraph "3️⃣ 销毁阶段"
-        M[App释放BufferPool shared_ptr] --> N{引用计数为0?}
-        N -->|是| O[BufferPool析构函数]
-        O --> P[shutdown 唤醒所有线程]
-        O --> Q[unregisterPool 从Registry注销]
-        O --> R[Allocator析构]
-        R --> S[释放所有Buffer对象]
-        R --> T[释放所有内存]
+        M[Allocator::destroyPool()] --> N[清理所有Buffer]
+        N --> O[调用unregisterPool()注销]
+        O --> P[释放shared_ptr]
+        P --> Q[BufferPool析构函数]
+        Q --> R[shutdown 唤醒所有线程]
+        Q --> S[BufferPool销毁完成]
+        Note over M,S: ⚠️ 注意：BufferPool析构函数<br/>不再调用unregisterPool()<br/>（由Allocator::destroyPool()负责）
     end
     
     F --> G
@@ -2041,15 +2042,15 @@ Buffer* buf = pool->acquireFilled();  // 如果 producer 销毁，崩溃！
 ```
 Allocator 创建 shared_ptr
     ↓
-立即注册到 Registry（转移所有权）
+立即注册到 Registry（转移所有权，传入 Allocator ID）
     ↓
-Registry 独占持有（引用计数 = 1）
+Registry 独占持有（引用计数 = 1），记录 allocator_id
     ↓
-Allocator 只记录 pool_id（不持有指针）
+Allocator 使用 allocator_id_ 唯一标识（不维护 Pool 列表）
     ↓
-使用者从 Registry 获取（临时 shared_ptr）
+使用者从 Registry 获取（临时 weak_ptr）
     ↓
-Allocator 析构时，通过友元清理并 unregister
+Allocator 析构时，查询 Registry 获取所有 Pool，逐个清理
 ```
 
 **核心设计原则**:
@@ -2086,8 +2087,8 @@ class BufferPoolRegistry {
     friend class BufferAllocatorBase;  // 🔑 友元
     
 public:
-    uint64_t registerPool(std::shared_ptr<BufferPool> pool);
-    void unregisterPool(uint64_t id);
+    uint64_t registerPool(std::shared_ptr<BufferPool> pool, uint64_t allocator_id);  // 🆕 传入 Allocator ID
+    void unregisterPool(uint64_t id);  // 私有方法，只能由 Allocator 调用
     std::shared_ptr<BufferPool> getPool(uint64_t id) const;  // 返回临时 shared_ptr
     
 private:
@@ -2260,6 +2261,13 @@ public:
         return id;
     }
     
+    // ⚠️ unregisterPool 现在是私有方法，只能由 Allocator 的 destroyPool() 调用
+    // 正确的销毁流程：
+    // 1. Allocator::destroyPool() 清理所有 Buffer
+    // 2. Allocator::destroyPool() 调用 unregisterPool() 注销
+    // 3. unregisterPool() 释放 shared_ptr，触发 Pool 析构
+    
+private:
     void unregisterPool(uint64_t id) {
         std::lock_guard<std::mutex> lock(mutex_);
         pools_.erase(id);  // ✅ 释放 shared_ptr，触发 Pool 析构
@@ -2278,10 +2286,32 @@ public:
 private:
     // 角色3：协调者（私有方法，只有友元可调用）
     std::shared_ptr<BufferPool> getPoolForAllocatorCleanup(uint64_t id) {
-        return getPool(id);  // 友元可以访问，用于清理
+        auto it = pools_.find(id);
+        if (it != pools_.end()) {
+            return it->second.pool;  // 返回 shared_ptr
+        }
+        return nullptr;
     }
     
-    std::unordered_map<uint64_t, std::shared_ptr<BufferPool>> pools_;
+    // 🆕 查询所有属于指定 Allocator 的 Pool ID
+    std::vector<uint64_t> getPoolsByAllocatorId(uint64_t allocator_id) const {
+        std::lock_guard<std::mutex> lock(mutex_);
+        std::vector<uint64_t> pool_ids;
+        for (const auto& pair : pools_) {
+            if (pair.second.allocator_id == allocator_id) {
+                pool_ids.push_back(pair.first);
+            }
+        }
+        return pool_ids;
+    }
+    
+    struct PoolInfo {
+        std::shared_ptr<BufferPool> pool;
+        uint64_t id;
+        uint64_t allocator_id;  // 🆕 创建者 Allocator ID
+    };
+    
+    std::unordered_map<uint64_t, PoolInfo> pools_;  // 🆕 使用 PoolInfo 结构
 };
 ```
 
@@ -2376,7 +2406,8 @@ public:
     }
     
 protected:
-    uint64_t pool_id_ = 0;  // 只记录 ID（不持有指针）
+    // v2.0: 不再需要 pool_id_，使用 allocator_id_ 机制
+    // Registry 记录每个 Pool 的创建者 Allocator ID
     std::vector<std::unique_ptr<Buffer>> buffer_objects_;  // 持有 Buffer 对象
     
     // 纯虚函数：子类实现具体的分配/释放逻辑
@@ -2452,11 +2483,13 @@ sequenceDiagram
         Alloc->>Buf: delete buffer
     end
     
-    Alloc->>Reg: unregisterPool(pool_id)
+    Note over Alloc: 4. 从 Registry 注销（私有方法，友元访问）
+    Alloc->>Reg: unregisterPool(pool_id) (private, friend access)
     activate Reg
     Reg->>Reg: pools_.erase(id)
-    Note over Reg: 释放 shared_ptr<br/>引用计数 -1 → 0
+    Note over Reg: ✅ 释放 shared_ptr<br/>引用计数 -1 → 0
     Reg->>Pool: ~BufferPool()
+    Note over Pool: BufferPool 析构<br/>（不再调用 unregisterPool）
     destroy Pool
     deactivate Reg
     
@@ -2486,13 +2519,12 @@ class BufferPoolRegistry {
 public:
     // 公开接口：任何人都可以调用
     uint64_t registerPool(std::shared_ptr<BufferPool> pool);
-    void unregisterPool(uint64_t id);
-    std::shared_ptr<BufferPool> getPool(uint64_t id) const;
-    std::weak_ptr<BufferPool> getPoolWeak(uint64_t id) const;
+    std::weak_ptr<BufferPool> getPool(uint64_t id) const;
     
 private:
     // 🔒 私有接口：只有友元 BufferAllocatorBase 可以调用
     std::shared_ptr<BufferPool> getPoolForAllocatorCleanup(uint64_t id);
+    void unregisterPool(uint64_t id);  // ⚠️ 私有方法，只能由 Allocator 的 destroyPool() 调用
     
     std::unordered_map<uint64_t, std::shared_ptr<BufferPool>> pools_;
 };
@@ -2505,11 +2537,17 @@ public:
     virtual ~BufferAllocatorBase() {
         auto& registry = BufferPoolRegistry::getInstance();
         
-        // ✅ 友元可以调用私有方法
-        auto pool = registry.getPoolForAllocatorCleanup(pool_id_);
+        // 🆕 查询 Registry 获取所有属于此 Allocator 的 Pool
+        auto pool_ids = registry.getPoolsByAllocatorId(getAllocatorId());
         
-        // 清理 Buffer...
-        registry.unregisterPool(pool_id_);
+        // 逐个清理
+        for (uint64_t pool_id : pool_ids) {
+            auto pool = registry.getPoolForAllocatorCleanup(pool_id);
+            // 清理所有 Buffer（只有 Allocator 知道如何清理）
+            // ...
+            // ✅ 友元可以调用私有方法注销 Pool
+            registry.unregisterPool(pool_id);
+        }
     }
 };
 
@@ -2642,7 +2680,7 @@ class BufferPoolRegistry {
 | 方法签名 | 返回类型 | 访问权限 | 当前实现 | v2.0 状态 | 说明 |
 |---------|---------|---------|---------|-----------|------|
 | `registerPool(shared_ptr<BufferPool>)` | `uint64_t` | public | 存储到 `pools_` | ✅ **正确** | 任何人都可以注册 |
-| `unregisterPool(uint64_t id)` | `void` | public | 从 `pools_` 删除 | ✅ **正确** | 触发 Pool 析构 |
+| `unregisterPool(uint64_t id)` | `void` | **private**<br/>friend | 从 `pools_` 删除 | ✅ **已更新** | 只能由 Allocator 的 destroyPool() 调用 |
 | `getPool(uint64_t id)` | `shared_ptr<BufferPool>` | public | 返回临时 `shared_ptr` | ✅ **正确** | 对外公开，临时持有 |
 | `getPoolWeak(uint64_t id)` | `weak_ptr<BufferPool>` | public | 返回 `weak_ptr` | ✅ **正确** | 用户自己 lock |
 | `getPoolForAllocatorCleanup(id)` | `shared_ptr<BufferPool>` | **private**<br/>friend | 返回 `shared_ptr` | ✅ **新增** | 只有 Allocator 可调用 |
@@ -2971,9 +3009,7 @@ sequenceDiagram
     
     Reg->>Pool: ~BufferPool()
     activate Pool
-    Note over Pool: BufferPool 析构
-    Pool->>Reg: unregisterPool(registry_id_)
-    Note over Reg: 从 Registry 注销（如果还没注销）
+    Note over Pool: BufferPool 析构<br/>⚠️ 不再调用 unregisterPool()<br/>（由 Allocator::destroyPool() 负责）
     destroy Pool
     deactivate Pool
     

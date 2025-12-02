@@ -1007,10 +1007,15 @@ sequenceDiagram
     participant Buffer as Buffer
     participant Registry as BufferPoolRegistry
     
-    App->>Allocator: destroyPool(pool)
+    App->>Allocator: destroyPool(pool_id)
     activate Allocator
     
-    Note over Allocator: 1. 获取pool中所有buffer
+    Note over Allocator: 1. 通过友元获取 Pool
+    Allocator->>Registry: getPoolForAllocatorCleanup(pool_id) (private, friend access)
+    activate Registry
+    Registry-->>Allocator: pool (shared_ptr)
+    deactivate Registry
+    
     Allocator->>Pool: getTotalCount()
     activate Pool
     Pool-->>Allocator: count
@@ -1018,7 +1023,7 @@ sequenceDiagram
     
     Note over Allocator: 2. 移除并销毁所有buffer
     loop 每个buffer
-        Allocator->>Pool: removeBufferFromPool(buffer)
+        Allocator->>Pool: removeBufferFromPool(pool_id, buffer)
         activate Pool
         Pool->>Pool: 检查buffer状态（必须是IDLE）
         Pool->>Pool: managed_buffers_.erase(buffer)
@@ -1034,16 +1039,15 @@ sequenceDiagram
         deactivate Buffer
     end
     
-    Note over Allocator: 3. 清除managed_pool_
-    Allocator->>Allocator: managed_pool_sptr_.reset()
-    
-    Note over Pool: 4. Pool自动注销（shared_ptr引用计数为0）
-    Pool->>Registry: unregisterPool(id)
+    Note over Allocator: 3. 从 Registry 注销（私有方法，友元访问）
+    Allocator->>Registry: unregisterPool(pool_id) (private, friend access)
     activate Registry
     Registry->>Registry: pools_.erase(id)
-    deactivate Registry
-    
+    Note over Registry: ✅ 释放 shared_ptr<br/>引用计数 -1 → 0
+    Registry->>Pool: ~BufferPool()
+    Note over Pool: BufferPool 析构<br/>（不再调用 unregisterPool）
     destroy Pool
+    deactivate Registry
     
     Allocator-->>App: true
     deactivate Allocator
@@ -1070,7 +1074,7 @@ stateDiagram-v2
     PoolAllocated --> PoolAllocated : injectBufferToPool() (扩容)
     PoolAllocated --> PoolAllocated : removeBufferFromPool() (缩容)
     
-    PoolAllocated --> Destroyed : destroyPool() / ~Allocator()
+    PoolAllocated --> Destroyed : destroyPool() / ~Allocator()<br/>（查询 Registry 获取所有 Pool，逐个清理）
     
     Destroyed --> [*]
     
@@ -1856,6 +1860,7 @@ A: 继承`BufferAllocatorBase`，实现`createBuffer()`和`deallocateBuffer()`�
 > 如有疑问，请联系 AI SDK Team  
 > 邮箱: ai-sdk@example.com  
 > Wiki: https://wiki.example.com/allocator-system
+
 
 
 

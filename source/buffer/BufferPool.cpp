@@ -28,10 +28,12 @@ BufferPool::~BufferPool() {
     // 停止等待线程
     shutdown();
     
-    // 注销
-    if (registry_id_ != 0) {
-        BufferPoolRegistry::getInstance().unregisterPool(registry_id_);
-    }
+    // ⚠️ 注意：不再在这里调用 unregisterPool()
+    // 原因：
+    // 1. unregisterPool() 现在是私有方法，只能由 Allocator 的 destroyPool() 调用
+    // 2. 正确的销毁流程：Allocator::destroyPool() → 清理 Buffer → unregisterPool() → Pool 析构
+    // 3. 如果在这里调用，会导致重复调用（destroyPool 已经调用过了）
+    // 4. 如果 Allocator 没有调用 destroyPool，说明是异常情况，不应该在这里处理
     
     printf("✅ BufferPool '%s' destroyed\n", name_.c_str());
 }

@@ -14,9 +14,14 @@ BufferPoolRegistry& BufferPoolRegistry::getInstance() {
 
 // ========== 注册管理接口实现 ==========
 
-uint64_t BufferPoolRegistry::registerPool(std::shared_ptr<BufferPool> pool) {
+uint64_t BufferPoolRegistry::registerPool(std::shared_ptr<BufferPool> pool, uint64_t allocator_id) {
     if (!pool) {
         printf("⚠️  Error: Cannot register null BufferPool\n");
+        return 0;
+    }
+    
+    if (allocator_id == 0) {
+        printf("⚠️  Error: Invalid allocator_id (0)\n");
         return 0;
     }
     
@@ -42,13 +47,14 @@ uint64_t BufferPoolRegistry::registerPool(std::shared_ptr<BufferPool> pool) {
     info.name = name;
     info.category = category;
     info.created_time = std::chrono::system_clock::now();
+    info.allocator_id = allocator_id;  // 🆕 记录创建者 Allocator ID
     
     // 注册
     pools_[id] = info;
     name_to_id_[name] = id;
     
-    printf("📦 [Registry] BufferPool registered: '%s' (ID: %lu, Category: %s, ref_count=1)\n",
-           name.c_str(), id, category.empty() ? "None" : category.c_str());
+    printf("📦 [Registry] BufferPool registered: '%s' (ID: %lu, Allocator ID: %lu, Category: %s, ref_count=1)\n",
+           name.c_str(), id, allocator_id, category.empty() ? "None" : category.c_str());
     
     return id;
 }
@@ -108,6 +114,25 @@ std::shared_ptr<BufferPool> BufferPoolRegistry::getPoolForAllocatorCleanup(uint6
     
     // 返回 shared_ptr（临时持有，用于清理）
     return it->second.pool;
+}
+
+std::vector<uint64_t> BufferPoolRegistry::getPoolsByAllocatorId(uint64_t allocator_id) const {
+    // 🔑 私有方法，只有友元 BufferAllocatorBase 可以调用
+    // 用于 Allocator 析构时查询所有属于它的 Pool
+    
+    std::lock_guard<std::mutex> lock(mutex_);
+    
+    std::vector<uint64_t> pool_ids;
+    pool_ids.reserve(pools_.size());  // 预分配空间
+    
+    // 遍历所有 Pool，查找匹配的 allocator_id
+    for (const auto& pair : pools_) {
+        if (pair.second.allocator_id == allocator_id) {
+            pool_ids.push_back(pair.first);
+        }
+    }
+    
+    return pool_ids;
 }
 
 // ========== 全局监控接口实现 ==========
