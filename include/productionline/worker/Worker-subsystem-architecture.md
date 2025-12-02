@@ -426,7 +426,7 @@ class WorkerBase : public IBufferFillingWorker, public IVideoFileNavigator {
 | 属性 | 类型 | 说明 | 访问权限 |
 |-----|------|------|---------|
 | `allocator_facade_` | `BufferAllocatorFacade` | Allocator门面（所有Worker子类自动继承） | `protected` |
-| `buffer_pool_sptr_` | `std::shared_ptr<BufferPool>` | Worker创建的BufferPool（所有Worker子类自动继承） | `protected` |
+| `buffer_pool_id_` | `uint64_t` | Worker创建的BufferPool ID（所有Worker子类自动继承，v2.0） | `protected` |
 
 #### 3.3.3 构造函数
 
@@ -469,24 +469,17 @@ public:
 
 ```cpp
 /**
- * @brief 获取Worker创建的BufferPool（默认实现）
+ * @brief 获取Worker创建的BufferPool ID（v2.0 新接口）
  * 
- * 子类可以重写此方法，但通常不需要（直接使用基类的buffer_pool_即可）
+ * 子类可以重写此方法，但通常不需要（直接使用基类的buffer_pool_id_即可）
  * 
- * @return unique_ptr<BufferPool> 成功返回pool，失败返回nullptr
+ * @return uint64_t 成功返回pool_id，失败返回0
  * 
- * @note Worker必须在open()时创建BufferPool，否则返回nullptr
- * @note 从shared_ptr转换为unique_ptr（通过release，但Allocator和Registry仍持有shared_ptr）
+ * @note Worker必须在open()时创建BufferPool，否则返回0
+ * @note v2.0: 返回 pool_id，使用者从 Registry 获取 Pool
  */
-virtual std::unique_ptr<BufferPool> getOutputBufferPool() override {
-    if (!buffer_pool_sptr_) {
-        return nullptr;
-    }
-    // 从shared_ptr转换为unique_ptr
-    // 注意：Allocator和Registry仍持有shared_ptr，所以不会销毁
-    BufferPool* raw_ptr = buffer_pool_sptr_.get();
-    buffer_pool_sptr_.reset();  // Worker不再持有
-    return std::unique_ptr<BufferPool>(raw_ptr);  // ProductionLine持有unique_ptr
+virtual uint64_t getOutputBufferPoolId() const override {
+    return buffer_pool_id_;
 }
 ```
 
@@ -1717,6 +1710,7 @@ A: 取决于实现：
 > 如有疑问，请联系 AI SDK Team  
 > 邮箱: ai-sdk@example.com  
 > Wiki: https://wiki.example.com/worker-system
+
 
 
 

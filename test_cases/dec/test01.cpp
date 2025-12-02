@@ -43,14 +43,13 @@ static void signal_handler(int signum) {
  * - 检查 BufferPool 是否正确创建
  * - 测试 Worker 的基本功能
  */
-static int test_ffmpeg_worker_open(const char* video_path) {
+static int test_ffmpeg_worker_open_close(const char* video_path) {
     printf("\n═══════════════════════════════════════════════════════\n");
     printf("  Test: FFmpeg Worker Open Test\n");
     printf("  File: %s\n", video_path);
     printf("═══════════════════════════════════════════════════════\n\n");
     
     // 1. 创建 BufferFillingWorkerFacade（使用门面模式）
-    printf("🔧 Creating BufferFillingWorkerFacade...\n");
     auto worker_facade = std::make_shared<BufferFillingWorkerFacade>(
         BufferFillingWorkerFactory::WorkerType::FFMPEG_VIDEO_FILE
     );
@@ -59,18 +58,14 @@ static int test_ffmpeg_worker_open(const char* video_path) {
         printf("❌ Failed to create worker facade\n");
         return -1;
     }
-    printf("✅ Worker facade created successfully\n");
-    printf("   Worker Type: %s\n", worker_facade->getWorkerType());
     
     // 2. 打开视频文件
-    printf("\n📹 Opening video file: %s\n", video_path);
     if (!worker_facade->open(video_path)) {
         printf("❌ Failed to open video file\n");
         printf("   Possible reasons: file not found, unsupported format, or FFmpeg initialization failed\n");
         return -1;
     }
     
-    printf("✅ Video file opened successfully\n");
     
     // 3. 验证视频信息
     printf("\n📊 Video Information:\n");
@@ -98,7 +93,11 @@ static int test_ffmpeg_worker_open(const char* video_path) {
     printf("\n🔄 Closing worker...\n");
     worker_facade->close();
     printf("✅ Worker closed successfully\n");
-    
+    try {
+        worker_facade->open(video_path);
+    } catch (...) {
+        printf("✅ Worker facade open failed,then destroyed successfully\n");
+    }
     printf("\n✅ Test completed successfully\n");
     printf("═══════════════════════════════════════════════════════\n\n");
     
@@ -156,7 +155,7 @@ int main(int argc, char* argv[]) {
     printf("╚═══════════════════════════════════════════════════════╝\n");
     
     // 运行测试
-    int result = test_ffmpeg_worker_open(video_path);
+    int result = test_ffmpeg_worker_open_close(video_path);
     
     if (result == 0) {
         printf("\n🎉 All tests passed!\n\n");

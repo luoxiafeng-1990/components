@@ -9,51 +9,62 @@
 | **ProductionLine** | 队列管理者 | ❌ 否 | ✅ 是<br>（持有 unique_ptr，从 Worker 获取） | ✅ 是 | 写操作 | `acquireFree()`<br>`submitFilled()`<br>管理队列状态 | 写权限（管理队列） |
 | **Display** | 使用者 | ❌ 否 | ❌ 否 | ✅ 是 | 读操作 | `getBufferPool()`<br>`displayBuffer()`<br>`getBufferCount()`<br>`getBufferSize()` | 只读权限 |
 | **Consumer** | 使用者 | ❌ 否 | ❌ 否 | ✅ 是 | 读操作 | `acquireFilled()`<br>`releaseFilled()`<br>`getFreeCount()`<br>`getFilledCount()` | 只读权限（队列操作） |
-| **BufferPoolRegistry** | 统一管理器 | ❌ 否 | ✅ 是<br>（持有 shared_ptr，统一管理） | ✅ 是 | 只读操作 | `registerPool()`<br>`unregisterPool()`<br>`getPoolReadOnly()`<br>`getPoolByNameForProductionLine()`<br>`getAllPoolsReadOnly()`<br>`printAllStats()` | 只读权限（查询和统计）<br>读写权限（仅 ProductionLine 通过 friend） |
+| **BufferPoolRegistry** | 统一管理器 | ❌ 否 | ✅ 是<br>（持有 shared_ptr，统一管理） | ✅ 是 | 只读操作 | `registerPool()`<br>`unregisterPool()` (private, 仅 Allocator 可调用)<br>`getPool()`<br>`getPoolCount()`<br>`printAllStats()` | 只读权限（查询和统计）<br>私有方法（仅 Allocator 通过 friend 调用） |
 
 ## 🔍 详细分析
 
-### 1. Allocator（创建者 + 持有者 + 写权限）
+### 1. Allocator（创建者 + 写权限）
 
 **职责**：
 - ✅ **创建 BufferPool**：通过 `allocatePoolWithBuffers()` 创建空的 BufferPool
-- ✅ **持有 BufferPool**：通过 `managed_pools_` 持有所有创建的 BufferPool 的 `shared_ptr`
 - ✅ **注入 Buffer**：通过 `injectBufferToPool()` 将 Buffer 注入到 BufferPool
 - ✅ **移除 Buffer**：通过 `removeBufferFromPool()` 从 BufferPool 移除 Buffer
 - ✅ **销毁 BufferPool**：通过 `destroyPool()` 销毁整个 BufferPool
 
-**所有权**：
-- ✅ **持有 BufferPool**：通过 `std::vector<std::shared_ptr<BufferPool>> managed_pools_` 持有所有创建的 BufferPool
-- ✅ **管理生命周期**：Allocator 持有 `shared_ptr`，确保 BufferPool 在使用期间不被销毁
+**所有权**（v2.0 新架构）：
+- ❌ **不持有 BufferPool**：Allocator 不维护 Pool 列表，Registry 中心化管理
+- ✅ **Allocator ID 机制**：每个 Allocator 有唯一 ID，Registry 记录 Pool 的创建者
+- ✅ **自动清理**：Allocator 析构时查询 Registry 获取所有 Pool，逐个清理
 - ✅ **有写权限**：通过友元关系可以访问 BufferPool 的私有方法
 
 **使用场景**：
 - Worker 在 `open()` 时调用 Allocator 创建 BufferPool
 - Worker 在解码循环中调用 Allocator 注入 Buffer（动态注入模式）
-- Allocator 析构时自动清理所有创建的 BufferPool
+- Allocator 析构时自动查询 Registry 并清理所有创建的 BufferPool
+- Worker 的 `close()` 调用 `destroyPool()` 主动清理资源
 
-**实现细节**：
+**实现细节（v2.0）**：
 ```cpp
 class BufferAllocatorBase {
-protected:
-    std::vector<std::shared_ptr<BufferPool>> managed_pools_;  // 持有所有创建的 BufferPool
-    mutable std::mutex managed_pools_mutex_;                  // 保护 managed_pools_
+private:
+    static std::atomic<uint64_t> next_allocator_id_;  // 全局计数器
+    uint64_t allocator_id_;  // 唯一标识符
     
 public:
-    std::shared_ptr<BufferPool> allocatePoolWithBuffers(...) {
-        auto pool = BufferPool::CreateEmpty(name, category);
+    BufferAllocatorBase() : allocator_id_(next_allocator_id_++) {}
+    uint64_t getAllocatorId() const { return allocator_id_; }
+    
+    uint64_t allocatePoolWithBuffers(...) {
+        auto pool = std::make_shared<BufferPool>(token(), name, category);
         // ... 创建 Buffer 并注入 ...
         
-        // Allocator 持有 shared_ptr
-        {
-            std::lock_guard<std::mutex> lock(managed_pools_mutex_);
-            managed_pools_.push_back(pool);
+        // 注册到 Registry（传入 Allocator ID）
+        uint64_t pool_id = BufferPoolRegistry::getInstance()
+            .registerPool(pool, getAllocatorId());
+        pool->setRegistryId(pool_id);
+        
+        return pool_id;  // 返回 ID，Registry 独占持有 Pool
+    }
+    
+    ~BufferAllocatorBase() {
+        // 查询 Registry 获取所有属于此 Allocator 的 Pool
+        auto pool_ids = BufferPoolRegistry::getInstance()
+            .getPoolsByAllocatorId(getAllocatorId());
+        
+        // 逐个清理
+        for (uint64_t pool_id : pool_ids) {
+            destroyPool(pool_id);
         }
-        
-        // 自动注册到 Registry
-        BufferPoolRegistry::getInstance().registerPool(pool, name, category);
-        
-        return pool;
     }
 };
 ```
@@ -212,7 +223,7 @@ private:
 
 | 组件 | 所有权方式 | 持有类型 | 权限 | 生命周期管理 | 说明 |
 |------|-----------|---------|------|------------|------|
-| **Allocator** | ✅ 持有 | `std::shared_ptr<BufferPool>`<br>（存储在 `managed_pools_` 中） | 写权限 | 管理 BufferPool 的生命周期 | Allocator 持有所有创建的 BufferPool，确保在使用期间不被销毁 |
+| **Allocator** | ❌ 不持有 | 无（Registry 中心化管理） | 写权限 | 创建和销毁 BufferPool | Allocator 通过唯一 ID 标识，Registry 记录 Pool 的创建者，Allocator 析构时自动清理 |
 | **BufferPoolRegistry** | ✅ 持有 | `std::shared_ptr<BufferPool>`<br>（存储在 `pools_` 中） | 只读权限（查询）<br>读写权限（仅 ProductionLine） | 统一管理所有 BufferPool | Registry 持有所有 BufferPool，提供统一查询接口 |
 | **Worker** | ❌ 不持有 | 临时持有 `std::shared_ptr<BufferPool>`<br>（创建后立即转换） | 无 | 不管理生命周期 | Worker 创建 BufferPool 后立即转换给 ProductionLine，不再持有 |
 | **ProductionLine** | ✅ 持有 | `std::unique_ptr<BufferPool>`<br>（从 Worker 获取） | 写权限（管理队列） | 管理 BufferPool 的使用 | ProductionLine 持有 BufferPool，负责队列管理，但 Allocator 和 Registry 也持有 shared_ptr |
@@ -247,25 +258,26 @@ ProductionLine 持有 unique_ptr<BufferPool>（管理队列，写权限）
 
 | 组件 | 职责 | 操作 | 所有权 | 权限 |
 |------|------|------|--------|------|
-| **Worker** | 创建 BufferPool（通过 Allocator）<br>填充 Buffer | `open()` 时调用 Allocator 创建<br>`fillBuffer()` 填充数据 | ❌ 不持有（创建后立即转换） | 无（创建后不再需要） |
-| **Allocator** | 创建 BufferPool<br>管理 Buffer 生命周期 | `allocatePoolWithBuffers()`<br>`injectBufferToPool()`<br>`removeBufferFromPool()`<br>`destroyPool()` | ✅ 持有 `std::shared_ptr<BufferPool>`（管理生命周期） | 写权限（管理 Buffer） |
-| **BufferPoolRegistry** | 统一管理所有 BufferPool<br>提供查询接口 | 持有 `shared_ptr`，提供查询接口 | ✅ 持有 `std::shared_ptr<BufferPool>`（统一管理） | 只读权限（查询接口）<br>读写权限（仅 ProductionLine 通过 friend） |
+| **Worker** | 创建 BufferPool（通过 Allocator）<br>填充 Buffer<br>关闭时清理 Pool | `open()` 时调用 Allocator 创建<br>`fillBuffer()` 填充数据<br>`close()` 调用 `destroyPool()` 清理 | ❌ 不持有（只记录 pool_id） | 无（创建后不再需要） |
+| **Allocator** | 创建 BufferPool<br>管理 Buffer 生命周期<br>析构时自动清理所有 Pool | `allocatePoolWithBuffers()`<br>`injectBufferToPool()`<br>`removeBufferFromPool()`<br>`destroyPool()` | ❌ 不持有（Registry 中心化管理） | 写权限（管理 Buffer） |
+| **BufferPoolRegistry** | 统一管理所有 BufferPool<br>记录 Pool 的创建者（Allocator ID）<br>提供查询接口 | 持有 `shared_ptr`，记录 `allocator_id`，提供查询接口 | ✅ 持有 `std::shared_ptr<BufferPool>`（统一管理） | 只读权限（查询接口）<br>私有方法（仅 Allocator 通过 friend） |
 | **ProductionLine** | 管理 BufferPool 队列<br>协调生产流程 | `acquireFree()`<br>`submitFilled()`<br>管理队列状态 | ✅ 持有 `std::unique_ptr<BufferPool>`（使用期间） | 写权限（管理队列） |
 | **用户** | 查询 BufferPool | 通过 Registry 查询 | ✅ 持有 `std::shared_ptr<const BufferPool>`（查询期间） | 只读 |
 | **Display/Consumer** | 使用 BufferPool | `acquireFilled()`<br>`releaseFilled()`<br>`getBufferCount()` | ✅ 持有 `std::shared_ptr<const BufferPool>`（使用期间） | 只读 |
 
 ### 生命周期管理
 
-- **Allocator 持有**：`std::shared_ptr<BufferPool>` 存储在 `managed_pools_` 中，管理 BufferPool 的生命周期
-- **Registry 持有**：`std::shared_ptr<BufferPool>` 存储在 `pools_` 中，统一管理所有 BufferPool
-- **ProductionLine 持有**：`std::unique_ptr<BufferPool>` 从 Worker 获取，管理 BufferPool 的使用
-- **Worker 不持有**：创建后立即转换给 ProductionLine，不再持有
-- **Display/Consumer 持有**：通过 Registry 获取 `shared_ptr<const BufferPool>`，只读访问
+- **Registry 独占持有**：`std::shared_ptr<BufferPool>` 存储在 `pools_` 中，Registry 独占持有（引用计数=1）
+- **Allocator ID 机制**：每个 PoolInfo 包含 `allocator_id`，记录创建者
+- **Allocator 不持有**：Allocator 不维护 Pool 列表，需要时向 Registry 查询
+- **Worker 不持有**：只记录 `pool_id`，`close()` 时主动清理
+- **Display/Consumer 持有**：通过 Registry 获取 `weak_ptr<BufferPool>`，只读访问
 
-**生命周期保证**：
-- Allocator 和 Registry 持有 `shared_ptr`，确保 BufferPool 在使用期间不被销毁
-- ProductionLine 持有 `unique_ptr`，管理 BufferPool 的使用
-- 当所有持有者都释放时，BufferPool 自动销毁并注销
+**生命周期保证（v2.0）**：
+- Registry 独占持有 `shared_ptr`，确保 BufferPool 在使用期间不被销毁
+- Allocator 析构时自动查询 Registry 获取所有 Pool，逐个清理
+- Worker 的 `close()` 调用 `destroyPool()` 主动清理资源
+- 当 Pool 被销毁时，Registry 自动从归属关系中移除
 
 ### 权限控制
 
@@ -309,17 +321,18 @@ public:
 ## 📋 修改点总结
 
 ### 1. BufferAllocatorBase（基类）
-- ✅ 添加 `std::vector<std::shared_ptr<BufferPool>> managed_pools_` 成员变量
-- ✅ 添加 `mutable std::mutex managed_pools_mutex_` 互斥锁
-- ✅ `allocatePoolWithBuffers()` 返回 `std::shared_ptr<BufferPool>`（而不是 `unique_ptr`）
-- ✅ 添加 `<vector>` 头文件
+- ✅ 添加 `allocator_id_` 成员变量（唯一标识符）
+- ✅ 添加静态原子计数器 `next_allocator_id_`（全局唯一）
+- ✅ `allocatePoolWithBuffers()` 返回 `uint64_t`（pool_id）
+- ✅ 析构函数自动查询 Registry 获取所有 Pool，逐个清理
+- ✅ 添加 `<atomic>` 头文件
 
 ### 2. 所有 Allocator 实现类
-- ✅ `NormalAllocator::allocatePoolWithBuffers()`：返回 `shared_ptr` 并持有
-- ✅ `AVFrameAllocator::allocatePoolWithBuffers()`：返回 `shared_ptr` 并持有
-- ✅ `FramebufferAllocator::allocatePoolWithBuffers()`：返回 `shared_ptr` 并持有
-- ✅ 所有 `destroyPool()` 方法：从 `managed_pools_` 中移除
-- ✅ 添加 `<algorithm>` 头文件（用于 `std::find_if`）
+- ✅ `NormalAllocator::allocatePoolWithBuffers()`：调用 `registerPool(pool, getAllocatorId())`
+- ✅ `AVFrameAllocator::allocatePoolWithBuffers()`：调用 `registerPool(pool, getAllocatorId())`
+- ✅ `FramebufferAllocator::allocatePoolWithBuffers()`：调用 `registerPool(pool, getAllocatorId())`
+- ✅ 所有 `destroyPool()` 方法：清理 Buffer 后调用 `unregisterPool()` 注销
+- ✅ 删除 `pool_id_` 成员变量（不再需要）
 
 ### 3. BufferAllocatorFacade
 - ✅ `allocatePoolWithBuffers()` 返回 `std::shared_ptr<BufferPool>`
@@ -330,20 +343,20 @@ public:
 - ✅ 添加 `setRegistryId()` 方法
 
 ### 5. BufferPoolRegistry
-- ✅ `registerPool()` 接收 `std::shared_ptr<BufferPool>`（而不是 `BufferPool*`）
-- ✅ `PoolInfo` 存储 `std::shared_ptr<BufferPool>`
-- ✅ 添加只读接口（公开，任何人都可以调用）
-- ✅ 添加读写接口（仅 `VideoProductionLine` 通过 friend 调用）
-- ✅ 添加 `friend class VideoProductionLine;` 声明
-- ✅ 所有查询接口返回只读版本
+- ✅ `registerPool()` 接收 `std::shared_ptr<BufferPool>` 和 `allocator_id` 参数
+- ✅ `PoolInfo` 存储 `std::shared_ptr<BufferPool>` 和 `allocator_id`
+- ✅ 添加 `getPoolsByAllocatorId()` 私有方法（友元访问）
+- ✅ `unregisterPool()` 改为私有方法（只能由 Allocator 调用）
+- ✅ 所有查询接口返回 `weak_ptr`（观察者模式）
 
 ### 6. WorkerBase
-- ✅ `buffer_pool_` 改为 `std::shared_ptr<BufferPool>`
-- ✅ `getOutputBufferPool()` 从 `shared_ptr` 转换为 `unique_ptr`（Allocator 和 Registry 仍持有 `shared_ptr`）
+- ✅ `buffer_pool_id_` 改为 `uint64_t`（只记录 pool_id）
+- ✅ `getOutputBufferPoolId()` 返回 `uint64_t`（pool_id）
 
 ### 7. Worker 实现类
-- ✅ `FfmpegDecodeVideoFileWorker::getOutputBufferPool()`：使用基类实现
-- ✅ `FfmpegDecodeRtspWorker::getOutputBufferPool()`：使用基类实现
+- ✅ `FfmpegDecodeVideoFileWorker::close()`：添加 `destroyPool()` 调用
+- ✅ `FfmpegDecodeRtspWorker::close()`：添加 `destroyPool()` 调用
+- ✅ 所有 Worker 的 `close()` 方法：主动清理 BufferPool
 
 ## 🔄 数据流和调用关系
 
@@ -470,10 +483,10 @@ bool VideoProductionLine::start(const Config& config) {
    - 只读接口和读写接口分离
    - 通过 friend 类实现权限控制
 
-4. **生命周期管理**：
-   - 使用 `shared_ptr` 管理共享资源
-   - Allocator 和 Registry 持有 `shared_ptr`，确保生命周期安全
-   - ProductionLine 持有 `unique_ptr`，管理使用
+4. **生命周期管理（v2.0）**：
+   - Registry 独占持有 `shared_ptr`，确保生命周期安全
+   - Allocator 通过 ID 机制查询和清理 Pool
+   - Worker 的 `close()` 主动清理资源
 
 5. **权限控制**：
    - 编译期权限控制（通过 friend 类）

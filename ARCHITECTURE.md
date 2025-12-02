@@ -1410,12 +1410,12 @@ ProductionLine（生产管理）
 
 **核心接口方法**（纯虚函数，子类必须实现）：
 - `allocatePoolWithBuffers(count, size, name, category)`：创建BufferPool并注入指定数量的Buffer
-  - **返回类型**：`std::unique_ptr<BufferPool>`（转移所有权给调用者）
-  - **设计**：Allocator 创建后立即返回，不持有 BufferPool
-  - **Registry**：自动注册到 BufferPoolRegistry（使用 weak_ptr，不持有所有权）
-- `injectBufferToPool(size, pool, queue)`：将Buffer注入到BufferPool
-- `removeBufferFromPool(buffer, pool)`：从BufferPool移除Buffer
-- `destroyPool(pool)`：销毁整个BufferPool及其所有Buffer
+  - **返回类型**：`uint64_t`（返回 pool_id，Registry 持有 Pool）
+  - **设计**：Allocator 创建后立即注册到 Registry，Registry 独占持有 BufferPool
+  - **Registry**：自动注册到 BufferPoolRegistry（传入 Allocator ID，Registry 记录归属关系）
+- `injectBufferToPool(pool_id, size, queue)`：将Buffer注入到BufferPool
+- `removeBufferFromPool(pool_id, buffer)`：从BufferPool移除Buffer
+- `destroyPool(pool_id)`：销毁整个BufferPool及其所有Buffer
 
 **子类必须实现的核心方法**（protected，纯虚函数）：
 - `createBuffer(id, size)`：创建单个Buffer（核心分配逻辑）
@@ -1429,30 +1429,27 @@ ProductionLine（生产管理）
 **子类创建 BufferPool 的方式**：
 ```cpp
 // 在子类的 allocatePoolWithBuffers() 中
-// 1. 创建 BufferPool（unique_ptr）
-auto pool = std::make_unique<BufferPool>(
+// 1. 创建 BufferPool（shared_ptr）
+auto pool = std::make_shared<BufferPool>(
     token(),    // 从基类获取通行证（Passkey Token）
     name,       // Pool 名称
     category    // Pool 分类
 );
 
-// 2. 注册到Registry（使用weak_ptr，不持有所有权）
-std::shared_ptr<BufferPool> temp_shared = std::shared_ptr<BufferPool>(
-    pool.get(), [](BufferPool*) {}  // 空删除器（不实际删除）
-);
-uint64_t id = BufferPoolRegistry::getInstance().registerPoolWeak(temp_shared);
-pool->setRegistryId(id);
-temp_shared.reset();  // 释放临时shared_ptr
+// 2. 注册到Registry（传入 Allocator ID，Registry 记录归属关系）
+uint64_t pool_id = BufferPoolRegistry::getInstance().registerPool(pool, getAllocatorId());
+pool->setRegistryId(pool_id);
 
-// 3. 返回unique_ptr（转移所有权给调用者）
-return pool;
+// 3. 返回 pool_id（Registry 独占持有 Pool）
+return pool_id;
 ```
 
-**设计变更说明**：
-- ✅ **独占所有权**：`allocatePoolWithBuffers()` 返回 `unique_ptr<BufferPool>`，所有权转移给调用者
-- ✅ **Allocator 不持有**：Allocator 创建后立即返回，不持有 BufferPool
-- ✅ **Registry 观察者**：Registry 使用 `weak_ptr` 存储，不持有所有权，Pool 销毁后自动失效
-- ✅ **RAII 原则**：谁持有 `unique_ptr`，谁负责释放 BufferPool
+**设计变更说明（v2.0）**：
+- ✅ **Registry 中心化管理**：Registry 独占持有 BufferPool（shared_ptr，引用计数=1）
+- ✅ **Allocator ID 机制**：每个 Allocator 有唯一 ID，Registry 记录 Pool 的创建者
+- ✅ **Allocator 不维护状态**：Allocator 不持有 Pool 列表，需要时向 Registry 查询
+- ✅ **自动清理**：Allocator 析构时自动查询 Registry 获取所有 Pool，逐个清理
+- ✅ **Worker 主动清理**：Worker 的 `close()` 调用 `destroyPool()` 主动清理资源
 
 **设计特点**：
 - ✅ **纯抽象接口**：所有方法都是纯虚函数（`= 0`），只有头文件，无实现文件
@@ -1958,15 +1955,16 @@ ProductionLine架构通过清晰的职责划分和设计模式应用，实现了
 - 提供比 friend 更精细的访问控制，更加安全和优雅
 - 子类通过 `BufferAllocatorBase::token()` 获取通行证，调用 `std::make_unique<BufferPool>(token(), name, category)` 创建
 
-**BufferPool 所有权管理**：
-- **独占所有权模式**：使用 `unique_ptr<BufferPool>` 实现独占所有权
-- **Allocator 不持有**：Allocator 创建 BufferPool 后立即返回 `unique_ptr`，不持有所有权
-- **Registry 观察者**：BufferPoolRegistry 使用 `weak_ptr<BufferPool>` 存储，不持有所有权
-- **谁持有谁释放**：持有 `unique_ptr` 的组件（Worker 或 ProductionLine）负责释放 BufferPool（RAII 原则）
-- **生命周期清晰**：Pool 销毁时，Registry 的 `weak_ptr` 自动失效（expired）
+**BufferPool 所有权管理（v2.0）**：
+- **Registry 中心化管理**：Registry 独占持有 BufferPool（shared_ptr，引用计数=1）
+- **Allocator ID 机制**：每个 Allocator 有唯一 ID，Registry 在 PoolInfo 中记录 `allocator_id`
+- **Allocator 不维护状态**：Allocator 不持有 Pool 列表，需要时向 Registry 查询
+- **自动清理**：Allocator 析构时查询 Registry 获取所有 Pool，逐个调用 `destroyPool()` 清理
+- **Worker 主动清理**：Worker 的 `close()` 调用 `destroyPool()` 主动清理资源
+- **生命周期清晰**：Pool 销毁时，Registry 自动从归属关系中移除
 
 ---
 
 **文档维护：** AI SDK Team  
 **最后更新：** 2025-01-24  
-**架构版本：** v3.6（基于接口和基类的架构设计 + Passkey Idiom + 独占所有权模式 - Allocator不持有BufferPool，Registry使用weak_ptr观察）
+**架构版本：** v2.0（Registry 中心化管理 + Allocator ID 机制 - Registry 独占持有 BufferPool，Allocator 通过 ID 查询和清理）

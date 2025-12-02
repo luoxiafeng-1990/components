@@ -60,20 +60,16 @@ public:
      * - Registry 独占持有 BufferPool（shared_ptr，引用计数=1）
      * - Allocator 立即转移所有权给 Registry
      * - Registry 负责 BufferPool 的生命周期管理
+     * - 记录创建者 Allocator 的 ID，用于归属关系追踪
      * 
      * @param pool BufferPool 的 shared_ptr（所有权转移给 Registry）
+     * @param allocator_id 创建者 Allocator 的唯一 ID
      * @return 唯一 ID
      * 
      * @note 线程安全：是
      * @note 注册后，Registry 成为唯一持有者（引用计数=1）
      */
-    uint64_t registerPool(std::shared_ptr<BufferPool> pool);
-    
-    /**
-     * @brief 注销 BufferPool（由 BufferPool 析构函数自动调用）
-     * @param id 注册时返回的唯一 ID
-     */
-    void unregisterPool(uint64_t id);
+    uint64_t registerPool(std::shared_ptr<BufferPool> pool, uint64_t allocator_id);
     
     // ========== 公开接口（所有人都可以调用）==========
     
@@ -178,6 +174,44 @@ private:
     std::shared_ptr<BufferPool> getPoolForAllocatorCleanup(uint64_t id);
     
     /**
+     * @brief 获取指定 Allocator 创建的所有 Pool ID（私有方法，只有友元可调用）
+     * 
+     * v2.0 设计：
+     * - Allocator 析构时调用此方法查询所有属于它的 Pool
+     * - 返回所有匹配的 Pool ID 列表
+     * - 用于自动清理所有 Pool
+     * 
+     * @param allocator_id Allocator 的唯一 ID
+     * @return std::vector<uint64_t> 所有属于此 Allocator 的 Pool ID 列表
+     * 
+     * @note 只有 friend class BufferAllocatorBase 可以调用
+     * @note 线程安全：是（内部有 mutex 保护）
+     */
+    std::vector<uint64_t> getPoolsByAllocatorId(uint64_t allocator_id) const;
+    
+    /**
+     * @brief 注销 BufferPool（私有方法，只能由 Allocator 的 destroyPool 调用）
+     * 
+     * ⚠️ 重要：此方法不应该被外部直接调用！
+     * 
+     * 正确的销毁流程：
+     * 1. Allocator::destroyPool() 清理所有 Buffer（调用 deallocateBuffer）
+     * 2. Allocator::destroyPool() 调用 unregisterPool() 注销
+     * 3. unregisterPool() 释放 shared_ptr，触发 Pool 析构
+     * 
+     * 为什么必须是私有？
+     * - 只有 Allocator 知道如何正确清理 Buffer（不同 Allocator 有不同的清理方式）
+     * - 如果外部直接调用 unregisterPool，会导致 Buffer 内存泄漏
+     * - 如果先调用 unregisterPool，再调用 destroyPool，destroyPool 无法获取 Pool（已从 Registry 移除）
+     * 
+     * @param id 注册时返回的唯一 ID
+     * 
+     * @note 线程安全：是
+     * @note 只有 friend class BufferAllocatorBase 可以调用
+     */
+    void unregisterPool(uint64_t id);
+    
+    /**
      * @brief Pool 信息结构
      */
     struct PoolInfo {
@@ -186,6 +220,7 @@ private:
         std::string name;                                    // 可读名称
         std::string category;                                // 分类
         std::chrono::system_clock::time_point created_time; // 创建时间
+        uint64_t allocator_id;                               // 🆕 创建者 Allocator 的唯一 ID
     };
     
     // ========== 成员变量 ==========

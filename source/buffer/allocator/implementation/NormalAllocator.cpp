@@ -21,12 +21,21 @@ NormalAllocator::NormalAllocator(BufferMemoryAllocatorType type, size_t alignmen
 }
 
 NormalAllocator::~NormalAllocator() {
-    // v2.0: 在子类析构中清理 BufferPool
-    // 此时对象还是 NormalAllocator 类型，可以正确调用子类的 destroyPool()
-    if (pool_id_ != 0) {
-        printf("🧹 [NormalAllocator] Cleaning up BufferPool (ID: %lu)...\n", pool_id_);
-        destroyPool(pool_id_);  // 调用子类的 destroyPool() 实现
+    // v2.0: 子类析构函数中显式清理所有 Pool
+    // 只有 NormalAllocator 自己知道如何释放 Buffer 内存
+    auto pool_ids = getAllPoolIds();
+    
+    if (!pool_ids.empty()) {
+        printf("🧹 [NormalAllocator] Cleaning up %zu Pool(s)...\n", pool_ids.size());
+        
+        // 逐个清理所有 Pool
+        for (uint64_t pool_id : pool_ids) {
+            destroyPool(pool_id);
+        }
+        
+        printf("✅ [NormalAllocator] All Pools cleaned up\n");
     }
+    
     printf("🧹 NormalAllocator destroyed\n");
 }
 
@@ -138,17 +147,14 @@ uint64_t NormalAllocator::allocatePoolWithBuffers(
                i, buffer->getVirtualAddress(), buffer->getPhysicalAddress(), size);
     }
     
-    // v2.0 步骤 3: 注册到 Registry（转移所有权）
-    uint64_t pool_id = BufferPoolRegistry::getInstance().registerPool(pool);
+    // v2.0 步骤 3: 注册到 Registry（转移所有权，传入 Allocator ID）
+    uint64_t pool_id = BufferPoolRegistry::getInstance().registerPool(pool, getAllocatorId());
     pool->setRegistryId(pool_id);
     
-    // v2.0 步骤 4: 记录 pool_id（不持有指针）
-    pool_id_ = pool_id;
+    printf("✅ [NormalAllocator] BufferPool '%s' created (ID: %lu, Allocator ID: %lu, ref_count=1, buffers=%d)\n", 
+           name.c_str(), pool_id, getAllocatorId(), count);
     
-    printf("✅ [NormalAllocator] BufferPool '%s' created (ID: %lu, ref_count=1, buffers=%d)\n", 
-           name.c_str(), pool_id, count);
-    
-    // v2.0 步骤 5: 返回 pool_id（Registry 独占持有 Pool）
+    // v2.0 步骤 4: 返回 pool_id（Registry 独占持有 Pool）
     return pool_id;
 }
 
@@ -325,11 +331,10 @@ bool NormalAllocator::destroyPool(uint64_t pool_id) {
     printf("✅ [NormalAllocator] Pool destroyed: removed %zu buffers\n", to_remove.size());
     
     // 4. 从 Registry 注销（触发 Pool 析构）
-    BufferPoolRegistry::getInstance().unregisterPool(pool_id);
+    // 通过基类的 protected 方法调用，因为 unregisterPool 是 Registry 的私有方法
+    unregisterPoolForCleanup(pool_id);
     
-    // 5. 清除 pool_id
-    pool_id_ = 0;
-    
+    // 5. 完成销毁（Registry 会自动从归属关系中移除）
     return true;
 }
 

@@ -122,6 +122,12 @@ void FfmpegDecodeRtspWorker::close() {
     
     printf("\n🛑 Closing RTSP stream...\n");
     
+    // v2.0: 主动清理 BufferPool
+    uint64_t pool_id = getOutputBufferPoolId();
+    if (pool_id != 0) {
+        allocator_facade_.destroyPool(pool_id);
+    }
+    
     // 停止解码线程
     running_ = false;
     buffer_cv_.notify_all();

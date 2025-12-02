@@ -6,6 +6,7 @@
 #include <vector>
 #include <unordered_map>
 #include <mutex>
+#include <atomic>
 #include <cstdint>
 #include <cstddef>
 #include <string>
@@ -74,12 +75,22 @@ enum class BufferMemoryAllocatorType {
 class BufferAllocatorBase {
 public:
     /**
+     * @brief 构造函数
+     * 
+     * v2.0 设计：
+     * - 自动分配唯一的 allocator_id_
+     * - 使用静态原子计数器保证全局唯一
+     */
+    BufferAllocatorBase() : allocator_id_(next_allocator_id_++) {}
+    
+    /**
      * @brief 析构函数
      * 
-     * v2.0 职责：
-     * 1. 通过友元获取 BufferPool（临时访问）
-     * 2. 销毁所有 Buffer 对象和内存
-     * 3. 从 Registry 注销（触发 Pool 析构）
+     * v2.0 设计：
+     * - 查询 Registry 获取所有属于此 Allocator 的 Pool ID
+     * - 逐个调用 destroyPool() 清理所有 Pool
+     * - 注意：此时对象还是子类类型（析构顺序：子类先，基类后）
+     *   但为了安全，我们仍然通过虚函数调用子类的 destroyPool()
      */
     virtual ~BufferAllocatorBase();
     
@@ -208,27 +219,54 @@ public:
      * 
      * @note 线程安全：是（BufferPool 内部加锁）
      * @note 只能销毁所有 Buffer 都处于 IDLE 状态的 pool
+     * @note 子类必须在析构函数中调用此方法清理所有 Pool
      */
     virtual bool destroyPool(uint64_t pool_id) = 0;
     
-    /**
-     * @brief 获取 Allocator 管理的 BufferPool ID
-     * @return uint64_t Pool ID，如果未创建返回 0
-     */
-    virtual uint64_t getManagedPoolId() const { return pool_id_; }
-    
 protected:
-    // ==================== v2.0 新架构：只记录 pool_id ====================
+    // ==================== v2.0 新架构：Allocator ID 机制 ====================
     
     /**
-     * @brief Allocator 创建的 BufferPool ID
+     * @brief Allocator 的唯一标识符
      * 
      * v2.0 设计：
-     * - Allocator 不持有 BufferPool 指针
-     * - 只记录 pool_id
-     * - 通过 Registry 获取 Pool（临时访问）
+     * - 每个 Allocator 实例在构造时分配唯一 ID
+     * - 用于 Registry 中记录 Pool 的归属关系
+     * - 析构时通过此 ID 查询并清理所有创建的 Pool
+     * 
+     * @note 此 ID 是只读的，不允许通过此 ID 访问 Allocator 对象
+     * @note Registry 使用此 ID 记录 Pool 的创建者
      */
-    uint64_t pool_id_ = 0;
+    uint64_t allocator_id_;
+    
+    /**
+     * @brief 全局 Allocator ID 计数器（静态原子变量）
+     * 
+     * 用于生成全局唯一的 Allocator ID
+     */
+    static std::atomic<uint64_t> next_allocator_id_;
+    
+    /**
+     * @brief 获取 Allocator 的唯一 ID（只读）
+     * 
+     * @return uint64_t Allocator 的唯一标识符
+     * 
+     * @note 此 ID 仅用于 Registry 中记录 Pool 的归属关系
+     * @note 不允许通过此 ID 访问 Allocator 对象
+     */
+    uint64_t getAllocatorId() const { return allocator_id_; }
+    
+    /**
+     * @brief 获取所有属于此 Allocator 的 Pool ID（辅助方法）
+     * 
+     * 子类在析构函数中使用此方法获取所有 Pool ID，然后逐个调用 destroyPool()。
+     * 
+     * @return std::vector<uint64_t> 所有 Pool ID 的列表
+     * 
+     * @note 此方法是非虚的，可以在析构函数中安全调用
+     * @note 子类析构函数应该使用此方法获取所有 Pool，然后逐个调用 destroyPool()
+     */
+    std::vector<uint64_t> getAllPoolIds() const;
     
     /**
      * @brief 供子类清理时使用（通过友元访问 Registry）
@@ -246,19 +284,26 @@ protected:
      */
     std::shared_ptr<BufferPool> getPoolForCleanup(uint64_t pool_id);
     
-    // ==================== 注意：以下成员已删除 ====================
-    // 
-    // 设计变更（v2.0）：
-    // - BufferPool 由 Registry 独占持有（shared_ptr，引用计数=1）
-    // - Allocator 只记录 pool_id，不持有指针
-    // - 通过友元访问 Registry 的私有清理方法
-    // 
-    // 已删除的成员：
-    // - managed_pool_sptr_（不再持有）
-    // - managed_pool_uptr_（不再持有）
-    // - managed_pool_mutex_（不再需要）
-    // - getManagedBufferPool()（改为 getManagedPoolId）
-    // - createBufferPool()（不再需要，子类直接创建 shared_ptr）
+    /**
+     * @brief 注销 Pool（供子类使用）
+     * 
+     * v2.0 设计：
+     * - 子类在 destroyPool() 中清理完 Buffer 后，需要注销 Pool
+     * - 通过友元访问 Registry 的私有方法 unregisterPool()
+     * - 只能由 Allocator 调用，确保销毁流程正确
+     * 
+     * 正确的销毁流程：
+     * 1. Allocator::destroyPool() 清理所有 Buffer (deallocateBuffer)
+     * 2. Allocator::destroyPool() 调用 unregisterPoolForCleanup() 注销
+     * 3. unregisterPoolForCleanup() 释放 shared_ptr，触发 Pool 析构
+     * 
+     * @param pool_id Pool ID
+     * 
+     * @note 只有子类可以调用（protected）
+     * @note 必须在清理完所有 Buffer 后调用
+     */
+    void unregisterPoolForCleanup(uint64_t pool_id);
+    
     
     // ==================== 子类必须实现的核心方法 ====================
     
