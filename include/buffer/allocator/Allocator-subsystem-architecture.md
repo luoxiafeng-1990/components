@@ -1011,7 +1011,7 @@ sequenceDiagram
     activate Allocator
     
     Note over Allocator: 1. 通过友元获取 Pool
-    Allocator->>Registry: getPoolForAllocatorCleanup(pool_id) (private, friend access)
+    Allocator->>Registry: getPoolSpecialForAllocator(pool_id) (private, friend access)
     activate Registry
     Registry-->>Allocator: pool (shared_ptr)
     deactivate Registry

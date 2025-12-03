@@ -23,18 +23,8 @@ NormalAllocator::NormalAllocator(BufferMemoryAllocatorType type, size_t alignmen
 NormalAllocator::~NormalAllocator() {
     // v2.0: 子类析构函数中显式清理所有 Pool
     // 只有 NormalAllocator 自己知道如何释放 Buffer 内存
-    auto pool_ids = getAllPoolIds();
-    
-    if (!pool_ids.empty()) {
-        printf("🧹 [NormalAllocator] Cleaning up %zu Pool(s)...\n", pool_ids.size());
-        
-        // 逐个清理所有 Pool
-        for (uint64_t pool_id : pool_ids) {
-            destroyPool(pool_id);
-        }
-        
-        printf("✅ [NormalAllocator] All Pools cleaned up\n");
-    }
+    // destroyPool() 会自动查询 Registry 获取所有 Pool 并清理
+    destroyPool();
     
     printf("🧹 NormalAllocator destroyed\n");
 }
@@ -296,45 +286,56 @@ bool NormalAllocator::removeBufferFromPool(uint64_t pool_id, Buffer* buffer) {
     return true;
 }
 
-bool NormalAllocator::destroyPool(uint64_t pool_id) {
-    if (pool_id == 0) {
-        printf("❌ [NormalAllocator] destroyPool: invalid pool_id\n");
-        return false;
+bool NormalAllocator::destroyPool() {
+    // 1. 获取所有属于此 allocator 的 pool
+    auto pool_ids = getPoolsByAllocator();
+    
+    if (pool_ids.empty()) {
+        printf("✅ [NormalAllocator] No pools to destroy\n");
+        return true;
     }
     
-    // v2.0: 通过基类辅助方法从 Registry 获取 Pool（临时访问）
-    auto pool = getPoolForCleanup(pool_id);
-    if (!pool) {
-        printf("⚠️  [NormalAllocator] destroyPool: pool_id %lu not found (already destroyed?)\n", pool_id);
-        return false;
-    }
-    
-    printf("🧹 [NormalAllocator] Destroying pool '%s' (ID: %lu)...\n", pool->getName().c_str(), pool_id);
+    printf("🧹 [NormalAllocator] Destroying %zu pool(s)...\n", pool_ids.size());
     
     std::lock_guard<std::mutex> lock(ownership_mutex_);
     
-    // 2. 找到所有属于此 allocator 的 buffer
-    std::vector<Buffer*> to_remove;
-    for (auto& [buf, alloc] : buffer_ownership_) {
-        if (alloc == this) {
-            to_remove.push_back(buf);
+    // 2. 遍历每个 pool
+    for (uint64_t pool_id : pool_ids) {
+        // 2.1 获取 pool
+        auto pool = getPoolSpecialForAllocator(pool_id);
+        if (!pool) {
+            printf("⚠️  [NormalAllocator] pool_id %lu not found (already destroyed?)\n", pool_id);
+            continue;
         }
+        
+        printf("🧹 [NormalAllocator] Destroying pool '%s' (ID: %lu)...\n", pool->getName().c_str(), pool_id);
+        
+        // 2.2 通过友元关系直接访问 pool 的 managed_buffers_，获取所有属于此 pool 的 buffer
+        // 由于 BufferAllocatorBase 是 BufferPool 的友元，子类可以访问私有成员
+        std::vector<Buffer*> to_remove;
+        for (Buffer* buf : pool->managed_buffers_) {
+            // 检查 buffer 是否属于此 allocator
+            auto it = buffer_ownership_.find(buf);
+            if (it != buffer_ownership_.end() && it->second == this) {
+                to_remove.push_back(buf);
+            }
+        }
+        
+        // 2.3 移除并销毁所有 Buffer
+        for (Buffer* buf : to_remove) {
+            BufferAllocatorBase::removeBufferFromPoolInternal(pool.get(), buf);
+            deallocateBuffer(buf);
+            buffer_ownership_.erase(buf);
+        }
+        
+        printf("✅ [NormalAllocator] Pool '%s' destroyed: removed %zu buffers\n", 
+               pool->getName().c_str(), to_remove.size());
+        
+        // 2.4 从 Registry 注销（触发 Pool 析构）
+        unregisterPool(pool_id);
     }
     
-    // 3. 移除并销毁所有 Buffer
-    for (Buffer* buf : to_remove) {
-        BufferAllocatorBase::removeBufferFromPoolInternal(pool.get(), buf);
-        deallocateBuffer(buf);
-        buffer_ownership_.erase(buf);
-    }
-    
-    printf("✅ [NormalAllocator] Pool destroyed: removed %zu buffers\n", to_remove.size());
-    
-    // 4. 从 Registry 注销（触发 Pool 析构）
-    // 通过基类的 protected 方法调用，因为 unregisterPool 是 Registry 的私有方法
-    unregisterPoolForCleanup(pool_id);
-    
-    // 5. 完成销毁（Registry 会自动从归属关系中移除）
+    printf("✅ [NormalAllocator] All %zu pool(s) destroyed\n", pool_ids.size());
     return true;
 }
 

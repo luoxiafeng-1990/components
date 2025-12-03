@@ -37,6 +37,7 @@ FfmpegDecodeVideoFileWorker::FfmpegDecodeVideoFileWorker()
     , total_frames_(-1)
     , current_frame_index_(0)
     , is_open_(false)
+    , is_ffmpeg_opened_(false)
     , eof_reached_(false)
     , zero_copy_buffer_pool_ptr_(nullptr)
     , use_hardware_decoder_(true)  // 默认启用硬件解码
@@ -67,25 +68,25 @@ bool FfmpegDecodeVideoFileWorker::open(const char* path) {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
     
     // 如果已经打开，先关闭
-    if (is_open_) {
-        closeVideo();
+    if (is_open_.load(std::memory_order_acquire)) {
+        closeFfmpegResources();
     }
     
     // 保存路径
     strncpy(file_path_, path, MAX_VIDEO_PATH_LENGTH - 1);
     file_path_[MAX_VIDEO_PATH_LENGTH - 1] = '\0';
     
-    // 打开视频文件
-    if (!openVideo()) {
+    // 打开FFmpeg资源
+    if (!openFfmpegResources()) {
         return false;
     }
     
     // 🎯 Worker职责：在open()时自动创建BufferPool（通过调用Allocator）
-    // 计算帧大小（在openVideo()后，output_width_和output_height_已设置）
+    // 计算帧大小（在openFfmpegResources()后，output_width_和output_height_已设置）
     size_t frame_size = output_width_ * output_height_ * output_bpp_ / 8;
     if (frame_size == 0) {
         setError("Invalid frame size, cannot create BufferPool");
-        closeVideo();
+        closeFfmpegResources();
         return false;
     }
     
@@ -101,7 +102,7 @@ bool FfmpegDecodeVideoFileWorker::open(const char* path) {
     
     if (buffer_pool_id_ == 0) {
         setError("Failed to create BufferPool via Allocator");
-        closeVideo();
+        closeFfmpegResources();
         return false;
     }
     
@@ -110,7 +111,7 @@ bool FfmpegDecodeVideoFileWorker::open(const char* path) {
     auto pool = pool_weak.lock();
     std::string pool_name = pool ? pool->getName() : "Unknown";
     
-    is_open_ = true;
+    is_open_.store(true, std::memory_order_release);
     current_frame_index_ = 0;
     eof_reached_ = false;
     decoded_frames_ = 0;
@@ -135,27 +136,44 @@ bool FfmpegDecodeVideoFileWorker::open(const char* path, int width, int height, 
 }
 
 void FfmpegDecodeVideoFileWorker::close() {
-    std::lock_guard<std::recursive_mutex> lock(mutex_);
-    
-    // v2.0: 主动清理 BufferPool
-    if (buffer_pool_id_ != 0) {
-        allocator_facade_.destroyPool(buffer_pool_id_);
-        buffer_pool_id_ = 0;
+    // 🎯 原子检查并设置：如果 is_open_ 是 true，则设置为 false
+    // 返回值表示是否成功设置（即之前是 true）
+    bool expected = true;
+    if (!is_open_.compare_exchange_strong(expected, false,
+                                         std::memory_order_acq_rel,
+                                         std::memory_order_acquire)) {
+        // is_open_ 已经是 false，说明已经关闭过了，直接返回
+        return;
     }
     
-    closeVideo();
-    is_open_ = false;
+    // 🎯 只有第一个线程能执行到这里（is_open_ 从 true 变为 false）
+    // 此时 is_open_ == false，其他线程调用 close() 会直接返回
+    
+    {
+        std::lock_guard<std::recursive_mutex> lock(mutex_);
+        
+        // v2.0: BufferPool 生命周期由 Allocator 管理，Worker 不需要调用 destroyPool
+        // Allocator 析构时会自动清理所有 Pool
+        buffer_pool_id_ = 0;  // 只清除ID，不调用destroyPool
+        
+        closeFfmpegResources();
+    }
+    
+    // is_open_ 已经在上面设置为 false，不需要再次设置
 }
 
 bool FfmpegDecodeVideoFileWorker::isOpen() const {
-    return is_open_;
+    return is_open_.load(std::memory_order_acquire);
 }
 
 // ============================================================================
-// 内部方法：打开视频
+// 内部方法：打开FFmpeg资源
 // ============================================================================
 
-bool FfmpegDecodeVideoFileWorker::openVideo() {
+bool FfmpegDecodeVideoFileWorker::openFfmpegResources() {
+    // 🎯 重置FFmpeg资源状态标志
+    is_ffmpeg_opened_.store(false, std::memory_order_release);
+    
     // 1. 打开输入文件
     format_ctx_ptr_ = avformat_alloc_context();
     if (!format_ctx_ptr_) {
@@ -174,19 +192,19 @@ bool FfmpegDecodeVideoFileWorker::openVideo() {
     ret = avformat_find_stream_info(format_ctx_ptr_, nullptr);
     if (ret < 0) {
         setError("Failed to find stream info", ret);
-        closeVideo();
+        closeFfmpegResources();
         return false;
     }
     
     // 3. 查找视频流
     if (!findVideoStream()) {
-        closeVideo();
+        closeFfmpegResources();
         return false;
     }
     
     // 4. 初始化解码器
     if (!initializeDecoder()) {
-        closeVideo();
+        closeFfmpegResources();
         return false;
     }
     
@@ -203,14 +221,32 @@ bool FfmpegDecodeVideoFileWorker::openVideo() {
     packet_ptr_ = av_packet_alloc();
     if (!packet_ptr_) {
         setError("Failed to allocate AVPacket");
-        closeVideo();
+        closeFfmpegResources();
         return false;
     }
+    
+    // 🎯 成功打开FFmpeg资源，设置标志位
+    is_ffmpeg_opened_.store(true, std::memory_order_release);
     
     return true;
 }
 
-void FfmpegDecodeVideoFileWorker::closeVideo() {
+void FfmpegDecodeVideoFileWorker::closeFfmpegResources() {
+    // 🎯 原子检查并设置：如果 is_ffmpeg_opened_ 是 true，则设置为 false
+    // 返回值表示是否成功设置（即之前是 true）
+    bool expected = true;
+    if (!is_ffmpeg_opened_.compare_exchange_strong(expected, false,
+                                                   std::memory_order_acq_rel,
+                                                   std::memory_order_acquire)) {
+        // is_ffmpeg_opened_ 已经是 false，说明已经关闭过了，直接返回
+        return;
+    }
+    
+    // 🎯 只有第一个线程能执行到这里（is_ffmpeg_opened_ 从 true 变为 false）
+    // 此时 is_ffmpeg_opened_ == false，其他线程调用 closeFfmpegResources() 会直接返回
+    
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
+    
     // 释放 AVPacket
     if (packet_ptr_) {
         av_packet_free(&packet_ptr_);
@@ -225,6 +261,7 @@ void FfmpegDecodeVideoFileWorker::closeVideo() {
     
     // 释放解码器
     if (codec_ctx_ptr_) {
+        avcodec_flush_buffers(codec_ctx_ptr_);
         avcodec_free_context(&codec_ctx_ptr_);
         codec_ctx_ptr_ = nullptr;
     }
@@ -526,8 +563,8 @@ bool FfmpegDecodeVideoFileWorker::convertFrameTo(AVFrame* src_frame, void* dest,
 
 bool FfmpegDecodeVideoFileWorker::seek(int frame_index) {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
-    closeVideo();
-    openVideo();
+    close();
+    open(file_path_);
     return true;
 }
 
@@ -610,7 +647,7 @@ bool FfmpegDecodeVideoFileWorker::fillBuffer(int frame_index, Buffer* buffer) {
         return false;
     }
     
-    if (!is_open_) {
+    if (!is_open_.load(std::memory_order_acquire)) {
         printf("❌ ERROR: Worker is not open\n");
         return false;
     }
@@ -711,26 +748,26 @@ uint64_t FfmpegDecodeVideoFileWorker::getOutputBufferPoolId() {
 // ============================================================================
 
 void FfmpegDecodeVideoFileWorker::setOutputResolution(int width, int height) {
-    if (!is_open_) {
+    if (!is_open_.load(std::memory_order_acquire)) {
         output_width_ = width;
         output_height_ = height;
     }
 }
 
 void FfmpegDecodeVideoFileWorker::setOutputBitsPerPixel(int bpp) {
-    if (!is_open_) {
+    if (!is_open_.load(std::memory_order_acquire)) {
         output_bpp_ = bpp;
     }
 }
 
 void FfmpegDecodeVideoFileWorker::setDecoderName(const char* decoder_name) {
-    if (!is_open_) {
+    if (!is_open_.load(std::memory_order_acquire)) {
         decoder_name_ptr_ = decoder_name;
     }
 }
 
 void FfmpegDecodeVideoFileWorker::setHardwareDecoder(bool enable) {
-    if (!is_open_) {
+    if (!is_open_.load(std::memory_order_acquire)) {
         use_hardware_decoder_ = enable;
     }
 }
@@ -776,7 +813,7 @@ void FfmpegDecodeVideoFileWorker::printStats() const {
 }
 
 void FfmpegDecodeVideoFileWorker::printVideoInfo() const {
-    if (!is_open_ || !format_ctx_ptr_ || video_stream_index_ < 0) {
+    if (!is_open_.load(std::memory_order_acquire) || !format_ctx_ptr_ || video_stream_index_ < 0) {
         printf("⚠️  Video not open\n");
         return;
     }

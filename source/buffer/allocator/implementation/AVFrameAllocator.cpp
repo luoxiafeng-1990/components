@@ -20,30 +20,20 @@ AVFrameAllocator::AVFrameAllocator()
 AVFrameAllocator::~AVFrameAllocator() {
     // v2.0: 子类析构函数中显式清理所有 Pool
     // 只有 AVFrameAllocator 自己知道如何释放 AVFrame
-    auto pool_ids = getAllPoolIds();
-    
-    if (!pool_ids.empty()) {
-        printf("🧹 [AVFrameAllocator] Cleaning up %zu Pool(s)...\n", pool_ids.size());
-        
-        // 逐个清理所有 Pool
-        for (uint64_t pool_id : pool_ids) {
-            destroyPool(pool_id);
-        }
-        
-        printf("✅ [AVFrameAllocator] All Pools cleaned up\n");
-    }
+    // destroyPool() 会自动查询 Registry 获取所有 Pool 并清理
+    destroyPool();
     
     std::lock_guard<std::mutex> lock(mapping_mutex_);
     
     // 释放所有未释放的 AVFrame（双重保险）
     for (auto& [buffer, frame] : buffer_to_frame_) {
         if (frame) {
+            printf("⚠️  [AVFrameAllocator] Releasing orphaned AVFrame (buffer #%u)\n", buffer->id());
             av_frame_free(&frame);
-            printf("   🗑️ Released AVFrame for Buffer #%u\n", buffer->id());
         }
     }
-    
     buffer_to_frame_.clear();
+    
     printf("🧹 AVFrameAllocator destroyed\n");
 }
 
@@ -406,45 +396,61 @@ bool AVFrameAllocator::removeBufferFromPool(uint64_t pool_id, Buffer* buffer) {
     return true;
 }
 
-bool AVFrameAllocator::destroyPool(uint64_t pool_id) {
-    if (pool_id == 0) {
-        printf("❌ [AVFrameAllocator] destroyPool: invalid pool_id\n");
-        return false;
+bool AVFrameAllocator::destroyPool() {
+    // 1. 获取所有属于此 allocator 的 pool
+    auto pool_ids = getPoolsByAllocator();
+    
+    if (pool_ids.empty()) {
+        printf("✅ [AVFrameAllocator] No pools to destroy\n");
+        return true;
     }
     
-    // v2.0: 通过基类辅助方法从 Registry 获取 Pool
-    auto pool = getPoolForCleanup(pool_id);
-    if (!pool) {
-        printf("⚠️  [AVFrameAllocator] pool_id %lu not found (already destroyed?)\n", pool_id);
-        return false;
-    }
-    
-    printf("🧹 [AVFrameAllocator] Destroying pool '%s' (ID: %lu)...\n", pool->getName().c_str(), pool_id);
+    printf("🧹 [AVFrameAllocator] Destroying %zu pool(s)...\n", pool_ids.size());
     
     std::lock_guard<std::mutex> lock(avframe_ownership_mutex_);
     
-    // 2. 找到所有属于此 allocator 的 buffer
-    std::vector<Buffer*> to_remove;
-    for (auto& [buf, alloc] : avframe_buffer_ownership_) {
-        if (alloc == this) {
-            to_remove.push_back(buf);
+    // 2. 遍历每个 pool
+    for (uint64_t pool_id : pool_ids) {
+        // 2.1 获取 pool
+        auto pool = getPoolSpecialForAllocator(pool_id);
+        if (!pool) {
+            printf("⚠️  [AVFrameAllocator] pool_id %lu not found (already destroyed?)\n", pool_id);
+            continue;
         }
+        
+        printf("🧹 [AVFrameAllocator] Destroying pool '%s' (ID: %lu)...\n", pool->getName().c_str(), pool_id);
+        
+        // 2.2 通过友元关系直接访问 pool 的 managed_buffers_，获取所有属于此 pool 的 buffer
+        std::vector<Buffer*> to_remove;
+        for (Buffer* buf : pool->managed_buffers_) {
+            // 检查 buffer 是否属于此 allocator
+            auto it = avframe_buffer_ownership_.find(buf);
+            if (it != avframe_buffer_ownership_.end() && it->second == this) {
+                to_remove.push_back(buf);
+            }
+        }
+        
+        // 2.3 移除并销毁所有 Buffer（同时释放 AVFrame）
+        for (Buffer* buf : to_remove) {
+            BufferAllocatorBase::removeBufferFromPoolInternal(pool.get(), buf);
+            deallocateBuffer(buf);  // 内部会释放 AVFrame
+            avframe_buffer_ownership_.erase(buf);
+            
+            // 从 buffer_to_frame_ 中移除
+            {
+                std::lock_guard<std::mutex> lock2(mapping_mutex_);
+                buffer_to_frame_.erase(buf);
+            }
+        }
+        
+        printf("✅ [AVFrameAllocator] Pool '%s' destroyed: removed %zu buffers\n", 
+               pool->getName().c_str(), to_remove.size());
+        
+        // 2.4 从 Registry 注销（触发 Pool 析构）
+        unregisterPool(pool_id);
     }
     
-    // 3. 移除并销毁
-    for (Buffer* buf : to_remove) {
-        BufferAllocatorBase::removeBufferFromPoolInternal(pool.get(), buf);
-        deallocateBuffer(buf);
-        avframe_buffer_ownership_.erase(buf);
-    }
-    
-    printf("✅ [AVFrameAllocator] Pool destroyed: removed %zu buffers\n", to_remove.size());
-    
-    // 4. 从 Registry 注销（触发 Pool 析构）
-    // 通过基类的 protected 方法调用，因为 unregisterPool 是 Registry 的私有方法
-    unregisterPoolForCleanup(pool_id);
-    
-    // 5. 完成销毁（Registry 会自动从归属关系中移除）
+    printf("✅ [AVFrameAllocator] All %zu pool(s) destroyed\n", pool_ids.size());
     return true;
 }
 

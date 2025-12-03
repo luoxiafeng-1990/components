@@ -78,7 +78,8 @@ private:
     // ============ 解码状态 ============
     int total_frames_;                 // 总帧数（估算）
     int current_frame_index_;          // 当前帧索引
-    bool is_open_;
+    std::atomic<bool> is_open_;        // 🎯 原子变量，保证线程安全的状态检查（Worker业务层面）
+    std::atomic<bool> is_ffmpeg_opened_;  // 🎯 原子变量，保证线程安全的FFmpeg资源状态检查
     bool eof_reached_;
     
     // ============ 零拷贝模式 ============
@@ -104,14 +105,14 @@ private:
     // ============ 内部辅助方法 ============
     
     /**
-     * @brief 打开视频文件并初始化解码器
+     * @brief 打开FFmpeg资源并初始化解码器
      */
-    bool openVideo();
+    bool openFfmpegResources();
     
     /**
-     * @brief 关闭视频文件并释放资源
+     * @brief 关闭FFmpeg资源并释放资源
      */
-    void closeVideo();
+    void closeFfmpegResources();
     
     /**
      * @brief 查找视频流

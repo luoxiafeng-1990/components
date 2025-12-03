@@ -87,10 +87,9 @@ public:
      * @brief 析构函数
      * 
      * v2.0 设计：
-     * - 查询 Registry 获取所有属于此 Allocator 的 Pool ID
-     * - 逐个调用 destroyPool() 清理所有 Pool
-     * - 注意：此时对象还是子类类型（析构顺序：子类先，基类后）
-     *   但为了安全，我们仍然通过虚函数调用子类的 destroyPool()
+     * - 基类析构函数不调用 destroyPool()（因为 destroyPool() 是纯虚函数）
+     * - 子类必须在自己的析构函数中调用 destroyPool() 清理所有 Pool
+     * - destroyPool() 会自动查询 Registry 获取所有 Pool 并清理
      */
     virtual ~BufferAllocatorBase();
     
@@ -201,27 +200,28 @@ public:
     virtual bool removeBufferFromPool(uint64_t pool_id, Buffer* buffer) = 0;
     
     /**
-     * @brief 销毁整个 BufferPool 及其所有 Buffer
+     * @brief 销毁所有 BufferPool 及其所有 Buffer
      * 
-     * v2.0 注意：需要通过友元访问 Registry
+     * v2.0 注意：自动处理所有属于此 Allocator 的 Pool
      * 
      * 适用场景：
-     * - 清理资源：销毁不再使用的 BufferPool
-     * - 析构时清理：Allocator 析构时清理所有创建的 Pool
+     * - 清理资源：销毁所有不再使用的 BufferPool
+     * - 析构时清理：Allocator 析构时自动清理所有创建的 Pool
      * 
      * 工作流程：
-     * 1. 通过友元从 Registry 获取 Pool（临时访问）
-     * 2. 销毁所有 Buffer（调用 deallocateBuffer）
-     * 3. 从 Registry 注销（触发 Pool 析构）
+     * 1. 查询 Registry 获取所有属于此 Allocator 的 Pool ID
+     * 2. 遍历每个 Pool：
+     *    - 通过友元从 Registry 获取 Pool（临时访问）
+     *    - 销毁所有 Buffer（调用 deallocateBuffer）
+     *    - 从 Registry 注销（触发 Pool 析构）
      * 
-     * @param pool_id BufferPool ID
      * @return true 成功，false 失败
      * 
      * @note 线程安全：是（BufferPool 内部加锁）
      * @note 只能销毁所有 Buffer 都处于 IDLE 状态的 pool
-     * @note 子类必须在析构函数中调用此方法清理所有 Pool
+     * @note 子类析构函数可以直接调用此方法清理所有 Pool
      */
-    virtual bool destroyPool(uint64_t pool_id) = 0;
+    virtual bool destroyPool() = 0;
     
 protected:
     // ==================== v2.0 新架构：Allocator ID 机制 ====================
@@ -259,14 +259,14 @@ protected:
     /**
      * @brief 获取所有属于此 Allocator 的 Pool ID（辅助方法）
      * 
-     * 子类在析构函数中使用此方法获取所有 Pool ID，然后逐个调用 destroyPool()。
+     * 子类在 destroyPool() 实现中使用此方法获取所有 Pool ID。
      * 
      * @return std::vector<uint64_t> 所有 Pool ID 的列表
      * 
-     * @note 此方法是非虚的，可以在析构函数中安全调用
-     * @note 子类析构函数应该使用此方法获取所有 Pool，然后逐个调用 destroyPool()
+     * @note 此方法是非虚的，可以在任何地方安全调用
+     * @note destroyPool() 内部会自动调用此方法获取所有 Pool
      */
-    std::vector<uint64_t> getAllPoolIds() const;
+    std::vector<uint64_t> getPoolsByAllocator() const;
     
     /**
      * @brief 供子类清理时使用（通过友元访问 Registry）
@@ -282,7 +282,7 @@ protected:
      * @note 只有子类在 destroyPool() 实现中使用
      * @note 实现位于 BufferAllocatorBase.cpp 中（避免头文件依赖）
      */
-    std::shared_ptr<BufferPool> getPoolForCleanup(uint64_t pool_id);
+    std::shared_ptr<BufferPool> getPoolSpecialForAllocator(uint64_t pool_id);
     
     /**
      * @brief 注销 Pool（供子类使用）
@@ -292,17 +292,18 @@ protected:
      * - 通过友元访问 Registry 的私有方法 unregisterPool()
      * - 只能由 Allocator 调用，确保销毁流程正确
      * 
-     * 正确的销毁流程：
-     * 1. Allocator::destroyPool() 清理所有 Buffer (deallocateBuffer)
-     * 2. Allocator::destroyPool() 调用 unregisterPoolForCleanup() 注销
-     * 3. unregisterPoolForCleanup() 释放 shared_ptr，触发 Pool 析构
+     * 正确的销毁流程（针对单个 Pool）：
+     * 1. Allocator::destroyPool() 遍历所有 Pool
+     * 2. 对每个 Pool：清理所有 Buffer (deallocateBuffer)
+     * 3. 对每个 Pool：调用 unregisterPool() 注销
+     * 4. unregisterPool() 释放 shared_ptr，触发 Pool 析构
      * 
      * @param pool_id Pool ID
      * 
      * @note 只有子类可以调用（protected）
      * @note 必须在清理完所有 Buffer 后调用
      */
-    void unregisterPoolForCleanup(uint64_t pool_id);
+    void unregisterPool(uint64_t pool_id);
     
     
     // ==================== 子类必须实现的核心方法 ====================

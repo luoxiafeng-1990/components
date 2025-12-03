@@ -144,13 +144,13 @@ public:
     bool removeBufferFromPool(uint64_t pool_id, Buffer* buffer);
     
     /**
-     * @brief 销毁整个 BufferPool 及其所有 Buffer
+     * @brief 销毁所有 BufferPool 及其所有 Buffer
      * 
-     * v2.0: @param pool_id BufferPool ID
+     * 自动查询 Registry 获取所有属于此 Allocator 的 Pool，逐个清理。
      * 
      * @return true 成功，false 失败
      */
-    bool destroyPool(uint64_t pool_id);
+    bool destroyPool();
     
     /**
      * @brief 获取底层 Allocator 指针（用于特殊操作）
