@@ -169,9 +169,9 @@ private:
      * @note 只有 friend class BufferAllocatorBase 可以调用
      * @note 与公开接口 getPool() 的区别：
      *       - getPool() 返回 weak_ptr（观察者模式）
-     *       - getPoolForAllocatorCleanup() 返回 shared_ptr（用于清理操作）
+     *       - getPoolSpecialForAllocator() 返回 shared_ptr（用于清理操作）
      */
-    std::shared_ptr<BufferPool> getPoolForAllocatorCleanup(uint64_t id);
+    std::shared_ptr<BufferPool> getPoolSpecialForAllocator(uint64_t id);
     
     /**
      * @brief 获取指定 Allocator 创建的所有 Pool ID（私有方法，只有友元可调用）
@@ -187,7 +187,7 @@ private:
      * @note 只有 friend class BufferAllocatorBase 可以调用
      * @note 线程安全：是（内部有 mutex 保护）
      */
-    std::vector<uint64_t> getPoolsByAllocatorId(uint64_t allocator_id) const;
+    std::vector<uint64_t> getPoolsByAllocator(uint64_t allocator_id) const;
     
     /**
      * @brief 注销 BufferPool（私有方法，只能由 Allocator 的 destroyPool 调用）

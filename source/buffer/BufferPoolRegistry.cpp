@@ -100,7 +100,7 @@ size_t BufferPoolRegistry::getPoolCount() const {
 
 // ========== v2.0 新增：Allocator 友元方法 ==========
 
-std::shared_ptr<BufferPool> BufferPoolRegistry::getPoolForAllocatorCleanup(uint64_t id) {
+std::shared_ptr<BufferPool> BufferPoolRegistry::getPoolSpecialForAllocator(uint64_t id) {
     // 🔑 私有方法，只有友元 BufferAllocatorBase 可以调用
     // 用于 Allocator 析构时获取 Pool 并清理 Buffer
     // 返回 shared_ptr（不是 weak_ptr），保证清理期间 Pool 不被销毁
@@ -116,7 +116,7 @@ std::shared_ptr<BufferPool> BufferPoolRegistry::getPoolForAllocatorCleanup(uint6
     return it->second.pool;
 }
 
-std::vector<uint64_t> BufferPoolRegistry::getPoolsByAllocatorId(uint64_t allocator_id) const {
+std::vector<uint64_t> BufferPoolRegistry::getPoolsByAllocator(uint64_t allocator_id) const {
     // 🔑 私有方法，只有友元 BufferAllocatorBase 可以调用
     // 用于 Allocator 析构时查询所有属于它的 Pool
     

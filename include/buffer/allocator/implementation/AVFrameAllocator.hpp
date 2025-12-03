@@ -145,11 +145,11 @@ public:
     bool removeBufferFromPool(uint64_t pool_id, Buffer* buffer) override;
     
     /**
-     * @brief 销毁整个 BufferPool 及其所有 Buffer
+     * @brief 销毁所有 BufferPool 及其所有 Buffer
      * 
-     * v2.0: @param pool_id BufferPool ID
+     * 自动查询 Registry 获取所有属于此 Allocator 的 Pool，逐个清理。
      */
-    bool destroyPool(uint64_t pool_id) override;
+    bool destroyPool() override;
     
 protected:
     /**

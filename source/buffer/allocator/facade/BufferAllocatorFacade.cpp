@@ -79,13 +79,13 @@ bool BufferAllocatorFacade::removeBufferFromPool(uint64_t pool_id, Buffer* buffe
     return allocator_base_uptr_->removeBufferFromPool(pool_id, buffer);
 }
 
-bool BufferAllocatorFacade::destroyPool(uint64_t pool_id) {
+bool BufferAllocatorFacade::destroyPool() {
     if (!allocator_base_uptr_) {
         printf("❌ ERROR: Allocator not initialized\n");
         return false;
     }
     
-    return allocator_base_uptr_->destroyPool(pool_id);
+    return allocator_base_uptr_->destroyPool();
 }
 
 // ==================== v2.0 已删除 getManagedBufferPool() ====================

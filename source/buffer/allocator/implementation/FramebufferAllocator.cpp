@@ -53,18 +53,8 @@ FramebufferAllocator::FramebufferAllocator(LinuxFramebufferDevice* device)
 FramebufferAllocator::~FramebufferAllocator() {
     // v2.0: 子类析构函数中显式清理所有 Pool
     // 只有 FramebufferAllocator 自己知道如何管理外部内存
-    auto pool_ids = getAllPoolIds();
-    
-    if (!pool_ids.empty()) {
-        printf("🧹 [FramebufferAllocator] Cleaning up %zu Pool(s)...\n", pool_ids.size());
-        
-        // 逐个清理所有 Pool
-        for (uint64_t pool_id : pool_ids) {
-            destroyPool(pool_id);
-        }
-        
-        printf("✅ [FramebufferAllocator] All Pools cleaned up\n");
-    }
+    // destroyPool() 会自动查询 Registry 获取所有 Pool 并清理
+    destroyPool();
     
     printf("🧹 FramebufferAllocator destroyed (external memory not freed)\n");
 }
@@ -98,15 +88,31 @@ uint64_t FramebufferAllocator::allocatePoolWithBuffers(
         Buffer* buffer = createBuffer(i, 0);  // size 参数被忽略
         if (!buffer) {
             printf("❌ Failed to wrap external buffer #%d\n", i);
-            // 清理已创建的 buffers
-            destroyPool(0);  // 稍后会设置 pool_id
+            // 清理已创建的 buffers（pool还未注册，需要手动清理）
+            // 遍历pool的managed_buffers_清理已添加的buffer
+            {
+                std::lock_guard<std::mutex> lock(framebuffer_ownership_mutex_);
+                for (Buffer* buf : pool->managed_buffers_) {
+                    deallocateBuffer(buf);
+                    framebuffer_buffer_ownership_.erase(buf);
+                }
+            }
+            pool->managed_buffers_.clear();
             return 0;
         }
         
         if (!BufferAllocatorBase::addBufferToPoolQueue(pool.get(), buffer, QueueType::FREE)) {
             printf("❌ Failed to add buffer #%d to pool\n", i);
             deallocateBuffer(buffer);
-            destroyPool(0);  // 稍后会设置 pool_id
+            // 清理已创建的 buffers（pool还未注册，需要手动清理）
+            {
+                std::lock_guard<std::mutex> lock(framebuffer_ownership_mutex_);
+                for (Buffer* buf : pool->managed_buffers_) {
+                    deallocateBuffer(buf);
+                    framebuffer_buffer_ownership_.erase(buf);
+                }
+            }
+            pool->managed_buffers_.clear();
             return 0;
         }
         
@@ -325,46 +331,55 @@ bool FramebufferAllocator::removeBufferFromPool(uint64_t pool_id, Buffer* buffer
     return true;
 }
 
-bool FramebufferAllocator::destroyPool(uint64_t pool_id) {
-    if (pool_id == 0) {
-        printf("❌ [FramebufferAllocator] destroyPool: invalid pool_id\n");
-        return false;
+bool FramebufferAllocator::destroyPool() {
+    // 1. 获取所有属于此 allocator 的 pool
+    auto pool_ids = getPoolsByAllocator();
+    
+    if (pool_ids.empty()) {
+        printf("✅ [FramebufferAllocator] No pools to destroy\n");
+        return true;
     }
     
-    // v2.0: 通过基类辅助方法从 Registry 获取 Pool
-    auto pool = getPoolForCleanup(pool_id);
-    if (!pool) {
-        printf("⚠️  [FramebufferAllocator] pool_id %lu not found (already destroyed?)\n", pool_id);
-        return false;
-    }
-    
-    printf("🧹 [FramebufferAllocator] Destroying pool '%s' (ID: %lu)...\n", pool->getName().c_str(), pool_id);
+    printf("🧹 [FramebufferAllocator] Destroying %zu pool(s)...\n", pool_ids.size());
     
     std::lock_guard<std::mutex> lock(framebuffer_ownership_mutex_);
     
-    // 2. 找到所有属于此 allocator 的 buffer
-    std::vector<Buffer*> to_remove;
-    for (auto& [buf, alloc] : framebuffer_buffer_ownership_) {
-        if (alloc == this) {
-            to_remove.push_back(buf);
+    // 2. 遍历每个 pool
+    for (uint64_t pool_id : pool_ids) {
+        // 2.1 获取 pool
+        auto pool = getPoolSpecialForAllocator(pool_id);
+        if (!pool) {
+            printf("⚠️  [FramebufferAllocator] pool_id %lu not found (already destroyed?)\n", pool_id);
+            continue;
         }
+        
+        printf("🧹 [FramebufferAllocator] Destroying pool '%s' (ID: %lu)...\n", pool->getName().c_str(), pool_id);
+        
+        // 2.2 通过友元关系直接访问 pool 的 managed_buffers_，获取所有属于此 pool 的 buffer
+        std::vector<Buffer*> to_remove;
+        for (Buffer* buf : pool->managed_buffers_) {
+            // 检查 buffer 是否属于此 allocator
+            auto it = framebuffer_buffer_ownership_.find(buf);
+            if (it != framebuffer_buffer_ownership_.end() && it->second == this) {
+                to_remove.push_back(buf);
+            }
+        }
+        
+        // 2.3 移除并销毁所有 Buffer（仅删除对象，不释放外部内存）
+        for (Buffer* buf : to_remove) {
+            BufferAllocatorBase::removeBufferFromPoolInternal(pool.get(), buf);
+            deallocateBuffer(buf);
+            framebuffer_buffer_ownership_.erase(buf);
+        }
+        
+        printf("✅ [FramebufferAllocator] Pool '%s' destroyed: removed %zu buffers (external memory retained)\n", 
+               pool->getName().c_str(), to_remove.size());
+        
+        // 2.4 从 Registry 注销（触发 Pool 析构）
+        unregisterPool(pool_id);
     }
     
-    // 3. 移除并销毁
-    for (Buffer* buf : to_remove) {
-        BufferAllocatorBase::removeBufferFromPoolInternal(pool.get(), buf);
-        deallocateBuffer(buf);
-        framebuffer_buffer_ownership_.erase(buf);
-    }
-    
-    printf("✅ [FramebufferAllocator] Pool destroyed: removed %zu buffers (external memory retained)\n", 
-           to_remove.size());
-    
-    // 4. 从 Registry 注销（触发 Pool 析构）
-    // 通过基类的 protected 方法调用，因为 unregisterPool 是 Registry 的私有方法
-    unregisterPoolForCleanup(pool_id);
-    
-    // 5. 完成销毁（Registry 会自动从归属关系中移除）
+    printf("✅ [FramebufferAllocator] All %zu pool(s) destroyed\n", pool_ids.size());
     return true;
 }
 
