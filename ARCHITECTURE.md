@@ -11,8 +11,9 @@
 7. [核心类详解](#核心类详解)
 8. [使用示例](#使用示例)
 9. [最佳实践](#最佳实践)
-10. [API参考](#api参考)
-11. [常见问题](#常见问题)
+10. [代码规范与风格指南](#代码规范与风格指南)
+11. [API参考](#api参考)
+12. [常见问题](#常见问题)
 
 ---
 
@@ -1780,6 +1781,215 @@ pool->submitFilled(buf);
 
 ---
 
+## 代码规范与风格指南
+
+### 概述
+
+本文档遵循业界主流 C++ 代码规范，确保代码风格统一、可读性强、易于维护。所有代码调整都基于以下大厂规范：
+
+- **Google C++ Style Guide**：类成员顺序、访问控制规范
+- **LLVM Coding Standards**：方法分组、注释规范
+- **Microsoft C++ Guidelines**：接口与实现分离原则
+
+### 类成员访问控制顺序
+
+#### 基本原则
+
+**推荐顺序：`public` → `protected` → `private`**
+
+这是业界主流规范，符合"接口优先"的设计理念：
+- 用户最关心的是公共接口（public）
+- 子类需要了解受保护接口（protected）
+- 实现细节放在最后（private）
+
+#### 每个访问级别内的顺序
+
+在每个访问级别内，按以下顺序组织：
+
+```
+public:
+    // 1. 类型别名和常量（public）
+    using TypeAlias = ...;
+    static constexpr int CONSTANT = ...;
+    
+    // 2. 构造函数和析构函数
+    MyClass();
+    ~MyClass();
+    
+    // 3. 核心公共接口（按功能分组）
+    void publicMethod1();
+    void publicMethod2();
+    
+protected:
+    // 受保护接口（供子类使用）
+    
+private:
+    // 私有实现细节
+    // 1. 成员变量（通常放在最后）
+    // 2. 私有辅助方法
+```
+
+#### 实际调整案例
+
+在本次代码重构中，我们调整了以下文件的成员顺序：
+
+| 文件 | 调整内容 | 调整原因 |
+|------|---------|---------|
+| `PerformanceMonitor.hpp` | 将 `private` 移到 `public` 之后 | 符合 public → private 顺序 |
+| `LinuxFramebufferDevice.hpp` | 将 `private` 移到 `public` 之后 | 符合 public → private 顺序 |
+| `FfmpegDecodeRtspWorker.hpp` | 将 `private` 移到 `public` 之后 | 符合 public → private 顺序 |
+| `MmapRawVideoFileWorker.hpp` | 将 `private` 移到 `public` 之后 | 符合 public → private 顺序 |
+| `FfmpegDecodeVideoFileWorker.hpp` | 将 `private` 移到 `public` 之后 | 符合 public → private 顺序 |
+
+**调整前示例**：
+```cpp
+class PerformanceMonitor {
+private:
+    // 成员变量和辅助方法
+    mutable std::mutex mutex_;
+    int frames_loaded_;
+    // ...
+    
+public:
+    // 公共接口
+    PerformanceMonitor();
+    void start();
+    // ...
+};
+```
+
+**调整后示例**：
+```cpp
+class PerformanceMonitor {
+public:
+    // 公共接口
+    PerformanceMonitor();
+    ~PerformanceMonitor();
+    void start();
+    // ...
+    
+private:
+    // 成员变量和辅助方法
+    mutable std::mutex mutex_;
+    int frames_loaded_;
+    // ...
+};
+```
+
+### 方法分组原则
+
+#### 功能分组
+
+公共方法应按功能分组，使用注释分隔：
+
+```cpp
+public:
+    // ============ 构造/析构 ============
+    MyClass();
+    ~MyClass();
+    
+    // ============ 核心业务接口 ============
+    // 4.1 Buffer填充相关
+    bool fillBuffer(...);
+    uint64_t getOutputBufferPoolId();
+    
+    // 4.2 文件操作相关
+    bool open(...);
+    void close();
+    
+    // 4.3 导航操作相关
+    bool seek(...);
+    bool skip(...);
+    
+    // 4.4 状态查询相关
+    int getTotalFrames() const;
+    int getCurrentFrameIndex() const;
+    
+private:
+    // ============ 实现细节 ============
+    std::unique_ptr<WorkerBase> worker_;
+    int preferred_type_;
+    
+    // ============ 内部辅助方法 ============
+    void validateInput();
+    bool initialize();
+```
+
+#### 分组建议
+
+1. **生命周期管理**：构造函数、析构函数、初始化、清理
+2. **核心业务接口**：按功能模块分组（如 Buffer 填充、文件操作、导航操作）
+3. **查询接口**：所有 `get*()`、`is*()`、`has*()` 方法放在一起
+4. **修改接口**：所有 `set*()`、`open()`、`close()` 方法放在一起
+5. **错误处理**：错误回调、错误信息查询
+6. **调试接口**：统计信息、打印方法
+
+### 成员变量组织
+
+#### 私有成员变量顺序
+
+私有成员变量建议按以下顺序组织：
+
+1. **资源管理**：智能指针、文件描述符、句柄等
+2. **状态信息**：原子变量、标志位、计数器等
+3. **配置参数**：用户配置、系统参数等
+4. **辅助数据**：临时变量、缓存等
+
+**示例**：
+```cpp
+private:
+    // ============ 资源管理 ============
+    std::unique_ptr<WorkerBase> worker_;
+    int fd_;
+    
+    // ============ 状态信息 ============
+    std::atomic<bool> running_;
+    bool is_open_;
+    int current_frame_index_;
+    
+    // ============ 配置参数 ============
+    int width_;
+    int height_;
+    int bits_per_pixel_;
+    
+    // ============ 辅助数据 ============
+    std::string last_error_;
+    mutable std::mutex error_mutex_;
+```
+
+### 代码风格检查清单
+
+在提交代码前，请检查以下事项：
+
+- [ ] 访问控制顺序：`public` → `protected` → `private`
+- [ ] 构造函数和析构函数在 `public` 区域最前面
+- [ ] 方法按功能分组，使用注释分隔
+- [ ] 成员变量在 `private` 区域最后
+- [ ] 相关方法放在一起（如所有 `get*()` 方法）
+- [ ] 禁止拷贝的声明紧跟在析构函数之后
+
+### 参考规范
+
+- **Google C++ Style Guide**: [Class Format](https://google.github.io/styleguide/cppguide.html#Class_Format)
+- **LLVM Coding Standards**: [Class Organization](https://llvm.org/docs/CodingStandards.html#class-organization)
+- **Microsoft C++ Guidelines**: [Class Design](https://docs.microsoft.com/en-us/cpp/cpp/class-design)
+
+### 实际应用
+
+本项目中的所有类都应遵循以上规范。在代码审查时，应检查：
+
+1. ✅ 访问控制顺序是否正确
+2. ✅ 方法是否按功能分组
+3. ✅ 成员变量是否合理组织
+4. ✅ 注释是否清晰明确
+
+通过统一的代码风格，可以：
+- **提升可读性**：新成员可以快速理解代码结构
+- **便于维护**：相关功能集中，修改更容易
+- **符合规范**：遵循业界主流标准，代码质量更高
+
+---
+
 ## API参考
 
 ### VideoProductionLine API
@@ -1963,8 +2173,15 @@ ProductionLine架构通过清晰的职责划分和设计模式应用，实现了
 - **Worker 主动清理**：Worker 的 `close()` 调用 `destroyPool()` 主动清理资源
 - **生命周期清晰**：Pool 销毁时，Registry 自动从归属关系中移除
 
+**代码规范与风格**：
+- **访问控制顺序**：遵循 `public` → `protected` → `private` 顺序，符合 Google C++ Style Guide、LLVM Coding Standards 等业界规范
+- **方法分组**：按功能组织方法（生命周期、核心接口、查询接口等），使用注释分隔
+- **成员变量组织**：私有成员变量按资源管理、状态信息、配置参数、辅助数据的顺序组织
+- **统一风格**：所有类遵循统一的代码风格，提升可读性和可维护性
+
 ---
 
 **文档维护：** AI SDK Team  
 **最后更新：** 2025-01-24  
-**架构版本：** v2.0（Registry 中心化管理 + Allocator ID 机制 - Registry 独占持有 BufferPool，Allocator 通过 ID 查询和清理）
+**架构版本：** v2.0（Registry 中心化管理 + Allocator ID 机制 - Registry 独占持有 BufferPool，Allocator 通过 ID 查询和清理）  
+**代码规范版本：** v1.0（统一类成员访问控制顺序为 public → private，遵循大厂代码规范）
