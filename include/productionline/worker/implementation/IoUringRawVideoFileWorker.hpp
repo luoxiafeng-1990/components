@@ -46,14 +46,19 @@ public:
     IoUringRawVideoFileWorker(const IoUringRawVideoFileWorker&) = delete;
     IoUringRawVideoFileWorker& operator=(const IoUringRawVideoFileWorker&) = delete;
     
-    // ============ IBufferFillingWorker 接口实现 ============
+    // ============ WorkerBase 接口实现 ============
+    
+    // Buffer填充功能（原IBufferFillingWorker的方法）
+    bool fillBuffer(int frame_index, Buffer* buffer) override;
+    const char* getWorkerType() const override {
+        return "IoUringRawVideoFileWorker";
+    }
+    
+    // 文件导航功能（继承自IVideoFileNavigator）
     bool open(const char* path) override;
     bool open(const char* path, int width, int height, int bits_per_pixel) override;
     void close() override;
     bool isOpen() const override;
-    bool fillBuffer(int frame_index, Buffer* buffer) override;
-    
-    // ============ IVideoFileNavigator 接口实现 ============
     bool seek(int frame_index) override;
     bool seekToBegin() override;
     bool seekToEnd() override;
@@ -68,9 +73,6 @@ public:
     const char* getPath() const override;
     bool hasMoreFrames() const override;
     bool isAtEnd() const override;
-    const char* getWorkerType() const override {
-        return "IoUringRawVideoFileWorker";
-    }
     
     // ============ IoUring 专有接口（保留原有功能） ============
     

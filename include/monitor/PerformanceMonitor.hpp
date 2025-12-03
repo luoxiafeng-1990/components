@@ -24,48 +24,6 @@
  * - 显示性能分析
  */
 class PerformanceMonitor {
-private:
-    // ============ 线程安全保护 ============
-    mutable std::mutex mutex_;
-    
-    // ============ 时间记录 ============
-    std::chrono::steady_clock::time_point start_time_;
-    std::chrono::steady_clock::time_point last_report_time_;
-    
-    // ============ 帧数统计 ============
-    int frames_loaded_;               // 加载的帧数
-    int frames_decoded_;              // 解码的帧数（如果有解码）
-    int frames_displayed_;            // 显示的帧数
-    
-    // ============ 时间统计 ============
-    long long total_load_time_us_;    // 总加载时间（微秒）
-    long long total_decode_time_us_;  // 总解码时间（微秒）
-    long long total_display_time_us_; // 总显示时间（微秒）
-    
-    // ============ 临时计时器 ============
-    std::chrono::steady_clock::time_point load_start_;
-    std::chrono::steady_clock::time_point decode_start_;
-    std::chrono::steady_clock::time_point display_start_;
-    
-    // ============ 状态标志 ============
-    bool is_started_;
-    bool is_paused_;
-    
-    // ============ 节流控制（用于实时打印）============
-    int report_interval_ms_;          // 报告间隔（毫秒）
-    
-    // ============ 内部辅助方法 ============
-    
-    /**
-     * 计算平均FPS
-     */
-    double calculateAverageFPS(int frame_count) const;
-    
-    /**
-     * 获取从开始到现在的总时长（秒）
-     */
-    double getTotalDuration() const;
-
 public:
     PerformanceMonitor();
     ~PerformanceMonitor();
@@ -208,6 +166,48 @@ public:
      * @param interval_ms 间隔时间（毫秒）
      */
     void setReportInterval(int interval_ms);
+
+private:
+    // ============ 线程安全保护 ============
+    mutable std::mutex mutex_;
+    
+    // ============ 时间记录 ============
+    std::chrono::steady_clock::time_point start_time_;
+    std::chrono::steady_clock::time_point last_report_time_;
+    
+    // ============ 帧数统计 ============
+    int frames_loaded_;               // 加载的帧数
+    int frames_decoded_;              // 解码的帧数（如果有解码）
+    int frames_displayed_;            // 显示的帧数
+    
+    // ============ 时间统计 ============
+    long long total_load_time_us_;    // 总加载时间（微秒）
+    long long total_decode_time_us_;  // 总解码时间（微秒）
+    long long total_display_time_us_; // 总显示时间（微秒）
+    
+    // ============ 临时计时器 ============
+    std::chrono::steady_clock::time_point load_start_;
+    std::chrono::steady_clock::time_point decode_start_;
+    std::chrono::steady_clock::time_point display_start_;
+    
+    // ============ 状态标志 ============
+    bool is_started_;
+    bool is_paused_;
+    
+    // ============ 节流控制（用于实时打印）============
+    int report_interval_ms_;          // 报告间隔（毫秒）
+    
+    // ============ 内部辅助方法 ============
+    
+    /**
+     * 计算平均FPS
+     */
+    double calculateAverageFPS(int frame_count) const;
+    
+    /**
+     * 获取从开始到现在的总时长（秒）
+     */
+    double getTotalDuration() const;
 };
 
 #endif // PERFORMANCE_MONITOR_HPP

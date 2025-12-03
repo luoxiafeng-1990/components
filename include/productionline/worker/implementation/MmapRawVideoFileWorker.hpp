@@ -32,7 +32,7 @@
  * - 单线程或少量线程
  */
 class MmapRawVideoFileWorker : public WorkerBase {
-private:
+public:
     // ============ 文件资源 ============
     int fd_;                          // 文件描述符
     char path_[MAX_PATH_LENGTH];     // 文件路径
@@ -112,14 +112,19 @@ public:
     MmapRawVideoFileWorker(const MmapRawVideoFileWorker&) = delete;
     MmapRawVideoFileWorker& operator=(const MmapRawVideoFileWorker&) = delete;
     
-    // ============ IBufferFillingWorker 接口实现 ============
+    // ============ WorkerBase 接口实现 ============
+    
+    // Buffer填充功能（原IBufferFillingWorker的方法）
+    bool fillBuffer(int frame_index, Buffer* buffer) override;
+    const char* getWorkerType() const override {
+        return "MmapRawVideoFileWorker";
+    }
+    
+    // 文件导航功能（继承自IVideoFileNavigator）
     bool open(const char* path) override;
     bool open(const char* path, int width, int height, int bits_per_pixel) override;
     void close() override;
     bool isOpen() const override;
-    bool fillBuffer(int frame_index, Buffer* buffer) override;
-    
-    // ============ IVideoFileNavigator 接口实现 ============
     bool seek(int frame_index) override;
     bool seekToBegin() override;
     bool seekToEnd() override;
@@ -134,9 +139,76 @@ public:
     const char* getPath() const override;
     bool hasMoreFrames() const override;
     bool isAtEnd() const override;
-    const char* getWorkerType() const override {
-        return "MmapRawVideoFileWorker";
-    }
+
+private:
+    // ============ 文件资源 ============
+    int fd_;                          // 文件描述符
+    char path_[MAX_PATH_LENGTH];     // 文件路径
+    void* mapped_file_ptr_;               // mmap映射的文件地址
+    size_t mapped_size_;              // 映射的文件大小
+    
+    // ============ 视频属性 ============
+    int width_;                       // 视频宽度（像素）
+    int height_;                      // 视频高度（像素）
+    int bits_per_pixel_;              // 每像素位数
+    size_t frame_size_;               // 单帧大小（字节）
+    
+    // ============ 文件信息 ============
+    long file_size_;                  // 文件大小（字节）
+    int total_frames_;                // 总帧数
+    int current_frame_index_;         // 当前帧索引
+    
+    // ============ 状态标志 ============
+    bool is_open_;
+    
+    // ============ 格式检测 ============
+    enum class FileFormat {
+        UNKNOWN,
+        RAW,          // 原始格式
+        MP4,          // MP4容器
+        H264,         // H.264裸流
+        H265,         // H.265裸流
+        AVI           // AVI容器
+    };
+    
+    FileFormat detected_format_;
+    
+    // ============ 内部辅助方法 ============
+    
+    /**
+     * 验证文件有效性
+     */
+    bool validateFile();
+    
+    /**
+     * 检测文件格式（通过魔数）
+     */
+    FileFormat detectFileFormat();
+    
+    /**
+     * 读取文件头（用于格式检测）
+     */
+    ssize_t readFileHeader(unsigned char* header, size_t size);
+    
+    /**
+     * 从MP4头部解析格式信息
+     */
+    bool parseMP4Header();
+    
+    /**
+     * 从H264流解析格式信息
+     */
+    bool parseH264Header();
+    
+    /**
+     * 映射文件到内存
+     */
+    bool mapFile();
+    
+    /**
+     * 解除文件映射
+     */
+    void unmapFile();
 };
 
 #endif // MMAP_RAW_VIDEO_FILE_WORKER_HPP

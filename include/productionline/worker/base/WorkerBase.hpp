@@ -1,8 +1,8 @@
 #ifndef WORKER_BASE_HPP
 #define WORKER_BASE_HPP
 
-#include "../interface/IBufferFillingWorker.hpp"
 #include "../interface/IVideoFileNavigator.hpp"
+#include "../../../buffer/Buffer.hpp"
 #include "../../../buffer/allocator/facade/BufferAllocatorFacade.hpp"
 #include "../../../buffer/allocator/factory/BufferAllocatorFactory.hpp"
 #include "../../../buffer/BufferPool.hpp"
@@ -14,33 +14,34 @@
  * 
  * 架构角色：抽象基类（Abstract Base Class）
  * 
+ * 设计变更（v2.1）：
+ * - 去除 IBufferFillingWorker 接口类
+ * - 直接在 WorkerBase 中定义 Buffer 填充相关的纯虚函数
+ * - 简化架构，减少不必要的抽象层
+ * 
  * 设计目的：
  * - 统一所有Worker实现类的基类
- * - 同时继承IBufferFillingWorker和IVideoFileNavigator两个接口
- * - 避免在门面类中使用dynamic_cast进行类型转换
- * - 提供统一的类型标识，便于工厂模式和门面模式使用
+ * - 定义 Buffer 填充功能（原 IBufferFillingWorker 的方法）
+ * - 继承文件导航功能（IVideoFileNavigator 接口）
  * - 提供统一的Allocator和BufferPool管理（所有Worker的共同职责）
  * - 采用构造函数参数传递模式，父类统一管理Allocator创建逻辑
  * 
  * 职责：
  * - 作为所有Worker实现类的统一基类
- * - 同时实现两个接口的功能（通过子类实现）
- * - 提供统一的类型系统，便于多态使用
+ * - 定义 Buffer 填充功能（纯虚函数，强制子类实现）
+ * - 继承文件导航功能（IVideoFileNavigator 接口）
  * - 提供统一的Allocator门面（所有Worker都需要创建BufferPool）
  * - 管理Worker创建的BufferPool（通过Allocator创建）
- * - 统一决策：根据子类传递的AllocatorType，创建合适的Allocator
  * 
  * 继承关系：
- * - WorkerBase 继承 IBufferFillingWorker 和 IVideoFileNavigator
+ * - WorkerBase 继承 IVideoFileNavigator
  * - 所有具体Worker实现类继承 WorkerBase
  * 
  * 优势：
- * - 类型安全：不需要dynamic_cast，直接使用基类指针即可访问两个接口
- * - 代码简洁：门面类只需要一个worker_指针，不需要单独的navigator_指针
- * - 架构清晰：明确的继承层次，符合面向对象设计原则
+ * - 架构简化：减少一层接口抽象
+ * - 强制实现：通过基类纯虚函数强制子类实现
  * - 易于维护：统一的基类便于扩展和维护
  * - 统一管理：所有Worker自动继承allocator_和buffer_pool_，无需每个子类重复定义
- * - 责任明确：子类只需传递类型参数，父类统一管理Allocator创建逻辑
  * - 符合单一职责原则：子类关注业务逻辑，父类关注Allocator管理
  * 
  * 构造函数参数传递模式：
@@ -49,7 +50,7 @@
  * - 所有Allocator配置细节封装在Factory中
  * - 子类无需关心Allocator内部实现
  */
-class WorkerBase : public IBufferFillingWorker, public IVideoFileNavigator {
+class WorkerBase : public IVideoFileNavigator {
 public:
     /**
      * @brief 构造函数
@@ -76,27 +77,45 @@ public:
     
     virtual ~WorkerBase() = default;
     
-    // ==================== 公开接口（实现 IBufferFillingWorker 和 IVideoFileNavigator）====================
-    // 所有方法都是纯虚函数，由子类实现
+    // ==================== Buffer填充功能（原IBufferFillingWorker的方法）====================
     
-    // IBufferFillingWorker 接口方法
-    virtual bool fillBuffer(int frame_index, Buffer* buffer) override = 0;
-    virtual const char* getWorkerType() const override = 0;
     /**
-     * @brief 获取Worker创建的BufferPool ID（v2.0 默认实现）
+     * @brief 填充Buffer（核心功能）
      * 
-     * 子类可以重写此方法，但通常不需要（直接使用基类的buffer_pool_id_即可）
+     * 纯虚函数：强制所有子类必须实现
      * 
-     * @return uint64_t 成功返回 pool_id，失败返回 0
+     * @param frame_index 帧索引
+     * @param buffer 输出 Buffer（从 BufferPool 获取）
+     * @return 成功返回 true
+     */
+    virtual bool fillBuffer(int frame_index, Buffer* buffer) = 0;
+    
+    /**
+     * @brief 获取Worker类型名称（用于调试和日志）
+     * 
+     * 纯虚函数：强制所有子类必须实现
+     * 
+     * @return 类型名称（如 "FfmpegDecodeVideoFileWorker"、"MmapRawVideoFileWorker"）
+     */
+    virtual const char* getWorkerType() const = 0;
+    
+    /**
+     * @brief 获取输出 BufferPool ID（如果有）
+     * 
+     * 默认实现：返回 buffer_pool_id_
+     * 子类可以重写此方法
+     * 
+     * @return uint64_t pool_id（成功），0（失败或未创建）
      * 
      * @note Worker必须在open()时创建BufferPool，否则返回 0
      * @note 调用者从 Registry 获取临时访问（getPool(pool_id)）
      */
-    virtual uint64_t getOutputBufferPoolId() override {
+    virtual uint64_t getOutputBufferPoolId() {
         return buffer_pool_id_;
     }
     
-    // IVideoFileNavigator 接口方法
+    // ==================== 文件导航功能（继承自IVideoFileNavigator）====================
+    // 以下方法继承自 IVideoFileNavigator，子类必须实现
     virtual bool open(const char* path) override = 0;
     virtual bool open(const char* path, int width, int height, int bits_per_pixel) override = 0;
     virtual void close() override = 0;
