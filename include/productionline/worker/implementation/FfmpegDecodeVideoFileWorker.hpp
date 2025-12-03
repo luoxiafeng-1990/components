@@ -57,6 +57,104 @@ struct AVDictionary;
  * ```
  */
 class FfmpegDecodeVideoFileWorker : public WorkerBase {
+public:
+    // ============ 构造/析构 ============
+    
+    FfmpegDecodeVideoFileWorker();
+    virtual ~FfmpegDecodeVideoFileWorker();
+    
+    // 禁止拷贝
+    FfmpegDecodeVideoFileWorker(const FfmpegDecodeVideoFileWorker&) = delete;
+    FfmpegDecodeVideoFileWorker& operator=(const FfmpegDecodeVideoFileWorker&) = delete;
+    
+    // ============ WorkerBase 接口实现 ============
+    
+    // Buffer填充功能（原IBufferFillingWorker的方法）
+    bool fillBuffer(int frame_index, Buffer* buffer) override;
+    const char* getWorkerType() const override {
+        return "FfmpegDecodeVideoFileWorker";
+    }
+    uint64_t getOutputBufferPoolId() override;  // v2.0: 返回 pool_id
+    
+    // 文件导航功能（继承自IVideoFileNavigator）
+    bool open(const char* path) override;
+    bool open(const char* path, int width, int height, int bits_per_pixel) override;
+    void close() override;
+    bool isOpen() const override;
+    bool seek(int frame_index) override;
+    bool seekToBegin() override;
+    bool seekToEnd() override;
+    bool skip(int frame_count) override;
+    int getTotalFrames() const override;
+    int getCurrentFrameIndex() const override;
+    size_t getFrameSize() const override;
+    long getFileSize() const override;
+    int getWidth() const override;
+    int getHeight() const override;
+    int getBytesPerPixel() const override;
+    const char* getPath() const override;
+    bool hasMoreFrames() const override;
+    bool isAtEnd() const override;
+    
+    // ============ 扩展配置接口 ============
+    
+    /**
+     * @brief 设置输出分辨率（在open之前调用）
+     */
+    void setOutputResolution(int width, int height);
+    
+    /**
+     * @brief 设置输出位深（在open之前调用）
+     */
+    void setOutputBitsPerPixel(int bpp);
+    
+    /**
+     * @brief 指定解码器名称（如 "h264_taco"）
+     */
+    void setDecoderName(const char* decoder_name);
+    
+    /**
+     * @brief 启用/禁用硬件解码
+     */
+    void setHardwareDecoder(bool enable);
+    
+    // ============ 信息查询 ============
+    
+    /**
+     * @brief 获取已解码帧数
+     */
+    int getDecodedFrames() const { return decoded_frames_.load(); }
+    
+    /**
+     * @brief 获取解码错误数
+     */
+    int getDecodeErrors() const { return decode_errors_.load(); }
+    
+    /**
+     * @brief 获取最后错误信息
+     */
+    std::string getLastError() const;
+    
+    /**
+     * @brief 获取FFmpeg错误码
+     */
+    int getLastFFmpegError() const { return last_ffmpeg_error_; }
+    
+    /**
+     * @brief 获取编解码器名称
+     */
+    const char* getCodecName() const;
+    
+    /**
+     * @brief 打印统计信息
+     */
+    void printStats() const;
+    
+    /**
+     * @brief 打印视频信息
+     */
+    void printVideoInfo() const;
+
 private:
     // ============ FFmpeg 资源 ============
     AVFormatContext* format_ctx_ptr_;
@@ -173,102 +271,6 @@ private:
      * @brief 设置错误信息
      */
     void setError(const std::string& error, int ffmpeg_error = 0);
-
-public:
-    // ============ 构造/析构 ============
-    
-    FfmpegDecodeVideoFileWorker();
-    virtual ~FfmpegDecodeVideoFileWorker();
-    
-    // 禁止拷贝
-    FfmpegDecodeVideoFileWorker(const FfmpegDecodeVideoFileWorker&) = delete;
-    FfmpegDecodeVideoFileWorker& operator=(const FfmpegDecodeVideoFileWorker&) = delete;
-    
-    // ============ IBufferFillingWorker 接口实现 ============
-    bool open(const char* path) override;
-    bool open(const char* path, int width, int height, int bits_per_pixel) override;
-    void close() override;
-    bool isOpen() const override;
-    bool fillBuffer(int frame_index, Buffer* buffer) override;
-    
-    // ============ IVideoFileNavigator 接口实现 ============
-    bool seek(int frame_index) override;
-    bool seekToBegin() override;
-    bool seekToEnd() override;
-    bool skip(int frame_count) override;
-    int getTotalFrames() const override;
-    int getCurrentFrameIndex() const override;
-    size_t getFrameSize() const override;
-    long getFileSize() const override;
-    int getWidth() const override;
-    int getHeight() const override;
-    int getBytesPerPixel() const override;
-    const char* getPath() const override;
-    bool hasMoreFrames() const override;
-    bool isAtEnd() const override;
-    const char* getWorkerType() const override {
-        return "FfmpegDecodeVideoFileWorker";
-    }
-    uint64_t getOutputBufferPoolId() override;  // v2.0: 返回 pool_id
-    
-    // ============ 扩展配置接口 ============
-    
-    /**
-     * @brief 设置输出分辨率（在open之前调用）
-     */
-    void setOutputResolution(int width, int height);
-    
-    /**
-     * @brief 设置输出位深（在open之前调用）
-     */
-    void setOutputBitsPerPixel(int bpp);
-    
-    /**
-     * @brief 指定解码器名称（如 "h264_taco"）
-     */
-    void setDecoderName(const char* decoder_name);
-    
-    /**
-     * @brief 启用/禁用硬件解码
-     */
-    void setHardwareDecoder(bool enable);
-    
-    // ============ 信息查询 ============
-    
-    /**
-     * @brief 获取已解码帧数
-     */
-    int getDecodedFrames() const { return decoded_frames_.load(); }
-    
-    /**
-     * @brief 获取解码错误数
-     */
-    int getDecodeErrors() const { return decode_errors_.load(); }
-    
-    /**
-     * @brief 获取最后错误信息
-     */
-    std::string getLastError() const;
-    
-    /**
-     * @brief 获取FFmpeg错误码
-     */
-    int getLastFFmpegError() const { return last_ffmpeg_error_; }
-    
-    /**
-     * @brief 获取编解码器名称
-     */
-    const char* getCodecName() const;
-    
-    /**
-     * @brief 打印统计信息
-     */
-    void printStats() const;
-    
-    /**
-     * @brief 打印视频信息
-     */
-    void printVideoInfo() const;
 };
 
 #endif // FFMPEG_DECODE_VIDEO_FILE_WORKER_HPP
