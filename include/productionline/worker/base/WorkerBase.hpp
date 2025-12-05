@@ -14,7 +14,7 @@
  * 
  * 架构角色：抽象基类（Abstract Base Class）
  * 
- * 设计变更（v2.1）：
+ * 设计变更（v2.0）：
  * - 去除 IBufferFillingWorker 接口类
  * - 直接在 WorkerBase 中定义 Buffer 填充相关的纯虚函数
  * - 简化架构，减少不必要的抽象层

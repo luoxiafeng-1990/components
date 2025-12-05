@@ -1,6 +1,8 @@
 #ifndef IVIDEO_FILE_NAVIGATOR_HPP
 #define IVIDEO_FILE_NAVIGATOR_HPP
 
+#include <cstddef>  // For size_t
+
 /**
  * @brief IVideoFileNavigator - 视频文件导航接口
  * 
