@@ -23,11 +23,12 @@
 
 ### 1.1 系统定位
 
-**Allocator子系统**是一个**统一接口、多种分配策略的内存管理与Buffer生命周期管理框架**，专为音视频处理场景设计。它提供：
+**Allocator子系统**是一个**统一接口、多种分配策略的内存管理与BufferPool生命周期管理框架**，专为音视频处理场景设计。它提供：
 
 - ✅ **统一接口**：通过`BufferAllocatorBase`抽象基类统一所有Allocator实现
 - ✅ **多种分配策略**：支持普通内存、AVFrame包装、Framebuffer外部内存等
-- ✅ **自动生命周期管理**：Allocator负责Buffer对象和内存的创建与销毁
+- ✅ **BufferPool生命周期管理（核心职责）**：Allocator负责BufferPool的创建、注册、清理和注销
+- ✅ **Buffer对象管理**：Allocator负责Buffer对象和物理内存的创建与销毁
 - ✅ **工厂模式**：通过`BufferAllocatorFactory`自动选择最优实现
 - ✅ **门面模式**：通过`BufferAllocatorFacade`简化使用
 
@@ -127,15 +128,28 @@
 ### 2.2 职责划分
 
 #### 🔹 BufferAllocatorBase - 抽象基类
-**职责**: 定义所有Allocator必须实现的统一接口  
-**核心能力**:
-- `allocatePoolWithBuffers()`: 批量创建Buffer并构建BufferPool（模板方法）
-- `injectBufferToPool()`: 创建单个Buffer并注入到Pool（扩容）
-- `injectExternalBufferToPool()`: 注入外部内存到Pool（零拷贝）
-- `removeBufferFromPool()`: 从Pool移除并销毁Buffer（缩容）
-- `destroyPool()`: 销毁整个BufferPool及其所有Buffer
-- `createBuffer()`: 纯虚函数，子类实现具体分配逻辑
-- `deallocateBuffer()`: 纯虚函数，子类实现具体释放逻辑
+
+**核心职责（v2.0架构）**:
+1. **🎯 BufferPool生命周期管理**（最核心职责）
+   - 创建BufferPool并注册到Registry（`allocatePoolWithBuffers`）
+   - 记录所有创建的Pool（通过allocator_id追踪）
+   - 销毁BufferPool并清理所有Buffer（`destroyPool`）
+   - 从Registry注销Pool（通过友元访问私有方法）
+
+2. **🎯 Buffer对象管理**
+   - 创建单个Buffer并注入到Pool（`injectBufferToPool`）
+   - 注入外部内存到Pool（`injectExternalBufferToPool`）
+   - 从Pool移除并销毁Buffer（`removeBufferFromPool`）
+
+3. **🎯 内存分配策略**（子类实现）
+   - `createBuffer()`: 纯虚函数，子类实现具体内存分配逻辑
+   - `deallocateBuffer()`: 纯虚函数，子类实现具体内存释放逻辑
+
+**v2.0架构特点**:
+- ✅ Allocator是BufferPool的**创建者和唯一清理者**
+- ✅ 通过Registry友元模式实现安全的清理操作
+- ✅ 每个Allocator有唯一ID，用于追踪创建的所有Pool
+- ✅ 析构时自动查询并清理所有创建的Pool
 
 #### 🔹 BufferAllocatorFacade - 门面类
 **职责**: 为用户提供统一、简单的接口  
@@ -190,11 +204,20 @@ BufferAllocatorFacade (门面)
 BufferAllocatorFactory (工厂)
     └── 创建 → BufferAllocatorBase (通过unique_ptr)
 
-BufferAllocatorBase
-    ├── 友元 → BufferPool (可访问私有方法)
-    ├── 创建 → BufferPool (通过Passkey)
-    ├── 持有 → BufferPool (shared_ptr，管理生命周期)
-    └── 创建 → Buffer (管理Buffer对象)
+BufferAllocatorBase（友元 BufferPoolRegistry）
+    ├── 创建 → BufferPool (通过Passkey Token)
+    ├── 注册 → Registry (立即转移所有权，传入allocator_id)
+    ├── 记录 → pool_id (不持有BufferPool指针)
+    ├── 清理 → 通过友元访问Registry私有方法
+    │   ├─ getPoolSpecialForAllocator(pool_id) → 获取临时shared_ptr
+    │   ├─ 遍历并销毁所有Buffer → deallocateBuffer()
+    │   └─ unregisterPool(pool_id) → 注销Pool（触发析构）
+    └── 创建/销毁 → Buffer对象 (createBuffer / deallocateBuffer)
+
+BufferPoolRegistry (单例)
+    ├── 独占持有 → BufferPool (shared_ptr, ref_count=1)
+    ├── 记录归属 → allocator_id (追踪创建者)
+    └── 提供友元方法 → 供Allocator清理使用
 
 BufferPool
     └── 管理 → Buffer* (指针，不拥有对象)
@@ -213,7 +236,8 @@ Buffer
 | **Passkey模式** | `BufferAllocatorBase::token()` | 控制BufferPool创建权限 |
 | **友元模式** | `BufferAllocatorBase` ↔ `BufferPool` | 解耦的同时保证协作 |
 | **策略模式** | 多种Allocator实现 | 可替换的不同内存分配策略 |
-| **RAII** | Allocator析构 | 自动释放所有Buffer和内存 |
+| **RAII** | Allocator析构 | 自动查询Registry并清理所有创建的Pool |
+| **Registry中心化（v2.0）** | `BufferPoolRegistry` | Registry独占持有BufferPool，Allocator通过友元清理 |
 
 ---
 
@@ -227,32 +251,44 @@ Buffer
 /**
  * @brief BufferAllocatorBase - Buffer分配器基类（纯抽象接口类）
  * 
- * 设计模式：模板方法模式 + 友元模式 + Passkey模式
+ * v2.0 架构：Allocator负责BufferPool的完整生命周期
  * 
- * 职责：
- * - 定义所有Allocator必须实现的接口
- * - 提供模板方法（allocatePoolWithBuffers）
- * - 作为BufferPool的友元，可访问其私有方法
- * - 通过Passkey模式创建BufferPool
+ * 设计模式：模板方法模式 + 友元模式 + Passkey模式 + Registry中心化
+ * 
+ * 核心职责（v2.0）：
+ * 1. **创建BufferPool**：通过Passkey创建Pool，立即注册到Registry
+ * 2. **管理Pool生命周期**：记录创建的所有Pool（通过allocator_id追踪）
+ * 3. **销毁BufferPool**：通过友元访问Registry，清理所有Buffer后注销Pool
+ * 4. **Buffer对象管理**：创建和销毁Buffer对象及其内存
  */
 class BufferAllocatorBase {
 public:
-    virtual ~BufferAllocatorBase() = default;
+    BufferAllocatorBase() : allocator_id_(next_allocator_id_++) {}
+    virtual ~BufferAllocatorBase();
     
-    // 纯虚函数接口（子类必须实现）
-    virtual std::shared_ptr<BufferPool> allocatePoolWithBuffers(...) = 0;
-    virtual Buffer* injectBufferToPool(...) = 0;
-    virtual Buffer* injectExternalBufferToPool(...) = 0;
-    virtual bool removeBufferFromPool(...) = 0;
-    virtual bool destroyPool(...) = 0;
+    // 纯虚函数接口（子类必须实现）- v2.0返回pool_id
+    virtual uint64_t allocatePoolWithBuffers(...) = 0;  // 返回pool_id
+    virtual Buffer* injectBufferToPool(uint64_t pool_id, ...) = 0;  // 接受pool_id
+    virtual Buffer* injectExternalBufferToPool(uint64_t pool_id, ...) = 0;
+    virtual bool removeBufferFromPool(uint64_t pool_id, Buffer* buffer) = 0;
+    virtual bool destroyPool() = 0;  // 自动查询并清理所有Pool
     
 protected:
+    // v2.0新增：Allocator ID机制
+    uint64_t allocator_id_;
+    static std::atomic<uint64_t> next_allocator_id_;
+    
     // 子类必须实现的核心方法
     virtual Buffer* createBuffer(uint32_t id, size_t size) = 0;
     virtual void deallocateBuffer(Buffer* buffer) = 0;
     
     // Passkey模式：获取创建BufferPool的通行证
     static BufferPool::PrivateToken token();
+    
+    // v2.0友元方法：通过Registry获取Pool（供清理使用）
+    std::shared_ptr<BufferPool> getPoolSpecialForAllocator(uint64_t pool_id);
+    std::vector<uint64_t> getPoolsByAllocator() const;
+    void unregisterPool(uint64_t pool_id);
     
     // 友元辅助方法：访问BufferPool私有方法
     static bool addBufferToPoolQueue(BufferPool* pool, Buffer* buffer, QueueType queue);
@@ -262,29 +298,30 @@ protected:
 
 #### 3.1.2 核心方法
 
-##### allocatePoolWithBuffers() - 批量创建Buffer并构建BufferPool（模板方法）
+##### allocatePoolWithBuffers() - 批量创建Buffer并构建BufferPool（v2.0）
 
 ```cpp
 /**
- * @brief 批量创建Buffer并构建BufferPool（模板方法）
+ * @brief 批量创建Buffer并构建BufferPool（v2.0返回pool_id）
  * 
- * 工作流程（模板）：
- * 1. 创建空的BufferPool（通过Passkey）
+ * v2.0工作流程（模板）：
+ * 1. 创建空的BufferPool（通过Passkey Token）
  * 2. 循环创建Buffer（调用子类的createBuffer）
  * 3. 将Buffer添加到pool的free队列
- * 4. Allocator持有shared_ptr（管理生命周期）
- * 5. 自动注册到BufferPoolRegistry
+ * 4. 注册到Registry（转移所有权，传入allocator_id）
+ * 5. 返回pool_id（Allocator不持有指针）
  * 
  * @param count Buffer数量
  * @param size 每个Buffer大小
  * @param name BufferPool名称
  * @param category BufferPool分类
- * @return shared_ptr<BufferPool> 成功返回pool，失败返回nullptr
+ * @return uint64_t 成功返回pool_id，失败返回0
  * 
- * @note 这是模板方法，定义了统一流程
- * @note 子类只需实现createBuffer()和deallocateBuffer()
+ * @note v2.0变更：返回pool_id而不是shared_ptr
+ * @note Registry独占持有BufferPool（引用计数=1）
+ * @note 使用者从Registry获取临时访问：getPool(pool_id)
  */
-virtual std::shared_ptr<BufferPool> allocatePoolWithBuffers(
+virtual uint64_t allocatePoolWithBuffers(
     int count,
     size_t size,
     const std::string& name,
@@ -292,86 +329,118 @@ virtual std::shared_ptr<BufferPool> allocatePoolWithBuffers(
 ) = 0;
 ```
 
-**模板方法模式示例**:
+**v2.0实现示例**:
 ```cpp
 // 在子类中实现（以NormalAllocator为例）
-std::shared_ptr<BufferPool> NormalAllocator::allocatePoolWithBuffers(
+uint64_t NormalAllocator::allocatePoolWithBuffers(
     int count, size_t size, const std::string& name, const std::string& category
 ) {
-    // 1. 创建BufferPool（通过Passkey）
+    // 步骤1: 创建BufferPool（通过Passkey）
     auto pool = std::make_shared<BufferPool>(token(), name, category);
     
-    // 2. 循环创建Buffer
+    // 步骤2: 循环创建Buffer
     for (int i = 0; i < count; i++) {
-        // 调用子类的createBuffer（具体分配逻辑）
         Buffer* buf = createBuffer(i, size);
         if (!buf) {
-            // 失败时清理已创建的buffer
-            destroyPool(pool.get());
-            return nullptr;
+            // 失败时清理（pool还未注册，手动清理）
+            for (Buffer* b : pool->getAllManagedBuffers()) {
+                deallocateBuffer(b);
+            }
+            pool->clearAllManagedBuffers();
+            return 0;  // 返回失败
         }
         
-        // 3. 添加到pool的free队列
+        // 步骤3: 添加到pool的free队列（通过友元）
         addBufferToPoolQueue(pool.get(), buf, QueueType::FREE);
     }
     
-    // 4. 保存到managed_pool_
-    {
-        std::lock_guard<std::mutex> lock(managed_pool_mutex_);
-        managed_pool_sptr_ = pool;
-    }
+    // 步骤4: 注册到Registry（转移所有权）
+    uint64_t pool_id = BufferPoolRegistry::getInstance().registerPool(pool, getAllocatorId());
+    pool->setRegistryId(pool_id);
     
-    return pool;
+    // 步骤5: 返回pool_id（不持有指针）
+    return pool_id;
 }
 ```
 
-##### injectBufferToPool() - 动态扩容
+##### injectBufferToPool() - 动态扩容（v2.0）
 
 ```cpp
 /**
  * @brief 创建单个Buffer并注入到指定BufferPool（内部分配）
  * 
+ * v2.0变更：
+ * - 接受pool_id而不是BufferPool指针
+ * - 通过Registry临时获取Pool（getPool返回weak_ptr）
+ * 
  * 适用场景：
  * - 动态扩容：向已有pool添加新buffer
  * - 内部分配：Allocator自己分配内存
  * 
+ * @param pool_id 目标BufferPool的ID
  * @param size Buffer大小
- * @param pool 目标BufferPool
  * @param queue 注入到哪个队列（FREE或FILLED）
  * @return Buffer* 成功返回buffer，失败返回nullptr
  */
 virtual Buffer* injectBufferToPool(
+    uint64_t pool_id,
     size_t size,
-    BufferPool* pool,
     QueueType queue = QueueType::FREE
 ) = 0;
 ```
 
-##### injectExternalBufferToPool() - 零拷贝注入
+**v2.0实现示例**:
+```cpp
+Buffer* NormalAllocator::injectBufferToPool(
+    uint64_t pool_id, size_t size, QueueType queue
+) {
+    // 步骤1: 从Registry获取Pool（临时shared_ptr）
+    auto pool_sptr = BufferPoolRegistry::getInstance().getPool(pool_id).lock();
+    if (!pool_sptr) {
+        printf("❌ Pool %lu not found or already destroyed\n", pool_id);
+        return nullptr;
+    }
+    
+    // 步骤2: 创建Buffer
+    Buffer* buf = createBuffer(pool_sptr->getTotalCount(), size);
+    if (!buf) return nullptr;
+    
+    // 步骤3: 添加到Pool（通过友元）
+    addBufferToPoolQueue(pool_sptr.get(), buf, queue);
+    
+    return buf;
+}
+```
+
+##### injectExternalBufferToPool() - 零拷贝注入（v2.0）
 
 ```cpp
 /**
  * @brief 注入外部已分配的内存到BufferPool（外部注入）
+ * 
+ * v2.0变更：
+ * - 接受pool_id而不是BufferPool指针
+ * - 通过Registry临时获取Pool
  * 
  * 适用场景：
  * - 外部内存包装：将外部已分配的内存包装为Buffer对象
  * - Framebuffer内存：将Framebuffer设备内存注入到Pool
  * - 零拷贝场景：直接使用外部内存，避免拷贝
  * 
+ * @param pool_id 目标BufferPool的ID
  * @param virt_addr 外部内存的虚拟地址（已分配）
  * @param phys_addr 外部内存的物理地址（可选，0表示无）
  * @param size 外部内存的大小（字节）
- * @param pool 目标BufferPool
  * @param queue 注入到哪个队列（FREE或FILLED）
  * @return Buffer* 成功返回buffer，失败返回nullptr
  * 
  * @note Buffer对象的ownership为EXTERNAL
  */
 virtual Buffer* injectExternalBufferToPool(
+    uint64_t pool_id,
     void* virt_addr,
     uint64_t phys_addr,
     size_t size,
-    BufferPool* pool,
     QueueType queue = QueueType::FREE
 ) = 0;
 ```
@@ -414,7 +483,111 @@ Allocator
        └─[✓]─> new BufferPool(token, name, category)  // ✅ 成功
 ```
 
-#### 3.1.4 友元模式
+#### 3.1.4 destroyPool() - BufferPool清理（v2.0核心职责）
+
+```cpp
+/**
+ * @brief 销毁所有由此Allocator创建的BufferPool及其Buffer
+ * 
+ * v2.0工作流程（Allocator是Pool的唯一清理者）：
+ * 1. 查询Registry，获取所有属于此Allocator的Pool ID列表
+ * 2. 遍历每个Pool ID：
+ *    a. 通过友元方法getPoolSpecialForAllocator()获取临时shared_ptr
+ *    b. 遍历Pool中所有Buffer（getAllManagedBuffers）
+ *    c. 逐个销毁Buffer（调用deallocateBuffer）
+ *    d. 清理Pool中的Buffer列表（clearAllManagedBuffers）
+ *    e. 通过友元方法unregisterPool()从Registry注销Pool
+ * 3. 所有Pool注销后，Registry中的shared_ptr引用计数归零，Pool自动析构
+ * 
+ * @return bool 成功返回true
+ * 
+ * @note v2.0架构：Allocator是BufferPool的唯一清理者
+ * @note 通过友元访问Registry私有方法，确保安全清理
+ * @note 子类析构函数必须调用destroyPool()
+ */
+virtual bool destroyPool() = 0;
+```
+
+**v2.0实现示例（NormalAllocator）**:
+```cpp
+bool NormalAllocator::destroyPool() {
+    // 步骤1: 从Registry获取所有属于此Allocator的Pool ID列表
+    auto pool_ids = BufferPoolRegistry::getInstance().getPoolsByAllocator(allocator_id_);
+    
+    // 步骤2: 遍历每个Pool ID
+    for (uint64_t pool_id : pool_ids) {
+        // 步骤2a: 通过友元方法获取Pool（临时shared_ptr）
+        auto pool_sptr = BufferPoolRegistry::getInstance().getPoolSpecialForAllocator(
+            pool_id, allocator_id_
+        );
+        
+        if (!pool_sptr) {
+            continue;  // Pool已被销毁，跳过
+        }
+        
+        // 步骤2b: 获取Pool中所有Buffer
+        std::vector<Buffer*> buffers = pool_sptr->getAllManagedBuffers();
+        
+        // 步骤2c: 逐个销毁Buffer（调用子类的deallocateBuffer）
+        for (Buffer* buf : buffers) {
+            deallocateBuffer(buf);  // 释放内存 + 删除对象
+        }
+        
+        // 步骤2d: 清理Pool中的Buffer列表
+        pool_sptr->clearAllManagedBuffers();
+        
+        // 步骤2e: 从Registry注销Pool（触发Pool析构）
+        BufferPoolRegistry::getInstance().unregisterPool(pool_id, allocator_id_);
+    }
+    
+    return true;
+}
+```
+
+**v2.0析构流程**:
+```cpp
+// 子类析构函数必须显式调用destroyPool()
+NormalAllocator::~NormalAllocator() {
+    destroyPool();  // 清理所有创建的Pool
+    printf("🧹 NormalAllocator destroyed\n");
+}
+```
+
+**v2.0清理流程图**:
+```
+Allocator析构
+  │
+  └─→ destroyPool()
+       │
+       ├─→ Registry.getPoolsByAllocator(allocator_id)
+       │    └─→ 返回: [pool_id_1, pool_id_2, ...]
+       │
+       └─→ for each pool_id:
+            │
+            ├─→ Registry.getPoolSpecialForAllocator(pool_id, allocator_id)  [友元]
+            │    └─→ 返回: shared_ptr<BufferPool> (临时)
+            │
+            ├─→ pool->getAllManagedBuffers()
+            │    └─→ 返回: [Buffer*, Buffer*, ...]
+            │
+            ├─→ for each Buffer*:
+            │    └─→ deallocateBuffer(buf)  // 释放内存 + delete buf
+            │
+            ├─→ pool->clearAllManagedBuffers()
+            │
+            └─→ Registry.unregisterPool(pool_id, allocator_id)  [友元]
+                 └─→ Registry移除shared_ptr
+                      └─→ ref_count归零 → BufferPool析构
+```
+
+**v2.0关键点**：
+- ✅ Allocator通过`allocator_id`追踪所有创建的Pool
+- ✅ 清理时通过友元方法访问Registry的私有接口
+- ✅ Registry独占持有BufferPool（ref_count=1）
+- ✅ Allocator只在清理时临时获取shared_ptr
+- ✅ 注销后Registry释放shared_ptr，Pool自动析构
+
+#### 3.1.5 友元模式
 
 ```cpp
 /**
@@ -436,17 +609,23 @@ static bool addBufferToPoolQueue(BufferPool* pool, Buffer* buffer, QueueType que
 }
 ```
 
-**友元关系示意图**:
+**友元关系示意图（v2.0）**:
 ```
 BufferAllocatorBase
-  ├── friend of BufferPool  // 友元关系
+  ├── friend of BufferPool  // 友元关系1
+  ├── friend of BufferPoolRegistry  // 友元关系2（v2.0新增）
   │
-  └── 可以访问：
-       ├── BufferPool::addBufferToQueue()     // 私有方法
-       └── BufferPool::removeBufferFromPool() // 私有方法
+  ├── 可以访问BufferPool：
+  │    ├── BufferPool::addBufferToQueue()     // 私有方法
+  │    └── BufferPool::removeBufferFromPool() // 私有方法
+  │
+  └── 可以访问Registry：
+       ├── Registry::getPoolSpecialForAllocator()  // 私有方法（v2.0）
+       ├── Registry::getPoolsByAllocator()         // 私有方法（v2.0）
+       └── Registry::unregisterPool()              // 私有方法（v2.0）
 
 外部代码
-  └── ❌ 无法访问BufferPool私有方法
+  └── ❌ 无法访问BufferPool和Registry私有方法
 ```
 
 ---
@@ -459,12 +638,15 @@ BufferAllocatorBase
 /**
  * @brief BufferAllocatorFacade - Buffer分配器门面类
  * 
+ * v2.0接口：完全遵循BufferAllocatorBase的v2.0变更
+ * 
  * 设计模式：门面模式（Facade Pattern）
  * 
  * 职责：
  * - 为用户提供统一、简单的Buffer分配接口
  * - 隐藏底层多种Allocator实现的复杂性
  * - 自动选择最优的Allocator实现
+ * - 转发所有方法到底层Allocator（v2.0返回pool_id）
  */
 class BufferAllocatorFacade {
 private:
@@ -477,42 +659,65 @@ public:
         BufferAllocatorFactory::AllocatorType type = AUTO
     );
     
-    // 转发所有方法到底层Allocator
-    std::shared_ptr<BufferPool> allocatePoolWithBuffers(...);
-    Buffer* injectBufferToPool(...);
-    Buffer* injectExternalBufferToPool(...);
-    bool removeBufferFromPool(...);
-    bool destroyPool(...);
+    // v2.0接口：转发所有方法到底层Allocator
+    uint64_t allocatePoolWithBuffers(...);  // 返回pool_id
+    Buffer* injectBufferToPool(uint64_t pool_id, ...);  // 接受pool_id
+    Buffer* injectExternalBufferToPool(uint64_t pool_id, ...);
+    bool removeBufferFromPool(uint64_t pool_id, Buffer* buffer);
+    bool destroyPool();  // 自动清理所有Pool
     
-    // 便利方法
-    std::shared_ptr<BufferPool> getManagedBufferPool() const;
+    // v2.0便利方法
+    std::weak_ptr<BufferPool> getPool(uint64_t pool_id) const;  // 从Registry获取
     BufferAllocatorBase* getUnderlyingAllocator() const;
 };
 ```
 
-#### 3.2.2 使用示例
+#### 3.2.2 使用示例（v2.0）
 
 ```cpp
-// 在WorkerBase中使用（最简单的方式）
+// 在WorkerBase中使用（v2.0方式）
 class WorkerBase {
 protected:
     BufferAllocatorFacade allocator_facade_;  // 只需一行声明
-    std::shared_ptr<BufferPool> buffer_pool_sptr_;
+    uint64_t buffer_pool_id_;  // v2.0：记录pool_id而不是指针
     
 public:
     WorkerBase(BufferAllocatorFactory::AllocatorType type)
         : allocator_facade_(type)  // 构造时自动创建
-        , buffer_pool_sptr_(nullptr)
+        , buffer_pool_id_(0)
     {
         // 无需其他初始化代码
     }
     
     bool open(const char* path) {
-        // 直接使用，无需关心底层类型
-        buffer_pool_sptr_ = allocator_facade_.allocatePoolWithBuffers(
+        // v2.0：直接使用，返回pool_id
+        buffer_pool_id_ = allocator_facade_.allocatePoolWithBuffers(
             10, frame_size, "WorkerPool", "Video"
         );
-        return buffer_pool_sptr_ != nullptr;
+        
+        if (buffer_pool_id_ == 0) {
+            printf("❌ Failed to create BufferPool\n");
+            return false;
+        }
+        
+        printf("✅ BufferPool created with ID: %lu\n", buffer_pool_id_);
+        return true;
+    }
+    
+    // v2.0：使用时从Registry临时获取Pool
+    Buffer* getBuffer() {
+        auto pool_weak = BufferPoolRegistry::getInstance().getPool(buffer_pool_id_);
+        auto pool_sptr = pool_weak.lock();
+        if (!pool_sptr) {
+            printf("❌ Pool %lu not found\n", buffer_pool_id_);
+            return nullptr;
+        }
+        return pool_sptr->getFreeBuffer();
+    }
+    
+    // v2.0：析构时Allocator自动清理（无需手动）
+    ~WorkerBase() {
+        // Allocator析构时会自动调用destroyPool()清理所有Pool
     }
 };
 ```
@@ -761,32 +966,52 @@ void FramebufferAllocator::deallocateBuffer(Buffer* buffer) {
 
 ```mermaid
 classDiagram
-    %% ========== 抽象基类 ==========
+    %% ========== v2.0 核心：Registry（单例） ==========
+    class BufferPoolRegistry {
+        <<singleton>>
+        -map~uint64_t, shared_ptr~BufferPool~~ pools_
+        -map~uint64_t, uint64_t~ pool_to_allocator_
+        -static atomic~uint64_t~ next_pool_id_
+        -mutex registry_mutex_
+        +getInstance()$ BufferPoolRegistry&
+        +registerPool(pool, allocator_id) uint64_t
+        +getPool(pool_id) weak_ptr~BufferPool~
+        +getPoolsByAllocator(allocator_id) vector~uint64_t~
+        -getPoolSpecialForAllocator(pool_id, aid) shared_ptr~BufferPool~
+        -unregisterPool(pool_id, allocator_id) bool
+    }
+    
+    %% ========== 抽象基类（v2.0） ==========
     class BufferAllocatorBase {
         <<abstract>>
-        #shared_ptr~BufferPool~ managed_pool_sptr_
-        #mutex managed_pool_mutex_
-        +allocatePoolWithBuffers(...)* shared_ptr~BufferPool~
-        +injectBufferToPool(...)* Buffer*
-        +injectExternalBufferToPool(...)* Buffer*
-        +removeBufferFromPool(...)* bool
-        +destroyPool(...)* bool
-        +getManagedBufferPool() shared_ptr~BufferPool~
+        #uint64_t allocator_id_
+        #static atomic~uint64_t~ next_allocator_id_
+        +BufferAllocatorBase()
+        +~BufferAllocatorBase()*
+        +allocatePoolWithBuffers(...)* uint64_t
+        +injectBufferToPool(pool_id, ...)* Buffer*
+        +injectExternalBufferToPool(pool_id, ...)* Buffer*
+        +removeBufferFromPool(pool_id, buffer)* bool
+        +destroyPool()* bool
         #createBuffer(id, size)* Buffer*
         #deallocateBuffer(buffer)* void
         #token()$ PrivateToken
+        #getPoolSpecialForAllocator(pool_id) shared_ptr~BufferPool~
+        #getPoolsByAllocator() vector~uint64_t~
+        #unregisterPool(pool_id) void
         #addBufferToPoolQueue(...)$ bool
-        #removeBufferFromPoolInternal(...)$ bool
     }
     
-    %% ========== 实现类 ==========
+    %% ========== 实现类（v2.0） ==========
     class NormalAllocator {
         -BufferMemoryAllocatorType type_
         -size_t alignment_
         +NormalAllocator(type, alignment)
-        +allocatePoolWithBuffers(...) shared_ptr~BufferPool~
-        +createBuffer(id, size) Buffer*
-        +deallocateBuffer(buffer) void
+        +~NormalAllocator()
+        +allocatePoolWithBuffers(...) uint64_t
+        +destroyPool() bool
+        #createBuffer(id, size) Buffer*
+        #deallocateBuffer(buffer) void
     }
     
     class AVFrameAllocator {
@@ -794,35 +1019,39 @@ classDiagram
         -unordered_map~Buffer*, AVFrame*~ buffer_to_frame_
         -mutex mapping_mutex_
         +AVFrameAllocator()
-        +injectAVFrameToPool(frame, pool) Buffer*
-        +releaseAVFrame(buffer, pool) bool
-        +allocatePoolWithBuffers(...) shared_ptr~BufferPool~
-        +createBuffer(id, size) Buffer*
-        +deallocateBuffer(buffer) void
+        +~AVFrameAllocator()
+        +injectAVFrameToPool(frame, pool_id) Buffer*
+        +releaseAVFrame(buffer, pool_id) bool
+        +allocatePoolWithBuffers(...) uint64_t
+        +destroyPool() bool
+        #createBuffer(id, size) Buffer*
+        #deallocateBuffer(buffer) void
     }
     
     class FramebufferAllocator {
         -vector~BufferInfo~ external_buffers_
-        -size_t next_buffer_index_
+        -atomic~size_t~ next_buffer_index_
         +FramebufferAllocator()
         +FramebufferAllocator(buffers)
         +FramebufferAllocator(device)
-        +allocatePoolWithBuffers(...) shared_ptr~BufferPool~
-        +createBuffer(id, size) Buffer*
-        +deallocateBuffer(buffer) void
+        +~FramebufferAllocator()
+        +allocatePoolWithBuffers(...) uint64_t
+        +destroyPool() bool
+        #createBuffer(id, size) Buffer*
+        #deallocateBuffer(buffer) void
     }
     
-    %% ========== 门面类 ==========
+    %% ========== 门面类（v2.0） ==========
     class BufferAllocatorFacade {
         -unique_ptr~BufferAllocatorBase~ allocator_base_uptr_
         -AllocatorType type_
         +BufferAllocatorFacade(type)
-        +allocatePoolWithBuffers(...) shared_ptr~BufferPool~
-        +injectBufferToPool(...) Buffer*
-        +injectExternalBufferToPool(...) Buffer*
-        +removeBufferFromPool(...) bool
-        +destroyPool(...) bool
-        +getManagedBufferPool() shared_ptr~BufferPool~
+        +allocatePoolWithBuffers(...) uint64_t
+        +injectBufferToPool(pool_id, ...) Buffer*
+        +injectExternalBufferToPool(pool_id, ...) Buffer*
+        +removeBufferFromPool(pool_id, buffer) bool
+        +destroyPool() bool
+        +getPool(pool_id) weak_ptr~BufferPool~
         +getUnderlyingAllocator() BufferAllocatorBase*
     }
     
@@ -833,15 +1062,18 @@ classDiagram
         +createWithConfig(...)$ unique_ptr~BufferAllocatorBase~
         +createByName(name)$ unique_ptr~BufferAllocatorBase~
         +typeToString(type)$ const char*
-        -createByType(...)$ unique_ptr~BufferAllocatorBase~
     }
     
     %% ========== Buffer子系统 ==========
     class BufferPool {
+        -uint64_t registry_id_
+        -vector~Buffer*~ managed_buffers_
         +acquireFree(blocking, timeout) Buffer*
         +submitFilled(Buffer*) void
         +acquireFilled(blocking, timeout) Buffer*
         +releaseFilled(Buffer*) void
+        +getAllManagedBuffers() vector~Buffer*~
+        +clearAllManagedBuffers() void
         -addBufferToQueue(Buffer*, QueueType) bool
         -removeBufferFromPool(Buffer*) bool
     }
@@ -854,34 +1086,45 @@ classDiagram
         +ownership() Ownership
     }
     
-    %% ========== 关系 ==========
+    %% ========== v2.0关系 ==========
     BufferAllocatorBase <|-- NormalAllocator : inherits
     BufferAllocatorBase <|-- AVFrameAllocator : inherits
     BufferAllocatorBase <|-- FramebufferAllocator : inherits
     
-    BufferAllocatorFacade ..> BufferAllocatorBase : uses
+    BufferAllocatorFacade o-- BufferAllocatorBase : owns
     BufferAllocatorFactory ..> BufferAllocatorBase : creates
     
-    BufferAllocatorBase ..> BufferPool : friend & creates
-    BufferAllocatorBase --> Buffer : creates & manages
+    BufferAllocatorBase ..> BufferPool : creates (Passkey)
+    BufferAllocatorBase ..> BufferPoolRegistry : friend access
+    BufferAllocatorBase --> Buffer : creates & destroys
     
-    BufferPool --> Buffer : manages pointers
+    BufferPoolRegistry o-- BufferPool : owns exclusively
+    BufferPoolRegistry ..> BufferAllocatorBase : friend (cleanup)
+    
+    BufferPool o-- Buffer : manages pointers
 ```
 
-**关键关系说明**:
+**v2.0关键关系说明**:
 
-| 关系符号 | 含义 | 示例 |
-|---------|------|------|
+| 关系符号 | 含义 | v2.0架构示例 |
+|---------|------|------------|
 | `<|--` | 继承 | `NormalAllocator`继承`BufferAllocatorBase` |
-| `..>` | 依赖 | `BufferAllocatorFactory`创建`BufferAllocatorBase` |
-| `-->` | 组合 | `BufferAllocatorBase`创建和管理`Buffer` |
-| `friend` | 友元 | `BufferAllocatorBase`是`BufferPool`的友元 |
+| `..>` | 依赖/使用 | `BufferAllocatorFactory`创建`BufferAllocatorBase` |
+| `-->` | 关联/管理 | `BufferAllocatorBase`创建和销毁`Buffer` |
+| `o--` | 聚合/独占持有 | `BufferPoolRegistry`独占持有`BufferPool`（ref_count=1） |
+| `friend` | 友元 | `BufferAllocatorBase`是`BufferPoolRegistry`的友元 |
+
+**v2.0核心变化**：
+- ✅ `BufferPoolRegistry`独占持有所有`BufferPool`（shared_ptr）
+- ✅ `Allocator`不持有Pool指针，只记录`pool_id`
+- ✅ `Allocator`通过友元访问`Registry`的私有方法进行清理
+- ✅ 外部使用者从`Registry`获取`weak_ptr<BufferPool>`
 
 ---
 
 ### 4.2 时序图（Sequence Diagrams）
 
-#### 场景1：创建BufferPool并批量分配Buffer
+#### 场景1：创建BufferPool并批量分配Buffer（v2.0）
 
 ```mermaid
 sequenceDiagram
@@ -899,6 +1142,7 @@ sequenceDiagram
     activate Factory
     Factory->>Allocator: new NormalAllocator(NORMAL_MALLOC, 64)
     activate Allocator
+    Note over Allocator: allocator_id_ = next_allocator_id_++
     Allocator-->>Factory: allocator_ptr
     deactivate Allocator
     Factory-->>Facade: allocator_base_uptr_
@@ -910,18 +1154,14 @@ sequenceDiagram
     Facade->>Allocator: allocatePoolWithBuffers(...)
     activate Allocator
     
-    Note over Allocator: 1. 创建BufferPool（通过Passkey）
+    Note over Allocator: v2.0步骤1: 创建BufferPool（通过Passkey）
     Allocator->>Allocator: token()
     Allocator->>Pool: new BufferPool(token, name, category)
     activate Pool
-    Pool-->>Allocator: pool_ptr
-    Pool->>Registry: registerPool(pool)
-    activate Registry
-    Registry-->>Pool: registry_id
-    deactivate Registry
+    Pool-->>Allocator: pool (shared_ptr)
     deactivate Pool
     
-    Note over Allocator: 2. 循环创建Buffer
+    Note over Allocator: v2.0步骤2: 循环创建Buffer
     loop 10次
         Allocator->>Allocator: createBuffer(i, 1MB)
         Allocator->>Allocator: posix_memalign(&virt_addr, 64, 1MB)
@@ -930,195 +1170,269 @@ sequenceDiagram
         Buffer-->>Allocator: buffer_ptr
         deactivate Buffer
         
-        Note over Allocator: 3. 添加到pool的free队列
+        Note over Allocator: v2.0步骤3: 添加到pool的free队列
         Allocator->>Allocator: addBufferToPoolQueue(pool, buffer, FREE)
-        Allocator->>Pool: addBufferToQueue(buffer, FREE)
+        Allocator->>Pool: addBufferToQueue(buffer, FREE) [friend]
         activate Pool
         Pool->>Pool: free_queue_.push(buffer)
-        Pool->>Buffer: setState(IDLE)
+        Pool->>Pool: managed_buffers_.push_back(buffer)
         deactivate Pool
     end
     
-    Note over Allocator: 4. 保存到managed_pool_
-    Allocator->>Allocator: managed_pool_sptr_ = pool
+    Note over Allocator: v2.0步骤4: 注册到Registry（转移所有权）
+    Allocator->>Registry: registerPool(pool, allocator_id_)
+    activate Registry
+    Registry->>Registry: pool_id = next_pool_id_++
+    Registry->>Registry: pools_[pool_id] = pool (独占持有)
+    Registry->>Registry: pool_to_allocator_[pool_id] = allocator_id_
+    Registry-->>Allocator: pool_id
+    deactivate Registry
     
-    Allocator-->>Facade: shared_ptr<BufferPool>
+    Allocator->>Pool: setRegistryId(pool_id)
+    activate Pool
+    Pool->>Pool: registry_id_ = pool_id
+    deactivate Pool
+    
+    Note over Allocator: v2.0步骤5: 返回pool_id（不持有指针）
+    Allocator-->>Facade: pool_id (uint64_t)
     deactivate Allocator
-    Facade-->>Worker: shared_ptr<BufferPool>
+    Facade-->>Worker: pool_id (uint64_t)
     deactivate Facade
+    
+    Note over Worker: v2.0使用：从Registry获取临时访问
+    Worker->>Registry: getPool(pool_id)
+    activate Registry
+    Registry-->>Worker: weak_ptr<BufferPool>
+    deactivate Registry
 ```
 
 ---
 
-#### 场景2：动态注入AVFrame到BufferPool
+#### 场景2：动态注入AVFrame到BufferPool（v2.0）
 
 ```mermaid
 sequenceDiagram
     participant Decoder as FfmpegDecoder
     participant Allocator as AVFrameAllocator
+    participant Registry as BufferPoolRegistry
     participant Pool as BufferPool
     participant Buffer as Buffer
     
     Note over Decoder: FFmpeg解码一帧
     Decoder->>Decoder: AVFrame* frame = decodeOneFrame()
     
-    Decoder->>Allocator: injectAVFrameToPool(frame, pool)
+    Decoder->>Allocator: injectAVFrameToPool(frame, pool_id)
     activate Allocator
     
-    Note over Allocator: 1. 生成唯一Buffer ID
+    Note over Allocator: v2.0步骤1: 从Registry获取Pool（临时）
+    Allocator->>Registry: getPool(pool_id)
+    activate Registry
+    Registry-->>Allocator: weak_ptr<BufferPool>
+    deactivate Registry
+    Allocator->>Allocator: pool_sptr = weak_ptr.lock()
+    
+    Note over Allocator: v2.0步骤2: 生成唯一Buffer ID
     Allocator->>Allocator: id = next_buffer_id_++
     
-    Note over Allocator: 2. 从AVFrame提取信息
+    Note over Allocator: v2.0步骤3: 从AVFrame提取信息
     Allocator->>Allocator: virt_addr = frame->data[0]
     Allocator->>Allocator: size = frame->linesize[0] * frame->height
     
-    Note over Allocator: 3. 创建Buffer对象（包装）
+    Note over Allocator: v2.0步骤4: 创建Buffer对象（包装）
     Allocator->>Buffer: new Buffer(id, virt_addr, 0, size, EXTERNAL)
     activate Buffer
     Buffer-->>Allocator: buffer_ptr
     deactivate Buffer
     
-    Note over Allocator: 4. 记录AVFrame映射
+    Note over Allocator: v2.0步骤5: 记录AVFrame映射（线程安全）
+    Allocator->>Allocator: lock(mapping_mutex_)
     Allocator->>Allocator: buffer_to_frame_[buffer] = frame
+    Allocator->>Allocator: unlock(mapping_mutex_)
     
-    Note over Allocator: 5. 添加到filled队列
-    Allocator->>Pool: addBufferToQueue(buffer, FILLED)
+    Note over Allocator: v2.0步骤6: 添加到filled队列（通过友元）
+    Allocator->>Pool: addBufferToQueue(buffer, FILLED) [friend]
     activate Pool
     Pool->>Pool: filled_queue_.push(buffer)
-    Pool->>Buffer: setState(READY_FOR_CONSUME)
+    Pool->>Pool: managed_buffers_.push_back(buffer)
     Pool->>Pool: filled_cv_.notify_one()
     deactivate Pool
     
     Allocator-->>Decoder: buffer_ptr
     deactivate Allocator
     
-    Note over Decoder,Buffer: 消费者可以从filled队列获取buffer
+    Note over Decoder: v2.0使用：消费者从filled队列获取
+    Decoder->>Registry: getPool(pool_id)
+    activate Registry
+    Registry-->>Decoder: weak_ptr<BufferPool>
+    deactivate Registry
+    Decoder->>Pool: acquireFilled(true, -1)
+    activate Pool
+    Pool-->>Decoder: buffer_ptr
+    deactivate Pool
 ```
 
 ---
 
-#### 场景3：销毁BufferPool
+#### 场景3：销毁BufferPool（v2.0核心流程）
 
 ```mermaid
 sequenceDiagram
-    participant App as 应用代码
+    participant App as 应用代码/析构
     participant Allocator as NormalAllocator
+    participant Registry as BufferPoolRegistry
     participant Pool as BufferPool
     participant Buffer as Buffer
-    participant Registry as BufferPoolRegistry
     
-    App->>Allocator: destroyPool(pool_id)
+    Note over App: Allocator析构或显式调用
+    App->>Allocator: ~NormalAllocator() / destroyPool()
     activate Allocator
     
-    Note over Allocator: 1. 通过友元获取 Pool
-    Allocator->>Registry: getPoolSpecialForAllocator(pool_id) (private, friend access)
+    Note over Allocator: v2.0步骤1: 查询所有属于此Allocator的Pool
+    Allocator->>Registry: getPoolsByAllocator(allocator_id_) [friend]
     activate Registry
-    Registry-->>Allocator: pool (shared_ptr)
+    Registry->>Registry: 遍历 pool_to_allocator_
+    Registry-->>Allocator: vector<uint64_t> {pool_id_1, pool_id_2, ...}
     deactivate Registry
     
-    Allocator->>Pool: getTotalCount()
-    activate Pool
-    Pool-->>Allocator: count
-    deactivate Pool
-    
-    Note over Allocator: 2. 移除并销毁所有buffer
-    loop 每个buffer
-        Allocator->>Pool: removeBufferFromPool(pool_id, buffer)
+    Note over Allocator: v2.0步骤2: 遍历每个pool_id
+    loop 每个 pool_id
+        Note over Allocator: v2.0步骤2a: 通过友元获取Pool（临时shared_ptr）
+        Allocator->>Registry: getPoolSpecialForAllocator(pool_id, allocator_id_) [private, friend]
+        activate Registry
+        Registry->>Registry: 验证 pool_to_allocator_[pool_id] == allocator_id_
+        Registry-->>Allocator: shared_ptr<BufferPool> (临时)
+        deactivate Registry
+        
+        Note over Allocator: v2.0步骤2b: 获取Pool中所有Buffer
+        Allocator->>Pool: getAllManagedBuffers()
         activate Pool
-        Pool->>Pool: 检查buffer状态（必须是IDLE）
-        Pool->>Pool: managed_buffers_.erase(buffer)
-        Pool->>Pool: free_queue_中移除
-        Pool-->>Allocator: true
+        Pool-->>Allocator: vector<Buffer*>
         deactivate Pool
         
-        Allocator->>Allocator: deallocateBuffer(buffer)
-        Allocator->>Buffer: delete buffer
-        activate Buffer
-        Buffer->>Buffer: free(virt_addr_)
-        destroy Buffer
-        deactivate Buffer
+        Note over Allocator: v2.0步骤2c: 遍历并销毁每个Buffer
+        loop 每个 Buffer
+            Allocator->>Allocator: deallocateBuffer(buffer)
+            alt Ownership::OWNED
+                Allocator->>Allocator: free(buffer->virt_addr_)
+            else Ownership::EXTERNAL
+                Note over Allocator: 不释放外部内存
+            end
+            Allocator->>Buffer: delete buffer
+            destroy Buffer
+        end
+        
+        Note over Allocator: v2.0步骤2d: 清理Pool的Buffer列表
+        Allocator->>Pool: clearAllManagedBuffers() [friend]
+        activate Pool
+        Pool->>Pool: managed_buffers_.clear()
+        Pool->>Pool: free_queue_.clear()
+        Pool->>Pool: filled_queue_.clear()
+        deactivate Pool
+        
+        Note over Allocator: v2.0步骤2e: 从Registry注销Pool（触发析构）
+        Allocator->>Registry: unregisterPool(pool_id, allocator_id_) [private, friend]
+        activate Registry
+        Registry->>Registry: 验证 pool_to_allocator_[pool_id] == allocator_id_
+        Registry->>Registry: pools_.erase(pool_id)
+        Registry->>Registry: pool_to_allocator_.erase(pool_id)
+        
+        Note over Registry: ✅ shared_ptr释放<br/>引用计数: 2→1→0
+        Registry->>Pool: ~BufferPool()
+        Note over Pool: BufferPool析构<br/>（不再调用unregisterPool）
+        destroy Pool
+        deactivate Registry
     end
     
-    Note over Allocator: 3. 从 Registry 注销（私有方法，友元访问）
-    Allocator->>Registry: unregisterPool(pool_id) (private, friend access)
-    activate Registry
-    Registry->>Registry: pools_.erase(id)
-    Note over Registry: ✅ 释放 shared_ptr<br/>引用计数 -1 → 0
-    Registry->>Pool: ~BufferPool()
-    Note over Pool: BufferPool 析构<br/>（不再调用 unregisterPool）
-    destroy Pool
-    deactivate Registry
-    
-    Allocator-->>App: true
+    Allocator-->>App: destroyPool完成
     deactivate Allocator
+    
+    Note over Allocator: v2.0关键点：<br/>1. Allocator通过allocator_id追踪所有Pool<br/>2. 友元访问Registry私有方法<br/>3. Registry独占持有Pool（ref_count=1）<br/>4. 注销后Pool自动析构
 ```
 
 ---
 
 ### 4.3 状态图（State Diagram）
 
-#### Allocator生命周期图
+#### Allocator生命周期图（v2.0）
 
 ```mermaid
 stateDiagram-v2
-    [*] --> Created : new Allocator()
+    [*] --> Created : new Allocator()<br/>allocator_id生成
     
-    Created --> PoolAllocated : allocatePoolWithBuffers()
+    Created --> PoolAllocated : allocatePoolWithBuffers()<br/>返回pool_id
     
     note right of PoolAllocated
+        v2.0状态：
         - BufferPool已创建
         - Buffer已分配并加入free队列
-        - 自动注册到Registry
+        - 已注册到Registry（转移所有权）
+        - Allocator只记录pool_id，不持有指针
+        - Registry独占持有Pool（ref_count=1）
     end note
     
-    PoolAllocated --> PoolAllocated : injectBufferToPool() (扩容)
-    PoolAllocated --> PoolAllocated : removeBufferFromPool() (缩容)
+    PoolAllocated --> PoolAllocated : injectBufferToPool(pool_id, ...) (扩容)
+    PoolAllocated --> PoolAllocated : removeBufferFromPool(pool_id, ...) (缩容)
     
-    PoolAllocated --> Destroyed : destroyPool() / ~Allocator()<br/>（查询 Registry 获取所有 Pool，逐个清理）
-    
-    Destroyed --> [*]
+    PoolAllocated --> Destroyed : destroyPool() / ~Allocator()<br/>v2.0清理流程
     
     note right of Destroyed
-        - 移除所有Buffer
-        - 释放所有内存
-        - Pool自动注销
+        v2.0清理流程：
+        1. 查询Registry获取所有pool_id（按allocator_id）
+        2. 遍历每个pool_id：
+           - 通过友元获取临时shared_ptr
+           - 销毁所有Buffer
+           - 从Registry注销Pool
+        3. Registry释放shared_ptr → Pool自动析构
     end note
+    
+    Destroyed --> [*]
 ```
 
 ---
 
 ## 5. 典型使用场景
 
-### 5.1 场景：NormalAllocator - 普通内存分配
+### 5.1 场景：NormalAllocator - 普通内存分配（v2.0）
 
 ```cpp
 #include "buffer/allocator/facade/BufferAllocatorFacade.hpp"
+#include "buffer/BufferPoolRegistry.hpp"
 
 int main() {
-    // 1. 创建Allocator门面（指定类型）
+    // v2.0步骤1: 创建Allocator门面（指定类型）
     BufferAllocatorFacade allocator(
         BufferAllocatorFactory::AllocatorType::NORMAL
     );
     
-    // 2. 批量创建Buffer并构建BufferPool
-    auto pool = allocator.allocatePoolWithBuffers(
+    // v2.0步骤2: 批量创建Buffer并构建BufferPool（返回pool_id）
+    uint64_t pool_id = allocator.allocatePoolWithBuffers(
         10,                  // 10个Buffer
         1920 * 1080 * 4,    // 每个8MB（1080p RGBA）
         "VideoPool",         // Pool名称
         "Video"              // Pool分类
     );
     
-    if (!pool) {
+    if (pool_id == 0) {
         printf("❌ Failed to create BufferPool\n");
         return -1;
     }
     
-    printf("✅ BufferPool created successfully\n");
-    printf("   Total Buffers: %d\n", pool->getTotalCount());
-    printf("   Free Buffers:  %d\n", pool->getFreeCount());
+    printf("✅ BufferPool created successfully (ID: %lu)\n", pool_id);
     
-    // 3. 使用BufferPool
-    Buffer* buf = pool->acquireFree(true, -1);
+    // v2.0步骤3: 从Registry获取Pool（临时访问）
+    auto pool_weak = BufferPoolRegistry::getInstance().getPool(pool_id);
+    auto pool_sptr = pool_weak.lock();
+    
+    if (!pool_sptr) {
+        printf("❌ Pool not found in Registry\n");
+        return -1;
+    }
+    
+    printf("   Total Buffers: %d\n", pool_sptr->getTotalCount());
+    printf("   Free Buffers:  %d\n", pool_sptr->getFreeCount());
+    
+    // v2.0步骤4: 使用BufferPool
+    Buffer* buf = pool_sptr->acquireFree(true, -1);
     if (buf) {
         printf("✅ Acquired buffer #%u\n", buf->id());
         
@@ -1126,22 +1440,28 @@ int main() {
         memset(buf->getVirtualAddress(), 0xFF, buf->size());
         
         // 提交到filled队列
-        pool->submitFilled(buf);
+        pool_sptr->submitFilled(buf);
     }
     
-    // 4. 销毁（可选，析构函数会自动清理）
-    allocator.destroyPool(pool.get());
+    // v2.0步骤5: 销毁（可选，allocator析构函数会自动清理）
+    // allocator.destroyPool();  // 显式调用
+    
+    // v2.0关键点：
+    // - allocator析构时会自动调用destroyPool()
+    // - Registry会自动注销Pool
+    // - 无需手动管理shared_ptr
     
     return 0;
-}
+}  // allocator析构，自动清理所有Pool
 ```
 
 ---
 
-### 5.2 场景：AVFrameAllocator - FFmpeg解码动态注入
+### 5.2 场景：AVFrameAllocator - FFmpeg解码动态注入（v2.0）
 
 ```cpp
 #include "buffer/allocator/implementation/AVFrameAllocator.hpp"
+#include "buffer/BufferPoolRegistry.hpp"
 
 extern "C" {
 #include <libavcodec/avcodec.h>
@@ -1150,31 +1470,37 @@ extern "C" {
 class FFmpegDecoder {
 private:
     std::unique_ptr<AVFrameAllocator> allocator_;
-    std::shared_ptr<BufferPool> pool_;
+    uint64_t pool_id_;  // v2.0: 记录pool_id而不是指针
     
 public:
-    FFmpegDecoder() {
-        // 1. 创建AVFrameAllocator
+    FFmpegDecoder() : pool_id_(0) {
+        // v2.0步骤1: 创建AVFrameAllocator
         allocator_ = std::make_unique<AVFrameAllocator>();
         
-        // 2. 创建空的BufferPool（动态注入模式）
-        pool_ = allocator_->allocatePoolWithBuffers(
+        // v2.0步骤2: 创建空的BufferPool（动态注入模式，返回pool_id）
+        pool_id_ = allocator_->allocatePoolWithBuffers(
             0, 0,           // count和size无意义（动态注入）
             "RTSP_Pool",
             "RTSP"
         );
+        
+        if (pool_id_ == 0) {
+            throw std::runtime_error("Failed to create BufferPool");
+        }
+        
+        printf("✅ BufferPool created (ID: %lu)\n", pool_id_);
     }
     
     void decodeLoop() {
         while (running_) {
-            // 1. 解码一帧
+            // v2.0步骤1: 解码一帧
             AVFrame* frame = decodeOneFrame();
             if (!frame) {
                 continue;
             }
             
-            // 2. 动态注入到BufferPool（零拷贝）
-            Buffer* buf = allocator_->injectAVFrameToPool(frame, pool_.get());
+            // v2.0步骤2: 动态注入到BufferPool（零拷贝，传入pool_id）
+            Buffer* buf = allocator_->injectAVFrameToPool(frame, pool_id_);
             if (!buf) {
                 av_frame_free(&frame);
                 continue;
@@ -1182,10 +1508,34 @@ public:
             
             printf("✅ Injected AVFrame as Buffer #%u\n", buf->id());
             
-            // 注意：
+            // v2.0注意事项：
             // - Buffer已在filled队列中
-            // - 消费者可以直接acquireFilled()获取
+            // - 消费者从Registry获取Pool：getPool(pool_id_)
             // - AVFrame生命周期由Allocator管理
+        }
+    }
+    
+    // v2.0消费者线程
+    void consumerLoop() {
+        while (running_) {
+            // v2.0步骤1: 从Registry获取Pool（临时访问）
+            auto pool_weak = BufferPoolRegistry::getInstance().getPool(pool_id_);
+            auto pool_sptr = pool_weak.lock();
+            
+            if (!pool_sptr) {
+                printf("❌ Pool %lu not found\n", pool_id_);
+                break;
+            }
+            
+            // v2.0步骤2: 获取filled buffer
+            Buffer* buf = pool_sptr->acquireFilled(true, -1);
+            if (!buf) break;
+            
+            // v2.0步骤3: 处理数据
+            processFrame(buf->getVirtualAddress(), buf->size());
+            
+            // v2.0步骤4: 释放（会触发AVFrame释放）
+            pool_sptr->releaseFilled(buf);
         }
     }
     
@@ -1200,110 +1550,158 @@ public:
 
 ---
 
-### 5.3 场景：FramebufferAllocator - Framebuffer设备内存包装
+### 5.3 场景：FramebufferAllocator - Framebuffer设备内存包装（v2.0）
 
 ```cpp
 #include "buffer/allocator/implementation/FramebufferAllocator.hpp"
 #include "display/LinuxFramebufferDevice.hpp"
+#include "buffer/BufferPoolRegistry.hpp"
 
 int main() {
-    // 1. 初始化Framebuffer设备
+    // v2.0步骤1: 初始化Framebuffer设备
     auto fb_device = std::make_unique<LinuxFramebufferDevice>();
     if (!fb_device->initialize(0)) {  // /dev/fb0
         printf("❌ Failed to initialize framebuffer device\n");
         return -1;
     }
     
-    // 2. 创建FramebufferAllocator（从设备构造）
+    // v2.0步骤2: 创建FramebufferAllocator（从设备构造）
     auto allocator = std::make_unique<FramebufferAllocator>(fb_device.get());
     
-    // 3. 创建BufferPool（包装Framebuffer内存）
-    auto pool = allocator->allocatePoolWithBuffers(
+    // v2.0步骤3: 创建BufferPool（包装Framebuffer内存，返回pool_id）
+    uint64_t pool_id = allocator->allocatePoolWithBuffers(
         0, 0,           // count和size由device决定
         "FBPool",
         "Display"
     );
     
-    if (!pool) {
+    if (pool_id == 0) {
         printf("❌ Failed to create BufferPool\n");
         return -1;
     }
     
-    printf("✅ BufferPool created from Framebuffer device\n");
-    printf("   Total Buffers: %d\n", pool->getTotalCount());
+    printf("✅ BufferPool created from Framebuffer device (ID: %lu)\n", pool_id);
     
-    // 4. 设置BufferPool到设备
-    fb_device->setBufferPool(pool.get());
+    // v2.0步骤4: 从Registry获取Pool（临时访问）
+    auto pool_weak = BufferPoolRegistry::getInstance().getPool(pool_id);
+    auto pool_sptr = pool_weak.lock();
     
-    // 5. 使用（显示）
-    Buffer* buf = pool->acquireFree(true, -1);
+    if (!pool_sptr) {
+        printf("❌ Pool not found\n");
+        return -1;
+    }
+    
+    printf("   Total Buffers: %d\n", pool_sptr->getTotalCount());
+    
+    // v2.0步骤5: 设置pool_id到设备（而不是指针）
+    fb_device->setBufferPoolId(pool_id);
+    
+    // v2.0步骤6: 使用（显示）
+    Buffer* buf = pool_sptr->acquireFree(true, -1);
     if (buf) {
         // 渲染到Framebuffer
         renderFrame(buf->getVirtualAddress(), buf->size());
         
         // 提交显示
-        pool->submitFilled(buf);
+        pool_sptr->submitFilled(buf);
         fb_device->flip();  // 切换显示buffer
     }
     
+    // v2.0关键点：
+    // - Framebuffer内存是EXTERNAL ownership
+    // - allocator析构时不会释放framebuffer内存
+    // - 只删除Buffer对象
+    
     return 0;
-}
+}  // allocator析构，自动清理Pool和Buffer对象
 ```
 
 ---
 
-### 5.4 场景：与Worker集成
+### 5.4 场景：与Worker集成（v2.0）
 
 ```cpp
 #include "productionline/worker/base/WorkerBase.hpp"
+#include "buffer/BufferPoolRegistry.hpp"
 
 class FfmpegDecodeVideoFileWorker : public WorkerBase {
+private:
+    uint64_t buffer_pool_id_;  // v2.0: 记录pool_id
+    
 public:
     FfmpegDecodeVideoFileWorker()
         : WorkerBase(BufferAllocatorFactory::AllocatorType::AVFRAME)
+        , buffer_pool_id_(0)
         // 父类自动创建AVFRAME类型的allocator_facade_
     {
     }
     
     bool open(const char* path) override {
-        // 1. 打开视频文件
+        // v2.0步骤1: 打开视频文件
         if (!openVideo(path)) {
             return false;
         }
         
-        // 2. 计算帧大小
+        // v2.0步骤2: 计算帧大小
         size_t frame_size = output_width_ * output_height_ * output_bpp_ / 8;
         
-        // 3. 使用allocator_facade_创建BufferPool
-        buffer_pool_sptr_ = allocator_facade_.allocatePoolWithBuffers(
+        // v2.0步骤3: 使用allocator_facade_创建BufferPool（返回pool_id）
+        buffer_pool_id_ = allocator_facade_.allocatePoolWithBuffers(
             4,                  // 4个Buffer
             frame_size,
             std::string("FFmpegDecoder_") + std::string(path),
             "Video"
         );
         
-        if (!buffer_pool_sptr_) {
+        if (buffer_pool_id_ == 0) {
             printf("❌ Failed to create BufferPool\n");
             closeVideo();
             return false;
         }
         
+        // v2.0步骤4: 从Registry获取Pool（验证创建成功）
+        auto pool_weak = BufferPoolRegistry::getInstance().getPool(buffer_pool_id_);
+        auto pool_sptr = pool_weak.lock();
+        
+        if (!pool_sptr) {
+            printf("❌ Pool not found in Registry\n");
+            closeVideo();
+            return false;
+        }
+        
         printf("✅ Worker opened successfully\n");
-        printf("   BufferPool: %s\n", buffer_pool_sptr_->getName().c_str());
-        printf("   Buffer Count: %d\n", buffer_pool_sptr_->getTotalCount());
+        printf("   BufferPool ID: %lu\n", buffer_pool_id_);
+        printf("   BufferPool Name: %s\n", pool_sptr->getName().c_str());
+        printf("   Buffer Count: %d\n", pool_sptr->getTotalCount());
         
         return true;
     }
     
-    std::unique_ptr<BufferPool> getOutputBufferPool() override {
-        if (!buffer_pool_sptr_) {
-            return nullptr;
+    uint64_t getOutputBufferPoolId() const override {
+        // v2.0: 返回pool_id而不是转移所有权
+        return buffer_pool_id_;
+    }
+    
+    void fillBuffer() override {
+        // v2.0: 使用时从Registry获取Pool
+        auto pool_weak = BufferPoolRegistry::getInstance().getPool(buffer_pool_id_);
+        auto pool_sptr = pool_weak.lock();
+        
+        if (!pool_sptr) {
+            printf("❌ Pool %lu not found\n", buffer_pool_id_);
+            return;
         }
         
-        // 转移所有权给ProductionLine
-        BufferPool* raw_ptr = buffer_pool_sptr_.get();
-        buffer_pool_sptr_.reset();
-        return std::unique_ptr<BufferPool>(raw_ptr);
+        // 解码逻辑...
+        AVFrame* frame = decodeOneFrame();
+        if (frame) {
+            allocator_facade_.injectAVFrameToPool(frame, buffer_pool_id_);
+        }
+    }
+    
+    ~FfmpegDecodeVideoFileWorker() override {
+        // v2.0: allocator_facade_析构时会自动清理Pool
+        // 无需手动管理
     }
 };
 ```
@@ -1429,45 +1827,75 @@ public:
     CudaAllocator() = default;
     ~CudaAllocator() override = default;
     
-    // 实现基类纯虚函数
-    std::shared_ptr<BufferPool> allocatePoolWithBuffers(
+    // v2.0实现基类纯虚函数
+    uint64_t allocatePoolWithBuffers(
         int count, size_t size, const std::string& name, const std::string& category
     ) override {
-        // 1. 创建BufferPool（通过Passkey）
+        // v2.0步骤1: 创建BufferPool（通过Passkey）
         auto pool = std::make_shared<BufferPool>(token(), name, category);
         
-        // 2. 循环创建Buffer
+        // v2.0步骤2: 循环创建Buffer
         for (int i = 0; i < count; i++) {
             Buffer* buf = createBuffer(i, size);
             if (!buf) {
-                destroyPool(pool.get());
-                return nullptr;
+                // 失败时手动清理（pool未注册）
+                for (Buffer* b : pool->getAllManagedBuffers()) {
+                    deallocateBuffer(b);
+                }
+                pool->clearAllManagedBuffers();
+                return 0;
             }
             addBufferToPoolQueue(pool.get(), buf, QueueType::FREE);
         }
         
-        // 3. 保存到managed_pool_
-        {
-            std::lock_guard<std::mutex> lock(managed_pool_mutex_);
-            managed_pool_sptr_ = pool;
-        }
+        // v2.0步骤3: 注册到Registry（转移所有权）
+        uint64_t pool_id = BufferPoolRegistry::getInstance().registerPool(pool, allocator_id_);
+        pool->setRegistryId(pool_id);
         
-        return pool;
+        // v2.0步骤4: 返回pool_id
+        return pool_id;
     }
     
     Buffer* injectBufferToPool(
-        size_t size, BufferPool* pool, QueueType queue
+        uint64_t pool_id, size_t size, QueueType queue
     ) override {
-        // 扩容逻辑
-        uint32_t id = pool->getTotalCount();
+        // v2.0扩容逻辑：从Registry获取Pool
+        auto pool_weak = BufferPoolRegistry::getInstance().getPool(pool_id);
+        auto pool_sptr = pool_weak.lock();
+        if (!pool_sptr) return nullptr;
+        
+        uint32_t id = pool_sptr->getTotalCount();
         Buffer* buf = createBuffer(id, size);
         if (!buf) return nullptr;
         
-        addBufferToPoolQueue(pool, buf, queue);
+        addBufferToPoolQueue(pool_sptr.get(), buf, queue);
         return buf;
     }
     
-    // ... 其他接口实现
+    bool destroyPool() override {
+        // v2.0清理逻辑：查询并清理所有Pool
+        auto pool_ids = BufferPoolRegistry::getInstance().getPoolsByAllocator(allocator_id_);
+        for (uint64_t pool_id : pool_ids) {
+            auto pool_sptr = BufferPoolRegistry::getInstance().getPoolSpecialForAllocator(
+                pool_id, allocator_id_
+            );
+            if (!pool_sptr) continue;
+            
+            // 销毁所有Buffer
+            for (Buffer* buf : pool_sptr->getAllManagedBuffers()) {
+                deallocateBuffer(buf);
+            }
+            pool_sptr->clearAllManagedBuffers();
+            
+            // 注销Pool
+            BufferPoolRegistry::getInstance().unregisterPool(pool_id, allocator_id_);
+        }
+        return true;
+    }
+    
+    ~CudaAllocator() override {
+        destroyPool();  // v2.0: 析构时清理
+    }
     
 protected:
     // 核心：CUDA内存分配
@@ -1531,25 +1959,48 @@ enum class AllocatorType {
 };
 ```
 
-#### 步骤4：使用
+#### 步骤4：使用（v2.0）
 
 ```cpp
-// 创建CUDA Allocator
+#include "buffer/BufferPoolRegistry.hpp"
+
+// v2.0步骤1: 创建CUDA Allocator
 BufferAllocatorFacade allocator(
     BufferAllocatorFactory::AllocatorType::CUDA
 );
 
-auto pool = allocator.allocatePoolWithBuffers(
+// v2.0步骤2: 创建BufferPool（返回pool_id）
+uint64_t pool_id = allocator.allocatePoolWithBuffers(
     10,
     1920 * 1080 * 4,
     "GpuPool",
     "GPU"
 );
 
-// 使用（需要CUDA kernel处理）
-Buffer* buf = pool->acquireFree(true, -1);
-launchCudaKernel<<<grid, block>>>(buf->getVirtualAddress(), buf->size());
-pool->submitFilled(buf);
+if (pool_id == 0) {
+    printf("❌ Failed to create GPU BufferPool\n");
+    return -1;
+}
+
+// v2.0步骤3: 从Registry获取Pool（临时访问）
+auto pool_weak = BufferPoolRegistry::getInstance().getPool(pool_id);
+auto pool_sptr = pool_weak.lock();
+
+if (!pool_sptr) {
+    printf("❌ Pool not found\n");
+    return -1;
+}
+
+// v2.0步骤4: 使用（需要CUDA kernel处理）
+Buffer* buf = pool_sptr->acquireFree(true, -1);
+if (buf) {
+    // CUDA kernel处理
+    launchCudaKernel<<<grid, block>>>(buf->getVirtualAddress(), buf->size());
+    cudaDeviceSynchronize();
+    
+    // 提交结果
+    pool_sptr->submitFilled(buf);
+}
 ```
 
 ---
@@ -1752,30 +2203,46 @@ $ ./your_app
 
 ## 8. 总结
 
-### 8.1 核心概念回顾
+### 8.1 核心概念回顾（v2.0）
 
-| 概念 | 说明 |
-|-----|------|
-| **BufferAllocatorBase** | 抽象基类，定义统一接口，模板方法模式 |
-| **BufferAllocatorFacade** | 门面类，简化使用，自动创建Allocator |
+| 概念 | v2.0说明 |
+|-----|---------|
+| **BufferAllocatorBase** | 抽象基类，定义统一接口，**负责BufferPool完整生命周期管理** |
+| **BufferPoolRegistry** | **v2.0核心**：单例，中心化管理所有BufferPool，独占持有（ref_count=1） |
+| **BufferAllocatorFacade** | 门面类，简化使用，自动创建Allocator，**返回pool_id** |
 | **BufferAllocatorFactory** | 工厂类，统一创建Allocator，封装配置 |
-| **NormalAllocator** | 普通内存分配器（malloc/posix_memalign） |
-| **AVFrameAllocator** | AVFrame包装分配器（动态注入，零拷贝） |
-| **FramebufferAllocator** | Framebuffer外部内存包装分配器 |
-| **Passkey模式** | 控制BufferPool创建权限 |
-| **友元模式** | Allocator与BufferPool解耦协作 |
-| **模板方法模式** | 定义统一流程，子类实现具体步骤 |
+| **NormalAllocator** | 普通内存分配器（malloc/posix_memalign），**析构时自动清理** |
+| **AVFrameAllocator** | AVFrame包装分配器（动态注入，零拷贝），**参数为pool_id** |
+| **FramebufferAllocator** | Framebuffer外部内存包装分配器，**EXTERNAL ownership** |
+| **Passkey模式** | 控制BufferPool创建权限，**只有Allocator可创建** |
+| **友元模式** | **v2.0扩展**：Allocator是Registry的友元，可访问私有清理方法 |
+| **模板方法模式** | 定义统一流程，子类实现createBuffer/deallocateBuffer |
+| **Registry中心化（v2.0）** | **所有Pool由Registry独占持有，使用者获取weak_ptr** |
 
-### 8.2 最佳实践清单
+### 8.2 最佳实践清单（v2.0）
 
+**v2.0架构核心原则**：
+- ✅ **Registry中心化**：所有BufferPool由Registry独占管理（ref_count=1）
+- ✅ **Allocator追踪**：通过allocator_id追踪创建的所有Pool，不持有指针
+- ✅ **pool_id引用**：使用pool_id而不是shared_ptr引用Pool
+- ✅ **weak_ptr访问**：从Registry获取weak_ptr临时访问Pool
+
+**开发实践**：
 - ✅ 通过`BufferAllocatorFacade`使用Allocator（不要直接使用实现类）
 - ✅ 根据场景选择合适的Allocator类型（NORMAL/AVFRAME/FRAMEBUFFER）
-- ✅ 使用模板方法模式扩展新的Allocator（只需实现createBuffer和deallocateBuffer）
-- ✅ 注意OWNED和EXTERNAL所有权的区别
-- ✅ AVFrameAllocator必须通过Allocator释放（av_frame_free）
-- ✅ Allocator析构时会自动清理所有Buffer和内存（RAII）
+- ✅ 使用模板方法模式扩展新的Allocator（实现createBuffer/deallocateBuffer/destroyPool）
+- ✅ 注意OWNED和EXTERNAL所有权的区别（EXTERNAL不释放外部内存）
+- ✅ AVFrameAllocator必须通过Allocator释放（av_frame_free在deallocateBuffer中）
+- ✅ **v2.0**：Allocator析构时自动调用destroyPool()清理所有Pool（RAII）
+- ✅ **v2.0**：destroyPool()通过友元访问Registry私有方法进行清理
 - ✅ 多线程访问时通过BufferPool的线程安全接口
 - ✅ 使用Passkey模式确保BufferPool只能由Allocator创建
+
+**v2.0特有注意事项**：
+- ⚠️ **不要持有shared_ptr<BufferPool>**：使用pool_id + weak_ptr模式
+- ⚠️ **不要在Registry外部unregisterPool**：只有Allocator通过友元可以注销
+- ⚠️ **子类必须在析构函数中调用destroyPool()**：基类析构不会调用纯虚函数
+- ⚠️ **扩展Allocator时必须实现destroyPool()**：v2.0纯虚函数
 
 ### 8.3 下一步学习
 
@@ -1787,7 +2254,7 @@ $ ./your_app
 
 ---
 
-## 附录A：快速参考
+## 附录A：快速参考（v2.0）
 
 ### 创建Allocator
 
@@ -1805,39 +2272,77 @@ BufferAllocatorFacade allocator(
 );
 ```
 
-### 创建BufferPool
+### 创建BufferPool（v2.0：返回pool_id）
 
 ```cpp
-auto pool = allocator.allocatePoolWithBuffers(
+uint64_t pool_id = allocator.allocatePoolWithBuffers(
     10,                  // Buffer数量
     1920 * 1080 * 4,    // 每个Buffer大小
     "MyPool",            // Pool名称
     "Video"              // Pool分类
 );
+
+if (pool_id == 0) {
+    // 创建失败
+}
 ```
 
-### 动态注入（AVFrame）
+### 获取BufferPool（v2.0：从Registry）
+
+```cpp
+#include "buffer/BufferPoolRegistry.hpp"
+
+auto pool_weak = BufferPoolRegistry::getInstance().getPool(pool_id);
+auto pool_sptr = pool_weak.lock();
+
+if (pool_sptr) {
+    // 使用pool_sptr
+    Buffer* buf = pool_sptr->acquireFree(true, -1);
+}
+```
+
+### 动态注入（AVFrame，v2.0：传入pool_id）
 
 ```cpp
 AVFrame* frame = decodeOneFrame();
-Buffer* buf = allocator->injectAVFrameToPool(frame, pool.get());
+Buffer* buf = allocator->injectAVFrameToPool(frame, pool_id);
 ```
 
-### 销毁Pool
+### 销毁Pool（v2.0：自动或显式）
 
 ```cpp
-allocator.destroyPool(pool.get());
+// 方式1：显式调用
+allocator.destroyPool();  // 清理所有Pool
+
+// 方式2：析构时自动（推荐）
+{
+    BufferAllocatorFacade allocator(...);
+    uint64_t pool_id = allocator.allocatePoolWithBuffers(...);
+    // ... 使用 ...
+}  // allocator析构，自动调用destroyPool()
 ```
 
 ---
 
-## 附录B：常见问题FAQ
+## 附录B：常见问题FAQ（v2.0）
 
 **Q: Allocator什么时候创建BufferPool？**  
-A: 调用`allocatePoolWithBuffers()`时创建。Allocator持有`shared_ptr`管理生命周期。
+A: v2.0架构：调用`allocatePoolWithBuffers()`时创建Pool，立即注册到Registry并转移所有权，返回`pool_id`。Allocator不持有指针，Registry独占持有`shared_ptr`（ref_count=1）。
 
 **Q: 为什么需要Passkey模式？**  
-A: 确保BufferPool只能由Allocator创建，防止外部随意创建，保证生命周期管理的一致性。
+A: 确保BufferPool只能由Allocator创建，防止外部随意创建，保证生命周期管理的一致性。v2.0架构中，Pool的创建和清理都由Allocator完成。
+
+**Q: v2.0架构中，如何访问BufferPool？**  
+A: 从`BufferPoolRegistry`获取：`auto pool_weak = BufferPoolRegistry::getInstance().getPool(pool_id);`，返回`weak_ptr`。使用`lock()`获取临时`shared_ptr`。
+
+**Q: 为什么v2.0返回pool_id而不是shared_ptr？**  
+A: 职责分离：Registry独占管理Pool的生命周期（ref_count=1），Allocator通过pool_id追踪，使用者通过weak_ptr临时访问。避免多方持有shared_ptr导致的生命周期复杂性。
+
+**Q: v2.0架构中，Allocator如何清理BufferPool？**  
+A: 通过友元访问Registry的私有方法：`getPoolsByAllocator()`获取所有pool_id → `getPoolSpecialForAllocator()`临时获取shared_ptr → 销毁Buffer → `unregisterPool()`注销。
+
+**Q: 为什么需要BufferPoolRegistry？**  
+A: v2.0核心设计：中心化管理所有BufferPool，提供统一的注册/查询/注销接口，独占持有所有Pool（ref_count=1），确保生命周期清晰可控。
 
 **Q: 什么时候使用OWNED，什么时候使用EXTERNAL？**  
 A: 

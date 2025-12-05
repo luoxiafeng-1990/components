@@ -427,3 +427,8 @@ void BufferPool::printAllBuffers() const {
     
     printf("========================================\n\n");
 }
+
+void BufferPool::clearAllManagedBuffers() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    managed_buffers_.clear();
+}

@@ -223,6 +223,39 @@ public:
      */
     size_t getBufferSize() const;
     
+    /**
+     * @brief 获取所有托管的 Buffer（仅供 Allocator 使用）
+     * 
+     * 使用场景：
+     * - Allocator 在 destroyPool() 时需要遍历所有 buffer
+     * - 检查哪些 buffer 属于自己，然后销毁
+     * 
+     * 线程安全：是（返回引用，调用者需要自行加锁）
+     * 
+     * @return const std::unordered_set<Buffer*>& 所有 managed buffers 的引用
+     * 
+     * @note 仅供 BufferAllocatorBase 及其子类使用
+     * @note 返回的是引用，调用者不应修改集合本身
+     */
+    const std::unordered_set<Buffer*>& getAllManagedBuffers() const {
+        return managed_buffers_;
+    }
+    
+    /**
+     * @brief 清空所有托管的 Buffer 集合（仅供 Allocator 使用）
+     * 
+     * 使用场景：
+     * - Allocator 在创建 Pool 失败时，需要清理已添加的 buffer
+     * - 在错误处理流程中使用，清空 managed_buffers_ 避免悬空指针
+     * 
+     * 线程安全：是（内部使用 mutex_ 保护）
+     * 
+     * @note 仅供 BufferAllocatorBase 及其子类使用
+     * @note 调用此方法前，应该已经通过 deallocateBuffer() 销毁了所有 buffer 对象
+     * @note 此方法只清空集合，不销毁 buffer 对象本身
+     */
+    void clearAllManagedBuffers();
+    
     // ====== 生命周期管理 ======
     
     /**

@@ -1,9 +1,10 @@
 # Worker子系统设计文档
 
 > **面向人群**: 新入职开发者  
-> **文档版本**: v1.0  
-> **最后更新**: 2025-01-XX  
-> **维护者**: AI SDK Team
+> **文档版本**: v2.1  
+> **最后更新**: 2025-12-05  
+> **维护者**: AI SDK Team  
+> **架构变更**: v2.1 重大变更 - BufferFillingWorkerFacade 不继承接口 + getOutputBufferPoolId 返回 ID
 
 ---
 
@@ -25,7 +26,7 @@
 
 **Worker子系统**是一个**统一接口、多种实现的视频数据读取与Buffer填充框架**，专为音视频处理流水线设计。它提供：
 
-- ✅ **统一接口**：通过`IBufferFillingWorker`和`IVideoFileNavigator`两个接口统一所有Worker实现
+- ✅ **统一基类**：通过`WorkerBase`统一所有Worker实现(继承`IVideoFileNavigator`接口)
 - ✅ **多种实现**：支持FFmpeg解码、MMAP内存映射、IoUring异步I/O等多种数据源
 - ✅ **自动BufferPool管理**：Worker在`open()`时自动创建和管理BufferPool
 - ✅ **工厂模式**：通过`BufferFillingWorkerFactory`自动选择最优实现
@@ -44,10 +45,10 @@
 ### 1.3 设计原则
 
 ```
-🎯 接口隔离原则 (ISP)
-   - IBufferFillingWorker: Buffer填充职责
-   - IVideoFileNavigator: 文件导航职责
-   - Worker可选择性实现两个接口
+🎯 单一基类设计 (v2.0)
+   - WorkerBase: 统一基类，定义Buffer填充和文件导航职责
+   - 继承IVideoFileNavigator接口
+   - 直接定义fillBuffer()等纯虚函数，无需独立接口
 
 🔌 依赖注入 (DI)
    - WorkerBase通过构造函数参数传递AllocatorType
@@ -121,27 +122,19 @@
 
 ### 2.2 职责划分
 
-#### 🔹 IBufferFillingWorker - Buffer填充接口
-**职责**: 定义Buffer填充的核心功能  
-**核心能力**:
-- `fillBuffer()`: 填充Buffer的核心方法
-- `getWorkerType()`: 获取Worker类型标识
-- `getOutputBufferPool()`: 提供Worker创建的BufferPool
-
-#### 🔹 IVideoFileNavigator - 文件导航接口
-**职责**: 定义文件操作和导航功能  
-**核心能力**:
-- 文件打开/关闭（`open()`, `close()`, `isOpen()`）
-- 文件导航（`seek()`, `skip()`, `seekToBegin()`, `seekToEnd()`）
-- 文件信息查询（`getTotalFrames()`, `getCurrentFrameIndex()`, `getWidth()`, `getHeight()`等）
-
-#### 🔹 WorkerBase - 统一基类
+#### 🔹 WorkerBase - 统一基类（v2.0架构）
 **职责**: 作为所有Worker实现类的统一基类  
 **核心能力**:
-- 同时实现`IBufferFillingWorker`和`IVideoFileNavigator`两个接口
+- 继承`IVideoFileNavigator`接口（文件导航功能）
+- 直接定义Buffer填充相关的纯虚函数：`fillBuffer()`, `getWorkerType()`, `getOutputBufferPoolId()`
 - 统一管理`BufferAllocatorFacade`（通过构造函数参数传递类型）
-- 统一管理`BufferPool`（在`open()`时自动创建）
-- 避免在门面类中使用`dynamic_cast`
+- 统一管理`BufferPool`（在`open()`时自动创建，记录pool_id）
+- 简化架构，减少不必要的接口抽象层
+
+**v2.0架构变更**:
+- 不再使用独立的`IBufferFillingWorker`接口
+- WorkerBase直接定义Buffer填充功能的纯虚函数
+- 所有Worker实现类只需继承WorkerBase一个基类
 
 #### 🔹 BufferFillingWorkerFacade - 门面类
 **职责**: 为用户提供统一、简单的接口  
@@ -157,42 +150,40 @@
 - 自动检测系统能力并选择最优实现
 - 支持环境变量和配置文件
 
-### 2.3 依赖关系
+### 2.3 依赖关系（v2.0架构）
 
 ```
-IBufferFillingWorker (接口)
-    ↑ implements
-WorkerBase (基类)
-    ↑ inherits
-具体实现类 (FfmpegDecodeVideoFileWorker等)
-
 IVideoFileNavigator (接口)
     ↑ implements
-WorkerBase (基类)
+WorkerBase (基类，定义fillBuffer等纯虚函数)
     ↑ inherits
-具体实现类
+具体实现类 (FfmpegDecodeVideoFileWorker, MmapRawVideoFileWorker等)
 
 BufferFillingWorkerFacade (门面)
     ├── 持有 → WorkerBase (通过unique_ptr)
-    ├── 实现 → IBufferFillingWorker
-    └── 实现 → IVideoFileNavigator
+    └── 实现 → IVideoFileNavigator (转发调用)
 
 BufferFillingWorkerFactory (工厂)
     └── 创建 → WorkerBase (通过unique_ptr)
 
 WorkerBase
     ├── 持有 → BufferAllocatorFacade (统一管理)
-    └── 持有 → BufferPool (shared_ptr)
+    └── 记录 → BufferPool ID (uint64_t buffer_pool_id_)
 
 具体实现类
-    └── 使用 → BufferPool (填充Buffer)
+    └── 使用 → BufferPool (通过Registry获取，填充Buffer)
 ```
+
+**关键变化**:
+- ❌ 删除了独立的`IBufferFillingWorker`接口
+- ✅ WorkerBase直接定义Buffer填充功能（纯虚函数）
+- ✅ 继承关系简化为：IVideoFileNavigator → WorkerBase → 具体实现类
 
 ### 2.4 设计模式应用
 
 | 设计模式 | 应用位置 | 目的 |
 |---------|---------|------|
-| **接口隔离原则** | `IBufferFillingWorker` + `IVideoFileNavigator` | 分离Buffer填充和文件导航职责 |
+| **单一基类设计（v2.0）** | `WorkerBase` | 统一基类，直接定义Buffer填充和文件导航功能 |
 | **工厂模式** | `BufferFillingWorkerFactory` | 统一创建Worker，支持自动检测 |
 | **门面模式** | `BufferFillingWorkerFacade` | 简化使用，隐藏实现细节 |
 | **模板方法模式** | `WorkerBase` | 统一Allocator和BufferPool管理逻辑 |
@@ -203,104 +194,9 @@ WorkerBase
 
 ## 3. 类详细设计
 
-### 3.1 IBufferFillingWorker接口
+### 3.1 IVideoFileNavigator接口
 
 #### 3.1.1 接口概述
-
-```cpp
-/**
- * @brief IBufferFillingWorker - 填充Buffer的Worker接口
- * 
- * 职责：
- * - 从不同数据源获取数据，填充到Buffer中
- * - 提供Worker类型标识
- * - 提供Worker创建的BufferPool（如果有）
- */
-class IBufferFillingWorker {
-public:
-    virtual ~IBufferFillingWorker() = default;
-    
-    // 核心功能：填充Buffer
-    virtual bool fillBuffer(int frame_index, Buffer* buffer) = 0;
-    
-    // 类型信息
-    virtual const char* getWorkerType() const = 0;
-    
-    // 提供BufferPool（可选）
-    virtual std::unique_ptr<BufferPool> getOutputBufferPool();
-};
-```
-
-#### 3.1.2 成员方法
-
-##### fillBuffer() - 核心填充方法
-
-```cpp
-/**
- * @brief 填充Buffer（核心功能）
- * @param frame_index 帧索引
- * @param buffer 输出Buffer（从BufferPool获取）
- * @return 成功返回true，失败返回false
- * 
- * 实现要求：
- * - MmapRawVideoFileWorker: 从mmap映射的内存读取数据到buffer->data()
- * - FfmpegDecodeVideoFileWorker: 解码视频帧并拷贝到buffer->data()
- * - FfmpegDecodeRtspWorker: 解码RTSP流并拷贝到buffer->data()
- * - IoUringRawVideoFileWorker: 使用io_uring异步读取到buffer->data()
- * 
- * 注意：
- * - buffer由调用者（ProductionLine）从BufferPool获取
- * - 实现者只负责填充数据
- * - 成功返回true，失败返回false（buffer由调用者归还）
- */
-virtual bool fillBuffer(int frame_index, Buffer* buffer) = 0;
-```
-
-**使用示例**:
-```cpp
-// ProductionLine使用
-Buffer* buf = pool->acquireFree(true, -1);
-if (worker->fillBuffer(frame_idx, buf)) {
-    pool->submitFilled(buf);  // 成功，提交到filled队列
-} else {
-    pool->releaseFilled(buf);  // 失败，归还到free队列
-}
-```
-
-##### getWorkerType() - 类型标识
-
-```cpp
-/**
- * @brief 获取Worker类型名称（用于调试和日志）
- * @return 类型名称（如"FfmpegDecodeVideoFileWorker"）
- */
-virtual const char* getWorkerType() const = 0;
-```
-
-##### getOutputBufferPool() - 提供BufferPool
-
-```cpp
-/**
- * @brief 获取输出BufferPool（如果有）
- * @return BufferPool的智能指针，如果Worker创建了内部BufferPool，返回unique_ptr；否则返回nullptr
- * 
- * 使用场景：
- * - 硬件解码器Worker：返回内部创建的overlay BufferPool
- * - MmapRawVideoFileWorker：返回nullptr（使用外部BufferPool）
- * - VideoProductionLine：通过此方法获取Worker的BufferPool（如果有）
- * 
- * 默认实现：返回nullptr（普通Worker没有内部BufferPool）
- */
-virtual std::unique_ptr<BufferPool> getOutputBufferPool() {
-    return nullptr;
-}
-```
-
----
-
-### 3.2 IVideoFileNavigator接口
-
-#### 3.2.1 接口概述
 
 ```cpp
 /**
@@ -341,7 +237,7 @@ public:
 };
 ```
 
-#### 3.2.2 核心方法说明
+#### 3.1.2 核心方法说明
 
 ##### open() - 打开文件（两个重载）
 
@@ -401,34 +297,46 @@ virtual bool skip(int frame_count) = 0;
 
 ---
 
-### 3.3 WorkerBase基类
+### 3.2 WorkerBase基类（v2.0架构）
 
-#### 3.3.1 类概述
+#### 3.2.1 类概述
 
 ```cpp
 /**
  * @brief WorkerBase - Worker基类
  * 
- * 设计目标：
+ * v2.0 设计目标：
  * - 统一所有Worker实现类的基类
- * - 同时继承IBufferFillingWorker和IVideoFileNavigator两个接口
+ * - 继承IVideoFileNavigator接口（文件导航功能）
+ * - 直接定义Buffer填充相关的纯虚函数（无需独立接口）
  * - 避免在门面类中使用dynamic_cast进行类型转换
  * - 提供统一的Allocator和BufferPool管理
  * - 采用构造函数参数传递模式，父类统一管理Allocator创建逻辑
+ * 
+ * v2.0 架构变更：
+ * - 不再继承IBufferFillingWorker接口
+ * - 直接定义fillBuffer(), getWorkerType(), getOutputBufferPoolId()等纯虚函数
+ * - 简化架构，减少不必要的抽象层
  */
-class WorkerBase : public IBufferFillingWorker, public IVideoFileNavigator {
+class WorkerBase : public IVideoFileNavigator {
+    // 定义Buffer填充相关的纯虚函数
+    virtual bool fillBuffer(int frame_index, Buffer* buffer) = 0;
+    virtual const char* getWorkerType() const = 0;
+    virtual uint64_t getOutputBufferPoolId();
+    
+    // 继承IVideoFileNavigator的所有纯虚函数
     // ...
 };
 ```
 
-#### 3.3.2 成员属性
+#### 3.2.2 成员属性
 
 | 属性 | 类型 | 说明 | 访问权限 |
 |-----|------|------|---------|
 | `allocator_facade_` | `BufferAllocatorFacade` | Allocator门面（所有Worker子类自动继承） | `protected` |
 | `buffer_pool_id_` | `uint64_t` | Worker创建的BufferPool ID（所有Worker子类自动继承，v2.0） | `protected` |
 
-#### 3.3.3 构造函数
+#### 3.2.3 构造函数
 
 ```cpp
 /**
@@ -463,31 +371,31 @@ public:
 };
 ```
 
-#### 3.3.4 核心方法
+#### 3.2.4 核心方法
 
-##### getOutputBufferPool() - 提供BufferPool（默认实现）
+##### getOutputBufferPoolId() - 获取BufferPool ID（默认实现）
 
 ```cpp
 /**
- * @brief 获取Worker创建的BufferPool ID（v2.0 新接口）
+ * @brief 获取Worker创建的BufferPool ID（v2.1 接口）
  * 
  * 子类可以重写此方法，但通常不需要（直接使用基类的buffer_pool_id_即可）
  * 
  * @return uint64_t 成功返回pool_id，失败返回0
  * 
  * @note Worker必须在open()时创建BufferPool，否则返回0
- * @note v2.0: 返回 pool_id，使用者从 Registry 获取 Pool
+ * @note v2.1: 返回 pool_id，使用者从 Registry 获取 Pool
  */
-virtual uint64_t getOutputBufferPoolId() const override {
+virtual uint64_t getOutputBufferPoolId() {
     return buffer_pool_id_;
 }
 ```
 
 ---
 
-### 3.4 具体实现类
+### 3.3 具体实现类
 
-#### 3.4.1 FfmpegDecodeVideoFileWorker
+#### 3.3.1 FfmpegDecodeVideoFileWorker
 
 **功能**: 使用FFmpeg解码视频文件（MP4, AVI, MKV, MOV, FLV等）
 
@@ -504,13 +412,21 @@ virtual uint64_t getOutputBufferPoolId() const override {
 ```cpp
 FfmpegDecodeVideoFileWorker worker;
 worker.open("video.mp4");  // 自动检测格式
-std::unique_ptr<BufferPool> pool = worker.getOutputBufferPool();
+
+// v2.1: 从 Registry 获取 BufferPool
+uint64_t pool_id = worker.getOutputBufferPoolId();
+auto pool = BufferPoolRegistry::getInstance().getPool(pool_id);
+if (!pool) {
+    printf("❌ Pool not found\n");
+    return;
+}
+
 Buffer* buf = pool->acquireFree(true, -1);
 worker.fillBuffer(0, buf);
 pool->submitFilled(buf);
 ```
 
-#### 3.4.2 FfmpegDecodeRtspWorker
+#### 3.3.2 FfmpegDecodeRtspWorker
 
 **功能**: 使用FFmpeg解码RTSP视频流
 
@@ -526,13 +442,21 @@ pool->submitFilled(buf);
 ```cpp
 FfmpegDecodeRtspWorker worker;
 worker.open("rtsp://192.168.1.100:8554/stream", 1920, 1080, 32);
-std::unique_ptr<BufferPool> pool = worker.getOutputBufferPool();
+
+// v2.1: 从 Registry 获取 BufferPool
+uint64_t pool_id = worker.getOutputBufferPoolId();
+auto pool = BufferPoolRegistry::getInstance().getPool(pool_id);
+if (!pool) {
+    printf("❌ Pool not found\n");
+    return;
+}
+
 Buffer* buf = pool->acquireFree(true, -1);
 worker.fillBuffer(0, buf);  // frame_index在RTSP中无意义，但需要传入
 pool->submitFilled(buf);
 ```
 
-#### 3.4.3 MmapRawVideoFileWorker
+#### 3.3.3 MmapRawVideoFileWorker
 
 **功能**: 使用mmap内存映射方式打开raw视频文件
 
@@ -554,7 +478,7 @@ worker.fillBuffer(0, buf);
 external_pool->submitFilled(buf);
 ```
 
-#### 3.4.4 IoUringRawVideoFileWorker
+#### 3.3.4 IoUringRawVideoFileWorker
 
 **功能**: 使用io_uring高性能异步I/O方式打开raw视频文件
 
@@ -578,9 +502,9 @@ external_pool->submitFilled(buf);
 
 ---
 
-### 3.5 BufferFillingWorkerFacade门面类
+### 3.4 BufferFillingWorkerFacade门面类
 
-#### 3.5.1 类概述
+#### 3.4.1 类概述
 
 ```cpp
 /**
@@ -588,19 +512,24 @@ external_pool->submitFilled(buf);
  * 
  * 设计模式：门面模式（Facade Pattern）
  * 
+ * 设计变更（v2.1）：
+ * - 去除对 IBufferFillingWorker 接口的依赖
+ * - 不继承任何接口或基类，直接定义所有方法
+ * - 所有方法转发给内部的 worker_base_uptr_
+ * 
  * 职责：
  * - 为用户提供统一、简单的Buffer填充操作接口
  * - 隐藏底层多种实现的复杂性
  * - 自动选择最优的Worker实现
  */
-class BufferFillingWorkerFacade : public IBufferFillingWorker, public IVideoFileNavigator {
+class BufferFillingWorkerFacade {
 private:
     std::unique_ptr<WorkerBase> worker_base_uptr_;  // 实际的Worker实现
     BufferFillingWorkerFactory::WorkerType preferred_type_;  // 用户偏好的类型
 };
 ```
 
-#### 3.5.2 核心特性
+#### 3.4.2 核心特性
 
 ##### 延迟创建Worker
 
@@ -642,7 +571,7 @@ bool open(const char* path, int width, int height, int bits_per_pixel) override 
 }
 ```
 
-#### 3.5.3 使用示例
+#### 3.4.3 使用示例
 
 ```cpp
 // 方式1：编码视频（自动检测格式）
@@ -661,9 +590,9 @@ worker.open(path, width, height, bpp);  // 门面类会根据Worker类型自动�
 
 ---
 
-### 3.6 BufferFillingWorkerFactory工厂类
+### 3.5 BufferFillingWorkerFactory工厂类
 
-#### 3.6.1 类概述
+#### 3.5.1 类概述
 
 ```cpp
 /**
@@ -690,14 +619,14 @@ public:
 };
 ```
 
-#### 3.6.2 创建策略（优先级从高到低）
+#### 3.5.2 创建策略（优先级从高到低）
 
 1. **用户显式指定** (`type != AUTO`)
 2. **环境变量** (`VIDEO_READER_TYPE`)
 3. **配置文件** (`/etc/video_reader.conf`)
 4. **自动检测系统能力**
 
-#### 3.6.3 自动检测逻辑
+#### 3.5.3 自动检测逻辑
 
 ```cpp
 /**
@@ -733,13 +662,6 @@ static std::unique_ptr<WorkerBase> autoDetect() {
 ```mermaid
 classDiagram
     %% ========== 接口层 ==========
-    class IBufferFillingWorker {
-        <<interface>>
-        +fillBuffer(int, Buffer*) bool
-        +getWorkerType() const char*
-        +getOutputBufferPool() unique_ptr~BufferPool~
-    }
-    
     class IVideoFileNavigator {
         <<interface>>
         +open(path) bool
@@ -759,15 +681,15 @@ classDiagram
         +isAtEnd() bool
     }
     
-    %% ========== 基类层 ==========
+    %% ========== 基类层（v2.0）==========
     class WorkerBase {
         <<abstract>>
         #BufferAllocatorFacade allocator_facade_
-        #shared_ptr~BufferPool~ buffer_pool_sptr_
+        #uint64_t buffer_pool_id_
         +WorkerBase(AllocatorType)
         +fillBuffer(int, Buffer*) bool*
         +getWorkerType() const char*
-        +getOutputBufferPool() unique_ptr~BufferPool~
+        +getOutputBufferPoolId() uint64_t
         +open(path) bool*
         +open(path, width, height, bpp) bool*
         +close() void*
@@ -831,7 +753,7 @@ classDiagram
         +getWorkerType() const char*
     }
     
-    %% ========== 门面层 ==========
+    %% ========== 门面层（v2.1：不继承任何接口）==========
     class BufferFillingWorkerFacade {
         -unique_ptr~WorkerBase~ worker_base_uptr_
         -WorkerType preferred_type_
@@ -841,7 +763,7 @@ classDiagram
         +open(path, width, height, bpp) bool
         +fillBuffer(int, Buffer*) bool
         +getWorkerType() const char*
-        +getOutputBufferPool() unique_ptr~BufferPool~
+        +getOutputBufferPoolId() uint64_t
     }
     
     %% ========== 工厂层 ==========
@@ -869,8 +791,7 @@ classDiagram
         +allocatePoolWithBuffers(...) shared_ptr~BufferPool~
     }
     
-    %% ========== 关系 ==========
-    IBufferFillingWorker <|.. WorkerBase : implements
+    %% ========== 关系（v2.1）==========
     IVideoFileNavigator <|.. WorkerBase : implements
     
     WorkerBase <|-- FfmpegDecodeVideoFileWorker : inherits
@@ -878,27 +799,29 @@ classDiagram
     WorkerBase <|-- MmapRawVideoFileWorker : inherits
     WorkerBase <|-- IoUringRawVideoFileWorker : inherits
     
-    BufferFillingWorkerFacade ..> WorkerBase : uses
-    BufferFillingWorkerFacade ..|> IBufferFillingWorker : implements
-    BufferFillingWorkerFacade ..|> IVideoFileNavigator : implements
+    BufferFillingWorkerFacade ..> WorkerBase : uses (delegates all methods)
     
     BufferFillingWorkerFactory ..> WorkerBase : creates
     
     WorkerBase --> BufferAllocatorFacade : uses
-    WorkerBase --> BufferPool : creates
+    WorkerBase --> BufferPool : records ID
     
     FfmpegDecodeVideoFileWorker ..> BufferPool : uses
     MmapRawVideoFileWorker ..> BufferPool : uses
 ```
 
-**关键关系说明**:
+**关键关系说明（v2.1）**:
 
 | 关系符号 | 含义 | 示例 |
 |---------|------|------|
-| `<|..` | 接口实现 | `WorkerBase`实现`IBufferFillingWorker` |
+| `<|..` | 接口实现 | `WorkerBase`实现`IVideoFileNavigator` |
 | `<|--` | 继承 | `FfmpegDecodeVideoFileWorker`继承`WorkerBase` |
-| `..>` | 依赖 | `WorkerBase`使用`BufferAllocatorFacade` |
-| `-->` | 组合 | `WorkerBase`创建`BufferPool` |
+| `..>` | 依赖/使用 | `BufferFillingWorkerFacade`使用`WorkerBase`（委托所有方法） |
+| `-->` | 记录ID | `WorkerBase`记录`BufferPool` ID |
+
+**v2.1 架构变更**:
+- ❌ 删除：`BufferFillingWorkerFacade`不再实现`IVideoFileNavigator`接口
+- ✅ 新增：所有方法通过内部的`worker_base_uptr_`转发
 
 ---
 
@@ -1106,6 +1029,7 @@ stateDiagram-v2
 ```cpp
 #include "productionline/worker/facade/BufferFillingWorkerFacade.hpp"
 #include "buffer/BufferPool.hpp"
+#include "buffer/BufferPoolRegistry.hpp"
 
 int main() {
     // 1. 创建Worker门面（指定类型）
@@ -1119,14 +1043,22 @@ int main() {
         return -1;
     }
     
-    // 3. 获取Worker创建的BufferPool
-    std::unique_ptr<BufferPool> pool = worker.getOutputBufferPool();
-    if (!pool) {
+    // 3. 获取Worker创建的BufferPool ID（v2.1）
+    uint64_t pool_id = worker.getOutputBufferPoolId();
+    if (pool_id == 0) {
         printf("❌ Worker did not create BufferPool\n");
         return -1;
     }
     
-    // 4. 填充Buffer
+    // 4. 从Registry获取BufferPool（临时访问）
+    auto& registry = BufferPoolRegistry::getInstance();
+    auto pool = registry.getPool(pool_id);
+    if (!pool) {
+        printf("❌ Pool not found in registry\n");
+        return -1;
+    }
+    
+    // 5. 填充Buffer
     Buffer* buf = pool->acquireFree(true, -1);
     if (!buf) {
         printf("❌ Failed to acquire buffer\n");
@@ -1141,7 +1073,7 @@ int main() {
         pool->releaseFilled(buf);
     }
     
-    // 5. 清理
+    // 6. 清理
     worker.close();
     return 0;
 }
@@ -1195,6 +1127,7 @@ int main() {
 
 ```cpp
 #include "productionline/worker/facade/BufferFillingWorkerFacade.hpp"
+#include "buffer/BufferPoolRegistry.hpp"
 
 int main() {
     // 1. 创建RTSP Worker
@@ -1208,10 +1141,22 @@ int main() {
         return -1;
     }
     
-    // 3. 获取Worker创建的BufferPool
-    std::unique_ptr<BufferPool> pool = worker.getOutputBufferPool();
+    // 3. 获取Worker创建的BufferPool ID（v2.1）
+    uint64_t pool_id = worker.getOutputBufferPoolId();
+    if (pool_id == 0) {
+        printf("❌ Worker did not create BufferPool\n");
+        return -1;
+    }
     
-    // 4. 持续读取帧
+    // 4. 从Registry获取BufferPool（循环外获取一次，减少开销）
+    auto& registry = BufferPoolRegistry::getInstance();
+    auto pool = registry.getPool(pool_id);
+    if (!pool) {
+        printf("❌ Pool not found in registry\n");
+        return -1;
+    }
+    
+    // 5. 持续读取帧
     while (running) {
         Buffer* buf = pool->acquireFilled(true, -1);
         if (!buf) {
@@ -1466,8 +1411,13 @@ worker.setHardwareDecoder(true);  // 启用硬件解码
 worker.setDecoderName("h264_taco");  // 使用特殊解码器
 worker.open("video.mp4");
 
-// Worker会自动使用零拷贝模式（如果解码器支持）
-std::unique_ptr<BufferPool> pool = worker.getOutputBufferPool();
+// v2.1: 从 Registry 获取 BufferPool
+uint64_t pool_id = worker.getOutputBufferPoolId();
+auto pool = BufferPoolRegistry::getInstance().getPool(pool_id);
+if (!pool) {
+    printf("❌ Pool not found\n");
+    return;
+}
 ```
 
 #### 优化3：批量读取（IoUring Worker）
@@ -1598,16 +1548,16 @@ void checkWorkerHealth(BufferFillingWorkerFacade* worker) {
 
 ## 8. 总结
 
-### 8.1 核心概念回顾
+### 8.1 核心概念回顾（v2.1架构）
 
 | 概念 | 说明 |
 |-----|------|
-| **IBufferFillingWorker** | Buffer填充接口，定义核心功能 |
+| **WorkerBase** | 统一基类，继承IVideoFileNavigator接口，直接定义Buffer填充功能（纯虚函数） |
 | **IVideoFileNavigator** | 文件导航接口，定义文件操作功能 |
-| **WorkerBase** | 统一基类，同时实现两个接口，统一管理Allocator和BufferPool |
-| **BufferFillingWorkerFacade** | 门面类，简化使用，隐藏实现细节 |
+| **BufferFillingWorkerFacade（v2.1）** | 门面类，不继承任何接口，通过组合模式使用WorkerBase，所有方法转发 |
 | **BufferFillingWorkerFactory** | 工厂类，统一创建Worker，支持自动检测 |
-| **接口隔离原则** | 分离Buffer填充和文件导航职责 |
+| **单一基类设计（v2.0）** | 不再使用独立的IBufferFillingWorker接口，简化架构 |
+| **getOutputBufferPoolId（v2.1）** | 返回uint64_t类型的pool_id，从Registry获取Pool |
 | **工厂模式** | 统一创建Worker，支持自动选择最优实现 |
 | **门面模式** | 简化使用，隐藏底层复杂性 |
 
@@ -1617,7 +1567,7 @@ void checkWorkerHealth(BufferFillingWorkerFacade* worker) {
 - ✅ 根据数据源类型选择合适的Worker类型
 - ✅ Raw视频Worker必须指定格式参数（width, height, bits_per_pixel）
 - ✅ 编码视频Worker使用`open(path)`自动检测格式
-- ✅ 使用`getOutputBufferPool()`获取Worker创建的BufferPool
+- ✅ 使用`getOutputBufferPoolId()`获取Worker创建的BufferPool ID，从Registry获取Pool
 - ✅ 使用RAII确保Worker被正确关闭
 - ✅ 多线程访问时注意Worker的线程安全策略
 - ✅ 使用工厂模式自动选择最优实现
@@ -1671,10 +1621,21 @@ if (worker->fillBuffer(frame_idx, buf)) {
 }
 ```
 
-### 获取BufferPool
+### 获取BufferPool ID（v2.1）
 
 ```cpp
-std::unique_ptr<BufferPool> pool = worker->getOutputBufferPool();
+// 1. 获取 BufferPool ID
+uint64_t pool_id = worker->getOutputBufferPoolId();
+
+// 2. 从 Registry 获取 Pool（临时访问）
+auto pool = BufferPoolRegistry::getInstance().getPool(pool_id);
+if (!pool) {
+    printf("❌ Pool not found or destroyed\n");
+    return;
+}
+
+// 3. 使用 Pool
+Buffer* buf = pool->acquireFree(true, -1);
 ```
 
 ---
@@ -1710,6 +1671,7 @@ A: 取决于实现：
 > 如有疑问，请联系 AI SDK Team  
 > 邮箱: ai-sdk@example.com  
 > Wiki: https://wiki.example.com/worker-system
+
 
 
 

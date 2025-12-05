@@ -310,10 +310,9 @@ bool NormalAllocator::destroyPool() {
         
         printf("🧹 [NormalAllocator] Destroying pool '%s' (ID: %lu)...\n", pool->getName().c_str(), pool_id);
         
-        // 2.2 通过友元关系直接访问 pool 的 managed_buffers_，获取所有属于此 pool 的 buffer
-        // 由于 BufferAllocatorBase 是 BufferPool 的友元，子类可以访问私有成员
+        // 2.2 通过 BufferPool 的公共方法获取所有属于此 pool 的 buffer
         std::vector<Buffer*> to_remove;
-        for (Buffer* buf : pool->managed_buffers_) {
+        for (Buffer* buf : pool->getAllManagedBuffers()) {
             // 检查 buffer 是否属于此 allocator
             auto it = buffer_ownership_.find(buf);
             if (it != buffer_ownership_.end() && it->second == this) {

@@ -100,11 +100,18 @@ bool displayFilledFramebuffer(Buffer* buffer);
 LinuxFramebufferDevice display;
 display.initialize(0);
 
-BufferPool& fb_pool = display.getBufferPool();
+// v2.0: 从 Registry 获取 BufferPool
+auto& registry = BufferPoolRegistry::getInstance();
+uint64_t pool_id = display.getBufferPoolId();
+auto pool = registry.getPool(pool_id);
+if (!pool) {
+    printf("❌ Pool not found\n");
+    return;
+}
 
 while (running) {
     // 生产者：获取一个空闲的 framebuffer buffer
-    Buffer* fb_buffer = fb_pool.acquireFree(true, 1000);
+    Buffer* fb_buffer = pool->acquireFree(true, 1000);
     
     // 生产者：在 framebuffer 内存上填充数据
     void* fb_mem = fb_buffer->getVirtualAddress();
@@ -117,42 +124,48 @@ while (running) {
     // 等待下一帧
     display.waitVerticalSync();
     
-    // 归还 buffer 到 filled 队列
-    fb_pool.releaseFilled(fb_buffer);
+    // 归还 buffer 到 free 队列
+    pool->releaseFilled(fb_buffer);
 }
 ```
 
 ```cpp
 // 场景2：多线程生产者-消费者
+// v2.0: 从 Registry 获取 BufferPool
+auto& registry = BufferPoolRegistry::getInstance();
+uint64_t pool_id = display.getBufferPoolId();
+
 // 生产者线程
 void producerThread() {
-    BufferPool& fb_pool = display.getBufferPool();
+    auto pool = registry.getPool(pool_id);
+    if (!pool) return;
     
     while (running) {
-        Buffer* fb_buffer = fb_pool.acquireFree(true, 1000);
+        Buffer* fb_buffer = pool->acquireFree(true, 1000);
         
         // 填充数据
         renderFrame(fb_buffer->getVirtualAddress());
         
         // 放入 filled 队列
-        fb_pool.releaseFilled(fb_buffer);
+        pool->submitFilled(fb_buffer);
     }
 }
 
 // 消费者线程（显示线程）
 void displayThread() {
-    BufferPool& fb_pool = display.getBufferPool();
+    auto pool = registry.getPool(pool_id);
+    if (!pool) return;
     
     while (running) {
         // 从 filled 队列获取
-        Buffer* filled_buffer = fb_pool.acquireFilled(true, 1000);
+        Buffer* filled_buffer = pool->acquireFilled(true, 1000);
         
         if (filled_buffer) {
             // 显示（自动解析 buffer id）
             display.displayFilledFramebuffer(filled_buffer);
             
             // 归还到 free 队列
-            fb_pool.releaseFree(filled_buffer);
+            pool->releaseFilled(filled_buffer);
         }
     }
 }
@@ -398,7 +411,8 @@ display.displayBufferByMemcpyToFramebuffer(buffer);
 
 ---
 
-**文档版本**: v1.0  
-**最后更新**: 2025-11-13  
-**维护者**: AI Assistant
+**文档版本**: v2.0  
+**最后更新**: 2025-12-05  
+**维护者**: AI SDK Team  
+**架构变更**: v2.0 - 使用 BufferPoolRegistry 获取 Pool + 修正方法名
 
