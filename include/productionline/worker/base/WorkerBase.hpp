@@ -1,4 +1,4 @@
-#ifndef WORKER_BASE_HPP
+  #ifndef WORKER_BASE_HPP
 #define WORKER_BASE_HPP
 
 #include "../interface/IVideoFileNavigator.hpp"
@@ -112,6 +112,28 @@ public:
      */
     virtual uint64_t getOutputBufferPoolId() {
         return buffer_pool_id_;
+    }
+    
+    // ==================== 可选配置接口（特定 Worker 可重写）====================
+    
+    /**
+     * @brief 设置解码器名称（可选配置，仅部分 Worker 支持）
+     * 
+     * 默认实现：空操作（非编码视频 Worker 忽略此配置）
+     * 子类可选择性重写此方法以提供实际功能
+     * 
+     * 适用 Worker：
+     * - FfmpegDecodeVideoFileWorker: 设置 FFmpeg 解码器（如 "h264_taco"）
+     * - FfmpegDecodeRtspWorker: 设置 RTSP 流解码器
+     * 
+     * @param decoder_name 解码器名称（nullptr 表示自动选择）
+     * 
+     * @note 此方法应在 open() 之前调用
+     * @note 非编码视频 Worker（如 MmapRawVideoFileWorker）可忽略此配置
+     */
+    virtual void setDecoderName(const char* decoder_name) {
+        // 默认空实现：不支持解码器配置的 Worker 忽略此调用
+        (void)decoder_name;  // 避免未使用参数警告
     }
     
     // ==================== 文件导航功能（继承自IVideoFileNavigator）====================

@@ -110,8 +110,10 @@ public:
     
     /**
      * @brief 指定解码器名称（如 "h264_taco"）
+     * 
+     * 重写基类方法，提供实际实现
      */
-    void setDecoderName(const char* decoder_name);
+    void setDecoderName(const char* decoder_name) override;
     
     /**
      * @brief 启用/禁用硬件解码

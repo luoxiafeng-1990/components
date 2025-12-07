@@ -98,6 +98,12 @@ public:
      */
     void setWorkerType(BufferFillingWorkerFactory::WorkerType type);
     
+    /**
+     * 设置解码器名称（在 open 之前调用，仅对 FFmpeg Worker 有效）
+     * @param decoder_name 解码器名称（如 "h264_taco"，nullptr=自动选择）
+     */
+    void setDecoderName(const char* decoder_name);
+    
     // ============ Buffer填充方法（原IBufferFillingWorker的方法）============
     
     /**

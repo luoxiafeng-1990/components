@@ -41,7 +41,7 @@ FfmpegDecodeVideoFileWorker::FfmpegDecodeVideoFileWorker()
     , eof_reached_(false)
     , zero_copy_buffer_pool_ptr_(nullptr)
     , use_hardware_decoder_(true)  // 默认启用硬件解码
-    , decoder_name_ptr_("h264_taco")
+    , decoder_name_ptr_(nullptr)   // 🎯 改为 nullptr，让 FFmpeg 自动选择
     , codec_options_ptr_(nullptr)
     , decoded_frames_(0)
     , decode_errors_(0)

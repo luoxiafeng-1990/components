@@ -27,6 +27,34 @@ void BufferFillingWorkerFacade::setWorkerType(BufferFillingWorkerFactory::Worker
     worker_base_uptr_.reset();  // 清除旧的 worker
 }
 
+void BufferFillingWorkerFacade::setDecoderName(const char* decoder_name) {
+    if (worker_base_uptr_ && worker_base_uptr_->isOpen()) {
+        printf("⚠️  Warning: Cannot change decoder name while file is open\n");
+        return;
+    }
+    
+    // 确保 worker 已创建
+    if (!worker_base_uptr_) {
+        worker_base_uptr_ = BufferFillingWorkerFactory::create(preferred_type_);
+    }
+    
+    if (!worker_base_uptr_) {
+        printf("❌ ERROR: Failed to create worker\n");
+        return;
+    }
+    
+    // 🎯 直接调用基类方法（多态）
+    // - 支持解码器配置的 Worker（如 FfmpegDecodeVideoFileWorker）会实际设置
+    // - 不支持的 Worker 会使用基类的空实现（忽略此配置）
+    worker_base_uptr_->setDecoderName(decoder_name);
+    
+    if (decoder_name) {
+        printf("✅ Decoder name set to: %s\n", decoder_name);
+    } else {
+        printf("✅ Decoder name set to: auto (FFmpeg will choose)\n");
+    }
+}
+
 const char* BufferFillingWorkerFacade::getWorkerType() const {
     if (worker_base_uptr_) {
         // Worker 已创建：返回实际 Worker 的类型

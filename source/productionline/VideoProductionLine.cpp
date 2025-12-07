@@ -63,6 +63,14 @@ bool VideoProductionLine::start(const Config& config) {
     worker_facade_sptr_ = std::make_shared<BufferFillingWorkerFacade>(config.worker_type);
     printf("   Worker type: %s\n", worker_facade_sptr_->getWorkerType());
     
+    // 🎯 配置解码器（如果用户指定了）
+    if (config.decoder_name != nullptr) {
+        printf("   Decoder: %s (user specified)\n", config.decoder_name);
+        worker_facade_sptr_->setDecoderName(config.decoder_name);
+    } else {
+        printf("   Decoder: auto (FFmpeg will choose)\n");
+    }
+    
     // 🎯 统一的open接口（传入所有参数，门面类内部智能判断）
     // - 对于编码视频（FFMPEG, RTSP）：自动检测格式，width/height/bpp 被忽略
     // - 对于raw视频（MMAP, IOURING）：使用 width/height/bpp 参数

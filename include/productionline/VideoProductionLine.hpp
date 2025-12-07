@@ -41,17 +41,22 @@ public:
         int thread_count;                              // 生产者线程数（默认1）
         BufferFillingWorkerFactory::WorkerType worker_type;    // Worker类型（默认AUTO）
         
+        // 🎯 FFmpeg解码器配置（用于 FFMPEG_VIDEO_FILE 类型）
+        const char* decoder_name;                      // 解码器名称（如 "h264_taco"，nullptr=自动选择）
+        
         // 默认构造
         Config() 
             : width(0), height(0), bits_per_pixel(0)
             , loop(false), thread_count(1)
-            , worker_type(BufferFillingWorkerFactory::WorkerType::AUTO) {}
+            , worker_type(BufferFillingWorkerFactory::WorkerType::AUTO)
+            , decoder_name(nullptr) {}  // 🎯 默认自动选择解码器
         
         // 便利构造
         Config(const std::string& path, int w, int h, int bpp, bool l = false, int tc = 1,
                BufferFillingWorkerFactory::WorkerType wt = BufferFillingWorkerFactory::WorkerType::AUTO)
             : file_path(path), width(w), height(h), bits_per_pixel(bpp)
-            , loop(l), thread_count(tc), worker_type(wt) {}
+            , loop(l), thread_count(tc), worker_type(wt)
+            , decoder_name(nullptr) {}  // 🎯 默认自动选择解码器
     };
     
     /**
