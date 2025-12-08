@@ -29,6 +29,7 @@
 #include <memory>
 #include "display/LinuxFramebufferDevice.hpp"
 #include "productionline/worker/facade/BufferFillingWorkerFacade.hpp"
+#include "productionline/worker/config/WorkerConfig.hpp"
 #include "buffer/BufferPool.hpp"
 #include "buffer/BufferPoolRegistry.hpp"
 #include "productionline/VideoProductionLine.hpp"
@@ -112,15 +113,20 @@ static int test_4frame_loop(const char* raw_video_path) {
     VideoProductionLine producer;
     
     // 4. 配置并启动视频生产者
-    VideoProductionLine::Config config(
-        raw_video_path,
-        display.getWidth(),
-        display.getHeight(),
-        display.getBitsPerPixel(),
-        true,  // loop
-        1,     // 单线程，顺序加载帧
-        BufferFillingWorkerFactory::WorkerType::MMAP_RAW  // 显式指定 MMAP Worker
-    );
+    auto workerConfig = WorkerConfigBuilder()
+        .setFileConfig(
+            FileConfigBuilder()
+                .setFilePath(raw_video_path)
+                .build()
+        )
+        .setOutputConfig(
+            OutputConfigBuilder()
+                .setResolution(display.getWidth(), display.getHeight())
+                .setBitsPerPixel(display.getBitsPerPixel())
+                .build()
+        )
+        .setWorkerType(WorkerType::MMAP_RAW)
+        .build();
     
     // 设置错误回调
     producer.setErrorCallback([](const std::string& error) {
@@ -128,7 +134,7 @@ static int test_4frame_loop(const char* raw_video_path) {
         g_running = false;
     });
     
-    if (!producer.start(config)) {
+    if (!producer.start(workerConfig, true, 1)) {  // loop=true, thread_count=1
         printf("❌ Failed to start video producer\n");
         return -1;
     }
@@ -220,15 +226,20 @@ static int test_sequential_playback(const char* raw_video_path) {
     VideoProductionLine producer;
     
     // 4. 配置并启动视频生产者
-    VideoProductionLine::Config config(
-        raw_video_path,
-        display.getWidth(),
-        display.getHeight(),
-        display.getBitsPerPixel(),
-        true,  // loop
-        1,     // 单线程，顺序读取
-        BufferFillingWorkerFactory::WorkerType::MMAP_RAW  // 显式指定 MMAP Worker
-    );
+    auto workerConfig = WorkerConfigBuilder()
+        .setFileConfig(
+            FileConfigBuilder()
+                .setFilePath(raw_video_path)
+                .build()
+        )
+        .setOutputConfig(
+            OutputConfigBuilder()
+                .setResolution(display.getWidth(), display.getHeight())
+                .setBitsPerPixel(display.getBitsPerPixel())
+                .build()
+        )
+        .setWorkerType(WorkerType::MMAP_RAW)
+        .build();
     
     // 设置错误回调
     producer.setErrorCallback([](const std::string& error) {
@@ -236,7 +247,7 @@ static int test_sequential_playback(const char* raw_video_path) {
         g_running = false;
     });
     
-    if (!producer.start(config)) {
+    if (!producer.start(workerConfig, true, 1)) {  // loop=true, thread_count=1
         printf("❌ Failed to start video producer\n");
         return -1;
     }
@@ -327,15 +338,20 @@ static int test_buffermanager_producer(const char* raw_video_path) {
     // 4. 配置并启动视频生产者
     int producer_thread_count = 2;  // 使用2个生产者线程
     
-    VideoProductionLine::Config config(
-        raw_video_path,
-        display.getWidth(),
-        display.getHeight(),
-        display.getBitsPerPixel(),
-        true,  // loop
-        producer_thread_count,
-        BufferFillingWorkerFactory::WorkerType::MMAP_RAW  // 显式指定 MMAP Worker
-    );
+    auto workerConfig = WorkerConfigBuilder()
+        .setFileConfig(
+            FileConfigBuilder()
+                .setFilePath(raw_video_path)
+                .build()
+        )
+        .setOutputConfig(
+            OutputConfigBuilder()
+                .setResolution(display.getWidth(), display.getHeight())
+                .setBitsPerPixel(display.getBitsPerPixel())
+                .build()
+        )
+        .setWorkerType(WorkerType::MMAP_RAW)
+        .build();
     
     // 设置错误回调
     producer.setErrorCallback([](const std::string& error) {
@@ -343,7 +359,7 @@ static int test_buffermanager_producer(const char* raw_video_path) {
         g_running = false;
     });
     
-    if (!producer.start(config)) {
+    if (!producer.start(workerConfig, true, producer_thread_count)) {  // loop=true
         printf("❌ Failed to start video producer\n");
         return -1;
     }
@@ -429,22 +445,27 @@ static int test_buffermanager_iouring(const char* raw_video_path) {
     printf("\n🎬 Starting video producer (io_uring mode)...\n");
     printf("   Using 1 producer thread with io_uring async I/O\n");
     
-    VideoProductionLine::Config config(
-        raw_video_path,
-        display.getWidth(),
-        display.getHeight(),
-        display.getBitsPerPixel(),
-        true,  // loop
-        1,  // 单线程顺序读取
-        BufferFillingWorkerFactory::WorkerType::IOURING_RAW  // 显式指定 IoUring Worker
-    );
+    auto workerConfig = WorkerConfigBuilder()
+        .setFileConfig(
+            FileConfigBuilder()
+                .setFilePath(raw_video_path)
+                .build()
+        )
+        .setOutputConfig(
+            OutputConfigBuilder()
+                .setResolution(display.getWidth(), display.getHeight())
+                .setBitsPerPixel(display.getBitsPerPixel())
+                .build()
+        )
+        .setWorkerType(WorkerType::IOURING_RAW)
+        .build();
     
     producer.setErrorCallback([](const std::string& error) {
         printf("\n❌ Producer Error: %s\n", error.c_str());
         g_running = false;
     });
     
-    if (!producer.start(config)) {
+    if (!producer.start(workerConfig, true, 1)) {  // loop=true, thread_count=1
         printf("❌ Failed to start video producer\n");
         return -1;
     }
@@ -566,15 +587,20 @@ static int test_rtsp_stream(const char* rtsp_url) {
     
     // 4. 配置 RTSP 流（注意：推荐单线程）
     printf("🔗 Configuring RTSP stream: %s\n", rtsp_url);
-    VideoProductionLine::Config config(
-        rtsp_url,
-        display.getWidth(),
-        display.getHeight(),
-        display.getBitsPerPixel(),
-        false,  // loop（对RTSP无意义）
-        1,      // thread_count（RTSP推荐单线程）
-        BufferFillingWorkerFactory::WorkerType::FFMPEG_RTSP  // 显式指定 FFmpeg RTSP Worker
-    );
+    auto workerConfig = WorkerConfigBuilder()
+        .setFileConfig(
+            FileConfigBuilder()
+                .setFilePath(rtsp_url)
+                .build()
+        )
+        .setOutputConfig(
+            OutputConfigBuilder()
+                .setResolution(display.getWidth(), display.getHeight())
+                .setBitsPerPixel(display.getBitsPerPixel())
+                .build()
+        )
+        .setWorkerType(WorkerType::FFMPEG_RTSP)
+        .build();
     
     // 5. 设置错误回调
     producer.setErrorCallback([](const std::string& error) {
@@ -584,7 +610,7 @@ static int test_rtsp_stream(const char* rtsp_url) {
     
     // 6. 启动生产者（内部会创建RTSP Reader并启用零拷贝）
     printf("🚀 Starting RTSP producer...\n");
-    if (!producer.start(config)) {
+    if (!producer.start(workerConfig, false, 1)) {  // loop=false, thread_count=1
         printf("❌ Failed to start RTSP producer\n");
         return -1;
     }
@@ -697,15 +723,20 @@ static int test_h264_taco_video(const char* video_path) {
     // 4. 配置 FFmpeg 解码
     printf("🎬 Configuring FFmpeg video reader: %s\n", video_path);
     
-    VideoProductionLine::Config config(
-        video_path,
-        display.getWidth(),
-        display.getHeight(),
-        display.getBitsPerPixel(),
-        true,  // loop（循环播放）
-        1,  // 零拷贝推荐单线程，普通模式可以多线程
-        BufferFillingWorkerFactory::WorkerType::FFMPEG_VIDEO_FILE  // 显式指定 FFmpeg Video File Worker
-    );
+    auto workerConfig = WorkerConfigBuilder()
+        .setFileConfig(
+            FileConfigBuilder()
+                .setFilePath(video_path)
+                .build()
+        )
+        .setOutputConfig(
+            OutputConfigBuilder()
+                .setResolution(display.getWidth(), display.getHeight())
+                .setBitsPerPixel(display.getBitsPerPixel())
+                .build()
+        )
+        .setWorkerType(WorkerType::FFMPEG_VIDEO_FILE)
+        .build();
     
     // 5. 设置错误回调
     producer.setErrorCallback([](const std::string& error) {
@@ -715,7 +746,7 @@ static int test_h264_taco_video(const char* video_path) {
     
     // 6. 启动生产者
     printf("🚀 Starting FFmpeg video producer...\n");
-    if (!producer.start(config)) {
+    if (!producer.start(workerConfig, true, 1)) {  // loop=true, thread_count=1
         printf("❌ Failed to start FFmpeg producer\n");
         return -1;
     }
