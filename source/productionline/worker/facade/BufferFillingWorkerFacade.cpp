@@ -3,11 +3,15 @@
 
 // ============ 构造/析构 ============
 
-BufferFillingWorkerFacade::BufferFillingWorkerFacade(BufferFillingWorkerFactory::WorkerType type)
+BufferFillingWorkerFacade::BufferFillingWorkerFacade(
+    BufferFillingWorkerFactory::WorkerType type,
+    const WorkerConfig& config
+)
     : preferred_type_(type)
+    , config_(config)
 {
     if (!worker_base_uptr_) {
-        worker_base_uptr_ = BufferFillingWorkerFactory::create(preferred_type_);
+        worker_base_uptr_ = BufferFillingWorkerFactory::create(preferred_type_, config_);
     }
 }
 
@@ -41,7 +45,7 @@ const char* BufferFillingWorkerFacade::getWorkerType() const {
 bool BufferFillingWorkerFacade::open(const char* path) {
     // 创建 worker（如果还没创建）
     if (!worker_base_uptr_) {
-        worker_base_uptr_ = BufferFillingWorkerFactory::create(preferred_type_);
+        worker_base_uptr_ = BufferFillingWorkerFactory::create(preferred_type_, config_);
     }
     
     if (!worker_base_uptr_) {
@@ -57,7 +61,7 @@ bool BufferFillingWorkerFacade::open(const char* path) {
 bool BufferFillingWorkerFacade::open(const char* path, int width, int height, int bits_per_pixel) {
     // 创建 worker（如果还没创建）
     if (!worker_base_uptr_) {
-        worker_base_uptr_ = BufferFillingWorkerFactory::create(preferred_type_);
+        worker_base_uptr_ = BufferFillingWorkerFactory::create(preferred_type_, config_);
     }
     
     if (!worker_base_uptr_) {
