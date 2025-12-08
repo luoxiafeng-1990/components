@@ -2,6 +2,7 @@
 #define WORKER_BASE_HPP
 
 #include "../interface/IVideoFileNavigator.hpp"
+#include "../config/WorkerConfig.hpp"
 #include "../../../buffer/Buffer.hpp"
 #include "../../../buffer/allocator/facade/BufferAllocatorFacade.hpp"
 #include "../../../buffer/allocator/factory/BufferAllocatorFactory.hpp"
@@ -67,11 +68,14 @@ public:
      * 3. 子类构造函数体执行
      * 
      * @param allocator_type Allocator类型（子类传递）
+     * @param config Worker配置（v2.2新增）
      */
     explicit WorkerBase(
-        BufferAllocatorFactory::AllocatorType allocator_type
+        BufferAllocatorFactory::AllocatorType allocator_type,
+        const WorkerConfig& config = WorkerConfig()
     ) : allocator_facade_(allocator_type)  // 🎯 父类直接创建Allocator门面
       , buffer_pool_id_(0)  // v2.0: 记录 pool_id 而不是指针
+      , worker_config_(config)  // 🎯 v2.2: 存储配置
     {
     }
     
@@ -114,26 +118,38 @@ public:
         return buffer_pool_id_;
     }
     
-    // ==================== 可选配置接口（特定 Worker 可重写）====================
+    // ==================== 解码器配置功能（v2.2新增）====================
     
     /**
-     * @brief 设置解码器名称（可选配置，仅部分 Worker 支持）
+     * @brief 设置解码器名称（用于FFmpeg解码Worker）
      * 
-     * 默认实现：空操作（非编码视频 Worker 忽略此配置）
-     * 子类可选择性重写此方法以提供实际功能
+     * 默认实现：空操作（不支持解码器配置的Worker忽略此调用）
+     * 子类可以重写此方法
      * 
-     * 适用 Worker：
-     * - FfmpegDecodeVideoFileWorker: 设置 FFmpeg 解码器（如 "h264_taco"）
-     * - FfmpegDecodeRtspWorker: 设置 RTSP 流解码器
+     * @param decoder_name 解码器名称（如 "h264_taco", "h264_cuvid"）
      * 
-     * @param decoder_name 解码器名称（nullptr 表示自动选择）
-     * 
-     * @note 此方法应在 open() 之前调用
-     * @note 非编码视频 Worker（如 MmapRawVideoFileWorker）可忽略此配置
+     * @note 必须在 open() 之前调用
+     * @note 只有FFmpeg类型的Worker需要重写此方法
      */
     virtual void setDecoderName(const char* decoder_name) {
         // 默认空实现：不支持解码器配置的 Worker 忽略此调用
-        (void)decoder_name;  // 避免未使用参数警告
+        (void)decoder_name;
+    }
+    
+    /**
+     * @brief 启用/禁用硬件解码（用于FFmpeg解码Worker）
+     * 
+     * 默认实现：空操作（不支持硬件解码配置的Worker忽略此调用）
+     * 子类可以重写此方法
+     * 
+     * @param enable true启用硬件解码，false禁用
+     * 
+     * @note 必须在 open() 之前调用
+     * @note 只有FFmpeg类型的Worker需要重写此方法
+     */
+    virtual void setHardwareDecoder(bool enable) {
+        // 默认空实现：不支持硬件解码配置的 Worker 忽略此调用
+        (void)enable;
     }
     
     // ==================== 文件导航功能（继承自IVideoFileNavigator）====================
@@ -173,6 +189,16 @@ protected:
      * - 符合中心化资源管理原则
      */
     uint64_t buffer_pool_id_;
+    
+    /**
+     * @brief Worker配置（v2.2 所有Worker子类自动继承）
+     * 
+     * v2.2 设计变更：
+     * - Worker 在构造时接收配置
+     * - Worker 从配置中读取需要的参数
+     * - 符合依赖注入原则
+     */
+    WorkerConfig worker_config_;
 };
 
 #endif // WORKER_BASE_HPP

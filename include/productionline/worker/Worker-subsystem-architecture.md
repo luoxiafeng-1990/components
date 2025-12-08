@@ -1,10 +1,10 @@
 # Worker子系统设计文档
 
 > **面向人群**: 新入职开发者  
-> **文档版本**: v2.1  
-> **最后更新**: 2025-12-05  
+> **文档版本**: v2.2  
+> **最后更新**: 2025-12-07  
 > **维护者**: AI SDK Team  
-> **架构变更**: v2.1 重大变更 - BufferFillingWorkerFacade 不继承接口 + getOutputBufferPoolId 返回 ID
+> **架构变更**: v2.2 引入 WorkerConfig + Builder 模式（解码器灵活配置）
 
 ---
 
@@ -31,6 +31,7 @@
 - ✅ **自动BufferPool管理**：Worker在`open()`时自动创建和管理BufferPool
 - ✅ **工厂模式**：通过`BufferFillingWorkerFactory`自动选择最优实现
 - ✅ **门面模式**：通过`BufferFillingWorkerFacade`简化使用
+- ✅ **配置系统**：通过`WorkerConfig` + Builder模式灵活配置Worker参数（v2.2新增）
 
 ### 1.2 核心价值
 
@@ -57,10 +58,16 @@
 🏭 工厂模式 (Factory Pattern)
    - BufferFillingWorkerFactory统一创建Worker
    - 支持自动检测和手动指定
+   - 工厂注入配置（v2.2：支持WorkerConfig）
 
 🎭 门面模式 (Facade Pattern)
    - BufferFillingWorkerFacade统一对外接口
    - 隐藏底层实现复杂性
+
+⚙️ 配置系统 (Configuration System, v2.2)
+   - WorkerConfig: 完全独立的配置结构体
+   - Builder模式: 链式调用，易用易读
+   - 工厂注入: 配置在创建时应用
 
 🏗️ 可扩展性 (Extensibility)
    - 通过继承WorkerBase可扩展新的Worker实现
@@ -89,9 +96,19 @@
                     │ delegate to
                     ▼
 ┌─────────────────────────────────────────────────────────────┐
+│              配置层 (WorkerConfig, v2.2)                     │
+│  - WorkerConfig: 独立配置结构体                              │
+│  - DecoderConfigBuilder: 解码器配置构建器                    │
+│  - WorkerConfigBuilder: 顶层配置构建器                       │
+│  - Builder模式: 链式调用，支持预设                           │
+└───────────────────┬─────────────────────────────────────────┘
+                    │ passed to
+                    ▼
+┌─────────────────────────────────────────────────────────────┐
 │              工厂层 (BufferFillingWorkerFactory)              │
 │  - 创建Worker实例                                            │
 │  - 自动检测最优实现                                          │
+│  - 注入配置到Worker（v2.2）                                  │
 │  - 环境变量/配置文件支持                                     │
 └───────────────────┬─────────────────────────────────────────┘
                     │ create
@@ -193,6 +210,210 @@ WorkerBase
 ---
 
 ## 3. 类详细设计
+
+### 3.0 WorkerConfig配置系统（v2.2新增）
+
+#### 3.0.1 设计目标
+
+**WorkerConfig** 是 v2.2 引入的配置系统，用于解决 Worker 参数配置的灵活性问题。
+
+**设计理念**:
+- ✅ **完全独立**：不依赖任何外部类（VideoProductionLine、Worker等）
+- ✅ **Builder模式**：链式调用，易用易读
+- ✅ **层次化配置**：支持解码器详细配置（包括 h264_taco 特定参数）
+- ✅ **工厂注入**：配置在Worker创建时由工厂注入
+
+#### 3.0.2 配置结构体
+
+```cpp
+/**
+ * @brief Worker 配置（简化版，只包含解码器配置）
+ */
+struct WorkerConfig {
+    // 解码器配置
+    struct DecoderConfig {
+        // 通用解码器参数
+        const char* name = nullptr;           // 解码器名称（nullptr=自动选择）
+        bool enable_hardware = true;          // 启用硬件加速
+        const char* hwaccel_device = nullptr; // 硬件设备
+        int decode_threads = 0;               // 解码线程数
+        
+        // h264_taco 特定配置
+        struct TacoConfig {
+            bool reorder_disable = true;
+            bool ch0_enable = true;
+            bool ch1_enable = true;
+            bool ch1_rgb = true;
+            const char* ch1_rgb_format = "argb888";
+            const char* ch1_rgb_std = "bt601";
+            // ... 其他 taco 参数
+            
+            TacoConfig() = default;
+        } taco;
+        
+        DecoderConfig() = default;
+    } decoder;
+    
+    WorkerConfig() = default;
+};
+```
+
+#### 3.0.3 Builder模式实现
+
+**TacoConfigBuilder** - h264_taco特定配置构建器:
+```cpp
+class TacoConfigBuilder {
+public:
+    TacoConfigBuilder& setReorderDisable(bool disable = true);
+    TacoConfigBuilder& setChannels(bool ch0, bool ch1);
+    TacoConfigBuilder& setRgbConfig(bool enable, const char* format, const char* std);
+    TacoConfigBuilder& setCropRegion(int x, int y, int width, int height);
+    TacoConfigBuilder& setScaleSize(int width, int height);
+    WorkerConfig::DecoderConfig::TacoConfig build() const;
+};
+```
+
+**DecoderConfigBuilder** - 解码器配置构建器:
+```cpp
+class DecoderConfigBuilder {
+public:
+    // 通用解码器参数
+    DecoderConfigBuilder& setDecoderName(const char* name);
+    DecoderConfigBuilder& enableHardware(bool enable = true);
+    DecoderConfigBuilder& setHwaccelDevice(const char* device);
+    DecoderConfigBuilder& setDecodeThreads(int threads);
+    
+    // h264_taco 配置
+    DecoderConfigBuilder& setTacoConfig(const WorkerConfig::DecoderConfig::TacoConfig& config);
+    DecoderConfigBuilder& configureTaco(...);  // 快速配置
+    
+    // 快捷预设
+    DecoderConfigBuilder& useH264Taco();
+    DecoderConfigBuilder& useH264TacoWith(const TacoConfig& config);
+    DecoderConfigBuilder& useSoftware();
+    DecoderConfigBuilder& useH264Cuvid();
+    DecoderConfigBuilder& useH264Qsv();
+    
+    WorkerConfig::DecoderConfig build() const;
+};
+```
+
+**WorkerConfigBuilder** - 顶层配置构建器:
+```cpp
+class WorkerConfigBuilder {
+public:
+    // 设置解码器配置
+    WorkerConfigBuilder& setDecoderConfig(const WorkerConfig::DecoderConfig& config);
+    
+    // 快捷方法
+    WorkerConfigBuilder& setDecoderName(const char* name);
+    WorkerConfigBuilder& enableHardwareDecoder(bool enable = true);
+    
+    // 预设配置
+    WorkerConfigBuilder& useH264TacoPreset();
+    WorkerConfigBuilder& useSoftwarePreset();
+    
+    WorkerConfig build() const;
+};
+```
+
+#### 3.0.4 使用示例
+
+**示例1：使用预设（最简单）**:
+```cpp
+auto worker_config = WorkerConfigBuilder()
+    .useH264TacoPreset()
+    .build();
+
+auto worker = BufferFillingWorkerFactory::create(
+    BufferFillingWorkerFactory::WorkerType::FFMPEG_VIDEO_FILE,
+    worker_config
+);
+```
+
+**示例2：自定义解码器**:
+```cpp
+auto worker_config = WorkerConfigBuilder()
+    .setDecoderName("h264_taco")
+    .enableHardwareDecoder(true)
+    .build();
+```
+
+**示例3：详细配置h264_taco**:
+```cpp
+auto taco_config = TacoConfigBuilder()
+    .setReorderDisable(true)
+    .setChannels(true, true)
+    .setRgbConfig(true, "argb888", "bt601")
+    .setCropRegion(0, 0, 1920, 1080)
+    .build();
+
+auto worker_config = WorkerConfigBuilder()
+    .setDecoderConfig(
+        DecoderConfigBuilder()
+            .useH264TacoWith(taco_config)
+            .build()
+    )
+    .build();
+```
+
+**示例4：在生产线中使用（v2.3重构版）**:
+```cpp
+// 构建 Worker 配置
+auto workerConfig = WorkerConfigBuilder()
+    .setFileConfig(
+        FileConfigBuilder()
+            .setFilePath("video.mp4")
+            .build()
+    )
+    .setOutputConfig(
+        OutputConfigBuilder()
+            .setResolution(1920, 1080)
+            .setBitsPerPixel(32)
+            .build()
+    )
+    .setDecoderConfig(
+        DecoderConfigBuilder()
+            .useH264Taco()
+            .build()
+    )
+    .setWorkerType(WorkerType::FFMPEG_VIDEO_FILE)
+    .build();
+
+// 启动生产线
+VideoProductionLine producer;
+producer.start(workerConfig, false, 1);  // loop=false, thread_count=1
+```
+
+#### 3.0.5 配置流转过程（v2.3重构版）
+
+```
+用户代码
+   ↓ 构建配置
+WorkerConfigBuilder()
+   .setFileConfig(...)
+   .setOutputConfig(...)
+   .setDecoderConfig(DecoderConfigBuilder().useH264Taco().build())
+   .build()
+   ↓ 传递给生产线
+VideoProductionLine.start(workerConfig, loop, thread_count)
+   ↓ 传递给门面
+BufferFillingWorkerFacade(workerConfig.worker_type, workerConfig)
+   ↓ 传递给工厂
+BufferFillingWorkerFactory::create(type, workerConfig)
+   ↓ 工厂创建并注入配置
+Worker(workerConfig)
+   ↓
+Worker 创建完成（配置已应用）
+```
+
+**关键设计点**:
+- ✅ **配置独立**：WorkerConfig 不依赖任何外部类
+- ✅ **工厂注入**：配置在工厂的 `create()` 方法中注入到 Worker
+- ✅ **生产线统一**：生产线代码无特殊处理，只传递配置
+- ✅ **支持所有场景**：生产线、测试代码、命令行工具都可用
+
+---
 
 ### 3.1 IVideoFileNavigator接口
 
@@ -1405,14 +1626,20 @@ if (file_size > 1GB) {
 #### 优化2：使用零拷贝模式（FFmpeg Worker）
 
 ```cpp
-// FFmpeg Worker支持零拷贝模式（当硬件支持时）
-FfmpegDecodeVideoFileWorker worker;
-worker.setHardwareDecoder(true);  // 启用硬件解码
-worker.setDecoderName("h264_taco");  // 使用特殊解码器
-worker.open("video.mp4");
+// 配置解码器（使用 WorkerConfig, v2.2）
+auto worker_config = WorkerConfigBuilder()
+    .setDecoderName("h264_taco")
+    .enableHardwareDecoder(true)
+    .build();
+
+auto worker = BufferFillingWorkerFactory::create(
+    BufferFillingWorkerFactory::WorkerType::FFMPEG_VIDEO_FILE,
+    worker_config
+);
+worker->open("video.mp4");
 
 // v2.1: 从 Registry 获取 BufferPool
-uint64_t pool_id = worker.getOutputBufferPoolId();
+uint64_t pool_id = worker->getOutputBufferPoolId();
 auto pool = BufferPoolRegistry::getInstance().getPool(pool_id);
 if (!pool) {
     printf("❌ Pool not found\n");
@@ -1548,18 +1775,20 @@ void checkWorkerHealth(BufferFillingWorkerFacade* worker) {
 
 ## 8. 总结
 
-### 8.1 核心概念回顾（v2.1架构）
+### 8.1 核心概念回顾（v2.2架构）
 
 | 概念 | 说明 |
 |-----|------|
 | **WorkerBase** | 统一基类，继承IVideoFileNavigator接口，直接定义Buffer填充功能（纯虚函数） |
 | **IVideoFileNavigator** | 文件导航接口，定义文件操作功能 |
 | **BufferFillingWorkerFacade（v2.1）** | 门面类，不继承任何接口，通过组合模式使用WorkerBase，所有方法转发 |
-| **BufferFillingWorkerFactory** | 工厂类，统一创建Worker，支持自动检测 |
+| **BufferFillingWorkerFactory** | 工厂类，统一创建Worker，支持自动检测，支持配置注入（v2.2） |
+| **WorkerConfig（v2.2新增）** | 独立配置结构体，支持解码器详细配置，Builder模式构建 |
 | **单一基类设计（v2.0）** | 不再使用独立的IBufferFillingWorker接口，简化架构 |
 | **getOutputBufferPoolId（v2.1）** | 返回uint64_t类型的pool_id，从Registry获取Pool |
 | **工厂模式** | 统一创建Worker，支持自动选择最优实现 |
 | **门面模式** | 简化使用，隐藏底层复杂性 |
+| **Builder模式（v2.2）** | 链式构建配置，支持预设和自定义 |
 
 ### 8.2 最佳实践清单
 
@@ -1571,6 +1800,9 @@ void checkWorkerHealth(BufferFillingWorkerFacade* worker) {
 - ✅ 使用RAII确保Worker被正确关闭
 - ✅ 多线程访问时注意Worker的线程安全策略
 - ✅ 使用工厂模式自动选择最优实现
+- ✅ **使用WorkerConfig配置Worker参数**（v2.2新增）
+- ✅ **通过Builder模式构建配置，链式调用**（v2.2新增）
+- ✅ **配置在工厂创建时注入，生产线代码保持统一**（v2.2新增）
 
 ### 8.3 下一步学习
 

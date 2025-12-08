@@ -10,30 +10,30 @@
 
 // ============ 公共接口 ============
 
-std::unique_ptr<WorkerBase> BufferFillingWorkerFactory::create(WorkerType type) {
+std::unique_ptr<WorkerBase> BufferFillingWorkerFactory::create(WorkerType type, const WorkerConfig& config) {
     // 1️⃣ 用户显式指定（最高优先级）
     if (type != WorkerType::AUTO) {
         printf("🏭 BufferFillingWorkerFactory: User specified type: %s\n", typeToString(type));
-        return createByType(type);
+        return createByType(type, config);
     }
     
     // 2️⃣ 环境变量配置
     WorkerType env_type = getTypeFromEnvironment();
     if (env_type != WorkerType::AUTO) {
         printf("🏭 BufferFillingWorkerFactory: Type from environment: %s\n", typeToString(env_type));
-        return createByType(env_type);
+        return createByType(env_type, config);
     }
     
     // 3️⃣ 配置文件
     WorkerType config_type = getTypeFromConfig();
     if (config_type != WorkerType::AUTO) {
         printf("🏭 BufferFillingWorkerFactory: Type from config: %s\n", typeToString(config_type));
-        return createByType(config_type);
+        return createByType(config_type, config);
     }
     
     // 4️⃣ 自动检测
     printf("🏭 BufferFillingWorkerFactory: Auto-detecting best worker type...\n");
-    return autoDetect();
+    return autoDetect(config);
 }
 
 std::unique_ptr<WorkerBase> BufferFillingWorkerFactory::createByName(const char* name) {
@@ -88,7 +88,7 @@ const char* BufferFillingWorkerFactory::typeToString(WorkerType type) {
 
 // ============ 私有辅助方法 ============
 
-std::unique_ptr<WorkerBase> BufferFillingWorkerFactory::autoDetect() {
+std::unique_ptr<WorkerBase> BufferFillingWorkerFactory::autoDetect(const WorkerConfig& config) {
     printf("🔍 Detecting system capabilities:\n");
     
     // 检查 io_uring
@@ -115,7 +115,7 @@ std::unique_ptr<WorkerBase> BufferFillingWorkerFactory::autoDetect() {
     return std::make_unique<MmapRawVideoFileWorker>();
 }
 
-std::unique_ptr<WorkerBase> BufferFillingWorkerFactory::createByType(WorkerType type) {
+std::unique_ptr<WorkerBase> BufferFillingWorkerFactory::createByType(WorkerType type, const WorkerConfig& config) {
     switch (type) {
         case WorkerType::MMAP_RAW:
             return std::make_unique<MmapRawVideoFileWorker>();
@@ -128,13 +128,15 @@ std::unique_ptr<WorkerBase> BufferFillingWorkerFactory::createByType(WorkerType 
             return std::make_unique<IoUringRawVideoFileWorker>();
             
         case WorkerType::FFMPEG_RTSP:
+            // FfmpegDecodeRtspWorker 不支持自定义解码器配置（总是自动选择）
             return std::make_unique<FfmpegDecodeRtspWorker>();
             
         case WorkerType::FFMPEG_VIDEO_FILE:
-            return std::make_unique<FfmpegDecodeVideoFileWorker>();
+            // 🎯 直接使用配置构造 Worker，Worker 自己从 config 读取配置
+            return std::make_unique<FfmpegDecodeVideoFileWorker>(config);
             
         default:
-            return autoDetect();
+            return autoDetect(config);
     }
 }
 

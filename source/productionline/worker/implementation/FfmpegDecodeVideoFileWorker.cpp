@@ -21,11 +21,12 @@ extern "C" {
 // 构造/析构
 // ============================================================================
 
+// 默认构造函数（向后兼容）
 FfmpegDecodeVideoFileWorker::FfmpegDecodeVideoFileWorker()
-    : WorkerBase(BufferAllocatorFactory::AllocatorType::AVFRAME)  // 🎯 只需传递类型！
+    : WorkerBase(BufferAllocatorFactory::AllocatorType::AVFRAME)
     , format_ctx_ptr_(nullptr)
     , codec_ctx_ptr_(nullptr)
-    , packet_ptr_(nullptr)          // 🎯 新增：packet 指针
+    , packet_ptr_(nullptr)
     , sws_ctx_ptr_(nullptr)
     , video_stream_index_(-1)
     , width_(0)
@@ -41,14 +42,43 @@ FfmpegDecodeVideoFileWorker::FfmpegDecodeVideoFileWorker()
     , eof_reached_(false)
     , zero_copy_buffer_pool_ptr_(nullptr)
     , use_hardware_decoder_(true)  // 默认启用硬件解码
-    , decoder_name_ptr_(nullptr)   // 🎯 改为 nullptr，让 FFmpeg 自动选择
+    , decoder_name_ptr_(nullptr)   // 默认自动选择
     , codec_options_ptr_(nullptr)
     , decoded_frames_(0)
     , decode_errors_(0)
     , last_ffmpeg_error_(0)
 {
     memset(file_path_, 0, sizeof(file_path_));
-    // 🎯 父类已经创建好 AVFRAME 类型的 allocator_facade_，无需任何初始化代码
+}
+
+// 配置构造函数（v2.2新增）
+FfmpegDecodeVideoFileWorker::FfmpegDecodeVideoFileWorker(const WorkerConfig& config)
+    : WorkerBase(BufferAllocatorFactory::AllocatorType::AVFRAME, config)
+    , format_ctx_ptr_(nullptr)
+    , codec_ctx_ptr_(nullptr)
+    , packet_ptr_(nullptr)
+    , sws_ctx_ptr_(nullptr)
+    , video_stream_index_(-1)
+    , width_(0)
+    , height_(0)
+    , output_width_(0)
+    , output_height_(0)
+    , output_bpp_(32)
+    , output_pixel_format_(AV_PIX_FMT_BGRA)
+    , total_frames_(-1)
+    , current_frame_index_(0)
+    , is_open_(false)
+    , is_ffmpeg_opened_(false)
+    , eof_reached_(false)
+    , zero_copy_buffer_pool_ptr_(nullptr)
+    , use_hardware_decoder_(config.decoder.enable_hardware)  // 🎯 从配置读取
+    , decoder_name_ptr_(config.decoder.name)                 // 🎯 从配置读取
+    , codec_options_ptr_(nullptr)
+    , decoded_frames_(0)
+    , decode_errors_(0)
+    , last_ffmpeg_error_(0)
+{
+    memset(file_path_, 0, sizeof(file_path_));
 }
 
 FfmpegDecodeVideoFileWorker::~FfmpegDecodeVideoFileWorker() {
@@ -757,18 +787,6 @@ void FfmpegDecodeVideoFileWorker::setOutputResolution(int width, int height) {
 void FfmpegDecodeVideoFileWorker::setOutputBitsPerPixel(int bpp) {
     if (!is_open_.load(std::memory_order_acquire)) {
         output_bpp_ = bpp;
-    }
-}
-
-void FfmpegDecodeVideoFileWorker::setDecoderName(const char* decoder_name) {
-    if (!is_open_.load(std::memory_order_acquire)) {
-        decoder_name_ptr_ = decoder_name;
-    }
-}
-
-void FfmpegDecodeVideoFileWorker::setHardwareDecoder(bool enable) {
-    if (!is_open_.load(std::memory_order_acquire)) {
-        use_hardware_decoder_ = enable;
     }
 }
 

@@ -3,6 +3,7 @@
 #include "monitor/Timer.hpp"
 #include <stdio.h>
 #include <chrono>
+#include <string>
 
 // ============================================================
 // 构造函数和析构函数
@@ -15,6 +16,8 @@ VideoProductionLine::VideoProductionLine()
     , produced_frames_(0)
     , skipped_frames_(0)
     , next_frame_index_(0)
+    , loop_(false)
+    , thread_count_(1)
     , total_frames_(0)
 {
     printf("🎬 VideoProductionLine created (v2.0: Registry持有BufferPool)\n");
@@ -31,7 +34,7 @@ VideoProductionLine::~VideoProductionLine() {
 // 核心接口实现
 // ============================================================
 
-bool VideoProductionLine::start(const Config& config) {
+bool VideoProductionLine::start(const WorkerConfig& worker_config, bool loop, int thread_count) {
     // 检查是否已经在运行
     if (running_) {
         printf("⚠️  Warning: VideoProductionLine already running\n");
@@ -39,46 +42,43 @@ bool VideoProductionLine::start(const Config& config) {
     }
     
     // 验证配置
-    if (config.file_path.empty()) {
+    if (worker_config.file.file_path == nullptr || std::string(worker_config.file.file_path).empty()) {
         setError("Video file path is empty");
         return false;
     }
     
-    if (config.thread_count < 1) {
+    if (thread_count < 1) {
         setError("Thread count must be >= 1");
         return false;
     }
     
     printf("\n🎬 Starting VideoProductionLine...\n");
-    printf("   File: %s\n", config.file_path.c_str());
-    printf("   Resolution: %dx%d\n", config.width, config.height);
-    printf("   Bits per pixel: %d\n", config.bits_per_pixel);
-    printf("   Loop mode: %s\n", config.loop ? "enabled" : "disabled");
-    printf("   Thread count: %d\n", config.thread_count);
+    printf("   File: %s\n", worker_config.file.file_path);
+    printf("   Resolution: %dx%d\n", worker_config.output.width, worker_config.output.height);
+    printf("   Bits per pixel: %d\n", worker_config.output.bits_per_pixel);
+    printf("   Loop mode: %s\n", loop ? "enabled" : "disabled");
+    printf("   Thread count: %d\n", thread_count);
     
     // 保存配置
-    config_ = config;
+    worker_config_ = worker_config;
+    loop_ = loop;
+    thread_count_ = thread_count;
     
-    // 创建共享的 BufferFillingWorkerFacade 对象
-    worker_facade_sptr_ = std::make_shared<BufferFillingWorkerFacade>(config.worker_type);
+    // 创建共享的 BufferFillingWorkerFacade 对象（配置在创建时传入）
+    worker_facade_sptr_ = std::make_shared<BufferFillingWorkerFacade>(
+        worker_config.worker_type,
+        worker_config  // 🎯 传入完整的 Worker 配置
+    );
     printf("   Worker type: %s\n", worker_facade_sptr_->getWorkerType());
-    
-    // 🎯 配置解码器（如果用户指定了）
-    if (config.decoder_name != nullptr) {
-        printf("   Decoder: %s (user specified)\n", config.decoder_name);
-        worker_facade_sptr_->setDecoderName(config.decoder_name);
-    } else {
-        printf("   Decoder: auto (FFmpeg will choose)\n");
-    }
     
     // 🎯 统一的open接口（传入所有参数，门面类内部智能判断）
     // - 对于编码视频（FFMPEG, RTSP）：自动检测格式，width/height/bpp 被忽略
     // - 对于raw视频（MMAP, IOURING）：使用 width/height/bpp 参数
-    if (!worker_facade_sptr_->open(config.file_path.c_str(), 
-                           config.width, 
-                           config.height, 
-                           config.bits_per_pixel)) {
-        setError("Failed to open video file: " + config.file_path);
+    if (!worker_facade_sptr_->open(worker_config.file.file_path, 
+                           worker_config.output.width, 
+                           worker_config.output.height, 
+                           worker_config.output.bits_per_pixel)) {
+        setError(std::string("Failed to open video file: ") + worker_config.file.file_path);
         worker_facade_sptr_.reset();
         return false;
     }
@@ -124,8 +124,8 @@ bool VideoProductionLine::start(const Config& config) {
     start_time_ = std::chrono::steady_clock::now();
     
     // 启动生产者线程
-    threads_.reserve(config.thread_count);
-    for (int i = 0; i < config.thread_count; i++) {
+    threads_.reserve(thread_count);
+    for (int i = 0; i < thread_count; i++) {
         try {
             threads_.emplace_back(&VideoProductionLine::producerThreadFunc, this, i);
             printf("   ✅ Producer thread #%d started\n", i);
@@ -145,7 +145,7 @@ bool VideoProductionLine::start(const Config& config) {
         }
     }
     
-    printf("✅ All %d producer thread(s) started successfully\n", config.thread_count);
+    printf("✅ All %d producer thread(s) started successfully\n", thread_count);
     
     return true;
 }
@@ -277,7 +277,7 @@ void VideoProductionLine::producerThreadFunc(int thread_id) {
         
         // 2. 处理循环模式和文件边界
         if (frame_index >= total_frames_) {
-            if (config_.loop) {
+            if (loop_) {
                 // 循环模式：归一化到 0-total_frames 范围
                 frame_index = frame_index % total_frames_;
                 

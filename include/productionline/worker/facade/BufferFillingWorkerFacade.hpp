@@ -3,6 +3,7 @@
 
 #include "../base/WorkerBase.hpp"
 #include "../factory/BufferFillingWorkerFactory.hpp"
+#include "../config/WorkerConfig.hpp"
 #include "../../../buffer/Buffer.hpp"
 #include "../../../buffer/BufferPool.hpp"
 #include <memory>
@@ -62,6 +63,7 @@ private:
     // ============ 门面模式：持有具体实现 ============
     std::unique_ptr<WorkerBase> worker_base_uptr_;  // 实际的Worker实现（统一基类）
     BufferFillingWorkerFactory::WorkerType preferred_type_;  // 用户偏好的类型
+    WorkerConfig config_;  // Worker配置
 
 public:
     // ============ 构造/析构 ============
@@ -69,17 +71,12 @@ public:
     /**
      * 构造函数
      * @param type Worker类型（默认AUTO，自动选择最优实现）
-     * 
-     * @note 推荐做法：不依赖默认值，显式调用 setWorkerType() 来明确Worker类型
-     * 
-     * 使用示例：
-     * @code
-     * BufferFillingWorkerFacade worker;
-     * worker.setWorkerType(BufferFillingWorkerFactory::WorkerType::MMAP_RAW);  // 明确指定
-     * worker.open(path, width, height, bpp);
-     * @endcode
+     * @param config Worker配置（默认空配置）
      */
-    BufferFillingWorkerFacade(BufferFillingWorkerFactory::WorkerType type = BufferFillingWorkerFactory::WorkerType::AUTO);
+    BufferFillingWorkerFacade(
+        BufferFillingWorkerFactory::WorkerType type = BufferFillingWorkerFactory::WorkerType::AUTO,
+        const WorkerConfig& config = WorkerConfig()
+    );
     
     /**
      * 析构函数
@@ -97,12 +94,6 @@ public:
      * @param type Worker类型
      */
     void setWorkerType(BufferFillingWorkerFactory::WorkerType type);
-    
-    /**
-     * 设置解码器名称（在 open 之前调用，仅对 FFmpeg Worker 有效）
-     * @param decoder_name 解码器名称（如 "h264_taco"，nullptr=自动选择）
-     */
-    void setDecoderName(const char* decoder_name);
     
     // ============ Buffer填充方法（原IBufferFillingWorker的方法）============
     

@@ -2,6 +2,7 @@
 #define BUFFER_FILLING_WORKER_FACTORY_HPP
 
 #include "../base/WorkerBase.hpp"
+#include "../config/WorkerConfig.hpp"
 #include <memory>
 
 /**
@@ -26,19 +27,13 @@
  * - 用户无需了解具体实现类
  * - 可以根据运行环境自动选择最优实现
  * - 支持通过配置、环境变量控制
+ * 
+ * 注意：WorkerType 枚举已迁移到 WorkerConfig.hpp 中，避免循环依赖
  */
 class BufferFillingWorkerFactory {
 public:
-    /**
-     * Worker类型枚举
-     */
-    enum class WorkerType {
-        AUTO,          // 自动检测（默认）
-        MMAP_RAW,      // 创建 MmapRawVideoFileWorker
-        IOURING_RAW,   // 创建 IoUringRawVideoFileWorker
-        FFMPEG_RTSP,   // 创建 FfmpegDecodeRtspWorker
-        FFMPEG_VIDEO_FILE  // 创建 FfmpegDecodeVideoFileWorker
-    };
+    // 使用 WorkerConfig.hpp 中定义的 WorkerType
+    using WorkerType = ::WorkerType;
     
     /**
      * 创建填充Buffer的Worker（工厂方法）
@@ -50,9 +45,10 @@ public:
      * 4. 自动检测系统能力
      * 
      * @param type Worker类型（默认AUTO）
+     * @param config Worker配置（默认空配置）
      * @return Worker实例（智能指针）
      */
-    static std::unique_ptr<WorkerBase> create(WorkerType type = WorkerType::AUTO);
+    static std::unique_ptr<WorkerBase> create(WorkerType type = WorkerType::AUTO, const WorkerConfig& config = WorkerConfig());
     
     /**
      * 从名称创建Worker
@@ -90,12 +86,12 @@ private:
     /**
      * 自动检测并创建最优Worker
      */
-    static std::unique_ptr<WorkerBase> autoDetect();
+    static std::unique_ptr<WorkerBase> autoDetect(const WorkerConfig& config = WorkerConfig());
     
     /**
      * 根据类型创建Worker
      */
-    static std::unique_ptr<WorkerBase> createByType(WorkerType type);
+    static std::unique_ptr<WorkerBase> createByType(WorkerType type, const WorkerConfig& config = WorkerConfig());
     
     /**
      * 从环境变量读取类型

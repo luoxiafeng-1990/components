@@ -2,6 +2,7 @@
 
 #include "../buffer/BufferPool.hpp"
 #include "worker/facade/BufferFillingWorkerFacade.hpp"
+#include "worker/config/WorkerConfig.hpp"
 #include <string>
 #include <vector>
 #include <thread>
@@ -17,48 +18,18 @@
  * 职责：
  * - 从Worker获取BufferPool（原材料）
  * - 填充 BufferPool 提供的 buffer
- * - 管理多个生产者线程
+ * - 管理多个生产者线程（循环、线程数控制）
  * - 性能监控和统计
  * 
  * 设计特点：
  * - Worker必须创建BufferPool（通过调用Allocator）
  * - 从Worker获取BufferPool（原材料）
  * - 职责单一（只负责视频读取和生产）
- * - 配置驱动（通过 Config 结构体）
+ * - 参数驱动（Worker配置 + 生产线控制参数）
  * - 线程安全（支持多线程生产）
  */
 class VideoProductionLine {
 public:
-    /**
-     * @brief 视频配置结构
-     */
-    struct Config {
-        std::string file_path;                         // 视频文件路径
-        int width;                                     // 分辨率宽度
-        int height;                                    // 分辨率高度
-        int bits_per_pixel;                            // 每像素位数（8/16/24/32）
-        bool loop;                                     // 是否循环播放
-        int thread_count;                              // 生产者线程数（默认1）
-        BufferFillingWorkerFactory::WorkerType worker_type;    // Worker类型（默认AUTO）
-        
-        // 🎯 FFmpeg解码器配置（用于 FFMPEG_VIDEO_FILE 类型）
-        const char* decoder_name;                      // 解码器名称（如 "h264_taco"，nullptr=自动选择）
-        
-        // 默认构造
-        Config() 
-            : width(0), height(0), bits_per_pixel(0)
-            , loop(false), thread_count(1)
-            , worker_type(BufferFillingWorkerFactory::WorkerType::AUTO)
-            , decoder_name(nullptr) {}  // 🎯 默认自动选择解码器
-        
-        // 便利构造
-        Config(const std::string& path, int w, int h, int bpp, bool l = false, int tc = 1,
-               BufferFillingWorkerFactory::WorkerType wt = BufferFillingWorkerFactory::WorkerType::AUTO)
-            : file_path(path), width(w), height(h), bits_per_pixel(bpp)
-            , loop(l), thread_count(tc), worker_type(wt)
-            , decoder_name(nullptr) {}  // 🎯 默认自动选择解码器
-    };
-    
     /**
      * @brief 错误回调函数类型
      */
@@ -85,10 +56,12 @@ public:
     
     /**
      * @brief 启动视频生产流水线
-     * @param config 视频配置
+     * @param worker_config Worker 配置（包含文件、输出、解码器等所有配置）
+     * @param loop 是否循环播放（默认 false）
+     * @param thread_count 生产者线程数（默认 1）
      * @return true 如果启动成功
      */
-    bool start(const Config& config);
+    bool start(const WorkerConfig& worker_config, bool loop = false, int thread_count = 1);
     
     /**
      * @brief 停止视频生产流水线
@@ -188,9 +161,11 @@ private:
     std::atomic<int> skipped_frames_;
     std::atomic<int> next_frame_index_;  // 下一个要读取的帧索引（原子递增）
     
-    // 配置
-    Config config_;
-    int total_frames_;
+    // 配置（存储启动时的参数）
+    WorkerConfig worker_config_;         // Worker 配置
+    bool loop_;                          // 是否循环播放
+    int thread_count_;                   // 生产者线程数
+    int total_frames_;                   // 总帧数
     
     // 错误处理
     ErrorCallback error_callback_;

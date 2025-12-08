@@ -60,7 +60,17 @@ class FfmpegDecodeVideoFileWorker : public WorkerBase {
 public:
     // ============ 构造/析构 ============
     
+    /**
+     * @brief 默认构造函数（向后兼容）
+     */
     FfmpegDecodeVideoFileWorker();
+    
+    /**
+     * @brief 配置构造函数（v2.2新增）
+     * @param config Worker配置（包含解码器配置等）
+     */
+    explicit FfmpegDecodeVideoFileWorker(const WorkerConfig& config);
+    
     virtual ~FfmpegDecodeVideoFileWorker();
     
     // 禁止拷贝
@@ -107,18 +117,6 @@ public:
      * @brief 设置输出位深（在open之前调用）
      */
     void setOutputBitsPerPixel(int bpp);
-    
-    /**
-     * @brief 指定解码器名称（如 "h264_taco"）
-     * 
-     * 重写基类方法，提供实际实现
-     */
-    void setDecoderName(const char* decoder_name) override;
-    
-    /**
-     * @brief 启用/禁用硬件解码
-     */
-    void setHardwareDecoder(bool enable);
     
     // ============ 信息查询 ============
     

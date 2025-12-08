@@ -42,12 +42,21 @@
 │    BufferAllocatorFacade（Allocator门面）                │
 │    （直接定义方法，不继承接口）                            │
 └───────────────────────┬─────────────────────────────────┘
-                        │ 使用工厂创建
+                        │ 使用配置
+┌───────────────────────▼─────────────────────────────────┐
+│                   配置层（Configuration, v2.2）            │
+│         WorkerConfig（独立配置结构体）                     │
+│         DecoderConfigBuilder（解码器配置构建器）           │
+│         WorkerConfigBuilder（顶层配置构建器）              │
+│    （Builder模式：链式调用，支持预设）                     │
+└───────────────────────┬─────────────────────────────────┘
+                        │ 传递给工厂
 ┌───────────────────────▼─────────────────────────────────┐
 │                   工厂层（Factory）                        │
 │         BufferFillingWorkerFactory（Worker工厂）          │
 │         BufferAllocatorFactory（Allocator工厂）           │
 │    （通过基类创建实现，不依赖具体类）                      │
+│    （工厂注入配置到Worker，v2.2）                         │
 └───────────────────────┬─────────────────────────────────┘
                         │ 返回基类指针
 ┌───────────────────────▼─────────────────────────────────┐
@@ -1256,6 +1265,156 @@ ProductionLine（生产管理）
 
 ## 核心类详解
 
+### 0. WorkerConfig配置系统（v2.2新增）
+
+#### 设计目标
+
+**WorkerConfig** 是 v2.2 引入的独立配置系统，用于解决 Worker 参数配置的灵活性问题（如解码器选择、h264_taco 特定参数等）。
+
+#### 核心特性
+
+- ✅ **完全独立**：不依赖任何外部类（VideoProductionLine、Worker等）
+- ✅ **Builder模式**：链式调用，易用易读
+- ✅ **层次化配置**：支持解码器详细配置
+- ✅ **工厂注入**：配置在Worker创建时由工厂注入
+
+#### 配置结构
+
+```cpp
+struct WorkerConfig {
+    struct DecoderConfig {
+        const char* name = nullptr;           // 解码器名称
+        bool enable_hardware = true;          // 启用硬件加速
+        const char* hwaccel_device = nullptr; // 硬件设备
+        
+        // h264_taco 特定配置
+        struct TacoConfig {
+            bool reorder_disable = true;
+            bool ch0_enable = true;
+            bool ch1_enable = true;
+            const char* ch1_rgb_format = "argb888";
+            // ... 更多参数
+        } taco;
+    } decoder;
+};
+```
+
+#### Builder模式使用
+
+```cpp
+// 方式1：使用预设
+auto config = WorkerConfigBuilder()
+    .useH264TacoPreset()
+    .build();
+
+// 方式2：自定义配置
+auto config = WorkerConfigBuilder()
+    .setDecoderName("h264_taco")
+    .enableHardwareDecoder(true)
+    .build();
+
+// 方式3：详细配置
+auto config = WorkerConfigBuilder()
+    .setDecoderConfig(
+        DecoderConfigBuilder()
+            .setDecoderName("h264_taco")
+            .configureTaco(true, true, true, true, "argb888", "bt601")
+            .build()
+    )
+    .build();
+```
+
+#### 配置流转（v2.3 重构后）
+
+```
+用户构建配置（Builder）
+   ↓
+WorkerConfig（包含文件、输出、解码器配置）
+   ↓
+VideoProductionLine.start(workerConfig, loop, thread_count)
+   ↓
+BufferFillingWorkerFacade（传递配置）
+   ↓
+BufferFillingWorkerFactory::create(type, config)
+   ↓ 工厂注入
+Worker（配置已应用）
+```
+
+#### 使用场景（v2.3 重构后）
+
+**场景1：生产线配置**
+```cpp
+auto workerConfig = WorkerConfigBuilder()
+    .setFileConfig(
+        FileConfigBuilder()
+            .setFilePath("video.mp4")
+            .build()
+    )
+    .setOutputConfig(
+        OutputConfigBuilder()
+            .setResolution(1920, 1080)
+            .setBitsPerPixel(32)
+            .build()
+    )
+    .setDecoderConfig(
+        DecoderConfigBuilder()
+            .useH264Taco()
+            .build()
+    )
+    .setWorkerType(WorkerType::FFMPEG_VIDEO_FILE)
+    .build();
+
+VideoProductionLine producer;
+producer.start(workerConfig, false, 1);  // loop=false, thread_count=1
+```
+
+**场景2：测试代码**
+```cpp
+auto workerConfig = WorkerConfigBuilder()
+    .setFileConfig(
+        FileConfigBuilder()
+            .setFilePath("video.mp4")
+            .build()
+    )
+    .setOutputConfig(
+        OutputConfigBuilder()
+            .setResolution(1920, 1080)
+            .setBitsPerPixel(32)
+            .build()
+    )
+    .setDecoderConfig(
+        DecoderConfigBuilder()
+            .useH264Taco()
+            .build()
+    )
+    .build();
+
+auto worker = BufferFillingWorkerFactory::create(
+    WorkerType::FFMPEG_VIDEO_FILE,
+    workerConfig
+);
+worker->open(workerConfig.file.file_path,
+             workerConfig.output.width,
+             workerConfig.output.height,
+             workerConfig.output.bits_per_pixel);
+```
+
+**场景3：命令行工具**
+```cpp
+const char* decoder = argc > 2 ? argv[2] : nullptr;
+auto workerConfig = WorkerConfigBuilder()
+    .setFileConfig(...)
+    .setOutputConfig(...)
+    .setDecoderConfig(
+        DecoderConfigBuilder()
+            .setDecoderName(decoder)
+            .build()
+    )
+    .build();
+```
+
+---
+
 ### 1. VideoProductionLine（生产流水线）
 
 **职责**：
@@ -1589,39 +1748,116 @@ return pool_id;
 
 ## 使用示例
 
-### 示例1：基本使用（Worker自动创建BufferPool）
+### 示例0：使用WorkerConfig配置解码器（v2.3重构版）
 
 ```cpp
 #include "productionline/VideoProductionLine.hpp"
-#include "buffer/BufferPool.hpp"
-#include "buffer/BufferPoolRegistry.hpp"
+#include "productionline/worker/config/WorkerConfig.hpp"
 
 int main() {
-    // 1. 创建VideoProductionLine（Worker会在实现IVideoFileNavigator::open()时自动创建BufferPool）
+    // 1. 构建 Worker 配置（使用 Builder 模式）
+    auto workerConfig = WorkerConfigBuilder()
+        .setFileConfig(
+            FileConfigBuilder()
+                .setFilePath("video.mp4")
+                .build()
+        )
+        .setOutputConfig(
+            OutputConfigBuilder()
+                .setResolution(1920, 1080)
+                .setBitsPerPixel(32)
+                .build()
+        )
+        .setDecoderConfig(
+            DecoderConfigBuilder()
+                .useH264Taco()  // 🎯 使用 h264_taco 预设
+                .build()
+        )
+        .setWorkerType(WorkerType::FFMPEG_VIDEO_FILE)
+        .build();
+    
+    // 或者自定义配置
+    // .setDecoderConfig(
+    //     DecoderConfigBuilder()
+    //         .setDecoderName("h264_taco")
+    //         .enableHardware(true)
+    //         .setDecodeThreads(4)
+    //         .build()
+    // )
+    
+    // 2. 启动生产线（配置会自动传递给 Worker）
     VideoProductionLine producer;
-    
-    // 2. 配置视频源
-    VideoProductionLine::Config config(
-        "/path/to/video.raw",  // 文件路径
-        1920,                  // 宽度
-        1080,                  // 高度
-        32,                    // 每像素位数（ARGB888）
-        true,                  // 循环播放
-        2,                     // 2个生产者线程
-        BufferFillingWorkerFactory::WorkerType::MMAP_RAW  // Worker类型
-    );
-    
-    // 3. 启动生产流水线（Worker会在实现IVideoFileNavigator::open()时自动调用Allocator创建BufferPool）
-    if (!producer.start(config)) {
+    if (!producer.start(workerConfig, true, 1)) {  // loop=true, thread_count=1
         printf("Failed to start production line\n");
         return -1;
     }
     
-    // 4. 获取工作BufferPool ID（v2.0）
+    // 3. 获取工作BufferPool
     uint64_t pool_id = producer.getWorkingBufferPoolId();
     auto& registry = BufferPoolRegistry::getInstance();
-    auto pool = registry.getPool(pool_id);
-    if (!pool) {
+    auto pool_weak = registry.getPool(pool_id);
+    auto pool_sptr = pool_weak.lock();
+    if (!pool_sptr) {
+        printf("❌ Pool not found\n");
+        return -1;
+    }
+    
+    // 4. 消费者循环
+    while (running) {
+        Buffer* filled_buffer = pool_sptr->acquireFilled(true, 100);
+        if (filled_buffer) {
+            processBuffer(filled_buffer);
+            pool_sptr->releaseFilled(filled_buffer);
+        }
+    }
+    
+    // 5. 停止
+    producer.stop();
+    return 0;
+}
+```
+
+---
+
+### 示例1：基本使用（Worker自动创建BufferPool）- v2.3重构版
+
+```cpp
+#include "productionline/VideoProductionLine.hpp"
+#include "productionline/worker/config/WorkerConfig.hpp"
+#include "buffer/BufferPool.hpp"
+#include "buffer/BufferPoolRegistry.hpp"
+
+int main() {
+    // 1. 构建 Worker 配置
+    auto workerConfig = WorkerConfigBuilder()
+        .setFileConfig(
+            FileConfigBuilder()
+                .setFilePath("/path/to/video.raw")
+                .build()
+        )
+        .setOutputConfig(
+            OutputConfigBuilder()
+                .setResolution(1920, 1080)
+                .setBitsPerPixel(32)  // ARGB888
+                .build()
+        )
+        .setWorkerType(WorkerType::MMAP_RAW)
+        .build();
+    
+    // 2. 创建并启动生产线
+    // Worker会在open()时自动调用Allocator创建BufferPool
+    VideoProductionLine producer;
+    if (!producer.start(workerConfig, true, 2)) {  // loop=true, thread_count=2
+        printf("Failed to start production line\n");
+        return -1;
+    }
+    
+    // 3. 获取工作BufferPool ID（v2.0）
+    uint64_t pool_id = producer.getWorkingBufferPoolId();
+    auto& registry = BufferPoolRegistry::getInstance();
+    auto pool_weak = registry.getPool(pool_id);
+    auto pool_sptr = pool_weak.lock();
+    if (!pool_sptr) {
         printf("❌ Pool not found\n");
         return -1;
     }
@@ -1645,36 +1881,43 @@ int main() {
 }
 ```
 
-### 示例2：RTSP流（零拷贝模式）
+### 示例2：RTSP流（零拷贝模式）- v2.3重构版
 
 ```cpp
-// 1. 创建VideoProductionLine（Worker会在实现IVideoFileNavigator::open()时自动创建BufferPool）
+// 1. 构建 Worker 配置
+auto workerConfig = WorkerConfigBuilder()
+    .setFileConfig(
+        FileConfigBuilder()
+            .setFilePath("rtsp://192.168.1.100:8554/stream")
+            .build()
+    )
+    .setOutputConfig(
+        OutputConfigBuilder()
+            .setResolution(1920, 1080)
+            .setBitsPerPixel(32)
+            .build()
+    )
+    .setWorkerType(WorkerType::FFMPEG_RTSP)
+    .build();
+
+// 2. 创建并启动生产线
+// Worker会在open()时自动调用Allocator创建BufferPool
 VideoProductionLine producer;
+producer.start(workerConfig, false, 1);  // loop=false, thread_count=1
 
-// 2. 配置RTSP Worker（Worker会在实现IVideoFileNavigator::open()时自动调用Allocator创建BufferPool）
-VideoProductionLine::Config config(
-    "rtsp://192.168.1.100:8554/stream",  // RTSP URL
-    1920, 1080, 32,                      // 输出分辨率
-    false,                               // 不循环（RTSP流是无限的）
-    1,                                   // 单线程（RTSP推荐）
-    BufferFillingWorkerFactory::WorkerType::FFMPEG_RTSP
-);
-
-// 4. 启动（Worker内部会自动注入Buffer到pool）
-producer.start(config);
-
-// 5. 获取工作BufferPool ID（v2.0）
+// 3. 获取工作BufferPool ID（v2.0）
 uint64_t pool_id = producer.getWorkingBufferPoolId();
 auto& registry = BufferPoolRegistry::getInstance();
-auto pool = registry.getPool(pool_id);
+auto pool_weak = registry.getPool(pool_id);
+auto pool_sptr = pool_weak.lock();
 
-// 6. 消费者循环（Worker已自动注入Buffer，直接使用即可）
+// 4. 消费者循环（Worker已自动注入Buffer，直接使用即可）
 while (running) {
-    Buffer* buffer = pool->acquireFilled(true, 100);
+    Buffer* buffer = pool_sptr->acquireFilled(true, 100);
     if (buffer) {
         // 零拷贝显示（使用DMA）
         display.displayBufferByDMA(buffer);
-        pool->releaseFilled(buffer);
+        pool_sptr->releaseFilled(buffer);
     }
 }
 ```
@@ -1682,6 +1925,69 @@ while (running) {
 ---
 
 ## 最佳实践
+
+### 0. Worker配置最佳实践（v2.2新增）
+
+#### 使用 WorkerConfig 配置 Worker
+
+**推荐做法：**
+```cpp
+// ✅ 推荐：使用 Builder 模式链式调用
+config.worker_config = WorkerConfigBuilder()
+    .useH264TacoPreset()
+    .build();
+
+// ✅ 推荐：根据场景选择合适的预设
+// - h264_taco 硬件解码：useH264TacoPreset()
+// - 软件解码：useSoftwarePreset()
+// - 自定义：setDecoderName() + enableHardwareDecoder()
+```
+
+**不推荐做法：**
+```cpp
+// ❌ 不推荐：直接调用 Worker 的 setDecoderName
+// （v2.2 后应该通过配置注入，而不是直接调用）
+worker->setDecoderName("h264_taco");  // 旧方式
+
+// ✅ 应该改为：
+auto config = WorkerConfigBuilder().setDecoderName("h264_taco").build();
+auto worker = Factory::create(type, config);
+```
+
+#### 配置的传递
+
+**生产线场景（v2.3重构后）：**
+```cpp
+// 构建 Worker 配置
+auto workerConfig = WorkerConfigBuilder()
+    .setFileConfig(...)
+    .setOutputConfig(...)
+    .setDecoderConfig(
+        DecoderConfigBuilder()
+            .useH264Taco()
+            .build()
+    )
+    .build();
+
+// 启动生产线
+producer.start(workerConfig, true, 4);  // loop, thread_count
+```
+
+**测试场景：**
+```cpp
+// 直接传递给工厂
+auto config = WorkerConfigBuilder().useH264TacoPreset().build();
+auto worker = Factory::create(type, config);
+```
+
+**命令行工具场景：**
+```cpp
+// 根据命令行参数动态构建
+const char* decoder = getArgument("--decoder");
+auto config = WorkerConfigBuilder().setDecoderName(decoder).build();
+```
+
+---
 
 ### 1. 选择正确的Worker类型
 
@@ -2193,6 +2499,7 @@ ProductionLine架构通过清晰的职责划分和设计模式应用，实现了
 ---
 
 **文档维护：** AI SDK Team  
-**最后更新：** 2025-12-05  
-**架构版本：** v2.1（删除 IBufferFillingWorker 接口，BufferFillingWorkerFacade 不继承接口 + v2.0 Registry 中心化管理）  
+**最后更新：** 2025-12-07  
+**架构版本：** v2.2（引入 WorkerConfig + Builder 模式）  
+**上一版本：** v2.1（删除 IBufferFillingWorker 接口，BufferFillingWorkerFacade 不继承接口 + v2.0 Registry 中心化管理）  
 **代码规范版本：** v1.0（统一类成员访问控制顺序为 public → private，遵循大厂代码规范）
