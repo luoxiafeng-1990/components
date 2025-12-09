@@ -118,22 +118,20 @@ std::unique_ptr<WorkerBase> BufferFillingWorkerFactory::autoDetect(const WorkerC
 std::unique_ptr<WorkerBase> BufferFillingWorkerFactory::createByType(WorkerType type, const WorkerConfig& config) {
     switch (type) {
         case WorkerType::MMAP_RAW:
-            return std::make_unique<MmapRawVideoFileWorker>();
+            return std::make_unique<MmapRawVideoFileWorker>(config);  // ✅ 传递 config
             
         case WorkerType::IOURING_RAW:
             if (!isIoUringAvailable()) {
                 printf("⚠️  Warning: io_uring not available, falling back to mmap\n");
-                return std::make_unique<MmapRawVideoFileWorker>();
+                return std::make_unique<MmapRawVideoFileWorker>(config);  // ✅ 传递 config
             }
-            return std::make_unique<IoUringRawVideoFileWorker>();
+            return std::make_unique<IoUringRawVideoFileWorker>(config);  // ✅ 传递 config
             
         case WorkerType::FFMPEG_RTSP:
-            // FfmpegDecodeRtspWorker 不支持自定义解码器配置（总是自动选择）
-            return std::make_unique<FfmpegDecodeRtspWorker>();
+            return std::make_unique<FfmpegDecodeRtspWorker>(config);  // ✅ 传递 config
             
         case WorkerType::FFMPEG_VIDEO_FILE:
-            // 🎯 直接使用配置构造 Worker，Worker 自己从 config 读取配置
-            return std::make_unique<FfmpegDecodeVideoFileWorker>(config);
+            return std::make_unique<FfmpegDecodeVideoFileWorker>(config);  // ✅ 已经传递 config
             
         default:
             return autoDetect(config);

@@ -26,6 +26,24 @@ IoUringRawVideoFileWorker::IoUringRawVideoFileWorker(int queue_depth)
     // io_uring 延迟初始化，在 open() 时初始化
 }
 
+// v2.2: 配置构造函数（新增）
+IoUringRawVideoFileWorker::IoUringRawVideoFileWorker(const WorkerConfig& config, int queue_depth)
+    : WorkerBase(BufferAllocatorFactory::AllocatorType::NORMAL, config)  // 传递 config 给父类
+    , queue_depth_(queue_depth)
+    , initialized_(false)
+    , video_fd_(-1)
+    , frame_size_(0)
+    , file_size_(0)
+    , total_frames_(0)
+    , current_frame_index_(0)
+    , width_(0)
+    , height_(0)
+    , bits_per_pixel_(0)
+    , is_open_(false)
+{
+    // io_uring 延迟初始化，在 open() 时初始化
+}
+
 IoUringRawVideoFileWorker::~IoUringRawVideoFileWorker() {
     close();
 }

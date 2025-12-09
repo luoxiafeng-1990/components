@@ -29,6 +29,25 @@ MmapRawVideoFileWorker::MmapRawVideoFileWorker()
     // 🎯 父类已经创建好 NORMAL 类型的 allocator_facade_，无需任何初始化代码
 }
 
+// v2.2: 配置构造函数（新增）
+MmapRawVideoFileWorker::MmapRawVideoFileWorker(const WorkerConfig& config)
+    : WorkerBase(BufferAllocatorFactory::AllocatorType::NORMAL, config)  // 传递 config 给父类
+    , fd_(-1)
+    , mapped_file_ptr_(nullptr)
+    , mapped_size_(0)
+    , width_(0)
+    , height_(0)
+    , bits_per_pixel_(0)
+    , frame_size_(0)
+    , file_size_(0)
+    , total_frames_(0)
+    , current_frame_index_(0)
+    , is_open_(false)
+    , detected_format_(FileFormat::UNKNOWN)
+{
+    path_[0] = '\0';
+}
+
 MmapRawVideoFileWorker::~MmapRawVideoFileWorker() {
     close();
 }

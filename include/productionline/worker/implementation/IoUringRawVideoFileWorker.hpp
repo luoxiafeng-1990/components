@@ -38,6 +38,13 @@ public:
     IoUringRawVideoFileWorker(int queue_depth = 32);
     
     /**
+     * 构造函数（配置版本）
+     * @param config Worker配置
+     * @param queue_depth io_uring队列深度（建议16-64）
+     */
+    IoUringRawVideoFileWorker(const WorkerConfig& config, int queue_depth = 32);
+    
+    /**
      * 析构函数
      */
     virtual ~IoUringRawVideoFileWorker();

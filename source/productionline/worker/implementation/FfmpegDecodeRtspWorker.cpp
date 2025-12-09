@@ -50,6 +50,38 @@ FfmpegDecodeRtspWorker::FfmpegDecodeRtspWorker()
     printf("🎬 FfmpegDecodeRtspWorker created\n");
 }
 
+// v2.2: 配置构造函数（新增）
+FfmpegDecodeRtspWorker::FfmpegDecodeRtspWorker(const WorkerConfig& config)
+    : WorkerBase(BufferAllocatorFactory::AllocatorType::AVFRAME, config)  // 传递 config 给父类
+    , format_ctx_ptr_(nullptr)
+    , codec_ctx_ptr_(nullptr)
+    , sws_ctx_ptr_(nullptr)
+    , video_stream_index_(-1)
+    , width_(0)
+    , height_(0)
+    , output_pixel_format_(AV_PIX_FMT_BGRA)
+    , running_(false)
+    , connected_(false)
+    , write_index_(0)
+    , read_index_(0)
+    , buffer_pool_ptr_(nullptr)
+    , decoded_frames_(0)
+    , dropped_frames_(0)
+    , is_open_(false)
+    , eof_reached_(false)
+{
+    rtsp_url_[0] = '\0';
+    
+    // 初始化内部缓冲区（30帧）
+    internal_buffer_.resize(30);
+    for (auto& slot : internal_buffer_) {
+        slot.filled = false;
+        slot.timestamp = 0;
+    }
+    
+    printf("🎬 FfmpegDecodeRtspWorker created (with config)\n");
+}
+
 FfmpegDecodeRtspWorker::~FfmpegDecodeRtspWorker() {
     printf("🧹 Destroying FfmpegDecodeRtspWorker...\n");
     close();

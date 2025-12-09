@@ -70,13 +70,9 @@ public:
     
     /**
      * 构造函数
-     * @param type Worker类型（默认AUTO，自动选择最优实现）
-     * @param config Worker配置（默认空配置）
+     * @param config Worker配置（包含 worker_type 和所有配置参数）
      */
-    BufferFillingWorkerFacade(
-        BufferFillingWorkerFactory::WorkerType type = BufferFillingWorkerFactory::WorkerType::AUTO,
-        const WorkerConfig& config = WorkerConfig()
-    );
+    explicit BufferFillingWorkerFacade(const WorkerConfig& config = WorkerConfig());
     
     /**
      * 析构函数
@@ -120,21 +116,11 @@ public:
     // ============ 文件导航方法（原IVideoFileNavigator的方法）============
     
     /**
-     * 打开编码视频文件（自动检测格式）
-     * @param path 文件路径
+     * 打开视频文件（从内部 config_ 获取所有参数）
+     * v2.2: 简化接口，所有参数从 config_ 获取
      * @return 成功返回 true
      */
-    bool open(const char* path);
-    
-    /**
-     * 打开视频文件（统一智能接口）
-     * @param path 文件路径
-     * @param width 视频宽度（可选，用于raw视频）
-     * @param height 视频高度（可选，用于raw视频）
-     * @param bits_per_pixel 每像素位数（可选，用于raw视频）
-     * @return 成功返回 true
-     */
-    bool open(const char* path, int width, int height, int bits_per_pixel);
+    bool open();
     
     /**
      * 关闭视频文件

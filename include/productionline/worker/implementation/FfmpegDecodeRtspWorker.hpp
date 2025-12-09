@@ -60,6 +60,7 @@ public:
     // ============ 构造/析构 ============
     
     FfmpegDecodeRtspWorker();
+    FfmpegDecodeRtspWorker(const WorkerConfig& config);  // v2.2: 配置构造函数
     virtual ~FfmpegDecodeRtspWorker();
     
     // 禁止拷贝

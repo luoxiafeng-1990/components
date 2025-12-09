@@ -20,6 +20,7 @@
 #include <string.h>
 #include <memory>
 #include "productionline/worker/facade/BufferFillingWorkerFacade.hpp"
+#include "productionline/worker/config/WorkerConfig.hpp"
 #include "buffer/BufferPool.hpp"
 
 // 全局标志，用于处理 Ctrl+C 退出
@@ -49,25 +50,29 @@ static int test_ffmpeg_worker_open_close(const char* video_path) {
     printf("  File: %s\n", video_path);
     printf("═══════════════════════════════════════════════════════\n\n");
     
-    // 1. 创建 BufferFillingWorkerFacade（使用门面模式）
-    auto worker_facade = std::make_shared<BufferFillingWorkerFacade>(
-        BufferFillingWorkerFactory::WorkerType::FFMPEG_VIDEO_FILE
-    );
+    // 1. 创建 WorkerConfig
+    WorkerConfig config;
+    config.worker_type = WorkerType::FFMPEG_VIDEO_FILE;
+    config.file.file_path = video_path;
+    // 编码视频会自动检测格式，无需设置 output 参数
+    
+    // 2. 创建 BufferFillingWorkerFacade（v2.2：使用配置构造）
+    auto worker_facade = std::make_shared<BufferFillingWorkerFacade>(config);
     
     if (!worker_facade) {
         printf("❌ Failed to create worker facade\n");
         return -1;
     }
     
-    // 2. 打开视频文件
-    if (!worker_facade->open(video_path)) {
+    // 3. 打开视频文件（v2.2：无参数，从 config 获取）
+    if (!worker_facade->open()) {
         printf("❌ Failed to open video file\n");
         printf("   Possible reasons: file not found, unsupported format, or FFmpeg initialization failed\n");
         return -1;
     }
     
     
-    // 3. 验证视频信息
+    // 4. 验证视频信息
     printf("\n📊 Video Information:\n");
     printf("   Path:          %s\n", worker_facade->getPath());
     printf("   Resolution:    %dx%d\n", 
@@ -89,15 +94,10 @@ static int test_ffmpeg_worker_open_close(const char* video_path) {
     printf("   At End:        %s\n", worker_facade->isAtEnd() ? "Yes" : "No");
     
     
-    // 7. 清理
+    // 5. 清理
     printf("\n🔄 Closing worker...\n");
     worker_facade->close();
-    printf("✅ Worker closed successfully\n");
-    try {
-        worker_facade->open(video_path);
-    } catch (...) {
-        printf("✅ Worker facade open failed,then destroyed successfully\n");
-    }
+    printf("✅ Worker closed successfully\n")
     printf("\n✅ Test completed successfully\n");
     printf("═══════════════════════════════════════════════════════\n\n");
     

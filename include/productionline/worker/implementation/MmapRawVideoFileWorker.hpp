@@ -36,6 +36,7 @@ public:
     // ============ 构造/析构 ============
     
     MmapRawVideoFileWorker();
+    MmapRawVideoFileWorker(const WorkerConfig& config);  // v2.2: 配置构造函数
     virtual ~MmapRawVideoFileWorker();
     
     // 禁止拷贝（RAII资源管理）

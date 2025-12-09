@@ -3,12 +3,9 @@
 
 // ============ 构造/析构 ============
 
-BufferFillingWorkerFacade::BufferFillingWorkerFacade(
-    BufferFillingWorkerFactory::WorkerType type,
-    const WorkerConfig& config
-)
-    : preferred_type_(type)
-    , config_(config)
+BufferFillingWorkerFacade::BufferFillingWorkerFacade(const WorkerConfig& config)
+    : config_(config)
+    , preferred_type_(config.worker_type)  // 从 config 获取 worker_type
 {
     if (!worker_base_uptr_) {
         worker_base_uptr_ = BufferFillingWorkerFactory::create(preferred_type_, config_);
@@ -42,7 +39,7 @@ const char* BufferFillingWorkerFacade::getWorkerType() const {
 
 // ============ 文件操作（门面转发） ============
 
-bool BufferFillingWorkerFacade::open(const char* path) {
+bool BufferFillingWorkerFacade::open() {
     // 创建 worker（如果还没创建）
     if (!worker_base_uptr_) {
         worker_base_uptr_ = BufferFillingWorkerFactory::create(preferred_type_, config_);
@@ -53,45 +50,36 @@ bool BufferFillingWorkerFacade::open(const char* path) {
         return false;
     }
     
-    // 编码视频Worker：自动检测格式
-    printf("🎬 BufferFillingWorkerFacade: Opening encoded video (auto-detect format)\n");
-    return worker_base_uptr_->open(path);
-}
-
-bool BufferFillingWorkerFacade::open(const char* path, int width, int height, int bits_per_pixel) {
-    // 创建 worker（如果还没创建）
-    if (!worker_base_uptr_) {
-        worker_base_uptr_ = BufferFillingWorkerFactory::create(preferred_type_, config_);
-    }
+    // 从 config_ 获取所有参数
+    const char* path = config_.file.file_path;
+    int width = config_.output.width;
+    int height = config_.output.height;
+    int bits_per_pixel = config_.output.bits_per_pixel;
     
-    if (!worker_base_uptr_) {
-        printf("❌ ERROR: Failed to create worker\n");
+    if (!path) {
+        printf("❌ ERROR: File path not set in config\n");
         return false;
     }
     
     // 🎯 智能判断：根据Worker类型选择合适的open方法
-    // - Raw视频Worker（MMAP_RAW, IOURING_RAW）：需要格式参数，调用 open(path, width, height, bits_per_pixel)
-    // - 编码视频Worker（FFMPEG_VIDEO_FILE, FFMPEG_RTSP）：自动检测格式，调用 open(path)
+    // - Raw视频Worker（MMAP_RAW, IOURING_RAW）：需要格式参数
+    // - 编码视频Worker（FFMPEG_VIDEO_FILE, FFMPEG_RTSP）：自动检测格式
     
     bool is_raw_worker = (preferred_type_ == BufferFillingWorkerFactory::WorkerType::MMAP_RAW ||
                           preferred_type_ == BufferFillingWorkerFactory::WorkerType::IOURING_RAW);
     
     if (is_raw_worker) {
-        // Raw视频Worker：使用传入的格式参数
+        // Raw视频Worker：需要格式参数
         if (width == 0 || height == 0 || bits_per_pixel == 0) {
-            printf("❌ ERROR: Raw video worker requires width, height, and bits_per_pixel!\n");
-            printf("   Usage: worker.open(path, width, height, bits_per_pixel)\n");
+            printf("❌ ERROR: Raw video worker requires width, height, and bits_per_pixel in config!\n");
             return false;
         }
         printf("🎬 BufferFillingWorkerFacade: Opening raw video with format %dx%d@%dbpp\n",
                width, height, bits_per_pixel);
         return worker_base_uptr_->open(path, width, height, bits_per_pixel);
     } else {
-        // 编码视频Worker：自动检测格式（忽略 width/height/bpp 参数）
+        // 编码视频Worker：自动检测格式
         printf("🎬 BufferFillingWorkerFacade: Opening encoded video (auto-detect format)\n");
-        if (width != 0 || height != 0 || bits_per_pixel != 0) {
-            printf("   Note: width/height/bpp parameters are ignored for encoded video\n");
-        }
         return worker_base_uptr_->open(path);
     }
 }

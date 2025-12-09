@@ -38,10 +38,13 @@ public:
     /**
      * @brief 构造函数
      * 
+     * @param loop 是否循环播放（默认 false）
+     * @param thread_count 生产者线程数（默认 1）
+     * 
      * 注意：Worker必须在open()时自动创建BufferPool（通过调用Allocator）
      * ProductionLine从Worker获取BufferPool，不再需要外部注入
      */
-    VideoProductionLine();
+    VideoProductionLine(bool loop = false, int thread_count = 1);
     
     /**
      * @brief 析构函数 - 自动停止生产者
@@ -57,11 +60,11 @@ public:
     /**
      * @brief 启动视频生产流水线
      * @param worker_config Worker 配置（包含文件、输出、解码器等所有配置）
-     * @param loop 是否循环播放（默认 false）
-     * @param thread_count 生产者线程数（默认 1）
      * @return true 如果启动成功
+     * 
+     * 注意：loop 和 thread_count 在构造函数中设置
      */
-    bool start(const WorkerConfig& worker_config, bool loop = false, int thread_count = 1);
+    bool start(const WorkerConfig& worker_config);
     
     /**
      * @brief 停止视频生产流水线
@@ -162,7 +165,6 @@ private:
     std::atomic<int> next_frame_index_;  // 下一个要读取的帧索引（原子递增）
     
     // 配置（存储启动时的参数）
-    WorkerConfig worker_config_;         // Worker 配置
     bool loop_;                          // 是否循环播放
     int thread_count_;                   // 生产者线程数
     int total_frames_;                   // 总帧数

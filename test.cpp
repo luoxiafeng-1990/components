@@ -110,7 +110,7 @@ static int test_4frame_loop(const char* raw_video_path) {
     BufferPool& pool = *pool_sptr;
     
     // 3. 创建 VideoProductionLine（Worker会在open()时自动创建BufferPool）
-    VideoProductionLine producer;
+    VideoProductionLine producer(true, 1);  // loop=true, thread_count=1
     
     // 4. 配置并启动视频生产者
     auto workerConfig = WorkerConfigBuilder()
@@ -134,7 +134,7 @@ static int test_4frame_loop(const char* raw_video_path) {
         g_running = false;
     });
     
-    if (!producer.start(workerConfig, true, 1)) {  // loop=true, thread_count=1
+    if (!producer.start(workerConfig)) {
         printf("❌ Failed to start video producer\n");
         return -1;
     }
@@ -223,7 +223,7 @@ static int test_sequential_playback(const char* raw_video_path) {
     (void)pool;  // 消除未使用警告
     
     // 3. 创建 VideoProductionLine（Worker会在open()时自动创建BufferPool）
-    VideoProductionLine producer;
+    VideoProductionLine producer(true, 1);  // loop=true, thread_count=1
     
     // 4. 配置并启动视频生产者
     auto workerConfig = WorkerConfigBuilder()
@@ -247,7 +247,7 @@ static int test_sequential_playback(const char* raw_video_path) {
         g_running = false;
     });
     
-    if (!producer.start(workerConfig, true, 1)) {  // loop=true, thread_count=1
+    if (!producer.start(workerConfig)) {
         printf("❌ Failed to start video producer\n");
         return -1;
     }
@@ -334,10 +334,10 @@ static int test_buffermanager_producer(const char* raw_video_path) {
     pool.printStats();
     
     // 3. 创建 VideoProductionLine（Worker会自动创建BufferPool）
-    VideoProductionLine producer;
-    // 4. 配置并启动视频生产者
     int producer_thread_count = 2;  // 使用2个生产者线程
+    VideoProductionLine producer(true, producer_thread_count);  // loop=true, thread_count=2
     
+    // 4. 配置并启动视频生产者
     auto workerConfig = WorkerConfigBuilder()
         .setFileConfig(
             FileConfigBuilder()
@@ -359,7 +359,7 @@ static int test_buffermanager_producer(const char* raw_video_path) {
         g_running = false;
     });
     
-    if (!producer.start(workerConfig, true, producer_thread_count)) {  // loop=true
+    if (!producer.start(workerConfig)) {
         printf("❌ Failed to start video producer\n");
         return -1;
     }
@@ -440,7 +440,7 @@ static int test_buffermanager_iouring(const char* raw_video_path) {
     pool.printStats();
     
     // 3. 创建 VideoProductionLine（Worker会自动创建BufferPool）
-    VideoProductionLine producer;
+    VideoProductionLine producer(true, 1);  // loop=true, thread_count=1
     
     printf("\n🎬 Starting video producer (io_uring mode)...\n");
     printf("   Using 1 producer thread with io_uring async I/O\n");
@@ -465,7 +465,7 @@ static int test_buffermanager_iouring(const char* raw_video_path) {
         g_running = false;
     });
     
-    if (!producer.start(workerConfig, true, 1)) {  // loop=true, thread_count=1
+    if (!producer.start(workerConfig)) {
         printf("❌ Failed to start video producer\n");
         return -1;
     }
@@ -583,7 +583,7 @@ static int test_rtsp_stream(const char* rtsp_url) {
     
     // 2. 创建 VideoProductionLine（Worker会在open()时自动调用Allocator创建BufferPool）
     printf("📹 Creating VideoProductionLine...\n");
-    VideoProductionLine producer;  // Worker会在open()时自动创建BufferPool
+    VideoProductionLine producer(false, 1);  // loop=false, thread_count=1
     
     // 4. 配置 RTSP 流（注意：推荐单线程）
     printf("🔗 Configuring RTSP stream: %s\n", rtsp_url);
@@ -610,7 +610,7 @@ static int test_rtsp_stream(const char* rtsp_url) {
     
     // 6. 启动生产者（内部会创建RTSP Reader并启用零拷贝）
     printf("🚀 Starting RTSP producer...\n");
-    if (!producer.start(workerConfig, false, 1)) {  // loop=false, thread_count=1
+    if (!producer.start(workerConfig)) {
         printf("❌ Failed to start RTSP producer\n");
         return -1;
     }
@@ -717,11 +717,11 @@ static int test_h264_taco_video(const char* video_path) {
     }
     
     // 2. 创建 VideoProductionLine（Worker会在open()时自动调用Allocator创建BufferPool）
-    printf("📹 Creating VideoProductionLine...\n");
-    VideoProductionLine producer;  // Worker会在open()时自动创建BufferPool
+    printf("\n\n📹 Creating VideoProductionLine...\n");
+    VideoProductionLine producer(true, 1);  // loop=true, thread_count=1
     
     // 4. 配置 FFmpeg 解码
-    printf("🎬 Configuring FFmpeg video reader: %s\n", video_path);
+    printf("\n\n🎬 Configuring FFmpeg video reader: %s\n", video_path);
     
     auto workerConfig = WorkerConfigBuilder()
         .setFileConfig(
@@ -746,7 +746,7 @@ static int test_h264_taco_video(const char* video_path) {
     
     // 6. 启动生产者
     printf("🚀 Starting FFmpeg video producer...\n");
-    if (!producer.start(workerConfig, true, 1)) {  // loop=true, thread_count=1
+    if (!producer.start(workerConfig)) {
         printf("❌ Failed to start FFmpeg producer\n");
         return -1;
     }

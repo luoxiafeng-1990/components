@@ -9,18 +9,23 @@
 // 构造函数和析构函数
 // ============================================================
 
-VideoProductionLine::VideoProductionLine()
+VideoProductionLine::VideoProductionLine(bool loop, int thread_count)
     : working_buffer_pool_id_(0)
     , working_buffer_pool_ptr_(nullptr)
     , running_(false)
     , produced_frames_(0)
     , skipped_frames_(0)
     , next_frame_index_(0)
-    , loop_(false)
-    , thread_count_(1)
+    , loop_(loop)
+    , thread_count_(thread_count)
     , total_frames_(0)
 {
-    printf("🎬 VideoProductionLine created (v2.0: Registry持有BufferPool)\n");
+    if (thread_count < 1) {
+        printf("⚠️  Warning: Invalid thread_count (%d), using default value 1\n", thread_count);
+        thread_count_ = 1;
+    }
+    printf("🎬 VideoProductionLine created (loop=%s, thread_count=%d)\n", 
+           loop_ ? "enabled" : "disabled", thread_count_);
 }
 
 VideoProductionLine::~VideoProductionLine() {
@@ -34,21 +39,10 @@ VideoProductionLine::~VideoProductionLine() {
 // 核心接口实现
 // ============================================================
 
-bool VideoProductionLine::start(const WorkerConfig& worker_config, bool loop, int thread_count) {
+bool VideoProductionLine::start(const WorkerConfig& worker_config) {
     // 检查是否已经在运行
     if (running_) {
         printf("⚠️  Warning: VideoProductionLine already running\n");
-        return false;
-    }
-    
-    // 验证配置
-    if (worker_config.file.file_path == nullptr || std::string(worker_config.file.file_path).empty()) {
-        setError("Video file path is empty");
-        return false;
-    }
-    
-    if (thread_count < 1) {
-        setError("Thread count must be >= 1");
         return false;
     }
     
@@ -56,28 +50,15 @@ bool VideoProductionLine::start(const WorkerConfig& worker_config, bool loop, in
     printf("   File: %s\n", worker_config.file.file_path);
     printf("   Resolution: %dx%d\n", worker_config.output.width, worker_config.output.height);
     printf("   Bits per pixel: %d\n", worker_config.output.bits_per_pixel);
-    printf("   Loop mode: %s\n", loop ? "enabled" : "disabled");
-    printf("   Thread count: %d\n", thread_count);
+    printf("   Loop mode: %s\n", loop_ ? "enabled" : "disabled");
+    printf("   Thread count: %d\n", thread_count_);
     
-    // 保存配置
-    worker_config_ = worker_config;
-    loop_ = loop;
-    thread_count_ = thread_count;
-    
-    // 创建共享的 BufferFillingWorkerFacade 对象（配置在创建时传入）
-    worker_facade_sptr_ = std::make_shared<BufferFillingWorkerFacade>(
-        worker_config.worker_type,
-        worker_config  // 🎯 传入完整的 Worker 配置
-    );
+    // 创建共享的 BufferFillingWorkerFacade 对象（v2.2：只传入完整配置）
+    worker_facade_sptr_ = std::make_shared<BufferFillingWorkerFacade>(worker_config);
     printf("   Worker type: %s\n", worker_facade_sptr_->getWorkerType());
     
-    // 🎯 统一的open接口（传入所有参数，门面类内部智能判断）
-    // - 对于编码视频（FFMPEG, RTSP）：自动检测格式，width/height/bpp 被忽略
-    // - 对于raw视频（MMAP, IOURING）：使用 width/height/bpp 参数
-    if (!worker_facade_sptr_->open(worker_config.file.file_path, 
-                           worker_config.output.width, 
-                           worker_config.output.height, 
-                           worker_config.output.bits_per_pixel)) {
+    // v2.2：简化的 open 接口（所有参数从 config 获取）
+    if (!worker_facade_sptr_->open()) {
         setError(std::string("Failed to open video file: ") + worker_config.file.file_path);
         worker_facade_sptr_.reset();
         return false;
@@ -124,8 +105,8 @@ bool VideoProductionLine::start(const WorkerConfig& worker_config, bool loop, in
     start_time_ = std::chrono::steady_clock::now();
     
     // 启动生产者线程
-    threads_.reserve(thread_count);
-    for (int i = 0; i < thread_count; i++) {
+    threads_.reserve(thread_count_);
+    for (int i = 0; i < thread_count_; i++) {
         try {
             threads_.emplace_back(&VideoProductionLine::producerThreadFunc, this, i);
             printf("   ✅ Producer thread #%d started\n", i);
@@ -145,7 +126,7 @@ bool VideoProductionLine::start(const WorkerConfig& worker_config, bool loop, in
         }
     }
     
-    printf("✅ All %d producer thread(s) started successfully\n", thread_count);
+    printf("✅ All %d producer thread(s) started successfully\n", thread_count_);
     
     return true;
 }
