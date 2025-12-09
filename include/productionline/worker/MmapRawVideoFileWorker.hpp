@@ -74,7 +74,7 @@ public:
 private:
     // ============ 文件资源 ============
     int fd_;                          // 文件描述符
-    char path_[MAX_PATH_LENGTH];     // 文件路径
+    std::string path_;                // 文件路径（使用 std::string 更安全）
     void* mapped_file_ptr_;               // mmap映射的文件地址
     size_t mapped_size_;              // 映射的文件大小
     

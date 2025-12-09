@@ -878,10 +878,10 @@ static void print_usage(const char* prog_name) {
  */
 int main(int argc, char* argv[]) {
     // 初始化日志系统
-    INIT_LOGGER("log4cplus.properties");
-    
-    const char* raw_video_path = NULL;
-    const char* mode = "loop";  // 默认模式：循环播放
+    INIT_LOGGER("common/log4cplus.properties");
+    // ✅ 优化：使用 std::string 存储（更安全、更清晰）
+    std::string raw_video_path;
+    std::string mode = "loop";  // 默认模式：循环播放
     
     // 定义长选项
     static struct option long_options[] = {
@@ -922,10 +922,10 @@ int main(int argc, char* argv[]) {
     }
     
     // 解析测试模式
-    TestMode test_mode = parse_test_mode(mode);
+    TestMode test_mode = parse_test_mode(mode.c_str());
     
     // 检查是否提供了视频文件路径
-    if (!raw_video_path) {
+    if (raw_video_path.empty()) {
         LOG_ERROR("Missing raw video file path");
         print_usage(argv[0]);
         return 1;
@@ -935,32 +935,32 @@ int main(int argc, char* argv[]) {
     int result = 0;
     switch (test_mode) {
         case TestMode::LOOP:
-            result = test_4frame_loop(raw_video_path);
+            result = test_4frame_loop(raw_video_path.c_str());
             break;
         
         case TestMode::SEQUENTIAL:
-            result = test_sequential_playback(raw_video_path);
+            result = test_sequential_playback(raw_video_path.c_str());
             break;
         
         case TestMode::PRODUCER:
-            result = test_buffermanager_producer(raw_video_path);
+            result = test_buffermanager_producer(raw_video_path.c_str());
             break;
         
         case TestMode::IOURING:
-            result = test_buffermanager_iouring(raw_video_path);
+            result = test_buffermanager_iouring(raw_video_path.c_str());
             break;
         
         case TestMode::RTSP:
-            result = test_rtsp_stream(raw_video_path);  // raw_video_path实际是rtsp_url
+            result = test_rtsp_stream(raw_video_path.c_str());  // raw_video_path实际是rtsp_url
             break;
         
         case TestMode::FFMPEG:
-            result = test_h264_taco_video(raw_video_path);
+            result = test_h264_taco_video(raw_video_path.c_str());
             break;
         
         case TestMode::UNKNOWN:
         default:
-            LOG_ERROR_FMT("Unknown mode '%s'", mode);
+            LOG_ERROR_FMT("Unknown mode '%s'", mode.c_str());
             print_usage(argv[0]);
             return 1;
     }

@@ -165,7 +165,7 @@ private:
     int video_stream_index_;
     
     // ============ 文件信息 ============
-    char file_path_[MAX_VIDEO_PATH_LENGTH];
+    std::string file_path_;            // 文件路径（使用 std::string 更安全）
     int width_;                        // 视频原始宽度
     int height_;                       // 视频原始高度
     int output_width_;                 // 输出宽度（可能缩放）
@@ -185,7 +185,7 @@ private:
     
     // ============ 解码器配置（用于特殊解码器）============
     bool use_hardware_decoder_;        // 是否使用硬件解码
-    const char* decoder_name_ptr_;         // 指定解码器名称（如 "h264_taco"）
+    std::string decoder_name_;         // 指定解码器名称（如 "h264_taco"），空字符串表示自动选择
     AVDictionary* codec_options_ptr_;      // 解码器选项（用于 h264_taco 配置）
     
     // ============ 线程安全 ============

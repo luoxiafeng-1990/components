@@ -25,7 +25,7 @@ MmapRawVideoFileWorker::MmapRawVideoFileWorker()
     , is_open_(false)
     , detected_format_(FileFormat::UNKNOWN)
 {
-    path_[0] = '\0';
+    // path_ 使用 std::string，无需手动初始化
     // 🎯 父类已经创建好 NORMAL 类型的 allocator_facade_，无需任何初始化代码
 }
 
@@ -45,7 +45,7 @@ MmapRawVideoFileWorker::MmapRawVideoFileWorker(const WorkerConfig& config)
     , is_open_(false)
     , detected_format_(FileFormat::UNKNOWN)
 {
-    path_[0] = '\0';
+    // path_ 使用 std::string，无需手动初始化
 }
 
 MmapRawVideoFileWorker::~MmapRawVideoFileWorker() {
@@ -60,8 +60,7 @@ bool MmapRawVideoFileWorker::open(const char* path) {
         close();
     }
     
-    strncpy(path_, path, MAX_PATH_LENGTH - 1);
-    path_[MAX_PATH_LENGTH - 1] = '\0';
+    path_ = path;  // 使用 std::string 自动管理
     
     printf("📂 Opening video file: %s\n", path);
     printf("   Mode: Auto-detect format\n");
@@ -167,8 +166,7 @@ bool MmapRawVideoFileWorker::open(const char* path, int width, int height, int b
         return false;
     }
     
-    strncpy(path_, path, MAX_PATH_LENGTH - 1);
-    path_[MAX_PATH_LENGTH - 1] = '\0';
+    path_ = path;  // 使用 std::string 自动管理
     width_ = width;
     height_ = height;
     bits_per_pixel_ = bits_per_pixel;
@@ -227,7 +225,7 @@ void MmapRawVideoFileWorker::close() {
     is_open_ = false;
     current_frame_index_ = 0;
     
-    printf("✅ Video file closed: %s\n", path_);
+    printf("✅ Video file closed: %s\n", path_.c_str());
 }
 
 bool MmapRawVideoFileWorker::isOpen() const {
@@ -299,7 +297,7 @@ int MmapRawVideoFileWorker::getBytesPerPixel() const {
 }
 
 const char* MmapRawVideoFileWorker::getPath() const {
-    return path_;
+    return path_.c_str();
 }
 
 bool MmapRawVideoFileWorker::hasMoreFrames() const {

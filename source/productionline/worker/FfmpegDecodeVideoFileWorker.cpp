@@ -42,13 +42,13 @@ FfmpegDecodeVideoFileWorker::FfmpegDecodeVideoFileWorker()
     , eof_reached_(false)
     , zero_copy_buffer_pool_ptr_(nullptr)
     , use_hardware_decoder_(true)  // 默认启用硬件解码
-    , decoder_name_ptr_(nullptr)   // 默认自动选择
+    , decoder_name_()              // 默认自动选择（空字符串）
     , codec_options_ptr_(nullptr)
     , decoded_frames_(0)
     , decode_errors_(0)
     , last_ffmpeg_error_(0)
 {
-    memset(file_path_, 0, sizeof(file_path_));
+    // file_path_ 使用 std::string，无需手动初始化
 }
 
 // 配置构造函数（v2.2新增）
@@ -72,13 +72,13 @@ FfmpegDecodeVideoFileWorker::FfmpegDecodeVideoFileWorker(const WorkerConfig& con
     , eof_reached_(false)
     , zero_copy_buffer_pool_ptr_(nullptr)
     , use_hardware_decoder_(config.decoder.enable_hardware)  // 🎯 从配置读取
-    , decoder_name_ptr_(config.decoder.name)                 // 🎯 从配置读取
+    , decoder_name_(config.decoder.name ? config.decoder.name : "")  // 🎯 从配置读取（安全拷贝）
     , codec_options_ptr_(nullptr)
     , decoded_frames_(0)
     , decode_errors_(0)
     , last_ffmpeg_error_(0)
 {
-    memset(file_path_, 0, sizeof(file_path_));
+    // file_path_ 使用 std::string，无需手动初始化
 }
 
 FfmpegDecodeVideoFileWorker::~FfmpegDecodeVideoFileWorker() {
@@ -102,9 +102,8 @@ bool FfmpegDecodeVideoFileWorker::open(const char* path) {
         closeFfmpegResources();
     }
     
-    // 保存路径
-    strncpy(file_path_, path, MAX_VIDEO_PATH_LENGTH - 1);
-    file_path_[MAX_VIDEO_PATH_LENGTH - 1] = '\0';
+    // 保存路径（使用 std::string 自动管理）
+    file_path_ = path;
     
     // 打开FFmpeg资源
     if (!openFfmpegResources()) {
@@ -211,7 +210,7 @@ bool FfmpegDecodeVideoFileWorker::openFfmpegResources() {
         return false;
     }
     
-    int ret = avformat_open_input(&format_ctx_ptr_, file_path_, nullptr, nullptr);
+    int ret = avformat_open_input(&format_ctx_ptr_, file_path_.c_str(), nullptr, nullptr);
     if (ret < 0) {
         setError("Failed to open video file", ret);
         format_ctx_ptr_ = nullptr;
@@ -339,13 +338,13 @@ bool FfmpegDecodeVideoFileWorker::initializeDecoder() {
     // 1. 查找解码器
     const AVCodec* codec = nullptr;
     
-    if (decoder_name_ptr_) {
+    if (!decoder_name_.empty()) {
         // 用户指定了解码器名称（如 "h264_taco"）
-        codec = avcodec_find_decoder_by_name(decoder_name_ptr_);
+        codec = avcodec_find_decoder_by_name(decoder_name_.c_str());
         if (!codec) {
-            printf("⚠️  Warning: Specified decoder '%s' not found, trying default\n", decoder_name_ptr_);
+            printf("⚠️  Warning: Specified decoder '%s' not found, trying default\n", decoder_name_.c_str());
         } else {
-            printf("✅ Using specified decoder: %s\n", decoder_name_ptr_);
+            printf("✅ Using specified decoder: %s\n", decoder_name_.c_str());
         }
     }
     
@@ -375,7 +374,7 @@ bool FfmpegDecodeVideoFileWorker::initializeDecoder() {
     }
     
     // 4. 配置特殊解码器（如 h264_taco）
-    if (decoder_name_ptr_ && strcmp(decoder_name_ptr_, "h264_taco") == 0) {
+    if (decoder_name_ == "h264_taco") {
         if (!configureSpecialDecoder()) {
             // 🔧 修复：配置失败是致命错误，必须返回
             printf("❌ ERROR: Failed to configure special decoder options\n");
@@ -594,7 +593,7 @@ bool FfmpegDecodeVideoFileWorker::convertFrameTo(AVFrame* src_frame, void* dest,
 bool FfmpegDecodeVideoFileWorker::seek(int frame_index) {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
     close();
-    open(file_path_);
+    open(file_path_.c_str());
     return true;
 }
 
@@ -656,7 +655,7 @@ int FfmpegDecodeVideoFileWorker::getBytesPerPixel() const {
 }
 
 const char* FfmpegDecodeVideoFileWorker::getPath() const {
-    return file_path_;
+    return file_path_.c_str();
 }
 
 bool FfmpegDecodeVideoFileWorker::hasMoreFrames() const {
@@ -820,7 +819,7 @@ const char* FfmpegDecodeVideoFileWorker::getCodecName() const {
 
 void FfmpegDecodeVideoFileWorker::printStats() const {
     printf("\n📊 FfmpegDecodeVideoFileWorker Statistics:\n");
-    printf("   File: %s\n", file_path_);
+    printf("   File: %s\n", file_path_.c_str());
     printf("   Codec: %s\n", getCodecName());
     printf("   Resolution: %dx%d → %dx%d\n", width_, height_, output_width_, output_height_);
     printf("   Total frames: %d\n", total_frames_);
@@ -840,7 +839,7 @@ void FfmpegDecodeVideoFileWorker::printVideoInfo() const {
     AVCodecParameters* codecpar = stream->codecpar;
     
     printf("\n📹 Video Information:\n");
-    printf("   File: %s\n", file_path_);
+    printf("   File: %s\n", file_path_.c_str());
     printf("   Format: %s\n", format_ctx_ptr_->iformat->long_name);
     printf("   Codec: %s\n", avcodec_get_name(codecpar->codec_id));
     printf("   Resolution: %dx%d\n", codecpar->width, codecpar->height);

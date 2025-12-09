@@ -131,7 +131,7 @@ private:
     int video_stream_index_;
     
     // ============ RTSP 连接信息 ============
-    char rtsp_url_[MAX_RTSP_PATH_LENGTH];
+    std::string rtsp_url_;            // RTSP URL（使用 std::string 更安全）
     int width_;                        // 输出宽度
     int height_;                       // 输出高度
     int output_pixel_format_;          // 输出像素格式（如AV_PIX_FMT_BGRA）

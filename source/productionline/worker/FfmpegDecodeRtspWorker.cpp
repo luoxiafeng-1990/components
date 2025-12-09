@@ -36,7 +36,7 @@ FfmpegDecodeRtspWorker::FfmpegDecodeRtspWorker()
     , is_open_(false)
     , eof_reached_(false)
 {
-    rtsp_url_[0] = '\0';
+    // rtsp_url_ 使用 std::string，无需手动初始化
     
     // 🎯 父类已经创建好 AVFRAME 类型的 allocator_facade_，无需任何初始化代码
     
@@ -70,7 +70,7 @@ FfmpegDecodeRtspWorker::FfmpegDecodeRtspWorker(const WorkerConfig& config)
     , is_open_(false)
     , eof_reached_(false)
 {
-    rtsp_url_[0] = '\0';
+    // rtsp_url_ 使用 std::string，无需手动初始化
     
     // 初始化内部缓冲区（30帧）
     internal_buffer_.resize(30);
@@ -101,8 +101,7 @@ bool FfmpegDecodeRtspWorker::open(const char* path, int width, int height, int b
         close();
     }
     
-    strncpy(rtsp_url_, path, MAX_RTSP_PATH_LENGTH - 1);
-    rtsp_url_[MAX_RTSP_PATH_LENGTH - 1] = '\0';
+    rtsp_url_ = path;  // 使用 std::string 自动管理
     
     width_ = width;
     height_ = height;
@@ -120,7 +119,7 @@ bool FfmpegDecodeRtspWorker::open(const char* path, int width, int height, int b
             return false;
     }
     
-    printf("\n📡 Opening RTSP stream: %s\n", rtsp_url_);
+    printf("\n📡 Opening RTSP stream: %s\n", rtsp_url_.c_str());
     printf("   Output resolution: %dx%d\n", width_, height_);
     printf("   Bits per pixel: %d\n", bits_per_pixel);
     printf("   Reader: RtspVideoReader (FFmpeg)\n");
@@ -243,7 +242,7 @@ int FfmpegDecodeRtspWorker::getBytesPerPixel() const {
 }
 
 const char* FfmpegDecodeRtspWorker::getPath() const {
-    return rtsp_url_;
+    return rtsp_url_.c_str();
 }
 
 bool FfmpegDecodeRtspWorker::hasMoreFrames() const {
@@ -316,7 +315,7 @@ bool FfmpegDecodeRtspWorker::connectRTSP() {
     av_dict_set(&options, "max_delay", "500000", 0);    // 最大延迟0.5秒
     
     // 3. 打开RTSP流
-    int ret = avformat_open_input(&format_ctx_ptr_, rtsp_url_, nullptr, &options);
+    int ret = avformat_open_input(&format_ctx_ptr_, rtsp_url_.c_str(), nullptr, &options);
     av_dict_free(&options);
     
     if (ret < 0) {
