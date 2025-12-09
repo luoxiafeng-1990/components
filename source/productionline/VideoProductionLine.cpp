@@ -47,12 +47,6 @@ bool VideoProductionLine::start(const WorkerConfig& worker_config) {
     }
     
     printf("\n🎬 Starting VideoProductionLine...\n");
-    printf("   File: %s\n", worker_config.file.file_path);
-    printf("   Resolution: %dx%d\n", worker_config.output.width, worker_config.output.height);
-    printf("   Bits per pixel: %d\n", worker_config.output.bits_per_pixel);
-    printf("   Loop mode: %s\n", loop_ ? "enabled" : "disabled");
-    printf("   Thread count: %d\n", thread_count_);
-    
     // 创建共享的 BufferFillingWorkerFacade 对象（v2.2：只传入完整配置）
     worker_facade_sptr_ = std::make_shared<BufferFillingWorkerFacade>(worker_config);
     printf("   Worker type: %s\n", worker_facade_sptr_->getWorkerType());

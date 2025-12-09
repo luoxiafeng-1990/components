@@ -48,7 +48,7 @@ public:
      * @param config Worker配置（默认空配置）
      * @return Worker实例（智能指针）
      */
-    static std::unique_ptr<WorkerBase> create(WorkerType type = WorkerType::AUTO, const WorkerConfig& config = WorkerConfig());
+    static std::unique_ptr<WorkerBase> create(const WorkerConfig& config = WorkerConfig());
     
     /**
      * 从名称创建Worker

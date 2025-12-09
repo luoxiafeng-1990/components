@@ -10,7 +10,8 @@
 
 // ============ 公共接口 ============
 
-std::unique_ptr<WorkerBase> BufferFillingWorkerFactory::create(WorkerType type, const WorkerConfig& config) {
+std::unique_ptr<WorkerBase> BufferFillingWorkerFactory::create(const WorkerConfig& config) {
+    auto type = config.worker_type;
     // 1️⃣ 用户显式指定（最高优先级）
     if (type != WorkerType::AUTO) {
         printf("🏭 BufferFillingWorkerFactory: User specified type: %s\n", typeToString(type));
@@ -36,7 +37,7 @@ std::unique_ptr<WorkerBase> BufferFillingWorkerFactory::create(WorkerType type, 
     return autoDetect(config);
 }
 
-std::unique_ptr<WorkerBase> BufferFillingWorkerFactory::createByName(const char* name) {
+/* std::unique_ptr<WorkerBase> BufferFillingWorkerFactory::createByName(const char* name) {
     if (strcmp(name, "mmap") == 0 || strcmp(name, "mmap_raw") == 0) {
         return std::make_unique<MmapRawVideoFileWorker>();
     } else if (strcmp(name, "iouring") == 0 || strcmp(name, "iouring_raw") == 0) {
@@ -51,7 +52,7 @@ std::unique_ptr<WorkerBase> BufferFillingWorkerFactory::createByName(const char*
     
     printf("⚠️  Unknown worker type: %s, using mmap\n", name);
     return std::make_unique<MmapRawVideoFileWorker>();
-}
+} */
 
 bool BufferFillingWorkerFactory::isIoUringAvailable() {
     struct io_uring ring;

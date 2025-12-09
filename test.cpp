@@ -125,6 +125,11 @@ static int test_4frame_loop(const char* raw_video_path) {
                 .setBitsPerPixel(display.getBitsPerPixel())
                 .build()
         )
+        .setDecoderConfig(
+            DecoderConfigBuilder()
+                .useSoftware()  // 原始文件无需解码，使用软件解码作为默认配置
+                .build()
+        )
         .setWorkerType(WorkerType::MMAP_RAW)
         .build();
     
@@ -236,6 +241,11 @@ static int test_sequential_playback(const char* raw_video_path) {
             OutputConfigBuilder()
                 .setResolution(display.getWidth(), display.getHeight())
                 .setBitsPerPixel(display.getBitsPerPixel())
+                .build()
+        )
+        .setDecoderConfig(
+            DecoderConfigBuilder()
+                .useSoftware()  // 原始文件无需解码，使用软件解码作为默认配置
                 .build()
         )
         .setWorkerType(WorkerType::MMAP_RAW)
@@ -350,6 +360,11 @@ static int test_buffermanager_producer(const char* raw_video_path) {
                 .setBitsPerPixel(display.getBitsPerPixel())
                 .build()
         )
+        .setDecoderConfig(
+            DecoderConfigBuilder()
+                .useSoftware()  // 原始文件无需解码，使用软件解码作为默认配置
+                .build()
+        )
         .setWorkerType(WorkerType::MMAP_RAW)
         .build();
     
@@ -455,6 +470,11 @@ static int test_buffermanager_iouring(const char* raw_video_path) {
             OutputConfigBuilder()
                 .setResolution(display.getWidth(), display.getHeight())
                 .setBitsPerPixel(display.getBitsPerPixel())
+                .build()
+        )
+        .setDecoderConfig(
+            DecoderConfigBuilder()
+                .useSoftware()  // 原始文件无需解码，使用软件解码作为默认配置
                 .build()
         )
         .setWorkerType(WorkerType::IOURING_RAW)
@@ -599,6 +619,11 @@ static int test_rtsp_stream(const char* rtsp_url) {
                 .setBitsPerPixel(display.getBitsPerPixel())
                 .build()
         )
+        .setDecoderConfig(
+            DecoderConfigBuilder()
+                .useH264Taco()  // 使用 h264_taco 硬件解码器进行 RTSP 流解码
+                .build()
+        )
         .setWorkerType(WorkerType::FFMPEG_RTSP)
         .build();
     
@@ -733,6 +758,11 @@ static int test_h264_taco_video(const char* video_path) {
             OutputConfigBuilder()
                 .setResolution(display.getWidth(), display.getHeight())
                 .setBitsPerPixel(display.getBitsPerPixel())
+                .build()
+        )
+        .setDecoderConfig(
+            DecoderConfigBuilder()
+                .useH264Taco()  // 使用 h264_taco 硬件解码器进行视频文件解码
                 .build()
         )
         .setWorkerType(WorkerType::FFMPEG_VIDEO_FILE)

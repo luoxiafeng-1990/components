@@ -8,7 +8,7 @@ BufferFillingWorkerFacade::BufferFillingWorkerFacade(const WorkerConfig& config)
     , preferred_type_(config.worker_type)  // 从 config 获取 worker_type
 {
     if (!worker_base_uptr_) {
-        worker_base_uptr_ = BufferFillingWorkerFactory::create(preferred_type_, config_);
+        worker_base_uptr_ = BufferFillingWorkerFactory::create(config_);
     }
 }
 
@@ -42,7 +42,7 @@ const char* BufferFillingWorkerFacade::getWorkerType() const {
 bool BufferFillingWorkerFacade::open() {
     // 创建 worker（如果还没创建）
     if (!worker_base_uptr_) {
-        worker_base_uptr_ = BufferFillingWorkerFactory::create(preferred_type_, config_);
+        worker_base_uptr_ = BufferFillingWorkerFactory::create(config_);
     }
     
     if (!worker_base_uptr_) {

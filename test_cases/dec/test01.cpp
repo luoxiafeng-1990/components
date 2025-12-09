@@ -97,7 +97,7 @@ static int test_ffmpeg_worker_open_close(const char* video_path) {
     // 5. 清理
     printf("\n🔄 Closing worker...\n");
     worker_facade->close();
-    printf("✅ Worker closed successfully\n")
+    printf("✅ Worker closed successfully\n");
     printf("\n✅ Test completed successfully\n");
     printf("═══════════════════════════════════════════════════════\n\n");
     
