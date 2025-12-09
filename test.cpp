@@ -33,6 +33,7 @@
 #include "buffer/bufferpool/BufferPool.hpp"
 #include "buffer/bufferpool/BufferPoolRegistry.hpp"
 #include "productionline/VideoProductionLine.hpp"
+#include "common/Logger.hpp"
 
 // FFmpeg头文件（解码器测试使用）
 extern "C" {
@@ -83,9 +84,9 @@ static TestMode parse_test_mode(const char* mode_str) {
  * - 显示性能统计
  */
 static int test_4frame_loop(const char* raw_video_path) {
-    printf("\n═══════════════════════════════════════════════════════\n");
-    printf("  Test: Multi-Buffer Loop Display (Using VideoProductionLine)\n");
-    printf("═══════════════════════════════════════════════════════\n\n");
+    LOG_INFO("\n═══════════════════════════════════════════════════════");
+    LOG_INFO("  Test: Multi-Buffer Loop Display (Using VideoProductionLine)");
+    LOG_INFO("═══════════════════════════════════════════════════════\n");
     
     // 1. 初始化显示设备
     LinuxFramebufferDevice display;
@@ -98,13 +99,13 @@ static int test_4frame_loop(const char* raw_video_path) {
     // 2. 获取 display 的 BufferPool（framebuffer 已托管，v2.0: 通过 Registry 获取）
     uint64_t pool_id = display.getBufferPoolId();
     if (pool_id == 0) {
-        printf("❌ ERROR: Display BufferPool not initialized\n");
+        LOG_ERROR("Display BufferPool not initialized");
         return -1;
     }
     auto pool_weak = BufferPoolRegistry::getInstance().getPool(pool_id);
     auto pool_sptr = pool_weak.lock();
     if (!pool_sptr) {
-        printf("❌ ERROR: Display BufferPool (ID: %lu) not found or already destroyed\n", pool_id);
+        LOG_ERROR_FMT("Display BufferPool (ID: %lu) not found or already destroyed", pool_id);
         return -1;
     }
     BufferPool& pool = *pool_sptr;
@@ -135,20 +136,20 @@ static int test_4frame_loop(const char* raw_video_path) {
     
     // 设置错误回调
     producer.setErrorCallback([](const std::string& error) {
-        printf("\n❌ Producer Error: %s\n", error.c_str());
+        LOG_ERROR_FMT("Producer Error: %s", error.c_str());
         g_running = false;
     });
     
     if (!producer.start(workerConfig)) {
-        printf("❌ Failed to start video producer\n");
+        LOG_ERROR("Failed to start video producer");
         return -1;
     }
     
     // 5. 加载帧到 framebuffer（从Worker的BufferPool获取）
-    printf("\n📥 Loading %d frames into framebuffer...\n", buffer_count);
+    LOG_INFO_FMT("Loading %d frames into framebuffer...", buffer_count);
     BufferPool* worker_pool = producer.getWorkingBufferPool();
     if (!worker_pool) {
-        printf("❌ ERROR: Worker failed to create BufferPool\n");
+        LOG_ERROR("Worker failed to create BufferPool");
         producer.stop();
         return -1;
     }
@@ -158,7 +159,7 @@ static int test_4frame_loop(const char* raw_video_path) {
     for (int i = 0; i < buffer_count; i++) {
         Buffer* filled_buffer = worker_pool->acquireFilled(true, 5000);
         if (!filled_buffer || !filled_buffer->isValid()) {
-            printf("❌ ERROR: Failed to acquire filled buffer %d\n", i);
+            LOG_ERROR_FMT("Failed to acquire filled buffer %d", i);
             producer.stop();
             return -1;
         }
@@ -187,8 +188,8 @@ static int test_4frame_loop(const char* raw_video_path) {
     // 7. 停止生产者
     producer.stop();
     
-    printf("\n🛑 Playback stopped\n\n");
-    printf("\n✅ Test completed successfully\n");
+    LOG_INFO("Playback stopped");
+    LOG_INFO("Test completed successfully");
     
     return 0;
 }
@@ -202,9 +203,9 @@ static int test_4frame_loop(const char* raw_video_path) {
  * - 展示生产者-消费者模式
  */
 static int test_sequential_playback(const char* raw_video_path) {
-    printf("\n═══════════════════════════════════════════════════════\n");
-    printf("  Test: Sequential Playback (Using VideoProductionLine)\n");
-    printf("═══════════════════════════════════════════════════════\n\n");
+    LOG_INFO("\n═══════════════════════════════════════════════════════");
+    LOG_INFO("  Test: Sequential Playback (Using VideoProductionLine)");
+    LOG_INFO("═══════════════════════════════════════════════════════\n");
     
     // 1. 初始化显示设备
     LinuxFramebufferDevice display;
@@ -215,13 +216,13 @@ static int test_sequential_playback(const char* raw_video_path) {
     // 2. 获取 display 的 BufferPool（framebuffer 已托管，v2.0: 通过 Registry 获取）
     uint64_t pool_id = display.getBufferPoolId();
     if (pool_id == 0) {
-        printf("❌ ERROR: Display BufferPool not initialized\n");
+        LOG_ERROR("Display BufferPool not initialized");
         return -1;
     }
     auto pool_weak = BufferPoolRegistry::getInstance().getPool(pool_id);
     auto pool_sptr = pool_weak.lock();
     if (!pool_sptr) {
-        printf("❌ ERROR: Display BufferPool (ID: %lu) not found or already destroyed\n", pool_id);
+        LOG_ERROR_FMT("Display BufferPool (ID: %lu) not found or already destroyed", pool_id);
         return -1;
     }
     BufferPool& pool = *pool_sptr;
@@ -253,23 +254,23 @@ static int test_sequential_playback(const char* raw_video_path) {
     
     // 设置错误回调
     producer.setErrorCallback([](const std::string& error) {
-        printf("\n❌ Producer Error: %s\n", error.c_str());
+        LOG_ERROR_FMT("Producer Error: %s", error.c_str());
         g_running = false;
     });
     
     if (!producer.start(workerConfig)) {
-        printf("❌ Failed to start video producer\n");
+        LOG_ERROR("Failed to start video producer");
         return -1;
     }
     
     // 5. 开始播放
-    printf("\n🎬 Starting sequential playback (Ctrl+C to stop)...\n\n");
+    LOG_INFO("Starting sequential playback (Ctrl+C to stop)...");
     
     // 6. 消费者循环：从 BufferPool 获取 buffer 并显示
     int frame_count = 0;
     BufferPool* worker_pool = producer.getWorkingBufferPool();
     if (!worker_pool) {
-        printf("❌ ERROR: Worker failed to create BufferPool\n");
+        LOG_ERROR("Worker failed to create BufferPool");
         producer.stop();
         return -1;
     }
@@ -285,7 +286,7 @@ static int test_sequential_playback(const char* raw_video_path) {
         // 直接显示（零拷贝）
         display.waitVerticalSync();
         if (!display.displayFilledFramebuffer(filled_buffer)) {
-            printf("⚠️  Warning: Failed to display buffer\n");
+            LOG_WARN("Failed to display buffer");
         }
         
         // 归还 buffer 到空闲队列
@@ -294,17 +295,17 @@ static int test_sequential_playback(const char* raw_video_path) {
         
         // 每100帧打印一次进度
         if (frame_count % 100 == 0) {
-            printf("   Frames displayed: %d (%.1f fps)\n", 
-                   frame_count, producer.getAverageFPS());
+            LOG_DEBUG_FMT("Frames displayed: %d (%.1f fps)", 
+                          frame_count, producer.getAverageFPS());
         }
     }
     
     // 7. 停止生产者
     producer.stop();
     
-    printf("\n🛑 Playback stopped\n\n");
-    printf("   Total frames played: %d\n", frame_count);
-    printf("\n✅ Test completed successfully\n");
+    LOG_INFO("Playback stopped");
+    LOG_INFO_FMT("Total frames played: %d", frame_count);
+    LOG_INFO("Test completed successfully");
     return 0;
 }
 
@@ -318,9 +319,9 @@ static int test_sequential_playback(const char* raw_video_path) {
  * - 展示生产者-消费者模式的解耦架构
  */
 static int test_buffermanager_producer(const char* raw_video_path) {
-    printf("\n═══════════════════════════════════════════════════════\n");
-    printf("  Test: BufferPool + VideoProductionLine (New Architecture)\n");
-    printf("═══════════════════════════════════════════════════════\n\n");
+    LOG_INFO("\n═══════════════════════════════════════════════════════");
+    LOG_INFO("  Test: BufferPool + VideoProductionLine (New Architecture)");
+    LOG_INFO("═══════════════════════════════════════════════════════\n");
     
     // 1. 初始化显示设备
     LinuxFramebufferDevice display;
@@ -331,13 +332,13 @@ static int test_buffermanager_producer(const char* raw_video_path) {
     // 2. 获取 display 的 BufferPool（framebuffer 已托管，v2.0: 通过 Registry 获取）
     uint64_t pool_id = display.getBufferPoolId();
     if (pool_id == 0) {
-        printf("❌ ERROR: Display BufferPool not initialized\n");
+        LOG_ERROR("Display BufferPool not initialized");
         return -1;
     }
     auto pool_weak = BufferPoolRegistry::getInstance().getPool(pool_id);
     auto pool_sptr = pool_weak.lock();
     if (!pool_sptr) {
-        printf("❌ ERROR: Display BufferPool (ID: %lu) not found or already destroyed\n", pool_id);
+        LOG_ERROR_FMT("Display BufferPool (ID: %lu) not found or already destroyed", pool_id);
         return -1;
     }
     BufferPool& pool = *pool_sptr;
@@ -370,12 +371,12 @@ static int test_buffermanager_producer(const char* raw_video_path) {
     
     // 设置错误回调
     producer.setErrorCallback([](const std::string& error) {
-        printf("\n❌ Producer Error: %s\n", error.c_str());
+        LOG_ERROR_FMT("Producer Error: %s", error.c_str());
         g_running = false;
     });
     
     if (!producer.start(workerConfig)) {
-        printf("❌ Failed to start video producer\n");
+        LOG_ERROR("Failed to start video producer");
         return -1;
     }
     
@@ -392,15 +393,15 @@ static int test_buffermanager_producer(const char* raw_video_path) {
         // 直接显示（无需拷贝，buffer 本身就是 framebuffer）
         display.waitVerticalSync();
         if (!display.displayFilledFramebuffer(filled_buffer)) {
-            printf("⚠️  Warning: Failed to display buffer\n");
+            LOG_WARN("Failed to display buffer");
         }
         // 归还 buffer 到空闲队列
         pool.releaseFilled(filled_buffer);
         frame_count++;
         // 每100帧打印一次进度
         if (frame_count % 100 == 0) {
-            printf("   Frames displayed: %d (%.1f fps)\n", 
-                   frame_count, producer.getAverageFPS());
+            LOG_DEBUG_FMT("Frames displayed: %d (%.1f fps)", 
+                          frame_count, producer.getAverageFPS());
         }
     }
     
@@ -419,12 +420,12 @@ static int test_buffermanager_producer(const char* raw_video_path) {
  * - 暂时使用普通 VideoProductionLine 作为替代
  */
 static int test_buffermanager_iouring(const char* raw_video_path) {
-    printf("\n═══════════════════════════════════════════════════════\n");
-    printf("  Test: io_uring Mode (using VideoProductionLine temporarily)\n");
-    printf("═══════════════════════════════════════════════════════\n\n");
+    LOG_INFO("\n═══════════════════════════════════════════════════════");
+    LOG_INFO("  Test: io_uring Mode (using VideoProductionLine temporarily)");
+    LOG_INFO("═══════════════════════════════════════════════════════\n");
     
-    printf("ℹ️  Note: IoUringVideoProductionLine not yet implemented in new architecture\n");
-    printf("   Using standard VideoProductionLine as fallback\n\n");
+    LOG_INFO("Note: IoUringVideoProductionLine not yet implemented in new architecture");
+    LOG_INFO("Using standard VideoProductionLine as fallback");
     
     // 1. 初始化显示设备
     LinuxFramebufferDevice display;
@@ -432,33 +433,31 @@ static int test_buffermanager_iouring(const char* raw_video_path) {
         return -1;
     }
     
-    printf("📺 Display initialized:\n");
-    printf("   Resolution: %dx%d\n", display.getWidth(), display.getHeight());
-    printf("   Bits per pixel: %d\n", display.getBitsPerPixel());
-    printf("   Buffer count: %d\n", display.getBufferCount());
+    LOG_INFO_FMT("Display initialized: Resolution: %dx%d, Bits per pixel: %d, Buffer count: %d",
+                 display.getWidth(), display.getHeight(), display.getBitsPerPixel(), display.getBufferCount());
     
     // 2. 获取 display 的 BufferPool（v2.0: 通过 Registry 获取）
     uint64_t pool_id = display.getBufferPoolId();
     if (pool_id == 0) {
-        printf("❌ ERROR: Display BufferPool not initialized\n");
+        LOG_ERROR("Display BufferPool not initialized");
         return -1;
     }
     auto pool_weak = BufferPoolRegistry::getInstance().getPool(pool_id);
     auto pool_sptr = pool_weak.lock();
     if (!pool_sptr) {
-        printf("❌ ERROR: Display BufferPool (ID: %lu) not found or already destroyed\n", pool_id);
+        LOG_ERROR_FMT("Display BufferPool (ID: %lu) not found or already destroyed", pool_id);
         return -1;
     }
     BufferPool& pool = *pool_sptr;
     
-    printf("\n📦 Using LinuxFramebufferDevice's BufferPool\n");
+    LOG_INFO("Using LinuxFramebufferDevice's BufferPool");
     pool.printStats();
     
     // 3. 创建 VideoProductionLine（Worker会自动创建BufferPool）
     VideoProductionLine producer(true, 1);  // loop=true, thread_count=1
     
-    printf("\n🎬 Starting video producer (io_uring mode)...\n");
-    printf("   Using 1 producer thread with io_uring async I/O\n");
+    LOG_INFO("Starting video producer (io_uring mode)");
+    LOG_INFO("Using 1 producer thread with io_uring async I/O");
     
     auto workerConfig = WorkerConfigBuilder()
         .setFileConfig(
@@ -481,17 +480,17 @@ static int test_buffermanager_iouring(const char* raw_video_path) {
         .build();
     
     producer.setErrorCallback([](const std::string& error) {
-        printf("\n❌ Producer Error: %s\n", error.c_str());
+        LOG_ERROR_FMT("Producer Error: %s", error.c_str());
         g_running = false;
     });
     
     if (!producer.start(workerConfig)) {
-        printf("❌ Failed to start video producer\n");
+        LOG_ERROR("Failed to start video producer");
         return -1;
     }
     
-    printf("✅ Video producer started\n");
-    printf("\n🎥 Starting display loop (Ctrl+C to stop)...\n\n");
+    LOG_INFO("Video producer started");
+    LOG_INFO("Starting display loop (Ctrl+C to stop)...");
     
     // 4. 消费者循环
     int frame_count = 0;
@@ -504,35 +503,32 @@ static int test_buffermanager_iouring(const char* raw_video_path) {
         
         display.waitVerticalSync();
         if (!display.displayFilledFramebuffer(filled_buffer)) {
-            printf("⚠️  Warning: Failed to display buffer\n");
+            LOG_WARN("Failed to display buffer");
         }
         
         pool.releaseFilled(filled_buffer);
         frame_count++;
         
         if (frame_count % 100 == 0) {
-            printf("   Frames displayed: %d (%.1f fps)\n", 
-                   frame_count, producer.getAverageFPS());
+            LOG_DEBUG_FMT("Frames displayed: %d (%.1f fps)", 
+                          frame_count, producer.getAverageFPS());
         }
     }
     
     // 5. 停止生产者
-    printf("\n\n🛑 Stopping video producer...\n");
+    LOG_INFO("Stopping video producer...");
     producer.stop();
     
-    printf("🛑 Playback stopped\n\n");
+    LOG_INFO("Playback stopped");
     
     // 6. 打印统计
-    printf("📊 Final Statistics:\n");
-    printf("   Frames displayed: %d\n", frame_count);
-    printf("   Frames produced: %d\n", producer.getProducedFrames());
-    printf("   Frames skipped: %d\n", producer.getSkippedFrames());
-    printf("   Average FPS: %.2f\n", producer.getAverageFPS());
+    LOG_DEBUG_FMT("Final Statistics: Frames displayed: %d, Frames produced: %d, Frames skipped: %d, Average FPS: %.2f",
+                  frame_count, producer.getProducedFrames(), producer.getSkippedFrames(), producer.getAverageFPS());
     
     pool.printStats();
     
-    printf("\n✅ Test completed successfully\n");
-    printf("\nℹ️  TODO: Implement IoUringVideoProductionLine for true async I/O performance\n");
+    LOG_INFO("Test completed successfully");
+    LOG_INFO("TODO: Implement IoUringVideoProductionLine for true async I/O performance");
     
     return 0;
 }
@@ -582,31 +578,31 @@ static int test_buffermanager_iouring(const char* raw_video_path) {
  * - 零拷贝路径：解码器输出 → DMA → 显示，无中间拷贝
  */
 static int test_rtsp_stream(const char* rtsp_url) {
-    printf("\n═══════════════════════════════════════════════════════\n");
-    printf("  Test: RTSP Stream Playback (Independent BufferPool + DMA)\n");
-    printf("═══════════════════════════════════════════════════════\n\n");
+    LOG_INFO("\n═══════════════════════════════════════════════════════");
+    LOG_INFO("  Test: RTSP Stream Playback (Independent BufferPool + DMA)");
+    LOG_INFO("═══════════════════════════════════════════════════════\n");
     
-    printf("ℹ️  Zero-Copy Workflow:\n");
-    printf("   1. Worker opens RTSP stream and automatically creates BufferPool (if needed)\n");
-    printf("   2. Worker decodes RTSP → AVFrame with phys_addr\n");
-    printf("   3. Worker injects Buffer to its BufferPool\n");
-    printf("   4. Consumer acquires Buffer from Worker's BufferPool\n");
-    printf("   5. display.displayBufferByDMA(buffer) → DMA zero-copy\n");
-    printf("   6. Consumer releases Buffer → triggers deleter\n\n");
+    LOG_INFO("Zero-Copy Workflow:");
+    LOG_INFO("  1. Worker opens RTSP stream and automatically creates BufferPool (if needed)");
+    LOG_INFO("  2. Worker decodes RTSP → AVFrame with phys_addr");
+    LOG_INFO("  3. Worker injects Buffer to its BufferPool");
+    LOG_INFO("  4. Consumer acquires Buffer from Worker's BufferPool");
+    LOG_INFO("  5. display.displayBufferByDMA(buffer) → DMA zero-copy");
+    LOG_INFO("  6. Consumer releases Buffer → triggers deleter");
     
     // 1. 初始化显示设备
-    printf("🖥️  Initializing display device...\n");
+    LOG_INFO("Initializing display device...");
     LinuxFramebufferDevice display;
     if (!display.initialize(0)) {
         return -1;
     }
     
     // 2. 创建 VideoProductionLine（Worker会在open()时自动调用Allocator创建BufferPool）
-    printf("📹 Creating VideoProductionLine...\n");
+    LOG_INFO("Creating VideoProductionLine...");
     VideoProductionLine producer(false, 1);  // loop=false, thread_count=1
     
     // 4. 配置 RTSP 流（注意：推荐单线程）
-    printf("🔗 Configuring RTSP stream: %s\n", rtsp_url);
+    LOG_INFO_FMT("Configuring RTSP stream: %s", rtsp_url);
     auto workerConfig = WorkerConfigBuilder()
         .setFileConfig(
             FileConfigBuilder()
@@ -629,30 +625,30 @@ static int test_rtsp_stream(const char* rtsp_url) {
     
     // 5. 设置错误回调
     producer.setErrorCallback([](const std::string& error) {
-        printf("\n❌ RTSP Error: %s\n", error.c_str());
+        LOG_ERROR_FMT("RTSP Error: %s", error.c_str());
         g_running = false;
     });
     
     // 6. 启动生产者（内部会创建RTSP Reader并启用零拷贝）
-    printf("🚀 Starting RTSP producer...\n");
+    LOG_INFO("Starting RTSP producer...");
     if (!producer.start(workerConfig)) {
-        printf("❌ Failed to start RTSP producer\n");
+        LOG_ERROR("Failed to start RTSP producer");
         return -1;
     }
     
-    printf("\n✅ RTSP stream connected, starting playback...\n");
-    printf("   Press Ctrl+C to stop\n");
-    printf("   Watch for '[DMA Display]' messages below\n\n");
+    LOG_INFO("RTSP stream connected, starting playback...");
+    LOG_INFO("Press Ctrl+C to stop");
+    LOG_INFO("Watch for '[DMA Display]' messages below");
     
     // 7. 获取工作BufferPool（Worker创建的或fallback的）
     BufferPool* working_pool = producer.getWorkingBufferPool();
     if (!working_pool) {
-        printf("❌ ERROR: No working BufferPool available\n");
+        LOG_ERROR("No working BufferPool available");
         return -1;
     }
     
-    printf("✅ Using BufferPool: '%s' (created by Worker via Allocator)\n", 
-           working_pool->getName().c_str());
+    LOG_INFO_FMT("Using BufferPool: '%s' (created by Worker via Allocator)", 
+                 working_pool->getName().c_str());
     working_pool->printStats();
     
     // 8. 消费者循环：从工作BufferPool获取并通过DMA显示
@@ -677,8 +673,8 @@ static int test_rtsp_stream(const char* rtsp_url) {
             dma_success++;
         } else {
             dma_failed++;
-            printf("⚠️  Warning: DMA display failed for buffer (phys_addr=0x%llx)\n",
-                   (unsigned long long)decoded_buffer->getPhysicalAddress());
+            LOG_WARN_FMT("DMA display failed for buffer (phys_addr=0x%llx)",
+                        (unsigned long long)decoded_buffer->getPhysicalAddress());
         }
         
         // 归还 buffer（会触发 RtspVideoReader 的 deleter 回收 AVFrame）
@@ -688,23 +684,23 @@ static int test_rtsp_stream(const char* rtsp_url) {
         
         // 每100帧打印一次统计
         if (frame_count % 100 == 0) {
-            printf("📊 Progress: %d frames displayed (%.1f fps, DMA success: %d, failed: %d)\n", 
-                   frame_count, producer.getAverageFPS(), dma_success, dma_failed);
+            LOG_DEBUG_FMT("Progress: %d frames displayed (%.1f fps, DMA success: %d, failed: %d)", 
+                          frame_count, producer.getAverageFPS(), dma_success, dma_failed);
         }
     }
     
     // 8. 停止生产者
-    printf("\n\n🛑 Stopping RTSP producer...\n");
+    LOG_INFO("Stopping RTSP producer...");
     producer.stop();
     
-    printf("\n✅ RTSP test completed\n");
-    printf("   Total frames displayed: %d\n", frame_count);
-    printf("   DMA display success: %d\n", dma_success);
-    printf("   DMA display failed: %d\n", dma_failed);
-    printf("   Success rate: %.1f%%\n", 
-           frame_count > 0 ? (100.0 * dma_success / frame_count) : 0.0);
+    LOG_INFO("RTSP test completed");
+    LOG_INFO_FMT("Total frames displayed: %d", frame_count);
+    LOG_INFO_FMT("DMA display success: %d", dma_success);
+    LOG_INFO_FMT("DMA display failed: %d", dma_failed);
+    LOG_INFO_FMT("Success rate: %.1f%%", 
+                 frame_count > 0 ? (100.0 * dma_success / frame_count) : 0.0);
     
-    printf("\n📦 Final BufferPool statistics:\n");
+    LOG_INFO("Final BufferPool statistics:");
     working_pool->printStats();
     
     return 0;
@@ -729,24 +725,23 @@ static int test_rtsp_stream(const char* rtsp_url) {
  * @param video_path 视频文件路径（如 "video.mp4"）
  */
 static int test_h264_taco_video(const char* video_path) {
-    printf("\n═══════════════════════════════════════════════════════\n");
-    printf("  Test: FFmpeg Encoded Video Playback\n");
-    printf("  File: %s\n", video_path);
-    printf("═══════════════════════════════════════════════════════\n\n");
+    LOG_INFO("\n═══════════════════════════════════════════════════════");
+    LOG_INFO_FMT("  Test: FFmpeg Encoded Video Playback - File: %s", video_path);
+    LOG_INFO("═══════════════════════════════════════════════════════\n");
     
     // 1. 初始化显示设备
-    printf("🖥️  Initializing display device...\n");
+    LOG_INFO("Initializing display device...");
     LinuxFramebufferDevice display;
     if (!display.initialize(0)) {
         return -1;
     }
     
     // 2. 创建 VideoProductionLine（Worker会在open()时自动调用Allocator创建BufferPool）
-    printf("\n\n📹 Creating VideoProductionLine...\n");
+    LOG_INFO("Creating VideoProductionLine...");
     VideoProductionLine producer(true, 1);  // loop=true, thread_count=1
     
     // 4. 配置 FFmpeg 解码
-    printf("\n\n🎬 Configuring FFmpeg video reader: %s\n", video_path);
+    LOG_INFO_FMT("Configuring FFmpeg video reader: %s", video_path);
     
     auto workerConfig = WorkerConfigBuilder()
         .setFileConfig(
@@ -770,29 +765,29 @@ static int test_h264_taco_video(const char* video_path) {
     
     // 5. 设置错误回调
     producer.setErrorCallback([](const std::string& error) {
-        printf("\n❌ FFmpeg Error: %s\n", error.c_str());
+        LOG_ERROR_FMT("FFmpeg Error: %s", error.c_str());
         g_running = false;
     });
     
     // 6. 启动生产者
-    printf("🚀 Starting FFmpeg video producer...\n");
+    LOG_INFO("Starting FFmpeg video producer...");
     if (!producer.start(workerConfig)) {
-        printf("❌ Failed to start FFmpeg producer\n");
+        LOG_ERROR("Failed to start FFmpeg producer");
         return -1;
     }
     
-    printf("\n✅ Video decoding started, starting playback...\n");
-    printf("   Press Ctrl+C to stop\n\n");
+    LOG_INFO("Video decoding started, starting playback...");
+    LOG_INFO("Press Ctrl+C to stop");
     
     // 7. 获取工作BufferPool（Worker创建的或fallback的）
     BufferPool* working_pool = producer.getWorkingBufferPool();
     if (!working_pool) {
-        printf("❌ ERROR: No working BufferPool available\n");
+        LOG_ERROR("No working BufferPool available");
         return -1;
     }
     
-    printf("✅ Using BufferPool: '%s' (created by Worker via Allocator)\n", 
-           working_pool->getName().c_str());
+    LOG_INFO_FMT("Using BufferPool: '%s' (created by Worker via Allocator)", 
+                 working_pool->getName().c_str());
     working_pool->printStats();
     
     // 8. 消费者循环
@@ -808,7 +803,7 @@ static int test_h264_taco_video(const char* video_path) {
         display.waitVerticalSync();
         // 零拷贝模式：使用 DMA 显示
         if (!display.displayBufferByDMA(filled_buffer)) {
-            printf("⚠️  Warning: DMA display failed, falling back to normal\n");
+            LOG_WARN("DMA display failed, falling back to normal");
             display.displayFilledFramebuffer(filled_buffer);
         }
         // 归还 buffer
@@ -818,22 +813,22 @@ static int test_h264_taco_video(const char* video_path) {
         
         // 每100帧打印一次统计
         if (frame_count % 100 == 0) {
-            printf("📊 Frames displayed: %d (%.1f fps)\n", 
-                   frame_count, producer.getAverageFPS());
+            LOG_DEBUG_FMT("Frames displayed: %d (%.1f fps)", 
+                          frame_count, producer.getAverageFPS());
         }
     }
     
     // 8. 停止生产者
-    printf("\n\n🛑 Stopping FFmpeg producer...\n");
+    LOG_INFO("Stopping FFmpeg producer...");
     producer.stop();
     
-    printf("\n✅ FFmpeg video test completed\n");
-    printf("   Total frames displayed: %d\n", frame_count);
-    printf("   Frames produced: %d\n", producer.getProducedFrames());
-    printf("   Frames skipped: %d\n", producer.getSkippedFrames());
-    printf("   Average FPS: %.2f\n", producer.getAverageFPS());
+    LOG_INFO("FFmpeg video test completed");
+    LOG_INFO_FMT("Total frames displayed: %d", frame_count);
+    LOG_INFO_FMT("Frames produced: %d", producer.getProducedFrames());
+    LOG_INFO_FMT("Frames skipped: %d", producer.getSkippedFrames());
+    LOG_INFO_FMT("Average FPS: %.2f", producer.getAverageFPS());
     
-    printf("\n📦 Final BufferPool statistics:\n");
+    LOG_INFO("Final BufferPool statistics:");
     working_pool->printStats();
     
     return 0;
@@ -882,6 +877,9 @@ static void print_usage(const char* prog_name) {
  * 主函数
  */
 int main(int argc, char* argv[]) {
+    // 初始化日志系统
+    INIT_LOGGER("log4cplus.properties");
+    
     const char* raw_video_path = NULL;
     const char* mode = "loop";  // 默认模式：循环播放
     
@@ -928,7 +926,7 @@ int main(int argc, char* argv[]) {
     
     // 检查是否提供了视频文件路径
     if (!raw_video_path) {
-        printf("Error: Missing raw video file path\n\n");
+        LOG_ERROR("Missing raw video file path");
         print_usage(argv[0]);
         return 1;
     }
@@ -962,7 +960,7 @@ int main(int argc, char* argv[]) {
         
         case TestMode::UNKNOWN:
         default:
-            printf("Error: Unknown mode '%s'\n\n", mode);
+            LOG_ERROR_FMT("Unknown mode '%s'", mode);
             print_usage(argv[0]);
             return 1;
     }

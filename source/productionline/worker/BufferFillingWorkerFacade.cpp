@@ -5,7 +5,6 @@
 
 BufferFillingWorkerFacade::BufferFillingWorkerFacade(const WorkerConfig& config)
     : config_(config)
-    , preferred_type_(config.worker_type)  // 从 config 获取 worker_type
 {
     if (!worker_base_uptr_) {
         worker_base_uptr_ = BufferFillingWorkerFactory::create(config_);
@@ -16,25 +15,15 @@ BufferFillingWorkerFacade::~BufferFillingWorkerFacade() {
     // worker_base_uptr_ 会自动调用析构函数（智能指针）
 }
 
-// ============ Worker类型控制 ============
-
-void BufferFillingWorkerFacade::setWorkerType(BufferFillingWorkerFactory::WorkerType type) {
-    if (worker_base_uptr_ && worker_base_uptr_->isOpen()) {
-        printf("⚠️  Warning: Cannot change worker type while file is open\n");
-        return;
-    }
-    
-    preferred_type_ = type;
-    worker_base_uptr_.reset();  // 清除旧的 worker
-}
+// ============ Buffer填充方法 ============
 
 const char* BufferFillingWorkerFacade::getWorkerType() const {
     if (worker_base_uptr_) {
         // Worker 已创建：返回实际 Worker 的类型
         return worker_base_uptr_->getWorkerType();
     }
-    // Worker 未创建：返回用户设置的偏好类型
-    return BufferFillingWorkerFactory::typeToString(preferred_type_);
+    // Worker 未创建：返回 config_ 中设置的 worker_type
+    return BufferFillingWorkerFactory::typeToString(config_.worker_type);
 }
 
 // ============ 文件操作（门面转发） ============
@@ -65,8 +54,8 @@ bool BufferFillingWorkerFacade::open() {
     // - Raw视频Worker（MMAP_RAW, IOURING_RAW）：需要格式参数
     // - 编码视频Worker（FFMPEG_VIDEO_FILE, FFMPEG_RTSP）：自动检测格式
     
-    bool is_raw_worker = (preferred_type_ == BufferFillingWorkerFactory::WorkerType::MMAP_RAW ||
-                          preferred_type_ == BufferFillingWorkerFactory::WorkerType::IOURING_RAW);
+    bool is_raw_worker = (config_.worker_type == BufferFillingWorkerFactory::WorkerType::MMAP_RAW ||
+                          config_.worker_type == BufferFillingWorkerFactory::WorkerType::IOURING_RAW);
     
     if (is_raw_worker) {
         // Raw视频Worker：需要格式参数

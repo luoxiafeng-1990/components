@@ -35,35 +35,23 @@
  * 
  * 使用方式（统一智能接口）：
  * 
- * **编码视频（MP4, AVI, RTSP等）：**
+ * **使用方式（推荐）：**
  * ```cpp
- * BufferFillingWorkerFacade worker;
- * worker.setWorkerType(BufferFillingWorkerFactory::WorkerType::FFMPEG_VIDEO_FILE);
- * worker.open("video.mp4");  // 自动检测格式，无需指定宽高
- * worker.fillBuffer(0, &buffer);
- * ```
+ * // 通过 WorkerConfig 配置 Worker 类型和所有参数
+ * WorkerConfig config;
+ * config.worker_type = WorkerType::FFMPEG_VIDEO_FILE;
+ * config.file.file_path = "video.mp4";
  * 
- * **Raw视频：**
- * ```cpp
- * BufferFillingWorkerFacade worker;
- * worker.setWorkerType(BufferFillingWorkerFactory::WorkerType::MMAP_RAW);
- * worker.open("video.raw", 1920, 1080, 32);  // 指定格式参数
+ * BufferFillingWorkerFacade worker(config);
+ * worker.open();  // 所有参数从 config 获取
  * worker.fillBuffer(0, &buffer);
- * ```
- * 
- * **通用方式（推荐）：**
- * ```cpp
- * // 调用者无需关心视频类型，只需传入所有可能需要的参数
- * // 门面类会根据Worker类型自动判断是否使用这些参数
- * worker.open(path, width, height, bpp);
  * ```
  */
 class BufferFillingWorkerFacade {
 private:
     // ============ 门面模式：持有具体实现 ============
     std::unique_ptr<WorkerBase> worker_base_uptr_;  // 实际的Worker实现（统一基类）
-    BufferFillingWorkerFactory::WorkerType preferred_type_;  // 用户偏好的类型
-    WorkerConfig config_;  // Worker配置
+    WorkerConfig config_;  // Worker配置（包含 worker_type 和所有配置参数）
 
 public:
     // ============ 构造/析构 ============
@@ -82,14 +70,6 @@ public:
     // 禁止拷贝
     BufferFillingWorkerFacade(const BufferFillingWorkerFacade&) = delete;
     BufferFillingWorkerFacade& operator=(const BufferFillingWorkerFacade&) = delete;
-    
-    // ============ Worker类型控制 ============
-    
-    /**
-     * 设置Worker类型（在 open 之前调用）
-     * @param type Worker类型
-     */
-    void setWorkerType(BufferFillingWorkerFactory::WorkerType type);
     
     // ============ Buffer填充方法（原IBufferFillingWorker的方法）============
     

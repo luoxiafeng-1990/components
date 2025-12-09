@@ -1057,8 +1057,8 @@ classDiagram
 graph TD
     subgraph "productionline/worker/"
         VPL[VideoProductionLine.hpp<br/>应用层]
-        BFW[facade/BufferFillingWorkerFacade.hpp<br/>🎭门面 v2.1]
-        BFWFactory[factory/BufferFillingWorkerFactory.hpp<br/>🏭工厂]
+        BFW[BufferFillingWorkerFacade.hpp<br/>🎭门面 v2.1]
+        BFWFactory[BufferFillingWorkerFactory.hpp<br/>🏭工厂]
         IVFN[interface/IVideoFileNavigator.hpp<br/>📋接口]
         WB[base/WorkerBase.hpp<br/>🔷基类]
         WorkerImpl[implementation/*.hpp<br/>实现类]

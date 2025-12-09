@@ -1,6 +1,7 @@
 #include "productionline/VideoProductionLine.hpp"
 #include "buffer/bufferpool/BufferPoolRegistry.hpp"
 #include "monitor/Timer.hpp"
+#include "common/Logger.hpp"
 #include <stdio.h>
 #include <chrono>
 #include <string>
@@ -21,15 +22,15 @@ VideoProductionLine::VideoProductionLine(bool loop, int thread_count)
     , total_frames_(0)
 {
     if (thread_count < 1) {
-        printf("⚠️  Warning: Invalid thread_count (%d), using default value 1\n", thread_count);
+        LOG_WARN_FMT("Invalid thread_count (%d), using default value 1", thread_count);
         thread_count_ = 1;
     }
-    printf("🎬 VideoProductionLine created (loop=%s, thread_count=%d)\n", 
-           loop_ ? "enabled" : "disabled", thread_count_);
+    LOG_INFO_FMT("VideoProductionLine created (loop=%s, thread_count=%d)", 
+                 loop_ ? "enabled" : "disabled", thread_count_);
 }
 
 VideoProductionLine::~VideoProductionLine() {
-    printf("🧹 Destroying VideoProductionLine...\n");
+    LOG_INFO("Destroying VideoProductionLine...");
     if (running_) {
         stop();
     }
@@ -42,14 +43,14 @@ VideoProductionLine::~VideoProductionLine() {
 bool VideoProductionLine::start(const WorkerConfig& worker_config) {
     // 检查是否已经在运行
     if (running_) {
-        printf("⚠️  Warning: VideoProductionLine already running\n");
+        LOG_WARN("VideoProductionLine already running");
         return false;
     }
     
-    printf("\n🎬 Starting VideoProductionLine...\n");
+    LOG_INFO("Starting VideoProductionLine...");
     // 创建共享的 BufferFillingWorkerFacade 对象（v2.2：只传入完整配置）
     worker_facade_sptr_ = std::make_shared<BufferFillingWorkerFacade>(worker_config);
-    printf("   Worker type: %s\n", worker_facade_sptr_->getWorkerType());
+    LOG_INFO_FMT("Worker type: %s", worker_facade_sptr_->getWorkerType());
     
     // v2.2：简化的 open 接口（所有参数从 config 获取）
     if (!worker_facade_sptr_->open()) {
@@ -79,17 +80,17 @@ bool VideoProductionLine::start(const WorkerConfig& worker_config) {
     
     // 缓存原始指针用于快速访问（在ProductionLine运行期间有效）
     working_buffer_pool_ptr_ = working_buffer_pool_sptr.get();
-    printf("   ✅ Using Worker's BufferPool: '%s' (ID: %lu, created by Worker via Allocator)\n", 
-           working_buffer_pool_ptr_->getName().c_str(), worker_pool_id);
+    LOG_INFO_FMT("Using Worker's BufferPool: '%s' (ID: %lu, created by Worker via Allocator)", 
+                 working_buffer_pool_ptr_->getName().c_str(), worker_pool_id);
     
     total_frames_ = worker_facade_sptr_->getTotalFrames();
     size_t frame_size = worker_facade_sptr_->getFrameSize();
     
-    printf("   Total frames: %d\n", total_frames_);
-    printf("   Frame size: %zu bytes (%.2f MB)\n", frame_size, frame_size / (1024.0 * 1024.0));
+    LOG_INFO_FMT("Total frames: %d", total_frames_);
+    LOG_INFO_FMT("Frame size: %zu bytes (%.2f MB)", frame_size, frame_size / (1024.0 * 1024.0));
     
     // Worker创建的BufferPool，不需要验证大小（Worker已经确保大小匹配）
-    printf("   ⚡ Worker's BufferPool created via Allocator, size validation handled by Worker\n");
+    LOG_INFO("Worker's BufferPool created via Allocator, size validation handled by Worker");
     
     // 重置状态
     running_ = true;
@@ -103,9 +104,9 @@ bool VideoProductionLine::start(const WorkerConfig& worker_config) {
     for (int i = 0; i < thread_count_; i++) {
         try {
             threads_.emplace_back(&VideoProductionLine::producerThreadFunc, this, i);
-            printf("   ✅ Producer thread #%d started\n", i);
+            LOG_INFO_FMT("Producer thread #%d started", i);
         } catch (const std::exception& e) {
-            printf("❌ ERROR: Failed to start thread #%d: %s\n", i, e.what());
+            LOG_ERROR_FMT("Failed to start thread #%d: %s", i, e.what());
             // 停止已启动的线程
             running_ = false;
             for (auto& thread : threads_) {
@@ -120,7 +121,7 @@ bool VideoProductionLine::start(const WorkerConfig& worker_config) {
         }
     }
     
-    printf("✅ All %d producer thread(s) started successfully\n", thread_count_);
+    LOG_INFO_FMT("All %d producer thread(s) started successfully", thread_count_);
     
     return true;
 }
@@ -130,7 +131,7 @@ void VideoProductionLine::stop() {
         return;
     }
     
-    printf("\n🛑 Stopping VideoProductionLine...\n");
+    LOG_INFO("Stopping VideoProductionLine...");
     
     // 设置停止标志
     running_ = false;
@@ -148,10 +149,10 @@ void VideoProductionLine::stop() {
         worker_facade_sptr_.reset();
     }
     
-    printf("✅ VideoProductionLine stopped\n");
-    printf("   Total produced: %d frames\n", produced_frames_.load());
-    printf("   Total skipped: %d frames\n", skipped_frames_.load());
-    printf("   Average FPS: %.2f\n", getAverageFPS());
+    LOG_INFO("VideoProductionLine stopped");
+    LOG_INFO_FMT("Total produced: %d frames", produced_frames_.load());
+    LOG_INFO_FMT("Total skipped: %d frames", skipped_frames_.load());
+    LOG_INFO_FMT("Average FPS: %.2f", getAverageFPS());
 }
 
 // ============================================================
@@ -192,13 +193,9 @@ std::string VideoProductionLine::getLastError() const {
 }
 
 void VideoProductionLine::printStats() const {
-    printf("\n📊 VideoProductionLine Statistics:\n");
-    printf("   Running: %s\n", running_.load() ? "Yes" : "No");
-    printf("   Produced frames: %d\n", produced_frames_.load());
-    printf("   Skipped frames: %d\n", skipped_frames_.load());
-    printf("   Total frames: %d\n", total_frames_);
-    printf("   Average FPS: %.2f\n", getAverageFPS());
-    printf("   Thread count: %zu\n", threads_.size());
+    LOG_DEBUG_FMT("VideoProductionLine Statistics: Running: %s, Produced: %d, Skipped: %d, Total: %d, FPS: %.2f, Threads: %zu",
+                  running_.load() ? "Yes" : "No", produced_frames_.load(), skipped_frames_.load(), 
+                  total_frames_, getAverageFPS(), threads_.size());
 }
 
 // ============================================================
@@ -206,8 +203,8 @@ void VideoProductionLine::printStats() const {
 // ============================================================
 
 void VideoProductionLine::producerThreadFunc(int thread_id) {
-    printf("🚀 Thread #%d: Starting unified producer loop\n", thread_id);
-    printf("   Working BufferPool: '%s'\n", working_buffer_pool_ptr_->getName().c_str());
+    LOG_INFO_FMT("Thread #%d: Starting unified producer loop", thread_id);
+    LOG_INFO_FMT("Working BufferPool: '%s'", working_buffer_pool_ptr_->getName().c_str());
     
     int thread_produced = 0;
     int thread_skipped = 0;
@@ -229,11 +226,11 @@ void VideoProductionLine::producerThreadFunc(int thread_id) {
     // 🎯 定义 Timer 回调函数（同时打印失败次数和进度）
     auto timer_callback = [](void* user_data) {
         auto* ctx = static_cast<TimerContext*>(user_data);
-        printf("🔔 [Timer] Thread #%d: consecutive_failures=%d, produced=%d, fps=%.1f\n", 
-               ctx->thread_id, 
-               *ctx->consecutive_failures_ptr,
-               *ctx->thread_produced_ptr,
-               ctx->self_ptr->getAverageFPS());
+        LOG_DEBUG_FMT("[Timer] Thread #%d: consecutive_failures=%d, produced=%d, fps=%.1f", 
+                      ctx->thread_id, 
+                      *ctx->consecutive_failures_ptr,
+                      *ctx->thread_produced_ptr,
+                      ctx->self_ptr->getAverageFPS());
     };
     
     // 🎯 创建并启动定时器（每2秒打印一次）
@@ -275,7 +272,7 @@ void VideoProductionLine::producerThreadFunc(int thread_id) {
             buffer = working_buffer_pool_ptr_->acquireFree(true, 100);  // 100ms 超时
             if (buffer == nullptr && running_) {
                 // 超时但仍在运行，继续等待
-                printf("   [Thread #%d] Waiting for free buffer...\n", thread_id);
+                LOG_DEBUG_FMT("[Thread #%d] Waiting for free buffer...", thread_id);
             }
         }
         
@@ -306,8 +303,8 @@ void VideoProductionLine::producerThreadFunc(int thread_id) {
     
     // 🎯 Timer 会在析构时自动调用 stop()
     // 线程结束
-    printf("🏁 Thread #%d finished: produced=%d, skipped=%d, final_consecutive_failures=%d\n",
-           thread_id, thread_produced, thread_skipped, consecutive_failures);
+    LOG_INFO_FMT("Thread #%d finished: produced=%d, skipped=%d, final_consecutive_failures=%d",
+                 thread_id, thread_produced, thread_skipped, consecutive_failures);
 }
 
 void VideoProductionLine::setError(const std::string& error_msg) {
@@ -322,11 +319,11 @@ void VideoProductionLine::setError(const std::string& error_msg) {
         try {
             error_callback_(error_msg);
         } catch (...) {
-            printf("⚠️  Warning: Exception in error callback\n");
+            LOG_WARN("Exception in error callback");
         }
     }
     
     // 打印到控制台
-    printf("❌ VideoProductionLine Error: %s\n", error_msg.c_str());
+    LOG_ERROR_FMT("VideoProductionLine Error: %s", error_msg.c_str());
 }
 
