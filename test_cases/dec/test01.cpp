@@ -19,9 +19,9 @@
 #include <signal.h>
 #include <string.h>
 #include <memory>
-#include "productionline/worker/facade/BufferFillingWorkerFacade.hpp"
-#include "productionline/worker/config/WorkerConfig.hpp"
-#include "buffer/BufferPool.hpp"
+#include "productionline/worker/BufferFillingWorkerFacade.hpp"
+#include "productionline/worker/WorkerConfig.hpp"
+#include "buffer/bufferpool/BufferPool.hpp"
 
 // 全局标志，用于处理 Ctrl+C 退出
 static volatile bool g_running = true;

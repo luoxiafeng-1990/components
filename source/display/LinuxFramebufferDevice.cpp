@@ -1,8 +1,8 @@
 #include "display/LinuxFramebufferDevice.hpp"
-#include "buffer/allocator/facade/BufferAllocatorFacade.hpp"
-#include "buffer/allocator/factory/BufferAllocatorFactory.hpp"
-#include "buffer/allocator/implementation/FramebufferAllocator.hpp"
-#include "buffer/BufferPoolRegistry.hpp"
+#include "buffer/BufferAllocatorFacade.hpp"
+#include "buffer/BufferAllocatorFactory.hpp"
+#include "buffer/FramebufferAllocator.hpp"
+#include "buffer/bufferpool/BufferPoolRegistry.hpp"
 #include <stdio.h>
 #include <fcntl.h>
 #include <unistd.h>

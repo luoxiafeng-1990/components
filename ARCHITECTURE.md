@@ -579,8 +579,8 @@ return pool;
 #### ✅ BufferFillingWorkerFacade（门面类）
 
 **文件位置**:
-- 头文件: `include/productionline/worker/facade/BufferFillingWorkerFacade.hpp`
-- 源文件: `source/productionline/worker/facade/BufferFillingWorkerFacade.cpp`
+- 头文件: `include/productionline/worker/BufferFillingWorkerFacade.hpp`
+- 源文件: `source/productionline/worker/BufferFillingWorkerFacade.cpp`
 
 **设计模式**: 门面模式（Facade Pattern）
 
@@ -624,8 +624,8 @@ public:
 #### ✅ BufferFillingWorkerFactory（工厂类）
 
 **文件位置**:
-- 头文件: `include/productionline/worker/factory/BufferFillingWorkerFactory.hpp`
-- 源文件: `source/productionline/worker/factory/BufferFillingWorkerFactory.cpp`
+- 头文件: `include/productionline/worker/BufferFillingWorkerFactory.hpp`
+- 源文件: `source/productionline/worker/BufferFillingWorkerFactory.cpp`
 
 **设计模式**: 工厂模式（Factory Pattern）
 
@@ -666,8 +666,8 @@ private:
 #### ✅ BufferAllocatorBase（Allocator接口，纯抽象基类）
 
 **文件位置**:
-- 接口: `include/buffer/allocator/base/BufferAllocatorBase.hpp`
-- 实现类: `include/buffer/allocator/implementation/`（NormalAllocator, AVFrameAllocator, FramebufferAllocator）
+- 接口: `include/buffer/BufferAllocatorBase.hpp`
+- 实现类: `include/buffer/`（NormalAllocator, AVFrameAllocator, FramebufferAllocator）
 
 **设计模式**: 抽象工厂模式（Abstract Factory Pattern）
 
@@ -717,8 +717,8 @@ protected:
 #### ✅ BufferAllocatorFactory（Allocator工厂）
 
 **文件位置**:
-- 工厂: `include/buffer/allocator/factory/BufferAllocatorFactory.hpp`
-- 源文件: `source/buffer/allocator/factory/BufferAllocatorFactory.cpp`
+- 工厂: `include/buffer/BufferAllocatorFactory.hpp`
+- 源文件: `source/buffer/BufferAllocatorFactory.cpp`
 
 **设计模式**: 工厂模式（Factory Pattern）
 
@@ -755,8 +755,8 @@ public:
 #### ✅ BufferAllocatorFacade（Allocator门面）
 
 **文件位置**:
-- 门面: `include/buffer/allocator/facade/BufferAllocatorFacade.hpp`
-- 源文件: `source/buffer/allocator/facade/BufferAllocatorFacade.cpp`
+- 门面: `include/buffer/BufferAllocatorFacade.hpp`
+- 源文件: `source/buffer/BufferAllocatorFacade.cpp`
 
 **设计模式**: 门面模式（Facade Pattern）
 
@@ -1064,7 +1064,7 @@ graph TD
         WorkerImpl[implementation/*.hpp<br/>实现类]
     end
     
-    subgraph "buffer/allocator/"
+    subgraph "buffer/"
         BAF[facade/BufferAllocatorFacade.hpp<br/>🎭门面]
         BAFactory[factory/BufferAllocatorFactory.hpp<br/>🏭工厂]
         BAB[base/BufferAllocatorBase.hpp<br/>📋接口]
@@ -1137,13 +1137,13 @@ sequenceDiagram
 
 | 设计模式 | 类/方法 | 文件位置 | 架构角色 | 返回类型 |
 |---------|---------|---------|---------|---------|
-| **门面模式（v2.1）** | BufferFillingWorkerFacade | `productionline/worker/facade/` | 门面层（不继承接口） | 直接定义方法 |
-| **门面模式** | BufferAllocatorFacade | `buffer/allocator/facade/` | 门面层 | 封装接口 |
-| **工厂模式** | BufferFillingWorkerFactory | `productionline/worker/factory/` | 工厂层 | 返回 `WorkerBase*` |
-| **工厂模式** | BufferAllocatorFactory | `buffer/allocator/factory/` | 工厂层 | 返回 `BufferAllocatorBase*` |
-| **接口层** | IVideoFileNavigator | `productionline/worker/interface/` | 接口层 | 定义契约 |
-| **接口层** | BufferAllocatorBase | `buffer/allocator/base/` | 接口层（纯抽象） | 定义契约 |
-| **基类层** | WorkerBase | `productionline/worker/base/` | 基类层 | 统一基类 |
+| **门面模式（v2.1）** | BufferFillingWorkerFacade | `productionline/worker/` | 门面层（不继承接口） | 直接定义方法 |
+| **门面模式** | BufferAllocatorFacade | `buffer/` | 门面层 | 封装接口 |
+| **工厂模式** | BufferFillingWorkerFactory | `productionline/worker/` | 工厂层 | 返回 `WorkerBase*` |
+| **工厂模式** | BufferAllocatorFactory | `buffer/` | 工厂层 | 返回 `BufferAllocatorBase*` |
+| **接口层** | IVideoFileNavigator | `productionline/worker/` | 接口层 | 定义契约 |
+| **接口层** | BufferAllocatorBase | `buffer/` | 接口层（纯抽象） | 定义契约 |
+| **基类层** | WorkerBase | `productionline/worker/` | 基类层 | 统一基类 |
 | **Passkey Idiom** | BufferPool::PrivateToken | `buffer/BufferPool.hpp` | 通行证模式 | 限制 BufferPool 创建权限 |
 
 **关键设计（v2.1）**：
@@ -1497,7 +1497,7 @@ auto workerConfig = WorkerConfigBuilder()
 ### 3. WorkerBase（Worker统一基类）
 
 **文件位置**:
-- 基类: `include/productionline/worker/base/WorkerBase.hpp`
+- 基类: `include/productionline/worker/WorkerBase.hpp`
 
 **架构角色**: 基类层（Base Layer）
 
@@ -1529,7 +1529,7 @@ auto workerConfig = WorkerConfigBuilder()
 ### 4. IVideoFileNavigator（Worker文件导航接口）
 
 **文件位置**:
-- 接口: `include/productionline/worker/interface/IVideoFileNavigator.hpp`
+- 接口: `include/productionline/worker/IVideoFileNavigator.hpp`
 
 **架构角色**: 接口层（Interface Layer）
 
@@ -1556,8 +1556,8 @@ auto workerConfig = WorkerConfigBuilder()
 ### 5. BufferAllocatorBase（Allocator接口，纯抽象基类）
 
 **文件位置**:
-- 接口: `include/buffer/allocator/base/BufferAllocatorBase.hpp`
-- 实现类: `include/buffer/allocator/implementation/`（NormalAllocator, AVFrameAllocator, FramebufferAllocator）
+- 接口: `include/buffer/BufferAllocatorBase.hpp`
+- 实现类: `include/buffer/`（NormalAllocator, AVFrameAllocator, FramebufferAllocator）
 
 **架构角色**: 接口层（Interface Layer，纯抽象基类）
 
@@ -1630,7 +1630,7 @@ return pool_id;
 ### 6. WorkerBase（Worker统一基类）
 
 **文件位置**:
-- 基类: `include/productionline/worker/base/WorkerBase.hpp`
+- 基类: `include/productionline/worker/WorkerBase.hpp`
 
 **架构角色**: 基类层（Base Layer）
 
@@ -1671,7 +1671,7 @@ return pool_id;
 ### 7. BufferFillingWorkerFacade（Worker门面）
 
 **文件位置**:
-- 门面: `include/productionline/worker/facade/BufferFillingWorkerFacade.hpp`
+- 门面: `include/productionline/worker/BufferFillingWorkerFacade.hpp`
 
 **架构角色**: 门面层（Facade Layer）
 
@@ -1725,7 +1725,7 @@ return pool_id;
 ### 8. Allocator实现类（Implementation Layer）
 
 **文件位置**:
-- 实现类: `include/buffer/allocator/implementation/`（NormalAllocator, AVFrameAllocator, FramebufferAllocator）
+- 实现类: `include/buffer/`（NormalAllocator, AVFrameAllocator, FramebufferAllocator）
 
 **架构角色**: 实现层（Implementation Layer）
 
@@ -1752,7 +1752,7 @@ return pool_id;
 
 ```cpp
 #include "productionline/VideoProductionLine.hpp"
-#include "productionline/worker/config/WorkerConfig.hpp"
+#include "productionline/worker/WorkerConfig.hpp"
 
 int main() {
     // 1. 构建 Worker 配置（使用 Builder 模式）
@@ -1823,7 +1823,7 @@ int main() {
 
 ```cpp
 #include "productionline/VideoProductionLine.hpp"
-#include "productionline/worker/config/WorkerConfig.hpp"
+#include "productionline/worker/WorkerConfig.hpp"
 #include "buffer/BufferPool.hpp"
 #include "buffer/BufferPoolRegistry.hpp"
 

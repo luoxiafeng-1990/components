@@ -1113,8 +1113,8 @@ graph TD
 ### 5.1 场景：视频解码器（生产者）
 
 ```cpp
-#include "buffer/BufferPool.hpp"
-#include "buffer/allocator/facade/BufferFacade.hpp"
+#include "buffer/bufferpool/BufferPool.hpp"
+#include "buffer/BufferAllocatorFacade.hpp"
 
 class VideoDecoder {
 public:
@@ -1232,7 +1232,7 @@ private:
 ### 5.3 场景：DMA零拷贝（硬件加速）
 
 ```cpp
-#include "buffer/allocator/facade/BufferFacade.hpp"
+#include "buffer/BufferAllocatorFacade.hpp"
 
 class HardwareEncoder {
 public:
@@ -1284,7 +1284,7 @@ private:
 ### 5.4 场景：外部Buffer托管（Framebuffer）
 
 ```cpp
-#include "buffer/allocator/facade/BufferFacade.hpp"
+#include "buffer/BufferAllocatorFacade.hpp"
 
 class FramebufferManager {
 public:
@@ -1354,7 +1354,7 @@ private:
 ### 5.5 场景：全局监控和调试
 
 ```cpp
-#include "buffer/BufferPoolRegistry.hpp"
+#include "buffer/bufferpool/BufferPoolRegistry.hpp"
 
 class SystemMonitor {
 public:
@@ -1646,7 +1646,7 @@ BufferPool::~BufferPool() {
 
 ```cpp
 // CudaAllocator.hpp
-#include "buffer/allocator/base/BufferAllocatorBase.hpp"
+#include "buffer/BufferAllocatorBase.hpp"
 #include <cuda_runtime.h>
 
 class CudaAllocator : public BufferAllocatorBase {
@@ -3804,7 +3804,7 @@ private:
 ### 创建BufferPool
 
 ```cpp
-#include "buffer/allocator/facade/BufferFacade.hpp"
+#include "buffer/BufferAllocatorFacade.hpp"
 
 auto pool = BufferFacade::createBufferPool(
     10,                              // buffer数量

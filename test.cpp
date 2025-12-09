@@ -28,10 +28,10 @@
 #include <vector>
 #include <memory>
 #include "display/LinuxFramebufferDevice.hpp"
-#include "productionline/worker/facade/BufferFillingWorkerFacade.hpp"
-#include "productionline/worker/config/WorkerConfig.hpp"
-#include "buffer/BufferPool.hpp"
-#include "buffer/BufferPoolRegistry.hpp"
+#include "productionline/worker/BufferFillingWorkerFacade.hpp"
+#include "productionline/worker/WorkerConfig.hpp"
+#include "buffer/bufferpool/BufferPool.hpp"
+#include "buffer/bufferpool/BufferPoolRegistry.hpp"
 #include "productionline/VideoProductionLine.hpp"
 
 // FFmpeg头文件（解码器测试使用）

@@ -1,11 +1,11 @@
 #ifndef LINUX_FRAMEBUFFER_DEVICE_HPP
 #define LINUX_FRAMEBUFFER_DEVICE_HPP
 
-#include "IDisplayDevice.hpp"
-#include "../buffer/Buffer.hpp"
-#include "../buffer/BufferPool.hpp"
-#include "../buffer/allocator/facade/BufferAllocatorFacade.hpp"
-#include "../buffer/allocator/factory/BufferAllocatorFactory.hpp"
+#include "display/IDisplayDevice.hpp"
+#include "buffer/bufferpool/Buffer.hpp"
+#include "buffer/bufferpool/BufferPool.hpp"
+#include "buffer/BufferAllocatorFacade.hpp"
+#include "buffer/BufferAllocatorFactory.hpp"
 #include <vector>
 #include <memory>
 #include <stdexcept>

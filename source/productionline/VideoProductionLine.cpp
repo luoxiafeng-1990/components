@@ -1,5 +1,5 @@
 #include "productionline/VideoProductionLine.hpp"
-#include "buffer/BufferPoolRegistry.hpp"
+#include "buffer/bufferpool/BufferPoolRegistry.hpp"
 #include "monitor/Timer.hpp"
 #include <stdio.h>
 #include <chrono>

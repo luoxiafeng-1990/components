@@ -6,23 +6,23 @@ noinst_LTLIBRARIES = libcomponents.la
 
 libcomponents_la_SOURCES = \
     source/display/LinuxFramebufferDevice.cpp \
-    source/productionline/worker/facade/BufferFillingWorkerFacade.cpp \
-    source/productionline/worker/implementation/MmapRawVideoFileWorker.cpp \
-    source/productionline/worker/factory/BufferFillingWorkerFactory.cpp \
-    source/productionline/worker/implementation/FfmpegDecodeRtspWorker.cpp \
-    source/productionline/worker/implementation/FfmpegDecodeVideoFileWorker.cpp \
-    source/productionline/worker/implementation/IoUringRawVideoFileWorker.cpp \
+    source/productionline/worker/BufferFillingWorkerFacade.cpp \
+    source/productionline/worker/MmapRawVideoFileWorker.cpp \
+    source/productionline/worker/BufferFillingWorkerFactory.cpp \
+    source/productionline/worker/FfmpegDecodeRtspWorker.cpp \
+    source/productionline/worker/FfmpegDecodeVideoFileWorker.cpp \
+    source/productionline/worker/IoUringRawVideoFileWorker.cpp \
     source/monitor/PerformanceMonitor.cpp \
     source/monitor/Timer.cpp \
-    source/buffer/Buffer.cpp \
-    source/buffer/allocator/factory/BufferAllocatorFactory.cpp \
-    source/buffer/allocator/facade/BufferAllocatorFacade.cpp \
-    source/buffer/allocator/base/BufferAllocatorBase.cpp \
-    source/buffer/allocator/implementation/NormalAllocator.cpp \
-    source/buffer/allocator/implementation/FramebufferAllocator.cpp \
-    source/buffer/allocator/implementation/AVFrameAllocator.cpp \
-    source/buffer/BufferPool.cpp \
-    source/buffer/BufferPoolRegistry.cpp \
+    source/buffer/bufferpool/Buffer.cpp \
+    source/buffer/BufferAllocatorFactory.cpp \
+    source/buffer/BufferAllocatorFacade.cpp \
+    source/buffer/BufferAllocatorBase.cpp \
+    source/buffer/NormalAllocator.cpp \
+    source/buffer/FramebufferAllocator.cpp \
+    source/buffer/AVFrameAllocator.cpp \
+    source/buffer/bufferpool/BufferPool.cpp \
+    source/buffer/bufferpool/BufferPoolRegistry.cpp \
     source/productionline/VideoProductionLine.cpp
 
 # ========== 测试程序（每个只包含自己的主文件）==========

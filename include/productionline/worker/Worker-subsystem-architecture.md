@@ -1248,9 +1248,9 @@ stateDiagram-v2
 ### 5.1 场景：FFmpeg解码视频文件
 
 ```cpp
-#include "productionline/worker/facade/BufferFillingWorkerFacade.hpp"
-#include "buffer/BufferPool.hpp"
-#include "buffer/BufferPoolRegistry.hpp"
+#include "productionline/worker/BufferFillingWorkerFacade.hpp"
+#include "buffer/bufferpool/BufferPool.hpp"
+#include "buffer/bufferpool/BufferPoolRegistry.hpp"
 
 int main() {
     // 1. 创建Worker门面（指定类型）
@@ -1305,8 +1305,8 @@ int main() {
 ### 5.2 场景：Raw视频文件读取（MMAP）
 
 ```cpp
-#include "productionline/worker/facade/BufferFillingWorkerFacade.hpp"
-#include "buffer/allocator/facade/BufferFacade.hpp"
+#include "productionline/worker/BufferFillingWorkerFacade.hpp"
+#include "buffer/BufferAllocatorFacade.hpp"
 
 int main() {
     // 1. 创建Worker门面
@@ -1347,8 +1347,8 @@ int main() {
 ### 5.3 场景：RTSP流解码
 
 ```cpp
-#include "productionline/worker/facade/BufferFillingWorkerFacade.hpp"
-#include "buffer/BufferPoolRegistry.hpp"
+#include "productionline/worker/BufferFillingWorkerFacade.hpp"
+#include "buffer/bufferpool/BufferPoolRegistry.hpp"
 
 int main() {
     // 1. 创建RTSP Worker
@@ -1401,7 +1401,7 @@ int main() {
 
 ```cpp
 #include "productionline/VideoProductionLine.hpp"
-#include "productionline/worker/facade/BufferFillingWorkerFacade.hpp"
+#include "productionline/worker/BufferFillingWorkerFacade.hpp"
 
 int main() {
     // 1. 创建Worker
@@ -1537,7 +1537,7 @@ void consumerThread(BufferPool* pool) {
 
 ```cpp
 // HardwareDecodeWorker.hpp
-#include "productionline/worker/base/WorkerBase.hpp"
+#include "productionline/worker/WorkerBase.hpp"
 
 class HardwareDecodeWorker : public WorkerBase {
 public:
@@ -1819,7 +1819,7 @@ void checkWorkerHealth(BufferFillingWorkerFacade* worker) {
 ### 创建Worker
 
 ```cpp
-#include "productionline/worker/facade/BufferFillingWorkerFacade.hpp"
+#include "productionline/worker/BufferFillingWorkerFacade.hpp"
 
 // 方式1：指定类型
 auto worker = std::make_shared<BufferFillingWorkerFacade>(

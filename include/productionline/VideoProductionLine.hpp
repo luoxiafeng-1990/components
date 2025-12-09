@@ -1,8 +1,8 @@
 #pragma once
 
-#include "../buffer/BufferPool.hpp"
-#include "worker/facade/BufferFillingWorkerFacade.hpp"
-#include "worker/config/WorkerConfig.hpp"
+#include "buffer/bufferpool/BufferPool.hpp"
+#include "productionline/worker/BufferFillingWorkerFacade.hpp"
+#include "productionline/worker/WorkerConfig.hpp"
 #include <string>
 #include <vector>
 #include <thread>
