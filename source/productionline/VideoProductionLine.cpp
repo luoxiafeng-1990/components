@@ -12,7 +12,7 @@
 
 VideoProductionLine::VideoProductionLine(bool loop, int thread_count)
     : working_buffer_pool_id_(0)
-    , working_buffer_pool_ptr_(nullptr)
+    , working_buffer_pool_weak_()
     , running_(false)
     , produced_frames_(0)
     , skipped_frames_(0)
@@ -68,20 +68,20 @@ bool VideoProductionLine::start(const WorkerConfig& worker_config) {
         return false;
     }
     
-    // v2.0: 记录 pool_id 并从 Registry 获取临时访问（返回 weak_ptr）
+    // v2.0: 记录 pool_id 并从 Registry 获取 weak_ptr（符合架构设计）
     working_buffer_pool_id_ = worker_pool_id;
-    auto working_buffer_pool_weak = BufferPoolRegistry::getInstance().getPool(worker_pool_id);
-    auto working_buffer_pool_sptr = working_buffer_pool_weak.lock();
-    if (!working_buffer_pool_sptr) {
+    working_buffer_pool_weak_ = BufferPoolRegistry::getInstance().getPool(worker_pool_id);
+    
+    // 验证 Pool 是否存在
+    auto pool_sptr = working_buffer_pool_weak_.lock();
+    if (!pool_sptr) {
         setError("Failed to get BufferPool from Registry (pool may have been destroyed)");
         worker_facade_sptr_.reset();
         return false;
     }
     
-    // 缓存原始指针用于快速访问（在ProductionLine运行期间有效）
-    working_buffer_pool_ptr_ = working_buffer_pool_sptr.get();
     LOG_INFO_FMT("Using Worker's BufferPool: '%s' (ID: %lu, created by Worker via Allocator)", 
-                 working_buffer_pool_ptr_->getName().c_str(), worker_pool_id);
+                 pool_sptr->getName().c_str(), worker_pool_id);
     
     total_frames_ = worker_facade_sptr_->getTotalFrames();
     size_t frame_size = worker_facade_sptr_->getFrameSize();
@@ -178,15 +178,6 @@ double VideoProductionLine::getAverageFPS() const {
     return 0.0;
 }
 
-int VideoProductionLine::getTotalFrames() const {
-    return total_frames_;
-}
-
-BufferPool* VideoProductionLine::getWorkingBufferPool() const {
-    // v2.0: 从缓存的指针返回（在start()时从Registry获取并缓存）
-    return working_buffer_pool_ptr_;
-}
-
 std::string VideoProductionLine::getLastError() const {
     std::lock_guard<std::mutex> lock(error_mutex_);
     return last_error_;
@@ -202,9 +193,47 @@ void VideoProductionLine::printStats() const {
 // 内部方法实现
 // ============================================================
 
+std::optional<int> VideoProductionLine::getNextFrameIndex() {
+    // 1. 原子地获取下一个原始索引
+    int raw_index = next_frame_index_.fetch_add(1);
+    
+    // 2. 使用已缓存的总帧数（在 start() 时从 Worker 获取）
+    if (total_frames_ <= 0) {
+        return std::nullopt;
+    }
+    
+    // 3. 处理循环模式和文件边界
+    if (raw_index >= total_frames_) {
+        if (loop_) {
+            // 循环模式：归一化到有效范围
+            int normalized = raw_index % total_frames_;
+            
+            // 4. 溢出保护：定期重置计数器（避免整数溢出）
+            if (raw_index > 0 && raw_index % (total_frames_ * 2) == 0) {
+                next_frame_index_.store(normalized + 1);
+            }
+            
+            return normalized;
+        } else {
+            // 非循环模式：无更多帧
+            return std::nullopt;
+        }
+    }
+    
+    // 有效索引，直接返回
+    return raw_index;
+}
+
 void VideoProductionLine::producerThreadFunc(int thread_id) {
+    // 从缓存的 weak_ptr 获取临时 shared_ptr（符合架构设计）
+    auto pool_sptr = working_buffer_pool_weak_.lock();
+    if (!pool_sptr) {
+        LOG_ERROR_FMT("Thread #%d: BufferPool not found or destroyed", thread_id);
+        return;
+    }
+    
     LOG_INFO_FMT("Thread #%d: Starting unified producer loop", thread_id);
-    LOG_INFO_FMT("Working BufferPool: '%s'", working_buffer_pool_ptr_->getName().c_str());
+    LOG_INFO_FMT("Working BufferPool: '%s'", pool_sptr->getName().c_str());
     
     int thread_produced = 0;
     int thread_skipped = 0;
@@ -244,32 +273,17 @@ void VideoProductionLine::producerThreadFunc(int thread_id) {
     //failure_monitor_timer.start();
     
     while (running_) {
-        // 1. 原子地获取下一个帧索引
-        int frame_index = next_frame_index_.fetch_add(1);
-        
-        // 2. 处理循环模式和文件边界
-        if (frame_index >= total_frames_) {
-            if (loop_) {
-                // 循环模式：归一化到 0-total_frames 范围
-                frame_index = frame_index % total_frames_;
-                
-                // 尝试重置计数器，避免整数溢出
-                int current = next_frame_index_.load();
-                if (current > total_frames_ * 2) {
-                    int expected = current;
-                    int new_value = frame_index + 1;
-                    next_frame_index_.compare_exchange_strong(expected, new_value);
-                }
-            } else {
-                // 非循环模式：没有更多帧可读
-                break;
-            }
+        // 获取下一个有效的帧索引（封装后的清晰接口）
+        auto frame_index_opt = getNextFrameIndex();
+        if (!frame_index_opt.has_value()) {
+            break;  // 无更多帧，退出循环
         }
+        int frame_index = frame_index_opt.value();
         
-        // 3. 🎯 统一的流程：从工作 BufferPool 获取 buffer
+        // 🎯 统一的流程：从工作 BufferPool 获取 buffer（使用临时 shared_ptr）
         Buffer* buffer = nullptr;
         while (running_ && buffer == nullptr) {
-            buffer = working_buffer_pool_ptr_->acquireFree(true, 100);  // 100ms 超时
+            buffer = pool_sptr->acquireFree(true, 100);  // 100ms 超时
             if (buffer == nullptr && running_) {
                 // 超时但仍在运行，继续等待
                 LOG_DEBUG_FMT("[Thread #%d] Waiting for free buffer...", thread_id);
@@ -287,13 +301,13 @@ void VideoProductionLine::producerThreadFunc(int thread_id) {
         // 5. 🎯 统一的处理：提交或归还
         if (fill_success) {
             // ✅ 填充成功：提交到 filled 队列（供消费者使用）
-            working_buffer_pool_ptr_->submitFilled(buffer);
+            pool_sptr->submitFilled(buffer);
             produced_frames_.fetch_add(1);
             thread_produced++;
             consecutive_failures = 0;  // 重置失败计数
         } else {
             // ⚠️ 填充失败：归还到 free 队列（Buffer 未填充数据，状态为 LOCKED_BY_PRODUCER）
-            working_buffer_pool_ptr_->releaseFree(buffer);
+            pool_sptr->releaseFree(buffer);
             skipped_frames_.fetch_add(1);
             thread_skipped++;
             // 🎯 累加连续失败次数（Timer 会每2秒自动打印）

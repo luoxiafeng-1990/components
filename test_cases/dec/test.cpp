@@ -59,18 +59,17 @@ static int test_4frame_loop(const char* raw_video_path) {
     int buffer_count = display.getBufferCount();
     
     // 2. 获取 display 的 BufferPool（framebuffer 已托管，v2.0: 通过 Registry 获取）
-    uint64_t pool_id = display.getBufferPoolId();
-    if (pool_id == 0) {
+    uint64_t display_pool_id = display.getBufferPoolId();
+    if (display_pool_id == 0) {
         LOG_ERROR("Display BufferPool not initialized");
         return -1;
     }
-    auto pool_weak = BufferPoolRegistry::getInstance().getPool(pool_id);
-    auto pool_sptr = pool_weak.lock();
-    if (!pool_sptr) {
-        LOG_ERROR_FMT("Display BufferPool (ID: %lu) not found or already destroyed", pool_id);
+    auto display_pool_weak = BufferPoolRegistry::getInstance().getPool(display_pool_id);
+    auto display_pool_sptr = display_pool_weak.lock();
+    if (!display_pool_sptr) {
+        LOG_ERROR_FMT("Display BufferPool (ID: %lu) not found or already destroyed", display_pool_id);
         return -1;
     }
-    BufferPool& pool = *pool_sptr;
     
     // 3. 创建 VideoProductionLine（Worker会在open()时自动创建BufferPool）
     VideoProductionLine producer(true, 1);  // loop=true, thread_count=1
@@ -109,12 +108,20 @@ static int test_4frame_loop(const char* raw_video_path) {
     
     // 5. 加载帧到 framebuffer（从Worker的BufferPool获取）
     LOG_INFO_FMT("Loading %d frames into framebuffer...", buffer_count);
-    BufferPool* worker_pool = producer.getWorkingBufferPool();
-    if (!worker_pool) {
+    uint64_t producer_pool_id = producer.getWorkingBufferPoolId();
+    if (producer_pool_id == 0) {
         LOG_ERROR("Worker failed to create BufferPool");
         producer.stop();
         return -1;
     }
+    auto producer_pool_weak = BufferPoolRegistry::getInstance().getPool(producer_pool_id);
+    auto producer_pool_sptr = producer_pool_weak.lock();
+    if (!producer_pool_sptr) {
+        LOG_ERROR("BufferPool not found or destroyed");
+        producer.stop();
+        return -1;
+    }
+    BufferPool* worker_pool = producer_pool_sptr.get();
     
     // 等待生产者填充buffer（生产者线程会自动填充）
     // 这里我们等待足够多的帧被填充
@@ -141,7 +148,7 @@ static int test_4frame_loop(const char* raw_video_path) {
             // 等待垂直同步
             display.waitVerticalSync();
             // 切换显示buffer（使用BufferPool和索引）
-            display.displayBuffer(&pool, buf_idx);
+            display.displayBuffer(display_pool_sptr.get(), buf_idx);
         }
         
         loop_count++;
@@ -176,19 +183,17 @@ static int test_sequential_playback(const char* raw_video_path) {
     }
     
     // 2. 获取 display 的 BufferPool（framebuffer 已托管，v2.0: 通过 Registry 获取）
-    uint64_t pool_id = display.getBufferPoolId();
-    if (pool_id == 0) {
+    uint64_t display_pool_id = display.getBufferPoolId();
+    if (display_pool_id == 0) {
         LOG_ERROR("Display BufferPool not initialized");
         return -1;
     }
-    auto pool_weak = BufferPoolRegistry::getInstance().getPool(pool_id);
-    auto pool_sptr = pool_weak.lock();
-    if (!pool_sptr) {
-        LOG_ERROR_FMT("Display BufferPool (ID: %lu) not found or already destroyed", pool_id);
+    auto display_pool_weak = BufferPoolRegistry::getInstance().getPool(display_pool_id);
+    auto display_pool_sptr = display_pool_weak.lock();
+    if (!display_pool_sptr) {
+        LOG_ERROR_FMT("Display BufferPool (ID: %lu) not found or already destroyed", display_pool_id);
         return -1;
     }
-    BufferPool& pool = *pool_sptr;
-    (void)pool;  // 消除未使用警告
     
     // 3. 创建 VideoProductionLine（Worker会在open()时自动创建BufferPool）
     VideoProductionLine producer(true, 1);  // loop=true, thread_count=1
@@ -230,12 +235,20 @@ static int test_sequential_playback(const char* raw_video_path) {
     
     // 6. 消费者循环：从 BufferPool 获取 buffer 并显示
     int frame_count = 0;
-    BufferPool* worker_pool = producer.getWorkingBufferPool();
-    if (!worker_pool) {
+    uint64_t producer_pool_id = producer.getWorkingBufferPoolId();
+    if (producer_pool_id == 0) {
         LOG_ERROR("Worker failed to create BufferPool");
         producer.stop();
         return -1;
     }
+    auto producer_pool_weak = BufferPoolRegistry::getInstance().getPool(producer_pool_id);
+    auto producer_pool_sptr = producer_pool_weak.lock();
+    if (!producer_pool_sptr) {
+        LOG_ERROR("BufferPool not found or destroyed");
+        producer.stop();
+        return -1;
+    }
+    BufferPool* worker_pool = producer_pool_sptr.get();
     
     while (g_running) {
         // 获取一个已填充的 buffer（阻塞，100ms超时）
@@ -292,19 +305,18 @@ static int test_buffermanager_producer(const char* raw_video_path) {
     }
     
     // 2. 获取 display 的 BufferPool（framebuffer 已托管，v2.0: 通过 Registry 获取）
-    uint64_t pool_id = display.getBufferPoolId();
-    if (pool_id == 0) {
+    uint64_t display_pool_id = display.getBufferPoolId();
+    if (display_pool_id == 0) {
         LOG_ERROR("Display BufferPool not initialized");
         return -1;
     }
-    auto pool_weak = BufferPoolRegistry::getInstance().getPool(pool_id);
-    auto pool_sptr = pool_weak.lock();
-    if (!pool_sptr) {
-        LOG_ERROR_FMT("Display BufferPool (ID: %lu) not found or already destroyed", pool_id);
+    auto display_pool_weak = BufferPoolRegistry::getInstance().getPool(display_pool_id);
+    auto display_pool_sptr = display_pool_weak.lock();
+    if (!display_pool_sptr) {
+        LOG_ERROR_FMT("Display BufferPool (ID: %lu) not found or already destroyed", display_pool_id);
         return -1;
     }
-    BufferPool& pool = *pool_sptr;
-    pool.printStats();
+    display_pool_sptr->printStats();
     
     // 3. 创建 VideoProductionLine（Worker会自动创建BufferPool）
     int producer_thread_count = 2;  // 使用2个生产者线程
@@ -347,7 +359,7 @@ static int test_buffermanager_producer(const char* raw_video_path) {
     
     while (g_running) {
         // 获取一个已填充的 buffer（阻塞，100ms超时）
-        Buffer* filled_buffer = pool.acquireFilled(true, 100);
+        Buffer* filled_buffer = display_pool_sptr->acquireFilled(true, 100);
         if (filled_buffer == nullptr) {
             // 超时，继续等待
             continue;
@@ -358,7 +370,7 @@ static int test_buffermanager_producer(const char* raw_video_path) {
             LOG_WARN("Failed to display buffer");
         }
         // 归还 buffer 到空闲队列
-        pool.releaseFilled(filled_buffer);
+        display_pool_sptr->releaseFilled(filled_buffer);
         frame_count++;
         // 每100帧打印一次进度
         if (frame_count % 100 == 0) {
@@ -369,7 +381,7 @@ static int test_buffermanager_producer(const char* raw_video_path) {
     
     // 6. 停止生产者
     producer.stop();
-    pool.printStats();
+    display_pool_sptr->printStats();
     return 0;
 }
 
@@ -399,21 +411,20 @@ static int test_buffermanager_iouring(const char* raw_video_path) {
                  display.getWidth(), display.getHeight(), display.getBitsPerPixel(), display.getBufferCount());
     
     // 2. 获取 display 的 BufferPool（v2.0: 通过 Registry 获取）
-    uint64_t pool_id = display.getBufferPoolId();
-    if (pool_id == 0) {
+    uint64_t display_pool_id = display.getBufferPoolId();
+    if (display_pool_id == 0) {
         LOG_ERROR("Display BufferPool not initialized");
         return -1;
     }
-    auto pool_weak = BufferPoolRegistry::getInstance().getPool(pool_id);
-    auto pool_sptr = pool_weak.lock();
-    if (!pool_sptr) {
-        LOG_ERROR_FMT("Display BufferPool (ID: %lu) not found or already destroyed", pool_id);
+    auto display_pool_weak = BufferPoolRegistry::getInstance().getPool(display_pool_id);
+    auto display_pool_sptr = display_pool_weak.lock();
+    if (!display_pool_sptr) {
+        LOG_ERROR_FMT("Display BufferPool (ID: %lu) not found or already destroyed", display_pool_id);
         return -1;
     }
-    BufferPool& pool = *pool_sptr;
     
     LOG_INFO("Using LinuxFramebufferDevice's BufferPool");
-    pool.printStats();
+    display_pool_sptr->printStats();
     
     // 3. 创建 VideoProductionLine（Worker会自动创建BufferPool）
     VideoProductionLine producer(true, 1);  // loop=true, thread_count=1
@@ -458,7 +469,7 @@ static int test_buffermanager_iouring(const char* raw_video_path) {
     int frame_count = 0;
     
     while (g_running) {
-        Buffer* filled_buffer = pool.acquireFilled(true, 100);
+        Buffer* filled_buffer = display_pool_sptr->acquireFilled(true, 100);
         if (filled_buffer == nullptr) {
             continue;
         }
@@ -468,7 +479,7 @@ static int test_buffermanager_iouring(const char* raw_video_path) {
             LOG_WARN("Failed to display buffer");
         }
         
-        pool.releaseFilled(filled_buffer);
+        display_pool_sptr->releaseFilled(filled_buffer);
         frame_count++;
         
         if (frame_count % 100 == 0) {
@@ -487,7 +498,7 @@ static int test_buffermanager_iouring(const char* raw_video_path) {
     LOG_DEBUG_FMT("Final Statistics: Frames displayed: %d, Frames produced: %d, Frames skipped: %d, Average FPS: %.2f",
                   frame_count, producer.getProducedFrames(), producer.getSkippedFrames(), producer.getAverageFPS());
     
-    pool.printStats();
+    display_pool_sptr->printStats();
     
     LOG_INFO("Test completed successfully");
     LOG_INFO("TODO: Implement IoUringVideoProductionLine for true async I/O performance");
@@ -563,15 +574,21 @@ static int test_rtsp_stream(const char* rtsp_url) {
     LOG_INFO("Watch for '[DMA Display]' messages below");
     
     // 7. 获取工作BufferPool（Worker创建的或fallback的）
-    BufferPool* working_pool = producer.getWorkingBufferPool();
-    if (!working_pool) {
-        LOG_ERROR("No working BufferPool available");
+    uint64_t producer_pool_id = producer.getWorkingBufferPoolId();
+    if (producer_pool_id == 0) {
+        LOG_ERROR("No working BufferPool ID available");
+        return -1;
+    }
+    auto producer_pool_weak = BufferPoolRegistry::getInstance().getPool(producer_pool_id);
+    auto producer_pool_sptr = producer_pool_weak.lock();
+    if (!producer_pool_sptr) {
+        LOG_ERROR("BufferPool not found or destroyed");
         return -1;
     }
     
     LOG_INFO_FMT("Using BufferPool: '%s' (created by Worker via Allocator)", 
-                 working_pool->getName().c_str());
-    working_pool->printStats();
+                 producer_pool_sptr->getName().c_str());
+    producer_pool_sptr->printStats();
     
     // 8. 消费者循环：从工作BufferPool获取并通过DMA显示
     int frame_count = 0;
@@ -580,7 +597,7 @@ static int test_rtsp_stream(const char* rtsp_url) {
     
     while (g_running) {
         // 从工作BufferPool获取已解码的buffer（带物理地址）
-        Buffer* decoded_buffer = working_pool->acquireFilled(true, 100);
+        Buffer* decoded_buffer = producer_pool_sptr->acquireFilled(true, 100);
         if (decoded_buffer == nullptr) {
             continue;  // 超时，继续等待
         }
@@ -596,7 +613,7 @@ static int test_rtsp_stream(const char* rtsp_url) {
         }
         
         // 归还 buffer（会触发 RtspVideoReader 的 deleter 回收 AVFrame）
-        working_pool->releaseFilled(decoded_buffer);
+        producer_pool_sptr->releaseFilled(decoded_buffer);
         
         frame_count++;
         
@@ -619,7 +636,7 @@ static int test_rtsp_stream(const char* rtsp_url) {
                  frame_count > 0 ? (100.0 * dma_success / frame_count) : 0.0);
     
     LOG_INFO("Final BufferPool statistics:");
-    working_pool->printStats();
+    producer_pool_sptr->printStats();
     
     return 0;
 }
@@ -683,22 +700,28 @@ static int test_h264_taco_video(const char* video_path) {
     LOG_INFO("Press Ctrl+C to stop");
     
     // 7. 获取工作BufferPool（Worker创建的或fallback的）
-    BufferPool* working_pool = producer.getWorkingBufferPool();
-    if (!working_pool) {
-        LOG_ERROR("No working BufferPool available");
+    uint64_t producer_pool_id = producer.getWorkingBufferPoolId();
+    if (producer_pool_id == 0) {
+        LOG_ERROR("No working BufferPool ID available");
+        return -1;
+    }
+    auto producer_pool_weak = BufferPoolRegistry::getInstance().getPool(producer_pool_id);
+    auto producer_pool_sptr = producer_pool_weak.lock();
+    if (!producer_pool_sptr) {
+        LOG_ERROR("BufferPool not found or destroyed");
         return -1;
     }
     
     LOG_INFO_FMT("Using BufferPool: '%s' (created by Worker via Allocator)", 
-                 working_pool->getName().c_str());
-    working_pool->printStats();
+                 producer_pool_sptr->getName().c_str());
+    producer_pool_sptr->printStats();
     
     // 8. 消费者循环
     int frame_count = 0;
     
     while (g_running) {
         // 从工作BufferPool获取已解码的buffer
-        Buffer* filled_buffer = working_pool->acquireFilled(true, 100);
+        Buffer* filled_buffer = producer_pool_sptr->acquireFilled(true, 100);
         if (filled_buffer == nullptr) {
             continue;  // 超时，继续等待
         }
@@ -710,7 +733,7 @@ static int test_h264_taco_video(const char* video_path) {
             display.displayFilledFramebuffer(filled_buffer);
         }
         // 归还 buffer
-        working_pool->releaseFilled(filled_buffer);
+        producer_pool_sptr->releaseFilled(filled_buffer);
         
         frame_count++;
         
@@ -732,7 +755,7 @@ static int test_h264_taco_video(const char* video_path) {
     LOG_INFO_FMT("Average FPS: %.2f", producer.getAverageFPS());
     
     LOG_INFO("Final BufferPool statistics:");
-    working_pool->printStats();
+    producer_pool_sptr->printStats();
     
     return 0;
 }

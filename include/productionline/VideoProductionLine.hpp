@@ -9,6 +9,7 @@
 #include <atomic>
 #include <memory>
 #include <functional>
+#include <optional>
 
 /**
  * @brief VideoProductionLine - 视频生产流水线
@@ -85,14 +86,7 @@ public:
     /// 获取平均 FPS
     double getAverageFPS() const;
     
-    /// 获取总帧数
-    int getTotalFrames() const;
-    
-    /// 获取工作BufferPool指针（供消费者使用）
-    /// v2.0: 从Registry获取临时访问
-    BufferPool* getWorkingBufferPool() const;
-    
-    /// v2.0: 获取工作BufferPool ID
+    /// v2.0: 获取工作BufferPool ID（消费者应从 Registry 获取）
     uint64_t getWorkingBufferPoolId() const { return working_buffer_pool_id_; }
     
     // ========== 错误处理 ==========
@@ -125,6 +119,20 @@ private:
     void producerThreadFunc(int thread_id);
     
     /**
+     * @brief 获取下一个有效的帧索引
+     * @return 有效的帧索引，如果无更多帧则返回 std::nullopt
+     * 
+     * 职责：
+     * - 原子地获取下一个原始索引（使用 next_frame_index_）
+     * - 使用已缓存的总帧数（total_frames_，在 start() 时从 Worker 获取）
+     * - 处理循环模式和文件边界
+     * - 处理溢出保护
+     * 
+     * 注意：这是生产者线程的进度管理逻辑，完全由 ProductionLine 负责
+     */
+    std::optional<int> getNextFrameIndex();
+    
+    /**
      * @brief 设置错误信息并触发回调
      */
     void setError(const std::string& error_msg);
@@ -145,12 +153,15 @@ private:
     uint64_t working_buffer_pool_id_;
     
     /**
-     * v2.0: 实际工作的BufferPool指针（缓存的临时访问）
+     * v2.0: 实际工作的BufferPool weak_ptr（缓存的观察者，符合架构设计）
      * 
-     * 警告：此指针在ProductionLine运行期间有效
-     * 如果Pool被销毁（Allocator析构），此指针会失效
+     * 设计：
+     * - 从 Registry 获取 weak_ptr，不持有所有权（符合去中心化设计）
+     * - 使用时通过 lock() 获取临时 shared_ptr
+     * - 自动检测 Pool 是否已销毁（lock() 返回 nullptr）
+     * - Registry 独占持有 BufferPool（shared_ptr，引用计数=1）
      */
-    BufferPool* working_buffer_pool_ptr_;
+    std::weak_ptr<BufferPool> working_buffer_pool_weak_;
     
     // Worker Facade（多线程共享）
     std::shared_ptr<BufferFillingWorkerFacade> worker_facade_sptr_;
