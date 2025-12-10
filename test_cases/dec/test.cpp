@@ -3,27 +3,18 @@
  * 
  * 测试 LinuxFramebufferDevice, BufferFillingWorkerFacade, PerformanceMonitor, BufferManager 四个类的功能
  * 
- * 编译命令：
- *   g++ -o test test.cpp \
- *       source/LinuxFramebufferDevice.cpp \
- *       source/productionline/worker/facade/BufferFillingWorkerFacade.cpp \
- *       source/PerformanceMonitor.cpp \
- *       source/BufferManager.cpp \
- *       -I./include -std=c++17 -pthread
+ * 使用新的测试框架，支持自动注册和统一的命令行接口
  * 
  * 运行命令：
- *   ./test <raw_video_file>
- * 
- * 示例：
- *   ./test /usr/testdata/ids/test_video_argb888.raw
- *   ./test -m producer /usr/testdata/ids/test_video_argb888.raw
+ *   ./display_test -m loop video.raw
+ *   ./display_test -m sequential video.raw
+ *   ./display_test -l  # 列出所有测试用例
  */
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <signal.h>
 #include <string.h>
-#include <getopt.h>
 #include <string>
 #include <vector>
 #include <memory>
@@ -34,6 +25,7 @@
 #include "buffer/bufferpool/BufferPoolRegistry.hpp"
 #include "productionline/VideoProductionLine.hpp"
 #include "common/Logger.hpp"
+#include "framework/TestMacros.hpp"
 
 // FFmpeg头文件（解码器测试使用）
 extern "C" {
@@ -43,36 +35,6 @@ extern "C" {
 
 // 全局标志，用于处理 Ctrl+C 退出
 static volatile bool g_running = true;
-
-// 测试模式枚举
-enum class TestMode {
-    LOOP,
-    SEQUENTIAL,
-    PRODUCER,
-    IOURING,
-    RTSP,
-    FFMPEG,
-    UNKNOWN
-};
-
-// 将字符串转换为测试模式枚举
-static TestMode parse_test_mode(const char* mode_str) {
-    if (strcmp(mode_str, "loop") == 0) {
-        return TestMode::LOOP;
-    } else if (strcmp(mode_str, "sequential") == 0) {
-        return TestMode::SEQUENTIAL;
-    } else if (strcmp(mode_str, "producer") == 0) {
-        return TestMode::PRODUCER;
-    } else if (strcmp(mode_str, "iouring") == 0) {
-        return TestMode::IOURING;
-    } else if (strcmp(mode_str, "rtsp") == 0) {
-        return TestMode::RTSP;
-    } else if (strcmp(mode_str, "ffmpeg") == 0) {
-        return TestMode::FFMPEG;
-    } else {
-        return TestMode::UNKNOWN;
-    }
-}
 
 /**
  * 测试1：多缓冲循环播放测试
@@ -535,47 +497,7 @@ static int test_buffermanager_iouring(const char* raw_video_path) {
 
 
 /**
- * 测试6：RTSP 视频流播放（Worker自动创建BufferPool + DMA 零拷贝显示）
- * 
- * 功能演示：
- * - 连接 RTSP 视频流
- * - Worker在open()时自动创建BufferPool和Allocator
- * - Worker自动管理BufferPool的创建和Buffer注入
- * - DMA 零拷贝显示：直接使用物理地址
- * - 展示 RTSP 流的实时处理能力
- * 
- * 架构设计（最新）：
- * RTSP Stream → Worker::open() → 自动创建BufferPool和Allocator
- *                                      ↓
- *                          Worker内部解码循环
- *                                      ↓
- *                         FFmpeg解码 → AVFrame (带物理地址)
- *                                      ↓
- *                         Worker自动注入Buffer到BufferPool
- *                                      ↓
- *                         Buffer (包含物理地址)
- *                                      ↓
- *                  display.displayBufferByDMA(buffer)
- *                                      ↓
- *                         Display 驱动 DMA 显示
- * 
- * 零拷贝工作流程（最新架构）：
- * 1. Worker在open()时自动创建BufferPool和Allocator（如果需要）
- * 2. Worker解码RTSP流，获得带物理地址的AVFrame
- * 3. Worker自动将AVFrame包装为Buffer，注入到Worker的BufferPool
- * 4. ProductionLine从Worker获取BufferPool（通过getOutputBufferPool()）
- * 5. 消费者从Worker的BufferPool获取Buffer（含物理地址）
- * 6. 消费者调用display.displayBufferByDMA(buffer)：
- *    - 直接将物理地址传递给驱动（FB_IOCTL_SET_DMA_INFO）
- *    - 驱动通过DMA从解码器内存直接读取显示
- *    - 整个过程：0次memcpy！
- * 7. 消费者归还buffer，Worker自动管理AVFrame的释放
- * 
- * 关键设计理念（最新架构）：
- * - Worker自动创建BufferPool：Worker在open()时自动创建，应用层无需关心
- * - Worker必须创建BufferPool：Worker在open()时自动调用Allocator创建BufferPool
- * - 显式DMA调用：明确使用displayBufferByDMA，清晰可控
- * - 零拷贝路径：解码器输出 → DMA → 显示，无中间拷贝
+ * 测试5：RTSP 视频流播放（Worker自动创建BufferPool + DMA 零拷贝显示）
  */
 static int test_rtsp_stream(const char* rtsp_url) {
     LOG_INFO("\n═══════════════════════════════════════════════════════");
@@ -664,10 +586,6 @@ static int test_rtsp_stream(const char* rtsp_url) {
         }
         
         // ✨ 关键调用：display.displayBufferByDMA(buffer)
-        // - 直接使用 buffer 的物理地址
-        // - 通过 FB_IOCTL_SET_DMA_INFO 将物理地址传递给驱动
-        // - 驱动通过 DMA 从解码器内存直接读取显示
-        // - 零拷贝：解码器输出 → DMA → 显示
         display.waitVerticalSync();
         if (display.displayBufferByDMA(decoded_buffer)) {
             dma_success++;
@@ -708,21 +626,6 @@ static int test_rtsp_stream(const char* rtsp_url) {
 
 /**
  * 测试6：FFmpeg 编码视频文件播放（使用Worker自动创建BufferPool）
- * 
- * 功能：
- * - 打开编码视频文件（MP4, AVI, MKV等）
- * - Worker在open()时自动创建BufferPool和Allocator
- * - Worker自动管理BufferPool的创建和Buffer注入
- * - 集成 VideoProductionLine + BufferPool 架构
- * - 支持 DMA 零拷贝显示
- * 
- * 架构说明（最新）：
- * - Worker在open()时自动创建BufferPool（如果需要）
- * - ProductionLine从Worker获取BufferPool（通过getOutputBufferPool()）
- * - Worker必须创建BufferPool：Worker在open()时自动调用Allocator创建BufferPool
- * 
- * 参数：
- * @param video_path 视频文件路径（如 "video.mp4"）
  */
 static int test_h264_taco_video(const char* video_path) {
     LOG_INFO("\n═══════════════════════════════════════════════════════");
@@ -834,44 +737,14 @@ static int test_h264_taco_video(const char* video_path) {
     return 0;
 }
 
-/**
- * 打印使用说明
- */
-static void print_usage(const char* prog_name) {
-    printf("Usage: %s [options] <raw_video_file|rtsp_url>\n\n", prog_name);
-    printf("Options:\n");
-    printf("  -h, --help          Show this help message\n");
-    printf("  -m, --mode <mode>   Test mode (default: loop)\n");
-    printf("                      loop:       4-frame loop display\n");
-    printf("                      sequential: Sequential playback (play once)\n");
-    printf("                      producer:   BufferPool + VideoProductionLine test\n");
-    printf("                      iouring:    io_uring mode (using VideoProductionLine)\n");
-    printf("                      rtsp:       RTSP stream playback (zero-copy)\n");
-    printf("                      ffmpeg:     FFmpeg encoded video playback (NEW)\n");
-    printf("\n");
-    printf("Examples:\n");
-    printf("  %s video.raw\n", prog_name);
-    printf("  %s -m loop video.raw\n", prog_name);
-    printf("  %s -m sequential video.raw\n", prog_name);
-    printf("  %s -m producer video.raw\n", prog_name);
-    printf("  %s -m iouring video.raw\n", prog_name);
-    printf("  %s -m rtsp rtsp://192.168.1.100:8554/stream\n", prog_name);
-    printf("  %s -m ffmpeg video.mp4\n", prog_name);
-    printf("\n");
-    printf("Test Modes Description:\n");
-    printf("  loop:       Load N frames into framebuffer and loop display them\n");
-    printf("  sequential: Read and display frames sequentially from file\n");
-    printf("  producer:   Use BufferPool + VideoProductionLine architecture (zero-copy)\n");
-    printf("  iouring:    io_uring async I/O mode\n");
-    printf("  rtsp:       RTSP stream decoding and display (zero-copy, FFmpeg)\n");
-    printf("  ffmpeg:     FFmpeg encoded video file decoding (MP4/AVI/MKV/etc)\n");
-    printf("\n");
-    printf("Note:\n");
-    printf("  - Raw video file must match framebuffer resolution\n");
-    printf("  - Format: ARGB888 (4 bytes per pixel)\n");
-    printf("  - RTSP/FFmpeg modes require FFmpeg libraries\n");
-    printf("  - Press Ctrl+C to stop playback\n");
-}
+// ========== 测试用例注册 ==========
+// 使用新的测试框架，自动注册所有测试用例
+REGISTER_TEST(loop, "4-frame loop display", test_4frame_loop);
+REGISTER_TEST(sequential, "Sequential playback (play once)", test_sequential_playback);
+REGISTER_TEST(producer, "BufferPool + VideoProductionLine test (zero-copy)", test_buffermanager_producer);
+REGISTER_TEST(iouring, "io_uring async I/O mode", test_buffermanager_iouring);
+REGISTER_TEST(rtsp, "RTSP stream playback (zero-copy, FFmpeg)", test_rtsp_stream);
+REGISTER_TEST(ffmpeg, "FFmpeg encoded video playback (MP4/AVI/MKV/etc)", test_h264_taco_video);
 
 /**
  * 主函数
@@ -879,92 +752,12 @@ static void print_usage(const char* prog_name) {
 int main(int argc, char* argv[]) {
     // 初始化日志系统
     INIT_LOGGER("common/log4cplus.properties");
-    // ✅ 优化：使用 std::string 存储（更安全、更清晰）
-    std::string raw_video_path;
-    std::string mode = "loop";  // 默认模式：循环播放
     
-    // 定义长选项
-    static struct option long_options[] = {
-        {"help",    no_argument,       0, 'h'},
-        {"mode",    required_argument, 0, 'm'},
-        {0,         0,                 0,  0 }
-    };
+    // 注册信号处理
+    signal(SIGINT, [](int) { g_running = false; });
+    signal(SIGTERM, [](int) { g_running = false; });
     
-    // 解析命令行参数
-    int opt;
-    int option_index = 0;
-    
-    while ((opt = getopt_long(argc, argv, "hm:", long_options, &option_index)) != -1) {
-        switch (opt) {
-            case 'h':
-                print_usage(argv[0]);
-                return 0;
-            
-            case 'm':
-                mode = optarg;
-                break;
-            
-            case '?':
-                // getopt_long 已经打印了错误信息
-                printf("\n");
-                print_usage(argv[0]);
-                return 1;
-            
-            default:
-                print_usage(argv[0]);
-                return 1;
-        }
-    }
-    
-    // 获取非选项参数（视频文件路径或RTSP URL）
-    if (optind < argc) {
-        raw_video_path = argv[optind];
-    }
-    
-    // 解析测试模式
-    TestMode test_mode = parse_test_mode(mode.c_str());
-    
-    // 检查是否提供了视频文件路径
-    if (raw_video_path.empty()) {
-        LOG_ERROR("Missing raw video file path");
-        print_usage(argv[0]);
-        return 1;
-    }
-    
-    // 根据模式运行测试
-    int result = 0;
-    switch (test_mode) {
-        case TestMode::LOOP:
-            result = test_4frame_loop(raw_video_path.c_str());
-            break;
-        
-        case TestMode::SEQUENTIAL:
-            result = test_sequential_playback(raw_video_path.c_str());
-            break;
-        
-        case TestMode::PRODUCER:
-            result = test_buffermanager_producer(raw_video_path.c_str());
-            break;
-        
-        case TestMode::IOURING:
-            result = test_buffermanager_iouring(raw_video_path.c_str());
-            break;
-        
-        case TestMode::RTSP:
-            result = test_rtsp_stream(raw_video_path.c_str());  // raw_video_path实际是rtsp_url
-            break;
-        
-        case TestMode::FFMPEG:
-            result = test_h264_taco_video(raw_video_path.c_str());
-            break;
-        
-        case TestMode::UNKNOWN:
-        default:
-            LOG_ERROR_FMT("Unknown mode '%s'", mode.c_str());
-            print_usage(argv[0]);
-            return 1;
-    }
-    
-    return result;
+    // 使用测试框架主函数
+    TEST_MAIN(argc, argv);
 }
 

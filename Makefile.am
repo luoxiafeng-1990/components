@@ -36,8 +36,9 @@ bin_PROGRAMS = display_test test01
 # 3. 运行时需要目标系统有 log4cplus 动态库（Buildroot 会自动安装到 TARGET_DIR）
 COMMON_LIBS = -lpthread -luring -lavformat -lavcodec -lavutil -lswscale -ltacosys -llog4cplus
 
-# display_test 主程序
-display_test_SOURCES = test.cpp
+# display_test 主程序（已移动到 test_cases/ 目录）
+display_test_SOURCES = test_cases/dec/test.cpp
+display_test_CPPFLAGS = -I$(top_srcdir)/test_cases $(AM_CPPFLAGS)
 display_test_LDADD = libcomponents.la $(COMMON_LIBS)
 
 # test01 测试程序
