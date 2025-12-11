@@ -106,39 +106,12 @@ public:
     bool hasMoreFrames() const override;
     bool isAtEnd() const override;
     
-    // ============ 扩展配置接口 ============
-    
-    /**
-     * @brief 设置输出分辨率（在open之前调用）
-     */
-    void setOutputResolution(int width, int height);
-    
-    /**
-     * @brief 设置输出位深（在open之前调用）
-     */
-    void setOutputBitsPerPixel(int bpp);
-    
     // ============ 信息查询 ============
-    
-    /**
-     * @brief 获取已解码帧数
-     */
-    int getDecodedFrames() const { return decoded_frames_.load(); }
-    
-    /**
-     * @brief 获取解码错误数
-     */
-    int getDecodeErrors() const { return decode_errors_.load(); }
     
     /**
      * @brief 获取最后错误信息
      */
     std::string getLastError() const;
-    
-    /**
-     * @brief 获取FFmpeg错误码
-     */
-    int getLastFFmpegError() const { return last_ffmpeg_error_; }
     
     /**
      * @brief 获取编解码器名称
@@ -149,11 +122,6 @@ public:
      * @brief 打印统计信息
      */
     void printStats() const;
-    
-    /**
-     * @brief 打印视频信息
-     */
-    void printVideoInfo() const;
 
 private:
     // ============ FFmpeg 资源 ============
@@ -226,41 +194,6 @@ private:
      * @brief 配置特殊解码器（如 h264_taco）
      */
     bool configureSpecialDecoder();
-    
-    /**
-     * @brief 初始化格式转换器
-     */
-    bool initializeSwsContext();
-    
-    /**
-     * @brief 解码一帧
-     * @return AVFrame* 解码后的帧，失败返回nullptr
-     */
-    AVFrame* decodeOneFrame();
-    
-    /**
-     * @brief 将AVFrame转换为目标格式
-     * @param src_frame 源帧
-     * @param dest 目标地址
-     * @param dest_size 目标大小
-     * @return true 如果成功
-     */
-    bool convertFrameTo(AVFrame* src_frame, void* dest, size_t dest_size);
-    
-    
-    /**
-     * @brief 从AVFrame提取物理地址（零拷贝模式）
-     * @param frame AVFrame指针
-     * @return 物理地址，失败返回0
-     */
-    uint64_t extractPhysicalAddress(AVFrame* frame);
-    
-    /**
-     * @brief 创建零拷贝Buffer并注入BufferPool
-     * @param frame AVFrame指针（解码器内存）
-     * @return Buffer指针，失败返回nullptr
-     */
-    Buffer* createZeroCopyBuffer(AVFrame* frame);
     
     /**
      * @brief 估算总帧数

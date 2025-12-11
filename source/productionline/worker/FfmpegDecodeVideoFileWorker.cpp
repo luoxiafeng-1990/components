@@ -72,7 +72,7 @@ FfmpegDecodeVideoFileWorker::FfmpegDecodeVideoFileWorker(const WorkerConfig& con
     , eof_reached_(false)
     , zero_copy_buffer_pool_ptr_(nullptr)
     , use_hardware_decoder_(config.decoder.enable_hardware)  // 🎯 从配置读取
-    , decoder_name_(config.decoder.name ? config.decoder.name : "")  // 🎯 从配置读取（安全拷贝）
+    , decoder_name_(config.decoder.name.value_or(""))  // 🎯 从配置读取（使用 optional 的 value_or）
     , codec_options_ptr_(nullptr)
     , decoded_frames_(0)
     , decode_errors_(0)
@@ -397,133 +397,79 @@ bool FfmpegDecodeVideoFileWorker::initializeDecoder() {
 }
 
 bool FfmpegDecodeVideoFileWorker::configureSpecialDecoder() {
-    // 配置 h264_taco 解码器（参考 ids_test_video3）
+    // 配置 h264_taco 解码器（从 worker_config_ 读取配置）
     if (!codec_ctx_ptr_->priv_data) {
         printf("⚠️  Warning: codec_ctx->priv_data is NULL, cannot set options\n");
-        // 🔧 修复：不要在这里释放，由调用者处理
-        // avcodec_free_context(&codec_ctx_ptr_);  // ❌ 删除，由调用者处理
         return false;
     }
     
-    printf("🔧 Configuring h264_taco decoder options...\n");
+    // 🎯 从 worker_config_ 获取 taco 配置
+    const auto& taco = worker_config_.decoder.taco;
+    
+    printf("🔧 Configuring h264_taco decoder options from config...\n");
     
     int ret;
     
-    // 禁用重排序
-    ret = av_opt_set_int(codec_ctx_ptr_->priv_data, "reorder_disable", 1, 0);
-    printf("   reorder_disable=1: %s\n", ret < 0 ? "FAILED" : "OK");
+    // 禁用重排序（从 config 读取）
+    ret = av_opt_set_int(codec_ctx_ptr_->priv_data, "reorder_disable", 
+                         taco.reorder_disable ? 1 : 0, 0);
+    printf("   reorder_disable=%d: %s\n", taco.reorder_disable ? 1 : 0, 
+           ret < 0 ? "FAILED" : "OK");
     
-    // 启用双通道（CH0: YUV, CH1: RGB）
-    ret = av_opt_set_int(codec_ctx_ptr_->priv_data, "ch0_enable", 1, 0);
-    printf("   ch0_enable=1: %s\n", ret < 0 ? "FAILED" : "OK");
+    // 启用通道（从 config 读取）
+    ret = av_opt_set_int(codec_ctx_ptr_->priv_data, "ch0_enable", 
+                         taco.ch0_enable ? 1 : 0, 0);
+    printf("   ch0_enable=%d: %s\n", taco.ch0_enable ? 1 : 0, 
+           ret < 0 ? "FAILED" : "OK");
     
-    ret = av_opt_set_int(codec_ctx_ptr_->priv_data, "ch1_enable", 1, 0);
-    printf("   ch1_enable=1: %s\n", ret < 0 ? "FAILED" : "OK");
+    ret = av_opt_set_int(codec_ctx_ptr_->priv_data, "ch1_enable", 
+                         taco.ch1_enable ? 1 : 0, 0);
+    printf("   ch1_enable=%d: %s\n", taco.ch1_enable ? 1 : 0, 
+           ret < 0 ? "FAILED" : "OK");
     
-    // 配置通道1（RGB输出）
-    av_opt_set_int(codec_ctx_ptr_->priv_data, "ch1_crop_x", 0, 0);
-    av_opt_set_int(codec_ctx_ptr_->priv_data, "ch1_crop_y", 0, 0);
-    av_opt_set_int(codec_ctx_ptr_->priv_data, "ch1_crop_width", 0, 0);
-    av_opt_set_int(codec_ctx_ptr_->priv_data, "ch1_crop_height", 0, 0);
-    av_opt_set_int(codec_ctx_ptr_->priv_data, "ch1_scale_width", 0, 0);
-    av_opt_set_int(codec_ctx_ptr_->priv_data, "ch1_scale_height", 0, 0);
+    // 配置通道1裁剪参数（从 config 读取）
+    if (taco.ch1_crop_width > 0 && taco.ch1_crop_height > 0) {
+        av_opt_set_int(codec_ctx_ptr_->priv_data, "ch1_crop_x", taco.ch1_crop_x, 0);
+        av_opt_set_int(codec_ctx_ptr_->priv_data, "ch1_crop_y", taco.ch1_crop_y, 0);
+        av_opt_set_int(codec_ctx_ptr_->priv_data, "ch1_crop_width", taco.ch1_crop_width, 0);
+        av_opt_set_int(codec_ctx_ptr_->priv_data, "ch1_crop_height", taco.ch1_crop_height, 0);
+        printf("   ch1_crop: (%d, %d, %d, %d)\n", 
+               taco.ch1_crop_x, taco.ch1_crop_y, 
+               taco.ch1_crop_width, taco.ch1_crop_height);
+    }
     
-    ret = av_opt_set_int(codec_ctx_ptr_->priv_data, "ch1_rgb", 1, 0);
-    printf("   ch1_rgb=1: %s\n", ret < 0 ? "FAILED" : "OK");
+    // 配置通道1缩放参数（从 config 读取）
+    if (taco.ch1_scale_width > 0 && taco.ch1_scale_height > 0) {
+        av_opt_set_int(codec_ctx_ptr_->priv_data, "ch1_scale_width", taco.ch1_scale_width, 0);
+        av_opt_set_int(codec_ctx_ptr_->priv_data, "ch1_scale_height", taco.ch1_scale_height, 0);
+        printf("   ch1_scale: (%d, %d)\n", taco.ch1_scale_width, taco.ch1_scale_height);
+    }
     
-    // 设置RGB格式为ARGB888
-    ret = av_opt_set(codec_ctx_ptr_->priv_data, "ch1_rgb_format", "argb888", 0);
-    printf("   ch1_rgb_format=argb888: %s\n", ret < 0 ? "FAILED" : "OK");
+    // 配置通道1 RGB（从 config 读取）
+    ret = av_opt_set_int(codec_ctx_ptr_->priv_data, "ch1_rgb", 
+                         taco.ch1_rgb ? 1 : 0, 0);
+    printf("   ch1_rgb=%d: %s\n", taco.ch1_rgb ? 1 : 0, 
+           ret < 0 ? "FAILED" : "OK");
     
-    // 设置颜色标准为BT.601
-    ret = av_opt_set(codec_ctx_ptr_->priv_data, "ch1_rgb_std", "bt601", 0);
-    printf("   ch1_rgb_std=bt601: %s\n", ret < 0 ? "FAILED" : "OK");
+    // 设置RGB格式（从 config 读取）
+    if (taco.ch1_rgb && !taco.ch1_rgb_format.empty()) {
+        ret = av_opt_set(codec_ctx_ptr_->priv_data, "ch1_rgb_format", 
+                         taco.ch1_rgb_format.c_str(), 0);
+        printf("   ch1_rgb_format=%s: %s\n", taco.ch1_rgb_format.c_str(), 
+               ret < 0 ? "FAILED" : "OK");
+    }
+    
+    // 设置颜色标准（从 config 读取）
+    if (taco.ch1_rgb && !taco.ch1_rgb_std.empty()) {
+        ret = av_opt_set(codec_ctx_ptr_->priv_data, "ch1_rgb_std", 
+                         taco.ch1_rgb_std.c_str(), 0);
+        printf("   ch1_rgb_std=%s: %s\n", taco.ch1_rgb_std.c_str(), 
+               ret < 0 ? "FAILED" : "OK");
+    }
     
     return true;
 }
 
-bool FfmpegDecodeVideoFileWorker::initializeSwsContext() {
-    // 确定输出像素格式
-    AVPixelFormat dst_pix_fmt;
-    if (output_bpp_ == 32) {
-        dst_pix_fmt = AV_PIX_FMT_BGRA;  // ARGB888 (4 bytes)
-    } else if (output_bpp_ == 24) {
-        dst_pix_fmt = AV_PIX_FMT_BGR24; // RGB888 (3 bytes)
-    } else {
-        setError("Unsupported output bits per pixel");
-        return false;
-    }
-    
-    output_pixel_format_ = dst_pix_fmt;
-    
-    // 创建格式转换器
-    sws_ctx_ptr_ = sws_getContext(
-        codec_ctx_ptr_->width, codec_ctx_ptr_->height, codec_ctx_ptr_->pix_fmt,
-        output_width_, output_height_, dst_pix_fmt,
-        SWS_BILINEAR, nullptr, nullptr, nullptr
-    );
-    
-    if (!sws_ctx_ptr_) {
-        setError("Failed to create SwsContext");
-        return false;
-    }
-    
-    return true;
-}
-
-
-uint64_t FfmpegDecodeVideoFileWorker::extractPhysicalAddress(AVFrame* frame) {
-    if (!frame || !frame->metadata) {
-        return 0;
-    }
-    
-    // 从 metadata 中读取 pool_blk_id（参考 ids_test_video3）
-    AVDictionaryEntry* entry = av_dict_get(frame->metadata, "pool_blk_id", nullptr, 0);
-    if (!entry) {
-        return 0;
-    }
-    
-    // 解析 block_id
-    uint32_t blk_id = (uint32_t)atoi(entry->value);
-    if (blk_id == 0) {
-        return 0;
-    }
-    
-    // 使用 taco_sys 接口获取物理地址
-    uint64_t phys_addr = taco_sys_handle2_phys_addr(blk_id);
-    
-    return phys_addr;
-}
-
-Buffer* FfmpegDecodeVideoFileWorker::createZeroCopyBuffer(AVFrame* frame) {
-    if (!frame) {
-        return nullptr;
-    }
-    
-    // 1. 提取物理地址
-    uint64_t phys_addr = extractPhysicalAddress(frame);
-    if (phys_addr == 0) {
-        printf("⚠️  Warning: Failed to extract physical address from AVFrame\n");
-        return nullptr;
-    }
-    
-    // 2. 创建 Buffer（包装解码器内存）
-    size_t buffer_size = frame->width * frame->height * (output_bpp_ / 8);
-    
-    Buffer* buffer = new Buffer(
-        0,                          // id（由 BufferPool 管理）
-        frame->data[0],             // 虚拟地址
-        phys_addr,                  // 物理地址
-        buffer_size,                // 大小
-        Buffer::Ownership::EXTERNAL // 外部拥有（解码器拥有）
-    );
-    
-    // 3. 设置 deleter（释放时回收 AVFrame）
-    // 注意：AVFrame 需要持久化，不能在这里 unref
-    // 由 BufferPool 的使用者负责在使用完毕后 unref
-    
-    return buffer;
-}
 
 int FfmpegDecodeVideoFileWorker::estimateTotalFrames() {
     if (!format_ctx_ptr_ || video_stream_index_ < 0) {
@@ -553,38 +499,6 @@ int FfmpegDecodeVideoFileWorker::estimateTotalFrames() {
     
     return -1;  // 无法估算
 }
-
-bool FfmpegDecodeVideoFileWorker::convertFrameTo(AVFrame* src_frame, void* dest, size_t dest_size) {
-    if (!src_frame || !dest || !sws_ctx_ptr_) {
-        return false;
-    }
-    
-    size_t expected_size = output_width_ * output_height_ * (output_bpp_ / 8);
-    if (dest_size < expected_size) {
-        setError("Destination buffer too small");
-        return false;
-    }
-    
-    // 准备目标缓冲区参数
-    uint8_t* dst_data[1] = { (uint8_t*)dest };
-    int dst_linesize[1] = { output_width_ * (output_bpp_ / 8) };
-    
-    // 执行格式转换
-    int ret = sws_scale(
-        sws_ctx_ptr_,
-        src_frame->data, src_frame->linesize,
-        0, src_frame->height,
-        dst_data, dst_linesize
-    );
-    
-    if (ret <= 0) {
-        setError("sws_scale failed");
-        return false;
-    }
-    
-    return true;
-}
-
 
 // ============================================================================
 // 导航操作
@@ -773,23 +687,6 @@ uint64_t FfmpegDecodeVideoFileWorker::getOutputBufferPoolId() {
 }
 
 // ============================================================================
-// 配置接口
-// ============================================================================
-
-void FfmpegDecodeVideoFileWorker::setOutputResolution(int width, int height) {
-    if (!is_open_.load(std::memory_order_acquire)) {
-        output_width_ = width;
-        output_height_ = height;
-    }
-}
-
-void FfmpegDecodeVideoFileWorker::setOutputBitsPerPixel(int bpp) {
-    if (!is_open_.load(std::memory_order_acquire)) {
-        output_bpp_ = bpp;
-    }
-}
-
-// ============================================================================
 // 辅助方法
 // ============================================================================
 
@@ -828,25 +725,4 @@ void FfmpegDecodeVideoFileWorker::printStats() const {
     printf("   Decode errors: %d\n", decode_errors_.load());
     printf("   EOF: %s\n", eof_reached_ ? "YES" : "NO");
 }
-
-void FfmpegDecodeVideoFileWorker::printVideoInfo() const {
-    if (!is_open_.load(std::memory_order_acquire) || !format_ctx_ptr_ || video_stream_index_ < 0) {
-        printf("⚠️  Video not open\n");
-        return;
-    }
-    
-    AVStream* stream = format_ctx_ptr_->streams[video_stream_index_];
-    AVCodecParameters* codecpar = stream->codecpar;
-    
-    printf("\n📹 Video Information:\n");
-    printf("   File: %s\n", file_path_.c_str());
-    printf("   Format: %s\n", format_ctx_ptr_->iformat->long_name);
-    printf("   Codec: %s\n", avcodec_get_name(codecpar->codec_id));
-    printf("   Resolution: %dx%d\n", codecpar->width, codecpar->height);
-    printf("   FPS: %.2f\n", av_q2d(stream->avg_frame_rate));
-    printf("   Duration: %.2f seconds\n", stream->duration * av_q2d(stream->time_base));
-    printf("   Bit rate: %ld kbps\n", (long)(codecpar->bit_rate / 1000));
-    printf("   Pixel format: %s\n", av_get_pix_fmt_name((AVPixelFormat)codecpar->format));
-}
-
 

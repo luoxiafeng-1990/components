@@ -40,15 +40,17 @@ bool BufferFillingWorkerFacade::open() {
     }
     
     // 从 config_ 获取所有参数
-    const char* path = config_.file.file_path;
+    const std::string& file_path = config_.file.file_path;
     int width = config_.output.width;
     int height = config_.output.height;
     int bits_per_pixel = config_.output.bits_per_pixel;
     
-    if (!path) {
+    if (file_path.empty()) {
         printf("❌ ERROR: File path not set in config\n");
         return false;
     }
+    
+    const char* path = file_path.c_str();
     
     // 🎯 智能判断：根据Worker类型选择合适的open方法
     // - Raw视频Worker（MMAP_RAW, IOURING_RAW）：需要格式参数

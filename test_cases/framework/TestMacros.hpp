@@ -155,7 +155,7 @@ public:
  * 
  * 使用示例：
  *   int main(int argc, char* argv[]) {
- *       INIT_LOGGER("common/log4cplus.properties");
+ *       INIT_LOGGER();  // 无需配置文件，使用编程式配置
  *       // ... 其他初始化代码 ...
  *       TEST_MAIN(argc, argv);
  *   }

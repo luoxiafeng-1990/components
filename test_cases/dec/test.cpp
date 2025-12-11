@@ -18,6 +18,10 @@
 #include <string>
 #include <vector>
 #include <memory>
+#include <thread>
+#include <atomic>
+#include <sstream>
+#include <algorithm>
 #include "display/LinuxFramebufferDevice.hpp"
 #include "productionline/worker/BufferFillingWorkerFacade.hpp"
 #include "productionline/worker/WorkerConfig.hpp"
@@ -760,6 +764,193 @@ static int test_h264_taco_video(const char* video_path) {
     return 0;
 }
 
+/**
+ * 单个生产线的解码工作函数（不显示，仅解码）
+ * 
+ * @param line_id 生产线ID（用于日志标识）
+ * @param video_path 视频文件路径
+ * @param width 输出分辨率宽度
+ * @param height 输出分辨率高度
+ * @param total_frames 全局帧数统计（原子变量）
+ * @param total_errors 全局错误数统计（原子变量）
+ */
+static void decode_production_line_worker(
+    int line_id,
+    const char* video_path,
+    int width,
+    int height,
+    std::atomic<int>* total_frames,
+    std::atomic<int>* total_errors
+) {
+    std::string thread_prefix = "[Line " + std::to_string(line_id) + "] ";
+    
+    LOG_INFO_FMT("%sStarting decode worker for: %s", thread_prefix.c_str(), video_path);
+    
+    // 1. 创建 VideoProductionLine（Worker会在open()时自动调用Allocator创建BufferPool）
+    VideoProductionLine producer(true, 1);  // loop=true, thread_count=1
+    
+    // 2. 配置 FFmpeg 解码
+    auto workerConfig = WorkerConfigBuilder()
+        .setFileConfig(
+            FileConfigBuilder()
+                .setFilePath(video_path)
+                .build()
+        )
+        .setOutputConfig(
+            OutputConfigBuilder()
+                .setResolution(width, height)
+                .setBitsPerPixel(32)  // 固定32位，因为不显示，这个值不影响解码
+                .build()
+        )
+        .setDecoderConfig(
+            DecoderConfigBuilder()
+                .useH264Taco()  // 使用 h264_taco 硬件解码器进行视频文件解码
+                .build()
+        )
+        .setWorkerType(WorkerType::FFMPEG_VIDEO_FILE)
+        .build();
+    
+    // 3. 设置错误回调
+    producer.setErrorCallback([thread_prefix, total_errors](const std::string& error) {
+        LOG_ERROR_FMT("%sFFmpeg Error: %s", thread_prefix.c_str(), error.c_str());
+        (*total_errors)++;
+    });
+    
+    // 4. 启动生产者
+    LOG_INFO_FMT("%sStarting FFmpeg video producer...", thread_prefix.c_str());
+    if (!producer.start(workerConfig)) {
+        LOG_ERROR_FMT("%sFailed to start FFmpeg producer", thread_prefix.c_str());
+        (*total_errors)++;
+        return;
+    }
+    
+    LOG_INFO_FMT("%sVideo decoding started", thread_prefix.c_str());
+    
+    // 5. 获取工作BufferPool（Worker创建的或fallback的）
+    uint64_t producer_pool_id = producer.getWorkingBufferPoolId();
+    if (producer_pool_id == 0) {
+        LOG_ERROR_FMT("%sNo working BufferPool ID available", thread_prefix.c_str());
+        (*total_errors)++;
+        producer.stop();
+        return;
+    }
+    
+    auto producer_pool_weak = BufferPoolRegistry::getInstance().getPool(producer_pool_id);
+    auto producer_pool_sptr = producer_pool_weak.lock();
+    if (!producer_pool_sptr) {
+        LOG_ERROR_FMT("%sBufferPool not found or destroyed", thread_prefix.c_str());
+        (*total_errors)++;
+        producer.stop();
+        return;
+    }
+    
+    LOG_INFO_FMT("%sUsing BufferPool: '%s'", thread_prefix.c_str(), 
+                 producer_pool_sptr->getName().c_str());
+    
+    // 6. 解码循环（不显示，直接释放buffer）
+    int frame_count = 0;
+    
+    while (g_running) {
+        // 从工作BufferPool获取已解码的buffer
+        Buffer* filled_buffer = producer_pool_sptr->acquireFilled(true, 100);
+        if (filled_buffer == nullptr) {
+            continue;  // 超时，继续等待
+        }
+        
+        // 不显示，直接归还 buffer
+        producer_pool_sptr->releaseFilled(filled_buffer);
+        
+        frame_count++;
+        (*total_frames)++;
+        
+        // 每100帧打印一次统计
+        if (frame_count % 100 == 0) {
+            LOG_DEBUG_FMT("%sDecoded %d frames (%.1f fps)", 
+                         thread_prefix.c_str(), frame_count, producer.getAverageFPS());
+        }
+    }
+    
+    // 7. 停止生产者
+    LOG_INFO_FMT("%sStopping FFmpeg producer...", thread_prefix.c_str());
+    producer.stop();
+    
+    LOG_INFO_FMT("%sDecode worker completed", thread_prefix.c_str());
+    LOG_INFO_FMT("%sTotal frames decoded: %d", thread_prefix.c_str(), frame_count);
+    LOG_INFO_FMT("%sFrames produced: %d", thread_prefix.c_str(), producer.getProducedFrames());
+    LOG_INFO_FMT("%sFrames skipped: %d", thread_prefix.c_str(), producer.getSkippedFrames());
+    LOG_INFO_FMT("%sAverage FPS: %.2f", thread_prefix.c_str(), producer.getAverageFPS());
+}
+
+/**
+ * 测试7：多线程 FFmpeg 视频解码（不显示，仅解码）
+ * 
+ * 功能：
+ * - 创建多个 VideoProductionLine 实例
+ * - 每个实例独立解码同一个视频文件
+ * - 不显示，仅做解码性能测试
+ * - 统计所有线程的解码性能
+ */
+static int test_h264_taco_video_multithread(const char* video_path) {
+    LOG_INFO("\n═══════════════════════════════════════════════════════");
+    LOG_INFO_FMT("  Test: Multi-threaded FFmpeg Video Decoding - File: %s", video_path);
+    LOG_INFO("═══════════════════════════════════════════════════════\n");
+    
+    // 配置参数
+    const int num_threads = 4;  // 固定4个线程
+    const int output_width = 1920;
+    const int output_height = 1080;
+    
+    LOG_INFO_FMT("Configuration:");
+    LOG_INFO_FMT("  Threads: %d", num_threads);
+    LOG_INFO_FMT("  Video file: %s", video_path);
+    LOG_INFO_FMT("  Output resolution: %dx%d", output_width, output_height);
+    LOG_INFO_FMT("  Display: Disabled (decode only)");
+    LOG_INFO("");
+    
+    // 全局统计
+    std::atomic<int> total_frames(0);
+    std::atomic<int> total_errors(0);
+    
+    // 创建多个线程，每个线程运行一个 VideoProductionLine
+    LOG_INFO("Creating decode threads...");
+    std::vector<std::thread> threads;
+    
+    for (int i = 0; i < num_threads; i++) {
+        threads.emplace_back(decode_production_line_worker,
+                            i + 1,  // line_id 从1开始
+                            video_path,
+                            output_width,
+                            output_height,
+                            &total_frames,
+                            &total_errors);
+    }
+    
+    LOG_INFO_FMT("All %d decode threads started", num_threads);
+    LOG_INFO("Press Ctrl+C to stop");
+    LOG_INFO("");
+    
+    // 等待所有线程完成（或通过 g_running 控制）
+    for (auto& t : threads) {
+        t.join();
+    }
+    
+    // 打印最终统计
+    LOG_INFO("\n═══════════════════════════════════════════════════════");
+    LOG_INFO("  Test Results");
+    LOG_INFO("═══════════════════════════════════════════════════════");
+    LOG_INFO_FMT("Total threads: %d", num_threads);
+    LOG_INFO_FMT("Total frames decoded: %d", total_frames.load());
+    LOG_INFO_FMT("Total errors: %d", total_errors.load());
+    
+    if (total_errors.load() > 0) {
+        LOG_WARN_FMT("Test completed with %d errors", total_errors.load());
+        return -1;
+    }
+    
+    LOG_INFO("Test completed successfully");
+    return 0;
+}
+
 // ========== 测试用例注册 ==========
 // 使用新的测试框架，自动注册所有测试用例
 REGISTER_TEST(loop, "4-frame loop display", test_4frame_loop);
@@ -768,13 +959,14 @@ REGISTER_TEST(producer, "BufferPool + VideoProductionLine test (zero-copy)", tes
 REGISTER_TEST(iouring, "io_uring async I/O mode", test_buffermanager_iouring);
 REGISTER_TEST(rtsp, "RTSP stream playback (zero-copy, FFmpeg)", test_rtsp_stream);
 REGISTER_TEST(ffmpeg, "FFmpeg encoded video playback (MP4/AVI/MKV/etc)", test_h264_taco_video);
+REGISTER_TEST(ffmpeg_multithread, "Multi-threaded FFmpeg video decoding (no display, decode only)", test_h264_taco_video_multithread);
 
 /**
  * 主函数
  */
 int main(int argc, char* argv[]) {
-    // 初始化日志系统
-    INIT_LOGGER("common/log4cplus.properties");
+    // 初始化日志系统（无需配置文件）
+    INIT_LOGGER();
     
     // 注册信号处理
     signal(SIGINT, [](int) { g_running = false; });

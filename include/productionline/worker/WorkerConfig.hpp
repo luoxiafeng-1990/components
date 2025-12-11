@@ -1,6 +1,10 @@
 #ifndef WORKER_CONFIG_HPP
 #define WORKER_CONFIG_HPP
 
+#include <string>
+#include <string_view>
+#include <optional>
+
 /**
  * @brief Worker 类型枚举
  * 
@@ -34,11 +38,15 @@ struct WorkerConfig {
     // 文件配置
     // ========================================
     struct FileConfig {
-        const char* file_path = nullptr;       // 文件路径
+        std::string file_path;                // 文件路径（使用 std::string 保证生命周期安全）
         int start_frame = 0;                   // 起始帧
         int end_frame = -1;                    // 结束帧（-1=全部）
         
         FileConfig() = default;
+        FileConfig(const FileConfig&) = default;
+        FileConfig& operator=(const FileConfig&) = default;
+        FileConfig(FileConfig&&) = default;
+        FileConfig& operator=(FileConfig&&) = default;
     } file;
     
     // ========================================
@@ -57,32 +65,40 @@ struct WorkerConfig {
     // ========================================
     struct DecoderConfig {
         // 通用解码器参数
-        const char* name = nullptr;           // 解码器名称（nullptr=自动选择）
-        bool enable_hardware = true;          // 启用硬件加速
-        const char* hwaccel_device = nullptr; // 硬件设备（如 "cuda:0", "vaapi"）
-        int decode_threads = 0;               // 解码线程数（0=自动）
+        std::optional<std::string> name;              // 解码器名称（std::nullopt=自动选择）
+        bool enable_hardware = true;                   // 启用硬件加速
+        std::optional<std::string> hwaccel_device;     // 硬件设备（如 "cuda:0", "vaapi"）
+        int decode_threads = 0;                        // 解码线程数（0=自动）
         
         // ========================================
         // h264_taco 特定配置（子子结构体）
         // ========================================
         struct TacoConfig {
-            bool reorder_disable = true;           // 禁用重排序
-            bool ch0_enable = true;                // 启用通道0（YUV）
-            bool ch1_enable = true;                // 启用通道1（RGB）
-            bool ch1_rgb = true;                   // 通道1输出RGB
-            const char* ch1_rgb_format = "argb888"; // RGB格式
-            const char* ch1_rgb_std = "bt601";     // 色彩标准
-            int ch1_crop_x = 0;                    // 裁剪参数
+            bool reorder_disable = true;               // 禁用重排序
+            bool ch0_enable = true;                    // 启用通道0（YUV）
+            bool ch1_enable = true;                    // 启用通道1（RGB）
+            bool ch1_rgb = true;                       // 通道1输出RGB
+            std::string ch1_rgb_format = "argb888";   // RGB格式（使用 std::string）
+            std::string ch1_rgb_std = "bt601";        // 色彩标准（使用 std::string）
+            int ch1_crop_x = 0;                        // 裁剪参数
             int ch1_crop_y = 0;
             int ch1_crop_width = 0;
             int ch1_crop_height = 0;
-            int ch1_scale_width = 0;               // 缩放参数
+            int ch1_scale_width = 0;                   // 缩放参数
             int ch1_scale_height = 0;
             
             TacoConfig() = default;
+            TacoConfig(const TacoConfig&) = default;
+            TacoConfig& operator=(const TacoConfig&) = default;
+            TacoConfig(TacoConfig&&) = default;
+            TacoConfig& operator=(TacoConfig&&) = default;
         } taco;
         
         DecoderConfig() = default;
+        DecoderConfig(const DecoderConfig&) = default;
+        DecoderConfig& operator=(const DecoderConfig&) = default;
+        DecoderConfig(DecoderConfig&&) = default;
+        DecoderConfig& operator=(DecoderConfig&&) = default;
     } decoder;
     
     // ========================================
@@ -91,6 +107,10 @@ struct WorkerConfig {
     WorkerType worker_type = WorkerType::AUTO;
     
     WorkerConfig() = default;
+    WorkerConfig(const WorkerConfig&) = default;
+    WorkerConfig& operator=(const WorkerConfig&) = default;
+    WorkerConfig(WorkerConfig&&) = default;
+    WorkerConfig& operator=(WorkerConfig&&) = default;
 };
 
 // ========================================
@@ -107,7 +127,24 @@ private:
 public:
     FileConfigBuilder() = default;
     
+    // 接受 std::string_view（推荐，C++17+）
+    FileConfigBuilder& setFilePath(std::string_view path) {
+        config_.file_path = std::string(path);
+        return *this;
+    }
+    
+    // 兼容 const char*（保持向后兼容）
     FileConfigBuilder& setFilePath(const char* path) {
+        if (path) {
+            config_.file_path = path;
+        } else {
+            config_.file_path.clear();
+        }
+        return *this;
+    }
+    
+    // 兼容 std::string
+    FileConfigBuilder& setFilePath(const std::string& path) {
         config_.file_path = path;
         return *this;
     }
@@ -190,10 +227,27 @@ public:
         return *this;
     }
     
-    TacoConfigBuilder& setRgbConfig(bool enable, const char* format = "argb888", const char* std = "bt601") {
+    // 接受 std::string_view（推荐）
+    TacoConfigBuilder& setRgbConfig(
+        bool enable, 
+        std::string_view format = "argb888", 
+        std::string_view std = "bt601"
+    ) {
         config_.ch1_rgb = enable;
-        config_.ch1_rgb_format = format;
-        config_.ch1_rgb_std = std;
+        config_.ch1_rgb_format = std::string(format);
+        config_.ch1_rgb_std = std::string(std);
+        return *this;
+    }
+    
+    // 兼容 const char*（保持向后兼容）
+    TacoConfigBuilder& setRgbConfig(bool enable, const char* format, const char* std) {
+        config_.ch1_rgb = enable;
+        if (format) {
+            config_.ch1_rgb_format = format;
+        }
+        if (std) {
+            config_.ch1_rgb_std = std;
+        }
         return *this;
     }
     
@@ -228,8 +282,25 @@ public:
     
     // ========== 通用解码器参数 ==========
     
+    // 接受 std::string_view（推荐）
+    DecoderConfigBuilder& setDecoderName(std::string_view name) {
+        config_.name = std::string(name);
+        return *this;
+    }
+    
+    // 兼容 const char*（保持向后兼容）
     DecoderConfigBuilder& setDecoderName(const char* name) {
-        config_.name = name;
+        if (name) {
+            config_.name = name;
+        } else {
+            config_.name = std::nullopt;
+        }
+        return *this;
+    }
+    
+    // 清除解码器名称（使用自动选择）
+    DecoderConfigBuilder& clearDecoderName() {
+        config_.name = std::nullopt;
         return *this;
     }
     
@@ -238,8 +309,19 @@ public:
         return *this;
     }
     
+    // 接受 std::string_view（推荐）
+    DecoderConfigBuilder& setHwaccelDevice(std::string_view device) {
+        config_.hwaccel_device = std::string(device);
+        return *this;
+    }
+    
+    // 兼容 const char*（保持向后兼容）
     DecoderConfigBuilder& setHwaccelDevice(const char* device) {
-        config_.hwaccel_device = device;
+        if (device) {
+            config_.hwaccel_device = device;
+        } else {
+            config_.hwaccel_device = std::nullopt;
+        }
         return *this;
     }
     
@@ -266,15 +348,15 @@ public:
         bool ch0_enable = true,
         bool ch1_enable = true,
         bool ch1_rgb = true,
-        const char* rgb_format = "argb888",
-        const char* rgb_std = "bt601"
+        std::string_view rgb_format = "argb888",
+        std::string_view rgb_std = "bt601"
     ) {
         config_.taco.reorder_disable = reorder_disable;
         config_.taco.ch0_enable = ch0_enable;
         config_.taco.ch1_enable = ch1_enable;
         config_.taco.ch1_rgb = ch1_rgb;
-        config_.taco.ch1_rgb_format = rgb_format;
-        config_.taco.ch1_rgb_std = rgb_std;
+        config_.taco.ch1_rgb_format = std::string(rgb_format);
+        config_.taco.ch1_rgb_std = std::string(rgb_std);
         return *this;
     }
     
@@ -304,7 +386,7 @@ public:
      * @brief 预设：软件解码（自动选择）
      */
     DecoderConfigBuilder& useSoftware() {
-        config_.name = nullptr;
+        config_.name = std::nullopt;
         config_.enable_hardware = false;
         return *this;
     }
