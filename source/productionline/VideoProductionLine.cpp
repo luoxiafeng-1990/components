@@ -1,6 +1,5 @@
 #include "productionline/VideoProductionLine.hpp"
 #include "buffer/bufferpool/BufferPoolRegistry.hpp"
-#include "monitor/Timer.hpp"
 #include "common/Logger.hpp"
 #include <stdio.h>
 #include <chrono>
@@ -10,28 +9,39 @@
 // 构造函数和析构函数
 // ============================================================
 
-VideoProductionLine::VideoProductionLine(bool loop, int thread_count)
+VideoProductionLine::VideoProductionLine(bool loop, int thread_count, bool enable_monitor)
     : working_buffer_pool_id_(0)
     , working_buffer_pool_weak_()
+    , worker_facade_sptr_(nullptr)
+    , threads_()
     , running_(false)
+    , active_threads_(0)
+    , threads_mutex_()
     , produced_frames_(0)
     , skipped_frames_(0)
     , next_frame_index_(0)
     , loop_(loop)
     , thread_count_(thread_count)
     , total_frames_(0)
+    , enable_monitor_(enable_monitor)
+    , error_callback_(nullptr)
+    , error_mutex_()
+    , last_error_()
+    , start_time_()
+    , monitor_(nullptr)
 {
     if (thread_count < 1) {
         LOG_WARN_FMT("Invalid thread_count (%d), using default value 1", thread_count);
         thread_count_ = 1;
     }
-    LOG_INFO_FMT("VideoProductionLine created (loop=%s, thread_count=%d)", 
-                 loop_ ? "enabled" : "disabled", thread_count_);
+    LOG_INFO_FMT("VideoProductionLine created (loop=%s, thread_count=%d, monitor=%s)", 
+                 loop_ ? "enabled" : "disabled", thread_count_,
+                 enable_monitor_ ? "enabled" : "disabled");
 }
 
 VideoProductionLine::~VideoProductionLine() {
     LOG_INFO("Destroying VideoProductionLine...");
-    if (running_) {
+    if (running_.load()) {
         stop();
     }
 }
@@ -42,7 +52,7 @@ VideoProductionLine::~VideoProductionLine() {
 
 bool VideoProductionLine::start(const WorkerConfig& worker_config) {
     // 检查是否已经在运行
-    if (running_) {
+    if (running_.load()) {
         LOG_WARN("VideoProductionLine already running");
         return false;
     }
@@ -93,14 +103,24 @@ bool VideoProductionLine::start(const WorkerConfig& worker_config) {
     LOG_INFO("Worker's BufferPool created via Allocator, size validation handled by Worker");
     
     // 重置状态
-    running_ = true;
-    produced_frames_ = 0;
-    skipped_frames_ = 0;
-    next_frame_index_ = 0;
+    running_.store(true);
+    produced_frames_.store(0);
+    skipped_frames_.store(0);
+    next_frame_index_.store(0);
     start_time_ = std::chrono::steady_clock::now();
+    
+    // 初始化性能监控（仅在启用时）
+    if (enable_monitor_) {
+        monitor_ = std::make_unique<PerformanceMonitor>();
+        monitor_->setReportInterval(1000);  // 设置1秒间隔
+        LOG_INFO("Performance monitor enabled");
+    }
+    
     
     // 启动生产者线程
     threads_.reserve(thread_count_);
+    active_threads_.store(thread_count_);  // 设置活跃线程数
+    
     for (int i = 0; i < thread_count_; i++) {
         try {
             threads_.emplace_back(&VideoProductionLine::producerThreadFunc, this, i);
@@ -108,7 +128,8 @@ bool VideoProductionLine::start(const WorkerConfig& worker_config) {
         } catch (const std::exception& e) {
             LOG_ERROR_FMT("Failed to start thread #%d: %s", i, e.what());
             // 停止已启动的线程
-            running_ = false;
+            running_.store(false);
+            active_threads_.store(0);  // 重置活跃线程计数
             for (auto& thread : threads_) {
                 if (thread.joinable()) {
                     thread.join();
@@ -127,14 +148,17 @@ bool VideoProductionLine::start(const WorkerConfig& worker_config) {
 }
 
 void VideoProductionLine::stop() {
-    if (!running_) {
+    // 加锁保护线程相关操作
+    std::lock_guard<std::mutex> lock(threads_mutex_);
+    
+    if (!running_.load()) {
         return;
     }
     
     LOG_INFO("Stopping VideoProductionLine...");
     
     // 设置停止标志
-    running_ = false;
+    running_.store(false);
     
     // 等待所有线程退出
     for (auto& thread : threads_) {
@@ -144,9 +168,18 @@ void VideoProductionLine::stop() {
     }
     threads_.clear();
     
+    // 重置活跃线程计数
+    active_threads_.store(0);
+    
     // 关闭视频文件
     if (worker_facade_sptr_) {
         worker_facade_sptr_.reset();
+    }
+    
+    // 停止性能监控
+    if (monitor_) {
+        monitor_->stop();
+        monitor_.reset();
     }
     
     LOG_INFO("VideoProductionLine stopped");
@@ -160,14 +193,14 @@ void VideoProductionLine::stop() {
 // ============================================================
 
 double VideoProductionLine::getAverageFPS() const {
-    if (!running_ && threads_.empty()) {
+    if (!running_.load() && threads_.empty()) {
         // 已停止，计算总体平均
         auto duration = std::chrono::steady_clock::now() - start_time_;
         double seconds = std::chrono::duration<double>(duration).count();
         if (seconds > 0) {
             return produced_frames_.load() / seconds;
         }
-    } else if (running_) {
+    } else if (running_.load()) {
         // 正在运行，计算当前平均
         auto duration = std::chrono::steady_clock::now() - start_time_;
         double seconds = std::chrono::duration<double>(duration).count();
@@ -238,41 +271,11 @@ void VideoProductionLine::producerThreadFunc(int thread_id) {
     int thread_produced = 0;
     int thread_skipped = 0;
     int consecutive_failures = 0;
+    if (monitor_) {
+        monitor_->start();  // 启动后Timer会自动触发周期性报告
+    }
     
-    // 🎯 创建 Timer 上下文（用于定时打印连续失败次数和进度）
-    struct TimerContext {
-        int thread_id;
-        int* consecutive_failures_ptr;
-        int* thread_produced_ptr;
-        VideoProductionLine* self_ptr;
-    } timer_context = { 
-        thread_id, 
-        &consecutive_failures,
-        &thread_produced,
-        this
-    };
-    
-    // 🎯 定义 Timer 回调函数（同时打印失败次数和进度）
-    auto timer_callback = [](void* user_data) {
-        auto* ctx = static_cast<TimerContext*>(user_data);
-        LOG_DEBUG_FMT("[Timer] Thread #%d: consecutive_failures=%d, produced=%d, fps=%.1f", 
-                      ctx->thread_id, 
-                      *ctx->consecutive_failures_ptr,
-                      *ctx->thread_produced_ptr,
-                      ctx->self_ptr->getAverageFPS());
-    };
-    
-    // 🎯 创建并启动定时器（每2秒打印一次）
-    Timer failure_monitor_timer(
-        2.0,              // interval_seconds: 每2秒触发一次
-        timer_callback,   // callback: 回调函数
-        &timer_context,   // user_data: 上下文数据
-        0.0,              // delay_seconds: 立即开始
-        0.0               // duration_seconds: 无限期运行
-    );
-    //failure_monitor_timer.start();
-    
-    while (running_) {
+    while (running_.load()) {
         // 获取下一个有效的帧索引（封装后的清晰接口）
         auto frame_index_opt = getNextFrameIndex();
         if (!frame_index_opt.has_value()) {
@@ -282,21 +285,26 @@ void VideoProductionLine::producerThreadFunc(int thread_id) {
         
         // 🎯 统一的流程：从工作 BufferPool 获取 buffer（使用临时 shared_ptr）
         Buffer* buffer = nullptr;
-        while (running_ && buffer == nullptr) {
+        while (running_.load() && buffer == nullptr) {
             buffer = pool_sptr->acquireFree(true, 100);  // 100ms 超时
-            if (buffer == nullptr && running_) {
+            if (buffer == nullptr && running_.load()) {
                 // 超时但仍在运行，继续等待
                 LOG_DEBUG_FMT("[Thread #%d] Waiting for free buffer...", thread_id);
             }
         }
         
         // 检查是否因为停止信号退出循环
-        if (!running_) {
+        if (!running_.load()) {
             break;
         }
         
         // 4. 🎯 统一的接口：调用 Worker 填充 buffer（使用fillBuffer）
+        // 使用 PerformanceMonitor 测量填充buffer的耗时
+        if (monitor_) {
+            monitor_->beginTiming("fill_buffer");
+        }
         bool fill_success = worker_facade_sptr_->fillBuffer(frame_index, buffer);
+      
         
         // 5. 🎯 统一的处理：提交或归还
         if (fill_success) {
@@ -305,20 +313,73 @@ void VideoProductionLine::producerThreadFunc(int thread_id) {
             produced_frames_.fetch_add(1);
             thread_produced++;
             consecutive_failures = 0;  // 重置失败计数
+            if (monitor_) {
+                monitor_->endTiming("fill_buffer");
+            }
         } else {
-            // ⚠️ 填充失败：归还到 free 队列（Buffer 未填充数据，状态为 LOCKED_BY_PRODUCER）
-            pool_sptr->releaseFree(buffer);
-            skipped_frames_.fetch_add(1);
-            thread_skipped++;
-            // 🎯 累加连续失败次数（Timer 会每2秒自动打印）
-            consecutive_failures++;
+            // ⚠️ 填充失败：检查 Worker 是否到达 EOF
+            if (worker_facade_sptr_->isAtEnd()) {
+                // Worker 到达 EOF
+                if (loop_) {
+                    // 🔧 修复：循环模式下，当 Worker 到达 EOF 时，重置 Worker
+                    // 这确保循环播放时 Worker 能够从文件开头重新开始读取
+                    LOG_DEBUG_FMT("[Thread #%d] Worker reached EOF in loop mode, resetting to begin (frame_index=%d)", 
+                                  thread_id, frame_index);
+                    if (worker_facade_sptr_->seekToBegin()) {
+                        // 重置成功：归还 buffer，重置失败计数，继续下一次循环
+                        // 注意：不增加 skipped_frames，因为这是正常的循环重置操作
+                        pool_sptr->releaseFree(buffer);
+                        consecutive_failures = 0;
+                    } else {
+                        LOG_ERROR_FMT("[Thread #%d] Failed to reset Worker to begin", thread_id);
+                        // 重置失败，按正常失败处理
+                        pool_sptr->releaseFree(buffer);
+                        skipped_frames_.fetch_add(1);
+                        thread_skipped++;
+                        consecutive_failures++;
+                    }
+                } else {
+                    // 🔧 修复：非循环模式下，Worker 到达 EOF 时应该停止循环
+                    LOG_DEBUG_FMT("[Thread #%d] Worker reached EOF in non-loop mode, stopping producer thread", 
+                                  thread_id);
+                    pool_sptr->releaseFree(buffer);
+                    // 停止循环，退出生产者线程
+                    break;
+                }
+            } else {
+                // 非 EOF 情况：正常处理失败（可能是损坏帧等其他错误）
+                pool_sptr->releaseFree(buffer);
+                skipped_frames_.fetch_add(1);
+                thread_skipped++;
+                // 🎯 累加连续失败次数（PerformanceMonitor的Timer会每2秒自动打印统计）
+                consecutive_failures++;
+            }
+            if (monitor_) {
+                monitor_->endTiming("fill_buffer");
+            }
         }
     }
     
-    // 🎯 Timer 会在析构时自动调用 stop()
+    // 🔧 修复：线程退出前停止 PerformanceMonitor
+    // 注意：monitor_ 是共享的，所有线程都使用同一个 monitor
+    // stop() 方法是线程安全的，可以多次调用（内部会检查是否已停止）
+    // 虽然多个线程退出时都会调用 stop()，但这是安全的，因为 stop() 内部有锁保护
+    // 实际上，只要有一个线程调用了 stop()，定时器就会停止，其他线程的调用会被忽略
+    if (monitor_) {
+        monitor_->stop();
+    }
+    
     // 线程结束
     LOG_INFO_FMT("Thread #%d finished: produced=%d, skipped=%d, final_consecutive_failures=%d",
                  thread_id, thread_produced, thread_skipped, consecutive_failures);
+    
+    // 减少活跃线程计数
+    int remaining = active_threads_.fetch_sub(1) - 1;
+    if (remaining == 0) {
+        // 最后一个线程退出，设置 running_ 为 false
+        running_.store(false);
+        LOG_INFO("All producer threads finished naturally, production line stopped");
+    }
 }
 
 void VideoProductionLine::setError(const std::string& error_msg) {

@@ -1,190 +1,179 @@
 #include "monitor/PerformanceMonitor.hpp"
 #include <stdio.h>
 #include <string.h>
+#include <utility>  // for std::piecewise_construct, std::forward_as_tuple
 
 // ============ 构造函数和析构函数 ============
 
 PerformanceMonitor::PerformanceMonitor()
-    : frames_loaded_(0)
-    , frames_decoded_(0)
-    , frames_displayed_(0)
-    , total_load_time_us_(0)
-    , total_decode_time_us_(0)
-    , total_display_time_us_(0)
-    , is_started_(false)
+    : is_started_(false)
     , is_paused_(false)
+    , report_timer_id_(0)
     , report_interval_ms_(1000)  // 默认1秒报告一次
 {
 }
 
 PerformanceMonitor::~PerformanceMonitor() {
-    // 析构时无需特殊清理
+    // 确保停止定时器
+    stopReportTimer();
 }
 
 // ============ 生命周期管理 ============
 
 void PerformanceMonitor::start() {
-    std::lock_guard<std::mutex> lock(mutex_);
+    
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     start_time_ = std::chrono::steady_clock::now();
     last_report_time_ = start_time_;
     is_started_ = true;
     is_paused_ = false;
     
-    printf("📊 PerformanceMonitor started\n");
+    // 启动定时器服务
+    report_timer_.start();
+    
+    
+    // 启动报告定时器
+    startReportTimer();
+    
+    printf("📊 PerformanceMonitor started (auto-report enabled)\n");
 }
 
 void PerformanceMonitor::reset() {
-    std::lock_guard<std::mutex> lock(mutex_);
-    frames_loaded_ = 0;
-    frames_decoded_ = 0;
-    frames_displayed_ = 0;
-    total_load_time_us_ = 0;
-    total_decode_time_us_ = 0;
-    total_display_time_us_ = 0;
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
+    // 重置所有指标
+    for (auto& pair : metrics_) {
+        pair.second.count.store(0);
+        pair.second.total_time_us.store(0);
+        pair.second.is_timing.store(false);
+    }
     
     start_time_ = std::chrono::steady_clock::now();
     last_report_time_ = start_time_;
 }
 
 void PerformanceMonitor::pause() {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     is_paused_ = true;
 }
 
 void PerformanceMonitor::resume() {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     is_paused_ = false;
 }
 
-// ============ 简单事件记录 ============
+void PerformanceMonitor::stop() {
+    Timer::TimerId timer_id = 0;
+    
+    {
+        std::lock_guard<std::recursive_mutex> lock(mutex_);
+        if (!is_started_) {
+            return;  // 未启动，无需停止
+        }
+        // 🔧 修复：先获取定时器ID并重置，然后设置 is_started_ = false
+        // 这样可以确保在取消定时器之前，不会有新的回调被调度
+        if (report_timer_id_ != 0) {
+            timer_id = report_timer_id_;
+            report_timer_id_ = 0;
+        }
+        is_started_ = false;
+        is_paused_ = false;
+    }
+    
+    // 在锁外取消定时器（Timer是线程安全的）
+    if (timer_id != 0) {
+        report_timer_.cancel(timer_id);
+    }
+    
+    // 🔧 修复：停止定时器服务本身，确保定时器完全停止
+    // 注意：在锁外调用，因为 Timer 内部可能有自己的锁，避免死锁
+    report_timer_.stop();
+    
+    printf("📊 PerformanceMonitor stopped\n");
+}
 
-void PerformanceMonitor::recordFrameLoaded() {
-    std::lock_guard<std::mutex> lock(mutex_);
+// ============ 通用接口（动态监控）===========
+
+void PerformanceMonitor::recordMetric(const std::string& metric_name) {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     if (!is_started_ || is_paused_) {
         return;
     }
-    frames_loaded_++;
+    getOrCreateMetric(metric_name).count.fetch_add(1);
 }
 
-void PerformanceMonitor::recordFrameDecoded() {
-    std::lock_guard<std::mutex> lock(mutex_);
+void PerformanceMonitor::beginTiming(const std::string& metric_name) {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     if (!is_started_ || is_paused_) {
         return;
     }
-    frames_decoded_++;
+    MetricData& metric = getOrCreateMetric(metric_name);
+    metric.start_time = std::chrono::steady_clock::now();
+    metric.is_timing.store(true);
 }
 
-void PerformanceMonitor::recordFrameDisplayed() {
-    std::lock_guard<std::mutex> lock(mutex_);
+void PerformanceMonitor::endTiming(const std::string& metric_name) {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     if (!is_started_ || is_paused_) {
         return;
     }
-    frames_displayed_++;
-}
-
-// ============ 带计时的事件记录 ============
-
-void PerformanceMonitor::beginLoadFrameTiming() {
-    std::lock_guard<std::mutex> lock(mutex_);
-    if (!is_started_ || is_paused_) {
-        return;
-    }
-    load_start_ = std::chrono::steady_clock::now();
-}
-
-void PerformanceMonitor::endLoadFrameTiming() {
-    std::lock_guard<std::mutex> lock(mutex_);
-    if (!is_started_ || is_paused_) {
-        return;
+    
+    MetricData& metric = getOrCreateMetric(metric_name);
+    if (!metric.is_timing.load()) {
+        return;  // 没有开始计时，忽略
     }
     
     auto end = std::chrono::steady_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::microseconds>(
-        end - load_start_);
+        end - metric.start_time);
     
-    total_load_time_us_ += duration.count();
-    frames_loaded_++;
+    metric.total_time_us.fetch_add(duration.count());
+    metric.count.fetch_add(1);
+    metric.is_timing.store(false);
 }
 
-void PerformanceMonitor::beginDecodeFrameTiming() {
-    std::lock_guard<std::mutex> lock(mutex_);
-    if (!is_started_ || is_paused_) {
-        return;
+int PerformanceMonitor::getMetricCount(const std::string& metric_name) const {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
+    const MetricData* metric = getMetric(metric_name);
+    if (!metric) {
+        return 0;
     }
-    decode_start_ = std::chrono::steady_clock::now();
+    return metric->count.load();
 }
 
-void PerformanceMonitor::endDecodeFrameTiming() {
-    std::lock_guard<std::mutex> lock(mutex_);
-    if (!is_started_ || is_paused_) {
-        return;
+double PerformanceMonitor::getMetricFPS(const std::string& metric_name) const {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
+    const MetricData* metric = getMetric(metric_name);
+    if (!metric) {
+        return 0.0;
     }
-    
-    auto end = std::chrono::steady_clock::now();
-    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(
-        end - decode_start_);
-    
-    total_decode_time_us_ += duration.count();
-    frames_decoded_++;
+    return calculateAverageFPS(metric->count.load());
 }
 
-void PerformanceMonitor::beginDisplayFrameTiming() {
-    std::lock_guard<std::mutex> lock(mutex_);
-    if (!is_started_ || is_paused_) {
-        return;
-    }
-    display_start_ = std::chrono::steady_clock::now();
-}
-
-void PerformanceMonitor::endDisplayFrameTiming() {
-    std::lock_guard<std::mutex> lock(mutex_);
-    if (!is_started_ || is_paused_) {
-        return;
+double PerformanceMonitor::getMetricAverageTime(const std::string& metric_name) const {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
+    const MetricData* metric = getMetric(metric_name);
+    if (!metric) {
+        return 0.0;
     }
     
-    auto end = std::chrono::steady_clock::now();
-    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(
-        end - display_start_);
+    int count = metric->count.load();
+    if (count == 0) {
+        return 0.0;
+    }
     
-    total_display_time_us_ += duration.count();
-    frames_displayed_++;
+    long long total_us = metric->total_time_us.load();
+    return (double)total_us / count / 1000.0;  // 转换为毫秒
 }
 
 // ============ 统计信息获取 ============
-
-int PerformanceMonitor::getLoadedFrames() const {
-    std::lock_guard<std::mutex> lock(mutex_);
-    return frames_loaded_;
-}
-
-int PerformanceMonitor::getDecodedFrames() const {
-    std::lock_guard<std::mutex> lock(mutex_);
-    return frames_decoded_;
-}
-
-int PerformanceMonitor::getDisplayedFrames() const {
-    std::lock_guard<std::mutex> lock(mutex_);
-    return frames_displayed_;
-}
-
-double PerformanceMonitor::getAverageLoadFPS() const {
-    return calculateAverageFPS(frames_loaded_);
-}
-
-double PerformanceMonitor::getAverageDecodeFPS() const {
-    return calculateAverageFPS(frames_decoded_);
-}
-
-double PerformanceMonitor::getAverageDisplayFPS() const {
-    return calculateAverageFPS(frames_displayed_);
-}
+// 注意：便捷接口（getLoadedFrames等）已在头文件中内联实现
 
 double PerformanceMonitor::getTotalTime() const {
     return getTotalDuration();
 }
 
 double PerformanceMonitor::getElapsedTime() const {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     if (!is_started_) {
         return 0.0;
     }
@@ -199,7 +188,7 @@ double PerformanceMonitor::getElapsedTime() const {
 // ============ 报告输出 ============
 
 void PerformanceMonitor::printStatistics() const {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     printf("\n");
     printf("═══════════════════════════════════════════════════════\n");
     printf("          Performance Statistics\n");
@@ -207,31 +196,26 @@ void PerformanceMonitor::printStatistics() const {
     
     double total_time = getTotalDuration();
     
-    // 帧数统计
-    if (frames_loaded_ > 0) {
-        printf("📥 Loaded Frames:    %d frames\n", frames_loaded_);
-        printf("   Average Load FPS: %.2f fps\n", getAverageLoadFPS());
-        if (total_load_time_us_ > 0) {
-            double avg_load_time = (double)total_load_time_us_ / frames_loaded_ / 1000.0;
-            printf("   Average Load Time: %.2f ms/frame\n", avg_load_time);
-        }
-    }
-    
-    if (frames_decoded_ > 0) {
-        printf("\n🎬 Decoded Frames:   %d frames\n", frames_decoded_);
-        printf("   Average Decode FPS: %.2f fps\n", getAverageDecodeFPS());
-        if (total_decode_time_us_ > 0) {
-            double avg_decode_time = (double)total_decode_time_us_ / frames_decoded_ / 1000.0;
-            printf("   Average Decode Time: %.2f ms/frame\n", avg_decode_time);
-        }
-    }
-    
-    if (frames_displayed_ > 0) {
-        printf("\n📺 Displayed Frames: %d frames\n", frames_displayed_);
-        printf("   Average Display FPS: %.2f fps\n", getAverageDisplayFPS());
-        if (total_display_time_us_ > 0) {
-            double avg_display_time = (double)total_display_time_us_ / frames_displayed_ / 1000.0;
-            printf("   Average Display Time: %.2f ms/frame\n", avg_display_time);
+    // 打印所有指标
+    if (metrics_.empty()) {
+        printf("No metrics recorded yet.\n");
+    } else {
+        for (const auto& pair : metrics_) {
+            const std::string& name = pair.first;
+            const MetricData& metric = pair.second;
+            int count = metric.count.load();
+            
+            if (count > 0) {
+                printf("\n📊 Metric: %s\n", name.c_str());
+                printf("   Count: %d\n", count);
+                printf("   Average FPS: %.2f fps\n", calculateAverageFPS(count));
+                
+                long long total_us = metric.total_time_us.load();
+                if (total_us > 0) {
+                    double avg_time = (double)total_us / count / 1000.0;
+                    printf("   Average Time: %.2f ms/event\n", avg_time);
+                }
+            }
         }
     }
     
@@ -239,44 +223,87 @@ void PerformanceMonitor::printStatistics() const {
     printf("═══════════════════════════════════════════════════════\n\n");
 }
 
-void PerformanceMonitor::printRealTimeStats() {
-    std::lock_guard<std::mutex> lock(mutex_);
-    if (!is_started_) {
+void PerformanceMonitor::printMetric(const std::string& metric_name) const {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
+    const MetricData* metric = getMetric(metric_name);
+    if (!metric) {
+        printf("Metric '%s' not found.\n", metric_name.c_str());
         return;
     }
     
-    // 节流：检查距离上次报告的时间
-    auto now = std::chrono::steady_clock::now();
-    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(
-        now - last_report_time_);
-    
-    if (duration.count() < report_interval_ms_) {
-        return;  // 未到报告时间
+    int count = metric->count.load();
+    if (count == 0) {
+        printf("Metric '%s': No data recorded yet.\n", metric_name.c_str());
+        return;
     }
     
-    // 更新上次报告时间
+    printf("📊 Metric: %s\n", metric_name.c_str());
+    printf("   Count: %d\n", count);
+    printf("   Average FPS: %.2f fps\n", calculateAverageFPS(count));
+    
+    long long total_us = metric->total_time_us.load();
+    if (total_us > 0) {
+        double avg_time = (double)total_us / count / 1000.0;
+        printf("   Average Time: %.2f ms/event\n", avg_time);
+    }
+}
+
+void PerformanceMonitor::printRealTimeStats() {
+    
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
+    // 🔧 修复：双重检查，确保定时器未被停止
+    // 检查 is_started_ 和 report_timer_id_，如果定时器已被取消（report_timer_id_ == 0），直接返回
+    if (!is_started_ || report_timer_id_ == 0) {
+        return;
+    }
+    
+    // 注意：现在不再需要手动节流检查，因为Timer会自动控制调用频率
+    // 但保留 last_report_time_ 用于兼容性
+    
+    auto now = std::chrono::steady_clock::now();
     last_report_time_ = now;
     
     // 打印实时统计
     printf("📊 Real-time Stats: ");
     
-    if (frames_loaded_ > 0) {
-        printf("Loaded=%d (%.1f fps) ", frames_loaded_, getAverageLoadFPS());
+    bool first = true;
+    for (const auto& pair : metrics_) {
+        const std::string& name = pair.first;
+        const MetricData& metric = pair.second;
+        int count = metric.count.load();
+        
+        if (count > 0) {
+            if (!first) {
+                printf(" ");
+            }
+            // 计算这个周期内的FPS（基于报告间隔）
+            double period_seconds = report_interval_ms_ / 1000.0;
+            double period_fps = (period_seconds > 0) ? count / period_seconds : 0.0;
+            
+            // 计算平均时间（毫秒）
+            long long total_us = metric.total_time_us.load();
+            double avg_time_ms = (count > 0 && total_us > 0) ? 
+                (double)total_us / count / 1000.0 : 0.0;
+            
+            printf("%s=%d (%.1f fps, avg=%.2f ms)", name.c_str(), count, period_fps, avg_time_ms);
+            first = false;
+        }
     }
     
-    if (frames_decoded_ > 0) {
-        printf("Decoded=%d (%.1f fps) ", frames_decoded_, getAverageDecodeFPS());
-    }
+    printf(" Time=%.1fs\n", getElapsedTime());
     
-    if (frames_displayed_ > 0) {
-        printf("Displayed=%d (%.1f fps) ", frames_displayed_, getAverageDisplayFPS());
+    // 打印后重置所有计数器（从0开始统计下一个周期）
+    for (auto& pair : metrics_) {
+        pair.second.count.store(0);
+        pair.second.total_time_us.store(0);
+        pair.second.is_timing.store(false);
     }
-    
-    printf("Time=%.1fs\n", getElapsedTime());
+    // 重置开始时间（用于下一个周期的FPS计算）
+    start_time_ = now;
 }
 
 void PerformanceMonitor::generateReport(char* buffer, size_t buffer_size) const {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     if (!buffer || buffer_size == 0) {
         return;
     }
@@ -287,22 +314,17 @@ void PerformanceMonitor::generateReport(char* buffer, size_t buffer_size) const 
     offset += snprintf(buffer + offset, buffer_size - offset,
                       "Performance Report:\n");
     
-    if (frames_loaded_ > 0) {
-        offset += snprintf(buffer + offset, buffer_size - offset,
-                          "  Loaded: %d frames, %.2f fps\n",
-                          frames_loaded_, getAverageLoadFPS());
-    }
-    
-    if (frames_decoded_ > 0) {
-        offset += snprintf(buffer + offset, buffer_size - offset,
-                          "  Decoded: %d frames, %.2f fps\n",
-                          frames_decoded_, getAverageDecodeFPS());
-    }
-    
-    if (frames_displayed_ > 0) {
-        offset += snprintf(buffer + offset, buffer_size - offset,
-                          "  Displayed: %d frames, %.2f fps\n",
-                          frames_displayed_, getAverageDisplayFPS());
+    // 打印所有指标
+    for (const auto& pair : metrics_) {
+        const std::string& name = pair.first;
+        const MetricData& metric = pair.second;
+        int count = metric.count.load();
+        
+        if (count > 0) {
+            offset += snprintf(buffer + offset, buffer_size - offset,
+                              "  %s: %d events, %.2f fps\n",
+                              name.c_str(), count, calculateAverageFPS(count));
+        }
     }
     
     snprintf(buffer + offset, buffer_size - offset,
@@ -312,15 +334,64 @@ void PerformanceMonitor::generateReport(char* buffer, size_t buffer_size) const 
 // ============ 配置 ============
 
 void PerformanceMonitor::setReportInterval(int interval_ms) {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::unique_lock<std::recursive_mutex> lock(mutex_);
+    
+    if (interval_ms <= 0) {
+        printf("⚠️  Invalid report interval: %d ms, must be > 0\n", interval_ms);
+        return;
+    }
+    
     report_interval_ms_ = interval_ms;
+    
+    // 如果定时器正在运行，需要重启以应用新间隔
+    if (is_started_ && report_timer_id_ != 0) {
+        // 保存旧定时器ID，然后释放锁
+        Timer::TimerId old_timer_id = report_timer_id_;
+        report_timer_id_ = 0;
+        lock.unlock();  // 释放锁，避免死锁（stopReportTimer和startReportTimer内部会加锁）
+        
+        // 在锁外调用Timer操作（Timer内部是线程安全的）
+        report_timer_.cancel(old_timer_id);
+        
+        // 重新加锁并创建新定时器
+        lock.lock();
+        report_timer_id_ = report_timer_.scheduleRepeated(
+            report_interval_ms_,
+            [this]() {
+                this->printRealTimeStats();
+            }
+        );
+    }
 }
 
 // ============ 内部辅助方法 ============
 
-double PerformanceMonitor::calculateAverageFPS(int frame_count) const {
+PerformanceMonitor::MetricData& PerformanceMonitor::getOrCreateMetric(const std::string& metric_name) {
+    // 注意：调用者必须已经持有 mutex_
+    auto it = metrics_.find(metric_name);
+    if (it == metrics_.end()) {
+        // 创建新指标：使用 piecewise_construct 就地构造，避免复制 std::atomic 成员
+        it = metrics_.emplace(
+            std::piecewise_construct,
+            std::forward_as_tuple(metric_name),
+            std::forward_as_tuple()
+        ).first;
+    }
+    return it->second;
+}
+
+const PerformanceMonitor::MetricData* PerformanceMonitor::getMetric(const std::string& metric_name) const {
+    // 注意：调用者必须已经持有 mutex_
+    auto it = metrics_.find(metric_name);
+    if (it == metrics_.end()) {
+        return nullptr;
+    }
+    return &it->second;
+}
+
+double PerformanceMonitor::calculateAverageFPS(int count) const {
     // 注意：这个方法已经在调用者处加锁，不需要再次加锁
-    if (!is_started_ || frame_count == 0) {
+    if (!is_started_ || count == 0) {
         return 0.0;
     }
     
@@ -329,7 +400,7 @@ double PerformanceMonitor::calculateAverageFPS(int frame_count) const {
         return 0.0;
     }
     
-    return frame_count / duration;
+    return count / duration;
 }
 
 double PerformanceMonitor::getTotalDuration() const {
@@ -343,4 +414,57 @@ double PerformanceMonitor::getTotalDuration() const {
         now - start_time_);
     
     return duration.count() / 1000.0;
+}
+
+void PerformanceMonitor::startReportTimer() {
+    
+    Timer::TimerId old_timer_id = 0;
+    
+    {
+        std::lock_guard<std::recursive_mutex> lock(mutex_);
+        old_timer_id = report_timer_id_;
+        report_timer_id_ = 0;  // 先重置，避免在锁外操作时被其他线程看到
+    }
+    
+    // 在锁外取消旧定时器（Timer是线程安全的）
+    if (old_timer_id != 0) {
+        report_timer_.cancel(old_timer_id);
+    }
+    
+    // 在锁外创建新定时器（Timer是线程安全的）
+    Timer::TimerId new_timer_id = report_timer_.scheduleRepeated(
+        report_interval_ms_,
+        [this]() {
+            // 在定时器线程中调用，但 printRealTimeStats 内部会加锁，所以是安全的
+            this->printRealTimeStats();
+        }
+    );
+    
+    
+    // 更新timer_id（需要加锁保护）
+    {
+        std::lock_guard<std::recursive_mutex> lock(mutex_);
+        report_timer_id_ = new_timer_id;
+    }
+}
+
+void PerformanceMonitor::stopReportTimer() {
+    Timer::TimerId timer_id = 0;
+    
+    {
+        std::lock_guard<std::recursive_mutex> lock(mutex_);
+        if (report_timer_id_ != 0) {
+            timer_id = report_timer_id_;
+            report_timer_id_ = 0;
+        }
+    }
+    
+    // 在锁外取消定时器（Timer是线程安全的）
+    if (timer_id != 0) {
+        report_timer_.cancel(timer_id);
+    }
+    
+    // 停止定时器服务（如果没有其他定时器在使用）
+    // 注意：这里我们保留定时器服务运行，以便将来可能添加其他定时器
+    // 如果需要完全停止，可以调用 report_timer_.stop()
 }

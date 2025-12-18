@@ -19,7 +19,6 @@ struct AVFrame;
 struct SwsContext;
 struct AVDictionary;
 
-#define MAX_VIDEO_PATH_LENGTH 1024
 
 /**
  * @brief FfmpegDecodeVideoFileWorker - FFmpeg解码视频文件Worker

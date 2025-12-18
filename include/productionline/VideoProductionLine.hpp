@@ -3,6 +3,7 @@
 #include "buffer/bufferpool/BufferPool.hpp"
 #include "productionline/worker/BufferFillingWorkerFacade.hpp"
 #include "productionline/worker/WorkerConfig.hpp"
+#include "monitor/PerformanceMonitor.hpp"
 #include <string>
 #include <vector>
 #include <thread>
@@ -41,11 +42,12 @@ public:
      * 
      * @param loop 是否循环播放（默认 false）
      * @param thread_count 生产者线程数（默认 1）
+     * @param enable_monitor 是否启用性能监控（默认 true）
      * 
      * 注意：Worker必须在open()时自动创建BufferPool（通过调用Allocator）
      * ProductionLine从Worker获取BufferPool，不再需要外部注入
      */
-    VideoProductionLine(bool loop = false, int thread_count = 1);
+    VideoProductionLine(bool loop = false, int thread_count = 1, bool enable_monitor = false);
     
     /**
      * @brief 析构函数 - 自动停止生产者
@@ -169,6 +171,8 @@ private:
     // 线程管理
     std::vector<std::thread> threads_;
     std::atomic<bool> running_;
+    std::atomic<int> active_threads_;    // 活跃线程计数
+    std::mutex threads_mutex_;            // 保护线程相关操作
     
     // 统计信息
     std::atomic<int> produced_frames_;
@@ -179,6 +183,7 @@ private:
     bool loop_;                          // 是否循环播放
     int thread_count_;                   // 生产者线程数
     int total_frames_;                   // 总帧数
+    bool enable_monitor_;                // 是否启用性能监控
     
     // 错误处理
     ErrorCallback error_callback_;
@@ -187,5 +192,6 @@ private:
     
     // 性能监控
     std::chrono::steady_clock::time_point start_time_;
+    std::unique_ptr<PerformanceMonitor> monitor_;  // 填充buffer性能监控
 };
 

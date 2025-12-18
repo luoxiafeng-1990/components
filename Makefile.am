@@ -13,7 +13,7 @@ libcomponents_la_SOURCES = \
     source/productionline/worker/FfmpegDecodeVideoFileWorker.cpp \
     source/productionline/worker/IoUringRawVideoFileWorker.cpp \
     source/monitor/PerformanceMonitor.cpp \
-    source/monitor/Timer.cpp \
+    source/common/Timer.cpp \
     source/buffer/bufferpool/Buffer.cpp \
     source/buffer/BufferAllocatorFactory.cpp \
     source/buffer/BufferAllocatorFacade.cpp \

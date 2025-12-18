@@ -9,6 +9,7 @@ extern "C" {
 #include <libavutil/imgutils.h>
 #include <libavutil/opt.h>
 #include <libavutil/dict.h>
+#include <libavutil/error.h>  // 用于 av_strerror
 #include <libswscale/swscale.h>
 }
 
@@ -605,23 +606,50 @@ bool FfmpegDecodeVideoFileWorker::fillBuffer(int frame_index, Buffer* buffer) {
     }
     
     // 步骤2: 读取一个 packet（参考 ids_test_video3:2240）
-    int read_ret = av_read_frame(format_ctx_ptr_, packet_ptr_);
+    // 🔧 修复：对于损坏帧，在内部循环尝试读取，而不是返回 false
+    const int AVERROR_INVALIDDATA_VALUE = -1094995529;  // AVERROR(0x41444e49)
+    const int MAX_CORRUPTED_RETRIES = 10;  // 最大重试次数，避免无限循环
     
-    if (read_ret < 0) {
-        if (read_ret == AVERROR_EOF) {
-            printf("🔄 EOF reached, restarting...\n");
-            // 在 seek 前先清理 packet 状态
-            av_packet_unref(packet_ptr_);
-            // 重新 seek 到开头
-            if (!seek(0)) {
-                printf("❌ ERROR: seek to begin failed\n");
+    int corrupted_retries = 0;
+    int read_ret;
+    
+    while (true) {
+        read_ret = av_read_frame(format_ctx_ptr_, packet_ptr_);
+        
+        if (read_ret < 0) {
+            if (read_ret == AVERROR_EOF) {
+                printf("🔄 EOF reached\n");
+                // 🔧 修复：Worker 不应该决定是否循环，只设置 EOF 标志并返回 false
+                // 循环逻辑由 ProductionLine 根据 loop_ 变量控制
+                av_packet_unref(packet_ptr_);
+                eof_reached_ = true;
+                return false;
+            } else if (read_ret == AVERROR_INVALIDDATA_VALUE) {
+                // 🔧 修复：遇到损坏帧时，在内部循环跳过，继续读取下一个 packet
+                corrupted_retries++;
+                if (corrupted_retries <= MAX_CORRUPTED_RETRIES) {
+                    printf("⚠️  WARNING: Corrupted packet detected (attempt %d/%d), skipping...\n", 
+                           corrupted_retries, MAX_CORRUPTED_RETRIES);
+                    av_packet_unref(packet_ptr_);
+                    // 继续循环，尝试读取下一个 packet
+                    continue;
+                } else {
+                    // 连续多次都是损坏帧，可能文件确实损坏严重，返回失败
+                    printf("❌ ERROR: Too many corrupted packets (%d), giving up\n", corrupted_retries);
+                    av_packet_unref(packet_ptr_);
+                    return false;
+                }
+            } else {
+                // 其他错误（非 EOF，非损坏帧）：记录错误并返回
+                char err_buf[AV_ERROR_MAX_STRING_SIZE];
+                av_strerror(read_ret, err_buf, sizeof(err_buf));
+                printf("❌ ERROR: av_read_frame failed: %d (%s)\n", read_ret, err_buf);
+                av_packet_unref(packet_ptr_);
                 return false;
             }
-            eof_reached_ = true;
-            return false;
         } else {
-            printf("❌ ERROR: av_read_frame failed: %d\n", read_ret);
-            return false;
+            // 成功读取到 packet，退出循环
+            break;
         }
     }
     

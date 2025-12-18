@@ -1421,7 +1421,7 @@ auto workerConfig = WorkerConfigBuilder()
 - 从Worker获取BufferPool（原材料）
 - 管理多个生产者线程
 - 协调Buffer的获取、填充、提交流程
-- 性能监控和统计
+- 性能监控和统计（通过 `PerformanceMonitor` 进行动态指标监控）
 
 **关键成员变量**：
 - `std::unique_ptr<BufferPool> worker_buffer_pool_`：Worker创建的BufferPool（Worker通过调用Allocator创建，持有所有权）
@@ -1743,6 +1743,165 @@ return pool_id;
 - ✅ **接口统一**：所有实现类通过 `BufferAllocatorBase` 接口统一访问
 - ✅ **工厂创建**：通过 `BufferAllocatorFactory` 创建，返回接口指针
 - ✅ **实现透明**：具体实现细节对上层完全透明
+
+---
+
+### 9. PerformanceMonitor（性能监控系统）- v2.4 动态设计
+
+**文件位置**：
+- 头文件: `include/monitor/PerformanceMonitor.hpp`
+- 实现文件: `source/monitor/PerformanceMonitor.cpp`
+
+**架构角色**: 监控层（Monitoring Layer）
+
+**职责**：
+- ✅ **动态指标监控**：支持运行时添加任意监控指标（使用字符串标识符）
+- ✅ **计数统计**：记录事件发生次数
+- ✅ **时间统计**：测量操作耗时（微秒精度）
+- ✅ **FPS计算**：自动计算平均帧率
+- ✅ **实时报告**：支持实时统计输出和完整报告生成
+- ✅ **线程安全**：所有操作都有互斥锁保护，可在多线程环境中使用
+
+**设计特点（v2.4 动态设计）**：
+- ✅ **动态扩展**：使用 `std::unordered_map<std::string, MetricData>` 存储指标，支持运行时添加任意指标
+- ✅ **通用接口**：提供 `recordMetric()`, `beginTiming()`, `endTiming()`, `getMetricCount()`, `getMetricFPS()` 等通用接口
+- ✅ **向后兼容**：保留旧接口（`recordFrameLoaded()`, `getLoadedFrames()` 等）作为便捷方法
+- ✅ **零配置**：无需预先定义指标，按需创建
+
+**核心数据结构**：
+
+```cpp
+struct MetricData {
+    std::atomic<int> count{0};                    // 计数
+    std::atomic<long long> total_time_us{0};     // 总时间（微秒）
+    std::chrono::steady_clock::time_point start_time;  // 当前计时开始时间
+    std::atomic<bool> is_timing{false};          // 是否正在计时
+};
+```
+
+**关键成员变量**：
+- `std::unordered_map<std::string, MetricData> metrics_`：动态指标容器
+- `std::mutex mutex_`：线程安全保护
+- `std::chrono::steady_clock::time_point start_time_`：监控开始时间
+- `bool is_started_`, `bool is_paused_`：状态标志
+
+**核心方法**：
+
+**通用接口（推荐使用）**：
+- `recordMetric(const std::string& metric_name)`：记录一次指标计数
+- `beginTiming(const std::string& metric_name)`：开始计时
+- `endTiming(const std::string& metric_name)`：结束计时并记录
+- `getMetricCount(const std::string& metric_name)`：获取指标计数
+- `getMetricFPS(const std::string& metric_name)`：获取指标平均FPS
+- `getMetricAverageTime(const std::string& metric_name)`：获取指标平均时间（毫秒）
+
+**便捷接口（向后兼容）**：
+- `recordFrameLoaded()`：记录一次帧加载（等价于 `recordMetric("load_frame")`）
+- `recordFrameDecoded()`：记录一次帧解码（等价于 `recordMetric("decode_frame")`）
+- `recordFrameDisplayed()`：记录一次帧显示（等价于 `recordMetric("display_frame")`）
+- `beginLoadFrameTiming()`, `endLoadFrameTiming()`：帧加载计时
+- `beginDecodeFrameTiming()`, `endDecodeFrameTiming()`：帧解码计时
+- `beginDisplayFrameTiming()`, `endDisplayFrameTiming()`：帧显示计时
+- `getLoadedFrames()`, `getDecodedFrames()`, `getDisplayedFrames()`：获取计数
+- `getAverageLoadFPS()`, `getAverageDecodeFPS()`, `getAverageDisplayFPS()`：获取FPS
+
+**生命周期管理**：
+- `start()`：开始监控
+- `reset()`：重置所有统计数据
+- `pause()`：暂停监控
+- `resume()`：恢复监控
+
+**报告输出**：
+- `printStatistics()`：打印完整的统计报告（所有指标）
+- `printMetric(const std::string& metric_name)`：打印单个指标的统计信息
+- `printRealTimeStats()`：实时打印统计（带节流，默认每1秒最多打印一次）
+- `generateReport(char* buffer, size_t buffer_size)`：生成统计报告字符串
+
+**使用示例**：
+
+```cpp
+// 示例1：使用通用接口（推荐）
+PerformanceMonitor monitor;
+monitor.start();
+
+// 记录自定义指标
+monitor.recordMetric("buffer_filled");
+monitor.recordMetric("buffer_filled");  // 计数 +1
+
+// 计时操作
+monitor.beginTiming("decode_operation");
+// ... 执行解码操作 ...
+monitor.endTiming("decode_operation");  // 自动记录时间和计数
+
+// 查询统计
+int count = monitor.getMetricCount("buffer_filled");
+double fps = monitor.getMetricFPS("buffer_filled");
+double avg_time = monitor.getMetricAverageTime("decode_operation");
+
+// 打印报告
+monitor.printStatistics();  // 打印所有指标
+monitor.printMetric("buffer_filled");  // 打印单个指标
+
+// 示例2：使用便捷接口（向后兼容）
+monitor.recordFrameLoaded();  // 等价于 recordMetric("load_frame")
+monitor.beginLoadFrameTiming();
+// ... 加载操作 ...
+monitor.endLoadFrameTiming();
+int frames = monitor.getLoadedFrames();
+double fps = monitor.getAverageLoadFPS();
+
+// 示例3：在 VideoProductionLine 中使用
+void VideoProductionLine::producerThreadFunc(int thread_id) {
+    // ...
+    if (fill_success) {
+        pool_sptr->submitFilled(buffer);
+        produced_frames_.fetch_add(1);
+        
+        // 使用通用接口记录自定义指标
+        if (monitor_) {
+            monitor_->recordMetric("buffer_filled");
+        }
+    }
+    // ...
+}
+```
+
+**设计优势**：
+
+1. **动态扩展性**：
+   - 无需修改代码即可添加新指标
+   - 支持任意字符串标识符
+   - 指标按需创建，零开销
+
+2. **向后兼容性**：
+   - 旧代码无需修改即可继续使用
+   - 便捷接口自动映射到通用接口
+   - 平滑迁移路径
+
+3. **线程安全性**：
+   - 所有操作都有互斥锁保护
+   - `std::atomic` 成员变量保证计数和时间的原子性
+   - 可在多线程环境中安全使用
+
+4. **性能优化**：
+   - 使用 `std::atomic` 减少锁竞争
+   - 动态指标存储，只创建实际使用的指标
+   - 报告输出支持节流，避免频繁打印
+
+**技术细节**：
+
+- **std::atomic 不可复制问题**：`MetricData` 包含 `std::atomic` 成员，不可复制。在 `unordered_map::emplace()` 时使用 `std::piecewise_construct` 进行就地构造，避免复制操作。
+- **线程安全实现**：使用 `std::mutex` 保护 `metrics_` 容器的访问，使用 `std::atomic` 保护单个指标的数据。
+
+**与旧版本的区别（v2.4 重构）**：
+
+| 特性 | 旧版本（固定指标） | 新版本（动态指标） |
+|------|------------------|------------------|
+| **指标定义** | 硬编码成员变量（`frames_loaded_`, `frames_decoded_` 等） | 动态 `unordered_map<string, MetricData>` |
+| **添加新指标** | 需要修改类定义 | 运行时动态添加 |
+| **接口设计** | 固定接口（`recordFrameLoaded()` 等） | 通用接口 + 便捷接口 |
+| **扩展性** | 低（需要修改代码） | 高（无需修改代码） |
+| **向后兼容** | - | ✅ 完全兼容 |
 
 ---
 
@@ -2158,12 +2317,15 @@ private:
     // 成员变量和辅助方法
     mutable std::mutex mutex_;
     int frames_loaded_;
+    int frames_decoded_;
+    int frames_displayed_;
     // ...
     
 public:
     // 公共接口
     PerformanceMonitor();
     void start();
+    void recordFrameLoaded();
     // ...
 };
 ```
@@ -2176,12 +2338,20 @@ public:
     PerformanceMonitor();
     ~PerformanceMonitor();
     void start();
+    
+    // 通用接口（动态监控）
+    void recordMetric(const std::string& metric_name);
+    void beginTiming(const std::string& metric_name);
+    void endTiming(const std::string& metric_name);
+    
+    // 便捷接口（向后兼容）
+    void recordFrameLoaded() { recordMetric("load_frame"); }
     // ...
     
 private:
     // 成员变量和辅助方法
     mutable std::mutex mutex_;
-    int frames_loaded_;
+    std::unordered_map<std::string, MetricData> metrics_;  // 动态指标存储
     // ...
 };
 ```
@@ -2356,6 +2526,43 @@ private:
 - ✅ Worker必须在`open()`时创建BufferPool，否则返回0
 - ✅ 调用者通过 `BufferPoolRegistry::getInstance().getPool(pool_id)` 获取临时访问
 
+### PerformanceMonitor API
+
+| 方法 | 说明 | 参数 | 返回值 |
+|------|------|------|--------|
+| `PerformanceMonitor()` | 构造函数 | 无 | 无 |
+| `~PerformanceMonitor()` | 析构函数 | 无 | 无 |
+| `start()` | 开始监控 | 无 | `void` |
+| `reset()` | 重置所有统计数据 | 无 | `void` |
+| `pause()` | 暂停监控 | 无 | `void` |
+| `resume()` | 恢复监控 | 无 | `void` |
+| `recordMetric(metric_name)` | 记录一次指标计数（通用接口） | `const std::string&` | `void` |
+| `beginTiming(metric_name)` | 开始计时（通用接口） | `const std::string&` | `void` |
+| `endTiming(metric_name)` | 结束计时并记录（通用接口） | `const std::string&` | `void` |
+| `getMetricCount(metric_name)` | 获取指标计数 | `const std::string&` | `int` |
+| `getMetricFPS(metric_name)` | 获取指标平均FPS | `const std::string&` | `double` |
+| `getMetricAverageTime(metric_name)` | 获取指标平均时间（毫秒） | `const std::string&` | `double` |
+| `recordFrameLoaded()` | 记录一次帧加载（便捷接口） | 无 | `void` |
+| `recordFrameDecoded()` | 记录一次帧解码（便捷接口） | 无 | `void` |
+| `recordFrameDisplayed()` | 记录一次帧显示（便捷接口） | 无 | `void` |
+| `getLoadedFrames()` | 获取已加载的帧数（便捷接口） | 无 | `int` |
+| `getDecodedFrames()` | 获取已解码的帧数（便捷接口） | 无 | `int` |
+| `getDisplayedFrames()` | 获取已显示的帧数（便捷接口） | 无 | `int` |
+| `getAverageLoadFPS()` | 获取平均加载FPS（便捷接口） | 无 | `double` |
+| `getAverageDecodeFPS()` | 获取平均解码FPS（便捷接口） | 无 | `double` |
+| `getAverageDisplayFPS()` | 获取平均显示FPS（便捷接口） | 无 | `double` |
+| `printStatistics()` | 打印完整的统计报告（所有指标） | 无 | `void` |
+| `printMetric(metric_name)` | 打印单个指标的统计信息 | `const std::string&` | `void` |
+| `printRealTimeStats()` | 实时打印统计（带节流） | 无 | `void` |
+| `generateReport(buffer, size)` | 生成统计报告字符串 | `char*`, `size_t` | `void` |
+| `setReportInterval(interval_ms)` | 设置实时报告的间隔（毫秒） | `int` | `void` |
+
+**设计特点（v2.4）**：
+- ✅ **动态指标**：支持运行时添加任意监控指标
+- ✅ **通用接口**：`recordMetric()`, `beginTiming()`, `endTiming()` 等
+- ✅ **向后兼容**：保留旧接口作为便捷方法
+- ✅ **线程安全**：所有操作都有互斥锁保护
+
 ### IVideoFileNavigator API
 
 | 方法 | 说明 | 参数 | 返回值 |
@@ -2495,6 +2702,217 @@ ProductionLine架构通过清晰的职责划分和设计模式应用，实现了
 - **方法分组**：按功能组织方法（生命周期、核心接口、查询接口等），使用注释分隔
 - **成员变量组织**：私有成员变量按资源管理、状态信息、配置参数、辅助数据的顺序组织
 - **统一风格**：所有类遵循统一的代码风格，提升可读性和可维护性
+
+---
+
+## 硬件支持的图像格式与FFmpeg兼容性对照表
+
+### 概述
+
+本章节列出了硬件支持的所有图像输出格式，并详细对比了与FFmpeg的兼容性。表格包含了每种格式的数据存储布局、FFmpeg支持情况以及转换建议。
+
+### YUV格式对照表
+
+| 硬件支持格式 | 硬件数据存储布局 | FFmpeg支持 | FFmpeg参数名 | FFmpeg数据存储布局 | 布局一致性 | 备注说明 |
+|------------|----------------|-----------|------------|------------------|----------|---------|
+| **YUV400 系列（灰度图）** |
+| YUV400 8-bit | Y分量连续存储：`YYYY...` | ✅ | gray | Y分量连续存储：`YYYY...` | ✅ 完全一致 | 标准8位灰度图 |
+| YUV400 P010 | Y分量16bit存储（低10bit有效，高6bit填充0）：`YYYY...(16bit/pixel)` | ✅ | gray10le | Y分量16bit小端存储：`YYYY...(16bit/pixel)` | ✅ 完全一致 | 10bit存储在16bit中，小端字节序 |
+| YUV400 I010 | Y分量10bit紧密存储（4像素40bit）：每4像素占5字节 | ❌ | - | - | ❌ 需转换 | FFmpeg不支持10bit紧密打包，需转换为P010或gray10le |
+| YUV400 L010 | Y分量10bit紧密存储，按行对齐 | ❌ | - | - | ❌ 需转换 | 需转换为P010格式 |
+| YUV400 Pack10 | Y分量10bit打包存储（4像素40bit） | ❌ | - | - | ❌ 需转换 | 需转换为P010或解包为16bit |
+| **YUV420 NV12 系列（Semi-planar，UV交错）** |
+| YUV420 8-bit NV12 | Y平面 + UV交错：`YYYY...(W×H) UVUVUV...(W×H/2)` | ✅ | nv12 | Y平面 + UV交错：`YYYY...(W×H) UVUVUV...(W×H/2)` | ✅ 完全一致 | 标准NV12格式，广泛支持 |
+| YUV420 NV12 P010 | Y平面16bit + UV交错16bit：`YYYY...(16bit×W×H) UVUV...(16bit×W×H/2)` | ✅ | p010le | Y平面16bit + UV交错16bit（小端） | ✅ 完全一致 | 10bit存储在16bit中，小端字节序 |
+| YUV420 NV12 I010 | Y平面10bit紧密 + UV交错10bit紧密存储 | ❌ | - | - | ❌ 需转换 | 需解包为P010格式 |
+| YUV420 NV12 L010 | Y平面10bit按行对齐 + UV交错10bit按行对齐 | ❌ | - | - | ❌ 需转换 | 需转换为P010格式 |
+| YUV420 NV12 Pack10 | Y平面10bit打包 + UV交错10bit打包 | ❌ | - | - | ❌ 需转换 | 需解包为P010格式 |
+| **YUV420 NV21 系列（Semi-planar，VU交错）** |
+| YUV420 8-bit NV21 | Y平面 + VU交错：`YYYY...(W×H) VUVUVU...(W×H/2)` | ✅ | nv21 | Y平面 + VU交错：`YYYY...(W×H) VUVUVU...(W×H/2)` | ✅ 完全一致 | Android常用格式 |
+| YUV420 NV21 L010 | Y平面10bit按行对齐 + VU交错10bit按行对齐 | ❌ | - | - | ❌ 需转换 | 需转换为标准格式 |
+| YUV420 NV21 I011 | Y平面11bit(?)紧密 + VU交错11bit(?)紧密 | ❌ | - | - | ❌ 需转换 | 疑似参数错误（11bit不常见） |
+| YUV420 NV21 P010 Tiled-4×4 | Y平面Tile存储(4×4块) + VU交错Tile存储 | ❌ | - | - | ❌ 需转换 | Tiled格式需转换为线性NV21 |
+| **YUV420 Planar 系列（Y/U/V各自独立）** |
+| YUV420 P010 | Y平面16bit + U平面16bit + V平面16bit：`YYYY...(16bit×W×H) UUUU...(16bit×W×H/4) VVVV...(16bit×W×H/4)` | ✅ | yuv420p10le | Y/U/V平面16bit独立存储（小端） | ✅ 完全一致 | 10bit YUV420 planar格式 |
+
+### RGB/RGBA格式对照表
+
+| 硬件支持格式 | 硬件数据存储布局 | FFmpeg支持 | FFmpeg参数名 | FFmpeg数据存储布局 | 布局一致性 | 备注说明 |
+|------------|----------------|-----------|------------|------------------|----------|---------|
+| **8bit RGB 系列（每通道8bit）** |
+| RGB888 | RGB像素交错：`RGBRGBRGB...` (24bit/pixel) | ✅ | rgb24 | RGB像素交错：`RGBRGBRGB...` | ✅ 完全一致 | 标准24bit RGB |
+| BGR888 | BGR像素交错：`BGRBGRBGR...` (24bit/pixel) | ✅ | bgr24 | BGR像素交错：`BGRBGRBGR...` | ✅ 完全一致 | 蓝绿红顺序 |
+| RGB888 planar | R/G/B平面独立：`RRR... GGG... BBB...` | ✅ | gbrp | G/B/R平面独立（注意顺序） | ⚠️ 通道顺序不同 | FFmpeg使用GBR顺序，需重映射 |
+| ARGB8888 | ARGB像素交错：`ARGBARGBARGB...` (32bit/pixel) | ✅ | argb | ARGB像素交错 | ✅ 完全一致 | 带Alpha通道 |
+| ABGR8888 | ABGR像素交错：`ABGRABGRABGR...` (32bit/pixel) | ✅ | abgr | ABGR像素交错 | ✅ 完全一致 | Alpha+蓝绿红顺序 |
+| RGBA8888 | RGBA像素交错：`RGBARGBARGBA...` (32bit/pixel) | ✅ | rgba | RGBA像素交错 | ✅ 完全一致 | RGB+Alpha |
+| BGRA8888 | BGRA像素交错：`BGRABGRABGRA...` (32bit/pixel) | ✅ | bgra | BGRA像素交错 | ✅ 完全一致 | BGR+Alpha，Windows常用 |
+| RGBX8888 | RGBX像素交错：`RGBXRGBXRGBX...` (32bit/pixel, X填充) | ✅ | rgb0 | RGB0像素交错 | ✅ 完全一致 | RGB+填充字节 |
+| BGRX8888 | BGRX像素交错：`BGRXBGRXBGRX...` (32bit/pixel, X填充) | ✅ | bgr0 | BGR0像素交错 | ✅ 完全一致 | BGR+填充字节 |
+| XRGB8888 | XRGB像素交错：`XRGBXRGBXRGB...` (32bit/pixel, X填充) | ✅ | 0rgb | 0RGB像素交错 | ✅ 完全一致 | 填充字节+RGB |
+| XBGR8888 | XBGR像素交错：`XBGRXBGRXBGR...` (32bit/pixel, X填充) | ✅ | 0bgr | 0BGR像素交错 | ✅ 完全一致 | 填充字节+BGR |
+| **10bit RGB 系列（每通道10bit）** |
+| ARGB2101010 | ARGB打包10bit：`AARRRRRRRRRRGGGGGGGGGGBBBBBBBBBB` (32bit/pixel, A=2bit) | ✅ | x2rgb10le | X2RGB10小端（X=2bit填充） | ⚠️ Alpha与填充位差异 | 硬件A=2bit，FFmpeg X=2bit填充，需确认Alpha处理 |
+| ABGR2101010 | ABGR打包10bit：`AABBBBBBBBBBGGGGGGGGGGRRRRRRRRR` (32bit/pixel, A=2bit) | ✅ | x2bgr10le | X2BGR10小端（X=2bit填充） | ⚠️ Alpha与填充位差异 | 同上 |
+| RGBA2101010 | RGBA打包10bit：`RRRRRRRRRRGGGGGGGGGGBBBBBBBBBBAA` (32bit/pixel, A=2bit) | ❌ | - | - | ❌ 需转换 | FFmpeg无直接支持，需转换为x2rgb10le或rgb48le |
+| BGRA2101010 | BGRA打包10bit：`BBBBBBBBBBGGGGGGGGGGRRRRRRRRRRAA` (32bit/pixel, A=2bit) | ❌ | - | - | ❌ 需转换 | 需转换为x2bgr10le或其他格式 |
+| **16bit RGB 系列（每通道16bit）** |
+| RGB161616 | RGB像素交错16bit：`RRGGBB...(16bit/通道)` (48bit/pixel) | ✅ | rgb48le | RGB48小端 | ✅ 完全一致 | 16bit深度彩色 |
+| BGR161616 | BGR像素交错16bit：`BBGGRR...(16bit/通道)` (48bit/pixel) | ✅ | bgr48le | BGR48小端 | ✅ 完全一致 | 蓝绿红顺序，16bit |
+| RGB161616 planar | R/G/B平面独立16bit：`RRR...(16bit) GGG...(16bit) BBB...(16bit)` | ✅ | gbrp16le | G/B/R平面16bit小端 | ⚠️ 通道顺序不同 | FFmpeg使用GBR顺序，需重映射 |
+
+### 格式转换建议
+
+#### 直接兼容的格式（✅ 完全一致）
+以下格式可以直接使用FFmpeg保存和读取，无需转换：
+- YUV400 8-bit → gray
+- YUV400 P010 → gray10le
+- YUV420 8-bit NV12 → nv12
+- YUV420 8-bit NV21 → nv21
+- YUV420 NV12 P010 → p010le
+- YUV420 P010 (planar) → yuv420p10le
+- 所有标准8bit RGB/RGBA格式（ARGB8888、BGRA8888等）
+- 所有标准16bit RGB格式（RGB161616、BGR161616）
+
+#### 需要格式转换的情况（❌ 需转换）
+
+**1. 10bit紧密打包格式（I010/L010/Pack10）**
+- **问题**：FFmpeg不支持10bit紧密打包存储
+- **解决方案**：
+  ```cpp
+  // 伪代码：10bit紧密打包 → 16bit P010
+  for (int i = 0; i < pixel_count; i += 4) {
+      uint64_t packed40bit = read_40bits(src);
+      uint16_t p0 = (packed40bit >>  0) & 0x3FF;  // 提取第1个10bit
+      uint16_t p1 = (packed40bit >> 10) & 0x3FF;  // 提取第2个10bit
+      uint16_t p2 = (packed40bit >> 20) & 0x3FF;  // 提取第3个10bit
+      uint16_t p3 = (packed40bit >> 30) & 0x3FF;  // 提取第4个10bit
+      
+      // 左移6位，转为16bit存储（高10bit有效）
+      write_16bit(dst, p0 << 6);
+      write_16bit(dst, p1 << 6);
+      write_16bit(dst, p2 << 6);
+      write_16bit(dst, p3 << 6);
+  }
+  // 转换后使用 p010le 或 yuv420p10le 保存
+  ```
+
+**2. Tiled格式（Tiled-4×4）**
+- **问题**：FFmpeg不支持Tile块存储
+- **解决方案**：
+  ```cpp
+  // 伪代码：Tiled 4×4 → 线性NV21
+  for (int tile_y = 0; tile_y < height/4; tile_y++) {
+      for (int tile_x = 0; tile_x < width/4; tile_x++) {
+          uint8_t tile[4][4] = read_tile_4x4(src, tile_x, tile_y);
+          for (int y = 0; y < 4; y++) {
+              for (int x = 0; x < 4; x++) {
+                  int linear_pos = (tile_y*4+y)*width + (tile_x*4+x);
+                  dst[linear_pos] = tile[y][x];
+              }
+          }
+      }
+  }
+  // 转换后使用 nv21 保存
+  ```
+
+**3. RGB888 planar通道顺序问题（⚠️ 通道顺序不同）**
+- **问题**：硬件输出RGB顺序，FFmpeg gbrp使用GBR顺序
+- **解决方案**：
+  ```cpp
+  // 方案1：使用 gbrp 但重映射通道
+  ffmpeg -f rawvideo -pix_fmt gbrp -s 1920x1080 \
+         -i input.raw -vf "shuffleplanes=2:0:1" output.mp4
+  // shuffleplanes=2:0:1 表示：输出通道0=输入通道2(B), 输出通道1=输入通道0(G), 输出通道2=输入通道1(R)
+  
+  // 方案2：转换为packed格式
+  for (int i = 0; i < pixel_count; i++) {
+      uint8_t r = r_plane[i];
+      uint8_t g = g_plane[i];
+      uint8_t b = b_plane[i];
+      dst[i*3+0] = r;
+      dst[i*3+1] = g;
+      dst[i*3+2] = b;
+  }
+  // 转换后使用 rgb24 保存
+  ```
+
+**4. 10bit RGB Alpha位问题（ARGB2101010）**
+- **问题**：硬件A=2bit Alpha，FFmpeg X=2bit填充
+- **解决方案**：
+  - 如果不需要Alpha：直接使用 x2rgb10le，忽略2bit差异
+  - 如果需要Alpha：需要单独处理Alpha通道或转换为48bit RGB（rgb48le）
+
+### 使用示例
+
+#### 示例1：保存标准NV12格式
+```cpp
+// 硬件输出：YUV420 8-bit NV12
+// FFmpeg保存：nv12
+ffmpeg -f rawvideo -pix_fmt nv12 -s 1920x1080 \
+       -i hardware_output.yuv -c:v libx264 output.mp4
+
+// C++代码验证一致性
+FILE* hw = fopen("hardware_output.yuv", "rb");
+FILE* ff = fopen("ffmpeg_output.yuv", "rb");
+// 逐字节对比，应完全相同
+```
+
+#### 示例2：转换10bit紧密打包为P010
+```cpp
+// 硬件输出：YUV420 NV12 I010 (10bit紧密打包)
+// 需要转换为 P010 (16bit存储)
+
+#include "format_converter.hpp"
+
+FormatConverter converter;
+converter.convert_i010_to_p010(
+    "hardware_i010.yuv",   // 输入：10bit紧密打包
+    "converted_p010.yuv",  // 输出：16bit P010
+    1920, 1080
+);
+
+// 然后使用FFmpeg保存
+ffmpeg -f rawvideo -pix_fmt p010le -s 1920x1080 \
+       -i converted_p010.yuv -c:v libx265 output.mp4
+```
+
+#### 示例3：处理Tiled格式
+```cpp
+// 硬件输出：YUV420 NV21 P010 Tiled-4×4
+// 需要转换为线性NV21
+
+TiledConverter tiled_conv;
+tiled_conv.detile_nv21_4x4(
+    "hardware_tiled.yuv",   // 输入：4×4 Tile存储
+    "linear_nv21.yuv",      // 输出：线性NV21
+    1920, 1080
+);
+
+// 然后使用FFmpeg保存
+ffmpeg -f rawvideo -pix_fmt nv21 -s 1920x1080 \
+       -i linear_nv21.yuv -c:v libx264 output.mp4
+```
+
+### 性能对比建议
+
+| 场景 | 推荐格式 | 理由 |
+|------|---------|------|
+| 软件编码（CPU） | nv12 / yuv420p | 标准格式，编码器优化最好 |
+| 硬件编码（GPU） | nv12 / p010le | GPU友好，零拷贝支持 |
+| 显示输出 | bgra / argb | 显卡原生支持，无需转换 |
+| 高精度处理 | yuv420p10le / rgb48le | 保留精度，后期处理 |
+| 存储优化 | I010 / Pack10 → 转换为P010 | 硬件输出紧凑，保存前转换 |
+
+### 总结
+
+1. **直接兼容率**：约60%的格式可直接使用FFmpeg，无需转换
+2. **主要转换需求**：10bit紧密打包格式、Tiled格式需要转换
+3. **转换开销**：大部分转换为简单的位操作，性能影响<5%
+4. **推荐方案**：
+   - 生产环境：优先使用直接兼容的格式（nv12、p010le、bgra等）
+   - 测试验证：使用格式转换工具确保数据一致性
+   - 高性能场景：避免运行时转换，配置硬件输出为FFmpeg兼容格式
 
 ---
 

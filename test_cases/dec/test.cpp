@@ -28,6 +28,7 @@
 #include "buffer/bufferpool/BufferPool.hpp"
 #include "buffer/bufferpool/BufferPoolRegistry.hpp"
 #include "productionline/VideoProductionLine.hpp"
+#include "monitor/PerformanceMonitor.hpp"
 #include "common/Logger.hpp"
 #include "framework/TestMacros.hpp"
 
@@ -257,9 +258,14 @@ static int test_sequential_playback(const char* raw_video_path) {
     while (g_running) {
         // 获取一个已填充的 buffer（阻塞，100ms超时）
         Buffer* filled_buffer = worker_pool->acquireFilled(true, 100);
+        
         if (filled_buffer == nullptr) {
-            // 超时，继续等待
-            continue;
+            // 超时时检查生产者状态
+            if (!producer.isRunning()) {
+                LOG_INFO("Producer stopped naturally, exiting consumer loop...");
+                break;
+            }
+            continue;  // 超时，继续等待
         }
         
         // 直接显示（零拷贝）
@@ -277,6 +283,21 @@ static int test_sequential_playback(const char* raw_video_path) {
             LOG_DEBUG_FMT("Frames displayed: %d (%.1f fps)", 
                           frame_count, producer.getAverageFPS());
         }
+    }
+    
+    // 排空剩余的已填充 buffer
+    LOG_INFO("Draining remaining buffers from BufferPool...");
+    Buffer* remaining_buffer = nullptr;
+    int drained_count = 0;
+    while ((remaining_buffer = worker_pool->acquireFilled(false, 0)) != nullptr) {
+        display.waitVerticalSync();
+        display.displayFilledFramebuffer(remaining_buffer);
+        worker_pool->releaseFilled(remaining_buffer);
+        frame_count++;
+        drained_count++;
+    }
+    if (drained_count > 0) {
+        LOG_INFO_FMT("Drained %d remaining buffers", drained_count);
     }
     
     // 7. 停止生产者
@@ -364,10 +385,16 @@ static int test_buffermanager_producer(const char* raw_video_path) {
     while (g_running) {
         // 获取一个已填充的 buffer（阻塞，100ms超时）
         Buffer* filled_buffer = display_pool_sptr->acquireFilled(true, 100);
+        
         if (filled_buffer == nullptr) {
-            // 超时，继续等待
-            continue;
+            // 超时时检查生产者状态
+            if (!producer.isRunning()) {
+                LOG_INFO("Producer stopped naturally, exiting consumer loop...");
+                break;
+            }
+            continue;  // 超时，继续等待
         }
+        
         // 直接显示（无需拷贝，buffer 本身就是 framebuffer）
         display.waitVerticalSync();
         if (!display.displayFilledFramebuffer(filled_buffer)) {
@@ -381,6 +408,21 @@ static int test_buffermanager_producer(const char* raw_video_path) {
             LOG_DEBUG_FMT("Frames displayed: %d (%.1f fps)", 
                           frame_count, producer.getAverageFPS());
         }
+    }
+    
+    // 排空剩余的已填充 buffer
+    LOG_INFO("Draining remaining buffers from BufferPool...");
+    Buffer* remaining_buffer = nullptr;
+    int drained_count = 0;
+    while ((remaining_buffer = display_pool_sptr->acquireFilled(false, 0)) != nullptr) {
+        display.waitVerticalSync();
+        display.displayFilledFramebuffer(remaining_buffer);
+        display_pool_sptr->releaseFilled(remaining_buffer);
+        frame_count++;
+        drained_count++;
+    }
+    if (drained_count > 0) {
+        LOG_INFO_FMT("Drained %d remaining buffers", drained_count);
     }
     
     // 6. 停止生产者
@@ -474,8 +516,14 @@ static int test_buffermanager_iouring(const char* raw_video_path) {
     
     while (g_running) {
         Buffer* filled_buffer = display_pool_sptr->acquireFilled(true, 100);
+        
         if (filled_buffer == nullptr) {
-            continue;
+            // 超时时检查生产者状态
+            if (!producer.isRunning()) {
+                LOG_INFO("Producer stopped naturally, exiting consumer loop...");
+                break;
+            }
+            continue;  // 超时，继续等待
         }
         
         display.waitVerticalSync();
@@ -490,6 +538,21 @@ static int test_buffermanager_iouring(const char* raw_video_path) {
             LOG_DEBUG_FMT("Frames displayed: %d (%.1f fps)", 
                           frame_count, producer.getAverageFPS());
         }
+    }
+    
+    // 排空剩余的已填充 buffer
+    LOG_INFO("Draining remaining buffers from BufferPool...");
+    Buffer* remaining_buffer = nullptr;
+    int drained_count = 0;
+    while ((remaining_buffer = display_pool_sptr->acquireFilled(false, 0)) != nullptr) {
+        display.waitVerticalSync();
+        display.displayFilledFramebuffer(remaining_buffer);
+        display_pool_sptr->releaseFilled(remaining_buffer);
+        frame_count++;
+        drained_count++;
+    }
+    if (drained_count > 0) {
+        LOG_INFO_FMT("Drained %d remaining buffers", drained_count);
     }
     
     // 5. 停止生产者
@@ -602,7 +665,13 @@ static int test_rtsp_stream(const char* rtsp_url) {
     while (g_running) {
         // 从工作BufferPool获取已解码的buffer（带物理地址）
         Buffer* decoded_buffer = producer_pool_sptr->acquireFilled(true, 100);
+        
         if (decoded_buffer == nullptr) {
+            // 超时时检查生产者状态
+            if (!producer.isRunning()) {
+                LOG_INFO("Producer stopped naturally, exiting consumer loop...");
+                break;
+            }
             continue;  // 超时，继续等待
         }
         
@@ -626,6 +695,25 @@ static int test_rtsp_stream(const char* rtsp_url) {
             LOG_DEBUG_FMT("Progress: %d frames displayed (%.1f fps, DMA success: %d, failed: %d)", 
                           frame_count, producer.getAverageFPS(), dma_success, dma_failed);
         }
+    }
+    
+    // 排空剩余的已填充 buffer
+    LOG_INFO("Draining remaining buffers from BufferPool...");
+    Buffer* remaining_buffer = nullptr;
+    int drained_count = 0;
+    while ((remaining_buffer = producer_pool_sptr->acquireFilled(false, 0)) != nullptr) {
+        display.waitVerticalSync();
+        if (display.displayBufferByDMA(remaining_buffer)) {
+            dma_success++;
+        } else {
+            dma_failed++;
+        }
+        producer_pool_sptr->releaseFilled(remaining_buffer);
+        frame_count++;
+        drained_count++;
+    }
+    if (drained_count > 0) {
+        LOG_INFO_FMT("Drained %d remaining buffers", drained_count);
     }
     
     // 8. 停止生产者
@@ -662,7 +750,7 @@ static int test_h264_taco_video(const char* video_path) {
     
     // 2. 创建 VideoProductionLine（Worker会在open()时自动调用Allocator创建BufferPool）
     LOG_INFO("Creating VideoProductionLine...");
-    VideoProductionLine producer(true, 1);  // loop=true, thread_count=1
+    VideoProductionLine producer(false, 1,false);  // loop=true, thread_count=1
     
     // 4. 配置 FFmpeg 解码
     LOG_INFO_FMT("Configuring FFmpeg video reader: %s", video_path);
@@ -720,25 +808,45 @@ static int test_h264_taco_video(const char* video_path) {
                  producer_pool_sptr->getName().c_str());
     producer_pool_sptr->printStats();
     
-    // 8. 消费者循环
+    // 8. 初始化性能监控（监控消费者显示效率）
+    std::unique_ptr<PerformanceMonitor> display_monitor = nullptr;//std::make_unique<PerformanceMonitor>();
+    //display_monitor->setReportInterval(1000);  // 设置1秒间隔
+    //display_monitor->start();  // 启动后Timer会自动触发周期性报告
+    
+    // 9. 消费者循环
     int frame_count = 0;
     
     while (g_running) {
         // 从工作BufferPool获取已解码的buffer
         Buffer* filled_buffer = producer_pool_sptr->acquireFilled(true, 100);
+        
         if (filled_buffer == nullptr) {
+            // 超时时检查生产者状态
+            if (!producer.isRunning()) {
+                LOG_INFO("Producer stopped naturally, exiting consumer loop...");
+                break;
+            }
             continue;  // 超时，继续等待
         }
+        
+        // 开始计时显示操作
+        if (display_monitor) {
+            display_monitor->beginTiming("display");
+        }
+        
         // 显示
         display.waitVerticalSync();
         // 零拷贝模式：使用 DMA 显示
         if (!display.displayBufferByDMA(filled_buffer)) {
             LOG_WARN("DMA display failed, falling back to normal");
             display.displayFilledFramebuffer(filled_buffer);
+            
         }
         // 归还 buffer
         producer_pool_sptr->releaseFilled(filled_buffer);
-        
+        if (display_monitor ) {
+            display_monitor->endTiming("display");
+        }
         frame_count++;
         
         // 每100帧打印一次统计
@@ -748,7 +856,34 @@ static int test_h264_taco_video(const char* video_path) {
         }
     }
     
-    // 8. 停止生产者
+    // 排空剩余的已填充 buffer
+    LOG_INFO("Draining remaining buffers from BufferPool...");
+    Buffer* remaining_buffer = nullptr;
+    int drained_count = 0;
+    while ((remaining_buffer = producer_pool_sptr->acquireFilled(false, 0)) != nullptr) {
+        display.waitVerticalSync();
+        if (!display.displayBufferByDMA(remaining_buffer)) {
+            display.displayFilledFramebuffer(remaining_buffer);
+        }
+        producer_pool_sptr->releaseFilled(remaining_buffer);
+        frame_count++;
+        drained_count++;
+    }
+    if (drained_count > 0) {
+        LOG_INFO_FMT("Drained %d remaining buffers", drained_count);
+    }
+    
+    // 10. 停止性能监控
+    if (display_monitor) {
+        display_monitor->stop();
+        LOG_INFO("\n═══════════════════════════════════════════════════════");
+        LOG_INFO("  Display Performance Statistics");
+        LOG_INFO("═══════════════════════════════════════════════════════");
+        display_monitor->printStatistics();
+        display_monitor.reset();
+    }
+    
+    // 11. 停止生产者
     LOG_INFO("Stopping FFmpeg producer...");
     producer.stop();
     
@@ -853,7 +988,14 @@ static void decode_production_line_worker(
     while (g_running) {
         // 从工作BufferPool获取已解码的buffer
         Buffer* filled_buffer = producer_pool_sptr->acquireFilled(true, 100);
+        
         if (filled_buffer == nullptr) {
+            // 超时时检查生产者状态
+            if (!producer.isRunning()) {
+                LOG_INFO_FMT("%sProducer stopped naturally, exiting decode loop...", 
+                           thread_prefix.c_str());
+                break;
+            }
             continue;  // 超时，继续等待
         }
         
@@ -868,6 +1010,20 @@ static void decode_production_line_worker(
             LOG_DEBUG_FMT("%sDecoded %d frames (%.1f fps)", 
                          thread_prefix.c_str(), frame_count, producer.getAverageFPS());
         }
+    }
+    
+    // 排空剩余的已填充 buffer
+    LOG_INFO_FMT("%sDraining remaining buffers from BufferPool...", thread_prefix.c_str());
+    Buffer* remaining_buffer = nullptr;
+    int drained_count = 0;
+    while ((remaining_buffer = producer_pool_sptr->acquireFilled(false, 0)) != nullptr) {
+        producer_pool_sptr->releaseFilled(remaining_buffer);
+        frame_count++;
+        (*total_frames)++;
+        drained_count++;
+    }
+    if (drained_count > 0) {
+        LOG_INFO_FMT("%sDrained %d remaining buffers", thread_prefix.c_str(), drained_count);
     }
     
     // 7. 停止生产者

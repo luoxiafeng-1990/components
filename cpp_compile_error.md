@@ -20,8 +20,9 @@
 7. [错误 #7: 成员变量 buffers_ 未声明](#错误-7-成员变量-buffers_-未声明)
 8. [错误 #8: Makefile 引用已删除的源文件](#错误-8-makefile-引用已删除的源文件)
 9. [错误 #9: 缺少头文件和默认参数类型不匹配](#错误-9-缺少头文件和默认参数类型不匹配)
-10. [知识点 #10: std::unique_ptr 的解引用和访问操作符](#知识点-10-stduniqueptr-的解引用和访问操作符)
-11. [知识点 #11: explicit 关键字与隐式类型转换](#知识点-11-explicit-关键字与隐式类型转换)
+10. [错误 #10: std::atomic 不可复制导致 unordered_map::emplace 失败](#错误-10-stdatomic-不可复制导致-unordered_mapemplace-失败)
+11. [知识点 #11: std::unique_ptr 的解引用和访问操作符](#知识点-11-stduniqueptr-的解引用和访问操作符)
+12. [知识点 #12: explicit 关键字与隐式类型转换](#知识点-12-explicit-关键字与隐式类型转换)
 
 ---
 
@@ -761,7 +762,266 @@ MyClass obj;  // OK
 
 ---
 
-## 知识点 #10: std::unique_ptr 的解引用和访问操作符
+## 错误 #10: std::atomic 不可复制导致 unordered_map::emplace 失败
+
+### 错误信息
+
+```
+/toolchain/riscv64-unknown-linux-gnu/include/c++/14.1.1/bits/new_allocator.h:191:11: error: no matching function for call to 'std::pair<const std::__cxx11::basic_string<char>, PerformanceMonitor::MetricData>::pair(const std::__cxx11::basic_string<char>&, PerformanceMonitor::MetricData)'
+  191 |         { ::new((void *)__p) _Up(std::forward<_Args>(__args)...); }
+      |           ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+source/monitor/PerformanceMonitor.cpp:292:30:   required from here
+  292 |         it = metrics_.emplace(metric_name, MetricData()).first;
+      |              ~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~
+```
+
+### 错误代码
+
+```cpp
+// PerformanceMonitor.cpp
+#include "monitor/PerformanceMonitor.hpp"
+#include <stdio.h>
+#include <string.h>
+// ❌ 缺少 #include <utility>
+
+// ...
+
+PerformanceMonitor::MetricData& PerformanceMonitor::getOrCreateMetric(const std::string& metric_name) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    auto it = metrics_.find(metric_name);
+    if (it == metrics_.end()) {
+        // ❌ 错误代码：尝试复制构造 MetricData
+        it = metrics_.emplace(metric_name, MetricData()).first;
+        //                              ^^^^^^^^^^^^^^^^
+        //                              先构造临时对象，然后尝试复制到 map 内部
+        //                              但 MetricData 包含 std::atomic 成员，不可复制！
+    }
+    return it->second;
+}
+```
+
+```cpp
+// PerformanceMonitor.hpp
+struct MetricData {
+    std::atomic<int> count{0};                    // ❌ 不可复制
+    std::atomic<long long> total_time_us{0};     // ❌ 不可复制
+    std::chrono::steady_clock::time_point start_time;
+    std::atomic<bool> is_timing{false};          // ❌ 不可复制
+    
+    MetricData() {
+        count.store(0);
+        total_time_us.store(0);
+        is_timing.store(false);
+    }
+};
+
+std::unordered_map<std::string, MetricData> metrics_;  // map 容器
+```
+
+### 错误原因分析
+
+#### 1. 根本原因
+
+**`std::atomic` 类型是**不可复制构造（non-copyable）**的**：
+- `std::atomic` 的复制构造函数和复制赋值运算符被标记为 `= delete`
+- 这是 C++ 标准的设计，因为原子操作需要保证线程安全，复制会破坏原子性
+
+#### 2. 错误发生过程
+
+```cpp
+// 步骤1：MetricData() 在栈上构造一个临时对象
+MetricData temp_object;  // 临时对象，在栈上
+
+// 步骤2：emplace 尝试将这个临时对象放入 map
+metrics_.emplace(metric_name, temp_object);
+//                      ↑              ↑
+//                    key        已构造的 value 对象
+
+// 步骤3：emplace 内部需要将这个对象"复制"到 map 的存储位置
+// 伪代码示意：
+// pair<const string, MetricData> new_pair(metric_name, temp_object);
+//                                                      ↑
+//                                            这里需要复制构造！
+//                                            但 std::atomic 不可复制 → 编译错误
+```
+
+#### 3. 为什么 `emplace` 会触发复制？
+
+**关键理解：`emplace` 有两种用法**
+
+**用法 1：传入已构造的对象（会触发复制/移动）**
+```cpp
+MetricData data;  // 先构造好
+map.emplace("key", data);  // ❌ 需要复制 data 到 map 内部
+// 等价于：map.insert({"key", data});
+```
+
+**用法 2：分段构造（真正的就地构造）**
+```cpp
+map.emplace(
+    std::piecewise_construct,
+    std::forward_as_tuple("key"),      // 告诉编译器：用这些参数构造 key
+    std::forward_as_tuple()            // 告诉编译器：用这些参数构造 value
+);
+// ✅ 直接在 map 内部构造，不复制
+```
+
+#### 4. 为什么错误信息指向 `new_allocator.h`？
+
+- 错误发生在标准库的分配器代码中
+- `emplace` 内部会调用 `allocator::construct` 来构造对象
+- 构造过程中需要复制 `MetricData`，但复制失败
+- 所以错误信息指向了 `new_allocator.h` 中的 `construct` 函数
+
+### 解决方案
+
+**使用 `std::piecewise_construct` 进行就地构造（in-place construction）**
+
+```cpp
+// PerformanceMonitor.cpp
+#include "monitor/PerformanceMonitor.hpp"
+#include <stdio.h>
+#include <string.h>
+#include <utility>  // ✅ 添加：for std::piecewise_construct, std::forward_as_tuple
+
+// ...
+
+PerformanceMonitor::MetricData& PerformanceMonitor::getOrCreateMetric(const std::string& metric_name) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    auto it = metrics_.find(metric_name);
+    if (it == metrics_.end()) {
+        // ✅ 正确代码：使用 piecewise_construct 就地构造，避免复制 std::atomic 成员
+        it = metrics_.emplace(
+            std::piecewise_construct,              // 标记：使用分段构造
+            std::forward_as_tuple(metric_name),    // 构造 key（string）
+            std::forward_as_tuple()                // 就地构造 value（MetricData，不复制）
+        ).first;
+    }
+    return it->second;
+}
+```
+
+### 代码对比
+
+```cpp
+// ============ 错误方式（会触发复制构造）============
+metrics_.emplace(metric_name, MetricData());
+//                              ↑
+//                   先构造临时对象 MetricData()
+//                   然后尝试复制到 map 内部
+//                   但 std::atomic 不可复制 → 编译错误！
+
+// 等价于：
+MetricData temp = MetricData();  // 步骤1：构造临时对象
+// 步骤2：尝试复制 temp 到 map（这里失败！）
+metrics_.emplace(metric_name, temp);  // ❌ 需要复制构造
+
+
+// ============ 正确方式（就地构造，不复制）============
+metrics_.emplace(
+    std::piecewise_construct,
+    std::forward_as_tuple(metric_name),  // 用 metric_name 构造 string
+    std::forward_as_tuple()              // 用无参构造 MetricData
+);
+// ✅ 直接在 map 内部调用 MetricData() 构造函数
+// ✅ 没有临时对象，没有复制操作
+```
+
+### 可视化对比
+
+```
+错误方式（emplace(metric_name, MetricData())）：
+┌─────────────────────────────────────────┐
+│ 栈上临时对象                            │
+│ MetricData temp = MetricData();        │ ← 步骤1：构造临时对象
+└─────────────────────────────────────────┘
+              │
+              │ 尝试复制（❌ 失败！std::atomic 不可复制）
+              ▼
+┌─────────────────────────────────────────┐
+│ map 内部存储位置                         │
+│ pair<string, MetricData>                │ ← 步骤2：需要复制构造（失败）
+└─────────────────────────────────────────┘
+
+
+正确方式（piecewise_construct）：
+┌─────────────────────────────────────────┐
+│ map 内部存储位置                         │
+│ 直接调用 MetricData() 构造函数          │ ← 一步到位，无临时对象
+│ pair<string, MetricData>                │
+└─────────────────────────────────────────┘
+```
+
+### 知识点
+
+#### 1. std::atomic 的特性
+
+```cpp
+#include <atomic>
+#include <iostream>
+
+int main() {
+    std::atomic<int> a(10);
+    std::atomic<int> b = a;  // ❌ 编译错误！
+    // error: use of deleted function 'std::atomic<int>::atomic(const std::atomic<int>&)'
+    return 0;
+}
+```
+
+- `std::atomic` 的复制构造函数被 `= delete`
+- 只能通过 `load()` 和 `store()` 操作值
+- 不可拷贝、不可移动（默认没有 move constructor/assignment）
+
+#### 2. piecewise_construct 的工作原理
+
+```cpp
+// 标准形式：
+map.emplace(
+    std::piecewise_construct,           // 标记：分段构造
+    std::forward_as_tuple(args_for_key), // key 的构造参数（tuple）
+    std::forward_as_tuple(args_for_value) // value 的构造参数（tuple）
+);
+
+// 我们的例子：
+metrics_.emplace(
+    std::piecewise_construct,
+    std::forward_as_tuple(metric_name),  // string 的构造参数
+    std::forward_as_tuple()              // MetricData() 的构造参数（无参构造）
+);
+```
+
+#### 3. 为什么需要 `#include <utility>`
+
+- `std::piecewise_construct` 定义在 `<utility>` 中
+- `std::forward_as_tuple` 定义在 `<tuple>` 中，但通常通过 `<utility>` 间接包含
+
+### 其他可选方案
+
+如果编译器支持 C++17，也可以使用 `try_emplace`：
+
+```cpp
+// C++17 方案（更简洁）
+auto [it, inserted] = metrics_.try_emplace(metric_name);
+return it->second;
+```
+
+但 `piecewise_construct` 方案兼容性更好（C++11 即可）。
+
+### 相关错误
+
+- **错误 #3**: `std::atomic` 不可移动导致 `vector` 操作失败
+  - 类似问题，但发生在 `vector::reserve()` 时
+  - 解决方案：显式实现移动构造函数和移动赋值运算符
+
+### 参考代码位置
+
+- `PerformanceMonitor.cpp:292` - 错误代码位置
+- `PerformanceMonitor.cpp:293-296` - 修复后的代码
+- `PerformanceMonitor.hpp:240-247` - `MetricData` 结构体定义
+
+---
+
+## 知识点 #11: std::unique_ptr 的解引用和访问操作符
 
 ### 常见困惑
 
@@ -1048,7 +1308,7 @@ BufferPool& ref = *smart_ptr;  // 获取引用
 
 ---
 
-## 知识点 #11: explicit 关键字与隐式类型转换
+## 知识点 #12: explicit 关键字与隐式类型转换
 
 ### 什么是 explicit 关键字？
 
@@ -1575,7 +1835,7 @@ static_assert(!std::is_convertible_v<int, Age>,
 | **缺少头文件** | 4 | 36% | ⭐ 简单 |
 | **API 不兼容（参数/返回值）** | 2 | 18% | ⭐⭐ 中等 |
 | **访问控制错误** | 1 | 9% | ⭐ 简单 |
-| **C++ 语言特性误用** | 3 | 27% | ⭐⭐⭐ 困难 |
+| **C++ 语言特性误用** | 4 | 36% | ⭐⭐⭐ 困难 |
 | **构建系统配置** | 1 | 9% | ⭐⭐ 中等 |
 | **智能指针使用（知识点）** | 1 | 9% | ⭐⭐ 中等 |
 | **explicit 与类型转换（知识点）** | 1 | 9% | ⭐⭐ 中等 |
@@ -1592,9 +1852,12 @@ static_assert(!std::is_convertible_v<int, Age>,
 
 ### 2. std::atomic 特殊性
 
-- 不可拷贝、不可移动
+- **不可拷贝、不可移动**（复制构造函数和移动构造函数都被 `= delete`）
 - 需要显式实现移动语义（通过 load/store）
 - 影响包含它的类的语义
+- **在容器操作中需要特别注意**：
+  - `vector::reserve()` 需要移动语义 → 需要显式实现移动构造函数
+  - `unordered_map::emplace(key, value)` 会触发复制 → 需要使用 `piecewise_construct` 就地构造
 
 ### 3. 默认参数限制
 
@@ -1939,8 +2202,8 @@ std::unique_ptr<BufferPool> BufferPool::CreateDynamic(
 
 ## ✅ 总结
 
-本次重构过程中遇到的 **9 大类编译错误 + 3 个重要知识点** 涵盖了：
-- ✅ C++ 语言特性（designated initializers, std::atomic）
+本次重构过程中遇到的 **10 大类编译错误 + 3 个重要知识点** 涵盖了：
+- ✅ C++ 语言特性（designated initializers, std::atomic, piecewise_construct）
 - ✅ 类型系统（不完整类型、临时对象、默认参数）
 - ✅ 访问控制（public/private）
 - ✅ 头文件管理（IWYU 原则）
@@ -1953,7 +2216,7 @@ std::unique_ptr<BufferPool> BufferPool::CreateDynamic(
 
 ---
 
-**文档版本**: v1.3  
+**文档版本**: v1.4  
 **最后更新**: 2025-11-17  
 **维护者**: AI Assistant  
 **状态**: ✅ 完成  
@@ -1961,6 +2224,7 @@ std::unique_ptr<BufferPool> BufferPool::CreateDynamic(
 - v1.1 (2025-11-13): 新增知识点 #10 - `std::unique_ptr` 的解引用和访问操作符详解
 - v1.2 (2025-11-14): 新增知识点 #11 - `explicit` 关键字与隐式类型转换详解
 - v1.3 (2025-11-17): 新增知识点 #12 - `new + unique_ptr` vs `make_unique` 的关键区别（访问权限、内存分配、图解对比）
+- v1.4 (2025-11-17): 新增错误 #10 - `std::atomic` 不可复制导致 `unordered_map::emplace` 失败（包含错误代码、原因分析、解决方案、可视化对比）
 
 
 
