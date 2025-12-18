@@ -2,6 +2,10 @@
 #include <cstring>
 #include <cerrno>
 
+extern "C" {
+#include <libavutil/pixdesc.h>
+}
+
 namespace productionline {
 namespace io {
 
