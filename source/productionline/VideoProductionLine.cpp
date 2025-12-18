@@ -29,18 +29,34 @@ VideoProductionLine::VideoProductionLine(bool loop, int thread_count, bool enabl
     , last_error_()
     , start_time_()
     , monitor_(nullptr)
+    , log_prefix_("[VideoProductionLine]")
 {
+    // 获取logger
+    auto logger = log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components"));
+    
+    // 打印生命周期开始
+    LOG4CPLUS_INFO(logger, "");
+    LOG4CPLUS_INFO(logger, log_prefix_ << " " << std::string(69, '═'));
+    LOG4CPLUS_INFO(logger, log_prefix_ << " 构造: loop=" << (loop_ ? "true" : "false") 
+                   << ", threads=" << thread_count_);
+    LOG4CPLUS_INFO(logger, log_prefix_ << " " << std::string(69, '═'));
+    
     if (thread_count < 1) {
-        LOG_WARN_FMT("Invalid thread_count (%d), using default value 1", thread_count);
+        LOG4CPLUS_WARN(logger, log_prefix_ << " Invalid thread_count, using 1");
         thread_count_ = 1;
     }
-    LOG_INFO_FMT("VideoProductionLine created (loop=%s, thread_count=%d, monitor=%s)", 
-                 loop_ ? "enabled" : "disabled", thread_count_,
-                 enable_monitor_ ? "enabled" : "disabled");
 }
 
 VideoProductionLine::~VideoProductionLine() {
-    LOG_INFO("Destroying VideoProductionLine...");
+    // 获取logger
+    auto logger = log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components"));
+    
+    // 打印生命周期结束
+    LOG4CPLUS_INFO(logger, "");
+    LOG4CPLUS_INFO(logger, log_prefix_ << " " << std::string(69, '='));
+    LOG4CPLUS_INFO(logger, log_prefix_ << " 析构: 已生产 " << produced_frames_.load() << " 帧, 跳过 " << skipped_frames_.load() << " 帧");
+    LOG4CPLUS_INFO(logger, log_prefix_ << " " << std::string(69, '='));
+    
     if (running_.load()) {
         stop();
     }
@@ -51,16 +67,19 @@ VideoProductionLine::~VideoProductionLine() {
 // ============================================================
 
 bool VideoProductionLine::start(const WorkerConfig& worker_config) {
+    auto logger = log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components"));
+    
     // 检查是否已经在运行
     if (running_.load()) {
-        LOG_WARN("VideoProductionLine already running");
+        LOG4CPLUS_WARN(logger, log_prefix_ << " Already running");
         return false;
     }
     
-    LOG_INFO("Starting VideoProductionLine...");
+    LOG4CPLUS_INFO(logger, log_prefix_ << " 配置Worker: " << worker_config.file.file_path);
+    
     // 创建共享的 BufferFillingWorkerFacade 对象（v2.2：只传入完整配置）
     worker_facade_sptr_ = std::make_shared<BufferFillingWorkerFacade>(worker_config);
-    LOG_INFO_FMT("Worker type: %s", worker_facade_sptr_->getWorkerType());
+    LOG4CPLUS_INFO(logger, log_prefix_ << " 启动Worker...");
     
     // v2.2：简化的 open 接口（所有参数从 config 获取）
     if (!worker_facade_sptr_->open()) {
@@ -73,7 +92,7 @@ bool VideoProductionLine::start(const WorkerConfig& worker_config) {
     // 获取 BufferPool ID
     uint64_t worker_pool_id = worker_facade_sptr_->getOutputBufferPoolId();
     if (worker_pool_id == 0) {
-        setError("Worker failed to create BufferPool. Worker must create BufferPool in open() method by calling Allocator.");
+        setError("Worker failed to create BufferPool");
         worker_facade_sptr_.reset();
         return false;
     }
@@ -85,22 +104,18 @@ bool VideoProductionLine::start(const WorkerConfig& worker_config) {
     // 验证 Pool 是否存在
     auto pool_sptr = working_buffer_pool_weak_.lock();
     if (!pool_sptr) {
-        setError("Failed to get BufferPool from Registry (pool may have been destroyed)");
+        setError("Failed to get BufferPool from Registry");
         worker_facade_sptr_.reset();
         return false;
     }
     
-    LOG_INFO_FMT("Using Worker's BufferPool: '%s' (ID: %lu, created by Worker via Allocator)", 
-                 pool_sptr->getName().c_str(), worker_pool_id);
-    
     total_frames_ = worker_facade_sptr_->getTotalFrames();
     size_t frame_size = worker_facade_sptr_->getFrameSize();
     
-    LOG_INFO_FMT("Total frames: %d", total_frames_);
-    LOG_INFO_FMT("Frame size: %zu bytes (%.2f MB)", frame_size, frame_size / (1024.0 * 1024.0));
-    
-    // Worker创建的BufferPool，不需要验证大小（Worker已经确保大小匹配）
-    LOG_INFO("Worker's BufferPool created via Allocator, size validation handled by Worker");
+    LOG4CPLUS_INFO(logger, log_prefix_ << " Worker已就绪: " << worker_facade_sptr_->getWorkerType());
+    LOG4CPLUS_INFO(logger, log_prefix_ << "   - 分辨率: " << worker_facade_sptr_->getWidth() << "x" << worker_facade_sptr_->getHeight());
+    LOG4CPLUS_INFO(logger, log_prefix_ << "   - 总帧数: " << total_frames_);
+    LOG4CPLUS_INFO(logger, log_prefix_ << "   - 帧大小: " << (frame_size / (1024.0 * 1024.0)) << " MB");
     
     // 重置状态
     running_.store(true);
@@ -112,21 +127,22 @@ bool VideoProductionLine::start(const WorkerConfig& worker_config) {
     // 初始化性能监控（仅在启用时）
     if (enable_monitor_) {
         monitor_ = std::make_unique<PerformanceMonitor>();
-        monitor_->setReportInterval(1000);  // 设置1秒间隔
-        LOG_INFO("Performance monitor enabled");
+        monitor_->setReportInterval(1000);
+        LOG4CPLUS_INFO(logger, log_prefix_ << "   - 性能监控: 已启用");
     }
-    
     
     // 启动生产者线程
     threads_.reserve(thread_count_);
-    active_threads_.store(thread_count_);  // 设置活跃线程数
+    active_threads_.store(thread_count_);
+    
+    LOG4CPLUS_INFO(logger, log_prefix_ << " 启动生产线: " << thread_count_ << " threads");
     
     for (int i = 0; i < thread_count_; i++) {
         try {
             threads_.emplace_back(&VideoProductionLine::producerThreadFunc, this, i);
-            LOG_INFO_FMT("Producer thread #%d started", i);
+            LOG4CPLUS_INFO(logger, log_prefix_ << "   - Thread #" << i << " started");
         } catch (const std::exception& e) {
-            LOG_ERROR_FMT("Failed to start thread #%d: %s", i, e.what());
+            LOG4CPLUS_ERROR(logger, log_prefix_ << " Failed to start thread #" << i << ": " << e.what());
             // 停止已启动的线程
             running_.store(false);
             active_threads_.store(0);  // 重置活跃线程计数
@@ -141,8 +157,6 @@ bool VideoProductionLine::start(const WorkerConfig& worker_config) {
             return false;
         }
     }
-    
-    LOG_INFO_FMT("All %d producer thread(s) started successfully", thread_count_);
     
     return true;
 }

@@ -1,4 +1,5 @@
 #include "productionline/worker/BufferFillingWorkerFacade.hpp"
+#include "common/Logger.hpp"
 #include <stdio.h>
 
 // ============ 构造/析构 ============
@@ -35,7 +36,7 @@ bool BufferFillingWorkerFacade::open() {
     }
     
     if (!worker_base_uptr_) {
-        printf("❌ ERROR: Failed to create worker\n");
+        LOG_ERROR("[Worker] ERROR: Failed to create worker\n");
         return false;
     }
     
@@ -46,7 +47,7 @@ bool BufferFillingWorkerFacade::open() {
     int bits_per_pixel = config_.output.bits_per_pixel;
     
     if (file_path.empty()) {
-        printf("❌ ERROR: File path not set in config\n");
+        LOG_ERROR("[Worker] ERROR: File path not set in config\n");
         return false;
     }
     
@@ -62,15 +63,15 @@ bool BufferFillingWorkerFacade::open() {
     if (is_raw_worker) {
         // Raw视频Worker：需要格式参数
         if (width == 0 || height == 0 || bits_per_pixel == 0) {
-            printf("❌ ERROR: Raw video worker requires width, height, and bits_per_pixel in config!\n");
+            LOG_ERROR("[Worker] ERROR: Raw video worker requires width, height, and bits_per_pixel in config!\n");
             return false;
         }
-        printf("🎬 BufferFillingWorkerFacade: Opening raw video with format %dx%d@%dbpp\n",
+        LOG_DEBUG("[Worker] BufferFillingWorkerFacade: Opening raw video with format %dx%d@%dbpp\n",
                width, height, bits_per_pixel);
         return worker_base_uptr_->open(path, width, height, bits_per_pixel);
     } else {
         // 编码视频Worker：自动检测格式
-        printf("🎬 BufferFillingWorkerFacade: Opening encoded video (auto-detect format)\n");
+        LOG_DEBUG("[Worker] BufferFillingWorkerFacade: Opening encoded video (auto-detect format)\n");
         return worker_base_uptr_->open(path);
     }
 }
@@ -89,7 +90,7 @@ bool BufferFillingWorkerFacade::isOpen() const {
 
 bool BufferFillingWorkerFacade::fillBuffer(int frame_index, Buffer* buffer) {
     if (!worker_base_uptr_) {
-        printf("❌ ERROR: Worker not initialized\n");
+        LOG_ERROR("[Worker] ERROR: Worker not initialized\n");
         return false;
     }
     return worker_base_uptr_->fillBuffer(frame_index, buffer);
@@ -99,7 +100,7 @@ bool BufferFillingWorkerFacade::fillBuffer(int frame_index, Buffer* buffer) {
 
 bool BufferFillingWorkerFacade::seek(int frame_index) {
     if (!worker_base_uptr_) {
-        printf("❌ ERROR: Worker not initialized\n");
+        LOG_ERROR("[Worker] ERROR: Worker not initialized\n");
         return false;
     }
     return worker_base_uptr_->seek(frame_index);
@@ -107,7 +108,7 @@ bool BufferFillingWorkerFacade::seek(int frame_index) {
 
 bool BufferFillingWorkerFacade::seekToBegin() {
     if (!worker_base_uptr_) {
-        printf("❌ ERROR: Worker not initialized\n");
+        LOG_ERROR("[Worker] ERROR: Worker not initialized\n");
         return false;
     }
     return worker_base_uptr_->seekToBegin();
@@ -115,7 +116,7 @@ bool BufferFillingWorkerFacade::seekToBegin() {
 
 bool BufferFillingWorkerFacade::seekToEnd() {
     if (!worker_base_uptr_) {
-        printf("❌ ERROR: Worker not initialized\n");
+        LOG_ERROR("[Worker] ERROR: Worker not initialized\n");
         return false;
     }
     return worker_base_uptr_->seekToEnd();
@@ -123,7 +124,7 @@ bool BufferFillingWorkerFacade::seekToEnd() {
 
 bool BufferFillingWorkerFacade::skip(int frame_count) {
     if (!worker_base_uptr_) {
-        printf("❌ ERROR: Worker not initialized\n");
+        LOG_ERROR("[Worker] ERROR: Worker not initialized\n");
         return false;
     }
     return worker_base_uptr_->skip(frame_count);

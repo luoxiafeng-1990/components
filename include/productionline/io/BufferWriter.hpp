@@ -3,6 +3,7 @@
 #include "buffer/bufferpool/Buffer.hpp"
 #include <atomic>
 #include <cstdio>
+#include <string>
 
 // FFmpeg标准格式定义
 extern "C" {
@@ -149,6 +150,13 @@ private:
     int width_;                      // 图像宽度
     int height_;                     // 图像高度
     std::atomic<int> write_count_;   // 写入计数器（原子，线程安全）
+    
+    // 对象ID（用于日志区分）
+    uint64_t writer_id_;
+    static std::atomic<uint64_t> next_id_;
+    
+    // 日志前缀（用于清晰标识对象）
+    std::string log_prefix_;
     
     // ============ 内部辅助方法 ============
     

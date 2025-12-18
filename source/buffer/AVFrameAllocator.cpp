@@ -1,4 +1,5 @@
 #include "buffer/AVFrameAllocator.hpp"
+#include "common/Logger.hpp"
 #include "buffer/bufferpool/BufferPool.hpp"
 #include "buffer/bufferpool/BufferPoolRegistry.hpp"
 #include <stdio.h>
@@ -14,7 +15,7 @@
 AVFrameAllocator::AVFrameAllocator()
     : next_buffer_id_(0)
 {
-    printf("🔧 AVFrameAllocator created\n");
+    LOG_DEBUG("[AVFrameAllocator] AVFrameAllocator created\n");
 }
 
 AVFrameAllocator::~AVFrameAllocator() {
@@ -28,13 +29,13 @@ AVFrameAllocator::~AVFrameAllocator() {
     // 释放所有未释放的 AVFrame（双重保险）
     for (auto& [buffer, frame] : buffer_to_frame_) {
         if (frame) {
-            printf("⚠️  [AVFrameAllocator] Releasing orphaned AVFrame (buffer #%u)\n", buffer->id());
+            LOG_WARN("[AVFrameAllocator]  [AVFrameAllocator] Releasing orphaned AVFrame (buffer #%u)\n", buffer->id());
             av_frame_free(&frame);
         }
     }
     buffer_to_frame_.clear();
     
-    printf("🧹 AVFrameAllocator destroyed\n");
+    LOG_DEBUG("[AVFrameAllocator] AVFrameAllocator destroyed\n");
 }
 
 // ============================================================
@@ -43,7 +44,7 @@ AVFrameAllocator::~AVFrameAllocator() {
 
 Buffer* AVFrameAllocator::injectAVFrameToPool(AVFrame* frame, BufferPool* pool) {
     if (!frame || !pool) {
-        printf("❌ AVFrameAllocator::injectAVFrameToPool: invalid parameters\n");
+        LOG_ERROR("[AVFrameAllocator] AVFrameAllocator::injectAVFrameToPool: invalid parameters\n");
         return nullptr;
     }
     
@@ -55,7 +56,7 @@ Buffer* AVFrameAllocator::injectAVFrameToPool(AVFrame* frame, BufferPool* pool) 
     size_t size = frame->linesize[0] * frame->height;  // 简化计算（实际应根据格式）
     
     if (!virt_addr || size == 0) {
-        printf("❌ Invalid AVFrame: data=%p, size=%zu\n", virt_addr, size);
+        LOG_ERROR("[AVFrameAllocator] Invalid AVFrame: data=%p, size=%zu\n", virt_addr, size);
         return nullptr;
     }
     
@@ -69,13 +70,13 @@ Buffer* AVFrameAllocator::injectAVFrameToPool(AVFrame* frame, BufferPool* pool) 
     );
     
     if (!buffer) {
-        printf("❌ Failed to create Buffer object #%u\n", id);
+        LOG_ERROR("[AVFrameAllocator] Failed to create Buffer object #%u\n", id);
         return nullptr;
     }
     
     // 4. 将 Buffer 添加到 pool 的 filled 队列（使用基类静态方法）
     if (!BufferAllocatorBase::addBufferToPoolQueue(pool, buffer, QueueType::FILLED)) {
-        printf("❌ Failed to add buffer #%u to pool '%s'\n", 
+        LOG_ERROR("[AVFrameAllocator] Failed to add buffer #%u to pool '%s'\n", 
                id, pool->getName().c_str());
         delete buffer;
         return nullptr;
@@ -95,7 +96,7 @@ Buffer* AVFrameAllocator::injectAVFrameToPool(AVFrame* frame, BufferPool* pool) 
         buffer_ownership_[buffer] = this;
     }
     
-    printf("✅ AVFrame injected to pool '%s' as Buffer #%u (size=%zu)\n",
+    LOG_DEBUG("[AVFrameAllocator] AVFrame injected to pool '%s' as Buffer #%u (size=%zu)\n",
            pool->getName().c_str(), id, size);
     
     return buffer;
@@ -103,7 +104,7 @@ Buffer* AVFrameAllocator::injectAVFrameToPool(AVFrame* frame, BufferPool* pool) 
 
 bool AVFrameAllocator::releaseAVFrame(Buffer* buffer, BufferPool* pool) {
     if (!buffer || !pool) {
-        printf("❌ AVFrameAllocator::releaseAVFrame: invalid parameters\n");
+        LOG_ERROR("[AVFrameAllocator] AVFrameAllocator::releaseAVFrame: invalid parameters\n");
         return false;
     }
     
@@ -124,12 +125,12 @@ bool AVFrameAllocator::releaseAVFrame(Buffer* buffer, BufferPool* pool) {
         av_frame_free(&frame);
         printf("   🗑️ Released AVFrame for Buffer #%u\n", buffer->id());
     } else {
-        printf("⚠️  No AVFrame found for Buffer #%u\n", buffer->id());
+        LOG_WARN("[AVFrameAllocator]  No AVFrame found for Buffer #%u\n", buffer->id());
     }
     
     // 3. 从 pool 移除 Buffer（使用基类静态方法）
     if (!BufferAllocatorBase::removeBufferFromPoolInternal(pool, buffer)) {
-        printf("⚠️  Failed to remove buffer #%u from pool '%s'\n",
+        LOG_WARN("[AVFrameAllocator]  Failed to remove buffer #%u from pool '%s'\n",
                buffer->id(), pool->getName().c_str());
         // 继续删除 buffer 对象
     }
@@ -145,7 +146,7 @@ bool AVFrameAllocator::releaseAVFrame(Buffer* buffer, BufferPool* pool) {
         buffer_ownership_.erase(buffer);
     }
     
-    printf("✅ Buffer #%u and AVFrame released\n", buffer->id());
+    LOG_DEBUG("[AVFrameAllocator] Buffer #%u and AVFrame released\n", buffer->id());
     
     return true;
 }
@@ -155,7 +156,7 @@ bool AVFrameAllocator::releaseAVFrame(Buffer* buffer, BufferPool* pool) {
 // ============================================================
 
 Buffer* AVFrameAllocator::createBuffer(uint32_t id, size_t size) {
-    printf("⚠️  AVFrameAllocator::createBuffer should not be called directly\n");
+    LOG_WARN("[AVFrameAllocator]  AVFrameAllocator::createBuffer should not be called directly\n");
     printf("   Use injectAVFrameToPool() instead\n");
     return nullptr;
 }
@@ -201,7 +202,7 @@ uint64_t AVFrameAllocator::allocatePoolWithBuffers(
     const std::string& name,
     const std::string& category
 ) {
-    printf("🔧 [AVFrameAllocator] allocatePoolWithBuffers: name='%s', category='%s', count=%d, size=%zu\n", 
+    LOG_DEBUG("[AVFrameAllocator] [AVFrameAllocator] allocatePoolWithBuffers: name='%s', category='%s', count=%d, size=%zu\n", 
            name.c_str(), category.c_str(), count, size);
     
     // v2.0 步骤 1: 使用 Passkey Token 创建 BufferPool（shared_ptr）
@@ -211,21 +212,21 @@ uint64_t AVFrameAllocator::allocatePoolWithBuffers(
         category
     );
     
-    printf("✅ Created BufferPool '%s'\n", pool->getName().c_str());
+    LOG_DEBUG("[AVFrameAllocator] Created BufferPool '%s'\n", pool->getName().c_str());
     
     // 4. 🎯 核心逻辑：提前分配 count 个 AVFrame* "壳子"，包装成 Buffer
-    printf("🔧 Pre-allocating %d AVFrame shells...\n", count);
+    LOG_DEBUG("[AVFrameAllocator] Pre-allocating %d AVFrame shells...\n", count);
     
     for (int i = 0; i < count; i++) {
         // 4.1 分配 AVFrame* "壳子"（只是 AVFrame 结构体，内部 data/buf 都是空的）
         AVFrame* frame_ptr = av_frame_alloc();
         if (!frame_ptr) {
-            printf("❌ ERROR: Failed to allocate AVFrame[%d]\n", i);
+            LOG_ERROR("[AVFrameAllocator] ERROR: Failed to allocate AVFrame[%d]\n", i);
             // TODO: 清理已分配的 frames 和 buffers
             return 0;
         }
         
-        printf("   ✅ Allocated AVFrame[%d] at %p (shell only, no physical memory yet)\n", i, frame_ptr);
+        LOG_DEBUG("[AVFrameAllocator]   Allocated AVFrame[%d] at %p (shell only, no physical memory yet)\n", i, frame_ptr);
         
         // 4.2 生成唯一 Buffer ID
         uint32_t buffer_id = next_buffer_id_.fetch_add(1);
@@ -244,7 +245,7 @@ uint64_t AVFrameAllocator::allocatePoolWithBuffers(
         );
         
         if (!buffer) {
-            printf("❌ ERROR: Failed to create Buffer #%u for AVFrame[%d]\n", buffer_id, i);
+            LOG_ERROR("[AVFrameAllocator] ERROR: Failed to create Buffer #%u for AVFrame[%d]\n", buffer_id, i);
             av_frame_free(&frame_ptr);
             return 0;
         }
@@ -257,7 +258,7 @@ uint64_t AVFrameAllocator::allocatePoolWithBuffers(
         
         // 4.5 🎯 关键：将 Buffer 添加到 BufferPool 的 FREE 队列
         if (!BufferAllocatorBase::addBufferToPoolQueue(pool.get(), buffer, QueueType::FREE)) {
-            printf("❌ ERROR: Failed to add Buffer #%u to FREE queue\n", buffer_id);
+            LOG_ERROR("[AVFrameAllocator] ERROR: Failed to add Buffer #%u to FREE queue\n", buffer_id);
             delete buffer;
             av_frame_free(&frame_ptr);
             {
@@ -267,7 +268,7 @@ uint64_t AVFrameAllocator::allocatePoolWithBuffers(
             return 0;
         }
         
-        printf("   ✅ Buffer #%u (wraps AVFrame* %p) → added to FREE queue\n", buffer_id, frame_ptr);
+        LOG_DEBUG("[AVFrameAllocator]   Buffer #%u (wraps AVFrame* %p) → added to FREE queue\n", buffer_id, frame_ptr);
     }
     
     printf("\n");
@@ -283,7 +284,7 @@ uint64_t AVFrameAllocator::allocatePoolWithBuffers(
     uint64_t pool_id = BufferPoolRegistry::getInstance().registerPool(pool, getAllocatorId());
     pool->setRegistryId(pool_id);
     
-    printf("✅ [AVFrameAllocator] BufferPool registered (ID: %lu, Allocator ID: %lu, ref_count=1)\n", 
+    LOG_DEBUG("[AVFrameAllocator] [AVFrameAllocator] BufferPool registered (ID: %lu, Allocator ID: %lu, ref_count=1)\n", 
            pool_id, getAllocatorId());
     
     // v2.0 步骤 4: 返回 pool_id
@@ -295,7 +296,7 @@ Buffer* AVFrameAllocator::injectBufferToPool(
     size_t size,
     QueueType queue
 ) {
-    printf("⚠️  [AVFrameAllocator] injectBufferToPool: This method is not supported\n");
+    LOG_WARN("[AVFrameAllocator]  [AVFrameAllocator] injectBufferToPool: This method is not supported\n");
     printf("   Use injectAVFrameToPool() or injectExternalBufferToPool() instead\n");
     return nullptr;
 }
@@ -308,7 +309,7 @@ Buffer* AVFrameAllocator::injectExternalBufferToPool(
     QueueType queue
 ) {
     if (!virt_addr || size == 0) {
-        printf("❌ [AVFrameAllocator] injectExternalBufferToPool: invalid parameters\n");
+        LOG_ERROR("[AVFrameAllocator] [AVFrameAllocator] injectExternalBufferToPool: invalid parameters\n");
         return nullptr;
     }
     
@@ -316,7 +317,7 @@ Buffer* AVFrameAllocator::injectExternalBufferToPool(
     auto pool_weak = BufferPoolRegistry::getInstance().getPool(pool_id);
     auto pool = pool_weak.lock();
     if (!pool) {
-        printf("❌ [AVFrameAllocator] pool_id %lu not found or already destroyed\n", pool_id);
+        LOG_ERROR("[AVFrameAllocator] [AVFrameAllocator] pool_id %lu not found or already destroyed\n", pool_id);
         return nullptr;
     }
     
@@ -333,13 +334,13 @@ Buffer* AVFrameAllocator::injectExternalBufferToPool(
     );
     
     if (!buffer) {
-        printf("❌ Failed to create Buffer object #%u for external memory\n", id);
+        LOG_ERROR("[AVFrameAllocator] Failed to create Buffer object #%u for external memory\n", id);
         return nullptr;
     }
     
     // 3. 通过基类静态方法添加到 pool 的指定队列（会自动添加到 managed_buffers_）
     if (!BufferAllocatorBase::addBufferToPoolQueue(pool.get(), buffer, queue)) {
-        printf("❌ Failed to add external buffer #%u to pool '%s'\n", 
+        LOG_ERROR("[AVFrameAllocator] Failed to add external buffer #%u to pool '%s'\n", 
                id, pool->getName().c_str());
         delete buffer;  // 只删除 Buffer 对象，不释放外部内存
         return nullptr;
@@ -353,7 +354,7 @@ Buffer* AVFrameAllocator::injectExternalBufferToPool(
         buffer_ownership_[buffer] = this;
     }
     
-    printf("✅ External buffer #%u injected to pool '%s' (virt=%p, phys=0x%lx, size=%zu, queue: %s)\n",
+    LOG_DEBUG("[AVFrameAllocator] External buffer #%u injected to pool '%s' (virt=%p, phys=0x%lx, size=%zu, queue: %s)\n",
            id, pool->getName().c_str(), virt_addr, phys_addr, size,
            queue == QueueType::FREE ? "FREE" : "FILLED");
     
@@ -362,7 +363,7 @@ Buffer* AVFrameAllocator::injectExternalBufferToPool(
 
 bool AVFrameAllocator::removeBufferFromPool(uint64_t pool_id, Buffer* buffer) {
     if (!buffer) {
-        printf("❌ [AVFrameAllocator] removeBufferFromPool: buffer is nullptr\n");
+        LOG_ERROR("[AVFrameAllocator] [AVFrameAllocator] removeBufferFromPool: buffer is nullptr\n");
         return false;
     }
     
@@ -370,13 +371,13 @@ bool AVFrameAllocator::removeBufferFromPool(uint64_t pool_id, Buffer* buffer) {
     auto pool_weak = BufferPoolRegistry::getInstance().getPool(pool_id);
     auto pool = pool_weak.lock();
     if (!pool) {
-        printf("❌ [AVFrameAllocator] pool_id %lu not found or already destroyed\n", pool_id);
+        LOG_ERROR("[AVFrameAllocator] [AVFrameAllocator] pool_id %lu not found or already destroyed\n", pool_id);
         return false;
     }
     
     // 1. 通过基类静态方法从 pool 移除
     if (!BufferAllocatorBase::removeBufferFromPoolInternal(pool.get(), buffer)) {
-        printf("⚠️  Failed to remove buffer #%u from pool '%s' (in use or not in pool)\n",
+        LOG_WARN("[AVFrameAllocator]  Failed to remove buffer #%u from pool '%s' (in use or not in pool)\n",
                buffer->id(), pool->getName().c_str());
         return false;
     }
@@ -390,7 +391,7 @@ bool AVFrameAllocator::removeBufferFromPool(uint64_t pool_id, Buffer* buffer) {
         avframe_buffer_ownership_.erase(buffer);
     }
     
-    printf("✅ Buffer #%u removed from pool '%s'\n",
+    LOG_DEBUG("[AVFrameAllocator] Buffer #%u removed from pool '%s'\n",
            buffer->id(), pool->getName().c_str());
     
     return true;
@@ -401,11 +402,11 @@ bool AVFrameAllocator::destroyPool() {
     auto pool_ids = getPoolsByAllocator();
     
     if (pool_ids.empty()) {
-        printf("✅ [AVFrameAllocator] No pools to destroy\n");
+        LOG_DEBUG("[AVFrameAllocator] [AVFrameAllocator] No pools to destroy\n");
         return true;
     }
     
-    printf("🧹 [AVFrameAllocator] Destroying %zu pool(s)...\n", pool_ids.size());
+    LOG_DEBUG("[AVFrameAllocator] [AVFrameAllocator] Destroying %zu pool(s)...\n", pool_ids.size());
     
     std::lock_guard<std::mutex> lock(avframe_ownership_mutex_);
     
@@ -414,11 +415,11 @@ bool AVFrameAllocator::destroyPool() {
         // 2.1 获取 pool
         auto pool = getPoolSpecialForAllocator(pool_id);
         if (!pool) {
-            printf("⚠️  [AVFrameAllocator] pool_id %lu not found (already destroyed?)\n", pool_id);
+            LOG_WARN("[AVFrameAllocator]  [AVFrameAllocator] pool_id %lu not found (already destroyed?)\n", pool_id);
             continue;
         }
         
-        printf("🧹 [AVFrameAllocator] Destroying pool '%s' (ID: %lu)...\n", pool->getName().c_str(), pool_id);
+        LOG_DEBUG("[AVFrameAllocator] [AVFrameAllocator] Destroying pool '%s' (ID: %lu)...\n", pool->getName().c_str(), pool_id);
         
         // 2.2 通过 BufferPool 的公共方法获取所有属于此 pool 的 buffer
         std::vector<Buffer*> to_remove;
@@ -443,14 +444,14 @@ bool AVFrameAllocator::destroyPool() {
             }
         }
         
-        printf("✅ [AVFrameAllocator] Pool '%s' destroyed: removed %zu buffers\n", 
+        LOG_DEBUG("[AVFrameAllocator] [AVFrameAllocator] Pool '%s' destroyed: removed %zu buffers\n", 
                pool->getName().c_str(), to_remove.size());
         
         // 2.4 从 Registry 注销（触发 Pool 析构）
         unregisterPool(pool_id);
     }
     
-    printf("✅ [AVFrameAllocator] All %zu pool(s) destroyed\n", pool_ids.size());
+    LOG_DEBUG("[AVFrameAllocator] [AVFrameAllocator] All %zu pool(s) destroyed\n", pool_ids.size());
     return true;
 }
 

@@ -592,14 +592,14 @@ static int test_rtsp_stream(const char* rtsp_url) {
     LOG_INFO("  6. Consumer releases Buffer → triggers deleter");
     
     // 1. 初始化显示设备
-    LOG_INFO("Initializing display device...");
+    LOG_INFO("[Test] 初始化显示设备...");
     LinuxFramebufferDevice display;
     if (!display.initialize(0)) {
         return -1;
     }
     
     // 2. 创建 VideoProductionLine（Worker会在open()时自动调用Allocator创建BufferPool）
-    LOG_INFO("Creating VideoProductionLine...");
+    LOG_INFO("[Test] 创建VideoProductionLine...");
     VideoProductionLine producer(false, 1);  // loop=false, thread_count=1
     
     // 4. 配置 RTSP 流（注意：推荐单线程）
@@ -638,7 +638,7 @@ static int test_rtsp_stream(const char* rtsp_url) {
     }
     
     LOG_INFO("RTSP stream connected, starting playback...");
-    LOG_INFO("Press Ctrl+C to stop");
+    LOG_INFO("[Test] 按Ctrl+C停止");
     LOG_INFO("Watch for '[DMA Display]' messages below");
     
     // 7. 获取工作BufferPool（Worker创建的或fallback的）
@@ -743,7 +743,7 @@ static int test_h264_taco_video(const char* video_path) {
     LOG_INFO("═══════════════════════════════════════════════════════\n");
     
     // 1. 初始化显示设备
-    LOG_INFO("Initializing display device...");
+    LOG_INFO("[Test] 初始化显示设备...");
     LinuxFramebufferDevice display;
     if (!display.initialize(0)) {
         return -1;
@@ -783,14 +783,14 @@ static int test_h264_taco_video(const char* video_path) {
     });
     
     // 6. 启动生产者
-    LOG_INFO("Starting FFmpeg video producer...");
+    LOG_INFO("[Test] 启动FFmpeg...");
     if (!producer.start(workerConfig)) {
         LOG_ERROR("Failed to start FFmpeg producer");
         return -1;
     }
     
-    LOG_INFO("Video decoding started, starting playback...");
-    LOG_INFO("Press Ctrl+C to stop");
+    LOG_INFO("[Test] 视频解码已启动, starting playback...");
+    LOG_INFO("[Test] 按Ctrl+C停止");
     
     // 7. 获取工作BufferPool（Worker创建的或fallback的）
     uint64_t producer_pool_id = producer.getWorkingBufferPoolId();
@@ -1083,7 +1083,7 @@ static int test_h264_taco_video_multithread(const char* video_path) {
     }
     
     LOG_INFO_FMT("All %d decode threads started", num_threads);
-    LOG_INFO("Press Ctrl+C to stop");
+    LOG_INFO("[Test] 按Ctrl+C停止");
     LOG_INFO("");
     
     // 等待所有线程完成（或通过 g_running 控制）

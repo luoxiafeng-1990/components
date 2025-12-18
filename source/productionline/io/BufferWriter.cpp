@@ -1,4 +1,5 @@
 #include "productionline/io/BufferWriter.hpp"
+#include "common/Logger.hpp"
 #include <cstring>
 #include <cerrno>
 
@@ -9,6 +10,9 @@ extern "C" {
 namespace productionline {
 namespace io {
 
+// 静态ID生成器
+std::atomic<uint64_t> BufferWriter::next_id_{0};
+
 // ========== 构造函数和析构函数 ==========
 
 BufferWriter::BufferWriter()
@@ -17,10 +21,29 @@ BufferWriter::BufferWriter()
     , width_(0)
     , height_(0)
     , write_count_(0)
+    , writer_id_(++next_id_)
+    , log_prefix_("[BufferWriter::" + std::to_string(writer_id_) + "]")
 {
+    // 获取logger
+    auto logger = log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components"));
+    
+    // 打印生命周期开始
+    LOG4CPLUS_INFO(logger, "");
+    LOG4CPLUS_INFO(logger, log_prefix_ << " " << std::string(67, '='));
+    LOG4CPLUS_INFO(logger, log_prefix_ << " 构造");
+    LOG4CPLUS_INFO(logger, log_prefix_ << " " << std::string(67, '='));
 }
 
 BufferWriter::~BufferWriter() {
+    // 获取logger
+    auto logger = log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components"));
+    
+    // 打印生命周期结束
+    LOG4CPLUS_INFO(logger, "");
+    LOG4CPLUS_INFO(logger, log_prefix_ << " " << std::string(67, '='));
+    LOG4CPLUS_INFO(logger, log_prefix_ << " 析构: 共写入 " << write_count_.load() << " 帧");
+    LOG4CPLUS_INFO(logger, log_prefix_ << " " << std::string(67, '='));
+    
     close();
 }
 

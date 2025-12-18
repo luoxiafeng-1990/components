@@ -2,6 +2,7 @@
 #include "buffer/NormalAllocator.hpp"
 #include "buffer/AVFrameAllocator.hpp"
 #include "buffer/FramebufferAllocator.hpp"
+#include "common/Logger.hpp"
 #include <stdio.h>
 #include <string.h>
 
@@ -22,25 +23,25 @@ std::unique_ptr<BufferAllocatorBase> BufferAllocatorFactory::create(
         type = AllocatorType::NORMAL;
     }
     
-    // 🎯 根据类型选择最优配置（工厂策略）
+    // 根据类型选择最优配置（工厂策略）
     switch (type) {
         case AllocatorType::NORMAL:
-            printf("🏭 BufferAllocatorFactory: Creating NormalAllocator (MALLOC + 64-byte aligned)\n");
+            LOG_DEBUG("[BufferAllocatorFactory] 创建NormalAllocator (MALLOC, 64-byte aligned)");
             return std::make_unique<NormalAllocator>(
-                BufferMemoryAllocatorType::NORMAL_MALLOC,  // 工厂决定
-                64                                          // 工厂决定
+                BufferMemoryAllocatorType::NORMAL_MALLOC,
+                64
             );
             
         case AllocatorType::AVFRAME:
-            printf("🏭 BufferAllocatorFactory: Creating AVFrameAllocator (default config)\n");
+            LOG_DEBUG("[BufferAllocatorFactory] 创建AVFrameAllocator");
             return std::make_unique<AVFrameAllocator>();
             
         case AllocatorType::FRAMEBUFFER:
-            printf("🏭 BufferAllocatorFactory: Creating FramebufferAllocator (default config)\n");
+            LOG_DEBUG("[BufferAllocatorFactory] 创建FramebufferAllocator");
             return std::make_unique<FramebufferAllocator>();
             
         default:
-            printf("⚠️  Warning: Unknown AllocatorType, using NormalAllocator\n");
+            LOG_WARN("[BufferAllocatorFactory] Unknown type, using NormalAllocator");
             return std::make_unique<NormalAllocator>(
                 BufferMemoryAllocatorType::NORMAL_MALLOC,
                 64
@@ -70,7 +71,7 @@ std::unique_ptr<BufferAllocatorBase> BufferAllocatorFactory::createByName(
     size_t alignment
 ) {
     if (!name) {
-        printf("⚠️  Warning: Null name provided, using NormalAllocator\n");
+        LOG_WARN("[BufferAllocatorFactory] Null name, using NormalAllocator");
         return createByType(AllocatorType::NORMAL, mem_type, alignment);
     }
     
@@ -84,7 +85,7 @@ std::unique_ptr<BufferAllocatorBase> BufferAllocatorFactory::createByName(
         return createWithConfig(AllocatorType::AUTO, mem_type, alignment);
     }
     
-    printf("⚠️  Warning: Unknown allocator type: %s, using NormalAllocator\n", name);
+    LOG_WARN_FMT("[BufferAllocatorFactory] Unknown type: %s, using NormalAllocator", name);
     return createByType(AllocatorType::NORMAL, mem_type, alignment);
 }
 

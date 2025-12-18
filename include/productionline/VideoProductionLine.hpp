@@ -220,5 +220,8 @@ private:
     // 性能监控
     std::chrono::steady_clock::time_point start_time_;
     std::unique_ptr<PerformanceMonitor> monitor_;  // 填充buffer性能监控
+    
+    // 日志前缀（用于清晰标识对象）
+    std::string log_prefix_;
 };
 

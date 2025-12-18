@@ -1,5 +1,6 @@
 #include "buffer/BufferAllocatorFacade.hpp"
 #include "buffer/BufferAllocatorFactory.hpp"
+#include "common/Logger.hpp"
 #include <stdio.h>
 
 // ============================================================================
@@ -9,14 +10,14 @@
 BufferAllocatorFacade::BufferAllocatorFacade(
     BufferAllocatorFactory::AllocatorType type
 ) : type_(type) {
-    // 🎯 使用 Factory 创建底层 Allocator（配置细节由Factory内部决定）
+    // 使用 Factory 创建底层 Allocator
     allocator_base_uptr_ = BufferAllocatorFactory::create(type);
     if (!allocator_base_uptr_) {
-        printf("❌ ERROR: Failed to create Allocator (type=%s)\n", 
-               BufferAllocatorFactory::typeToString(type));
+        LOG_ERROR_FMT("[BufferAllocatorFacade] Failed to create Allocator (type=%s)", 
+                      BufferAllocatorFactory::typeToString(type));
     } else {
-        printf("✅ [BufferAllocatorFacade] Created %s\n", 
-               BufferAllocatorFactory::typeToString(type));
+        LOG_DEBUG_FMT("[BufferAllocatorFacade] Created %s", 
+                      BufferAllocatorFactory::typeToString(type));
     }
 }
 
@@ -35,7 +36,7 @@ uint64_t BufferAllocatorFacade::allocatePoolWithBuffers(
     const std::string& category
 ) {
     if (!allocator_base_uptr_) {
-        printf("❌ ERROR: Allocator not initialized\n");
+        LOG_ERROR("[BufferAllocatorFacade] Allocator not initialized");
         return 0;
     }
     
@@ -48,7 +49,7 @@ Buffer* BufferAllocatorFacade::injectBufferToPool(
     QueueType queue
 ) {
     if (!allocator_base_uptr_) {
-        printf("❌ ERROR: Allocator not initialized\n");
+        LOG_ERROR("[BufferAllocatorFacade] Allocator not initialized");
         return nullptr;
     }
     
@@ -63,7 +64,7 @@ Buffer* BufferAllocatorFacade::injectExternalBufferToPool(
     QueueType queue
 ) {
     if (!allocator_base_uptr_) {
-        printf("❌ ERROR: Allocator not initialized\n");
+        LOG_ERROR("[BufferAllocatorFacade] Allocator not initialized");
         return nullptr;
     }
     
@@ -72,7 +73,7 @@ Buffer* BufferAllocatorFacade::injectExternalBufferToPool(
 
 bool BufferAllocatorFacade::removeBufferFromPool(uint64_t pool_id, Buffer* buffer) {
     if (!allocator_base_uptr_) {
-        printf("❌ ERROR: Allocator not initialized\n");
+        LOG_ERROR("[BufferAllocatorFacade] Allocator not initialized");
         return false;
     }
     
@@ -81,7 +82,7 @@ bool BufferAllocatorFacade::removeBufferFromPool(uint64_t pool_id, Buffer* buffe
 
 bool BufferAllocatorFacade::destroyPool() {
     if (!allocator_base_uptr_) {
-        printf("❌ ERROR: Allocator not initialized\n");
+        LOG_ERROR("[BufferAllocatorFacade] Allocator not initialized");
         return false;
     }
     

@@ -1,4 +1,5 @@
 #include "buffer/bufferpool/BufferPoolRegistry.hpp"
+#include "common/Logger.hpp"
 #include "buffer/bufferpool/BufferPool.hpp"
 #include <stdio.h>
 #include <algorithm>
@@ -16,12 +17,12 @@ BufferPoolRegistry& BufferPoolRegistry::getInstance() {
 
 uint64_t BufferPoolRegistry::registerPool(std::shared_ptr<BufferPool> pool, uint64_t allocator_id) {
     if (!pool) {
-        printf("⚠️  Error: Cannot register null BufferPool\n");
+        LOG_WARN("[Registry]  Error: Cannot register null BufferPool\n");
         return 0;
     }
     
     if (allocator_id == 0) {
-        printf("⚠️  Error: Invalid allocator_id (0)\n");
+        LOG_WARN("[Registry]  Error: Invalid allocator_id (0)\n");
         return 0;
     }
     
@@ -33,7 +34,7 @@ uint64_t BufferPoolRegistry::registerPool(std::shared_ptr<BufferPool> pool, uint
     
     // 检查名称是否已存在
     if (name_to_id_.find(name) != name_to_id_.end()) {
-        printf("⚠️  Warning: BufferPool name '%s' already exists, appending ID suffix\n", 
+        LOG_WARN("[Registry]  Warning: BufferPool name '%s' already exists, appending ID suffix\n", 
                name.c_str());
     }
     
@@ -53,7 +54,7 @@ uint64_t BufferPoolRegistry::registerPool(std::shared_ptr<BufferPool> pool, uint
     pools_[id] = info;
     name_to_id_[name] = id;
     
-    printf("📦 [Registry] BufferPool registered: '%s' (ID: %lu, Allocator ID: %lu, Category: %s, ref_count=1)\n",
+    LOG_DEBUG("[Registry] [Registry] BufferPool registered: '%s' (ID: %lu, Allocator ID: %lu, Category: %s, ref_count=1)\n",
            name.c_str(), id, allocator_id, category.empty() ? "None" : category.c_str());
     
     return id;
@@ -64,7 +65,7 @@ void BufferPoolRegistry::unregisterPool(uint64_t id) {
     
     auto it = pools_.find(id);
     if (it == pools_.end()) {
-        printf("⚠️  Warning: Trying to unregister non-existent BufferPool (ID: %lu)\n", id);
+        LOG_WARN("[Registry]  Warning: Trying to unregister non-existent BufferPool (ID: %lu)\n", id);
         return;
     }
     
@@ -76,7 +77,7 @@ void BufferPoolRegistry::unregisterPool(uint64_t id) {
     // 移除 Pool（v2.0: 释放 shared_ptr，引用计数 -1 → 0 → 触发 Pool 析构）
     pools_.erase(it);
     
-    printf("📦 [Registry] BufferPool unregistered and destroyed: '%s' (ID: %lu)\n", name.c_str(), id);
+    LOG_DEBUG("[Registry] [Registry] BufferPool unregistered and destroyed: '%s' (ID: %lu)\n", name.c_str(), id);
 }
 
 // ========== 公开接口实现 ==========

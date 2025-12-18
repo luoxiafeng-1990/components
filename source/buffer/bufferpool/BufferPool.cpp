@@ -1,5 +1,6 @@
 #include "buffer/bufferpool/BufferPool.hpp"
 #include "buffer/bufferpool/BufferPoolRegistry.hpp"
+#include "common/Logger.hpp"
 #include <stdio.h>
 #include <stdexcept>
 #include <chrono>
@@ -17,13 +18,30 @@ BufferPool::BufferPool(
     , category_(category)
     , registry_id_(0)
     , running_(true)
+    , log_prefix_("[BufferPool::" + name + "]")
 {
     (void)token;  // 标记 token 已使用
-    printf("📦 BufferPool '%s' (category: %s) created\n", name_.c_str(), category_.c_str());
+    
+    // 获取logger
+    auto logger = log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components"));
+    
+    // 打印生命周期开始（空行+分隔线）
+    LOG4CPLUS_INFO(logger, "");
+    LOG4CPLUS_INFO(logger, log_prefix_ << " " << std::string(67, '='));
+    LOG4CPLUS_INFO(logger, log_prefix_ << " 构造: category=" << category_);
+    LOG4CPLUS_INFO(logger, log_prefix_ << " " << std::string(67, '='));
 }
 
 BufferPool::~BufferPool() {
-    printf("🧹 Destroying BufferPool '%s'...\n", name_.c_str());
+    // 获取logger
+    auto logger = log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components"));
+    
+    // 打印生命周期结束
+    LOG4CPLUS_INFO(logger, "");
+    LOG4CPLUS_INFO(logger, log_prefix_ << " " << std::string(67, '='));
+    LOG4CPLUS_INFO(logger, log_prefix_ << " 析构: total=" << getTotalCount() 
+                   << ", free=" << getFreeCount() << ", filled=" << getFilledCount());
+    LOG4CPLUS_INFO(logger, log_prefix_ << " " << std::string(67, '='));
     
     // 停止等待线程
     shutdown();
@@ -34,8 +52,6 @@ BufferPool::~BufferPool() {
     // 2. 正确的销毁流程：Allocator::destroyPool() → 清理 Buffer → unregisterPool() → Pool 析构
     // 3. 如果在这里调用，会导致重复调用（destroyPool 已经调用过了）
     // 4. 如果 Allocator 没有调用 destroyPool，说明是异常情况，不应该在这里处理
-    
-    printf("✅ BufferPool '%s' destroyed\n", name_.c_str());
 }
 
 void BufferPool::shutdown() {

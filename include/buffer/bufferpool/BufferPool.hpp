@@ -366,4 +366,7 @@ private:
     std::condition_variable free_cv_;               // 空闲队列条件变量
     std::condition_variable filled_cv_;             // 填充队列条件变量
     std::atomic<bool> running_;                     // 运行状态（用于停止等待）
+    
+    // 日志前缀（用于清晰标识对象）
+    std::string log_prefix_;
 };
