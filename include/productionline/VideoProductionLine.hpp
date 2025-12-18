@@ -54,8 +54,14 @@ public:
      */
     ~VideoProductionLine();
     
-    // 禁止拷贝和赋值
+    /**
+     * @brief 禁止拷贝构造
+     */
     VideoProductionLine(const VideoProductionLine&) = delete;
+    
+    /**
+     * @brief 禁止拷贝赋值
+     */
     VideoProductionLine& operator=(const VideoProductionLine&) = delete;
     
     // ========== 核心接口 ==========
@@ -76,19 +82,36 @@ public:
     
     // ========== 查询接口 ==========
     
-    /// 是否正在运行
+    /**
+     * @brief 检查生产线是否正在运行
+     * @return true 如果正在运行，否则返回 false
+     */
     bool isRunning() const { return running_.load(); }
     
-    /// 获取已生产的帧数
+    /**
+     * @brief 获取已生产的帧数
+     * @return 已成功生产的帧数
+     */
     int getProducedFrames() const { return produced_frames_.load(); }
     
-    /// 获取跳过的帧数（读取失败）
+    /**
+     * @brief 获取跳过的帧数
+     * @return 读取失败而跳过的帧数
+     */
     int getSkippedFrames() const { return skipped_frames_.load(); }
     
-    /// 获取平均 FPS
+    /**
+     * @brief 获取平均FPS
+     * @return 平均每秒生产的帧数
+     */
     double getAverageFPS() const;
     
-    /// v2.0: 获取工作BufferPool ID（消费者应从 Registry 获取）
+    /**
+     * @brief 获取工作BufferPool ID
+     * @return BufferPool的注册表ID
+     * 
+     * @note 消费者应使用此ID从 BufferPoolRegistry 获取 BufferPool
+     */
     uint64_t getWorkingBufferPoolId() const { return working_buffer_pool_id_; }
     
     // ========== 错误处理 ==========
@@ -108,7 +131,11 @@ public:
     
     // ========== 调试接口 ==========
     
-    /// 打印统计信息
+    /**
+     * @brief 打印统计信息
+     * 
+     * @note 输出生产帧数、跳过帧数、平均FPS等统计数据
+     */
     void printStats() const;
     
 private:

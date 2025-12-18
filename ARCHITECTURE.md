@@ -1905,6 +1905,397 @@ void VideoProductionLine::producerThreadFunc(int thread_id) {
 
 ---
 
+### 10. Buffer图像元数据增强 - v2.6 新增
+
+**版本**: v2.6  
+**影响范围**: Buffer类、BufferWriter类、FfmpegDecodeVideoFileWorker类
+
+#### 设计背景
+
+在v2.5及之前版本，`Buffer`类仅封装基本的内存管理信息（虚拟地址、物理地址、大小等），缺少图像格式相关的元数据（宽高、像素格式、stride、plane偏移等）。这导致`BufferWriter`在保存数据时无法正确处理不同图像格式的内存布局差异（如planar vs. packed、stride padding、多plane存储等），只能简单地进行`fwrite`操作，无法保存正确的裸图像文件。
+
+#### 问题分析
+
+**问题1：BufferWriter无法处理stride和padding**
+- 不同YUV/RGB格式的内存布局差异巨大（见ARCHITECTURE.md表格）
+- 硬件分配的Buffer通常有stride/padding用于对齐
+- 简单的`fwrite(buffer, size)`会将padding一起写入，导致保存的文件与FFmpeg期望的格式不一致
+
+**问题2：Buffer类设计缺陷**
+- `Buffer`仅记录`virt_addr_`和`size_`，丢失了图像语义信息
+- Worker从`AVFrame`解码得到完整的图像元数据，但在填充`Buffer`时这些信息被丢弃
+- BufferWriter无法从Buffer获取正确的格式信息
+
+#### 解决方案：方案1 - Buffer类直接增加图像元数据字段
+
+**核心思路**：
+```
+AVFrame (FFmpeg)
+    ├── width, height, format
+    ├── linesize[4] (stride)
+    ├── data[4] (plane指针)
+    └── plane offsets
+         ↓ Worker::fillBuffer()
+Buffer v2.6 ⭐ 新增图像元数据
+    ├── width_, height_, format_
+    ├── linesize_[4] (stride)
+    ├── plane_offset_[4]
+    └── has_image_metadata_
+         ↓ BufferWriter::write()
+文件 (正确的裸格式)
+    └── 根据format、stride正确写入，去除padding
+```
+
+#### 修改详情
+
+**1. Buffer.hpp 新增字段**：
+```cpp
+class Buffer {
+private:
+    // ⭐ v2.6新增：图像元数据
+    bool has_image_metadata_;        // 是否包含图像元数据
+    int width_;                      // 图像宽度（像素）
+    int height_;                     // 图像高度（像素）
+    AVPixelFormat format_;           // 像素格式（FFmpeg标准）
+    int linesize_[4];                // 各plane的stride（字节）
+    size_t plane_offset_[4];         // 各plane相对于virt_addr_的偏移
+    int nb_planes_;                  // plane数量（1-4）
+    
+public:
+    // ⭐ 从AVFrame自动设置元数据
+    void setImageMetadataFromAVFrame(const AVFrame* frame);
+    
+    // ⭐ 手动设置元数据
+    void setImageMetadata(int width, int height, AVPixelFormat format,
+                         const int* linesize = nullptr,
+                         const size_t* plane_offsets = nullptr);
+    
+    // ⭐ Getters
+    bool hasImageMetadata() const;
+    int getImageWidth() const;
+    int getImageHeight() const;
+    AVPixelFormat getImageFormat() const;
+    const int* getImageLinesize() const;
+    uint8_t* getImagePlaneData(int plane) const;
+    int getImagePlaneCount() const;
+};
+```
+
+**2. FfmpegDecodeVideoFileWorker::fillBuffer() 填充元数据**：
+```cpp
+bool FfmpegDecodeVideoFileWorker::fillBuffer(int frame_index, Buffer* buffer) {
+    // ... 解码逻辑 ...
+    
+    // ⭐ v2.6新增：从AVFrame设置图像元数据到Buffer
+    buffer->setImageMetadataFromAVFrame(frame_ptr);
+    
+    return true;
+}
+```
+
+**3. BufferWriter::write() 使用元数据正确保存**：
+```cpp
+bool BufferWriter::write(const Buffer* buffer) {
+    if (buffer->hasImageMetadata()) {
+        // ⭐ 使用元数据模式（v2.6）
+        return writeWithMetadata(buffer);
+    } else {
+        // 回退到简单模式（向后兼容）
+        return writeSimple(buffer);
+    }
+}
+
+bool BufferWriter::writeWithMetadata(const Buffer* buffer) {
+    AVPixelFormat format = buffer->getImageFormat();
+    int width = buffer->getImageWidth();
+    int height = buffer->getImageHeight();
+    const int* linesize = buffer->getImageLinesize();
+    
+    switch (format) {
+        case AV_PIX_FMT_NV12: {
+            // Semi-planar: Y + UV
+            const uint8_t* y_data = buffer->getImagePlaneData(0);
+            const uint8_t* uv_data = buffer->getImagePlaneData(1);
+            
+            // ⭐ 去除stride，逐行写入
+            writePlane(y_data, linesize[0], width, height);       // Y平面
+            writePlane(uv_data, linesize[1], width, height / 2);  // UV平面
+            break;
+        }
+        // ... 其他格式 ...
+    }
+}
+
+bool BufferWriter::writePlane(const uint8_t* data, int stride, 
+                               int width, int height) {
+    if (stride == width) {
+        // 无padding，直接写入
+        fwrite(data, 1, width * height, file_);
+    } else {
+        // ⭐ 有padding，逐行写入，去除padding
+        for (int y = 0; y < height; y++) {
+            fwrite(data + y * stride, 1, width, file_);
+        }
+    }
+}
+```
+
+#### 支持的格式（18种，基于ARCHITECTURE.md表格）
+
+| 格式类别 | FFmpeg枚举 | 支持状态 | 内存布局处理 |
+|---------|-----------|---------|------------|
+| **YUV400** | AV_PIX_FMT_GRAY8 | ✅ | 单plane，去除stride |
+| **YUV400** | AV_PIX_FMT_GRAY10LE | ✅ | 单plane，16bit/pixel |
+| **YUV420 NV12** | AV_PIX_FMT_NV12 | ✅ | 2 planes (Y + UV)，各自去除stride |
+| **YUV420 NV12 P010** | AV_PIX_FMT_P010LE | ✅ | 2 planes (Y + UV)，16bit |
+| **YUV420 NV21** | AV_PIX_FMT_NV21 | ✅ | 2 planes (Y + VU)，各自去除stride |
+| **YUV420 Planar** | AV_PIX_FMT_YUV420P10LE | ✅ | 3 planes (Y + U + V) |
+| **RGB888** | AV_PIX_FMT_RGB24 | ✅ | Packed，单plane |
+| **BGR888** | AV_PIX_FMT_BGR24 | ✅ | Packed，单plane |
+| **ARGB8888** | AV_PIX_FMT_ARGB | ✅ | Packed，4 bytes/pixel |
+| **ABGR8888** | AV_PIX_FMT_ABGR | ✅ | Packed，4 bytes/pixel |
+| **RGBA8888** | AV_PIX_FMT_RGBA | ✅ | Packed，4 bytes/pixel |
+| **BGRA8888** | AV_PIX_FMT_BGRA | ✅ | Packed，4 bytes/pixel |
+| **RGBX8888** | AV_PIX_FMT_RGB0 | ✅ | Packed，4 bytes/pixel |
+| **BGRX8888** | AV_PIX_FMT_BGR0 | ✅ | Packed，4 bytes/pixel |
+| **XRGB8888** | AV_PIX_FMT_0RGB | ✅ | Packed，4 bytes/pixel |
+| **XBGR8888** | AV_PIX_FMT_0BGR | ✅ | Packed，4 bytes/pixel |
+| **RGB161616** | AV_PIX_FMT_RGB48LE | ✅ | Packed，6 bytes/pixel |
+| **BGR161616** | AV_PIX_FMT_BGR48LE | ✅ | Packed，6 bytes/pixel |
+
+#### 设计优势
+
+| 优势 | 说明 |
+|------|------|
+| **简单直接** | 直接在Buffer类中增加字段，理解容易 |
+| **性能好** | 数据局部性好，访问快速，无额外指针解引用 |
+| **类型安全** | 编译期类型检查，使用FFmpeg标准AVPixelFormat |
+| **向后兼容** | 使用`has_image_metadata_`标志，不影响不需要元数据的场景 |
+| **自动填充** | Worker自动从AVFrame提取并填充，无需手动设置 |
+| **正确保存** | BufferWriter根据元数据正确处理stride/plane/padding |
+
+#### 内存开销
+
+- **每个Buffer增加**：约80字节（7个int + 8个size_t + 1个bool + 1个AVPixelFormat枚举）
+- **相对Buffer大小**：可忽略（Buffer本身通常几MB，80字节占比<0.01%）
+- **权衡**：为了正确性和易用性，可接受的开销
+
+#### 测试验证
+
+**验证方法**：
+```bash
+# 1. 运行测试程序，保存裸格式文件
+./test -m writer test_video.mp4
+# 输出：output_test_argb.raw
+
+# 2. 使用FFmpeg播放验证（以ARGB为例）
+ffplay -f rawvideo -pixel_format argb -video_size 1920x1080 output_test_argb.raw
+
+# 3. 对比FFmpeg保存的文件
+ffmpeg -i test_video.mp4 -f rawvideo -pix_fmt argb ffmpeg_output.raw
+diff output_test_argb.raw ffmpeg_output.raw
+```
+
+**预期结果**：
+- ✅ ffplay能正常播放，画面无花屏、错位
+- ✅ 与FFmpeg保存的文件完全一致（`diff`无差异）
+
+#### 架构影响
+
+```
+修改文件：
+  ├── include/buffer/bufferpool/Buffer.hpp          ⭐ 新增图像元数据字段和方法
+  ├── source/buffer/bufferpool/Buffer.cpp           ⭐ 实现元数据方法
+  ├── source/productionline/worker/FfmpegDecodeVideoFileWorker.cpp  ⭐ fillBuffer中调用setImageMetadataFromAVFrame
+  ├── include/productionline/io/BufferWriter.hpp    ⭐ 新增writeWithMetadata方法
+  └── source/productionline/io/BufferWriter.cpp     ⭐ 实现基于元数据的正确写入逻辑
+
+数据流：
+  AVFrame → Worker → Buffer (带元数据) → BufferWriter → 文件（正确格式）
+```
+
+---
+
+### 11. BufferWriter（Buffer输出工具）- v2.5 新增（v2.6增强）
+
+**文件位置**：
+- 头文件: `include/productionline/io/BufferWriter.hpp`
+- 实现文件: `source/productionline/io/BufferWriter.cpp`
+
+**架构角色**: I/O工具层（I/O Utility Layer）
+
+**职责**：
+- ✅ **Buffer输出**：将Buffer数据写入文件
+- ✅ **格式支持**：支持多种输出格式（RAW、YUV、JPEG等）
+- ✅ **统计信息**：记录写入帧数、字节数等
+- ✅ **错误处理**：详细的错误信息和状态查询
+
+**设计定位**：
+```
+数据流向：
+  数据源 → Worker（输入侧）→ Buffer → BufferWriter（输出侧）→ 文件
+  
+职责对称：
+  Worker      ：负责输入（数据源 → Buffer）
+  BufferWriter：负责输出（Buffer → 文件）
+  
+消费者模型：
+  真正的消费者：应用层（test.cpp、显示程序等）
+  BufferWriter  ：消费者的辅助工具（帮助消费者保存数据）
+```
+
+**设计特点（v2.5）**：
+- ✅ **职责单一**：只负责输出，不参与生产流程
+- ✅ **对称设计**：与Worker形成输入/输出对称
+- ✅ **独立工具**：放在`productionline/io/`目录，独立于worker
+- ✅ **易于使用**：简单的open/write/close接口
+- ✅ **可扩展**：支持多种输出格式（预留扩展）
+
+**核心接口**：
+
+```cpp
+class BufferWriter {
+public:
+    enum class OutputFormat {
+        RAW,           // 原始数据（直接写入Buffer内容）
+        YUV,           // YUV格式（带格式头）
+        JPEG,          // JPEG压缩
+        PNG,           // PNG压缩
+        MP4            // MP4容器
+    };
+    
+    // ============ 核心接口 ============
+    
+    /// 打开输出文件
+    bool open(const char* path);
+    
+    /// 写入单个Buffer
+    bool write(const Buffer* buffer);
+    
+    /// 批量写入Buffer
+    int writeBatch(const std::vector<const Buffer*>& buffers);
+    
+    /// 关闭文件
+    void close();
+    
+    // ============ 状态查询 ============
+    
+    bool isOpen() const;
+    int getWrittenFrames() const;
+    size_t getBytesWritten() const;
+    const std::string& getLastError() const;
+    
+    // ============ 配置接口 ============
+    
+    void setOutputFormat(OutputFormat format);
+    void setAutoFlush(bool enable);
+    void flush();
+    
+    // ============ 调试接口 ============
+    
+    void printStatistics() const;
+};
+```
+
+**使用示例**：
+
+```cpp
+#include "productionline/VideoProductionLine.hpp"
+#include "productionline/io/BufferWriter.hpp"
+
+int main() {
+    using namespace productionline::io;
+    
+    // 1. 启动生产线
+    VideoProductionLine producer;
+    producer.start(config, true, 2);
+    
+    // 2. 获取BufferPool
+    uint64_t pool_id = producer.getWorkingBufferPoolId();
+    auto pool_sptr = BufferPoolRegistry::getInstance()
+                        .getPool(pool_id).lock();
+    
+    // 3. 创建BufferWriter（消费者的辅助工具）
+    BufferWriter writer(BufferWriter::OutputFormat::RAW);
+    writer.open("output.yuv");
+    
+    // 4. 消费者循环：获取Buffer并保存
+    int saved_count = 0;
+    while (saved_count < 100) {
+        Buffer* buffer = pool_sptr->acquireFilled(true, 100);
+        if (buffer) {
+            // 保存Buffer到文件
+            if (writer.write(buffer)) {
+                saved_count++;
+            }
+            // 归还Buffer
+            pool_sptr->releaseFilled(buffer);
+        }
+    }
+    
+    // 5. 关闭并打印统计
+    writer.close();
+    writer.printStatistics();
+    
+    printf("Saved: %d frames, %zu bytes\n",
+           writer.getWrittenFrames(), writer.getBytesWritten());
+    
+    producer.stop();
+    return 0;
+}
+```
+
+**架构集成**：
+
+```
+packages/components/
+├── include/
+│   └── productionline/
+│       ├── VideoProductionLine.hpp
+│       ├── worker/              # 输入侧（Worker负责填充Buffer）
+│       │   ├── WorkerBase.hpp
+│       │   └── ...
+│       └── io/                  # I/O工具模块⭐ v2.5新增
+│           └── BufferWriter.hpp # 输出工具（消费者辅助）
+└── source/
+    └── productionline/
+        ├── worker/
+        └── io/                  # ⭐ v2.5新增
+            └── BufferWriter.cpp
+```
+
+**设计优势**：
+
+| 优势 | 说明 |
+|------|------|
+| **职责清晰** | Worker负责输入，BufferWriter负责输出，职责单一（SRP） |
+| **对称设计** | Reader（Worker）↔ Writer，符合直觉，易于理解 |
+| **可复用性** | 所有需要保存Buffer的场景都可以使用 |
+| **易于扩展** | 支持多种输出格式，未来可添加压缩、编码等功能 |
+| **架构一致** | 遵循现有的Worker设计模式，目录组织清晰 |
+| **不破坏流程** | 不干涉生产流程，纯粹的消费者侧工具 |
+
+**与大厂设计对比**：
+
+| 项目/公司 | 输入类 | 输出类 | 设计模式 |
+|----------|--------|--------|---------|
+| **FFmpeg** | AVFormatContext（输入） | AVFormatContext（输出） | 对称设计 |
+| **OpenCV** | VideoCapture | VideoWriter | Reader/Writer对称 |
+| **GStreamer** | Source Element | Sink Element | 管道模型 |
+| **Android** | ImageReader | ImageWriter | Reader/Writer对称 |
+| **本项目** | Worker | BufferWriter | Reader/Writer对称 |
+
+**测试用例**：
+
+见 `test_cases/dec/test.cpp` 中的 `test_buffer_writer()` 测试用例（测试8）。
+
+**运行测试**：
+```bash
+./test -m writer video.mp4
+```
+
+---
+
 ## 使用示例
 
 ### 示例0：使用WorkerConfig配置解码器（v2.3重构版）

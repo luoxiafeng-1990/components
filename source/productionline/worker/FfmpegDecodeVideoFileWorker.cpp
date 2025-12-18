@@ -698,6 +698,9 @@ bool FfmpegDecodeVideoFileWorker::fillBuffer(int frame_index, Buffer* buffer) {
             return false;
         }
         
+        // ⭐ v2.6新增：从AVFrame设置图像元数据到Buffer
+        buffer->setImageMetadataFromAVFrame(frame_ptr);
+        
         decoded_frames_++;
         current_frame_index_++;
         recv_frm = true;

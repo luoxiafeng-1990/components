@@ -3,7 +3,13 @@
 #include <cstddef>
 #include <cstdint>
 #include <atomic>
-#include <functional>
+#include <cstring>
+
+// FFmpeg标准格式定义
+extern "C" {
+#include <libavutil/pixfmt.h>
+#include <libavutil/frame.h>
+}
 
 /**
  * @brief Buffer 元数据类
@@ -14,7 +20,7 @@
  * - 物理地址（DMA/硬件访问）
  * - 所有权类型（自有/外部）
  * - 状态机（FREE/ACQUIRED/FILLED/IN_USE）
- * - 引用计数（生命周期跟踪）
+ * - 图像元数据（宽高、格式、stride等）⭐ v2.6新增
  */
 class Buffer {
 public:
@@ -46,69 +52,150 @@ public:
            size_t size,
            Ownership ownership);
     
+    /**
+     * @brief 析构函数
+     */
     ~Buffer() = default;
     
-    // 禁止拷贝（Buffer 不应该被拷贝）
+    /**
+     * @brief 禁止拷贝构造（Buffer 不应该被拷贝）
+     */
     Buffer(const Buffer&) = delete;
+    
+    /**
+     * @brief 禁止拷贝赋值（Buffer 不应该被拷贝）
+     */
     Buffer& operator=(const Buffer&) = delete;
     
-    // 允许移动（用于 vector 的 resize/reserve）
+    /**
+     * @brief 移动构造函数
+     * @param other 源Buffer对象
+     * 
+     * @note 用于 vector 的 resize/reserve 操作
+     * @note 移动后源对象将被清空
+     */
     Buffer(Buffer&& other) noexcept;
+    
+    /**
+     * @brief 移动赋值运算符
+     * @param other 源Buffer对象
+     * @return 当前对象的引用
+     * 
+     * @note 用于 vector 的内部管理
+     * @note 移动后源对象将被清空
+     */
     Buffer& operator=(Buffer&& other) noexcept;
     
-    // ========== Getters ==========
+    // ========== 基础信息接口 ==========
     
-    /// 获取唯一ID
+    /**
+     * @brief 获取Buffer唯一ID
+     * @return Buffer的唯一标识符
+     */
     uint32_t id() const { return id_; }
     
-    /// 获取虚拟地址（CPU访问）
+    /**
+     * @brief 获取虚拟地址
+     * @return CPU可访问的虚拟地址指针
+     */
     void* getVirtualAddress() const { return virt_addr_; }
     
-    /// 获取物理地址（DMA/硬件访问）
+    /**
+     * @brief 获取物理地址
+     * @return DMA/硬件访问的物理地址（0表示未知）
+     */
     uint64_t getPhysicalAddress() const { return phys_addr_; }
     
-    /// 获取Buffer大小
+    /**
+     * @brief 获取Buffer大小
+     * @return Buffer大小（字节）
+     */
     size_t size() const { return size_; }
     
-    /// 获取所有权类型
-    Ownership ownership() const { return ownership_; }
-    
-    /// 获取当前状态
+    /**
+     * @brief 获取当前状态
+     * @return Buffer当前状态（线程安全）
+     */
     State state() const { return state_.load(); }
     
-    /// 获取 DMA-BUF fd（如果有）
-    int getDmaBufFd() const { return dma_fd_; }
-    
-    /// 别名（兼容旧代码）
+    /**
+     * @brief 获取数据指针（getVirtualAddress的别名）
+     * @return CPU可访问的虚拟地址指针
+     * 
+     * @note 为兼容旧代码保留
+     */
     void* data() const { return virt_addr_; }
     
-    // ========== Setters ==========
+    // ========== 状态管理接口 ==========
     
-    /// 设置状态
+    /**
+     * @brief 设置Buffer状态
+     * @param state 新的状态值
+     * 
+     * @note 线程安全操作
+     */
     void setState(State state) { state_.store(state); }
     
-    /// 设置物理地址（用于延迟获取物理地址的场景，如零拷贝解码）
+    /**
+     * @brief 设置物理地址
+     * @param phys_addr 物理地址
+     * 
+     * @note 用于延迟获取物理地址的场景，如零拷贝解码
+     */
     void setPhysicalAddress(uint64_t phys_addr) { phys_addr_ = phys_addr; }
     
-    /// 设置 DMA-BUF fd（用于共享/导出）
-    void setDmaBufFd(int fd) { dma_fd_ = fd; }
+    // ========== 图像元数据接口 ⭐ v2.6新增 ==========
     
-    // ========== 引用计数（用于外部buffer生命周期检测）==========
+    /**
+     * @brief 从AVFrame设置图像元数据
+     * @param frame AVFrame指针（不能为nullptr）
+     * 
+     * @note 会自动提取frame的width、height、format、linesize等信息
+     * @note 会计算各plane相对于virt_addr_的偏移
+     */
+    void setImageMetadataFromAVFrame(const AVFrame* frame);
     
-    /// 增加引用计数
-    void addRef() { ref_count_.fetch_add(1); }
+    /**
+     * @brief 检查是否有图像元数据
+     * @return true 如果已设置图像元数据，否则返回 false
+     */
+    bool hasImageMetadata() const { return has_image_metadata_; }
     
-    /// 减少引用计数
-    void releaseRef() { 
-        int old_count = ref_count_.fetch_sub(1);
-        if (old_count <= 0) {
-            // 警告：引用计数异常
-            // 不在这里处理，由 BufferPool 检测
-        }
+    /**
+     * @brief 获取图像宽度
+     * @return 图像宽度（像素）
+     */
+    int getImageWidth() const { return width_; }
+    
+    /**
+     * @brief 获取图像高度
+     * @return 图像高度（像素）
+     */
+    int getImageHeight() const { return height_; }
+    
+    /**
+     * @brief 获取像素格式
+     * @return FFmpeg标准的像素格式枚举
+     */
+    AVPixelFormat getImageFormat() const { return format_; }
+    
+    /**
+     * @brief 获取linesize数组
+     * @return 指向包含4个元素的linesize数组的指针（每个plane的stride）
+     */
+    const int* getImageLinesize() const { return linesize_; }
+    
+    /**
+     * @brief 获取指定plane的数据指针
+     * @param plane plane索引（0-3）
+     * @return plane数据的起始地址，如果参数无效则返回 nullptr
+     * 
+     * @note 返回的地址已加上 plane_offset_
+     */
+    uint8_t* getImagePlaneData(int plane) const {
+        if (plane < 0 || plane >= 4 || !virt_addr_) return nullptr;
+        return (uint8_t*)virt_addr_ + plane_offset_[plane];
     }
-    
-    /// 获取当前引用计数
-    int refCount() const { return ref_count_.load(); }
     
     // ========== 校验接口 ==========
     
@@ -120,41 +207,16 @@ public:
         return validation_magic_ == MAGIC_NUMBER && virt_addr_ != nullptr;
     }
     
-    /**
-     * @brief 完整校验：包含用户自定义校验回调
-     * @return true 如果基础校验通过且自定义校验通过（如果有）
-     */
-    bool validate() const;
-    
-    /**
-     * @brief 自定义校验回调类型
-     */
-    using ValidationCallback = std::function<bool(const Buffer*)>;
-    
-    /**
-     * @brief 设置自定义校验回调（高级功能）
-     * @param cb 校验函数，返回 true 表示有效
-     */
-    void setValidationCallback(ValidationCallback cb) {
-        validation_callback_ = cb;
-    }
-    
     // ========== 调试接口 ==========
     
     /**
-     * @brief 打印Buffer详细信息
-     */
-    void printInfo() const;
-    
-    /**
      * @brief 获取状态字符串
+     * @param state Buffer状态
+     * @return 状态的中文描述字符串
+     * 
+     * @note 静态方法，可直接调用
      */
     static const char* stateToString(State state);
-    
-    /**
-     * @brief 获取所有权类型字符串
-     */
-    static const char* ownershipToString(Ownership ownership);
     
 private:
     // ========== 核心属性 ==========
@@ -166,20 +228,18 @@ private:
     
     // ========== 状态管理 ==========
     std::atomic<State> state_;       // 当前状态（线程安全）
-    std::atomic<int> ref_count_;     // 引用计数（外部buffer检测）
     
-    // ========== DMA/共享相关 ==========
-    int dma_fd_;                     // DMA-BUF file descriptor
+    // ========== 图像元数据 ⭐ v2.6新增 ==========
+    bool has_image_metadata_;        // 是否包含图像元数据
+    int width_;                      // 图像宽度（像素）
+    int height_;                     // 图像高度（像素）
+    AVPixelFormat format_;           // 像素格式（FFmpeg标准）
+    int linesize_[4];                // 各plane的stride（字节）
+    size_t plane_offset_[4];         // 各plane相对于virt_addr_的偏移
+    int nb_planes_;                  // plane数量（1-4）
     
     // ========== 安全性 ==========
     static constexpr uint32_t MAGIC_NUMBER = 0xBEEFF123;  // 魔数：BEEF + F123
     uint32_t validation_magic_;      // 魔数，用于检测野指针
-    
-    // ========== 高级校验 ==========
-    ValidationCallback validation_callback_;
-    
-    // ========== 扩展元数据（可根据需求添加）==========
-    // uint64_t timestamp_;          // 填充时间戳
-    // int frame_index_;             // 帧索引
-    // void* user_data_;             // 用户自定义数据
+  
 };

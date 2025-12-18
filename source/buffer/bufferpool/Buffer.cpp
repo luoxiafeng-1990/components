@@ -14,10 +14,14 @@ Buffer::Buffer(uint32_t id,
     , size_(size)
     , ownership_(ownership)
     , state_(State::IDLE)
-    , ref_count_(0)
-    , dma_fd_(-1)
+    , has_image_metadata_(false)
+    , width_(0)
+    , height_(0)
+    , format_(AV_PIX_FMT_NONE)
+    , linesize_{0, 0, 0, 0}
+    , plane_offset_{0, 0, 0, 0}
+    , nb_planes_(0)
     , validation_magic_(MAGIC_NUMBER)
-    , validation_callback_(nullptr)
 {
 }
 
@@ -30,16 +34,20 @@ Buffer::Buffer(Buffer&& other) noexcept
     , size_(other.size_)
     , ownership_(other.ownership_)
     , state_(other.state_.load())           // 从 atomic 读取
-    , ref_count_(other.ref_count_.load())   // 从 atomic 读取
-    , dma_fd_(other.dma_fd_)
+    , has_image_metadata_(other.has_image_metadata_)
+    , width_(other.width_)
+    , height_(other.height_)
+    , format_(other.format_)
+    , linesize_{other.linesize_[0], other.linesize_[1], other.linesize_[2], other.linesize_[3]}
+    , plane_offset_{other.plane_offset_[0], other.plane_offset_[1], other.plane_offset_[2], other.plane_offset_[3]}
+    , nb_planes_(other.nb_planes_)
     , validation_magic_(other.validation_magic_)
-    , validation_callback_(std::move(other.validation_callback_))
 {
     // 清空源对象
     other.virt_addr_ = nullptr;
     other.phys_addr_ = 0;
     other.size_ = 0;
-    other.dma_fd_ = -1;
+    other.has_image_metadata_ = false;
     other.validation_magic_ = 0;
 }
 
@@ -52,56 +60,26 @@ Buffer& Buffer::operator=(Buffer&& other) noexcept {
         size_ = other.size_;
         ownership_ = other.ownership_;
         state_.store(other.state_.load());           // atomic 赋值
-        ref_count_.store(other.ref_count_.load());   // atomic 赋值
-        dma_fd_ = other.dma_fd_;
+        has_image_metadata_ = other.has_image_metadata_;
+        width_ = other.width_;
+        height_ = other.height_;
+        format_ = other.format_;
+        memcpy(linesize_, other.linesize_, sizeof(linesize_));
+        memcpy(plane_offset_, other.plane_offset_, sizeof(plane_offset_));
+        nb_planes_ = other.nb_planes_;
         validation_magic_ = other.validation_magic_;
-        validation_callback_ = std::move(other.validation_callback_);
         
         // 清空源对象
         other.virt_addr_ = nullptr;
         other.phys_addr_ = 0;
         other.size_ = 0;
-        other.dma_fd_ = -1;
+        other.has_image_metadata_ = false;
         other.validation_magic_ = 0;
     }
     return *this;
 }
 
-// ========== 校验接口实现 ==========
-
-bool Buffer::validate() const {
-    // 基础校验
-    if (!isValid()) {
-        return false;
-    }
-    
-    // 用户自定义校验
-    if (validation_callback_) {
-        try {
-            return validation_callback_(this);
-        } catch (...) {
-            // 校验回调抛出异常，视为校验失败
-            return false;
-        }
-    }
-    
-    return true;
-}
-
 // ========== 调试接口实现 ==========
-
-void Buffer::printInfo() const {
-    printf("📦 Buffer #%u:\n", id_);
-    printf("   Virtual Address:  %p\n", virt_addr_);
-    printf("   Physical Address: 0x%016lx\n", phys_addr_);
-    printf("   Size:             %zu bytes (%.2f MB)\n", 
-           size_, size_ / (1024.0 * 1024.0));
-    printf("   Ownership:        %s\n", ownershipToString(ownership_));
-    printf("   State:            %s\n", stateToString(state_.load()));
-    printf("   Ref Count:        %d\n", ref_count_.load());
-    printf("   DMA-BUF FD:       %d\n", dma_fd_);
-    printf("   Valid:            %s\n", isValid() ? "✅ Yes" : "❌ No");
-}
 
 const char* Buffer::stateToString(State state) {
     switch (state) {
@@ -113,11 +91,45 @@ const char* Buffer::stateToString(State state) {
     }
 }
 
-const char* Buffer::ownershipToString(Ownership ownership) {
-    switch (ownership) {
-        case Ownership::OWNED:    return "OWNED (自有内存)";
-        case Ownership::EXTERNAL: return "EXTERNAL (外部托管)";
-        default:                  return "UNKNOWN";
+// ========== 图像元数据接口实现 ⭐ v2.6新增 ==========
+
+void Buffer::setImageMetadataFromAVFrame(const AVFrame* frame) {
+    if (!frame) {
+        has_image_metadata_ = false;
+        return;
     }
+    
+    // 设置基本信息
+    width_ = frame->width;
+    height_ = frame->height;
+    format_ = (AVPixelFormat)frame->format;
+    
+    // 复制linesize
+    memcpy(linesize_, frame->linesize, sizeof(linesize_));
+    
+    // 计算各plane的偏移
+    // 假设virt_addr_指向第一个plane的起始位置
+    plane_offset_[0] = 0;
+    
+    // 计算后续plane的偏移
+    for (int i = 1; i < 4; i++) {
+        if (frame->data[i] && frame->data[i-1]) {
+            // 计算相对偏移
+            ptrdiff_t offset = frame->data[i] - frame->data[0];
+            plane_offset_[i] = (offset >= 0) ? offset : 0;
+        } else {
+            plane_offset_[i] = 0;
+        }
+    }
+    
+    // 确定plane数量
+    nb_planes_ = 0;
+    for (int i = 0; i < 4; i++) {
+        if (frame->data[i] != nullptr) {
+            nb_planes_ = i + 1;
+        }
+    }
+    
+    has_image_metadata_ = true;
 }
 
