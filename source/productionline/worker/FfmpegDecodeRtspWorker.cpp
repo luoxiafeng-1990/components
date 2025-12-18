@@ -98,7 +98,7 @@ bool FfmpegDecodeRtspWorker::open(const char* path) {
 
 bool FfmpegDecodeRtspWorker::open(const char* path, int width, int height, int bits_per_pixel) {
     if (is_open_) {
-        LOG_WARN("[Worker]  Warning: Stream already open, closing previous stream\n");
+        LOG_WARN_FMT("[Worker]  Warning: Stream already open, closing previous stream\n");
         close();
     }
     
@@ -116,7 +116,7 @@ bool FfmpegDecodeRtspWorker::open(const char* path, int width, int height, int b
             output_pixel_format_ = AV_PIX_FMT_BGRA;
             break;
         default:
-            LOG_ERROR("[Worker] ERROR: Unsupported bits_per_pixel: %d\n", bits_per_pixel);
+            LOG_ERROR_FMT("[Worker] ERROR: Unsupported bits_per_pixel: %d\n", bits_per_pixel);
             return false;
     }
     
@@ -573,7 +573,7 @@ bool FfmpegDecodeRtspWorker::copyFromInternalBuffer(void* dest, size_t size) {
 void FfmpegDecodeRtspWorker::setError(const std::string& error) {
     std::lock_guard<std::mutex> lock(error_mutex_);
     last_error_ = error;
-    LOG_ERROR("[Worker] RtspVideoReader Error: %s\n", error.c_str());
+    LOG_ERROR_FMT("[Worker] RtspVideoReader Error: %s\n", error.c_str());
 }
 
 uint64_t FfmpegDecodeRtspWorker::getAVFramePhysicalAddress(AVFrame* frame) {

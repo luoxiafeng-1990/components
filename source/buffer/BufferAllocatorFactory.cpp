@@ -26,7 +26,7 @@ std::unique_ptr<BufferAllocatorBase> BufferAllocatorFactory::create(
     // 根据类型选择最优配置（工厂策略）
     switch (type) {
         case AllocatorType::NORMAL:
-            LOG_DEBUG("[BufferAllocatorFactory] 创建NormalAllocator (MALLOC, 64-byte aligned)");
+            LOG_DEBUG_FMT("[BufferAllocatorFactory] 创建NormalAllocator (MALLOC, 64-byte aligned)");
             return std::make_unique<NormalAllocator>(
                 BufferMemoryAllocatorType::NORMAL_MALLOC,
                 64
@@ -41,7 +41,7 @@ std::unique_ptr<BufferAllocatorBase> BufferAllocatorFactory::create(
             return std::make_unique<FramebufferAllocator>();
             
         default:
-            LOG_WARN("[BufferAllocatorFactory] Unknown type, using NormalAllocator");
+            LOG_WARN_FMT("[BufferAllocatorFactory] Unknown type, using NormalAllocator");
             return std::make_unique<NormalAllocator>(
                 BufferMemoryAllocatorType::NORMAL_MALLOC,
                 64
@@ -71,7 +71,7 @@ std::unique_ptr<BufferAllocatorBase> BufferAllocatorFactory::createByName(
     size_t alignment
 ) {
     if (!name) {
-        LOG_WARN("[BufferAllocatorFactory] Null name, using NormalAllocator");
+        LOG_WARN_FMT("[BufferAllocatorFactory] Null name, using NormalAllocator");
         return createByType(AllocatorType::NORMAL, mem_type, alignment);
     }
     

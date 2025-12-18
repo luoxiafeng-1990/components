@@ -18,7 +18,7 @@ NormalAllocator::NormalAllocator(BufferMemoryAllocatorType type, size_t alignmen
     : type_(type)
     , alignment_(alignment)
 {
-    LOG_DEBUG("[NormalAllocator] 创建完成 (alignment=%zu)\n", alignment_);
+    LOG_DEBUG_FMT("[NormalAllocator] 创建完成 (alignment=%zu)\n", alignment_);
 }
 
 NormalAllocator::~NormalAllocator() {
@@ -41,14 +41,14 @@ Buffer* NormalAllocator::createBuffer(uint32_t id, size_t size) {
     if (alignment_ > 0) {
         // 使用对齐分配
         if (posix_memalign(&virt_addr, alignment_, size) != 0) {
-            LOG_ERROR("[NormalAllocator] posix_memalign failed for buffer #%u (size=%zu)\n", id, size);
+            LOG_ERROR_FMT("[NormalAllocator] posix_memalign failed for buffer #%u (size=%zu)\n", id, size);
             return nullptr;
         }
     } else {
         // 普通分配
         virt_addr = malloc(size);
         if (!virt_addr) {
-            LOG_ERROR("[NormalAllocator] malloc failed for buffer #%u (size=%zu)\n", id, size);
+            LOG_ERROR_FMT("[NormalAllocator] malloc failed for buffer #%u (size=%zu)\n", id, size);
             return nullptr;
         }
     }
@@ -67,7 +67,7 @@ Buffer* NormalAllocator::createBuffer(uint32_t id, size_t size) {
     );
     
     if (!buffer) {
-        LOG_ERROR("[NormalAllocator] Failed to create Buffer object #%u\n", id);
+        LOG_ERROR_FMT("[NormalAllocator] Failed to create Buffer object #%u\n", id);
         free(virt_addr);
         return nullptr;
     }
@@ -117,13 +117,13 @@ uint64_t NormalAllocator::allocatePoolWithBuffers(
     for (int i = 0; i < count; i++) {
         Buffer* buffer = createBuffer(i, size);
         if (!buffer) {
-            LOG_ERROR("[NormalAllocator] Failed to create buffer #%d\n", i);
+            LOG_ERROR_FMT("[NormalAllocator] Failed to create buffer #%d\n", i);
             cleanupPoolTemp(pool.get());
             return 0;
         }
         
         if (!BufferAllocatorBase::addBufferToPoolQueue(pool.get(), buffer, QueueType::FREE)) {
-            LOG_ERROR("[NormalAllocator] Failed to add buffer #%d to pool\n", i);
+            LOG_ERROR_FMT("[NormalAllocator] Failed to add buffer #%d to pool\n", i);
             deallocateBuffer(buffer);
             cleanupPoolTemp(pool.get());
             return 0;
@@ -134,7 +134,7 @@ uint64_t NormalAllocator::allocatePoolWithBuffers(
             buffer_ownership_[buffer] = this;
         }
         
-        LOG_DEBUG("[NormalAllocator]   Buffer #%d created: virt=%p, phys=0x%lx, size=%zu\n",
+        LOG_DEBUG_FMT("[NormalAllocator]   Buffer #%d created: virt=%p, phys=0x%lx, size=%zu\n",
                i, buffer->getVirtualAddress(), buffer->getPhysicalAddress(), size);
     }
     
@@ -142,7 +142,7 @@ uint64_t NormalAllocator::allocatePoolWithBuffers(
     uint64_t pool_id = BufferPoolRegistry::getInstance().registerPool(pool, getAllocatorId());
     pool->setRegistryId(pool_id);
     
-    LOG_DEBUG("[NormalAllocator] [NormalAllocator] BufferPool '%s' created (ID: %lu, Allocator ID: %lu, ref_count=1, buffers=%d)\n", 
+    LOG_DEBUG_FMT("[NormalAllocator] [NormalAllocator] BufferPool '%s' created (ID: %lu, Allocator ID: %lu, ref_count=1, buffers=%d)\n", 
            name.c_str(), pool_id, getAllocatorId(), count);
     
     // v2.0 步骤 4: 返回 pool_id（Registry 独占持有 Pool）
@@ -158,7 +158,7 @@ Buffer* NormalAllocator::injectBufferToPool(
     auto pool_weak = BufferPoolRegistry::getInstance().getPool(pool_id);
     auto pool = pool_weak.lock();
     if (!pool) {
-        LOG_ERROR("[NormalAllocator] [NormalAllocator] injectBufferToPool: pool_id %lu not found or already destroyed\n", pool_id);
+        LOG_ERROR_FMT("[NormalAllocator] [NormalAllocator] injectBufferToPool: pool_id %lu not found or already destroyed\n", pool_id);
         return nullptr;
     }
     
@@ -168,13 +168,13 @@ Buffer* NormalAllocator::injectBufferToPool(
     // 2. 创建 Buffer（内部分配内存）
     Buffer* buffer = createBuffer(id, size);
     if (!buffer) {
-        LOG_ERROR("[NormalAllocator] Failed to create buffer #%u\n", id);
+        LOG_ERROR_FMT("[NormalAllocator] Failed to create buffer #%u\n", id);
         return nullptr;
     }
     
     // 3. 通过基类静态方法添加到 pool 的指定队列（会自动添加到 managed_buffers_）
     if (!BufferAllocatorBase::addBufferToPoolQueue(pool.get(), buffer, queue)) {
-        LOG_ERROR("[NormalAllocator] Failed to add buffer #%u to pool '%s'\n", 
+        LOG_ERROR_FMT("[NormalAllocator] Failed to add buffer #%u to pool '%s'\n", 
                id, pool->getName().c_str());
         deallocateBuffer(buffer);
         return nullptr;
@@ -186,7 +186,7 @@ Buffer* NormalAllocator::injectBufferToPool(
         buffer_ownership_[buffer] = this;
     }
     
-    LOG_DEBUG("[NormalAllocator] Buffer #%u injected to pool '%s' (queue: %s)\n",
+    LOG_DEBUG_FMT("[NormalAllocator] Buffer #%u injected to pool '%s' (queue: %s)\n",
            id, pool->getName().c_str(), 
            queue == QueueType::FREE ? "FREE" : "FILLED");
     
@@ -209,7 +209,7 @@ Buffer* NormalAllocator::injectExternalBufferToPool(
     auto pool_weak = BufferPoolRegistry::getInstance().getPool(pool_id);
     auto pool = pool_weak.lock();
     if (!pool) {
-        LOG_ERROR("[NormalAllocator] [NormalAllocator] injectExternalBufferToPool: pool_id %lu not found or already destroyed\n", pool_id);
+        LOG_ERROR_FMT("[NormalAllocator] [NormalAllocator] injectExternalBufferToPool: pool_id %lu not found or already destroyed\n", pool_id);
         return nullptr;
     }
     
@@ -226,13 +226,13 @@ Buffer* NormalAllocator::injectExternalBufferToPool(
     );
     
     if (!buffer) {
-        LOG_ERROR("[NormalAllocator] Failed to create Buffer object #%u for external memory\n", id);
+        LOG_ERROR_FMT("[NormalAllocator] Failed to create Buffer object #%u for external memory\n", id);
         return nullptr;
     }
     
     // 3. 通过基类静态方法添加到 pool 的指定队列（会自动添加到 managed_buffers_）
     if (!BufferAllocatorBase::addBufferToPoolQueue(pool.get(), buffer, queue)) {
-        LOG_ERROR("[NormalAllocator] Failed to add external buffer #%u to pool '%s'\n", 
+        LOG_ERROR_FMT("[NormalAllocator] Failed to add external buffer #%u to pool '%s'\n", 
                id, pool->getName().c_str());
         delete buffer;  // 只删除 Buffer 对象，不释放外部内存
         return nullptr;
@@ -244,7 +244,7 @@ Buffer* NormalAllocator::injectExternalBufferToPool(
         buffer_ownership_[buffer] = this;
     }
     
-    LOG_DEBUG("[NormalAllocator] External buffer #%u injected to pool '%s' (virt=%p, phys=0x%lx, size=%zu, queue: %s)\n",
+    LOG_DEBUG_FMT("[NormalAllocator] External buffer #%u injected to pool '%s' (virt=%p, phys=0x%lx, size=%zu, queue: %s)\n",
            id, pool->getName().c_str(), virt_addr, phys_addr, size,
            queue == QueueType::FREE ? "FREE" : "FILLED");
     
@@ -261,7 +261,7 @@ bool NormalAllocator::removeBufferFromPool(uint64_t pool_id, Buffer* buffer) {
     auto pool_weak = BufferPoolRegistry::getInstance().getPool(pool_id);
     auto pool = pool_weak.lock();
     if (!pool) {
-        LOG_ERROR("[NormalAllocator] [NormalAllocator] removeBufferFromPool: pool_id %lu not found or already destroyed\n", pool_id);
+        LOG_ERROR_FMT("[NormalAllocator] [NormalAllocator] removeBufferFromPool: pool_id %lu not found or already destroyed\n", pool_id);
         return false;
     }
     
@@ -281,7 +281,7 @@ bool NormalAllocator::removeBufferFromPool(uint64_t pool_id, Buffer* buffer) {
         buffer_ownership_.erase(buffer);
     }
     
-    LOG_DEBUG("[NormalAllocator] Buffer #%u removed from pool '%s'\n",
+    LOG_DEBUG_FMT("[NormalAllocator] Buffer #%u removed from pool '%s'\n",
            buffer->id(), pool->getName().c_str());
     
     return true;
@@ -328,14 +328,14 @@ bool NormalAllocator::destroyPool() {
             buffer_ownership_.erase(buf);
         }
         
-        LOG_DEBUG("[NormalAllocator] [NormalAllocator] Pool '%s' destroyed: removed %zu buffers\n", 
+        LOG_DEBUG_FMT("[NormalAllocator] [NormalAllocator] Pool '%s' destroyed: removed %zu buffers\n", 
                pool->getName().c_str(), to_remove.size());
         
         // 2.4 从 Registry 注销（触发 Pool 析构）
         unregisterPool(pool_id);
     }
     
-    LOG_DEBUG("[NormalAllocator] [NormalAllocator] All %zu pool(s) destroyed\n", pool_ids.size());
+    LOG_DEBUG_FMT("[NormalAllocator] [NormalAllocator] All %zu pool(s) destroyed\n", pool_ids.size());
     return true;
 }
 
@@ -364,6 +364,6 @@ void NormalAllocator::cleanupPoolTemp(BufferPool* pool) {
         buffer_ownership_.erase(buf);
     }
     
-    LOG_DEBUG("[NormalAllocator] Cleanup complete: removed %zu buffers\n", to_remove.size());
+    LOG_DEBUG_FMT("[NormalAllocator] Cleanup complete: removed %zu buffers\n", to_remove.size());
 }
 

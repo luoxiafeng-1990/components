@@ -750,11 +750,11 @@ static int test_h264_taco_video(const char* video_path) {
     }
     
     // 2. 创建 VideoProductionLine（Worker会在open()时自动调用Allocator创建BufferPool）
-    LOG_INFO("Creating VideoProductionLine...");
+    LOG_INFO("[Test] 创建VideoProductionLine...");
     VideoProductionLine producer(false, 1,false);  // loop=true, thread_count=1
     
     // 4. 配置 FFmpeg 解码
-    LOG_INFO_FMT("Configuring FFmpeg video reader: %s", video_path);
+    LOG_INFO_FMT("[Test] 配置FFmpeg: %s", video_path);
     
     auto workerConfig = WorkerConfigBuilder()
         .setFileConfig(

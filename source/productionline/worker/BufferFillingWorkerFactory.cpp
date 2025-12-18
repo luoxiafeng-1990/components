@@ -15,21 +15,21 @@ std::unique_ptr<WorkerBase> BufferFillingWorkerFactory::create(const WorkerConfi
     auto type = config.worker_type;
     // 1️⃣ 用户显式指定（最高优先级）
     if (type != WorkerType::AUTO) {
-        LOG_DEBUG("[WorkerFactory] BufferFillingWorkerFactory: User specified type: %s\n", typeToString(type));
+        LOG_DEBUG_FMT("[WorkerFactory] BufferFillingWorkerFactory: User specified type: %s\n", typeToString(type));
         return createByType(type, config);
     }
     
     // 2️⃣ 环境变量配置
     WorkerType env_type = getTypeFromEnvironment();
     if (env_type != WorkerType::AUTO) {
-        LOG_DEBUG("[WorkerFactory] BufferFillingWorkerFactory: Type from environment: %s\n", typeToString(env_type));
+        LOG_DEBUG_FMT("[WorkerFactory] BufferFillingWorkerFactory: Type from environment: %s\n", typeToString(env_type));
         return createByType(env_type, config);
     }
     
     // 3️⃣ 配置文件
     WorkerType config_type = getTypeFromConfig();
     if (config_type != WorkerType::AUTO) {
-        LOG_DEBUG("[WorkerFactory] BufferFillingWorkerFactory: Type from config: %s\n", typeToString(config_type));
+        LOG_DEBUG_FMT("[WorkerFactory] BufferFillingWorkerFactory: Type from config: %s\n", typeToString(config_type));
         return createByType(config_type, config);
     }
     
@@ -51,7 +51,7 @@ std::unique_ptr<WorkerBase> BufferFillingWorkerFactory::create(const WorkerConfi
         return create(WorkerType::AUTO);
     }
     
-    LOG_WARN("[Worker]  Unknown worker type: %s, using mmap\n", name);
+    LOG_WARN_FMT("[Worker]  Unknown worker type: %s, using mmap\n", name);
     return std::make_unique<MmapRawVideoFileWorker>();
 } */
 
@@ -113,7 +113,7 @@ std::unique_ptr<WorkerBase> BufferFillingWorkerFactory::autoDetect(const WorkerC
     }
     
     // 默认降级
-    LOG_WARN("[Worker]  Warning: No optimal worker available, using MmapRawVideoFileWorker\n");
+    LOG_WARN_FMT("[Worker]  Warning: No optimal worker available, using MmapRawVideoFileWorker\n");
     return std::make_unique<MmapRawVideoFileWorker>();
 }
 
@@ -124,7 +124,7 @@ std::unique_ptr<WorkerBase> BufferFillingWorkerFactory::createByType(WorkerType 
             
         case WorkerType::IOURING_RAW:
             if (!isIoUringAvailable()) {
-                LOG_WARN("[Worker]  Warning: io_uring not available, falling back to mmap\n");
+                LOG_WARN_FMT("[Worker]  Warning: io_uring not available, falling back to mmap\n");
                 return std::make_unique<MmapRawVideoFileWorker>(config);  // ✅ 传递 config
             }
             return std::make_unique<IoUringRawVideoFileWorker>(config);  // ✅ 传递 config

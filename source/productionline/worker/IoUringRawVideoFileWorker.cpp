@@ -52,19 +52,19 @@ IoUringRawVideoFileWorker::~IoUringRawVideoFileWorker() {
 // ============ IVideoReader 接口实现 ============
 
 bool IoUringRawVideoFileWorker::open(const char* path) {
-    LOG_ERROR("[Worker] ERROR: IoUringVideoReader does not support auto-detect format\n");
+    LOG_ERROR_FMT("[Worker] ERROR: IoUringVideoReader does not support auto-detect format\n");
     printf("   Please use open(path, width, height, bits_per_pixel) for raw video files\n");
     return false;
 }
 
 bool IoUringRawVideoFileWorker::open(const char* path, int width, int height, int bits_per_pixel) {
     if (is_open_) {
-        LOG_WARN("[Worker]  Warning: File already opened, closing previous file\n");
+        LOG_WARN_FMT("[Worker]  Warning: File already opened, closing previous file\n");
         close();
     }
     
     if (width <= 0 || height <= 0 || bits_per_pixel <= 0) {
-        LOG_ERROR("[Worker] ERROR: Invalid parameters\n");
+        LOG_ERROR_FMT("[Worker] ERROR: Invalid parameters\n");
         return false;
     }
     
@@ -84,14 +84,14 @@ bool IoUringRawVideoFileWorker::open(const char* path, int width, int height, in
     // 打开文件
     video_fd_ = ::open(path, O_RDONLY);
     if (video_fd_ < 0) {
-        LOG_ERROR("[Worker] ERROR: Cannot open file: %s\n", strerror(errno));
+        LOG_ERROR_FMT("[Worker] ERROR: Cannot open file: %s\n", strerror(errno));
         return false;
     }
     
     // 获取文件大小
     struct stat st;
     if (fstat(video_fd_, &st) < 0) {
-        LOG_ERROR("[Worker] ERROR: Cannot get file size: %s\n", strerror(errno));
+        LOG_ERROR_FMT("[Worker] ERROR: Cannot get file size: %s\n", strerror(errno));
         ::close(video_fd_);
         video_fd_ = -1;
         return false;
@@ -101,7 +101,7 @@ bool IoUringRawVideoFileWorker::open(const char* path, int width, int height, in
     total_frames_ = file_size_ / frame_size_;
     
     if (total_frames_ == 0) {
-        LOG_ERROR("[Worker] ERROR: File too small\n");
+        LOG_ERROR_FMT("[Worker] ERROR: File too small\n");
         ::close(video_fd_);
         video_fd_ = -1;
         return false;
@@ -110,7 +110,7 @@ bool IoUringRawVideoFileWorker::open(const char* path, int width, int height, in
     // 初始化 io_uring
     int ret = io_uring_queue_init(queue_depth_, &ring_, 0);
     if (ret < 0) {
-        LOG_ERROR("[Worker] ERROR: io_uring_queue_init failed: %s\n", strerror(-ret));
+        LOG_ERROR_FMT("[Worker] ERROR: io_uring_queue_init failed: %s\n", strerror(-ret));
         ::close(video_fd_);
         video_fd_ = -1;
         return false;
@@ -120,7 +120,7 @@ bool IoUringRawVideoFileWorker::open(const char* path, int width, int height, in
     is_open_ = true;
     current_frame_index_ = 0;
     
-    LOG_DEBUG("[Worker] Raw video file opened successfully\n");
+    LOG_DEBUG_FMT("[Worker] Raw video file opened successfully\n");
     printf("   File size: %ld bytes\n", file_size_);
     printf("   Total frames: %d\n", total_frames_);
     
@@ -145,7 +145,7 @@ void IoUringRawVideoFileWorker::close() {
     is_open_ = false;
     current_frame_index_ = 0;
     
-    LOG_DEBUG("[Worker] Video file closed: %s\n", video_path_.c_str());
+    LOG_DEBUG_FMT("[Worker] Video file closed: %s\n", video_path_.c_str());
 }
 
 bool IoUringRawVideoFileWorker::isOpen() const {
@@ -229,23 +229,23 @@ bool IoUringRawVideoFileWorker::isAtEnd() const {
 
 bool IoUringRawVideoFileWorker::fillBuffer(int frame_index, Buffer* buffer) {
     if (!buffer || !buffer->data()) {
-        LOG_ERROR("[Worker] ERROR: Invalid buffer\n");
+        LOG_ERROR_FMT("[Worker] ERROR: Invalid buffer\n");
         return false;
     }
     
     if (!is_open_) {
-        LOG_ERROR("[Worker] ERROR: Worker is not open\n");
+        LOG_ERROR_FMT("[Worker] ERROR: Worker is not open\n");
         return false;
     }
     
     if (frame_index < 0 || frame_index >= total_frames_) {
-        LOG_ERROR("[Worker] ERROR: Invalid frame index %d (valid: 0-%d)\n",
+        LOG_ERROR_FMT("[Worker] ERROR: Invalid frame index %d (valid: 0-%d)\n",
                frame_index, total_frames_ - 1);
         return false;
     }
     
     if (buffer->size() < frame_size_) {
-        LOG_ERROR("[Worker] ERROR: Buffer too small (need %zu, got %zu)\n", 
+        LOG_ERROR_FMT("[Worker] ERROR: Buffer too small (need %zu, got %zu)\n", 
                frame_size_, buffer->size());
         return false;
     }
@@ -266,12 +266,12 @@ void IoUringRawVideoFileWorker::asyncProducerThread(int thread_id,
                                             const std::vector<int>& frame_indices,
                                             std::atomic<bool>& running,
                                             bool loop) {
-    LOG_WARN("[Worker]  Warning: asyncProducerThread not yet re-implemented\n");
+    LOG_WARN_FMT("[Worker]  Warning: asyncProducerThread not yet re-implemented\n");
 }
 
 int IoUringRawVideoFileWorker::submitBatchReads(BufferPool* pool, 
                                        const std::vector<int>& frame_indices) {
-    LOG_WARN("[Worker]  Warning: submitBatchReads not yet re-implemented\n");
+    LOG_WARN_FMT("[Worker]  Warning: submitBatchReads not yet re-implemented\n");
     return 0;
 }
 
@@ -279,7 +279,7 @@ int IoUringRawVideoFileWorker::submitBatchReads(BufferPool* pool,
 
 bool IoUringRawVideoFileWorker::submitReadRequest(int frame_index, void* buffer, size_t buffer_size) {
     if (!initialized_ || video_fd_ < 0) {
-        LOG_ERROR("[Worker] ERROR: IoUring not initialized or file not open\n");
+        LOG_ERROR_FMT("[Worker] ERROR: IoUring not initialized or file not open\n");
         return false;
     }
     
@@ -289,7 +289,7 @@ bool IoUringRawVideoFileWorker::submitReadRequest(int frame_index, void* buffer,
     // 获取 SQE（Submission Queue Entry）
     struct io_uring_sqe* sqe = io_uring_get_sqe(&ring_);
     if (!sqe) {
-        LOG_ERROR("[Worker] ERROR: Failed to get SQE from io_uring\n");
+        LOG_ERROR_FMT("[Worker] ERROR: Failed to get SQE from io_uring\n");
         return false;
     }
     
@@ -300,7 +300,7 @@ bool IoUringRawVideoFileWorker::submitReadRequest(int frame_index, void* buffer,
     // 提交请求
     int ret = io_uring_submit(&ring_);
     if (ret < 0) {
-        LOG_ERROR("[Worker] ERROR: io_uring_submit failed: %s\n", strerror(-ret));
+        LOG_ERROR_FMT("[Worker] ERROR: io_uring_submit failed: %s\n", strerror(-ret));
         return false;
     }
     
@@ -309,7 +309,7 @@ bool IoUringRawVideoFileWorker::submitReadRequest(int frame_index, void* buffer,
 
 bool IoUringRawVideoFileWorker::waitForCompletion() {
     if (!initialized_) {
-        LOG_ERROR("[Worker] ERROR: IoUring not initialized\n");
+        LOG_ERROR_FMT("[Worker] ERROR: IoUring not initialized\n");
         return false;
     }
     
@@ -317,19 +317,19 @@ bool IoUringRawVideoFileWorker::waitForCompletion() {
     struct io_uring_cqe* cqe;
     int ret = io_uring_wait_cqe(&ring_, &cqe);
     if (ret < 0) {
-        LOG_ERROR("[Worker] ERROR: io_uring_wait_cqe failed: %s\n", strerror(-ret));
+        LOG_ERROR_FMT("[Worker] ERROR: io_uring_wait_cqe failed: %s\n", strerror(-ret));
         return false;
     }
     
     // 检查读取结果
     if (cqe->res < 0) {
-        LOG_ERROR("[Worker] ERROR: Read failed: %s\n", strerror(-cqe->res));
+        LOG_ERROR_FMT("[Worker] ERROR: Read failed: %s\n", strerror(-cqe->res));
         io_uring_cqe_seen(&ring_, cqe);
         return false;
     }
     
     if ((size_t)cqe->res != frame_size_) {
-        LOG_ERROR("[Worker] ERROR: Incomplete read: got %d bytes, expected %zu\n", 
+        LOG_ERROR_FMT("[Worker] ERROR: Incomplete read: got %d bytes, expected %zu\n", 
                cqe->res, frame_size_);
         io_uring_cqe_seen(&ring_, cqe);
         return false;

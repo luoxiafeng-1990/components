@@ -63,10 +63,10 @@ bool BufferFillingWorkerFacade::open() {
     if (is_raw_worker) {
         // Raw视频Worker：需要格式参数
         if (width == 0 || height == 0 || bits_per_pixel == 0) {
-            LOG_ERROR("[Worker] ERROR: Raw video worker requires width, height, and bits_per_pixel in config!\n");
+            LOG_ERROR_FMT("[Worker] ERROR: Raw video worker requires width, height, and bits_per_pixel in config!\n");
             return false;
         }
-        LOG_DEBUG("[Worker] BufferFillingWorkerFacade: Opening raw video with format %dx%d@%dbpp\n",
+        LOG_DEBUG_FMT("[Worker] BufferFillingWorkerFacade: Opening raw video with format %dx%d@%dbpp\n",
                width, height, bits_per_pixel);
         return worker_base_uptr_->open(path, width, height, bits_per_pixel);
     } else {

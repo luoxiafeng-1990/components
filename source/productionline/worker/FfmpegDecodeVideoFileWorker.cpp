@@ -148,7 +148,7 @@ bool FfmpegDecodeVideoFileWorker::open(const char* path) {
     decoded_frames_ = 0;
     decode_errors_ = 0;
     
-    LOG_DEBUG("[Worker] FfmpegDecodeVideoFileWorker: Opened '%s'\n", path);
+    LOG_DEBUG_FMT("[Worker] FfmpegDecodeVideoFileWorker: Opened '%s'\n", path);
     printf("   Resolution: %dx%d → %dx%d\n", width_, height_, output_width_, output_height_);
     printf("   Codec: %s\n", codec_ctx_ptr_->codec->name);
     printf("   Total frames (estimated): %d\n", total_frames_);
@@ -344,9 +344,9 @@ bool FfmpegDecodeVideoFileWorker::initializeDecoder() {
         // 用户指定了解码器名称（如 "h264_taco"）
         codec = avcodec_find_decoder_by_name(decoder_name_.c_str());
         if (!codec) {
-            LOG_WARN("[Worker]  Warning: Specified decoder '%s' not found, trying default\n", decoder_name_.c_str());
+            LOG_WARN_FMT("[Worker]  Warning: Specified decoder '%s' not found, trying default\n", decoder_name_.c_str());
         } else {
-            LOG_DEBUG("[Worker] Using specified decoder: %s\n", decoder_name_.c_str());
+            LOG_DEBUG_FMT("[Worker] Using specified decoder: %s\n", decoder_name_.c_str());
         }
     }
     
@@ -379,7 +379,7 @@ bool FfmpegDecodeVideoFileWorker::initializeDecoder() {
     if (decoder_name_ == "h264_taco") {
         if (!configureSpecialDecoder()) {
             // 🔧 修复：配置失败是致命错误，必须返回
-            LOG_ERROR("[Worker] ERROR: Failed to configure special decoder options\n");
+            LOG_ERROR_FMT("[Worker] ERROR: Failed to configure special decoder options\n");
             avcodec_free_context(&codec_ctx_ptr_);
             codec_ctx_ptr_ = nullptr;  // 🔧 置空防止 double free
             return false;
@@ -401,14 +401,14 @@ bool FfmpegDecodeVideoFileWorker::initializeDecoder() {
 bool FfmpegDecodeVideoFileWorker::configureSpecialDecoder() {
     // 配置 h264_taco 解码器（从 worker_config_ 读取配置）
     if (!codec_ctx_ptr_->priv_data) {
-        LOG_WARN("[Worker]  Warning: codec_ctx->priv_data is NULL, cannot set options\n");
+        LOG_WARN_FMT("[Worker]  Warning: codec_ctx->priv_data is NULL, cannot set options\n");
         return false;
     }
     
     // 🎯 从 worker_config_ 获取 taco 配置
     const auto& taco = worker_config_.decoder.taco;
     
-    LOG_DEBUG("[Worker] Configuring h264_taco decoder options from config...\n");
+    LOG_DEBUG_FMT("[Worker] Configuring h264_taco decoder options from config...\n");
     
     int ret;
     
@@ -588,12 +588,12 @@ bool FfmpegDecodeVideoFileWorker::isAtEnd() const {
 
 bool FfmpegDecodeVideoFileWorker::fillBuffer(int frame_index, Buffer* buffer) {
     if (!buffer) {
-        LOG_ERROR("[Worker] ERROR: buffer is nullptr\n");
+        LOG_ERROR_FMT("[Worker] ERROR: buffer is nullptr\n");
         return false;
     }
     
     if (!is_open_.load(std::memory_order_acquire)) {
-        LOG_ERROR("[Worker] ERROR: Worker is not open\n");
+        LOG_ERROR_FMT("[Worker] ERROR: Worker is not open\n");
         return false;
     }
     
@@ -602,7 +602,7 @@ bool FfmpegDecodeVideoFileWorker::fillBuffer(int frame_index, Buffer* buffer) {
     // 步骤1: 从 Buffer 获取预分配的 AVFrame*
     AVFrame* frame_ptr = (AVFrame*)buffer->getVirtualAddress();
     if (!frame_ptr) {
-        LOG_ERROR("[Worker] ERROR: buffer->getVirtualAddress() is nullptr\n");
+        LOG_ERROR_FMT("[Worker] ERROR: buffer->getVirtualAddress() is nullptr\n");
         return false;
     }
     
@@ -629,14 +629,14 @@ bool FfmpegDecodeVideoFileWorker::fillBuffer(int frame_index, Buffer* buffer) {
                 // 🔧 修复：遇到损坏帧时，在内部循环跳过，继续读取下一个 packet
                 corrupted_retries++;
                 if (corrupted_retries <= MAX_CORRUPTED_RETRIES) {
-                    LOG_WARN("[Worker]  WARNING: Corrupted packet detected (attempt %d/%d), skipping...\n", 
+                    LOG_WARN_FMT("[Worker]  WARNING: Corrupted packet detected (attempt %d/%d), skipping...\n", 
                            corrupted_retries, MAX_CORRUPTED_RETRIES);
                     av_packet_unref(packet_ptr_);
                     // 继续循环，尝试读取下一个 packet
                     continue;
                 } else {
                     // 连续多次都是损坏帧，可能文件确实损坏严重，返回失败
-                    LOG_ERROR("[Worker] ERROR: Too many corrupted packets (%d), giving up\n", corrupted_retries);
+                    LOG_ERROR_FMT("[Worker] ERROR: Too many corrupted packets (%d), giving up\n", corrupted_retries);
                     av_packet_unref(packet_ptr_);
                     return false;
                 }
@@ -644,7 +644,7 @@ bool FfmpegDecodeVideoFileWorker::fillBuffer(int frame_index, Buffer* buffer) {
                 // 其他错误（非 EOF，非损坏帧）：记录错误并返回
                 char err_buf[AV_ERROR_MAX_STRING_SIZE];
                 av_strerror(read_ret, err_buf, sizeof(err_buf));
-                LOG_ERROR("[Worker] ERROR: av_read_frame failed: %d (%s)\n", read_ret, err_buf);
+                LOG_ERROR_FMT("[Worker] ERROR: av_read_frame failed: %d (%s)\n", read_ret, err_buf);
                 av_packet_unref(packet_ptr_);
                 return false;
             }
@@ -669,7 +669,7 @@ bool FfmpegDecodeVideoFileWorker::fillBuffer(int frame_index, Buffer* buffer) {
     av_packet_unref(packet_ptr_);
     
     if (ret < 0) {
-        LOG_ERROR("[Worker] ERROR: avcodec_send_packet failed: %d\n", ret);
+        LOG_ERROR_FMT("[Worker] ERROR: avcodec_send_packet failed: %d\n", ret);
         return false;
     }
     bool recv_frm = false;
@@ -695,7 +695,7 @@ bool FfmpegDecodeVideoFileWorker::fillBuffer(int frame_index, Buffer* buffer) {
         }
         
         if (phys_addr == 0) {
-            LOG_WARN("[Worker]  Warning: Failed to extract physical address\n");
+            LOG_WARN_FMT("[Worker]  Warning: Failed to extract physical address\n");
             return false;
         }
         
@@ -729,9 +729,9 @@ void FfmpegDecodeVideoFileWorker::setError(const std::string& error, int ffmpeg_
     if (ffmpeg_error != 0) {
         char err_buf[AV_ERROR_MAX_STRING_SIZE];
         av_strerror(ffmpeg_error, err_buf, sizeof(err_buf));
-        LOG_ERROR("[Worker] FfmpegDecodeVideoFileWorker Error: %s (FFmpeg: %s)\n", error.c_str(), err_buf);
+        LOG_ERROR_FMT("[Worker] FfmpegDecodeVideoFileWorker Error: %s (FFmpeg: %s)\n", error.c_str(), err_buf);
     } else {
-        LOG_ERROR("[Worker] FfmpegDecodeVideoFileWorker Error: %s\n", error.c_str());
+        LOG_ERROR_FMT("[Worker] FfmpegDecodeVideoFileWorker Error: %s\n", error.c_str());
     }
 }
 
