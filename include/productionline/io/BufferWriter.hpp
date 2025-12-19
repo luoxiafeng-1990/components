@@ -206,6 +206,50 @@ private:
      * @return true 成功，false 失败
      */
     bool writePlane(const uint8_t* data, int stride, int width, int height);
+    
+    /**
+     * @brief 写入Semi-Planar YUV (NV12/NV21/P010LE通用)
+     * 
+     * @param buffer Buffer指针
+     * @param bytes_per_component 每个分量的字节数（1=8bit, 2=10/16bit）
+     * @return true 成功，false 失败
+     * 
+     * @note Semi-Planar布局：Plane0(Y) + Plane1(UV交错)
+     */
+    bool writeSemiPlanarYUV(const Buffer* buffer, int bytes_per_component);
+    
+    /**
+     * @brief 写入Planar YUV420 (YUV420P10LE通用)
+     * 
+     * @param buffer Buffer指针
+     * @param bytes_per_component 每个分量的字节数（1=8bit, 2=10/16bit）
+     * @return true 成功，false 失败
+     * 
+     * @note Planar布局：Plane0(Y) + Plane1(U) + Plane2(V)
+     */
+    bool writePlanarYUV420(const Buffer* buffer, int bytes_per_component);
+    
+    /**
+     * @brief 写入Packed RGB (所有RGB格式通用)
+     * 
+     * @param buffer Buffer指针
+     * @param bytes_per_pixel 每像素字节数（3/4/6）
+     * @return true 成功，false 失败
+     * 
+     * @note 单plane，packed存储
+     */
+    bool writePackedRGB(const Buffer* buffer, int bytes_per_pixel);
+    
+    /**
+     * @brief 写入灰度图 (GRAY8/GRAY10LE通用)
+     * 
+     * @param buffer Buffer指针
+     * @param bytes_per_pixel 每像素字节数（1=8bit, 2=10/16bit）
+     * @return true 成功，false 失败
+     * 
+     * @note 单plane，只有Y分量
+     */
+    bool writeGrayscale(const Buffer* buffer, int bytes_per_pixel);
 };
 
 } // namespace io
