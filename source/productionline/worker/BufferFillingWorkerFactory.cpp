@@ -4,7 +4,6 @@
 #include "productionline/worker/IoUringRawVideoFileWorker.hpp"
 #include "productionline/worker/FfmpegDecodeRtspWorker.hpp"
 #include "productionline/worker/FfmpegDecodeVideoFileWorker.hpp"
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <liburing.h>
@@ -91,15 +90,15 @@ const char* BufferFillingWorkerFactory::typeToString(WorkerType type) {
 // ============ 私有辅助方法 ============
 
 std::unique_ptr<WorkerBase> BufferFillingWorkerFactory::autoDetect(const WorkerConfig& config) {
-    printf("🔍 Detecting system capabilities:\n");
+    LOG_INFO("🔍 Detecting system capabilities:");
     
     // 检查 io_uring
     bool iouring_available = isIoUringAvailable();
-    printf("   - io_uring: %s\n", iouring_available ? "✓ Available" : "✗ Not available");
+    LOG_INFO_FMT("   - io_uring: %s", iouring_available ? "✓ Available" : "✗ Not available");
     
     // 检查 mmap
     bool mmap_available = isMmapAvailable();
-    printf("   - mmap: %s\n", mmap_available ? "✓ Available" : "✗ Not available");
+    LOG_INFO_FMT("   - mmap: %s", mmap_available ? "✓ Available" : "✗ Not available");
     
     // 决策逻辑
     if (iouring_available && isIoUringSuitable()) {

@@ -35,24 +35,35 @@ class BufferPool;
  * 
  * 功能：
  * - 连接 RTSP 视频流并解码
- * - 支持两种工作模式：
- *   1. 传统模式：内部缓冲 + fillBuffer拷贝
- *   2. 零拷贝模式：直接注入BufferPool（Worker自动创建）
+ * - 同步解码模式：fillBuffer() 直接解码到 AVFrame（与 VideoFileWorker 一致）
+ * - 零拷贝模式：利用特殊解码器（如 h264_taco）的物理地址
+ * - 支持硬件加速解码（可选，通过 WorkerConfig 配置）
  * 
  * 特点：
  * - 实时流处理（无总帧数概念）
- * - 自动重连机制
  * - 线程安全的帧访问
- * - 支持硬件加速解码（可选）
+ * - 支持解码器配置（v2.2）：硬件/软件、解码器名称、特殊配置
+ * - BufferPool 自动创建（v2.0架构要求）
  * 
  * 使用方式：
  * ```cpp
- * FfmpegDecodeRtspWorker worker;
- * worker.open("rtsp://192.168.1.100:8554/stream", width, height, bpp);
- * // Worker在open()时自动创建BufferPool（如果需要）
- * std::unique_ptr<BufferPool> pool = worker.getOutputBufferPool();
- * Buffer buffer(frame_size);
- * worker.fillBuffer(0, &buffer);
+ * // v2.2: 使用配置构造函数
+ * auto config = WorkerConfigBuilder()
+ *     .setDecoderConfig(
+ *         DecoderConfigBuilder().useH264Taco().build()
+ *     )
+ *     .build();
+ * FfmpegDecodeRtspWorker worker(config);
+ * worker.open("rtsp://192.168.1.100:8554/stream", 1920, 1080, 32);
+ * 
+ * // v2.0: 获取 BufferPool ID
+ * uint64_t pool_id = worker.getOutputBufferPoolId();
+ * auto pool = BufferPoolRegistry::getInstance().getPool(pool_id).lock();
+ * 
+ * // 同步解码
+ * Buffer* buffer = pool->acquireFree(true, 100);
+ * worker.fillBuffer(0, buffer);  // 直接解码到 Buffer 的 AVFrame
+ * pool->submitFilled(buffer);
  * ```
  */
 class FfmpegDecodeRtspWorker : public WorkerBase {
@@ -135,34 +146,24 @@ private:
     int width_;                        // 输出宽度
     int height_;                       // 输出高度
     int output_pixel_format_;          // 输出像素格式（如AV_PIX_FMT_BGRA）
+    int output_bpp_;                   // 输出每像素位数
     
-    // ============ 解码线程 ============
-    std::thread decode_thread_;
-    std::atomic<bool> running_;
-    std::atomic<bool> connected_;
-    
-    // ============ 内部帧缓冲（传统模式）============
-    struct FrameSlot {
-        std::vector<uint8_t> data;     // 帧数据
-        bool filled;                   // 是否已填充
-        uint64_t timestamp;            // 时间戳
-    };
-    std::vector<FrameSlot> internal_buffer_;  // 环形缓冲区（默认30帧）
-    int write_index_;                  // 写入索引
-    int read_index_;                   // 读取索引
-    std::mutex buffer_mutex_;
-    std::condition_variable buffer_cv_;
-    
-    // ============ 零拷贝模式 ============
-    BufferPool* buffer_pool_ptr_;          // 可选：零拷贝模式的BufferPool
+    // ============ 解码器配置（v2.2新增）============
+    bool use_hardware_decoder_;        // 是否使用硬件解码
+    std::string decoder_name_;         // 指定解码器名称（如 "h264_taco"），空字符串表示自动选择
+    struct AVDictionary* codec_options_ptr_;  // 解码器选项（用于 h264_taco 配置）
     
     // ============ 统计信息 ============
     std::atomic<int> decoded_frames_;
     std::atomic<int> dropped_frames_;
     
     // ============ 状态 ============
+    std::atomic<bool> connected_;
     bool is_open_;
     std::atomic<bool> eof_reached_;    // 流结束标志
+    
+    // ============ 线程安全 ============
+    mutable std::recursive_mutex mutex_;  // 使用递归锁避免死锁
     
     // ============ 错误处理 ============
     std::string last_error_;
@@ -171,7 +172,7 @@ private:
     // ============ 内部辅助方法 ============
     
     /**
-     * 连接 RTSP 流并初始化解码器
+     * 连接 RTSP 流
      */
     bool connectRTSP();
     
@@ -181,44 +182,25 @@ private:
     void disconnectRTSP();
     
     /**
-     * 解码线程主函数
+     * 查找视频流
      */
-    void decodeThreadFunc();
+    bool findVideoStream();
     
     /**
-     * 从RTSP接收并解码一帧
-     * @return AVFrame* 解码后的帧，失败返回nullptr
+     * 初始化解码器（支持硬件解码和配置）
      */
-    AVFrame* decodeOneFrame();
+    bool initializeDecoder();
     
     /**
-     * 将AVFrame转换为目标格式并存储
-     * @param frame 源帧
-     * @param dest 目标地址
-     * @param dest_size 目标大小
+     * 配置特殊解码器（如 h264_taco）
      * @return true 如果成功
      */
-    bool convertAndStore(AVFrame* frame, void* dest, size_t dest_size);
-    
-    /**
-     * 存储帧到内部缓冲区（传统模式）
-     */
-    void storeToInternalBuffer(AVFrame* frame);
-    
-    /**
-     * 从内部缓冲区拷贝帧（传统模式）
-     */
-    bool copyFromInternalBuffer(void* dest, size_t size);
+    bool configureSpecialDecoder();
     
     /**
      * 设置错误信息
      */
-    void setError(const std::string& error);
-    
-    /**
-     * 获取AVFrame的物理地址（如果可用）
-     */
-    uint64_t getAVFramePhysicalAddress(AVFrame* frame);
+    void setError(const std::string& error, int ffmpeg_error = 0);
 };
 
 #endif // FFMPEG_DECODE_RTSP_WORKER_HPP

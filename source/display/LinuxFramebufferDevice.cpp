@@ -4,7 +4,6 @@
 #include "buffer/BufferAllocatorFactory.hpp"
 #include "buffer/FramebufferAllocator.hpp"
 #include "buffer/bufferpool/BufferPoolRegistry.hpp"
-#include <stdio.h>
 #include <fcntl.h>
 #include <unistd.h>
 #include <sys/ioctl.h>
@@ -558,7 +557,7 @@ bool LinuxFramebufferDevice::displayBufferByDMA(Buffer* buffer) {
     // 统计和日志（每100帧打印一次）
     display_count++;
     if (display_count == 1 || display_count % 100 == 0) {
-        printf("🚀 [DMA Display] Frame #%d (phys_addr=0x%llx, buffer_id=%u)",
+        LOG_DEBUG_FMT("🚀 [DMA Display] Frame #%d (phys_addr=0x%llx, buffer_id=%u)",
                display_count, (unsigned long long)phys_addr, buffer->id());
     }
     
@@ -632,7 +631,7 @@ bool LinuxFramebufferDevice::displayFilledFramebuffer(Buffer* buffer) {
     // 统计和日志
     display_count++;
     if (display_count == 1 || display_count % 100 == 0) {
-        printf("🔄 [Framebuffer Switch] Frame #%d (buffer_id=%u)",
+        LOG_DEBUG_FMT("🔄 [Framebuffer Switch] Frame #%d (buffer_id=%u)",
                display_count, buffer_id);
     }
     
@@ -712,7 +711,7 @@ bool LinuxFramebufferDevice::displayBufferByMemcpyToFramebuffer(Buffer* buffer) 
     // 统计和日志
     display_count++;
     if (display_count == 1 || display_count % 100 == 0) {
-        printf("📋 [Memcpy Display] Frame #%d (copied %zu bytes to fb_buffer[%u])",
+        LOG_DEBUG_FMT("📋 [Memcpy Display] Frame #%d (copied %zu bytes to fb_buffer[%u])",
                display_count, copy_size, fb_buffer_id);
     }
     

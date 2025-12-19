@@ -1,6 +1,6 @@
 #include "common/Timer.hpp"
+#include "common/Logger.hpp"
 #include <algorithm>
-#include <cstdio>
 
 // ============ 构造函数和析构函数 ============
 
@@ -30,8 +30,7 @@ void Timer::start() {
     // 启动定时器线程
     timer_thread_ = std::thread(&Timer::timerThreadLoop, this);
     
-    
-    printf("⏰ Timer started\n");
+    LOG_DEBUG("⏰ Timer started");
 }
 
 void Timer::stop() {
@@ -59,7 +58,7 @@ void Timer::stop() {
         timer_thread_.join();
     }
     
-    printf("⏰ Timer stopped\n");
+    LOG_DEBUG("⏰ Timer stopped");
 }
 
 // ============ 定时器调度 ============
@@ -72,7 +71,7 @@ Timer::TimerId Timer::scheduleOnce(int delay_ms, Callback callback) {
     std::lock_guard<std::mutex> lock(mutex_);
     
     if (!is_running_.load()) {
-        printf("⚠️  Timer not started, call start() first\n");
+        LOG_WARN("⚠️  Timer not started, call start() first");
         return 0;
     }
     
@@ -98,14 +97,14 @@ Timer::TimerId Timer::scheduleOnce(int delay_ms, Callback callback) {
 Timer::TimerId Timer::scheduleRepeated(int interval_ms, Callback callback) {
     
     if (interval_ms <= 0) {
-        printf("⚠️  Invalid interval: %d ms, must be > 0\n", interval_ms);
+        LOG_WARN_FMT("⚠️  Invalid interval: %d ms, must be > 0", interval_ms);
         return 0;
     }
     
     std::lock_guard<std::mutex> lock(mutex_);
     
     if (!is_running_.load()) {
-        printf("⚠️  Timer not started, call start() first\n");
+        LOG_WARN("⚠️  Timer not started, call start() first");
         return 0;
     }
     
@@ -323,9 +322,9 @@ void Timer::executeExpiredTimers() {
                 task.callback();
             }
         } catch (const std::exception& e) {
-            printf("⚠️  Timer callback exception: %s\n", e.what());
+            LOG_ERROR_FMT("⚠️  Timer callback exception: %s", e.what());
         } catch (...) {
-            printf("⚠️  Timer callback unknown exception\n");
+            LOG_ERROR("⚠️  Timer callback unknown exception");
         }
     }
     
@@ -340,9 +339,9 @@ void Timer::executeExpiredTimers() {
                 task.callback();
             }
         } catch (const std::exception& e) {
-            printf("⚠️  Timer callback exception: %s\n", e.what());
+            LOG_ERROR_FMT("⚠️  Timer callback exception: %s", e.what());
         } catch (...) {
-            printf("⚠️  Timer callback unknown exception\n");
+            LOG_ERROR("⚠️  Timer callback unknown exception");
         }
     }
 }

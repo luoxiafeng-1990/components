@@ -1,6 +1,5 @@
 #include "productionline/worker/MmapRawVideoFileWorker.hpp"
 #include "common/Logger.hpp"
-#include <stdio.h>
 #include <stdlib.h>
 #include <fcntl.h>
 #include <unistd.h>
@@ -63,9 +62,9 @@ bool MmapRawVideoFileWorker::open(const char* path) {
     
     path_ = path;  // 使用 std::string 自动管理
     
-    printf("📂 Opening video file: %s\n", path);
-    printf("   Mode: Auto-detect format\n");
-    printf("   Worker: MmapRawVideoFileWorker (memory-mapped I/O)\n");
+    LOG_INFO_FMT("📂 Opening video file: %s\n", path);
+    LOG_INFO_FMT("   Mode: Auto-detect format");
+    LOG_INFO_FMT("   Worker: MmapRawVideoFileWorker (memory-mapped I/O)");
     
     fd_ = ::open(path, O_RDONLY);
     if (fd_ < 0) {
@@ -77,7 +76,7 @@ bool MmapRawVideoFileWorker::open(const char* path) {
     
     switch (detected_format_) {
         case FileFormat::MP4:
-            printf("📹 Detected format: MP4\n");
+            LOG_INFO_FMT("📹 Detected format: MP4");
             if (!parseMP4Header()) {
                 ::close(fd_);
                 fd_ = -1;
@@ -86,7 +85,7 @@ bool MmapRawVideoFileWorker::open(const char* path) {
             break;
             
         case FileFormat::H264:
-            printf("📹 Detected format: H.264\n");
+            LOG_INFO_FMT("📹 Detected format: H.264");
             if (!parseH264Header()) {
                 ::close(fd_);
                 fd_ = -1;
@@ -95,14 +94,14 @@ bool MmapRawVideoFileWorker::open(const char* path) {
             break;
             
         case FileFormat::H265:
-            printf("📹 Detected format: H.265\n");
+            LOG_INFO_FMT("📹 Detected format: H.265");
             LOG_ERROR_FMT("[Worker] ERROR: H.265 format not yet supported");
             ::close(fd_);
             fd_ = -1;
             return false;
             
         case FileFormat::AVI:
-            printf("📹 Detected format: AVI\n");
+            LOG_INFO_FMT("📹 Detected format: AVI");
             LOG_ERROR_FMT("[Worker] ERROR: AVI format not yet supported");
             ::close(fd_);
             fd_ = -1;
@@ -111,10 +110,10 @@ bool MmapRawVideoFileWorker::open(const char* path) {
         case FileFormat::RAW:
         case FileFormat::UNKNOWN:
             LOG_ERROR_FMT("[Worker] ERROR: No format magic detected");
-            printf("   This file may be raw format or unsupported encoded format\n");
-            printf("   \n");
-            printf("   💡 For raw format, please use:\n");
-            printf("      open(path, width, height, bits_per_pixel)\n");
+            LOG_INFO_FMT("   This file may be raw format or unsupported encoded format");
+            LOG_INFO_FMT("   ");
+            LOG_INFO_FMT("   💡 For raw format, please use:");
+            LOG_INFO_FMT("      open(path, width, height, bits_per_pixel)");
             ::close(fd_);
             fd_ = -1;
             return false;
@@ -136,20 +135,20 @@ bool MmapRawVideoFileWorker::open(const char* path) {
     current_frame_index_ = 0;
     
     LOG_DEBUG_FMT("[Worker] Video file opened successfully");
-    printf("   Format: ");
+    LOG_INFO_FMT("   Format: ");
     switch (detected_format_) {
-        case FileFormat::RAW:  printf("RAW\n"); break;
-        case FileFormat::MP4:  printf("MP4\n"); break;
-        case FileFormat::H264: printf("H.264\n"); break;
-        case FileFormat::H265: printf("H.265\n"); break;
-        case FileFormat::AVI:  printf("AVI\n"); break;
-        default: printf("UNKNOWN\n"); break;
+        case FileFormat::RAW:  LOG_INFO_FMT("RAW"); break;
+        case FileFormat::MP4:  LOG_INFO_FMT("MP4"); break;
+        case FileFormat::H264: LOG_INFO_FMT("H.264"); break;
+        case FileFormat::H265: LOG_INFO_FMT("H.265"); break;
+        case FileFormat::AVI:  LOG_INFO_FMT("AVI"); break;
+        default: LOG_INFO_FMT("UNKNOWN"); break;
     }
-    printf("   Resolution: %dx%d\n", width_, height_);
-    printf("   Bits per pixel: %d\n", bits_per_pixel_);
-    printf("   Frame size: %zu bytes\n", frame_size_);
-    printf("   File size: %ld bytes\n", file_size_);
-    printf("   Total frames: %d\n", total_frames_);
+    LOG_INFO_FMT("   Resolution: %dx%d\n", width_, height_);
+    LOG_INFO_FMT("   Bits per pixel: %d\n", bits_per_pixel_);
+    LOG_INFO_FMT("   Frame size: %zu bytes\n", frame_size_);
+    LOG_INFO_FMT("   File size: %ld bytes\n", file_size_);
+    LOG_INFO_FMT("   Total frames: %d\n", total_frames_);
     
     return true;
 }
@@ -162,7 +161,7 @@ bool MmapRawVideoFileWorker::open(const char* path, int width, int height, int b
     
     if (width <= 0 || height <= 0 || bits_per_pixel <= 0) {
         LOG_ERROR_FMT("[Worker] ERROR: Invalid parameters");
-        printf("   width=%d, height=%d, bits_per_pixel=%d\n", 
+        LOG_INFO_FMT("   width=%d, height=%d, bits_per_pixel=%d\n", 
                width, height, bits_per_pixel);
         return false;
     }
@@ -177,11 +176,11 @@ bool MmapRawVideoFileWorker::open(const char* path, int width, int height, int b
     
     detected_format_ = FileFormat::RAW;
     
-    printf("📂 Opening raw video file: %s\n", path);
-    printf("   Format: %dx%d, %d bits per pixel\n", 
+    LOG_INFO_FMT("📂 Opening raw video file: %s\n", path);
+    LOG_INFO_FMT("   Format: %dx%d, %d bits per pixel\n", 
            width_, height_, bits_per_pixel_);
-    printf("   Frame size: %zu bytes\n", frame_size_);
-    printf("   Worker: MmapRawVideoFileWorker (memory-mapped I/O)\n");
+    LOG_INFO_FMT("   Frame size: %zu bytes\n", frame_size_);
+    LOG_INFO_FMT("   Worker: MmapRawVideoFileWorker (memory-mapped I/O)");
     
     fd_ = ::open(path, O_RDONLY);
     if (fd_ < 0) {
@@ -205,8 +204,8 @@ bool MmapRawVideoFileWorker::open(const char* path, int width, int height, int b
     current_frame_index_ = 0;
     
     LOG_DEBUG_FMT("[Worker] Raw video file opened successfully");
-    printf("   File size: %ld bytes\n", file_size_);
-    printf("   Total frames: %d\n", total_frames_);
+    LOG_INFO_FMT("   File size: %ld bytes\n", file_size_);
+    LOG_INFO_FMT("   Total frames: %d\n", total_frames_);
     
     return true;
 }
@@ -372,7 +371,7 @@ bool MmapRawVideoFileWorker::validateFile() {
     if (file_size_ % frame_size_ != 0) {
         LOG_WARN_FMT("[Worker]  Warning: File size (%ld) not aligned to frame size (%zu)\n",
                file_size_, frame_size_);
-        printf("   Last frame may be incomplete\n");
+        LOG_INFO_FMT("   Last frame may be incomplete");
     }
     
     return true;
@@ -445,13 +444,13 @@ ssize_t MmapRawVideoFileWorker::readFileHeader(unsigned char* header, size_t siz
 
 bool MmapRawVideoFileWorker::parseMP4Header() {
     LOG_WARN_FMT("[Worker]  MP4 format detected but not yet fully supported");
-    printf("   Please use a tool to extract raw frames, or provide format info\n");
+    LOG_INFO_FMT("   Please use a tool to extract raw frames, or provide format info");
     return false;
 }
 
 bool MmapRawVideoFileWorker::parseH264Header() {
     LOG_WARN_FMT("[Worker]  H.264 format detected but not yet fully supported");
-    printf("   Please use a tool to extract raw frames, or provide format info\n");
+    LOG_INFO_FMT("   Please use a tool to extract raw frames, or provide format info");
     return false;
 }
 
@@ -478,7 +477,7 @@ bool MmapRawVideoFileWorker::mapFile() {
     
     mapped_size_ = file_size_;
     
-    printf("🗺️  File mapped to memory: address=%p, size=%zu bytes\n", 
+    LOG_INFO_FMT("🗺️  File mapped to memory: address=%p, size=%zu bytes\n", 
            mapped_file_ptr_, mapped_size_);
     
     return true;

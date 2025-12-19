@@ -12,11 +12,7 @@ extern "C" {
 #include <libavutil/dict.h>
 #include <libavutil/error.h>  // 用于 av_strerror
 #include <libswscale/swscale.h>
-}
-
-// taco_sys 接口（零拷贝模式需要）
-extern "C" {
-    uint64_t taco_sys_handle2_phys_addr(uint32_t handle);
+#include "taco_sys_api.h"
 }
 
 // ============================================================================
@@ -619,7 +615,7 @@ bool FfmpegDecodeVideoFileWorker::fillBuffer(int frame_index, Buffer* buffer) {
         
         if (read_ret < 0) {
             if (read_ret == AVERROR_EOF) {
-                printf("🔄 EOF reached");
+                LOG_DEBUG("🔄 EOF reached");
                 // 🔧 修复：Worker 不应该决定是否循环，只设置 EOF 标志并返回 false
                 // 循环逻辑由 ProductionLine 根据 loop_ 变量控制
                 av_packet_unref(packet_ptr_);

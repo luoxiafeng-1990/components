@@ -5,7 +5,6 @@
 #include <sys/stat.h>
 #include <string.h>
 #include <errno.h>
-#include <stdio.h>
 
 // ============ 构造/析构 ============
 
@@ -53,7 +52,7 @@ IoUringRawVideoFileWorker::~IoUringRawVideoFileWorker() {
 
 bool IoUringRawVideoFileWorker::open(const char* path) {
     LOG_ERROR_FMT("[Worker] ERROR: IoUringVideoReader does not support auto-detect format");
-    printf("   Please use open(path, width, height, bits_per_pixel) for raw video files\n");
+    LOG_ERROR("   Please use open(path, width, height, bits_per_pixel) for raw video files");
     return false;
 }
 
@@ -75,11 +74,11 @@ bool IoUringRawVideoFileWorker::open(const char* path, int width, int height, in
     
     frame_size_ = (size_t)width * height * (bits_per_pixel / 8);
     
-    printf("📂 Opening raw video file: %s\n", path);
-    printf("   Format: %dx%d, %d bits per pixel\n", width, height, bits_per_pixel);
-    printf("   Frame size: %zu bytes\n", frame_size_);
-    printf("   Reader: IoUringVideoReader (async I/O)\n");
-    printf("   Queue depth: %d\n", queue_depth_);
+    LOG_INFO_FMT("📂 Opening raw video file: %s", path);
+    LOG_INFO_FMT("   Format: %dx%d, %d bits per pixel", width, height, bits_per_pixel);
+    LOG_INFO_FMT("   Frame size: %zu bytes", frame_size_);
+    LOG_INFO("   Reader: IoUringVideoReader (async I/O)");
+    LOG_INFO_FMT("   Queue depth: %d", queue_depth_);
     
     // 打开文件
     video_fd_ = ::open(path, O_RDONLY);
@@ -121,8 +120,8 @@ bool IoUringRawVideoFileWorker::open(const char* path, int width, int height, in
     current_frame_index_ = 0;
     
     LOG_DEBUG_FMT("[Worker] Raw video file opened successfully");
-    printf("   File size: %ld bytes\n", file_size_);
-    printf("   Total frames: %d\n", total_frames_);
+    LOG_INFO_FMT("   File size: %ld bytes", file_size_);
+    LOG_INFO_FMT("   Total frames: %d", total_frames_);
     
     return true;
 }
