@@ -55,24 +55,24 @@ bool BufferWriter::open(const char* path,
                         int height) {
     // 1. 参数校验
     if (!path) {
-        fprintf(stderr, "[BufferWriter] Error: Invalid path (nullptr)\n");
+        LOG_ERROR("[BufferWriter] Error: Invalid path (nullptr)");
         return false;
     }
     
     if (width <= 0 || height <= 0) {
-        fprintf(stderr, "[BufferWriter] Error: Invalid dimensions (%dx%d)\n", 
+        LOG_ERROR_FMT("[BufferWriter] Error: Invalid dimensions (%dx%d)", 
                 width, height);
         return false;
     }
     
     // 2. 检查格式支持
     if (!isSupportedFormat(format)) {
-        fprintf(stderr, "[BufferWriter] Error: Unsupported format: %s (%d)\n",
+        LOG_ERROR_FMT("[BufferWriter] Error: Unsupported format: %s (%d)",
                 av_get_pix_fmt_name(format), format);
-        fprintf(stderr, "[BufferWriter] Supported formats (18): "
+        LOG_ERROR("[BufferWriter] Supported formats (18): "
                 "GRAY8, GRAY10LE, NV12, P010LE, NV21, YUV420P10LE, "
                 "RGB24, BGR24, ARGB, ABGR, RGBA, BGRA, "
-                "RGB0, BGR0, 0RGB, 0BGR, RGB48LE, BGR48LE\n");
+                "RGB0, BGR0, 0RGB, 0BGR, RGB48LE, BGR48LE");
         return false;
     }
     
@@ -84,8 +84,8 @@ bool BufferWriter::open(const char* path,
     // 4. 打开文件（二进制写入模式）
     file_ = fopen(path, "wb");
     if (!file_) {
-        fprintf(stderr, "[BufferWriter] Error: Failed to open file: %s "
-                "(errno=%d: %s)\n", path, errno, strerror(errno));
+        LOG_ERROR_FMT("[BufferWriter] Error: Failed to open file: %s "
+                "(errno=%d: %s)", path, errno, strerror(errno));
         return false;
     }
     
@@ -96,10 +96,10 @@ bool BufferWriter::open(const char* path,
     write_count_.store(0);  // 重置计数器
     
     // 6. 打印成功信息
-    printf("[BufferWriter] Opened: %s\n", path);
-    printf("  Format: %s\n", getFormatName(format_));
-    printf("  Resolution: %dx%d\n", width_, height_);
-    printf("  Frame size: %zu bytes\n", calculateFrameSize(format_, width_, height_));
+    LOG_INFO_FMT("[BufferWriter] Opened: %s", path);
+    LOG_INFO_FMT("  Format: %s", getFormatName(format_));
+    LOG_INFO_FMT("  Resolution: %dx%d", width_, height_);
+    LOG_INFO_FMT("  Frame size: %zu bytes", calculateFrameSize(format_, width_, height_));
     
     return true;
 }
@@ -107,7 +107,7 @@ bool BufferWriter::open(const char* path,
 bool BufferWriter::write(const Buffer* buffer) {
     // 1. 参数校验
     if (!buffer || !file_) {
-        fprintf(stderr, "[BufferWriter] Error: Invalid buffer or file not opened\n");
+        LOG_ERROR("[BufferWriter] Error: Invalid buffer or file not opened");
         return false;
     }
     
@@ -124,7 +124,7 @@ bool BufferWriter::write(const Buffer* buffer) {
 bool BufferWriter::writeSimple(const Buffer* buffer) {
     // 旧版简单写入（向后兼容）
     if (!buffer->isValid()) {
-        fprintf(stderr, "[BufferWriter] Error: Buffer validation failed\n");
+        LOG_ERROR("[BufferWriter] Error: Buffer validation failed");
         return false;
     }
     
@@ -132,26 +132,26 @@ bool BufferWriter::writeSimple(const Buffer* buffer) {
     size_t buffer_size = buffer->size();
     
     if (!data || buffer_size == 0) {
-        fprintf(stderr, "[BufferWriter] Error: Buffer has no data or zero size\n");
+        LOG_ERROR("[BufferWriter] Error: Buffer has no data or zero size");
         return false;
     }
     
     size_t expected_size = calculateFrameSize(format_, width_, height_);
     
     if (buffer_size < expected_size) {
-        fprintf(stderr, "[BufferWriter] Error: Buffer size mismatch\n");
-        fprintf(stderr, "  Expected: %zu bytes (format=%s, %dx%d)\n",
+        LOG_ERROR("[BufferWriter] Error: Buffer size mismatch");
+        LOG_ERROR_FMT("  Expected: %zu bytes (format=%s, %dx%d)",
                 expected_size, getFormatName(format_), width_, height_);
-        fprintf(stderr, "  Got: %zu bytes\n", buffer_size);
+        LOG_ERROR_FMT("  Got: %zu bytes", buffer_size);
         return false;
     }
     
     size_t written = fwrite(data, 1, expected_size, file_);
     if (written != expected_size) {
-        fprintf(stderr, "[BufferWriter] Error: Write failed\n");
-        fprintf(stderr, "  Expected to write: %zu bytes\n", expected_size);
-        fprintf(stderr, "  Actually wrote: %zu bytes\n", written);
-        fprintf(stderr, "  errno=%d: %s\n", errno, strerror(errno));
+        LOG_ERROR("[BufferWriter] Error: Write failed");
+        LOG_ERROR_FMT("  Expected to write: %zu bytes", expected_size);
+        LOG_ERROR_FMT("  Actually wrote: %zu bytes", written);
+        LOG_ERROR_FMT("  errno=%d: %s", errno, strerror(errno));
         return false;
     }
     
@@ -167,7 +167,7 @@ bool BufferWriter::writeWithMetadata(const Buffer* buffer) {
     
     // 2. 验证格式（如果open时指定了格式）
     if (format_ != AV_PIX_FMT_NONE && buf_format != format_) {
-        fprintf(stderr, "[BufferWriter] Format mismatch: expected %s, got %s\n",
+        LOG_ERROR_FMT("[BufferWriter] Format mismatch: expected %s, got %s",
                 av_get_pix_fmt_name(format_), av_get_pix_fmt_name(buf_format));
         return false;
     }
@@ -225,7 +225,7 @@ bool BufferWriter::writeWithMetadata(const Buffer* buffer) {
             break;
         
         default:
-            fprintf(stderr, "[BufferWriter] Unsupported format: %s\n",
+            LOG_ERROR_FMT("[BufferWriter] Unsupported format: %s",
                     av_get_pix_fmt_name(buf_format));
             return false;
     }
@@ -241,7 +241,7 @@ bool BufferWriter::writeWithMetadata(const Buffer* buffer) {
 bool BufferWriter::writePlane(const uint8_t* data, int stride, 
                                int width, int height) {
     if (!data) {
-        fprintf(stderr, "[BufferWriter] Error: plane data is nullptr\n");
+        LOG_ERROR("[BufferWriter] Error: plane data is nullptr");
         return false;
     }
     
@@ -254,7 +254,7 @@ bool BufferWriter::writePlane(const uint8_t* data, int stride,
         for (int y = 0; y < height; y++) {
             size_t written = fwrite(data + y * stride, 1, width, file_);
             if (written != (size_t)width) {
-                fprintf(stderr, "[BufferWriter] Error: Write plane failed at row %d\n", y);
+                LOG_ERROR_FMT("[BufferWriter] Error: Write plane failed at row %d", y);
                 return false;
             }
         }
@@ -433,7 +433,7 @@ void BufferWriter::close() {
         fclose(file_);
         file_ = nullptr;
         
-        printf("[BufferWriter] Closed (written %d frames)\n", 
+        LOG_INFO_FMT("[BufferWriter] Closed (written %d frames)", 
                write_count_.load());
     }
 }

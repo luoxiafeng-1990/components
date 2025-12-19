@@ -1,7 +1,6 @@
 #include "buffer/bufferpool/BufferPoolRegistry.hpp"
 #include "common/Logger.hpp"
 #include "buffer/bufferpool/BufferPool.hpp"
-#include <stdio.h>
 #include <algorithm>
 #include <iomanip>
 #include <sstream>
@@ -141,15 +140,14 @@ std::vector<uint64_t> BufferPoolRegistry::getPoolsByAllocator(uint64_t allocator
 void BufferPoolRegistry::printAllStats() const {
     std::lock_guard<std::mutex> lock(mutex_);
     
-    printf("");
-    printf("========================================");
-    printf("📊 Global BufferPool Statistics");
-    printf("========================================");
-    printf("Total Pools: %zu\n", pools_.size());
+    LOG_INFO("========================================");
+    LOG_INFO("📊 Global BufferPool Statistics");
+    LOG_INFO("========================================");
+    LOG_INFO_FMT("Total Pools: %zu", pools_.size());
     
     if (pools_.empty()) {
-        printf("   (No BufferPools registered)");
-        printf("========================================\n");
+        LOG_INFO("   (No BufferPools registered)");
+        LOG_INFO("========================================");
         return;
     }
     
@@ -174,12 +172,12 @@ void BufferPoolRegistry::printAllStats() const {
                       std::localtime(&time_t_val));
         
         // 打印 Pool 信息
-        printf("[%s] %s (ID: %lu)",
+        LOG_INFO_FMT("[%s] %s (ID: %lu)",
                info.category.empty() ? "Uncategorized" : info.category.c_str(),
                info.name.c_str(),
                info.id);
         
-        printf("   Buffers: %d total, %d free, %d filled",
+        LOG_INFO_FMT("   Buffers: %d total, %d free, %d filled",
                pool->getTotalCount(),
                pool->getFreeCount(),
                pool->getFilledCount());
@@ -187,13 +185,13 @@ void BufferPoolRegistry::printAllStats() const {
         size_t pool_memory = pool->getTotalCount() * pool->getBufferSize();
         total_memory += pool_memory;
         
-        printf("   Memory: %.2f MB", pool_memory / (1024.0 * 1024.0));
-        printf("   Created: %s\n", time_buf);
+        LOG_INFO_FMT("   Memory: %.2f MB", pool_memory / (1024.0 * 1024.0));
+        LOG_INFO_FMT("   Created: %s", time_buf);
     }
     
-    printf("========================================");
-    printf("TOTAL MEMORY: %.2f MB", total_memory / (1024.0 * 1024.0));
-    printf("========================================\n");
+    LOG_INFO("========================================");
+    LOG_INFO_FMT("TOTAL MEMORY: %.2f MB", total_memory / (1024.0 * 1024.0));
+    LOG_INFO("========================================");
 }
 
 size_t BufferPoolRegistry::getTotalMemoryUsage() const {
