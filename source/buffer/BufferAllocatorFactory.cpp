@@ -110,19 +110,19 @@ std::unique_ptr<BufferAllocatorBase> BufferAllocatorFactory::createByType(
 ) {
     switch (type) {
         case AllocatorType::NORMAL:
-            printf("🏭 BufferAllocatorFactory: Creating NormalAllocator\n");
+            LOG_DEBUG("🏭 [BufferAllocatorFactory] Creating NormalAllocator");
             return std::make_unique<NormalAllocator>(mem_type, alignment);
             
         case AllocatorType::AVFRAME:
-            printf("🏭 BufferAllocatorFactory: Creating AVFrameAllocator\n");
+            LOG_DEBUG("🏭 [BufferAllocatorFactory] Creating AVFrameAllocator");
             return std::make_unique<AVFrameAllocator>();
             
         case AllocatorType::FRAMEBUFFER:
-            printf("🏭 BufferAllocatorFactory: Creating FramebufferAllocator\n");
+            LOG_DEBUG("🏭 [BufferAllocatorFactory] Creating FramebufferAllocator");
             return std::make_unique<FramebufferAllocator>();
             
         default:
-            printf("⚠️  Warning: Unknown AllocatorType, using NormalAllocator\n");
+            LOG_WARN("⚠️  [BufferAllocatorFactory] Warning: Unknown AllocatorType, using NormalAllocator");
             return std::make_unique<NormalAllocator>(mem_type, alignment);
     }
 }

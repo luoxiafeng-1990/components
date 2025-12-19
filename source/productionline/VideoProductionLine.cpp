@@ -35,11 +35,8 @@ VideoProductionLine::VideoProductionLine(bool loop, int thread_count, bool enabl
     auto logger = log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components"));
     
     // 打印生命周期开始
-    LOG4CPLUS_INFO(logger, "");
-    LOG4CPLUS_INFO(logger, log_prefix_ << " " << std::string(69, '═'));
-    LOG4CPLUS_INFO(logger, log_prefix_ << " 构造: loop=" << (loop_ ? "true" : "false") 
+    LOG4CPLUS_INFO(logger, log_prefix_ << " 创建: loop=" << (loop_ ? "true" : "false") 
                    << ", threads=" << thread_count_);
-    LOG4CPLUS_INFO(logger, log_prefix_ << " " << std::string(69, '═'));
     
     if (thread_count < 1) {
         LOG4CPLUS_WARN(logger, log_prefix_ << " Invalid thread_count, using 1");
@@ -75,7 +72,7 @@ bool VideoProductionLine::start(const WorkerConfig& worker_config) {
         return false;
     }
     
-    LOG4CPLUS_INFO(logger, log_prefix_ << " 配置Worker: " << worker_config.file.file_path);
+    LOG4CPLUS_INFO(logger, log_prefix_ << " BufferFillingWorkerFacade: " << worker_config.file.file_path);
     
     // 创建共享的 BufferFillingWorkerFacade 对象（v2.2：只传入完整配置）
     worker_facade_sptr_ = std::make_shared<BufferFillingWorkerFacade>(worker_config);
@@ -279,8 +276,8 @@ void VideoProductionLine::producerThreadFunc(int thread_id) {
         return;
     }
     
-    LOG_INFO_FMT("Thread #%d: Starting unified producer loop", thread_id);
-    LOG_INFO_FMT("Working BufferPool: '%s'", pool_sptr->getName().c_str());
+    LOG_INFO_FMT("[VideoProductionLine] Thread #%d: Starting unified producer loop", thread_id);
+    LOG_INFO_FMT("[VideoProductionLine] Working BufferPool: '%s'", pool_sptr->getName().c_str());
     
     int thread_produced = 0;
     int thread_skipped = 0;

@@ -148,11 +148,11 @@ bool FfmpegDecodeVideoFileWorker::open(const char* path) {
     decoded_frames_ = 0;
     decode_errors_ = 0;
     
-    LOG_DEBUG_FMT("[Worker] FfmpegDecodeVideoFileWorker: Opened '%s'\n", path);
-    printf("   Resolution: %dx%d → %dx%d\n", width_, height_, output_width_, output_height_);
-    printf("   Codec: %s\n", codec_ctx_ptr_->codec->name);
-    printf("   Total frames (estimated): %d\n", total_frames_);
-    printf("   BufferPool: '%s' (ID: %lu, %d buffers, %zu bytes each)\n", 
+    LOG_DEBUG_FMT("[Worker] FfmpegDecodeVideoFileWorker: Opened '%s'", path);
+    LOG_DEBUG_FMT("[Worker]    Resolution: %dx%d → %dx%d", width_, height_, output_width_, output_height_);
+    LOG_DEBUG_FMT("[Worker]    Codec: %s", codec_ctx_ptr_->codec->name);
+    LOG_DEBUG_FMT("[Worker]    Total frames (estimated): %d", total_frames_);
+    LOG_DEBUG_FMT("[Worker]    BufferPool: '%s' (ID: %lu, %d buffers, %zu bytes each)", 
            pool_name.c_str(), buffer_pool_id_, buffer_count, frame_size);
     
     return true;
@@ -344,9 +344,9 @@ bool FfmpegDecodeVideoFileWorker::initializeDecoder() {
         // 用户指定了解码器名称（如 "h264_taco"）
         codec = avcodec_find_decoder_by_name(decoder_name_.c_str());
         if (!codec) {
-            LOG_WARN_FMT("[Worker]  Warning: Specified decoder '%s' not found, trying default\n", decoder_name_.c_str());
+            LOG_WARN_FMT("[Worker]  Warning: Specified decoder '%s' not found, trying default", decoder_name_.c_str());
         } else {
-            LOG_DEBUG_FMT("[Worker] Using specified decoder: %s\n", decoder_name_.c_str());
+            LOG_DEBUG_FMT("[Worker] Using specified decoder: %s", decoder_name_.c_str());
         }
     }
     
@@ -379,7 +379,7 @@ bool FfmpegDecodeVideoFileWorker::initializeDecoder() {
     if (decoder_name_ == "h264_taco") {
         if (!configureSpecialDecoder()) {
             // 🔧 修复：配置失败是致命错误，必须返回
-            LOG_ERROR_FMT("[Worker] ERROR: Failed to configure special decoder options\n");
+            LOG_ERROR_FMT("[Worker] ERROR: Failed to configure special decoder options");
             avcodec_free_context(&codec_ctx_ptr_);
             codec_ctx_ptr_ = nullptr;  // 🔧 置空防止 double free
             return false;
@@ -401,32 +401,32 @@ bool FfmpegDecodeVideoFileWorker::initializeDecoder() {
 bool FfmpegDecodeVideoFileWorker::configureSpecialDecoder() {
     // 配置 h264_taco 解码器（从 worker_config_ 读取配置）
     if (!codec_ctx_ptr_->priv_data) {
-        LOG_WARN_FMT("[Worker]  Warning: codec_ctx->priv_data is NULL, cannot set options\n");
+        LOG_WARN_FMT("[Worker]  Warning: codec_ctx->priv_data is NULL, cannot set options");
         return false;
     }
     
     // 🎯 从 worker_config_ 获取 taco 配置
     const auto& taco = worker_config_.decoder.taco;
     
-    LOG_DEBUG_FMT("[Worker] Configuring h264_taco decoder options from config...\n");
+    LOG_DEBUG_FMT("[Worker] Configuring h264_taco decoder options from config...");
     
     int ret;
     
     // 禁用重排序（从 config 读取）
     ret = av_opt_set_int(codec_ctx_ptr_->priv_data, "reorder_disable", 
                          taco.reorder_disable ? 1 : 0, 0);
-    printf("   reorder_disable=%d: %s\n", taco.reorder_disable ? 1 : 0, 
+    LOG_DEBUG_FMT("[Worker]    reorder_disable=%d: %s", taco.reorder_disable ? 1 : 0, 
            ret < 0 ? "FAILED" : "OK");
     
     // 启用通道（从 config 读取）
     ret = av_opt_set_int(codec_ctx_ptr_->priv_data, "ch0_enable", 
                          taco.ch0_enable ? 1 : 0, 0);
-    printf("   ch0_enable=%d: %s\n", taco.ch0_enable ? 1 : 0, 
+    LOG_DEBUG_FMT("[Worker]    ch0_enable=%d: %s", taco.ch0_enable ? 1 : 0, 
            ret < 0 ? "FAILED" : "OK");
     
     ret = av_opt_set_int(codec_ctx_ptr_->priv_data, "ch1_enable", 
                          taco.ch1_enable ? 1 : 0, 0);
-    printf("   ch1_enable=%d: %s\n", taco.ch1_enable ? 1 : 0, 
+    LOG_DEBUG_FMT("[Worker]    ch1_enable=%d: %s", taco.ch1_enable ? 1 : 0, 
            ret < 0 ? "FAILED" : "OK");
     
     // 配置通道1裁剪参数（从 config 读取）
@@ -435,7 +435,7 @@ bool FfmpegDecodeVideoFileWorker::configureSpecialDecoder() {
         av_opt_set_int(codec_ctx_ptr_->priv_data, "ch1_crop_y", taco.ch1_crop_y, 0);
         av_opt_set_int(codec_ctx_ptr_->priv_data, "ch1_crop_width", taco.ch1_crop_width, 0);
         av_opt_set_int(codec_ctx_ptr_->priv_data, "ch1_crop_height", taco.ch1_crop_height, 0);
-        printf("   ch1_crop: (%d, %d, %d, %d)\n", 
+        LOG_DEBUG_FMT("[Worker]    ch1_crop: (%d, %d, %d, %d)", 
                taco.ch1_crop_x, taco.ch1_crop_y, 
                taco.ch1_crop_width, taco.ch1_crop_height);
     }
@@ -444,20 +444,20 @@ bool FfmpegDecodeVideoFileWorker::configureSpecialDecoder() {
     if (taco.ch1_scale_width > 0 && taco.ch1_scale_height > 0) {
         av_opt_set_int(codec_ctx_ptr_->priv_data, "ch1_scale_width", taco.ch1_scale_width, 0);
         av_opt_set_int(codec_ctx_ptr_->priv_data, "ch1_scale_height", taco.ch1_scale_height, 0);
-        printf("   ch1_scale: (%d, %d)\n", taco.ch1_scale_width, taco.ch1_scale_height);
+        LOG_DEBUG_FMT("[Worker]    ch1_scale: (%d, %d)", taco.ch1_scale_width, taco.ch1_scale_height);
     }
     
     // 配置通道1 RGB（从 config 读取）
     ret = av_opt_set_int(codec_ctx_ptr_->priv_data, "ch1_rgb", 
                          taco.ch1_rgb ? 1 : 0, 0);
-    printf("   ch1_rgb=%d: %s\n", taco.ch1_rgb ? 1 : 0, 
+    LOG_DEBUG_FMT("[Worker]    ch1_rgb=%d: %s", taco.ch1_rgb ? 1 : 0, 
            ret < 0 ? "FAILED" : "OK");
     
     // 设置RGB格式（从 config 读取）
     if (taco.ch1_rgb && !taco.ch1_rgb_format.empty()) {
         ret = av_opt_set(codec_ctx_ptr_->priv_data, "ch1_rgb_format", 
                          taco.ch1_rgb_format.c_str(), 0);
-        printf("   ch1_rgb_format=%s: %s\n", taco.ch1_rgb_format.c_str(), 
+        LOG_DEBUG_FMT("[Worker]    ch1_rgb_format=%s: %s", taco.ch1_rgb_format.c_str(), 
                ret < 0 ? "FAILED" : "OK");
     }
     
@@ -465,7 +465,7 @@ bool FfmpegDecodeVideoFileWorker::configureSpecialDecoder() {
     if (taco.ch1_rgb && !taco.ch1_rgb_std.empty()) {
         ret = av_opt_set(codec_ctx_ptr_->priv_data, "ch1_rgb_std", 
                          taco.ch1_rgb_std.c_str(), 0);
-        printf("   ch1_rgb_std=%s: %s\n", taco.ch1_rgb_std.c_str(), 
+        LOG_DEBUG_FMT("[Worker]    ch1_rgb_std=%s: %s", taco.ch1_rgb_std.c_str(), 
                ret < 0 ? "FAILED" : "OK");
     }
     
@@ -588,12 +588,12 @@ bool FfmpegDecodeVideoFileWorker::isAtEnd() const {
 
 bool FfmpegDecodeVideoFileWorker::fillBuffer(int frame_index, Buffer* buffer) {
     if (!buffer) {
-        LOG_ERROR_FMT("[Worker] ERROR: buffer is nullptr\n");
+        LOG_ERROR_FMT("[Worker] ERROR: buffer is nullptr");
         return false;
     }
     
     if (!is_open_.load(std::memory_order_acquire)) {
-        LOG_ERROR_FMT("[Worker] ERROR: Worker is not open\n");
+        LOG_ERROR_FMT("[Worker] ERROR: Worker is not open");
         return false;
     }
     
@@ -602,7 +602,7 @@ bool FfmpegDecodeVideoFileWorker::fillBuffer(int frame_index, Buffer* buffer) {
     // 步骤1: 从 Buffer 获取预分配的 AVFrame*
     AVFrame* frame_ptr = (AVFrame*)buffer->getVirtualAddress();
     if (!frame_ptr) {
-        LOG_ERROR_FMT("[Worker] ERROR: buffer->getVirtualAddress() is nullptr\n");
+        LOG_ERROR_FMT("[Worker] ERROR: buffer->getVirtualAddress() is nullptr");
         return false;
     }
     
@@ -619,7 +619,7 @@ bool FfmpegDecodeVideoFileWorker::fillBuffer(int frame_index, Buffer* buffer) {
         
         if (read_ret < 0) {
             if (read_ret == AVERROR_EOF) {
-                printf("🔄 EOF reached\n");
+                printf("🔄 EOF reached");
                 // 🔧 修复：Worker 不应该决定是否循环，只设置 EOF 标志并返回 false
                 // 循环逻辑由 ProductionLine 根据 loop_ 变量控制
                 av_packet_unref(packet_ptr_);
@@ -669,7 +669,7 @@ bool FfmpegDecodeVideoFileWorker::fillBuffer(int frame_index, Buffer* buffer) {
     av_packet_unref(packet_ptr_);
     
     if (ret < 0) {
-        LOG_ERROR_FMT("[Worker] ERROR: avcodec_send_packet failed: %d\n", ret);
+        LOG_ERROR_FMT("[Worker] ERROR: avcodec_send_packet failed: %d", ret);
         return false;
     }
     bool recv_frm = false;
@@ -695,7 +695,7 @@ bool FfmpegDecodeVideoFileWorker::fillBuffer(int frame_index, Buffer* buffer) {
         }
         
         if (phys_addr == 0) {
-            LOG_WARN_FMT("[Worker]  Warning: Failed to extract physical address\n");
+            LOG_WARN_FMT("[Worker]  Warning: Failed to extract physical address");
             return false;
         }
         
@@ -731,7 +731,7 @@ void FfmpegDecodeVideoFileWorker::setError(const std::string& error, int ffmpeg_
         av_strerror(ffmpeg_error, err_buf, sizeof(err_buf));
         LOG_ERROR_FMT("[Worker] FfmpegDecodeVideoFileWorker Error: %s (FFmpeg: %s)\n", error.c_str(), err_buf);
     } else {
-        LOG_ERROR_FMT("[Worker] FfmpegDecodeVideoFileWorker Error: %s\n", error.c_str());
+        LOG_ERROR_FMT("[Worker] FfmpegDecodeVideoFileWorker Error: %s", error.c_str());
     }
 }
 
@@ -747,14 +747,14 @@ const char* FfmpegDecodeVideoFileWorker::getCodecName() const {
 }
 
 void FfmpegDecodeVideoFileWorker::printStats() const {
-    printf("\n📊 FfmpegDecodeVideoFileWorker Statistics:\n");
-    printf("   File: %s\n", file_path_.c_str());
-    printf("   Codec: %s\n", getCodecName());
-    printf("   Resolution: %dx%d → %dx%d\n", width_, height_, output_width_, output_height_);
-    printf("   Total frames: %d\n", total_frames_);
-    printf("   Current frame: %d\n", current_frame_index_);
-    printf("   Decoded frames: %d\n", decoded_frames_.load());
-    printf("   Decode errors: %d\n", decode_errors_.load());
-    printf("   EOF: %s\n", eof_reached_ ? "YES" : "NO");
+    LOG_INFO("\n[Worker] 📊 FfmpegDecodeVideoFileWorker Statistics:");
+    LOG_INFO_FMT("[Worker]    File: %s", file_path_.c_str());
+    LOG_INFO_FMT("[Worker]    Codec: %s", getCodecName());
+    LOG_INFO_FMT("[Worker]    Resolution: %dx%d → %dx%d", width_, height_, output_width_, output_height_);
+    LOG_INFO_FMT("[Worker]    Total frames: %d", total_frames_);
+    LOG_INFO_FMT("[Worker]    Current frame: %d", current_frame_index_);
+    LOG_INFO_FMT("[Worker]    Decoded frames: %d", decoded_frames_.load());
+    LOG_INFO_FMT("[Worker]    Decode errors: %d", decode_errors_.load());
+    LOG_INFO_FMT("[Worker]    EOF: %s", eof_reached_ ? "YES" : "NO");
 }
 

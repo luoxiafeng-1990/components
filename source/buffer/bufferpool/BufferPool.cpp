@@ -25,11 +25,8 @@ BufferPool::BufferPool(
     // 获取logger
     auto logger = log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components"));
     
-    // 打印生命周期开始（空行+分隔线）
-    LOG4CPLUS_INFO(logger, "");
-    LOG4CPLUS_INFO(logger, log_prefix_ << " " << std::string(67, '='));
-    LOG4CPLUS_INFO(logger, log_prefix_ << " 构造: category=" << category_);
-    LOG4CPLUS_INFO(logger, log_prefix_ << " " << std::string(67, '='));
+    // 打印生命周期开始
+    LOG4CPLUS_INFO(logger, log_prefix_ << " 创建: category=" << category_);
 }
 
 BufferPool::~BufferPool() {
@@ -121,16 +118,16 @@ void BufferPool::submitFilled(Buffer* buffer_ptr) {
         
         // 验证 buffer 属于此 pool
         if (managed_buffers_.find(buffer_ptr) == managed_buffers_.end()) {
-            printf("⚠️  Buffer #%u does not belong to pool '%s'\n",
+            printf("⚠️  Buffer #%u does not belong to pool '%s'",
                    buffer_ptr->id(), name_.c_str());
             return;
         }
         
         // 🛡️ 状态检查：确保 buffer 由生产者持有
         if (buffer_ptr->state() != Buffer::State::LOCKED_BY_PRODUCER) {
-            printf("❌ ERROR: submitFilled() called with wrong state: %s (expected LOCKED_BY_PRODUCER)\n",
+            printf("❌ ERROR: submitFilled() called with wrong state: %s (expected LOCKED_BY_PRODUCER)",
                    Buffer::stateToString(buffer_ptr->state()));
-            printf("   Buffer #%u in pool '%s'\n", buffer_ptr->id(), name_.c_str());
+            printf("   Buffer #%u in pool '%s'", buffer_ptr->id(), name_.c_str());
             return;
         }
         
@@ -153,16 +150,16 @@ void BufferPool::releaseFree(Buffer* buffer_ptr) {
         
         // 验证 buffer 属于此 pool
         if (managed_buffers_.find(buffer_ptr) == managed_buffers_.end()) {
-            printf("⚠️  Buffer #%u does not belong to pool '%s'\n",
+            printf("⚠️  Buffer #%u does not belong to pool '%s'",
                    buffer_ptr->id(), name_.c_str());
             return;
         }
         
         // 🛡️ 状态检查：确保 buffer 由生产者持有（填充失败的场景）
         if (buffer_ptr->state() != Buffer::State::LOCKED_BY_PRODUCER) {
-            printf("❌ ERROR: releaseFree() called with wrong state: %s (expected LOCKED_BY_PRODUCER)\n",
+            printf("❌ ERROR: releaseFree() called with wrong state: %s (expected LOCKED_BY_PRODUCER)",
                    Buffer::stateToString(buffer_ptr->state()));
-            printf("   Buffer #%u in pool '%s'\n", buffer_ptr->id(), name_.c_str());
+            printf("   Buffer #%u in pool '%s'", buffer_ptr->id(), name_.c_str());
             return;
         }
         
@@ -231,16 +228,16 @@ void BufferPool::releaseFilled(Buffer* buffer) {
         
         // 验证 buffer 属于此 pool
         if (managed_buffers_.find(buffer) == managed_buffers_.end()) {
-            printf("⚠️  Buffer #%u does not belong to pool '%s'\n",
+            printf("⚠️  Buffer #%u does not belong to pool '%s'",
                    buffer->id(), name_.c_str());
             return;
         }
         
         // 🛡️ 状态检查：确保 buffer 由消费者持有
         if (buffer->state() != Buffer::State::LOCKED_BY_CONSUMER) {
-            printf("❌ ERROR: releaseFilled() called with wrong state: %s (expected LOCKED_BY_CONSUMER)\n",
+            printf("❌ ERROR: releaseFilled() called with wrong state: %s (expected LOCKED_BY_CONSUMER)",
                    Buffer::stateToString(buffer->state()));
-            printf("   Buffer #%u in pool '%s'\n", buffer->id(), name_.c_str());
+            printf("   Buffer #%u in pool '%s'", buffer->id(), name_.c_str());
             return;
         }
         
@@ -313,7 +310,7 @@ bool BufferPool::addBufferToQueue(Buffer* buffer, QueueType queue) {
         
         // 检查是否已托管
         if (managed_buffers_.find(buffer) != managed_buffers_.end()) {
-            printf("⚠️  Buffer #%u already in pool '%s'\n", 
+            printf("⚠️  Buffer #%u already in pool '%s'", 
                    buffer->id(), name_.c_str());
             return false;
         }
@@ -356,7 +353,7 @@ bool BufferPool::removeBufferFromPool(Buffer* buffer) {
         
         // 检查状态（只能移除空闲的）
         if (buffer->state() != Buffer::State::IDLE) {
-            printf("⚠️  Cannot remove buffer #%u: state=%s (must be IDLE)\n",
+            printf("⚠️  Cannot remove buffer #%u: state=%s (must be IDLE)",
                    buffer->id(), Buffer::stateToString(buffer->state()));
             return false;
         }
@@ -365,7 +362,7 @@ bool BufferPool::removeBufferFromPool(Buffer* buffer) {
         bool removed = removeFromQueue(free_queue_, buffer);
         
         if (!removed) {
-            printf("⚠️  Buffer #%u not in free_queue\n", buffer->id());
+            printf("⚠️  Buffer #%u not in free_queue", buffer->id());
             return false;
         }
         
@@ -411,28 +408,30 @@ bool BufferPool::removeFromQueue(std::queue<Buffer*>& queue, Buffer* target) {
 void BufferPool::printStats() const {
     std::lock_guard<std::mutex> lock(mutex_);
     
-    printf("\n========================================\n");
-    printf("📊 BufferPool '%s' Statistics\n", name_.c_str());
-    printf("========================================\n");
-    printf("  Category: %s\n", category_.empty() ? "(none)" : category_.c_str());
-    printf("  Registry ID: %lu\n", registry_id_);
-    printf("  Total buffers: %zu\n", managed_buffers_.size());
-    printf("  Free buffers: %zu\n", free_queue_.size());
-    printf("  Filled buffers: %zu\n", filled_queue_.size());
-    printf("  Running: %s\n", running_ ? "Yes" : "No");
-    printf("========================================\n\n");
+    auto logger = log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components"));
+    
+    LOG4CPLUS_INFO(logger, "[BufferPool] ========================================");
+    LOG4CPLUS_INFO(logger, "[BufferPool] 📊 BufferPool '" << name_ << "' Statistics");
+    LOG4CPLUS_INFO(logger, "[BufferPool] ========================================");
+    LOG4CPLUS_INFO(logger, "[BufferPool]   Category: " << (category_.empty() ? "(none)" : category_));
+    LOG4CPLUS_INFO(logger, "[BufferPool]   Registry ID: " << registry_id_);
+    LOG4CPLUS_INFO(logger, "[BufferPool]   Total buffers: " << managed_buffers_.size());
+    LOG4CPLUS_INFO(logger, "[BufferPool]   Free buffers: " << free_queue_.size());
+    LOG4CPLUS_INFO(logger, "[BufferPool]   Filled buffers: " << filled_queue_.size());
+    LOG4CPLUS_INFO(logger, "[BufferPool]   Running: " << (running_ ? "Yes" : "No"));
+    LOG4CPLUS_INFO(logger, "[BufferPool] ========================================");
 }
 
 void BufferPool::printAllBuffers() const {
     std::lock_guard<std::mutex> lock(mutex_);
     
-    printf("\n========================================\n");
-    printf("📋 BufferPool '%s' - All Buffers\n", name_.c_str());
-    printf("========================================\n");
+    printf("\n========================================");
+    printf("📋 BufferPool '%s' - All Buffers", name_.c_str());
+    printf("========================================");
     
     int index = 0;
     for (Buffer* buf : managed_buffers_) {
-        printf("  [%d] Buffer #%u: virt=%p, phys=0x%lx, size=%zu, state=%s\n",
+        printf("  [%d] Buffer #%u: virt=%p, phys=0x%lx, size=%zu, state=%s",
                index++,
                buf->id(),
                buf->getVirtualAddress(),
@@ -441,7 +440,7 @@ void BufferPool::printAllBuffers() const {
                Buffer::stateToString(buf->state()));
     }
     
-    printf("========================================\n\n");
+    printf("========================================\n");
 }
 
 void BufferPool::clearAllManagedBuffers() {

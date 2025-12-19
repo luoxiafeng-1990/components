@@ -48,7 +48,7 @@ FfmpegDecodeRtspWorker::FfmpegDecodeRtspWorker()
         slot.timestamp = 0;
     }
     
-    LOG_DEBUG("[Worker] FfmpegDecodeRtspWorker created\n");
+    LOG_DEBUG("[Worker] FfmpegDecodeRtspWorker created");
 }
 
 // v2.2: 配置构造函数（新增）
@@ -91,14 +91,14 @@ FfmpegDecodeRtspWorker::~FfmpegDecodeRtspWorker() {
 // ============ IVideoReader 接口实现 ============
 
 bool FfmpegDecodeRtspWorker::open(const char* path) {
-    LOG_ERROR("[Worker] ERROR: RTSP stream requires explicit format specification\n");
+    LOG_ERROR("[Worker] ERROR: RTSP stream requires explicit format specification");
     printf("   Please use: open(rtsp_url, width, height, bits_per_pixel)\n");
     return false;
 }
 
 bool FfmpegDecodeRtspWorker::open(const char* path, int width, int height, int bits_per_pixel) {
     if (is_open_) {
-        LOG_WARN_FMT("[Worker]  Warning: Stream already open, closing previous stream\n");
+        LOG_WARN_FMT("[Worker]  Warning: Stream already open, closing previous stream");
         close();
     }
     
@@ -116,7 +116,7 @@ bool FfmpegDecodeRtspWorker::open(const char* path, int width, int height, int b
             output_pixel_format_ = AV_PIX_FMT_BGRA;
             break;
         default:
-            LOG_ERROR_FMT("[Worker] ERROR: Unsupported bits_per_pixel: %d\n", bits_per_pixel);
+            LOG_ERROR_FMT("[Worker] ERROR: Unsupported bits_per_pixel: %d", bits_per_pixel);
             return false;
     }
     
@@ -143,7 +143,7 @@ bool FfmpegDecodeRtspWorker::open(const char* path, int width, int height, int b
     
     is_open_ = true;
     
-    LOG_DEBUG("[Worker] RTSP stream opened successfully\n");
+    LOG_DEBUG("[Worker] RTSP stream opened successfully");
     return true;
 }
 
@@ -171,7 +171,7 @@ void FfmpegDecodeRtspWorker::close() {
     is_open_ = false;
     connected_ = false;
     
-    LOG_DEBUG("[Worker] RTSP stream closed\n");
+    LOG_DEBUG("[Worker] RTSP stream closed");
     printf("   Decoded frames: %d\n", decoded_frames_.load());
     printf("   Dropped frames: %d\n", dropped_frames_.load());
 }
@@ -182,22 +182,22 @@ bool FfmpegDecodeRtspWorker::isOpen() const {
 
 
 bool FfmpegDecodeRtspWorker::seek(int frame_index) {
-    LOG_WARN("[Worker]  Warning: RTSP stream does not support seeking\n");
+    LOG_WARN("[Worker]  Warning: RTSP stream does not support seeking");
     return false;
 }
 
 bool FfmpegDecodeRtspWorker::seekToBegin() {
-    LOG_WARN("[Worker]  Warning: RTSP stream does not support seeking\n");
+    LOG_WARN("[Worker]  Warning: RTSP stream does not support seeking");
     return false;
 }
 
 bool FfmpegDecodeRtspWorker::seekToEnd() {
-    LOG_WARN("[Worker]  Warning: RTSP stream does not support seeking\n");
+    LOG_WARN("[Worker]  Warning: RTSP stream does not support seeking");
     return false;
 }
 
 bool FfmpegDecodeRtspWorker::skip(int frame_count) {
-    LOG_WARN("[Worker]  Warning: RTSP stream does not support frame skipping\n");
+    LOG_WARN("[Worker]  Warning: RTSP stream does not support frame skipping");
     return false;
 }
 
@@ -402,7 +402,7 @@ bool FfmpegDecodeRtspWorker::connectRTSP() {
     
     connected_ = true;
     
-    LOG_DEBUG("[Worker] Connected to RTSP stream\n");
+    LOG_DEBUG("[Worker] Connected to RTSP stream");
     printf("   Codec: %s\n", codec->long_name);
     printf("   Stream resolution: %dx%d\n", codec_ctx_ptr_->width, codec_ctx_ptr_->height);
     printf("   Output resolution: %dx%d\n", width_, height_);
@@ -446,7 +446,7 @@ void FfmpegDecodeRtspWorker::decodeThreadFunc() {
             // ✨ 零拷贝模式：直接注入BufferPool
             // TODO: 实现 NormalAllocator 动态注入逻辑
             // 临时方案：使用传统模式
-            LOG_WARN("[Worker]  Buffer pool injection not yet implemented with new allocator\n");
+            LOG_WARN("[Worker]  Buffer pool injection not yet implemented with new allocator");
             printf("   Falling back to internal buffer mode\n");
             storeToInternalBuffer(frame);
             decoded_frames_++;
@@ -573,7 +573,7 @@ bool FfmpegDecodeRtspWorker::copyFromInternalBuffer(void* dest, size_t size) {
 void FfmpegDecodeRtspWorker::setError(const std::string& error) {
     std::lock_guard<std::mutex> lock(error_mutex_);
     last_error_ = error;
-    LOG_ERROR_FMT("[Worker] RtspVideoReader Error: %s\n", error.c_str());
+    LOG_ERROR_FMT("[Worker] RtspVideoReader Error: %s", error.c_str());
 }
 
 uint64_t FfmpegDecodeRtspWorker::getAVFramePhysicalAddress(AVFrame* frame) {

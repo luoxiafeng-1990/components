@@ -52,9 +52,9 @@ static volatile bool g_running = true;
  * - 显示性能统计
  */
 static int test_4frame_loop(const char* raw_video_path) {
-    LOG_INFO("\n═══════════════════════════════════════════════════════");
+    LOG_INFO("═══════════════════════════════════════════════════════");
     LOG_INFO("  Test: Multi-Buffer Loop Display (Using VideoProductionLine)");
-    LOG_INFO("═══════════════════════════════════════════════════════\n");
+    LOG_INFO("═══════════════════════════════════════════════════════");
     
     // 1. 初始化显示设备
     LinuxFramebufferDevice display;
@@ -178,9 +178,9 @@ static int test_4frame_loop(const char* raw_video_path) {
  * - 展示生产者-消费者模式
  */
 static int test_sequential_playback(const char* raw_video_path) {
-    LOG_INFO("\n═══════════════════════════════════════════════════════");
+    LOG_INFO("═══════════════════════════════════════════════════════");
     LOG_INFO("  Test: Sequential Playback (Using VideoProductionLine)");
-    LOG_INFO("═══════════════════════════════════════════════════════\n");
+    LOG_INFO("═══════════════════════════════════════════════════════");
     
     // 1. 初始化显示设备
     LinuxFramebufferDevice display;
@@ -320,9 +320,9 @@ static int test_sequential_playback(const char* raw_video_path) {
  * - 展示生产者-消费者模式的解耦架构
  */
 static int test_buffermanager_producer(const char* raw_video_path) {
-    LOG_INFO("\n═══════════════════════════════════════════════════════");
+    LOG_INFO("═══════════════════════════════════════════════════════");
     LOG_INFO("  Test: BufferPool + VideoProductionLine (New Architecture)");
-    LOG_INFO("═══════════════════════════════════════════════════════\n");
+    LOG_INFO("═══════════════════════════════════════════════════════");
     
     // 1. 初始化显示设备
     LinuxFramebufferDevice display;
@@ -441,9 +441,9 @@ static int test_buffermanager_producer(const char* raw_video_path) {
  * - 暂时使用普通 VideoProductionLine 作为替代
  */
 static int test_buffermanager_iouring(const char* raw_video_path) {
-    LOG_INFO("\n═══════════════════════════════════════════════════════");
+    LOG_INFO("═══════════════════════════════════════════════════════");
     LOG_INFO("  Test: io_uring Mode (using VideoProductionLine temporarily)");
-    LOG_INFO("═══════════════════════════════════════════════════════\n");
+    LOG_INFO("═══════════════════════════════════════════════════════");
     
     LOG_INFO("Note: IoUringVideoProductionLine not yet implemented in new architecture");
     LOG_INFO("Using standard VideoProductionLine as fallback");
@@ -579,9 +579,9 @@ static int test_buffermanager_iouring(const char* raw_video_path) {
  * 测试5：RTSP 视频流播放（Worker自动创建BufferPool + DMA 零拷贝显示）
  */
 static int test_rtsp_stream(const char* rtsp_url) {
-    LOG_INFO("\n═══════════════════════════════════════════════════════");
+    LOG_INFO("═══════════════════════════════════════════════════════");
     LOG_INFO("  Test: RTSP Stream Playback (Independent BufferPool + DMA)");
-    LOG_INFO("═══════════════════════════════════════════════════════\n");
+    LOG_INFO("═══════════════════════════════════════════════════════");
     
     LOG_INFO("Zero-Copy Workflow:");
     LOG_INFO("  1. Worker opens RTSP stream and automatically creates BufferPool (if needed)");
@@ -654,7 +654,7 @@ static int test_rtsp_stream(const char* rtsp_url) {
         return -1;
     }
     
-    LOG_INFO_FMT("Using BufferPool: '%s' (created by Worker via Allocator)", 
+    LOG_INFO_FMT("[Test] Using BufferPool: '%s' (created by Worker via Allocator)", 
                  producer_pool_sptr->getName().c_str());
     producer_pool_sptr->printStats();
     
@@ -738,9 +738,9 @@ static int test_rtsp_stream(const char* rtsp_url) {
  * 测试6：FFmpeg 编码视频文件播放（使用Worker自动创建BufferPool）
  */
 static int test_h264_taco_video(const char* video_path) {
-    LOG_INFO("\n═══════════════════════════════════════════════════════");
+    LOG_INFO("═══════════════════════════════════════════════════════");
     LOG_INFO_FMT("  Test: FFmpeg Encoded Video Playback - File: %s", video_path);
-    LOG_INFO("═══════════════════════════════════════════════════════\n");
+    LOG_INFO("═══════════════════════════════════════════════════════");
     
     // 1. 初始化显示设备
     LOG_INFO("[Test] 初始化显示设备...");
@@ -805,7 +805,7 @@ static int test_h264_taco_video(const char* video_path) {
         return -1;
     }
     
-    LOG_INFO_FMT("Using BufferPool: '%s' (created by Worker via Allocator)", 
+    LOG_INFO_FMT("[Test] Using BufferPool: '%s' (created by Worker via Allocator)", 
                  producer_pool_sptr->getName().c_str());
     producer_pool_sptr->printStats();
     
@@ -877,7 +877,7 @@ static int test_h264_taco_video(const char* video_path) {
     // 10. 停止性能监控
     if (display_monitor) {
         display_monitor->stop();
-        LOG_INFO("\n═══════════════════════════════════════════════════════");
+        LOG_INFO("═══════════════════════════════════════════════════════");
         LOG_INFO("  Display Performance Statistics");
         LOG_INFO("═══════════════════════════════════════════════════════");
         display_monitor->printStatistics();
@@ -1048,9 +1048,9 @@ static void decode_production_line_worker(
  * - 统计所有线程的解码性能
  */
 static int test_h264_taco_video_multithread(const char* video_path) {
-    LOG_INFO("\n═══════════════════════════════════════════════════════");
+    LOG_INFO("═══════════════════════════════════════════════════════");
     LOG_INFO_FMT("  Test: Multi-threaded FFmpeg Video Decoding - File: %s", video_path);
-    LOG_INFO("═══════════════════════════════════════════════════════\n");
+    LOG_INFO("═══════════════════════════════════════════════════════");
     
     // 配置参数
     const int num_threads = 4;  // 固定4个线程
@@ -1062,7 +1062,7 @@ static int test_h264_taco_video_multithread(const char* video_path) {
     LOG_INFO_FMT("  Video file: %s", video_path);
     LOG_INFO_FMT("  Output resolution: %dx%d", output_width, output_height);
     LOG_INFO_FMT("  Display: Disabled (decode only)");
-    LOG_INFO("");
+    
     
     // 全局统计
     std::atomic<int> total_frames(0);
@@ -1084,7 +1084,7 @@ static int test_h264_taco_video_multithread(const char* video_path) {
     
     LOG_INFO_FMT("All %d decode threads started", num_threads);
     LOG_INFO("[Test] 按Ctrl+C停止");
-    LOG_INFO("");
+    
     
     // 等待所有线程完成（或通过 g_running 控制）
     for (auto& t : threads) {
@@ -1092,7 +1092,7 @@ static int test_h264_taco_video_multithread(const char* video_path) {
     }
     
     // 打印最终统计
-    LOG_INFO("\n═══════════════════════════════════════════════════════");
+    LOG_INFO("═══════════════════════════════════════════════════════");
     LOG_INFO("  Test Results");
     LOG_INFO("═══════════════════════════════════════════════════════");
     LOG_INFO_FMT("Total threads: %d", num_threads);
@@ -1124,10 +1124,10 @@ static int test_h264_taco_video_multithread(const char* video_path) {
 static int test_buffer_writer(const char* video_path) {
     using namespace productionline::io;
     
-    LOG_INFO("\n═══════════════════════════════════════════════════════");
+    LOG_INFO("═══════════════════════════════════════════════════════");
     LOG_INFO_FMT("  Test 8: BufferWriter - Save Frames (Simplified API)");
     LOG_INFO_FMT("  Video: %s", video_path);
-    LOG_INFO("═══════════════════════════════════════════════════════\n");
+    LOG_INFO("═══════════════════════════════════════════════════════");
     
     // 1. 配置VideoProductionLine
     LOG_INFO("Step 1: Configuring VideoProductionLine...");
@@ -1235,7 +1235,7 @@ static int test_buffer_writer(const char* video_path) {
     producer.stop();
     
     // 7. 打印统计信息
-    LOG_INFO("\n═══════════════════════════════════════════════════════");
+    LOG_INFO("═══════════════════════════════════════════════════════");
     LOG_INFO("  Test Results");
     LOG_INFO("═══════════════════════════════════════════════════════");
     LOG_INFO_FMT("Output file: %s", output_path);
@@ -1254,7 +1254,7 @@ static int test_buffer_writer(const char* video_path) {
         LOG_ERROR("\n❌ Test FAILED: No frames saved");
     }
     
-    LOG_INFO("═══════════════════════════════════════════════════════\n");
+    LOG_INFO("═══════════════════════════════════════════════════════");
     
     return success ? 0 : -1;
 }

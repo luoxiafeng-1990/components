@@ -59,7 +59,7 @@ LinuxFramebufferDevice::~LinuxFramebufferDevice() {
 
 bool LinuxFramebufferDevice::initialize(int device_index) {
     if (is_initialized_) {
-        LOG_WARN_FMT("[Display]  Warning: Device already initialized\n");
+        LOG_WARN_FMT("[Display]  Warning: Device already initialized");
         return true;
     }
     
@@ -68,16 +68,16 @@ bool LinuxFramebufferDevice::initialize(int device_index) {
     // 1. 查找framebuffer设备节点
     const char* device_node = findDeviceNode(fb_index_);
     if (!device_node) {
-        LOG_ERROR_FMT("[Display] ERROR: Cannot find framebuffer device for fb%d\n", fb_index_);
+        LOG_ERROR_FMT("[Display] ERROR: Cannot find framebuffer device for fb%d", fb_index_);
         return false;
     }
     
-    LOG_INFO_FMT("[Display] Found framebuffer device: %s\n", device_node);
+    LOG_INFO_FMT("[Display] Found framebuffer device: %s", device_node);
     
     // 2. 打开framebuffer设备
     fd_ = open(device_node, O_RDWR);
     if (fd_ < 0) {
-        LOG_ERROR_FMT("[Display] ERROR: Cannot open %s: %s\n", device_node, strerror(errno));
+        LOG_ERROR_FMT("[Display] ERROR: Cannot open %s: %s", device_node, strerror(errno));
         return false;
     }
     
@@ -100,13 +100,13 @@ bool LinuxFramebufferDevice::initialize(int device_index) {
         BufferAllocatorFactory::AllocatorType::FRAMEBUFFER
     );
     if (!allocator_facade_) {
-        LOG_ERROR_FMT("[Display] ERROR: Failed to create allocator_facade_\n");
+        LOG_ERROR_FMT("[Display] ERROR: Failed to create allocator_facade_");
         munmap(framebuffer_base_ptr_, framebuffer_total_size_);
         close(fd_);
         fd_ = -1;
         return false;
     }
-    LOG_DEBUG_FMT("[Display] allocator_facade_ created for FRAMEBUFFER type\n");
+    LOG_DEBUG_FMT("[Display] BufferAllocatorFacade instance created for FRAMEBUFFER type");
     
     // 6. 通过 allocator 创建空的 BufferPool（v2.0: 返回 pool_id）
     std::string pool_name = "LinuxFramebufferDevice_fb" + std::to_string(fb_index_);
@@ -118,7 +118,7 @@ bool LinuxFramebufferDevice::initialize(int device_index) {
     );
     
     if (buffer_pool_id_ == 0) {
-        LOG_ERROR_FMT("[Display] ERROR: Failed to create BufferPool through allocator\n");
+        LOG_ERROR_FMT("[Display] ERROR: Failed to create BufferPool through allocator");
         allocator_facade_.reset();
         munmap(framebuffer_base_ptr_, framebuffer_total_size_);
         close(fd_);
@@ -130,9 +130,9 @@ bool LinuxFramebufferDevice::initialize(int device_index) {
     auto pool_weak = BufferPoolRegistry::getInstance().getPool(buffer_pool_id_);
     auto pool = pool_weak.lock();
     if (pool) {
-        LOG_DEBUG_FMT("[Display] Empty BufferPool '%s' created (ID: %lu)\n", pool->getName().c_str(), buffer_pool_id_);
+        LOG_DEBUG_FMT("[Display] Empty BufferPool '%s' created (ID: %lu)", pool->getName().c_str(), buffer_pool_id_);
     } else {
-        LOG_DEBUG_FMT("[Display] Empty BufferPool created (ID: %lu)\n", buffer_pool_id_);
+        LOG_DEBUG_FMT("[Display] Empty BufferPool created (ID: %lu)", buffer_pool_id_);
     }
     
     // 7. 动态注入 framebuffer buffers 到 BufferPool（v2.0: 使用 pool_id）
@@ -150,7 +150,7 @@ bool LinuxFramebufferDevice::initialize(int device_index) {
         );
         
         if (!buffer) {
-            LOG_ERROR_FMT("[Display] ERROR: Failed to inject buffer #%d to BufferPool\n", i);
+            LOG_ERROR_FMT("[Display] ERROR: Failed to inject buffer #%d to BufferPool", i);
             buffer_pool_id_ = 0;
             allocator_facade_.reset();
             munmap(framebuffer_base_ptr_, framebuffer_total_size_);
@@ -163,10 +163,10 @@ bool LinuxFramebufferDevice::initialize(int device_index) {
     // v2.0: 从 Registry 获取 Pool 以获取名称
     pool = pool_weak.lock();
     if (pool) {
-        LOG_DEBUG_FMT("[Display] All %d framebuffer buffers injected to BufferPool '%s'\n",
+        LOG_DEBUG_FMT("[Display] All %d framebuffer buffers injected to BufferPool '%s'",
                buffer_count_, pool->getName().c_str());
     } else {
-        LOG_DEBUG_FMT("[Display] All %d framebuffer buffers injected to BufferPool (ID: %lu)\n",
+        LOG_DEBUG_FMT("[Display] All %d framebuffer buffers injected to BufferPool (ID: %lu)",
                buffer_count_, buffer_pool_id_);
     }
     
@@ -176,10 +176,10 @@ bool LinuxFramebufferDevice::initialize(int device_index) {
     // 打印初始化成功的总结信息
     pool = pool_weak.lock();
     if (pool) {
-        LOG_DEBUG_FMT("[Display] Display initialized: %dx%d, %d buffers, %d bits/pixel\n",
+        LOG_DEBUG_FMT("[Display] Display initialized: %dx%d, %d buffers, %d bits/pixel",
                width_, height_, pool->getTotalCount(), bits_per_pixel_);
     } else {
-        LOG_DEBUG_FMT("[Display] Display initialized: %dx%d, %d buffers, %d bits/pixel\n",
+        LOG_DEBUG_FMT("[Display] Display initialized: %dx%d, %d buffers, %d bits/pixel",
                width_, height_, buffer_count_, bits_per_pixel_);
     }
     
@@ -211,7 +211,7 @@ void LinuxFramebufferDevice::cleanup() {
     current_buffer_index_ = 0;
     buffer_count_ = 0;
     
-    LOG_DEBUG_FMT("[Display] LinuxFramebufferDevice cleaned up\n");
+    LOG_DEBUG_FMT("[Display] LinuxFramebufferDevice cleaned up");
 }
 
 int LinuxFramebufferDevice::getWidth() const {
@@ -249,17 +249,17 @@ size_t LinuxFramebufferDevice::getBufferSize() const {
 
 bool LinuxFramebufferDevice::displayBuffer(Buffer* buffer) {
     if (!is_initialized_) {
-        LOG_ERROR_FMT("[Display] ERROR: Device not initialized\n");
+        LOG_ERROR_FMT("[Display] ERROR: Device not initialized");
         return false;
     }
     
     if (!buffer) {
-        LOG_ERROR_FMT("[Display] ERROR: Null buffer pointer\n");
+        LOG_ERROR_FMT("[Display] ERROR: Null buffer pointer");
         return false;
     }
     
     if (buffer_pool_id_ == 0) {
-        LOG_ERROR_FMT("[Display] ERROR: BufferPool not initialized\n");
+        LOG_ERROR_FMT("[Display] ERROR: BufferPool not initialized");
         return false;
     }
     
@@ -267,14 +267,14 @@ bool LinuxFramebufferDevice::displayBuffer(Buffer* buffer) {
     auto pool_weak = BufferPoolRegistry::getInstance().getPool(buffer_pool_id_);
     auto pool = pool_weak.lock();
     if (!pool) {
-        LOG_ERROR_FMT("[Display] ERROR: BufferPool (ID: %lu) not found or already destroyed\n", buffer_pool_id_);
+        LOG_ERROR_FMT("[Display] ERROR: BufferPool (ID: %lu) not found or already destroyed", buffer_pool_id_);
         return false;
     }
     
     // 验证Buffer是否属于当前设备的BufferPool
     Buffer* pool_buffer = pool->getBufferById(buffer->id());
     if (!pool_buffer || pool_buffer != buffer) {
-        LOG_ERROR_FMT("[Display] ERROR: Buffer (ID=%u) does not belong to device's BufferPool\n", 
+        LOG_ERROR_FMT("[Display] ERROR: Buffer (ID=%u) does not belong to device's BufferPool", 
                buffer->id());
         return false;
     }
@@ -283,7 +283,7 @@ bool LinuxFramebufferDevice::displayBuffer(Buffer* buffer) {
     int buffer_index = static_cast<int>(buffer->id());
     
     if (buffer_index < 0 || buffer_index >= buffer_count_) {
-        LOG_ERROR_FMT("[Display] ERROR: Invalid buffer index %d (from Buffer ID %u)\n", 
+        LOG_ERROR_FMT("[Display] ERROR: Invalid buffer index %d (from Buffer ID %u)", 
                buffer_index, buffer->id());
         return false;
     }
@@ -291,7 +291,7 @@ bool LinuxFramebufferDevice::displayBuffer(Buffer* buffer) {
     // 获取当前屏幕信息
     struct fb_var_screeninfo var_info;
     if (ioctl(fd_, FBIOGET_VSCREENINFO, &var_info) < 0) {
-        LOG_ERROR_FMT("[Display] ERROR: FBIOGET_VSCREENINFO failed: %s\n", strerror(errno));
+        LOG_ERROR_FMT("[Display] ERROR: FBIOGET_VSCREENINFO failed: %s", strerror(errno));
         return false;
     }
     
@@ -301,7 +301,7 @@ bool LinuxFramebufferDevice::displayBuffer(Buffer* buffer) {
     
     // 通过ioctl通知驱动切换buffer
     if (ioctl(fd_, FBIOPAN_DISPLAY, &var_info) < 0) {
-        LOG_ERROR_FMT("[Display] ERROR: FBIOPAN_DISPLAY failed: %s\n", strerror(errno));
+        LOG_ERROR_FMT("[Display] ERROR: FBIOPAN_DISPLAY failed: %s", strerror(errno));
         return false;
     }
     
@@ -311,12 +311,12 @@ bool LinuxFramebufferDevice::displayBuffer(Buffer* buffer) {
 
 bool LinuxFramebufferDevice::displayBuffer(BufferPool* pool, int buffer_index) {
     if (!is_initialized_) {
-        LOG_ERROR_FMT("[Display] ERROR: Device not initialized\n");
+        LOG_ERROR_FMT("[Display] ERROR: Device not initialized");
         return false;
     }
     
     if (!pool) {
-        LOG_ERROR_FMT("[Display] ERROR: Null BufferPool pointer\n");
+        LOG_ERROR_FMT("[Display] ERROR: Null BufferPool pointer");
         return false;
     }
     
@@ -325,13 +325,13 @@ bool LinuxFramebufferDevice::displayBuffer(BufferPool* pool, int buffer_index) {
         auto pool_weak = BufferPoolRegistry::getInstance().getPool(buffer_pool_id_);
         auto device_pool = pool_weak.lock();
         if (device_pool && pool != device_pool.get()) {
-            LOG_WARN_FMT("[Display]  Warning: BufferPool mismatch (provided pool != device's buffer_pool_)\n");
-            printf("   Continuing anyway...\n");
+            LOG_WARN_FMT("[Display]  Warning: BufferPool mismatch (provided pool != device's buffer_pool_)");
+            LOG_WARN("[Display]     Continuing anyway...");
         }
     }
     
     if (buffer_index < 0 || buffer_index >= buffer_count_) {
-        LOG_ERROR_FMT("[Display] ERROR: Invalid buffer index %d (valid range: 0-%d)\n", 
+        LOG_ERROR_FMT("[Display] ERROR: Invalid buffer index %d (valid range: 0-%d)", 
                buffer_index, buffer_count_ - 1);
         return false;
     }
@@ -339,7 +339,7 @@ bool LinuxFramebufferDevice::displayBuffer(BufferPool* pool, int buffer_index) {
     // 获取当前屏幕信息
     struct fb_var_screeninfo var_info;
     if (ioctl(fd_, FBIOGET_VSCREENINFO, &var_info) < 0) {
-        LOG_ERROR_FMT("[Display] ERROR: FBIOGET_VSCREENINFO failed: %s\n", strerror(errno));
+        LOG_ERROR_FMT("[Display] ERROR: FBIOGET_VSCREENINFO failed: %s", strerror(errno));
         return false;
     }
     
@@ -349,7 +349,7 @@ bool LinuxFramebufferDevice::displayBuffer(BufferPool* pool, int buffer_index) {
     
     // 通过ioctl通知驱动切换buffer
     if (ioctl(fd_, FBIOPAN_DISPLAY, &var_info) < 0) {
-        LOG_ERROR_FMT("[Display] ERROR: FBIOPAN_DISPLAY failed: %s\n", strerror(errno));
+        LOG_ERROR_FMT("[Display] ERROR: FBIOPAN_DISPLAY failed: %s", strerror(errno));
         return false;
     }
     
@@ -359,13 +359,13 @@ bool LinuxFramebufferDevice::displayBuffer(BufferPool* pool, int buffer_index) {
 
 bool LinuxFramebufferDevice::waitVerticalSync() {
     if (!is_initialized_) {
-        LOG_ERROR_FMT("[Display] ERROR: Device not initialized\n");
+        LOG_ERROR_FMT("[Display] ERROR: Device not initialized");
         return false;
     }
     
     int zero = 0;
     if (ioctl(fd_, FBIO_WAITFORVSYNC, &zero) < 0) {
-        LOG_WARN_FMT("[Display]  Warning: FBIO_WAITFORVSYNC failed: %s\n", strerror(errno));
+        LOG_WARN_FMT("[Display]  Warning: FBIO_WAITFORVSYNC failed: %s", strerror(errno));
         return false;
     }
     
@@ -387,7 +387,7 @@ const char* LinuxFramebufferDevice::findDeviceNode(int device_index) {
     // 打开/proc/fb文件
     fp = fopen(PROC_FB, "r");
     if (fp == NULL) {
-        LOG_ERROR_FMT("[Display] ERROR: Cannot open %s: %s\n", PROC_FB, strerror(errno));
+        LOG_ERROR_FMT("[Display] ERROR: Cannot open %s: %s", PROC_FB, strerror(errno));
         return NULL;
     }
     
@@ -413,7 +413,7 @@ const char* LinuxFramebufferDevice::findDeviceNode(int device_index) {
     }
     
     fclose(fp);
-    LOG_ERROR_FMT("[Display] ERROR: %s not found in %s\n", 
+    LOG_ERROR_FMT("[Display] ERROR: %s not found in %s", 
            (device_index == 0) ? TPS_FB0 : TPS_FB1, PROC_FB);
     return NULL;
 }
@@ -422,7 +422,7 @@ bool LinuxFramebufferDevice::queryHardwareDisplayParameters() {
     // 获取屏幕信息
     struct fb_var_screeninfo var_info;
     if (ioctl(fd_, FBIOGET_VSCREENINFO, &var_info) < 0) {
-        LOG_ERROR_FMT("[Display] ERROR: FBIOGET_VSCREENINFO failed: %s\n", strerror(errno));
+        LOG_ERROR_FMT("[Display] ERROR: FBIOGET_VSCREENINFO failed: %s", strerror(errno));
         return false;
     }
     
@@ -439,15 +439,15 @@ bool LinuxFramebufferDevice::queryHardwareDisplayParameters() {
     // 计算buffer数量（虚拟高度 / 实际高度）
     int buffer_count = var_info.yres_virtual / var_info.yres;
     
-    LOG_INFO_FMT("[Display] Framebuffer info:\n");
-    printf("   xres=%d, yres=%d, bits_per_pixel=%d\n", 
+    LOG_INFO_FMT("[Display] Framebuffer info:");
+    LOG_INFO_FMT("[Display]    xres=%d, yres=%d, bits_per_pixel=%d", 
            var_info.xres, var_info.yres, var_info.bits_per_pixel);
-    printf("   yres_virtual=%d, buffer_count=%d\n", 
+    LOG_INFO_FMT("[Display]    yres_virtual=%d, buffer_count=%d", 
            var_info.yres_virtual, buffer_count);
     
     // 保存 buffer 数量（稍后创建 BufferPool）
     buffer_count_ = buffer_count;
-    LOG_DEBUG_FMT("[Display] Will create BufferPool with %d buffers\n", buffer_count_);
+    LOG_DEBUG_FMT("[Display] Will create BufferPool with %d buffers", buffer_count_);
     
     return true;
 }
@@ -456,7 +456,7 @@ bool LinuxFramebufferDevice::mapHardwareFramebufferMemory() {
     // 计算需要映射的总大小
     framebuffer_total_size_ = buffer_size_ * buffer_count_;
     
-    LOG_DEBUG_FMT("[Display]  Mapping framebuffer: size=%zu bytes (%d buffers × %zu bytes)\n", 
+    LOG_DEBUG_FMT("[Display]  Mapping framebuffer: size=%zu bytes (%d buffers × %zu bytes)", 
            framebuffer_total_size_, buffer_count_, buffer_size_);
     
     // 执行mmap映射
@@ -467,12 +467,12 @@ bool LinuxFramebufferDevice::mapHardwareFramebufferMemory() {
                             0);
     
     if (framebuffer_base_ptr_ == MAP_FAILED) {
-        LOG_ERROR_FMT("[Display] ERROR: mmap failed: %s\n", strerror(errno));
+        LOG_ERROR_FMT("[Display] ERROR: mmap failed: %s", strerror(errno));
         framebuffer_base_ptr_ = nullptr;
         return false;
     }
     
-    LOG_DEBUG_FMT("[Display] mmap successful: base_address=%p\n", framebuffer_base_ptr_);
+    LOG_DEBUG_FMT("[Display] mmap successful: base_address=%p", framebuffer_base_ptr_);
     
     return true;
 }
@@ -481,7 +481,7 @@ bool LinuxFramebufferDevice::mapHardwareFramebufferMemory() {
 void LinuxFramebufferDevice::unmapHardwareFramebufferMemory() {
     if (framebuffer_base_ptr_ != nullptr) {
         if (munmap(framebuffer_base_ptr_, framebuffer_total_size_) < 0) {
-            LOG_WARN_FMT("[Display]  Warning: munmap failed: %s\n", strerror(errno));
+            LOG_WARN_FMT("[Display]  Warning: munmap failed: %s", strerror(errno));
         }
         framebuffer_base_ptr_ = nullptr;
         framebuffer_total_size_ = 0;
@@ -506,20 +506,20 @@ LinuxFramebufferDevice::MappedInfo LinuxFramebufferDevice::getMappedInfo() const
 
 bool LinuxFramebufferDevice::displayBufferByDMA(Buffer* buffer) {
     if (!is_initialized_) {
-        LOG_ERROR_FMT("[Display] ERROR: Device not initialized\n");
+        LOG_ERROR_FMT("[Display] ERROR: Device not initialized");
         return false;
     }
     
     if (!buffer) {
-        LOG_ERROR_FMT("[Display] ERROR: Null buffer pointer\n");
+        LOG_ERROR_FMT("[Display] ERROR: Null buffer pointer");
         return false;
     }
     
     // 检查是否有物理地址
     uint64_t phys_addr = buffer->getPhysicalAddress();
     if (phys_addr == 0) {
-        LOG_ERROR_FMT("[Display] ERROR: Buffer has no physical address (phys_addr=0)\n");
-        printf("   Hint: DMA display requires buffer with physical address\n");
+        LOG_ERROR_FMT("[Display] ERROR: Buffer has no physical address (phys_addr=0)");
+        LOG_ERROR("[Display]    Hint: DMA display requires buffer with physical address");
         return false;
     }
     
@@ -533,16 +533,16 @@ bool LinuxFramebufferDevice::displayBufferByDMA(Buffer* buffer) {
     
     // 设置 DMA 物理地址
     if (ioctl(fd_, FB_IOCTL_SET_DMA_INFO, &dma_info) < 0) {
-        LOG_ERROR_FMT("[Display] ERROR: FB_IOCTL_SET_DMA_INFO failed: %s (phys_addr=0x%llx)\n", 
+        LOG_ERROR_FMT("[Display] ERROR: FB_IOCTL_SET_DMA_INFO failed: %s (phys_addr=0x%llx)", 
                strerror(errno), (unsigned long long)phys_addr);
-        printf("   Hint: Driver may not support DMA display\n");
+        LOG_ERROR("[Display]    Hint: Driver may not support DMA display");
         return false;
     }
     
     // 获取当前屏幕信息
     struct fb_var_screeninfo var_info;
     if (ioctl(fd_, FBIOGET_VSCREENINFO, &var_info) < 0) {
-        LOG_ERROR_FMT("[Display] ERROR: FBIOGET_VSCREENINFO failed: %s\n", strerror(errno));
+        LOG_ERROR_FMT("[Display] ERROR: FBIOGET_VSCREENINFO failed: %s", strerror(errno));
         return false;
     }
     
@@ -551,14 +551,14 @@ bool LinuxFramebufferDevice::displayBufferByDMA(Buffer* buffer) {
     
     // 通知驱动显示（驱动会通过 DMA 从 phys_addr 读取数据）
     if (ioctl(fd_, FBIOPAN_DISPLAY, &var_info) < 0) {
-        LOG_ERROR_FMT("[Display] ERROR: FBIOPAN_DISPLAY failed: %s\n", strerror(errno));
+        LOG_ERROR_FMT("[Display] ERROR: FBIOPAN_DISPLAY failed: %s", strerror(errno));
         return false;
     }
     
     // 统计和日志（每100帧打印一次）
     display_count++;
     if (display_count == 1 || display_count % 100 == 0) {
-        printf("🚀 [DMA Display] Frame #%d (phys_addr=0x%llx, buffer_id=%u)\n",
+        printf("🚀 [DMA Display] Frame #%d (phys_addr=0x%llx, buffer_id=%u)",
                display_count, (unsigned long long)phys_addr, buffer->id());
     }
     
@@ -568,17 +568,17 @@ bool LinuxFramebufferDevice::displayBufferByDMA(Buffer* buffer) {
 
 bool LinuxFramebufferDevice::displayFilledFramebuffer(Buffer* buffer) {
     if (!is_initialized_) {
-        LOG_ERROR_FMT("[Display] ERROR: Device not initialized\n");
+        LOG_ERROR_FMT("[Display] ERROR: Device not initialized");
         return false;
     }
     
     if (!buffer) {
-        LOG_ERROR_FMT("[Display] ERROR: Null buffer pointer\n");
+        LOG_ERROR_FMT("[Display] ERROR: Null buffer pointer");
         return false;
     }
     
     if (buffer_pool_id_ == 0) {
-        LOG_ERROR_FMT("[Display] ERROR: BufferPool not initialized\n");
+        LOG_ERROR_FMT("[Display] ERROR: BufferPool not initialized");
         return false;
     }
     
@@ -586,7 +586,7 @@ bool LinuxFramebufferDevice::displayFilledFramebuffer(Buffer* buffer) {
     auto pool_weak = BufferPoolRegistry::getInstance().getPool(buffer_pool_id_);
     auto pool = pool_weak.lock();
     if (!pool) {
-        LOG_ERROR_FMT("[Display] ERROR: BufferPool (ID: %lu) not found or already destroyed\n", buffer_pool_id_);
+        LOG_ERROR_FMT("[Display] ERROR: BufferPool (ID: %lu) not found or already destroyed", buffer_pool_id_);
         return false;
     }
     
@@ -595,18 +595,18 @@ bool LinuxFramebufferDevice::displayFilledFramebuffer(Buffer* buffer) {
     
     // 验证 buffer_id 在有效范围内
     if (buffer_id >= static_cast<uint32_t>(buffer_count_)) {
-        LOG_ERROR_FMT("[Display] ERROR: Invalid buffer id %u (valid range: 0-%d)\n", 
+        LOG_ERROR_FMT("[Display] ERROR: Invalid buffer id %u (valid range: 0-%d)", 
                buffer_id, buffer_count_ - 1);
-        printf("   Hint: This buffer may not belong to this framebuffer's BufferPool\n");
+        LOG_ERROR("[Display]    Hint: This buffer may not belong to this framebuffer's BufferPool");
         return false;
     }
     
     // 可选：验证这个 buffer 是否确实属于我们的 BufferPool
     Buffer* pool_buffer = pool->getBufferById(buffer_id);
     if (pool_buffer != buffer) {
-        LOG_ERROR_FMT("[Display] ERROR: Buffer (id=%u) does not belong to this framebuffer's BufferPool\n", 
+        LOG_ERROR_FMT("[Display] ERROR: Buffer (id=%u) does not belong to this framebuffer's BufferPool", 
                buffer_id);
-        printf("   Buffer pointer: %p, Expected: %p\n", (void*)buffer, (void*)pool_buffer);
+        LOG_ERROR_FMT("[Display]    Buffer pointer: %p, Expected: %p", (void*)buffer, (void*)pool_buffer);
         return false;
     }
     
@@ -616,7 +616,7 @@ bool LinuxFramebufferDevice::displayFilledFramebuffer(Buffer* buffer) {
     // 获取当前屏幕信息
     struct fb_var_screeninfo var_info;
     if (ioctl(fd_, FBIOGET_VSCREENINFO, &var_info) < 0) {
-        LOG_ERROR_FMT("[Display] ERROR: FBIOGET_VSCREENINFO failed: %s\n", strerror(errno));
+        LOG_ERROR_FMT("[Display] ERROR: FBIOGET_VSCREENINFO failed: %s", strerror(errno));
         return false;
     }
     
@@ -625,14 +625,14 @@ bool LinuxFramebufferDevice::displayFilledFramebuffer(Buffer* buffer) {
     
     // 通过ioctl通知驱动切换buffer
     if (ioctl(fd_, FBIOPAN_DISPLAY, &var_info) < 0) {
-        LOG_ERROR_FMT("[Display] ERROR: FBIOPAN_DISPLAY failed: %s\n", strerror(errno));
+        LOG_ERROR_FMT("[Display] ERROR: FBIOPAN_DISPLAY failed: %s", strerror(errno));
         return false;
     }
     
     // 统计和日志
     display_count++;
     if (display_count == 1 || display_count % 100 == 0) {
-        printf("🔄 [Framebuffer Switch] Frame #%d (buffer_id=%u)\n",
+        printf("🔄 [Framebuffer Switch] Frame #%d (buffer_id=%u)",
                display_count, buffer_id);
     }
     
@@ -642,17 +642,17 @@ bool LinuxFramebufferDevice::displayFilledFramebuffer(Buffer* buffer) {
 
 bool LinuxFramebufferDevice::displayBufferByMemcpyToFramebuffer(Buffer* buffer) {
     if (!is_initialized_) {
-        LOG_ERROR_FMT("[Display] ERROR: Device not initialized\n");
+        LOG_ERROR_FMT("[Display] ERROR: Device not initialized");
         return false;
     }
     
     if (!buffer) {
-        LOG_ERROR_FMT("[Display] ERROR: Null buffer pointer\n");
+        LOG_ERROR_FMT("[Display] ERROR: Null buffer pointer");
         return false;
     }
     
     if (buffer_pool_id_ == 0) {
-        LOG_ERROR_FMT("[Display] ERROR: BufferPool not initialized\n");
+        LOG_ERROR_FMT("[Display] ERROR: BufferPool not initialized");
         return false;
     }
     
@@ -660,7 +660,7 @@ bool LinuxFramebufferDevice::displayBufferByMemcpyToFramebuffer(Buffer* buffer) 
     auto pool_weak = BufferPoolRegistry::getInstance().getPool(buffer_pool_id_);
     auto pool = pool_weak.lock();
     if (!pool) {
-        LOG_ERROR_FMT("[Display] ERROR: BufferPool (ID: %lu) not found or already destroyed\n", buffer_pool_id_);
+        LOG_ERROR_FMT("[Display] ERROR: BufferPool (ID: %lu) not found or already destroyed", buffer_pool_id_);
         return false;
     }
     
@@ -670,14 +670,14 @@ bool LinuxFramebufferDevice::displayBufferByMemcpyToFramebuffer(Buffer* buffer) 
     // 获取一个空闲的 framebuffer buffer 来接收数据
     Buffer* fb_buffer = pool->acquireFree(false, 0);  // 非阻塞获取
     if (!fb_buffer) {
-        LOG_ERROR_FMT("[Display] ERROR: No free framebuffer buffer available\n");
-        printf("   Hint: All framebuffer buffers are busy, try again later\n");
+        LOG_ERROR_FMT("[Display] ERROR: No free framebuffer buffer available");
+        LOG_ERROR("[Display]    Hint: All framebuffer buffers are busy, try again later");
         return false;
     }
     
     // 检查大小是否匹配
     if (buffer->size() != fb_buffer->size()) {
-        LOG_WARN_FMT("[Display]  Warning: Buffer size mismatch (%zu vs %zu), copying min size\n",
+        LOG_WARN_FMT("[Display]  Warning: Buffer size mismatch (%zu vs %zu), copying min size",
                buffer->size(), fb_buffer->size());
     }
     
@@ -694,7 +694,7 @@ bool LinuxFramebufferDevice::displayBufferByMemcpyToFramebuffer(Buffer* buffer) 
     // 获取当前屏幕信息
     struct fb_var_screeninfo var_info;
     if (ioctl(fd_, FBIOGET_VSCREENINFO, &var_info) < 0) {
-        LOG_ERROR_FMT("[Display] ERROR: FBIOGET_VSCREENINFO failed: %s\n", strerror(errno));
+        LOG_ERROR_FMT("[Display] ERROR: FBIOGET_VSCREENINFO failed: %s", strerror(errno));
         pool->releaseFilled(fb_buffer);  // 归还 buffer
         return false;
     }
@@ -704,7 +704,7 @@ bool LinuxFramebufferDevice::displayBufferByMemcpyToFramebuffer(Buffer* buffer) 
     
     // 通过ioctl通知驱动切换buffer
     if (ioctl(fd_, FBIOPAN_DISPLAY, &var_info) < 0) {
-        LOG_ERROR_FMT("[Display] ERROR: FBIOPAN_DISPLAY failed: %s\n", strerror(errno));
+        LOG_ERROR_FMT("[Display] ERROR: FBIOPAN_DISPLAY failed: %s", strerror(errno));
         pool->releaseFilled(fb_buffer);  // 归还 buffer
         return false;
     }
@@ -712,7 +712,7 @@ bool LinuxFramebufferDevice::displayBufferByMemcpyToFramebuffer(Buffer* buffer) 
     // 统计和日志
     display_count++;
     if (display_count == 1 || display_count % 100 == 0) {
-        printf("📋 [Memcpy Display] Frame #%d (copied %zu bytes to fb_buffer[%u])\n",
+        printf("📋 [Memcpy Display] Frame #%d (copied %zu bytes to fb_buffer[%u])",
                display_count, copy_size, fb_buffer_id);
     }
     

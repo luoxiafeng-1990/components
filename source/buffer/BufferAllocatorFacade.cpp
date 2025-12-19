@@ -10,14 +10,12 @@
 BufferAllocatorFacade::BufferAllocatorFacade(
     BufferAllocatorFactory::AllocatorType type
 ) : type_(type) {
+    LOG_DEBUG_FMT("[BufferAllocatorFacade] 创建: 类型=%s", 
+                  BufferAllocatorFactory::typeToString(type));
     // 使用 Factory 创建底层 Allocator
     allocator_base_uptr_ = BufferAllocatorFactory::create(type);
     if (!allocator_base_uptr_) {
-        LOG_ERROR_FMT("[BufferAllocatorFacade] Failed to create Allocator (type=%s)", 
-                      BufferAllocatorFactory::typeToString(type));
-    } else {
-        LOG_DEBUG_FMT("[BufferAllocatorFacade] Created %s", 
-                      BufferAllocatorFactory::typeToString(type));
+        LOG_ERROR_FMT("[BufferAllocatorFacade] 创建底层Allocator失败");
     }
 }
 

@@ -23,6 +23,8 @@
 #include <log4cplus/loggingmacros.h>
 #include <log4cplus/initializer.h>
 #include <log4cplus/configurator.h>
+#include <log4cplus/consoleappender.h>
+#include <log4cplus/layout.h>
 #include <string>
 #include <memory>
 
@@ -31,26 +33,27 @@
 // ============================================
 namespace {
     /**
-     * @brief 初始化日志系统（使用默认配置）
+     * @brief 初始化日志系统（使用自定义格式）
      * 
      * 配置内容：
      * - 控制台输出：DEBUG 级别
-     * - 使用 log4cplus 的默认配置（BasicConfigurator）
-     * 
-     * 注意：为了兼容不同版本的 log4cplus，使用最简单的配置方式
+     * - 自定义格式：[LEVEL] message（级别用[]包围，统一宽度）
      */
     inline void initializeLogger() {
-        // 使用 BasicConfigurator 进行基本配置（控制台输出）
-        // 这是最兼容的方式，适用于所有版本的 log4cplus
-        log4cplus::BasicConfigurator::doConfigure();
+        // 创建 ConsoleAppender
+        log4cplus::SharedAppenderPtr appender(new log4cplus::ConsoleAppender());
         
-        // 设置根 Logger 的日志级别为 DEBUG
+        // 设置自定义 PatternLayout
+        // [%-5p] - 日志级别，左对齐，固定5字符宽度，用[]包围
+        // %m%n - 消息内容 + 换行
+        std::string pattern = "[%-5p] %m%n";
+        std::unique_ptr<log4cplus::Layout> layout(new log4cplus::PatternLayout(pattern));
+        appender->setLayout(std::move(layout));
+        
+        // 设置根 Logger
         log4cplus::Logger root = log4cplus::Logger::getRoot();
+        root.addAppender(appender);
         root.setLogLevel(log4cplus::DEBUG_LOG_LEVEL);
-        
-        // 注意：如果需要文件输出或更复杂的配置，可以在运行时通过环境变量
-        // 或使用 PropertyConfigurator 加载配置文件（如果需要）
-        // 但为了简化部署，这里只使用最基本的控制台输出
     }
 }
 
