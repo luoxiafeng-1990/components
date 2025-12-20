@@ -121,9 +121,6 @@ struct WorkerConfig {
  * @brief 文件配置构建器
  */
 class FileConfigBuilder {
-private:
-    WorkerConfig::FileConfig config_;
-    
 public:
     FileConfigBuilder() = default;
     
@@ -168,15 +165,15 @@ public:
     WorkerConfig::FileConfig build() const {
         return config_;
     }
+    
+private:
+    WorkerConfig::FileConfig config_;
 };
 
 /**
  * @brief 输出配置构建器
  */
 class OutputConfigBuilder {
-private:
-    WorkerConfig::OutputConfig config_;
-    
 public:
     OutputConfigBuilder() = default;
     
@@ -204,15 +201,15 @@ public:
     WorkerConfig::OutputConfig build() const {
         return config_;
     }
+    
+private:
+    WorkerConfig::OutputConfig config_;
 };
 
 /**
  * @brief h264_taco 特定配置构建器
  */
 class TacoConfigBuilder {
-private:
-    WorkerConfig::DecoderConfig::TacoConfig config_;
-    
 public:
     TacoConfigBuilder() = default;
     
@@ -268,15 +265,15 @@ public:
     WorkerConfig::DecoderConfig::TacoConfig build() const {
         return config_;
     }
+    
+private:
+    WorkerConfig::DecoderConfig::TacoConfig config_;
 };
 
 /**
  * @brief 解码器配置构建器
  */
 class DecoderConfigBuilder {
-private:
-    WorkerConfig::DecoderConfig config_;
-    
 public:
     DecoderConfigBuilder() = default;
     
@@ -414,6 +411,9 @@ public:
     WorkerConfig::DecoderConfig build() const {
         return config_;
     }
+    
+private:
+    WorkerConfig::DecoderConfig config_;
 };
 
 /**
@@ -422,9 +422,6 @@ public:
  * 职责：只负责组装 WorkerConfig，不涉及具体配置细节
  */
 class WorkerConfigBuilder {
-private:
-    WorkerConfig config_;
-    
 public:
     WorkerConfigBuilder() = default;
     
@@ -466,6 +463,9 @@ public:
     WorkerConfig build() const {
         return config_;
     }
+    
+private:
+    WorkerConfig config_;
 };
 
 #endif // WORKER_CONFIG_HPP
