@@ -24,16 +24,8 @@ AVFrameAllocator::~AVFrameAllocator() {
     // destroyPool() 会自动查询 Registry 获取所有 Pool 并清理
     destroyPool();
     
-    std::lock_guard<std::mutex> lock(mapping_mutex_);
-    
-    // 释放所有未释放的 AVFrame（双重保险）
-    for (auto& [buffer, frame] : buffer_to_frame_) {
-        if (frame) {
-            LOG_WARN_FMT("[AVFrameAllocator]  [AVFrameAllocator] Releasing orphaned AVFrame (buffer #%u)", buffer->id());
-            av_frame_free(&frame);
-        }
-    }
-    buffer_to_frame_.clear();
+    // ⭐ v2.7移除：不再需要清理 buffer_to_frame_ 映射表
+    // AVFrame* 的释放已在 deallocateBuffer() 中通过 buffer->getAVFrame() 处理
     
     LOG_DEBUG("[AVFrameAllocator] AVFrameAllocator destroyed");
 }
@@ -52,7 +44,7 @@ Buffer* AVFrameAllocator::injectAVFrameToPool(AVFrame* frame, BufferPool* pool) 
     uint32_t id = next_buffer_id_.fetch_add(1);
     
     // 2. 从 AVFrame 提取信息
-    void* virt_addr = frame->data[0];
+    void* virt_addr = frame->data[0];  // ⭐ v2.7：明确存储实际数据地址
     size_t size = frame->linesize[0] * frame->height;  // 简化计算（实际应根据格式）
     
     if (!virt_addr || size == 0) {
@@ -63,7 +55,7 @@ Buffer* AVFrameAllocator::injectAVFrameToPool(AVFrame* frame, BufferPool* pool) 
     // 3. 创建 Buffer 对象（Ownership::EXTERNAL）
     Buffer* buffer = new Buffer(
         id,
-        virt_addr,
+        virt_addr,  // ⭐ v2.7：virt_addr 存储 frame->data[0]
         0,  // AVFrame 不提供物理地址
         size,
         Buffer::Ownership::EXTERNAL
@@ -74,6 +66,9 @@ Buffer* AVFrameAllocator::injectAVFrameToPool(AVFrame* frame, BufferPool* pool) 
         return nullptr;
     }
     
+    // 3.5 ⭐ v2.7新增：设置 Buffer 关联的 AVFrame 指针
+    buffer->setAVFrame(frame);
+    
     // 4. 将 Buffer 添加到 pool 的 filled 队列（使用基类静态方法）
     if (!BufferAllocatorBase::addBufferToPoolQueue(pool, buffer, QueueType::FILLED)) {
         LOG_ERROR_FMT("[AVFrameAllocator] Failed to add buffer #%u to pool '%s'", 
@@ -82,11 +77,7 @@ Buffer* AVFrameAllocator::injectAVFrameToPool(AVFrame* frame, BufferPool* pool) 
         return nullptr;
     }
     
-    // 5. 记录 AVFrame 和 Buffer 的映射
-    {
-        std::lock_guard<std::mutex> lock(mapping_mutex_);
-        buffer_to_frame_[buffer] = frame;
-    }
+    // 5. ⭐ v2.7移除：不再需要记录 buffer_to_frame_ 映射，Buffer 自己持有 AVFrame*
     
     // 6. 记录所有权（使用静态所有权跟踪）
     {
@@ -108,21 +99,13 @@ bool AVFrameAllocator::releaseAVFrame(Buffer* buffer, BufferPool* pool) {
         return false;
     }
     
-    AVFrame* frame = nullptr;
-    
-    // 1. 查找 Buffer 对应的 AVFrame
-    {
-        std::lock_guard<std::mutex> lock(mapping_mutex_);
-        auto it = buffer_to_frame_.find(buffer);
-        if (it != buffer_to_frame_.end()) {
-            frame = it->second;
-            buffer_to_frame_.erase(it);
-        }
-    }
+    // 1. ⭐ v2.7改进：直接从 Buffer 获取 AVFrame 指针
+    AVFrame* frame = buffer->getAVFrame();
     
     // 2. 释放 AVFrame
     if (frame) {
         av_frame_free(&frame);
+        buffer->setAVFrame(nullptr);  // 清空 Buffer 的 AVFrame 引用
         LOG_DEBUG_FMT("[AVFrameAllocator] Released AVFrame for Buffer #%u", buffer->id());
     } else {
         LOG_WARN_FMT("[AVFrameAllocator]  No AVFrame found for Buffer #%u", buffer->id());
@@ -166,21 +149,13 @@ void AVFrameAllocator::deallocateBuffer(Buffer* buffer) {
         return;
     }
     
-    AVFrame* frame = nullptr;
-    
-    // 1. 查找 Buffer 对应的 AVFrame
-    {
-        std::lock_guard<std::mutex> lock(mapping_mutex_);
-        auto it = buffer_to_frame_.find(buffer);
-        if (it != buffer_to_frame_.end()) {
-            frame = it->second;
-            buffer_to_frame_.erase(it);
-        }
-    }
+    // 1. ⭐ v2.7改进：直接从 Buffer 获取 AVFrame 指针
+    AVFrame* frame = buffer->getAVFrame();
     
     // 2. 释放 AVFrame
     if (frame) {
         av_frame_free(&frame);
+        buffer->setAVFrame(nullptr);  // 清空 Buffer 的 AVFrame 引用
         LOG_DEBUG_FMT("[AVFrameAllocator] Released AVFrame for Buffer #%u", buffer->id());
     }
     
@@ -229,13 +204,14 @@ uint64_t AVFrameAllocator::allocatePoolWithBuffers(
         uint32_t buffer_id = next_buffer_id_.fetch_add(1);
         
         // 4.3 🎯 关键：将 AVFrame* 包装成 Buffer 对象
-        //     - virt_addr: 存储 AVFrame* 指针（作为"标识符"）
+        //     ⭐ v2.7语义修正：
+        //     - virt_addr: 初始为 nullptr（解码后更新为 frame->data[0]）
         //     - phys_addr: 初始化为 0（延迟获取）
         //     - size: Worker 期望的 buffer 大小
         //     - ownership: EXTERNAL（物理内存由 h264_taco 管理）
         Buffer* buffer = new Buffer(
             buffer_id,
-            (void*)frame_ptr,  // virt_addr 存储 AVFrame* 指针
+            nullptr,           // ⭐ v2.7：virt_addr 初始为 nullptr，解码后更新
             0,                 // phys_addr 初始为 0，在 avcodec_receive_frame 后提取
             size,
             Buffer::Ownership::EXTERNAL
@@ -247,21 +223,14 @@ uint64_t AVFrameAllocator::allocatePoolWithBuffers(
             return 0;
         }
         
-        // 4.4 记录 Buffer -> AVFrame* 的映射
-        {
-            std::lock_guard<std::mutex> lock(mapping_mutex_);
-            buffer_to_frame_[buffer] = frame_ptr;
-        }
+        // 4.4 ⭐ v2.7新增：设置 Buffer 关联的 AVFrame 指针
+        buffer->setAVFrame(frame_ptr);
         
         // 4.5 🎯 关键：将 Buffer 添加到 BufferPool 的 FREE 队列
         if (!BufferAllocatorBase::addBufferToPoolQueue(pool.get(), buffer, QueueType::FREE)) {
             LOG_ERROR_FMT("[AVFrameAllocator] ERROR: Failed to add Buffer #%u to FREE queue", buffer_id);
             delete buffer;
             av_frame_free(&frame_ptr);
-            {
-                std::lock_guard<std::mutex> lock(mapping_mutex_);
-                buffer_to_frame_.erase(buffer);
-            }
             return 0;
         }
         
@@ -426,14 +395,10 @@ bool AVFrameAllocator::destroyPool() {
         // 2.3 移除并销毁所有 Buffer（同时释放 AVFrame）
         for (Buffer* buf : to_remove) {
             BufferAllocatorBase::removeBufferFromPoolInternal(pool.get(), buf);
-            deallocateBuffer(buf);  // 内部会释放 AVFrame
+            deallocateBuffer(buf);  // ⭐ v2.7：内部会通过 buffer->getAVFrame() 释放 AVFrame
             avframe_buffer_ownership_.erase(buf);
             
-            // 从 buffer_to_frame_ 中移除
-            {
-                std::lock_guard<std::mutex> lock2(mapping_mutex_);
-                buffer_to_frame_.erase(buf);
-            }
+            // ⭐ v2.7移除：不再需要从 buffer_to_frame_ 中移除
         }
         
         LOG_DEBUG_FMT("[AVFrameAllocator] Pool '%s' destroyed: removed %zu buffers", 

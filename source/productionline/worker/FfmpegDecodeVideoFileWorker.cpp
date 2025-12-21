@@ -595,10 +595,10 @@ bool FfmpegDecodeVideoFileWorker::fillBuffer(int frame_index, Buffer* buffer) {
     
     std::lock_guard<std::recursive_mutex> lock(mutex_);
     
-    // 步骤1: 从 Buffer 获取预分配的 AVFrame*
-    AVFrame* frame_ptr = (AVFrame*)buffer->getVirtualAddress();
+    // 步骤1: ⭐ v2.7改进：从 Buffer 获取关联的 AVFrame*
+    AVFrame* frame_ptr = buffer->getAVFrame();
     if (!frame_ptr) {
-        LOG_ERROR_FMT("[Worker] ERROR: buffer->getVirtualAddress() is nullptr");
+        LOG_ERROR_FMT("[Worker] ERROR: buffer->getAVFrame() is nullptr");
         return false;
     }
     
@@ -694,6 +694,9 @@ bool FfmpegDecodeVideoFileWorker::fillBuffer(int frame_index, Buffer* buffer) {
             LOG_WARN_FMT("[Worker]  Warning: Failed to extract physical address");
             return false;
         }
+        
+        // ⭐ v2.7改进：先更新虚拟地址为实际数据地址（frame->data[0]）
+        buffer->setVirtualAddress(frame_ptr->data[0]);
         
         // ⭐ v2.6新增：从AVFrame设置图像元数据到Buffer
         buffer->setImageMetadataFromAVFrame(frame_ptr);

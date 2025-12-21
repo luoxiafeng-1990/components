@@ -144,6 +144,30 @@ public:
      */
     void setPhysicalAddress(uint64_t phys_addr) { phys_addr_ = phys_addr; }
     
+    // ========== AVFrame 关联接口 ⭐ v2.7新增 ==========
+    
+    /**
+     * @brief 设置关联的 AVFrame（仅用于 AVFrameAllocator）
+     * @param frame AVFrame 指针
+     * 
+     * @note Buffer 持有引用但不拥有所有权，释放由 Allocator 负责
+     */
+    void setAVFrame(AVFrame* frame) { avframe_ = frame; }
+    
+    /**
+     * @brief 获取关联的 AVFrame
+     * @return AVFrame 指针，如果没有关联则返回 nullptr
+     */
+    AVFrame* getAVFrame() const { return avframe_; }
+    
+    /**
+     * @brief 更新虚拟地址（解码后更新为 frame->data[0]）
+     * @param addr 新的虚拟地址
+     * 
+     * @note 用于解码后更新数据地址
+     */
+    void setVirtualAddress(void* addr) { virt_addr_ = addr; }
+    
     // ========== 图像元数据接口 ⭐ v2.6新增 ==========
     
     /**
@@ -192,8 +216,38 @@ public:
      * 
      * @note 返回的地址已加上 plane_offset_
      */
+    /**
+     * @brief 获取指定 plane 的数据指针
+     * @param plane plane 索引 [0-3]
+     * @return plane 数据指针，失败返回 nullptr
+     * 
+     * @note v2.7改进：
+     *   1. 优先使用 virt_addr_（解码后已更新为 frame->data[0]）
+     *   2. 如果 virt_addr_ 为 nullptr，尝试从 avframe_->data[plane] 获取
+     *   3. 对于 plane > 0，通过 avframe_->data[plane] 获取（硬件解码零拷贝场景）
+     */
     uint8_t* getImagePlaneData(int plane) const {
-        if (plane < 0 || plane >= 4 || !virt_addr_) return nullptr;
+        if (plane < 0 || plane >= 4) return nullptr;
+        
+        // ⭐ v2.7修复：对于 plane 0，优先使用 virt_addr_（已是 frame->data[0]）
+        if (plane == 0) {
+            if (virt_addr_) {
+                return (uint8_t*)virt_addr_;
+            }
+            // 回退到 AVFrame（用于创建时的临时访问）
+            if (avframe_) {
+                return avframe_->data[0];
+            }
+            return nullptr;
+        }
+        
+        // ⭐ v2.7修复：对于 plane > 0，必须从 AVFrame 获取（多plane地址不连续）
+        if (avframe_) {
+            return avframe_->data[plane];
+        }
+        
+        // 最后回退到旧逻辑（兼容非 AVFrame 场景，如纯软件解码）
+        if (!virt_addr_) return nullptr;
         return (uint8_t*)virt_addr_ + plane_offset_[plane];
     }
     
@@ -221,13 +275,16 @@ public:
 private:
     // ========== 核心属性 ==========
     uint32_t id_;                    // 唯一标识
-    void* virt_addr_;                // 虚拟地址（用户空间）
+    void* virt_addr_;                // 虚拟地址（真实数据地址，如 frame->data[0]）⭐ v2.7语义修正
     uint64_t phys_addr_;             // 物理地址（硬件/DMA）
     size_t size_;                    // Buffer 大小
     Ownership ownership_;            // 所有权类型
     
     // ========== 状态管理 ==========
     std::atomic<State> state_;       // 当前状态（线程安全）
+    
+    // ========== AVFrame 关联 ⭐ v2.7新增 ==========
+    AVFrame* avframe_;               // 关联的 AVFrame 指针（引用，不拥有所有权）
     
     // ========== 图像元数据 ⭐ v2.6新增 ==========
     bool has_image_metadata_;        // 是否包含图像元数据

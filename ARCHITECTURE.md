@@ -1905,10 +1905,10 @@ void VideoProductionLine::producerThreadFunc(int thread_id) {
 
 ---
 
-### 10. Buffer图像元数据增强 - v2.6 新增
+### 10. Buffer图像元数据增强 - v2.6 新增（v2.7 改进）
 
-**版本**: v2.6  
-**影响范围**: Buffer类、BufferWriter类、FfmpegDecodeVideoFileWorker类
+**版本**: v2.6 初始设计，v2.7 重大改进  
+**影响范围**: Buffer类、AVFrameAllocator类、BufferWriter类、FfmpegDecodeVideoFileWorker类
 
 #### 设计背景
 
@@ -1921,83 +1921,141 @@ void VideoProductionLine::producerThreadFunc(int thread_id) {
 - 硬件分配的Buffer通常有stride/padding用于对齐
 - 简单的`fwrite(buffer, size)`会将padding一起写入，导致保存的文件与FFmpeg期望的格式不一致
 
-**问题2：Buffer类设计缺陷**
+**问题2：Buffer类设计缺陷（v2.6问题，v2.7已修复）**
 - `Buffer`仅记录`virt_addr_`和`size_`，丢失了图像语义信息
 - Worker从`AVFrame`解码得到完整的图像元数据，但在填充`Buffer`时这些信息被丢弃
 - BufferWriter无法从Buffer获取正确的格式信息
+- **⭐ v2.7发现的关键问题**：`virt_addr_` 语义混乱，AVFrame指针和实际数据地址混用；`AVFrameAllocator` 维护冗余的 `buffer_to_frame_` 映射表
 
-#### 解决方案：方案1 - Buffer类直接增加图像元数据字段
+#### 解决方案：方案1 - Buffer类直接增加图像元数据字段（v2.6 + v2.7改进）
 
-**核心思路**：
+**核心思路**（v2.7版本）：
 ```
 AVFrame (FFmpeg)
     ├── width, height, format
     ├── linesize[4] (stride)
     ├── data[4] (plane指针)
-    └── plane offsets
+    └── AVFrame* 指针本身
          ↓ Worker::fillBuffer()
-Buffer v2.6 ⭐ 新增图像元数据
+Buffer v2.7 ⭐ 改进：直接持有AVFrame*
+    ├── AVFrame* avframe_         ← v2.7新增：直接持有AVFrame指针
+    ├── virt_addr_ = frame->data[0] ← v2.7语义修正：存储实际数据地址
     ├── width_, height_, format_
     ├── linesize_[4] (stride)
-    ├── plane_offset_[4]
     └── has_image_metadata_
          ↓ BufferWriter::write()
 文件 (正确的裸格式)
     └── 根据format、stride正确写入，去除padding
 ```
 
+**v2.7关键改进点**：
+1. **Buffer 直接持有 AVFrame 指针**：新增 `AVFrame* avframe_` 成员，`Buffer` 自己管理 AVFrame 引用
+2. **virt_addr_ 语义修正**：统一为实际数据地址（`frame->data[0]`），不再存储 AVFrame 指针
+3. **移除冗余映射表**：`AVFrameAllocator` 不再维护 `buffer_to_frame_` 映射，简化设计
+4. **getImagePlaneData() 改进**：直接从 `avframe_->data[plane]` 获取，不再依赖 `plane_offset_` 计算
+5. **符合大厂设计经验**：参考 Android BufferQueue、FFmpeg AVBufferRef，资源与描述符绑定
+
 #### 修改详情
 
-**1. Buffer.hpp 新增字段**：
+**1. Buffer.hpp 新增字段（v2.6 + v2.7）**：
 ```cpp
 class Buffer {
 private:
-    // ⭐ v2.6新增：图像元数据
+    // ========== 核心属性 ==========
+    void* virt_addr_;                // ⭐ v2.7语义修正：真实数据地址（frame->data[0]）
+    
+    // ========== AVFrame 关联 ⭐ v2.7新增 ==========
+    AVFrame* avframe_;               // 关联的 AVFrame 指针（引用，不拥有所有权）
+    
+    // ========== 图像元数据 ⭐ v2.6新增 ==========
     bool has_image_metadata_;        // 是否包含图像元数据
     int width_;                      // 图像宽度（像素）
     int height_;                     // 图像高度（像素）
     AVPixelFormat format_;           // 像素格式（FFmpeg标准）
     int linesize_[4];                // 各plane的stride（字节）
-    size_t plane_offset_[4];         // 各plane相对于virt_addr_的偏移
+    size_t plane_offset_[4];         // ⭐ v2.7已废弃，保留仅为二进制兼容
     int nb_planes_;                  // plane数量（1-4）
     
 public:
-    // ⭐ 从AVFrame自动设置元数据
-    void setImageMetadataFromAVFrame(const AVFrame* frame);
+    // ========== AVFrame 关联接口 ⭐ v2.7新增 ==========
+    void setAVFrame(AVFrame* frame);      // 设置关联的 AVFrame
+    AVFrame* getAVFrame() const;          // 获取关联的 AVFrame
+    void setVirtualAddress(void* addr);   // 更新虚拟地址（解码后）
     
-    // ⭐ 手动设置元数据
+    // ========== 图像元数据接口 ⭐ v2.6新增 ==========
+    void setImageMetadataFromAVFrame(const AVFrame* frame);
     void setImageMetadata(int width, int height, AVPixelFormat format,
                          const int* linesize = nullptr,
                          const size_t* plane_offsets = nullptr);
     
-    // ⭐ Getters
     bool hasImageMetadata() const;
     int getImageWidth() const;
     int getImageHeight() const;
     AVPixelFormat getImageFormat() const;
     const int* getImageLinesize() const;
-    uint8_t* getImagePlaneData(int plane) const;
+    uint8_t* getImagePlaneData(int plane) const;  // ⭐ v2.7改进：直接从avframe_获取
     int getImagePlaneCount() const;
 };
 ```
 
-**2. FfmpegDecodeVideoFileWorker::fillBuffer() 填充元数据**：
+**2. AVFrameAllocator 简化（v2.7）**：
+```cpp
+class AVFrameAllocator : public BufferAllocatorBase {
+private:
+    // ⭐ v2.7移除：不再需要 buffer_to_frame_ 映射表
+    // std::unordered_map<Buffer*, AVFrame*> buffer_to_frame_;  // 已废弃
+};
+
+// allocatePoolWithBuffers() - 创建Buffer时
+Buffer* buffer = new Buffer(
+    buffer_id,
+    nullptr,           // ⭐ v2.7：virt_addr 初始为 nullptr
+    0,
+    size,
+    Buffer::Ownership::EXTERNAL
+);
+buffer->setAVFrame(frame_ptr);  // ⭐ v2.7：直接设置AVFrame指针
+
+// deallocateBuffer() - 释放Buffer时
+AVFrame* frame = buffer->getAVFrame();  // ⭐ v2.7：直接从Buffer获取
+if (frame) {
+    av_frame_free(&frame);
+    buffer->setAVFrame(nullptr);
+}
+delete buffer;
+```
+
+**3. FfmpegDecodeVideoFileWorker::fillBuffer() 使用新接口（v2.7）**：
 ```cpp
 bool FfmpegDecodeVideoFileWorker::fillBuffer(int frame_index, Buffer* buffer) {
+    // ⭐ v2.7改进：从 Buffer 获取关联的 AVFrame*
+    AVFrame* frame_ptr = buffer->getAVFrame();
+    if (!frame_ptr) {
+        LOG_ERROR_FMT("[Worker] ERROR: buffer->getAVFrame() is nullptr");
+        return false;
+    }
+    
     // ... 解码逻辑 ...
     
-    // ⭐ v2.6新增：从AVFrame设置图像元数据到Buffer
-    buffer->setImageMetadataFromAVFrame(frame_ptr);
-    
-    return true;
+    ret = avcodec_receive_frame(codec_ctx_ptr_, frame_ptr);
+    if (ret == 0) {
+        // ⭐ v2.7改进：解码成功后更新虚拟地址为实际数据地址
+        buffer->setVirtualAddress(frame_ptr->data[0]);
+        
+        // ⭐ v2.6新增：从AVFrame设置图像元数据到Buffer
+        buffer->setImageMetadataFromAVFrame(frame_ptr);
+        
+        return true;
+    }
 }
 ```
 
-**3. BufferWriter::write() 使用元数据正确保存**：
+**4. BufferWriter::write() 使用元数据正确保存（v2.6 + v2.7）**：
 ```cpp
 bool BufferWriter::write(const Buffer* buffer) {
     if (buffer->hasImageMetadata()) {
         // ⭐ 使用元数据模式（v2.6）
+        // ⭐ v2.7改进：getImagePlaneData() 直接从 avframe_->data[plane] 获取
         return writeWithMetadata(buffer);
     } else {
         // 回退到简单模式（向后兼容）
@@ -2065,20 +2123,44 @@ bool BufferWriter::writePlane(const uint8_t* data, int stride,
 
 #### 设计优势
 
-| 优势 | 说明 |
-|------|------|
-| **简单直接** | 直接在Buffer类中增加字段，理解容易 |
-| **性能好** | 数据局部性好，访问快速，无额外指针解引用 |
-| **类型安全** | 编译期类型检查，使用FFmpeg标准AVPixelFormat |
-| **向后兼容** | 使用`has_image_metadata_`标志，不影响不需要元数据的场景 |
-| **自动填充** | Worker自动从AVFrame提取并填充，无需手动设置 |
-| **正确保存** | BufferWriter根据元数据正确处理stride/plane/padding |
+| 优势 | v2.6 | v2.7 改进 |
+|------|------|----------|
+| **简单直接** | 直接在Buffer类中增加字段，理解容易 | ✅ 保持 |
+| **性能好** | 数据局部性好，访问快速，无额外指针解引用 | ✅ 保持 |
+| **类型安全** | 编译期类型检查，使用FFmpeg标准AVPixelFormat | ✅ 保持 |
+| **向后兼容** | 使用`has_image_metadata_`标志，不影响不需要元数据的场景 | ✅ 保持 |
+| **自动填充** | Worker自动从AVFrame提取并填充，无需手动设置 | ✅ 保持 |
+| **正确保存** | BufferWriter根据元数据正确处理stride/plane/padding | ✅ 保持 |
+| **⭐ 责任清晰** | - | **Buffer自己管理AVFrame引用，不需要外部映射表** |
+| **⭐ 内存模型统一** | - | **virt_addr_语义统一为实际数据地址，消除混乱** |
+| **⭐ 代码简洁** | - | **移除AVFrameAllocator的buffer_to_frame_映射表及相关同步代码** |
+| **⭐ 大厂实践** | - | **参考Android BufferQueue、FFmpeg AVBufferRef设计模式** |
+
+#### v2.7 设计原则
+
+**核心原则：资源与描述符绑定（RAII）**
+
+1. **Buffer 持有 AVFrame 引用**：`Buffer::avframe_` 直接持有 AVFrame 指针，生命周期绑定
+2. **Allocator 负责创建和销毁**：`AVFrameAllocator` 创建时设置 `buffer->setAVFrame()`，销毁时通过 `buffer->getAVFrame()` 释放
+3. **Worker 只管使用**：`FfmpegDecodeVideoFileWorker` 通过 `buffer->getAVFrame()` 获取并填充数据
+4. **语义统一**：`virt_addr_` 始终存储实际数据地址（`frame->data[0]`），不再混用
+
+**参考大厂设计经验**：
+
+| 系统 | 设计模式 | 对应关系 |
+|------|---------|---------|
+| **Android BufferQueue** | GraphicBuffer 持有 native_handle_t* | Buffer 持有 AVFrame* |
+| **FFmpeg** | AVBufferRef 持有 AVBuffer* | Buffer 持有 AVFrame* |
+| **Linux DMA-BUF** | dma_buf 持有 file* | Buffer 持有 AVFrame* |
+| **共同点** | 描述符与资源绑定，生命周期一致 | ✅ v2.7采用此模式 |
 
 #### 内存开销
 
-- **每个Buffer增加**：约80字节（7个int + 8个size_t + 1个bool + 1个AVPixelFormat枚举）
-- **相对Buffer大小**：可忽略（Buffer本身通常几MB，80字节占比<0.01%）
-- **权衡**：为了正确性和易用性，可接受的开销
+- **v2.6每个Buffer增加**：约80字节（7个int + 8个size_t + 1个bool + 1个AVPixelFormat枚举）
+- **v2.7额外增加**：8字节（1个AVFrame*指针）
+- **v2.7节省**：移除AVFrameAllocator的buffer_to_frame_映射表（每个Buffer节省~40字节的map开销 + 锁竞争）
+- **相对Buffer大小**：可忽略（Buffer本身通常几MB，88字节占比<0.01%）
+- **权衡**：为了正确性、易用性和设计清晰度，可接受的开销
 
 #### 测试验证
 

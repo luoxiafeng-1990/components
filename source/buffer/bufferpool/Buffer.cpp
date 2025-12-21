@@ -14,6 +14,7 @@ Buffer::Buffer(uint32_t id,
     , size_(size)
     , ownership_(ownership)
     , state_(State::IDLE)
+    , avframe_(nullptr)              // ⭐ v2.7新增：初始化 AVFrame 指针
     , has_image_metadata_(false)
     , width_(0)
     , height_(0)
@@ -34,6 +35,7 @@ Buffer::Buffer(Buffer&& other) noexcept
     , size_(other.size_)
     , ownership_(other.ownership_)
     , state_(other.state_.load())           // 从 atomic 读取
+    , avframe_(other.avframe_)              // ⭐ v2.7新增：移动 AVFrame 指针
     , has_image_metadata_(other.has_image_metadata_)
     , width_(other.width_)
     , height_(other.height_)
@@ -47,6 +49,7 @@ Buffer::Buffer(Buffer&& other) noexcept
     other.virt_addr_ = nullptr;
     other.phys_addr_ = 0;
     other.size_ = 0;
+    other.avframe_ = nullptr;              // ⭐ v2.7新增：清空 AVFrame 指针
     other.has_image_metadata_ = false;
     other.validation_magic_ = 0;
 }
@@ -60,6 +63,7 @@ Buffer& Buffer::operator=(Buffer&& other) noexcept {
         size_ = other.size_;
         ownership_ = other.ownership_;
         state_.store(other.state_.load());           // atomic 赋值
+        avframe_ = other.avframe_;                   // ⭐ v2.7新增：移动 AVFrame 指针
         has_image_metadata_ = other.has_image_metadata_;
         width_ = other.width_;
         height_ = other.height_;
@@ -73,6 +77,7 @@ Buffer& Buffer::operator=(Buffer&& other) noexcept {
         other.virt_addr_ = nullptr;
         other.phys_addr_ = 0;
         other.size_ = 0;
+        other.avframe_ = nullptr;                    // ⭐ v2.7新增：清空 AVFrame 指针
         other.has_image_metadata_ = false;
         other.validation_magic_ = 0;
     }
@@ -107,20 +112,8 @@ void Buffer::setImageMetadataFromAVFrame(const AVFrame* frame) {
     // 复制linesize
     memcpy(linesize_, frame->linesize, sizeof(linesize_));
     
-    // 计算各plane的偏移
-    // 假设virt_addr_指向第一个plane的起始位置
-    plane_offset_[0] = 0;
-    
-    // 计算后续plane的偏移
-    for (int i = 1; i < 4; i++) {
-        if (frame->data[i] && frame->data[i-1]) {
-            // 计算相对偏移
-            ptrdiff_t offset = frame->data[i] - frame->data[0];
-            plane_offset_[i] = (offset >= 0) ? offset : 0;
-        } else {
-            plane_offset_[i] = 0;
-        }
-    }
+    // ⭐ v2.7简化：不再计算 plane_offset_，getImagePlaneData() 直接从 avframe_->data[i] 读取
+    // plane_offset_ 数组保留但不使用，避免破坏二进制兼容性
     
     // 确定plane数量
     nb_planes_ = 0;

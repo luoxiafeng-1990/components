@@ -180,8 +180,9 @@ private:
     // Buffer ID 计数器（用于生成唯一 ID）
     std::atomic<uint32_t> next_buffer_id_;
     
-    // Buffer → AVFrame 映射（用于释放时查找）
-    std::unordered_map<Buffer*, AVFrame*> buffer_to_frame_;
-    std::mutex mapping_mutex_;
+    // ⭐ v2.7移除：不再需要 buffer_to_frame_ 映射表，由 Buffer::avframe_ 直接持有
+    // std::unordered_map<Buffer*, AVFrame*> buffer_to_frame_;  // 已废弃
+    
+    std::mutex mapping_mutex_;  // 保留互斥锁用于其他同步需求
 };
 
