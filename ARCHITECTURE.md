@@ -2941,6 +2941,72 @@ private:
 - **便于维护**：相关功能集中，修改更容易
 - **符合规范**：遵循业界主流标准，代码质量更高
 
+### Git Commit 规范
+
+#### 基本原则
+
+**Commit 信息应控制在 4 行以内**，保持简洁明了。
+
+#### 格式规范
+
+```
+<type>(<scope>): <subject> - 简短描述（第1行）
+
+- 核心改动点1：简要说明（第2行）
+- 核心改动点2：简要说明（第3行）
+- 核心改动点3或问题修复说明（第4行）
+```
+
+#### Type 类型
+
+| Type | 说明 | 示例 |
+|------|------|------|
+| `feat` | 新功能 | `feat(buffer): 新增AVFrame直接管理` |
+| `fix` | Bug修复 | `fix(allocator): 修复内存泄漏` |
+| `refactor` | 代码重构 | `refactor(pool): 简化队列管理逻辑` |
+| `perf` | 性能优化 | `perf(decoder): 优化解码性能` |
+| `docs` | 文档更新 | `docs(arch): 更新架构文档` |
+| `style` | 代码格式 | `style(worker): 调整访问控制顺序` |
+| `test` | 测试相关 | `test(buffer): 添加单元测试` |
+| `chore` | 构建/工具 | `chore(build): 更新Makefile` |
+
+#### 示例
+
+**✅ 好的示例**（4行以内）：
+```
+feat(buffer): v2.7 - Buffer直接持有AVFrame指针，简化Allocator设计
+
+- Buffer新增avframe_成员和setAVFrame()/getAVFrame()接口，统一virt_addr_语义为实际数据地址
+- AVFrameAllocator移除buffer_to_frame_映射表，通过buffer->getAVFrame()管理生命周期
+- 修复getImagePlaneData()优先级：plane 0优先使用virt_addr_，解决硬件解码地址访问问题
+```
+
+**❌ 不好的示例**（超过4行，过于冗长）：
+```
+feat(buffer): 新增AVFrame管理功能
+
+本次提交主要包含以下改动：
+1. 在Buffer类中新增了AVFrame指针成员
+2. 添加了setAVFrame和getAVFrame接口
+3. 修改了AVFrameAllocator的实现逻辑
+4. 移除了冗余的buffer_to_frame_映射表
+5. 更新了Worker的填充逻辑
+6. 修复了硬件解码的bug
+... (超过4行)
+```
+
+#### 核心原则
+
+1. **第1行**：类型(范围): 主标题 - 核心改动
+2. **第2-4行**：关键改动点，每行一个要点
+3. **避免**：详细实现细节、代码片段、长篇解释
+4. **聚焦**：影响范围、核心价值、问题修复
+
+#### 参考规范
+
+- **Conventional Commits**: [conventionalcommits.org](https://www.conventionalcommits.org/)
+- **Angular Commit Guidelines**: [Angular Contributing](https://github.com/angular/angular/blob/main/CONTRIBUTING.md#commit)
+
 ---
 
 ## API参考
