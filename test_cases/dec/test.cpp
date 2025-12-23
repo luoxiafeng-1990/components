@@ -22,6 +22,7 @@
 #include <atomic>
 #include <sstream>
 #include <algorithm>
+#include <functional>
 #include "display/LinuxFramebufferDevice.hpp"
 #include "productionline/worker/BufferFillingWorkerFacade.hpp"
 #include "productionline/worker/WorkerConfig.hpp"
@@ -37,6 +38,7 @@
 extern "C" {
 #include <libavcodec/avcodec.h>
 #include <libavutil/pixfmt.h>
+#include <libavutil/pixdesc.h>  // av_get_pix_fmt_name() 函数
 }
 
 // 全局标志，用于处理 Ctrl+C 退出
@@ -1109,7 +1111,204 @@ static int test_h264_taco_video_multithread(const char* video_path) {
 }
 
 /**
- * 测试8：BufferWriter保存帧测试（简化版）
+ * 测试8a：BufferWriter单格式保存测试
+ * 
+ * 通过配置h264_taco解码器输出指定格式，测试BufferWriter保存功能
+ * 所有格式信息从taco_config中自动推导
+ * 
+ * @param video_path 视频文件路径
+ * @param taco_config h264_taco解码器配置（通过TacoConfigBuilder构建）
+ */
+static int test_buffer_writer_format(
+    const char* video_path,
+    const WorkerConfig::DecoderConfig::TacoConfig& taco_config
+) {
+    using namespace productionline::io;
+    
+    // ⭐ 从 taco_config 推导格式信息
+    std::string format_name;
+    std::string ffplay_fmt;
+    
+    if (taco_config.ch1_rgb) {
+        // RGB格式：使用配置的格式名
+        format_name = taco_config.ch1_rgb_format;
+        
+        // 推导 ffplay 验证格式（去掉 888 后缀）
+        ffplay_fmt = taco_config.ch1_rgb_format;
+        if (ffplay_fmt.size() > 3 && ffplay_fmt.substr(ffplay_fmt.size() - 3) == "888") {
+            ffplay_fmt = ffplay_fmt.substr(0, ffplay_fmt.size() - 3);  // "argb888" -> "argb"
+        }
+    } else {
+        // YUV格式：默认NV12
+        format_name = "nv12";
+        ffplay_fmt = "nv12";
+    }
+    
+    LOG_INFO("═══════════════════════════════════════════════════════");
+    LOG_INFO_FMT("  BufferWriter Format Test: %s", format_name.c_str());
+    LOG_INFO_FMT("  Video: %s", video_path);
+    LOG_INFO("═══════════════════════════════════════════════════════");
+    
+    // 1. 配置VideoProductionLine（使用传入的taco配置）
+    auto workerConfig = WorkerConfigBuilder()
+        .setFileConfig(
+            FileConfigBuilder()
+                .setFilePath(video_path)
+                .build()
+        )
+        .setOutputConfig(
+            OutputConfigBuilder()
+                .setResolution(1920, 1080)
+                .setBitsPerPixel(32)
+                .build()
+        )
+        .setDecoderConfig(
+            DecoderConfigBuilder()
+                .useH264Taco(taco_config)  // ⭐ 直接使用传入的配置
+                .build()
+        )
+        .setWorkerType(WorkerType::FFMPEG_VIDEO_FILE)
+        .build();
+    
+    LOG_INFO_FMT("Decoder config: ch1_rgb=%s, format=%s", 
+                 taco_config.ch1_rgb ? "true" : "false",
+                 format_name.c_str());
+    
+    // 2. 启动生产线
+    LOG_INFO("Step 2: Starting VideoProductionLine...");
+    VideoProductionLine producer(false, 1, false);
+    if (!producer.start(workerConfig)) {
+        LOG_ERROR("Failed to start VideoProductionLine");
+        return -1;
+    }
+    
+    // 3. 获取BufferPool
+    LOG_INFO("Step 3: Getting BufferPool...");
+    uint64_t pool_id = producer.getWorkingBufferPoolId();
+    auto pool_sptr = BufferPoolRegistry::getInstance().getPool(pool_id).lock();
+    if (!pool_sptr) {
+        LOG_ERROR("Failed to get BufferPool");
+        producer.stop();
+        return -1;
+    }
+    
+    LOG_INFO_FMT("BufferPool: %s (ID: %lu)", 
+                 pool_sptr->getName().c_str(), pool_id);
+    
+    // 4. 等待第一个Buffer，获取实际格式
+    LOG_INFO("Step 4: Waiting for first buffer to detect format...");
+    Buffer* first_buffer = pool_sptr->acquireFilled(true, 5000);  // 5秒超时
+    if (!first_buffer) {
+        LOG_ERROR("Failed to get first buffer (timeout)");
+        producer.stop();
+        return -1;
+    }
+    
+    // 5. 从Buffer元数据获取实际格式
+    AVPixelFormat actual_format = AV_PIX_FMT_NONE;
+    int actual_width = 1920;
+    int actual_height = 1080;
+    
+    if (first_buffer->hasImageMetadata()) {
+        actual_format = first_buffer->getImageFormat();
+        actual_width = first_buffer->getImageWidth();
+        actual_height = first_buffer->getImageHeight();
+        LOG_INFO_FMT("Detected format from buffer: %s (%dx%d)", 
+                    av_get_pix_fmt_name(actual_format),
+                    actual_width, actual_height);
+    } else {
+        LOG_WARN("Buffer has no metadata, using default NV12");
+        actual_format = AV_PIX_FMT_NV12;
+    }
+    
+    // 6. 创建BufferWriter（使用检测到的格式）
+    LOG_INFO("Step 5: Creating BufferWriter...");
+    BufferWriter writer;
+    char output_path[256];
+    snprintf(output_path, sizeof(output_path), 
+             "output_test_%s.yuv", format_name.c_str());
+    
+    if (!writer.open(output_path, actual_format, actual_width, actual_height)) {
+        LOG_ERROR_FMT("Failed to open BufferWriter for format %s", 
+                     av_get_pix_fmt_name(actual_format));
+        pool_sptr->releaseFilled(first_buffer);
+        producer.stop();
+        return -1;
+    }
+    
+    LOG_INFO_FMT("Saving to: %s (format: %s)", 
+                 output_path, av_get_pix_fmt_name(actual_format));
+    
+    // 7. 保存第一帧
+    LOG_INFO("\nStep 6: Saving frames...");
+    LOG_INFO("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    if (writer.write(first_buffer)) {
+        LOG_INFO("  ✅ Saved frame 1");
+    }
+    pool_sptr->releaseFilled(first_buffer);
+    
+    // 8. 消费者循环：保存剩余帧（直到视频播放完毕）
+    int timeout_count = 0;
+    const int MAX_TIMEOUT = 10;
+    
+    while (g_running) {  // ⭐ 移除 max_frames 限制，让视频自然结束
+        Buffer* buffer = pool_sptr->acquireFilled(true, 100);
+        
+        if (buffer) {
+            if (writer.write(buffer)) {
+                if (writer.getWriteCount() % 10 == 0) {
+                    LOG_INFO_FMT("  Saved %d frames", writer.getWriteCount());
+                }
+            } else {
+                LOG_ERROR_FMT("Failed to write frame %d", 
+                             writer.getWriteCount() + 1);
+            }
+            
+            pool_sptr->releaseFilled(buffer);
+            timeout_count = 0;
+        } else {
+            timeout_count++;
+            if (timeout_count >= MAX_TIMEOUT) {
+                LOG_INFO("Video finished, stopping...");
+                break;
+            }
+        }
+    }
+    
+    LOG_INFO("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    
+    // 9. 关闭
+    LOG_INFO("\nStep 7: Cleaning up...");
+    writer.close();
+    producer.stop();
+    
+    // 10. 打印结果
+    LOG_INFO("═══════════════════════════════════════════════════════");
+    LOG_INFO("  Test Results");
+    LOG_INFO("═══════════════════════════════════════════════════════");
+    LOG_INFO_FMT("Format requested: %s", format_name.c_str());
+    LOG_INFO_FMT("Format actual: %s", av_get_pix_fmt_name(actual_format));
+    LOG_INFO_FMT("Output file: %s", output_path);
+    LOG_INFO_FMT("Frames saved: %d", writer.getWriteCount());
+    
+    bool success = (writer.getWriteCount() > 0);
+    if (success) {
+        LOG_INFO("\n✅ Test PASSED");
+        LOG_INFO_FMT("   - Successfully saved %d frames", writer.getWriteCount());
+        LOG_INFO("\n💡 Tip: Verify the output with FFmpeg:");
+        LOG_INFO_FMT("   ffplay -f rawvideo -pix_fmt %s -s %dx%d %s",
+                     ffplay_fmt.c_str(), actual_width, actual_height, output_path);
+    } else {
+        LOG_ERROR("\n❌ Test FAILED: No frames saved");
+    }
+    
+    LOG_INFO("═══════════════════════════════════════════════════════");
+    
+    return success ? 0 : -1;
+}
+
+/**
+ * 测试8：BufferWriter保存帧测试（默认NV12格式）
  * 
  * 功能：
  * - 使用VideoProductionLine解码视频
@@ -1122,6 +1321,82 @@ static int test_h264_taco_video_multithread(const char* video_path) {
  * - 测试原子计数器功能
  */
 static int test_buffer_writer(const char* video_path) {
+    // ✅ 直接使用TacoConfigBuilder配置NV12格式（YUV输出）
+    auto tacoConfig = TacoConfigBuilder()
+        .setRgbConfig(false, "", "bt601")  // ch1_rgb=false，输出YUV
+        .build();
+    
+    return test_buffer_writer_format(video_path, tacoConfig);
+}
+
+/**
+ * 测试8b：BufferWriter多格式保存测试
+ * 
+ * 遍历所有配置的格式，测试BufferWriter对各种格式的支持
+ */
+static int test_buffer_writer_all_formats(const char* video_path) {
+    LOG_INFO("╔═══════════════════════════════════════════════════════╗");
+    LOG_INFO("║  BufferWriter Multi-Format Test Suite                 ║");
+    LOG_INFO("║  Testing h264_taco decoder output formats             ║");
+    LOG_INFO("╚═══════════════════════════════════════════════════════╝");
+    
+    // ✅ 定义测试用例（只需要TacoConfig构造函数）
+    std::function<WorkerConfig::DecoderConfig::TacoConfig()> tests[] = {
+        // YUV格式
+    
+        // RGB格式
+        []() { return TacoConfigBuilder().setRgbConfig(true, "argb888", "bt601").build(); },
+        []() { return TacoConfigBuilder().setRgbConfig(true, "bgra8888", "bt601").build(); },
+        []() { return TacoConfigBuilder().setRgbConfig(true, "rgba8888", "bt601").build(); },
+        []() { return TacoConfigBuilder().setRgbConfig(true, "rgb888", "bt601").build(); },
+        []() { return TacoConfigBuilder().setRgbConfig(true, "bgr888", "bt601").build(); },
+    };
+    
+    int total_tests = sizeof(tests) / sizeof(tests[0]);
+    int passed = 0;
+    int failed = 0;
+    
+    LOG_INFO_FMT("\nTotal formats to test: %d\n", total_tests);
+    
+    for (int i = 0; i < total_tests; i++) {
+        LOG_INFO_FMT("\n╔═══════════════════════════════════════════════════════╗");
+        LOG_INFO_FMT("║  [%d/%d] Testing format                                ║", i + 1, total_tests);
+        LOG_INFO_FMT("╚═══════════════════════════════════════════════════════╝");
+        
+        // ✅ 调用build_config()构建TacoConfig，直接传给测试函数
+        int result = test_buffer_writer_format(video_path, tests[i]());
+        
+        if (result == 0) {
+            passed++;
+            LOG_INFO_FMT("\n✅ [%d/%d] PASSED\n", i + 1, total_tests);
+        } else {
+            failed++;
+            LOG_ERROR_FMT("\n❌ [%d/%d] FAILED\n", i + 1, total_tests);
+        }
+        
+        // 短暂延迟，避免资源冲突
+        std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    }
+    
+    // 最终统计
+    LOG_INFO("\n╔═══════════════════════════════════════════════════════╗");
+    LOG_INFO("║  Test Summary                                          ║");
+    LOG_INFO("╚═══════════════════════════════════════════════════════╝");
+    LOG_INFO_FMT("Total tests: %d", total_tests);
+    LOG_INFO_FMT("Passed: %d ✅", passed);
+    LOG_INFO_FMT("Failed: %d ❌", failed);
+    LOG_INFO_FMT("Success rate: %.1f%%", (100.0 * passed / total_tests));
+    LOG_INFO("\n╔═══════════════════════════════════════════════════════╗");
+    
+    return (failed == 0) ? 0 : -1;
+}
+
+/**
+ * 测试8（旧版兼容）：BufferWriter保存帧测试（ARGB格式）
+ * 
+ * 保留用于向后兼容，使用ARGB格式
+ */
+static int test_buffer_writer_legacy(const char* video_path) {
     using namespace productionline::io;
     
     LOG_INFO("═══════════════════════════════════════════════════════");
@@ -1268,7 +1543,9 @@ REGISTER_TEST(iouring, "io_uring async I/O mode", test_buffermanager_iouring);
 REGISTER_TEST(rtsp, "RTSP stream playback (zero-copy, FFmpeg)", test_rtsp_stream);
 REGISTER_TEST(ffmpeg, "FFmpeg encoded video playback (MP4/AVI/MKV/etc)", test_h264_taco_video);
 REGISTER_TEST(ffmpeg_multithread, "Multi-threaded FFmpeg video decoding (no display, decode only)", test_h264_taco_video_multithread);
-REGISTER_TEST(writer, "BufferWriter - Save frames to file", test_buffer_writer);
+REGISTER_TEST(writer, "BufferWriter - Save frames (NV12 format)", test_buffer_writer);
+REGISTER_TEST(writer_all, "BufferWriter - Test all supported formats", test_buffer_writer_all_formats);
+REGISTER_TEST(writer_legacy, "BufferWriter - Save frames (ARGB format, legacy)", test_buffer_writer_legacy);
 
 /**
  * 主函数

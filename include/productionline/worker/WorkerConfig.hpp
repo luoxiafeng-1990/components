@@ -327,45 +327,58 @@ public:
         return *this;
     }
     
-    // ========== h264_taco 配置 ==========
-    
-    /**
-     * @brief 设置 taco 配置（使用独立的配置对象）
-     */
-    DecoderConfigBuilder& setTacoConfig(const WorkerConfig::DecoderConfig::TacoConfig& taco_config) {
-        config_.taco = taco_config;
-        return *this;
-    }
-    
-    /**
-     * @brief 快速配置 taco 参数（简化版）
-     */
-    DecoderConfigBuilder& configureTaco(
-        bool reorder_disable = true,
-        bool ch0_enable = true,
-        bool ch1_enable = true,
-        bool ch1_rgb = true,
-        std::string_view rgb_format = "argb888",
-        std::string_view rgb_std = "bt601"
-    ) {
-        config_.taco.reorder_disable = reorder_disable;
-        config_.taco.ch0_enable = ch0_enable;
-        config_.taco.ch1_enable = ch1_enable;
-        config_.taco.ch1_rgb = ch1_rgb;
-        config_.taco.ch1_rgb_format = std::string(rgb_format);
-        config_.taco.ch1_rgb_std = std::string(rgb_std);
-        return *this;
-    }
-    
     // ========== 快捷预设 ==========
     
     /**
      * @brief 预设：h264_taco 硬件解码（默认配置）
+     * 
+     * 设置解码器为 h264_taco，并使用默认 taco 配置：
+     * - reorder_disable = true
+     * - ch0_enable = true (YUV通道)
+     * - ch1_enable = true (RGB通道)
+     * - ch1_rgb = true (输出RGB格式)
+     * - ch1_rgb_format = "argb888"
+     * - ch1_rgb_std = "bt601"
+     * 
+     * 示例：
+     * @code
+     * DecoderConfigBuilder().useH264Taco().build()
+     * @endcode
      */
     DecoderConfigBuilder& useH264Taco() {
         config_.name = "h264_taco";
         config_.enable_hardware = true;
-        configureTaco();  // 使用默认 taco 配置
+        
+        // 设置默认 taco 配置
+        config_.taco.reorder_disable = true;
+        config_.taco.ch0_enable = true;
+        config_.taco.ch1_enable = true;
+        config_.taco.ch1_rgb = true;
+        config_.taco.ch1_rgb_format = "argb888";
+        config_.taco.ch1_rgb_std = "bt601";
+        
+        return *this;
+    }
+    
+    /**
+     * @brief 预设：h264_taco 硬件解码（自定义配置）
+     * 
+     * 设置解码器为 h264_taco，并使用用户提供的 taco 配置。
+     * 
+     * 示例：
+     * @code
+     * auto tacoConfig = TacoConfigBuilder()
+     *     .setRgbConfig(false, "", "bt601")  // 输出YUV
+     *     .build();
+     * DecoderConfigBuilder().useH264Taco(tacoConfig).build()
+     * @endcode
+     * 
+     * @param taco_config 自定义的 taco 配置对象
+     */
+    DecoderConfigBuilder& useH264Taco(const WorkerConfig::DecoderConfig::TacoConfig& taco_config) {
+        config_.name = "h264_taco";
+        config_.enable_hardware = true;
+        config_.taco = taco_config;
         return *this;
     }
     
