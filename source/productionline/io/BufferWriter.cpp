@@ -122,7 +122,13 @@ bool BufferWriter::write(const Buffer* buffer) {
 }
 
 bool BufferWriter::writeSimple(const Buffer* buffer) {
-    // 旧版简单写入（向后兼容）
+    // 1. 参数校验：空指针检查（防御性编程）
+    if (!buffer) {
+        LOG_ERROR("[BufferWriter::writeSimple] Error: buffer is nullptr");
+        return false;
+    }
+    
+    // 2. 旧版简单写入（向后兼容）
     if (!buffer->isValid()) {
         LOG_ERROR("[BufferWriter] Error: Buffer validation failed");
         return false;
@@ -160,20 +166,26 @@ bool BufferWriter::writeSimple(const Buffer* buffer) {
 }
 
 bool BufferWriter::writeWithMetadata(const Buffer* buffer) {
-    // 1. 获取图像元数据
+    // 1. 参数校验：空指针检查（防御性编程）
+    if (!buffer) {
+        LOG_ERROR("[BufferWriter::writeWithMetadata] Error: buffer is nullptr");
+        return false;
+    }
+    
+    // 2. 获取图像元数据
     AVPixelFormat buf_format = buffer->getImageFormat();
     int buf_width = buffer->getImageWidth();
     int buf_height = buffer->getImageHeight();
     const int* linesize = buffer->getImageLinesize();
     
-    // 2. 验证格式（如果open时指定了格式）
+    // 3. 验证格式（如果open时指定了格式）
     if (format_ != AV_PIX_FMT_NONE && buf_format != format_) {
         LOG_ERROR_FMT("[BufferWriter] Format mismatch: expected %s, got %s",
                 av_get_pix_fmt_name(format_), av_get_pix_fmt_name(buf_format));
         return false;
     }
     
-    // 3. 根据格式写入数据
+    // 4. 根据格式写入数据
     switch (buf_format) {
         case AV_PIX_FMT_NV12:
         case AV_PIX_FMT_NV21: {
@@ -295,7 +307,7 @@ bool BufferWriter::writeWithMetadata(const Buffer* buffer) {
             return false;
     }
     
-    // 4. 累加计数器
+    // 5. 累加计数器
     write_count_.fetch_add(1);
     return true;
 }

@@ -370,16 +370,6 @@ public:
     }
     
     /**
-     * @brief 预设：h264_taco 硬件解码（自定义 taco 配置）
-     */
-    DecoderConfigBuilder& useH264TacoWith(const WorkerConfig::DecoderConfig::TacoConfig& taco_config) {
-        config_.name = "h264_taco";
-        config_.enable_hardware = true;
-        config_.taco = taco_config;
-        return *this;
-    }
-    
-    /**
      * @brief 预设：软件解码（自动选择）
      */
     DecoderConfigBuilder& useSoftware() {
