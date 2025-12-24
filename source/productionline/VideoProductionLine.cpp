@@ -54,8 +54,19 @@ VideoProductionLine::~VideoProductionLine() {
     LOG4CPLUS_INFO(logger, log_prefix_ << " 析构: 已生产 " << produced_frames_.load() << " 帧, 跳过 " << skipped_frames_.load() << " 帧");
     LOG4CPLUS_INFO(logger, log_prefix_ << " " << std::string(69, '='));
     
+    // 🔧 修复：无论 running_ 的状态如何，都必须确保所有线程被正确 join
+    // 避免 std::thread 在 joinable 状态下被析构导致 std::terminate()
     if (running_.load()) {
         stop();
+    } else {
+        // 即使 running_ 是 false，也要确保所有线程被 join
+        std::lock_guard<std::mutex> lock(threads_mutex_);
+        for (auto& thread : threads_) {
+            if (thread.joinable()) {
+                thread.join();
+            }
+        }
+        threads_.clear();
     }
 }
 
