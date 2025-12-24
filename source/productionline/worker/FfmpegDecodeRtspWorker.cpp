@@ -117,7 +117,7 @@ bool FfmpegDecodeRtspWorker::open(const char* path, int width, int height, int b
     LOG_INFO_FMT("   Bits per pixel: %d", bits_per_pixel);
     
     // 连接RTSP流并初始化解码器
-    if (!connectRTSP()) {
+    if (!openMediaSource()) {
         return false;
     }
     
@@ -126,7 +126,7 @@ bool FfmpegDecodeRtspWorker::open(const char* path, int width, int height, int b
     size_t frame_size = width_ * height_ * (bits_per_pixel / 8);
     if (frame_size == 0) {
         setError("Invalid frame size, cannot create BufferPool");
-        disconnectRTSP();
+        closeMediaSource();
         return false;
     }
     
@@ -142,7 +142,7 @@ bool FfmpegDecodeRtspWorker::open(const char* path, int width, int height, int b
     
     if (buffer_pool_id_ == 0) {
         setError("Failed to create BufferPool via Allocator");
-        disconnectRTSP();
+        closeMediaSource();
         return false;
     }
     
@@ -180,7 +180,7 @@ void FfmpegDecodeRtspWorker::close() {
     buffer_pool_id_ = 0;  // 只清除ID，不调用destroyPool
     
     // 断开RTSP连接并释放资源
-    disconnectRTSP();
+    closeMediaSource();
     
     is_open_ = false;
     connected_ = false;
@@ -409,7 +409,7 @@ void FfmpegDecodeRtspWorker::printStats() const {
 
 // ============ 内部实现 ============
 
-bool FfmpegDecodeRtspWorker::connectRTSP() {
+bool FfmpegDecodeRtspWorker::openMediaSource() {
     // 1. 分配格式上下文
     format_ctx_ptr_ = avformat_alloc_context();
     if (!format_ctx_ptr_) {
@@ -472,7 +472,7 @@ bool FfmpegDecodeRtspWorker::connectRTSP() {
     
     connected_ = true;
     
-    LOG_DEBUG("[Worker] Connected to RTSP stream");
+    LOG_DEBUG("[Worker] Opened RTSP media source");
     LOG_INFO_FMT("   Codec: %s", codec_ctx_ptr_->codec->name);
     LOG_INFO_FMT("   Stream resolution: %dx%d", codec_ctx_ptr_->width, codec_ctx_ptr_->height);
     LOG_INFO_FMT("   Output resolution: %dx%d", width_, height_);
@@ -480,7 +480,7 @@ bool FfmpegDecodeRtspWorker::connectRTSP() {
     return true;
 }
 
-void FfmpegDecodeRtspWorker::disconnectRTSP() {
+void FfmpegDecodeRtspWorker::closeMediaSource() {
     if (sws_ctx_ptr_) {
         sws_freeContext(sws_ctx_ptr_);
         sws_ctx_ptr_ = nullptr;

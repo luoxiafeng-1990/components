@@ -170,14 +170,14 @@ private:
     // ============ 内部辅助方法 ============
     
     /**
-     * @brief 打开FFmpeg资源并初始化解码器
+     * @brief 打开媒体源（视频文件）并初始化解码器
      */
-    bool openFfmpegResources();
+    bool openMediaSource();
     
     /**
-     * @brief 关闭FFmpeg资源并释放资源
+     * @brief 关闭媒体源并释放资源
      */
-    void closeFfmpegResources();
+    void closeMediaSource();
     
     /**
      * @brief 查找视频流

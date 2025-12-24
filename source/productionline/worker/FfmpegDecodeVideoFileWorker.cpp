@@ -97,23 +97,23 @@ bool FfmpegDecodeVideoFileWorker::open(const char* path) {
     
     // 如果已经打开，先关闭
     if (is_open_.load(std::memory_order_acquire)) {
-        closeFfmpegResources();
+        closeMediaSource();
     }
     
     // 保存路径（使用 std::string 自动管理）
     file_path_ = path;
     
     // 打开FFmpeg资源
-    if (!openFfmpegResources()) {
+    if (!openMediaSource()) {
         return false;
     }
     
     // 🎯 Worker职责：在open()时自动创建BufferPool（通过调用Allocator）
-    // 计算帧大小（在openFfmpegResources()后，output_width_和output_height_已设置）
+    // 计算帧大小（在openMediaSource()后，output_width_和output_height_已设置）
     size_t frame_size = output_width_ * output_height_ * output_bpp_ / 8;
     if (frame_size == 0) {
         setError("Invalid frame size, cannot create BufferPool");
-        closeFfmpegResources();
+        closeMediaSource();
         return false;
     }
     
@@ -129,7 +129,7 @@ bool FfmpegDecodeVideoFileWorker::open(const char* path) {
     
     if (buffer_pool_id_ == 0) {
         setError("Failed to create BufferPool via Allocator");
-        closeFfmpegResources();
+        closeMediaSource();
         return false;
     }
     
@@ -183,7 +183,7 @@ void FfmpegDecodeVideoFileWorker::close() {
         // Allocator 析构时会自动清理所有 Pool
         buffer_pool_id_ = 0;  // 只清除ID，不调用destroyPool
         
-        closeFfmpegResources();
+        closeMediaSource();
     }
     
     // is_open_ 已经在上面设置为 false，不需要再次设置
@@ -197,7 +197,7 @@ bool FfmpegDecodeVideoFileWorker::isOpen() const {
 // 内部方法：打开FFmpeg资源
 // ============================================================================
 
-bool FfmpegDecodeVideoFileWorker::openFfmpegResources() {
+bool FfmpegDecodeVideoFileWorker::openMediaSource() {
     // 🎯 重置FFmpeg资源状态标志
     is_ffmpeg_opened_.store(false, std::memory_order_release);
     
@@ -219,19 +219,19 @@ bool FfmpegDecodeVideoFileWorker::openFfmpegResources() {
     ret = avformat_find_stream_info(format_ctx_ptr_, nullptr);
     if (ret < 0) {
         setError("Failed to find stream info", ret);
-        closeFfmpegResources();
+        closeMediaSource();
         return false;
     }
     
     // 3. 查找视频流
     if (!findVideoStream()) {
-        closeFfmpegResources();
+        closeMediaSource();
         return false;
     }
     
     // 4. 初始化解码器
     if (!initializeDecoder()) {
-        closeFfmpegResources();
+        closeMediaSource();
         return false;
     }
     
@@ -248,7 +248,7 @@ bool FfmpegDecodeVideoFileWorker::openFfmpegResources() {
     packet_ptr_ = av_packet_alloc();
     if (!packet_ptr_) {
         setError("Failed to allocate AVPacket");
-        closeFfmpegResources();
+        closeMediaSource();
         return false;
     }
     
@@ -258,7 +258,7 @@ bool FfmpegDecodeVideoFileWorker::openFfmpegResources() {
     return true;
 }
 
-void FfmpegDecodeVideoFileWorker::closeFfmpegResources() {
+void FfmpegDecodeVideoFileWorker::closeMediaSource() {
     // 🎯 原子检查并设置：如果 is_ffmpeg_opened_ 是 true，则设置为 false
     // 返回值表示是否成功设置（即之前是 true）
     bool expected = true;
@@ -270,7 +270,7 @@ void FfmpegDecodeVideoFileWorker::closeFfmpegResources() {
     }
     
     // 🎯 只有第一个线程能执行到这里（is_ffmpeg_opened_ 从 true 变为 false）
-    // 此时 is_ffmpeg_opened_ == false，其他线程调用 closeFfmpegResources() 会直接返回
+    // 此时 is_ffmpeg_opened_ == false，其他线程调用 closeMediaSource() 会直接返回
     
     std::lock_guard<std::recursive_mutex> lock(mutex_);
     
