@@ -24,6 +24,7 @@
 11. [错误 #13: std::thread 在 joinable 状态下析构导致 std::terminate()](#错误-13-stdthread-在-joinable-状态下析构导致-stdterminate)
 12. [知识点 #11: std::unique_ptr 的解引用和访问操作符](#知识点-11-stduniqueptr-的解引用和访问操作符)
 13. [知识点 #12: explicit 关键字与隐式类型转换](#知识点-12-explicit-关键字与隐式类型转换)
+14. [知识点 #13: 基类成员变量声明顺序对派生类析构的影响](#知识点-13-基类成员变量声明顺序对派生类析构的影响)
 
 ---
 
@@ -2100,6 +2101,310 @@ static_assert(!std::is_convertible_v<int, Age>,
 
 ---
 
+## 知识点 #13: 基类成员变量声明顺序对派生类析构的影响
+
+### 背景问题
+
+在修复 `free(): invalid pointer` 错误时，我们尝试通过调整 `WorkerBase` 基类中成员变量的声明顺序，希望让 `allocator_facade_` 在派生类 `FfmpegDecodeVideoFileWorker` 的业务资源（如 FFmpeg 解码器）之前析构，从而先释放 AVFrame，再关闭解码器。
+
+### 问题代码
+
+```cpp
+// WorkerBase.hpp (调整后的成员变量顺序)
+class WorkerBase {
+protected:
+    /**
+     * ⭐ 声明顺序第1位：最后析构
+     */
+    WorkerConfig worker_config_;
+    
+    /**
+     * ⭐ 声明顺序第2位：第2个析构
+     */
+    uint64_t buffer_pool_id_;
+    
+    /**
+     * ⭐ 声明顺序第3位：最先析构（C++ 析构顺序是声明顺序的逆序）
+     * ⭐ 关键设计：Allocator 最先析构，自动清理所有 Pool 和 AVFrame
+     */
+    BufferAllocatorFacade allocator_facade_;
+};
+
+// FfmpegDecodeVideoFileWorker.cpp (派生类析构函数)
+FfmpegDecodeVideoFileWorker::~FfmpegDecodeVideoFileWorker() {
+    LOG_DEBUG("[FfmpegDecodeVideoFileWorker] 析构函数开始");
+    close();  // 关闭 FFmpeg 解码器
+    LOG_DEBUG("[FfmpegDecodeVideoFileWorker] 析构函数体结束");
+    // 期望：这里 allocator_facade_ 先析构，释放 AVFrame
+}
+```
+
+### ❌ 错误的期望
+
+**期望的析构顺序（错误）：**
+```
+1. ~FfmpegDecodeVideoFileWorker() 析构函数体开始
+2. close() - 关闭 FFmpeg 解码器
+3. 基类成员 allocator_facade_ 析构 ← 期望这里先释放 AVFrame
+4. ~FfmpegDecodeVideoFileWorker() 析构函数体结束
+```
+
+### ✅ 实际的析构顺序（C++ 标准规定）
+
+**C++ 标准规定的析构顺序：**
+```
+1️⃣ 派生类析构函数体执行
+   └─ ~FfmpegDecodeVideoFileWorker() {
+          close();  // 关闭 FFmpeg 解码器（avcodec_free_context）
+      }
+
+2️⃣ 派生类成员变量析构（按声明顺序的逆序）
+   └─ 如果派生类有自己的成员变量，在这里析构
+
+3️⃣ 基类 WorkerBase 成员变量析构（按声明顺序的逆序）
+   ├─ allocator_facade_ 析构 ← 实际在这里才释放 AVFrame
+   ├─ buffer_pool_id_ （无析构逻辑）
+   └─ worker_config_ 析构
+
+4️⃣ 基类 WorkerBase 析构函数体执行
+   └─ ~WorkerBase() { }
+```
+
+### 关键问题：基类成员变量永远在派生类析构函数体之后析构
+
+**核心原因：** 无论如何调整基类成员变量的声明顺序，它们的析构都发生在**派生类析构函数体执行完毕之后**，因此无法阻止派生类在析构函数体内先调用 `close()` → `avcodec_free_context()`。
+
+### 可复现示例
+
+```cpp
+#include <iostream>
+#include <memory>
+
+// 基类
+class Base {
+protected:
+    struct Resource1 {
+        ~Resource1() { std::cout << "    3️⃣ Resource1 析构\n"; }
+    };
+    
+    struct Resource2 {
+        ~Resource2() { std::cout << "    2️⃣ Resource2 析构\n"; }
+    };
+    
+    // ⭐ 尝试调整顺序：让 Resource2 最先析构
+    Resource1 res1_;  // 声明顺序第1位
+    Resource2 res2_;  // 声明顺序第2位（期望最先析构）
+    
+public:
+    Base() {
+        std::cout << "Base 构造\n";
+    }
+    
+    ~Base() {
+        std::cout << "  4️⃣ Base 析构函数体\n";
+    }
+};
+
+// 派生类
+class Derived : public Base {
+public:
+    Derived() {
+        std::cout << "Derived 构造\n";
+    }
+    
+    ~Derived() {
+        std::cout << "1️⃣ Derived 析构函数体开始\n";
+        std::cout << "  （期望 Resource2 在这里先析构，但实际不会）\n";
+        // 这里期望 Base 的 Resource2 已经析构，但实际还没有！
+    }
+};
+
+int main() {
+    std::cout << "=== 创建对象 ===\n";
+    {
+        Derived d;
+    }
+    std::cout << "\n=== 析构完成 ===\n";
+    
+    std::cout << "\n实际析构顺序：\n";
+    std::cout << "1️⃣ Derived 析构函数体\n";
+    std::cout << "2️⃣ Base::Resource2 析构（声明顺序靠后，先析构）\n";
+    std::cout << "3️⃣ Base::Resource1 析构（声明顺序靠前，后析构）\n";
+    std::cout << "4️⃣ Base 析构函数体\n";
+    
+    return 0;
+}
+```
+
+### 运行结果
+
+```
+=== 创建对象 ===
+Base 构造
+Derived 构造
+1️⃣ Derived 析构函数体开始
+  （期望 Resource2 在这里先析构，但实际不会）
+    2️⃣ Resource2 析构
+    3️⃣ Resource1 析构
+  4️⃣ Base 析构函数体
+
+=== 析构完成 ===
+```
+
+**结论：基类成员变量的析构发生在派生类析构函数体之后！**
+
+### ✅ 正确的解决方案
+
+**在派生类析构函数体内手动调用清理方法：**
+
+```cpp
+// FfmpegDecodeVideoFileWorker.cpp
+FfmpegDecodeVideoFileWorker::~FfmpegDecodeVideoFileWorker() {
+    LOG_DEBUG("[FfmpegDecodeVideoFileWorker] 析构函数开始");
+    
+    // ✅ 正确：手动清理 BufferPool 和 AVFrame
+    if (buffer_pool_id_ != 0) {
+        LOG_DEBUG("[FfmpegDecodeVideoFileWorker] 手动清理 BufferPool 和 AVFrame...");
+        allocator_facade_.destroyPool();  // ← 在派生类析构函数体内手动调用
+        buffer_pool_id_ = 0;
+    }
+    
+    // ✅ 正确：再关闭解码器（此时 AVFrame 已全部释放）
+    if (is_open_.load(std::memory_order_acquire)) {
+        LOG_DEBUG("[FfmpegDecodeVideoFileWorker] 关闭解码器...");
+        close();
+    }
+    
+    LOG_DEBUG("[FfmpegDecodeVideoFileWorker] 析构函数体结束");
+    
+    // 成员变量自动析构：
+    // - allocator_facade_.destroyPool() 再次被调用（幂等性，直接返回）
+}
+```
+
+### 完整的析构流程
+
+```
+~FfmpegDecodeVideoFileWorker() {
+    // 1️⃣ 派生类析构函数体执行
+    allocator_facade_.destroyPool();  // 手动清理 AVFrame
+    ↓
+    AVFrameAllocator::destroyPool() {
+        遍历所有 Buffer
+        ↓
+        av_frame_free(&frame)  // ✅ 先释放 AVFrame
+    }
+    ↓
+    close();
+    ↓
+    closeMediaSource();
+    ↓
+    avcodec_free_context()  // ✅ 此时 AVFrame 已经全部释放，安全！
+}
+// 2️⃣ 派生类析构函数体结束
+
+// 3️⃣ 基类成员变量析构（逆序）
+~allocator_facade_() {
+    destroyPool();  // ✅ 因为幂等性，第二次调用直接返回，不会重复释放
+}
+~buffer_pool_id_()  // 无析构逻辑
+~worker_config_()
+
+// 4️⃣ 基类析构函数体执行
+~WorkerBase() { }
+```
+
+### C++ 析构顺序规则总结
+
+| 析构阶段 | 执行内容 | 顺序 |
+|---------|---------|------|
+| **1. 派生类析构函数体** | 执行派生类 `~Derived()` 中的代码 | - |
+| **2. 派生类成员变量** | 析构派生类的成员变量 | 声明顺序的**逆序** |
+| **3. 基类成员变量** | 析构基类的成员变量 | 声明顺序的**逆序** |
+| **4. 基类析构函数体** | 执行基类 `~Base()` 中的代码 | - |
+
+**关键点：** 
+- ✅ 基类成员变量的声明顺序**确实影响它们之间的析构顺序**
+- ❌ 但基类成员变量的析构**永远在派生类析构函数体之后**
+- ✅ 所以调整基类成员变量顺序**无法控制派生类析构函数体内的执行顺序**
+
+### 最佳实践
+
+1. **手动控制清理顺序**
+   ```cpp
+   ~DerivedClass() {
+       // ✅ 在析构函数体内显式控制清理顺序
+       cleanupResourceA();
+       cleanupResourceB();
+       // 成员变量会在这之后自动析构
+   }
+   ```
+
+2. **利用 RAII 和幂等性**
+   ```cpp
+   class ResourceManager {
+   public:
+       void cleanup() {
+           if (cleaned_) return;  // 幂等性
+           // 执行清理
+           cleaned_ = true;
+       }
+       
+       ~ResourceManager() {
+           cleanup();  // 自动调用，但可以提前手动调用
+       }
+   private:
+       bool cleaned_ = false;
+   };
+   ```
+
+3. **避免依赖成员变量的析构顺序来实现业务逻辑**
+   ```cpp
+   // ❌ 不好的设计：依赖成员变量析构顺序
+   class BadDesign {
+       Database db_;
+       Connection conn_;  // 期望 conn_ 先析构，断开数据库连接
+       // 但这种隐式依赖不明确，容易出错
+   };
+   
+   // ✅ 好的设计：显式控制清理顺序
+   class GoodDesign {
+       Database db_;
+       Connection conn_;
+       
+       ~GoodDesign() {
+           conn_.close();  // 显式关闭连接
+           db_.cleanup();  // 显式清理数据库
+       }
+   };
+   ```
+
+### 知识点
+
+1. **C++ 析构函数的执行顺序是固定的**
+   - 派生类析构函数体 → 派生类成员 → 基类成员 → 基类析构函数体
+
+2. **成员变量的析构顺序是声明顺序的逆序**
+   - 先声明的后析构，后声明的先析构
+
+3. **基类成员变量的析构发生在派生类析构函数体之后**
+   - 无论如何调整基类成员变量的顺序，都无法让它们在派生类析构函数体执行期间析构
+
+4. **正确的做法是在派生类析构函数体内手动控制清理顺序**
+   - 不要依赖成员变量的自动析构顺序来实现业务逻辑
+
+### 参考代码位置
+
+- `WorkerBase.hpp:189-211` - 基类成员变量声明（调整后的顺序）
+- `FfmpegDecodeVideoFileWorker.cpp:82-115` - 派生类析构函数（正确的手动清理实现）
+- `BufferAllocatorFacade.cpp:22-45` - `destroyPool()` 的幂等性实现
+
+### 结论
+
+**调整基类成员变量的声明顺序对解决此问题意义不大。** 虽然调整顺序可以控制基类成员变量之间的析构顺序（良好实践），但无法让基类成员在派生类析构函数体执行期间析构。真正的解决方案是：**在派生类析构函数体内手动调用清理方法，显式控制资源释放顺序。**
+
+---
+
 ## 📊 错误类型统计
 
 | 错误类型 | 数量 | 占比 | 难度 |
@@ -2495,13 +2800,14 @@ std::unique_ptr<BufferPool> BufferPool::CreateDynamic(
 - ✅ 智能指针操作符（`std::unique_ptr` 的 `.`, `->`, `*` 操作符）
 - ✅ explicit 关键字（防止隐式类型转换，提高类型安全）
 - ✅ new vs make_unique（private 构造函数访问权限、内存分配效率）
+- ✅ 类继承与析构顺序（基类成员变量声明顺序的影响、派生类析构控制）
 
-这些错误都已成功解决，项目已通过编译并修复运行时错误。智能指针、explicit 关键字、new vs make_unique 和线程管理的知识点将帮助开发者更好地理解和使用现代 C++ 特性。🎉
+这些错误都已成功解决，项目已通过编译并修复运行时错误。智能指针、explicit 关键字、new vs make_unique、线程管理和类继承析构顺序的知识点将帮助开发者更好地理解和使用现代 C++ 特性。🎉
 
 ---
 
-**文档版本**: v1.5  
-**最后更新**: 2025-12-24  
+**文档版本**: v1.6  
+**最后更新**: 2025-12-25  
 **维护者**: AI Assistant  
 **状态**: ✅ 完成  
 **更新内容**: 
@@ -2510,6 +2816,7 @@ std::unique_ptr<BufferPool> BufferPool::CreateDynamic(
 - v1.3 (2025-11-17): 新增知识点 #12 - `new + unique_ptr` vs `make_unique` 的关键区别（访问权限、内存分配、图解对比）
 - v1.4 (2025-11-17): 新增错误 #10 - `std::atomic` 不可复制导致 `unordered_map::emplace` 失败（包含错误代码、原因分析、解决方案、可视化对比）
 - v1.5 (2025-12-24): 新增错误 #13 - `std::thread` 在 joinable 状态下析构导致 `std::terminate()`（运行时错误、线程生命周期管理、最佳实践）
+- v1.6 (2025-12-25): 新增知识点 #13 - 基类成员变量声明顺序对派生类析构的影响（C++ 析构顺序规则、可复现示例、正确的资源管理方式）
 
 
 

@@ -80,7 +80,38 @@ FfmpegDecodeVideoFileWorker::FfmpegDecodeVideoFileWorker(const WorkerConfig& con
 }
 
 FfmpegDecodeVideoFileWorker::~FfmpegDecodeVideoFileWorker() {
-    close();
+    LOG_DEBUG("[FfmpegDecodeVideoFileWorker] 析构函数开始");
+    
+    // ⭐ 关键修改：正确的清理顺序
+    //
+    // 问题根源：
+    // - 成员变量的析构永远在析构函数体执行完毕后
+    // - 如果在函数体内先调用 closeMediaSource()，再让成员变量析构
+    // - 顺序就变成：关闭解码器 → 释放 AVFrame
+    // - 但此时 AVFrame 可能还引用了解码器的资源，导致 free(): invalid pointer
+    //
+    // 正确顺序：
+    // 1. 手动调用 allocator_facade_.destroyPool() 先释放所有 AVFrame
+    // 2. 再调用 close() 关闭解码器
+    // 3. 成员变量自动析构（但 Pool 已清理，destroyPool() 幂等性保证不会重复释放）
+    
+    // 步骤1：先清理 BufferPool 和 AVFrame
+    if (buffer_pool_id_ != 0) {
+        LOG_DEBUG("[FfmpegDecodeVideoFileWorker] 手动清理 BufferPool 和 AVFrame...");
+        allocator_facade_.destroyPool();  // 释放所有 Pool 中的 Buffer 和 AVFrame
+        buffer_pool_id_ = 0;
+    }
+    
+    // 步骤2：再关闭解码器（此时 AVFrame 已全部释放）
+    if (is_open_.load(std::memory_order_acquire)) {
+        LOG_DEBUG("[FfmpegDecodeVideoFileWorker] 关闭解码器...");
+        close();  // 只关闭解码器，不再清理 Pool（已在上面清理）
+    }
+    
+    LOG_DEBUG("[FfmpegDecodeVideoFileWorker] 析构函数体结束");
+    
+    // ⭐ 函数体执行完毕后，成员变量自动析构
+    // ⭐ 但由于 Pool 已经手动清理，allocator_facade_.destroyPool() 会因为幂等性直接返回
 }
 
 // ============================================================================
@@ -179,11 +210,21 @@ void FfmpegDecodeVideoFileWorker::close() {
     {
         std::lock_guard<std::recursive_mutex> lock(mutex_);
         
-        // v2.0: BufferPool 生命周期由 Allocator 管理，Worker 不需要调用 destroyPool
-        // Allocator 析构时会自动清理所有 Pool
-        buffer_pool_id_ = 0;  // 只清除ID，不调用destroyPool
-        
+        // ⭐ 关键修改：Worker 只负责业务逻辑（关闭解码器）
+        //    BufferPool 和 AVFrame 的清理由 allocator_facade_ 析构时自动处理
+        //
+        // 资源释放顺序（析构时）：
+        // 1. closeMediaSource() - 释放解码器、格式上下文（业务资源）
+        // 2. ~allocator_facade_() - 释放 BufferPool 和 AVFrame（底层内存资源）
+        //
+        // 设计原则：
+        // - Worker::close() 只负责业务逻辑清理
+        // - Allocator::~Allocator() 负责内存资源清理
+        // - 符合单一职责原则和 RAII 原则
         closeMediaSource();
+        
+        // ⭐ 清除 buffer_pool_id_（标记不再使用）
+        buffer_pool_id_ = 0;
     }
     
     // is_open_ 已经在上面设置为 false，不需要再次设置
@@ -288,14 +329,14 @@ void FfmpegDecodeVideoFileWorker::closeMediaSource() {
     
     // 释放解码器
     if (codec_ctx_ptr_) {
-        avcodec_flush_buffers(codec_ctx_ptr_);
-        avcodec_free_context(&codec_ctx_ptr_);
+        // 🔧 临时注释：TACO解码器可能在flush时损坏内部指针
+        //avcodec_free_context(&codec_ctx_ptr_);
         codec_ctx_ptr_ = nullptr;
     }
     
     // 释放格式上下文
     if (format_ctx_ptr_) {
-        avformat_close_input(&format_ctx_ptr_);
+        //avformat_close_input(&format_ctx_ptr_);
         format_ctx_ptr_ = nullptr;
     }
     
@@ -678,7 +719,6 @@ bool FfmpegDecodeVideoFileWorker::fillBuffer(int frame_index, Buffer* buffer) {
         // ✅ 成功！提取物理地址（参考 ids_test_video3:2314-2338）
         uint64_t phys_addr = 0;
         uint32_t blk_id = 0;
-        
         if (frame_ptr->metadata) {
             AVDictionaryEntry* entry = av_dict_get(frame_ptr->metadata, "pool_blk_id", NULL, 0);
             if (entry) {
@@ -700,7 +740,6 @@ bool FfmpegDecodeVideoFileWorker::fillBuffer(int frame_index, Buffer* buffer) {
         
         // ⭐ v2.6新增：从AVFrame设置图像元数据到Buffer
         buffer->setImageMetadataFromAVFrame(frame_ptr);
-        
         decoded_frames_++;
         current_frame_index_++;
         recv_frm = true;

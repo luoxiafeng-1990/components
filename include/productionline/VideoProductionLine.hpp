@@ -169,6 +169,11 @@ private:
     // ========== 成员变量 ==========
     
     /**
+     * @brief 连续失败次数阈值（超过此值则停止生产者线程）
+     */
+    static constexpr int kMaxConsecutiveFailures = 10;
+    
+    /**
      * v2.0: Worker创建的BufferPool ID（Registry持有）
      * 
      * 用途：记录Worker创建的BufferPool的ID

@@ -192,12 +192,6 @@ void VideoProductionLine::stop() {
     
     // 重置活跃线程计数
     active_threads_.store(0);
-    
-    // 关闭视频文件
-    if (worker_facade_sptr_) {
-        worker_facade_sptr_.reset();
-    }
-    
     // 停止性能监控
     if (monitor_) {
         monitor_->stop();
@@ -375,6 +369,11 @@ void VideoProductionLine::producerThreadFunc(int thread_id) {
                 thread_skipped++;
                 // 🎯 累加连续失败次数（PerformanceMonitor的Timer会每2秒自动打印统计）
                 consecutive_failures++;
+                if (consecutive_failures > kMaxConsecutiveFailures) {
+                    LOG_ERROR_FMT("[Thread #%d] Failed to fill buffer %d times in a row, stopping producer thread", 
+                                  thread_id, kMaxConsecutiveFailures);
+                    break;
+                }
             }
             if (monitor_) {
                 monitor_->endTiming("fill_buffer");

@@ -304,6 +304,7 @@ bool FfmpegDecodeRtspWorker::fillBuffer(int frame_index, Buffer* buffer) {
         int ret = av_read_frame(format_ctx_ptr_, packet);
         if (ret < 0) {
             av_packet_free(&packet);
+            packet = nullptr;
             if (ret == AVERROR_EOF) {
                 eof_reached_ = true;
                 LOG_DEBUG("[Worker] RTSP EOF reached");
