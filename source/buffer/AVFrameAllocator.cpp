@@ -158,7 +158,6 @@ void AVFrameAllocator::deallocateBuffer(Buffer* buffer) {
     
     // 2. 释放 AVFrame
     if (frame) {
-        av_frame_free(&frame);
         buffer->setAVFrame(nullptr);  // 清空 Buffer 的 AVFrame 引用
         LOG_DEBUG_FMT("[AVFrameAllocator] Released AVFrame for Buffer #%u", buffer->id());
     }

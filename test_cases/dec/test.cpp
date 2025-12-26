@@ -1330,21 +1330,19 @@ static int test_buffer_writer(const char* video_path) {
 }
 
 /**
- * 测试8b：BufferWriter多格式保存测试
+ * 测试8b：BufferWriter RGB格式保存测试
  * 
- * 遍历所有配置的格式，测试BufferWriter对各种格式的支持
+ * 测试 BufferWriter 对所有 RGB 格式的支持（argb888/bgra8888/rgba8888/rgb888/bgr888）
+ * 注意：NV12 格式由 test_buffer_writer() 单独测试
  */
-static int test_buffer_writer_all_formats(const char* video_path) {
+static int test_buffer_writer_rgb_formats(const char* video_path) {
     LOG_INFO("╔═══════════════════════════════════════════════════════╗");
-    LOG_INFO("║  BufferWriter Multi-Format Test Suite                 ║");
-    LOG_INFO("║  Testing h264_taco decoder output formats             ║");
+    LOG_INFO("║  BufferWriter RGB Formats Test Suite                  ║");
+    LOG_INFO("║  Testing h264_taco RGB output formats                 ║");
     LOG_INFO("╚═══════════════════════════════════════════════════════╝");
     
-    // ✅ 定义测试用例（只需要TacoConfig构造函数）
+    // ✅ 定义测试用例：所有 RGB 格式（NV12 由 test_buffer_writer 单独测试）
     std::function<WorkerConfig::DecoderConfig::TacoConfig()> tests[] = {
-        // YUV格式
-    
-        // RGB格式
         []() { return TacoConfigBuilder().setRgbConfig(true, "argb888", "bt601").build(); },
         []() { return TacoConfigBuilder().setRgbConfig(true, "bgra8888", "bt601").build(); },
         []() { return TacoConfigBuilder().setRgbConfig(true, "rgba8888", "bt601").build(); },
@@ -1356,7 +1354,7 @@ static int test_buffer_writer_all_formats(const char* video_path) {
     int passed = 0;
     int failed = 0;
     
-    LOG_INFO_FMT("\nTotal formats to test: %d\n", total_tests);
+    LOG_INFO_FMT("\nTotal RGB formats to test: %d\n", total_tests);
     
     for (int i = 0; i < total_tests; i++) {
         LOG_INFO_FMT("\n╔═══════════════════════════════════════════════════════╗");
@@ -1391,149 +1389,6 @@ static int test_buffer_writer_all_formats(const char* video_path) {
     return (failed == 0) ? 0 : -1;
 }
 
-/**
- * 测试8（旧版兼容）：BufferWriter保存帧测试（ARGB格式）
- * 
- * 保留用于向后兼容，使用ARGB格式
- */
-static int test_buffer_writer_legacy(const char* video_path) {
-    using namespace productionline::io;
-    
-    LOG_INFO("═══════════════════════════════════════════════════════");
-    LOG_INFO_FMT("  Test 8: BufferWriter - Save Frames (Simplified API)");
-    LOG_INFO_FMT("  Video: %s", video_path);
-    LOG_INFO("═══════════════════════════════════════════════════════");
-    
-    // 1. 配置VideoProductionLine
-    LOG_INFO("Step 1: Configuring VideoProductionLine...");
-    auto workerConfig = WorkerConfigBuilder()
-        .setFileConfig(
-            FileConfigBuilder()
-                .setFilePath(video_path)
-                .build()
-        )
-        .setOutputConfig(
-            OutputConfigBuilder()
-                .setResolution(1920, 1080)
-                .setBitsPerPixel(32)
-                .build()
-        )
-        .setDecoderConfig(
-            DecoderConfigBuilder()
-                .useH264Taco()
-                .build()
-        )
-        .setWorkerType(WorkerType::FFMPEG_VIDEO_FILE)
-        .build();
-    
-    // 2. 启动生产线
-    LOG_INFO("Step 2: Starting VideoProductionLine...");
-    VideoProductionLine producer(false, 1, false);  // loop=false, thread_count=1, no_display=true
-    if (!producer.start(workerConfig)) {
-        LOG_ERROR("Failed to start VideoProductionLine");
-        return -1;
-    }
-    
-    // 3. 获取BufferPool
-    LOG_INFO("Step 3: Getting BufferPool...");
-    uint64_t pool_id = producer.getWorkingBufferPoolId();
-    auto& registry = BufferPoolRegistry::getInstance();
-    auto pool_weak = registry.getPool(pool_id);
-    auto pool_sptr = pool_weak.lock();
-    
-    if (!pool_sptr) {
-        LOG_ERROR("Failed to get BufferPool");
-        producer.stop();
-        return -1;
-    }
-    
-    LOG_INFO_FMT("BufferPool: %s (ID: %lu)", 
-                 pool_sptr->getName().c_str(), pool_id);
-    
-    // 4. 创建BufferWriter（使用FFmpeg标准格式）
-    LOG_INFO("Step 4: Creating BufferWriter (using FFmpeg format)...");
-    BufferWriter writer;
-    
-    const char* output_path = "output_test_argb.raw";
-    
-    // ⭐ 使用FFmpeg标准格式定义（AV_PIX_FMT_ARGB）
-    if (!writer.open(output_path, AV_PIX_FMT_ARGB, 1920, 1080)) {
-        LOG_ERROR("Failed to open BufferWriter");
-        producer.stop();
-        return -1;
-    }
-    
-    // 5. 消费者循环：获取Buffer并保存
-    LOG_INFO("\nStep 5: Consuming and saving frames...");
-    LOG_INFO("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-    
-    const int MAX_FRAMES = 100;  // 最多保存100帧
-    int timeout_count = 0;
-    const int MAX_TIMEOUT = 10;  // 最多10次超时
-    
-    while (writer.getWriteCount() < MAX_FRAMES && g_running) {
-        // 从BufferPool获取填充好的Buffer
-        Buffer* buffer = pool_sptr->acquireFilled(true, 100);  // 超时100ms
-        
-        if (buffer) {
-            // ⭐ 保存Buffer到文件（自动累加计数器）
-            if (writer.write(buffer)) {
-                // 每10帧打印一次进度
-                if (writer.getWriteCount() % 10 == 0) {
-                    LOG_INFO_FMT("  ✅ Saved frame %d (buffer #%u, %zu bytes)", 
-                                 writer.getWriteCount(), buffer->id(), buffer->size());
-                }
-            } else {
-                LOG_ERROR_FMT("Failed to write frame %d", writer.getWriteCount() + 1);
-            }
-            
-            // 归还Buffer到BufferPool
-            pool_sptr->releaseFilled(buffer);
-            
-            // 重置超时计数
-            timeout_count = 0;
-        } else {
-            // 超时或没有更多帧
-            timeout_count++;
-            if (timeout_count >= MAX_TIMEOUT) {
-                LOG_INFO("No more frames available, stopping...");
-                break;
-            }
-        }
-    }
-    
-    LOG_INFO("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-    
-    // 6. 关闭Writer和生产线
-    LOG_INFO("\nStep 6: Cleaning up...");
-    writer.close();
-    producer.stop();
-    
-    // 7. 打印统计信息
-    LOG_INFO("═══════════════════════════════════════════════════════");
-    LOG_INFO("  Test Results");
-    LOG_INFO("═══════════════════════════════════════════════════════");
-    LOG_INFO_FMT("Output file: %s", output_path);
-    LOG_INFO_FMT("Pixel format: ARGB8888 (AV_PIX_FMT_ARGB)");
-    LOG_INFO_FMT("Resolution: 1920x1080");
-    LOG_INFO_FMT("Frames written: %d", writer.getWriteCount());
-    
-    // 8. 验证结果
-    bool success = (writer.getWriteCount() > 0);
-    if (success) {
-        LOG_INFO("\n✅ Test PASSED");
-        LOG_INFO_FMT("   - Successfully saved %d frames", writer.getWriteCount());
-        LOG_INFO("\n💡 Tip: Verify the output with FFmpeg:");
-        LOG_INFO_FMT("   ffplay -f rawvideo -pix_fmt argb -s 1920x1080 %s", output_path);
-    } else {
-        LOG_ERROR("\n❌ Test FAILED: No frames saved");
-    }
-    
-    LOG_INFO("═══════════════════════════════════════════════════════");
-    
-    return success ? 0 : -1;
-}
-
 // ========== 测试用例注册 ==========
 // 使用新的测试框架，自动注册所有测试用例
 REGISTER_TEST(loop, "4-frame loop display", test_4frame_loop);
@@ -1544,8 +1399,7 @@ REGISTER_TEST(rtsp, "RTSP stream playback (zero-copy, FFmpeg)", test_rtsp_stream
 REGISTER_TEST(ffmpeg, "FFmpeg encoded video playback (MP4/AVI/MKV/etc)", test_h264_taco_video);
 REGISTER_TEST(ffmpeg_multithread, "Multi-threaded FFmpeg video decoding (no display, decode only)", test_h264_taco_video_multithread);
 REGISTER_TEST(writer, "BufferWriter - Save frames (NV12 format)", test_buffer_writer);
-REGISTER_TEST(writer_all, "BufferWriter - Test all supported formats", test_buffer_writer_all_formats);
-REGISTER_TEST(writer_legacy, "BufferWriter - Save frames (ARGB format, legacy)", test_buffer_writer_legacy);
+REGISTER_TEST(writer_rgb, "BufferWriter - RGB formats (argb888/bgra8888/rgba8888/rgb888/bgr888)", test_buffer_writer_rgb_formats);
 
 /**
  * 主函数
