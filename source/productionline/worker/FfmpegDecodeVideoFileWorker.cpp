@@ -314,13 +314,13 @@ void FfmpegDecodeVideoFileWorker::closeMediaSource() {
     // 释放解码器
     if (codec_ctx_ptr_) {
         // 🔧 临时注释：TACO解码器可能在flush时损坏内部指针
-        //avcodec_free_context(&codec_ctx_ptr_);
+        avcodec_free_context(&codec_ctx_ptr_);
         codec_ctx_ptr_ = nullptr;
     }
     
     // 释放格式上下文
     if (format_ctx_ptr_) {
-        //avformat_close_input(&format_ctx_ptr_);
+        avformat_close_input(&format_ctx_ptr_);
         format_ctx_ptr_ = nullptr;
     }
     
