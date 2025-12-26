@@ -24,7 +24,6 @@ FfmpegDecodeVideoFileWorker::FfmpegDecodeVideoFileWorker()
     : WorkerBase(BufferAllocatorFactory::AllocatorType::AVFRAME)
     , format_ctx_ptr_(nullptr)
     , codec_ctx_ptr_(nullptr)
-    , packet_ptr_(nullptr)
     , sws_ctx_ptr_(nullptr)
     , video_stream_index_(-1)
     , width_(0)
@@ -54,7 +53,6 @@ FfmpegDecodeVideoFileWorker::FfmpegDecodeVideoFileWorker(const WorkerConfig& con
     : WorkerBase(BufferAllocatorFactory::AllocatorType::AVFRAME, config)
     , format_ctx_ptr_(nullptr)
     , codec_ctx_ptr_(nullptr)
-    , packet_ptr_(nullptr)
     , sws_ctx_ptr_(nullptr)
     , video_stream_index_(-1)
     , width_(0)
@@ -285,14 +283,6 @@ bool FfmpegDecodeVideoFileWorker::openMediaSource() {
         output_height_ = height_;
     }
    
-    // 8. 🎯 分配 AVPacket（用于 fillBuffer）
-    packet_ptr_ = av_packet_alloc();
-    if (!packet_ptr_) {
-        setError("Failed to allocate AVPacket");
-        closeMediaSource();
-        return false;
-    }
-    
     // 🎯 成功打开FFmpeg资源，设置标志位
     is_ffmpeg_opened_.store(true, std::memory_order_release);
     
@@ -314,12 +304,6 @@ void FfmpegDecodeVideoFileWorker::closeMediaSource() {
     // 此时 is_ffmpeg_opened_ == false，其他线程调用 closeMediaSource() 会直接返回
     
     std::lock_guard<std::recursive_mutex> lock(mutex_);
-    
-    // 释放 AVPacket
-    if (packet_ptr_) {
-        av_packet_free(&packet_ptr_);
-        packet_ptr_ = nullptr;
-    }
     
     // 释放格式转换器
     if (sws_ctx_ptr_) {
@@ -643,6 +627,13 @@ bool FfmpegDecodeVideoFileWorker::fillBuffer(int frame_index, Buffer* buffer) {
         return false;
     }
     
+    // 步骤1.1: ⭐ v2.8新增：从 Buffer 获取关联的 AVPacket*
+    AVPacket* packet_ptr = buffer->getAVPacket();
+    if (!packet_ptr) {
+        LOG_ERROR_FMT("[Worker] ERROR: buffer->getAVPacket() is nullptr");
+        return false;
+    }
+    
     // 步骤2: 读取一个 packet（参考 ids_test_video3:2240）
     // 🔧 修复：对于损坏帧，在内部循环尝试读取，而不是返回 false
     const int AVERROR_INVALIDDATA_VALUE = -1094995529;  // AVERROR(0x41444e49)
@@ -652,14 +643,14 @@ bool FfmpegDecodeVideoFileWorker::fillBuffer(int frame_index, Buffer* buffer) {
     int read_ret;
     
     while (true) {
-        read_ret = av_read_frame(format_ctx_ptr_, packet_ptr_);
+        read_ret = av_read_frame(format_ctx_ptr_, packet_ptr);
         
         if (read_ret < 0) {
             if (read_ret == AVERROR_EOF) {
                 LOG_DEBUG("🔄 EOF reached");
                 // 🔧 修复：Worker 不应该决定是否循环，只设置 EOF 标志并返回 false
                 // 循环逻辑由 ProductionLine 根据 loop_ 变量控制
-                av_packet_unref(packet_ptr_);
+                av_packet_unref(packet_ptr);
                 eof_reached_ = true;
                 return false;
             } else if (read_ret == AVERROR_INVALIDDATA_VALUE) {
@@ -668,13 +659,13 @@ bool FfmpegDecodeVideoFileWorker::fillBuffer(int frame_index, Buffer* buffer) {
                 if (corrupted_retries <= MAX_CORRUPTED_RETRIES) {
                     LOG_WARN_FMT("[Worker]  WARNING: Corrupted packet detected (attempt %d/%d), skipping...\n", 
                            corrupted_retries, MAX_CORRUPTED_RETRIES);
-                    av_packet_unref(packet_ptr_);
+                    av_packet_unref(packet_ptr);
                     // 继续循环，尝试读取下一个 packet
                     continue;
                 } else {
                     // 连续多次都是损坏帧，可能文件确实损坏严重，返回失败
                     LOG_ERROR_FMT("[Worker] ERROR: Too many corrupted packets (%d), giving up\n", corrupted_retries);
-                    av_packet_unref(packet_ptr_);
+                    av_packet_unref(packet_ptr);
                     return false;
                 }
             } else {
@@ -682,7 +673,7 @@ bool FfmpegDecodeVideoFileWorker::fillBuffer(int frame_index, Buffer* buffer) {
                 char err_buf[AV_ERROR_MAX_STRING_SIZE];
                 av_strerror(read_ret, err_buf, sizeof(err_buf));
                 LOG_ERROR_FMT("[Worker] ERROR: av_read_frame failed: %d (%s)\n", read_ret, err_buf);
-                av_packet_unref(packet_ptr_);
+                av_packet_unref(packet_ptr);
                 return false;
             }
         } else {
@@ -692,18 +683,18 @@ bool FfmpegDecodeVideoFileWorker::fillBuffer(int frame_index, Buffer* buffer) {
     }
     
     // 步骤3: 检查是否是视频流
-    if (packet_ptr_->stream_index != video_stream_index_) {
+    if (packet_ptr->stream_index != video_stream_index_) {
         // 🔧 修复：不是视频流的packet需要释放，然后继续读取下一个
-        av_packet_unref(packet_ptr_);
+        av_packet_unref(packet_ptr);
         return false;  // 让调用者再次调用以读取下一个packet
     }
     
     // 步骤4: 发送 packet 到解码器（参考 ids_test_video3:2270）
-    int ret = avcodec_send_packet(codec_ctx_ptr_, packet_ptr_);
+    int ret = avcodec_send_packet(codec_ctx_ptr_, packet_ptr);
     
     // 🔧 修复：无论成功与否，都要释放packet引用
     // avcodec_send_packet 会复制数据，不再需要原始packet
-    av_packet_unref(packet_ptr_);
+    av_packet_unref(packet_ptr);
     
     if (ret < 0) {
         LOG_ERROR_FMT("[Worker] ERROR: avcodec_send_packet failed: %d", ret);

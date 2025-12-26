@@ -9,6 +9,7 @@
 extern "C" {
 #include <libavutil/pixfmt.h>
 #include <libavutil/frame.h>
+#include <libavcodec/packet.h>  // ⭐ v2.8新增：AVPacket 定义
 }
 
 /**
@@ -160,6 +161,22 @@ public:
      */
     AVFrame* getAVFrame() const { return avframe_; }
     
+    // ========== AVPacket 关联接口 ⭐ v2.8新增 ==========
+    
+    /**
+     * @brief 设置关联的 AVPacket（仅用于 AVFrameAllocator）
+     * @param packet AVPacket 指针
+     * 
+     * @note Buffer 持有引用但不拥有所有权，释放由 Allocator 负责
+     */
+    void setAVPacket(AVPacket* packet) { avpacket_ = packet; }
+    
+    /**
+     * @brief 获取关联的 AVPacket
+     * @return AVPacket 指针，如果没有关联则返回 nullptr
+     */
+    AVPacket* getAVPacket() const { return avpacket_; }
+    
     /**
      * @brief 更新虚拟地址（解码后更新为 frame->data[0]）
      * @param addr 新的虚拟地址
@@ -285,6 +302,7 @@ private:
     
     // ========== AVFrame 关联 ⭐ v2.7新增 ==========
     AVFrame* avframe_;               // 关联的 AVFrame 指针（引用，不拥有所有权）
+    AVPacket* avpacket_;             // ⭐ v2.8新增：关联的 AVPacket 指针（引用，不拥有所有权）
     
     // ========== 图像元数据 ⭐ v2.6新增 ==========
     bool has_image_metadata_;        // 是否包含图像元数据

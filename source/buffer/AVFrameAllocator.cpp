@@ -75,6 +75,16 @@ Buffer* AVFrameAllocator::injectAVFrameToPool(AVFrame* frame, BufferPool* pool) 
     // 3.5 ⭐ v2.7新增：设置 Buffer 关联的 AVFrame 指针
     buffer->setAVFrame(frame);
     
+    // 3.5.1 ⭐ v2.8新增：为 Buffer 分配关联的 AVPacket
+    AVPacket* packet = av_packet_alloc();
+    if (!packet) {
+        LOG_ERROR_FMT("[AVFrameAllocator] Failed to allocate AVPacket for Buffer #%u", id);
+        delete buffer;
+        return nullptr;
+    }
+    buffer->setAVPacket(packet);
+    LOG_TRACE_FMT("[AVFrameAllocator]   AVPacket allocated at %p for Buffer #%u", packet, id);
+    
     // 4. 将 Buffer 添加到 pool 的 filled 队列（使用基类静态方法）
     if (!BufferAllocatorBase::addBufferToPoolQueue(pool, buffer, QueueType::FILLED)) {
         LOG_ERROR_FMT("[AVFrameAllocator] Failed to add buffer #%u to pool '%s'", 
@@ -158,11 +168,20 @@ void AVFrameAllocator::deallocateBuffer(Buffer* buffer) {
     
     // 2. 释放 AVFrame
     if (frame) {
+        av_frame_free(&frame);
         buffer->setAVFrame(nullptr);  // 清空 Buffer 的 AVFrame 引用
         LOG_DEBUG_FMT("[AVFrameAllocator] Released AVFrame for Buffer #%u", buffer->id());
     }
     
-    // 3. 删除 Buffer 对象
+    // 3. ⭐ v2.8新增：释放 AVPacket
+    AVPacket* packet = buffer->getAVPacket();
+    if (packet) {
+        av_packet_free(&packet);
+        buffer->setAVPacket(nullptr);  // 清空 Buffer 的 AVPacket 引用
+        LOG_DEBUG_FMT("[AVFrameAllocator] Released AVPacket for Buffer #%u", buffer->id());
+    }
+    
+    // 4. 删除 Buffer 对象
     delete buffer;
 }
 
@@ -225,7 +244,19 @@ uint64_t AVFrameAllocator::allocatePoolWithBuffers(
         // 4.4 ⭐ v2.7新增：设置 Buffer 关联的 AVFrame 指针
         buffer->setAVFrame(frame_ptr);
         
-        // 4.4.1 ⭐ 关键修复：注册 Buffer 所有权（用于 destroyPool 时识别）
+        // 4.4.1 ⭐ v2.8新增：为 Buffer 分配关联的 AVPacket
+        AVPacket* packet_ptr = av_packet_alloc();
+        if (!packet_ptr) {
+            LOG_ERROR_FMT("[AVFrameAllocator] ERROR: Failed to allocate AVPacket for buffer #%u", buffer_id);
+            av_frame_free(&frame_ptr);
+            delete buffer;
+            // TODO: 清理已分配的 buffers
+            return 0;
+        }
+        buffer->setAVPacket(packet_ptr);
+        LOG_TRACE_FMT("[AVFrameAllocator]   AVPacket allocated at %p for Buffer #%u", packet_ptr, buffer_id);
+        
+        // 4.4.2 ⭐ 关键修复：注册 Buffer 所有权（用于 destroyPool 时识别）
         {
             std::lock_guard<std::mutex> lock(avframe_ownership_mutex_);
             avframe_buffer_ownership_[buffer] = this;
