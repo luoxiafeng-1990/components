@@ -42,9 +42,9 @@ bool BufferFillingWorkerFacade::open() {
     
     // 从 config_ 获取所有参数
     const std::string& file_path = config_.file.file_path;
-    int width = config_.output.width;
-    int height = config_.output.height;
-    int bits_per_pixel = config_.output.bits_per_pixel;
+    int width = config_.display.width;
+    int height = config_.display.height;
+    int bits_per_pixel = config_.display.bits_per_pixel;
     
     if (file_path.empty()) {
         LOG_ERROR("[Worker] ERROR: File path not set in config");

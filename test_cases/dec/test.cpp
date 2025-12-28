@@ -89,9 +89,9 @@ static int test_4frame_loop(const char* raw_video_path) {
                 .setFilePath(raw_video_path)
                 .build()
         )
-        .setOutputConfig(
-            OutputConfigBuilder()
-                .setResolution(display.getWidth(), display.getHeight())
+        .setDisplayConfig(
+            DisplayConfigBuilder()
+                .setDisplayResolution(display.getWidth(), display.getHeight())
                 .setBitsPerPixel(display.getBitsPerPixel())
                 .build()
         )
@@ -213,9 +213,9 @@ static int test_sequential_playback(const char* raw_video_path) {
                 .setFilePath(raw_video_path)
                 .build()
         )
-        .setOutputConfig(
-            OutputConfigBuilder()
-                .setResolution(display.getWidth(), display.getHeight())
+        .setDisplayConfig(
+            DisplayConfigBuilder()
+                .setDisplayResolution(display.getWidth(), display.getHeight())
                 .setBitsPerPixel(display.getBitsPerPixel())
                 .build()
         )
@@ -357,9 +357,9 @@ static int test_buffermanager_producer(const char* raw_video_path) {
                 .setFilePath(raw_video_path)
                 .build()
         )
-        .setOutputConfig(
-            OutputConfigBuilder()
-                .setResolution(display.getWidth(), display.getHeight())
+        .setDisplayConfig(
+            DisplayConfigBuilder()
+                .setDisplayResolution(display.getWidth(), display.getHeight())
                 .setBitsPerPixel(display.getBitsPerPixel())
                 .build()
         )
@@ -487,9 +487,9 @@ static int test_buffermanager_iouring(const char* raw_video_path) {
                 .setFilePath(raw_video_path)
                 .build()
         )
-        .setOutputConfig(
-            OutputConfigBuilder()
-                .setResolution(display.getWidth(), display.getHeight())
+        .setDisplayConfig(
+            DisplayConfigBuilder()
+                .setDisplayResolution(display.getWidth(), display.getHeight())
                 .setBitsPerPixel(display.getBitsPerPixel())
                 .build()
         )
@@ -612,9 +612,9 @@ static int test_rtsp_stream(const char* rtsp_url) {
                 .setFilePath(rtsp_url)
                 .build()
         )
-        .setOutputConfig(
-            OutputConfigBuilder()
-                .setResolution(display.getWidth(), display.getHeight())
+        .setDisplayConfig(
+            DisplayConfigBuilder()
+                .setDisplayResolution(display.getWidth(), display.getHeight())
                 .setBitsPerPixel(display.getBitsPerPixel())
                 .build()
         )
@@ -764,9 +764,9 @@ static int test_h264_taco_video(const char* video_path) {
                 .setFilePath(video_path)
                 .build()
         )
-        .setOutputConfig(
-            OutputConfigBuilder()
-                .setResolution(display.getWidth(), display.getHeight())
+        .setDisplayConfig(
+            DisplayConfigBuilder()
+                .setDisplayResolution(display.getWidth(), display.getHeight())
                 .setBitsPerPixel(display.getBitsPerPixel())
                 .build()
         )
@@ -934,9 +934,9 @@ static void decode_production_line_worker(
                 .setFilePath(video_path)
                 .build()
         )
-        .setOutputConfig(
-            OutputConfigBuilder()
-                .setResolution(width, height)
+        .setDisplayConfig(
+            DisplayConfigBuilder()
+                .setDisplayResolution(width, height)
                 .setBitsPerPixel(32)  // 固定32位，因为不显示，这个值不影响解码
                 .build()
         )
@@ -1156,9 +1156,9 @@ static int test_buffer_writer_format(
                 .setFilePath(video_path)
                 .build()
         )
-        .setOutputConfig(
-            OutputConfigBuilder()
-                .setResolution(1920, 1080)
+        .setDisplayConfig(
+            DisplayConfigBuilder()
+                .setDisplayResolution(1920, 1080)
                 .setBitsPerPixel(32)
                 .build()
         )
@@ -1343,11 +1343,31 @@ static int test_buffer_writer_rgb_formats(const char* video_path) {
     
     // ✅ 定义测试用例：所有 RGB 格式（NV12 由 test_buffer_writer 单独测试）
     std::function<WorkerConfig::DecoderConfig::TacoConfig()> tests[] = {
-        []() { return TacoConfigBuilder().setRgbConfig(true, "argb888", "bt601").build(); },
-        []() { return TacoConfigBuilder().setRgbConfig(true, "bgra8888", "bt601").build(); },
-        []() { return TacoConfigBuilder().setRgbConfig(true, "rgba8888", "bt601").build(); },
-        []() { return TacoConfigBuilder().setRgbConfig(true, "rgb888", "bt601").build(); },
-        []() { return TacoConfigBuilder().setRgbConfig(true, "bgr888", "bt601").build(); },
+        []() { return TacoConfigBuilder()
+                   .setRgbConfig(true, "argb888", "bt601")
+                   .setDecoderOutputResolution(1920, 1080)
+                   .build(); 
+        },
+        []() { return TacoConfigBuilder()
+                   .setRgbConfig(true, "bgra8888", "bt601")
+                   .setDecoderOutputResolution(1920, 1080)
+                   .build(); 
+        },
+        []() { return TacoConfigBuilder()
+                   .setRgbConfig(true, "rgba8888", "bt601")
+                   .setDecoderOutputResolution(1920, 1080)
+                   .build(); 
+        },
+        []() { return TacoConfigBuilder()
+                   .setRgbConfig(true, "rgb888", "bt601")
+                   .setDecoderOutputResolution(1920, 1080)
+                   .build(); 
+        },
+        []() { return TacoConfigBuilder()
+                   .setRgbConfig(true, "bgr888", "bt601")
+                   .setDecoderOutputResolution(1920, 1080)
+                   .build(); 
+        },
     };
     
     int total_tests = sizeof(tests) / sizeof(tests[0]);

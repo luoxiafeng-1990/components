@@ -50,15 +50,23 @@ struct WorkerConfig {
     } file;
     
     // ========================================
-    // 输出配置
+    // 显示设备配置
     // ========================================
-    struct OutputConfig {
-        int width = 0;                         // 输出宽度
-        int height = 0;                        // 输出高度
-        int bits_per_pixel = 0;                // 每像素位数
+    /**
+     * @brief 显示设备配置
+     * 
+     * 用于配置目标显示设备（如 Framebuffer、显示器）的参数。
+     * 
+     * ⚠️ 注意：此配置指定的是显示设备分辨率，不是解码器输出分辨率！
+     * 解码器输出分辨率请使用 TacoConfig::setDecoderOutputResolution()
+     */
+    struct DisplayConfig {
+        int width = 0;                         ///< 显示设备宽度（像素）
+        int height = 0;                        ///< 显示设备高度（像素）
+        int bits_per_pixel = 0;                ///< 每像素位数（用于BufferPool内存计算）
         
-        OutputConfig() = default;
-    } output;
+        DisplayConfig() = default;
+    } display;
     
     // ========================================
     // 解码器配置
@@ -171,39 +179,66 @@ private:
 };
 
 /**
- * @brief 输出配置构建器
+ * @brief 显示设备配置构建器
  */
-class OutputConfigBuilder {
+class DisplayConfigBuilder {
 public:
-    OutputConfigBuilder() = default;
+    DisplayConfigBuilder() = default;
     
-    OutputConfigBuilder& setWidth(int width) {
+    /**
+     * @brief 设置显示设备宽度
+     * @param width 显示设备宽度（像素）
+     */
+    DisplayConfigBuilder& setDisplayWidth(int width) {
         config_.width = width;
         return *this;
     }
     
-    OutputConfigBuilder& setHeight(int height) {
+    /**
+     * @brief 设置显示设备高度
+     * @param height 显示设备高度（像素）
+     */
+    DisplayConfigBuilder& setDisplayHeight(int height) {
         config_.height = height;
         return *this;
     }
     
-    OutputConfigBuilder& setResolution(int width, int height) {
+    /**
+     * @brief 设置显示设备分辨率
+     * 
+     * @param width  显示设备宽度（像素）
+     * @param height 显示设备高度（像素）
+     * @return DisplayConfigBuilder& 链式调用
+     * 
+     * @example
+     * ```cpp
+     * DisplayConfigBuilder()
+     *     .setDisplayResolution(1920, 1080)  // Framebuffer 分辨率
+     *     .setBitsPerPixel(32)
+     *     .build()
+     * ```
+     */
+    DisplayConfigBuilder& setDisplayResolution(int width, int height) {
         config_.width = width;
         config_.height = height;
         return *this;
     }
     
-    OutputConfigBuilder& setBitsPerPixel(int bpp) {
+    /**
+     * @brief 设置每像素位数
+     * @param bpp 每像素位数（如 32 表示 ARGB8888）
+     */
+    DisplayConfigBuilder& setBitsPerPixel(int bpp) {
         config_.bits_per_pixel = bpp;
         return *this;
     }
     
-    WorkerConfig::OutputConfig build() const {
+    WorkerConfig::DisplayConfig build() const {
         return config_;
     }
     
 private:
-    WorkerConfig::OutputConfig config_;
+    WorkerConfig::DisplayConfig config_;
 };
 
 /**
@@ -256,7 +291,26 @@ public:
         return *this;
     }
     
-    TacoConfigBuilder& setScaleSize(int width, int height) {
+    /**
+     * @brief 设置解码器输出分辨率（硬件缩放）
+     * 
+     * ⚠️ 重要：此方法设置的是解码器输出分辨率，不是显示设备分辨率！
+     * 
+     * TACO 解码器会将视频通过硬件缩放到指定分辨率后输出。
+     * 
+     * @param width  解码器输出宽度（像素）
+     * @param height 解码器输出高度（像素）
+     * @return TacoConfigBuilder& 链式调用
+     * 
+     * @example
+     * ```cpp
+     * TacoConfigBuilder()
+     *     .setRgbConfig(true, "argb888", "bt601")
+     *     .setDecoderOutputResolution(1920, 1080)  // 解码器输出 1920×1080
+     *     .build()
+     * ```
+     */
+    TacoConfigBuilder& setDecoderOutputResolution(int width, int height) {
         config_.ch1_scale_width = width;
         config_.ch1_scale_height = height;
         return *this;
@@ -437,10 +491,11 @@ public:
     }
     
     /**
-     * @brief 设置输出配置
+     * @brief 设置显示设备配置
+     * @param display_config 显示设备配置
      */
-    WorkerConfigBuilder& setOutputConfig(const WorkerConfig::OutputConfig& output_config) {
-        config_.output = output_config;
+    WorkerConfigBuilder& setDisplayConfig(const WorkerConfig::DisplayConfig& display_config) {
+        config_.display = display_config;
         return *this;
     }
     

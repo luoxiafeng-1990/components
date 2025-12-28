@@ -426,8 +426,8 @@ bool FfmpegDecodeVideoFileWorker::configureSpecialDecoder() {
         return false;
     }
     
-    // 🎯 从 worker_config_ 获取 taco 配置
-    const auto& taco = worker_config_.decoder.taco;
+    // 🎯 从 worker_config_ 获取 taco 配置（非 const，可能需要修改）
+    auto& taco = worker_config_.decoder.taco;
     
     LOG_DEBUG_FMT("[Worker] Configuring h264_taco decoder options from config...");
     
@@ -461,11 +461,29 @@ bool FfmpegDecodeVideoFileWorker::configureSpecialDecoder() {
                taco.ch1_crop_width, taco.ch1_crop_height);
     }
     
-    // 配置通道1缩放参数（从 config 读取）
+    // ⭐ 配置通道1缩放参数（从 config 读取）
+    // ⚠️ TACO 硬件限制：只能缩小，不能放大
     if (taco.ch1_scale_width > 0 && taco.ch1_scale_height > 0) {
-        av_opt_set_int(codec_ctx_ptr_->priv_data, "ch1_scale_width", taco.ch1_scale_width, 0);
-        av_opt_set_int(codec_ctx_ptr_->priv_data, "ch1_scale_height", taco.ch1_scale_height, 0);
-        LOG_DEBUG_FMT("[Worker]    ch1_scale: (%d, %d)", taco.ch1_scale_width, taco.ch1_scale_height);
+        // 验证缩放配置是否超出原始分辨率
+        if (taco.ch1_scale_width > width_ || taco.ch1_scale_height > height_) {
+            LOG_WARN("═══════════════════════════════════════════════════════════════");
+            LOG_WARN("  ⚠️  TACO 硬件缩放限制：只能缩小，不能放大");
+            LOG_WARN("═══════════════════════════════════════════════════════════════");
+            LOG_WARN_FMT("  原始分辨率: %dx%d", width_, height_);
+            LOG_WARN_FMT("  请求分辨率: %dx%d (超出限制)", 
+                         taco.ch1_scale_width, taco.ch1_scale_height);
+            LOG_WARN_FMT("  自动回退：使用原始分辨率 %dx%d", width_, height_);
+            LOG_WARN("═══════════════════════════════════════════════════════════════");
+            
+            // 清除缩放配置，使用原始分辨率
+            taco.ch1_scale_width = 0;
+            taco.ch1_scale_height = 0;
+        } else {
+            // 配置有效，设置缩放参数
+            av_opt_set_int(codec_ctx_ptr_->priv_data, "ch1_scale_width", taco.ch1_scale_width, 0);
+            av_opt_set_int(codec_ctx_ptr_->priv_data, "ch1_scale_height", taco.ch1_scale_height, 0);
+            LOG_DEBUG_FMT("[Worker]    ch1_scale: (%d, %d)", taco.ch1_scale_width, taco.ch1_scale_height);
+        }
     }
     
     // 配置通道1 RGB（从 config 读取）
