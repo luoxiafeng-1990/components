@@ -2039,6 +2039,16 @@ bool FfmpegDecodeVideoFileWorker::fillBuffer(int frame_index, Buffer* buffer) {
     
     ret = avcodec_receive_frame(codec_ctx_ptr_, frame_ptr);
     if (ret == 0) {
+        // ⭐ v2.9新增：硬件解码器提取物理地址
+        if (!decoder_name_.empty() && use_hardware_decoder_) {
+            if (!extractHardwareAddressFromMetadata(frame_ptr, buffer)) {
+                LOG_ERROR_FMT("[Worker] Hardware decoder '%s': Failed to extract physical address", 
+                             decoder_name_.c_str());
+                return false;
+            }
+        }
+        // 软件解码器：不提取物理地址（正常）
+        
         // ⭐ v2.7改进：解码成功后更新虚拟地址为实际数据地址
         buffer->setVirtualAddress(frame_ptr->data[0]);
         
@@ -2050,7 +2060,59 @@ bool FfmpegDecodeVideoFileWorker::fillBuffer(int frame_index, Buffer* buffer) {
 }
 ```
 
-**4. BufferWriter::write() 使用元数据正确保存（v2.6 + v2.7）**：
+**4. FfmpegDecodeVideoFileWorker::initializeDecoder() 软件解码器自动选择（v2.9）**：
+```cpp
+bool FfmpegDecodeVideoFileWorker::initializeDecoder() {
+    // ... 查找解码器 ...
+    
+    if (!codec) {
+        // 使用默认解码器
+        codec = avcodec_find_decoder(codecpar->codec_id);
+        
+        // ⭐ v2.9新增：软件解码时自动排除硬件解码器
+        if (!use_hardware_decoder_ && codec->name && 
+            (strstr(codec->name, "taco") || strstr(codec->name, "cuvid") || 
+             strstr(codec->name, "qsv") || strstr(codec->name, "vaapi") ||
+             strstr(codec->name, "nvdec") || strstr(codec->name, "nvenc") ||
+             strstr(codec->name, "videotoolbox") || strstr(codec->name, "mediacodec"))) {
+            
+            LOG_WARN_FMT("[Worker] ⚠️ WARNING: FFmpeg auto-selected hardware decoder '%s', "
+                        "but user requested software decoding!", codec->name);
+            
+            // 遍历所有解码器，找到第一个匹配 codec_id 的纯软件解码器
+            const AVCodec* sw_codec = nullptr;
+            void* opaque = nullptr;
+            
+            while ((sw_codec = av_codec_iterate(&opaque)) != nullptr) {
+                if (av_codec_is_decoder(sw_codec) && 
+                    sw_codec->id == codecpar->codec_id &&
+                    sw_codec->name &&
+                    !strstr(sw_codec->name, "taco") &&
+                    !strstr(sw_codec->name, "cuvid") &&
+                    !strstr(sw_codec->name, "qsv") &&
+                    !strstr(sw_codec->name, "vaapi") &&
+                    !strstr(sw_codec->name, "nvdec") &&
+                    !strstr(sw_codec->name, "nvenc") &&
+                    !strstr(sw_codec->name, "videotoolbox") &&
+                    !strstr(sw_codec->name, "mediacodec")) {
+                    codec = sw_codec;
+                    LOG_INFO_FMT("[Worker] ✅ Found software decoder: %s", codec->name);
+                    break;
+                }
+            }
+        }
+    }
+}
+```
+
+**v2.9 软件解码器自动选择机制说明**：
+- ✅ **问题背景**：`avcodec_find_decoder(codec_id)` 可能返回硬件解码器（如 `h264_taco`），即使用户未明确指定
+- ✅ **解决方案**：检测到硬件解码器名称时，遍历所有已注册解码器，查找纯软件版本
+- ✅ **支持范围**：支持所有编解码器（H.264/H.265/VP9/AV1/MPEG4等），不再硬编码特定解码器名称
+- ✅ **硬件关键字**：`taco`、`cuvid`、`qsv`、`vaapi`、`nvdec`、`nvenc`、`videotoolbox`、`mediacodec`
+- ✅ **向后兼容**：明确指定解码器名称时，行为不变
+
+**5. BufferWriter::write() 使用元数据正确保存（v2.6 + v2.7）**：
 ```cpp
 bool BufferWriter::write(const Buffer* buffer) {
     if (buffer->hasImageMetadata()) {
@@ -2369,11 +2431,28 @@ packages/components/
 
 **测试用例**：
 
-见 `test_cases/dec/test.cpp` 中的 `test_buffer_writer()` 测试用例（测试8）。
+见 `test_cases/dec/test.cpp`，包含以下主要测试：
+
+| 测试名称 | 命令 | 说明 |
+|---------|------|------|
+| `test_buffer_writer()` | `./test -m writer video.mp4` | BufferWriter保存帧测试（NV12格式） |
+| `test_buffer_writer_rgb_formats()` | `./test -m writer_rgb video.mp4` | BufferWriter RGB格式测试（12种RGB格式） |
+| `test_h264_taco_video()` | `./test -m ffmpeg video.mp4` | FFmpeg硬件解码器测试（h264_taco） |
+| `test_ffmpeg_software_decoder()` | `./test -m ffmpeg_software video.mp4` | **v2.9新增**：FFmpeg软件解码器测试（纯软件解码，含内存拷贝显示） |
 
 **运行测试**：
 ```bash
+# BufferWriter测试
 ./test -m writer video.mp4
+
+# RGB格式测试（12种格式）
+./test -m writer_rgb video.mp4
+
+# 硬件解码测试
+./test -m ffmpeg video.mp4
+
+# 软件解码测试（v2.9新增）
+./test -m ffmpeg_software video.mp4
 ```
 
 ---
@@ -3058,12 +3137,19 @@ feat(buffer): 新增AVFrame管理功能
 | `fillBuffer(frame_index, buffer)` | 填充Buffer（核心功能，纯虚函数） | `frame_index`: 帧索引<br>`buffer`: Buffer指针 | `bool` |
 | `getOutputBufferPoolId()` | 获取Worker的输出BufferPool ID（v2.0） | 无 | `uint64_t`（0表示未创建） |
 | `getWorkerType()` | 获取Worker类型名称 | 无 | `const char*` |
+| `extractHardwareAddressFromMetadata(frame, buffer)` | **v2.9新增**：从AVFrame元数据中提取硬件解码器的物理内存地址（虚函数，默认返回false） | `frame`: AVFrame指针<br>`buffer`: Buffer指针 | `bool`（成功true，失败false） |
 
 **注意（v2.0）**：
 - ✅ 文件操作方法（`open()`, `close()`, `isOpen()`）属于`IVideoFileNavigator`接口，WorkerBase继承此接口
 - ✅ `open()`方法有两个重载版本
 - ✅ Worker必须在`open()`时创建BufferPool，否则返回0
 - ✅ 调用者通过 `BufferPoolRegistry::getInstance().getPool(pool_id)` 获取临时访问
+
+**新增（v2.9）- 硬件解码器物理地址提取**：
+- ✅ `extractHardwareAddressFromMetadata()` 为虚函数，默认实现返回 `false`（不支持或无物理地址）
+- ✅ 子类（如 `FfmpegDecodeVideoFileWorker`）可重写此方法实现特定硬件的提取逻辑
+- ✅ 仅在明确使用硬件解码器时调用（`!decoder_name_.empty() && use_hardware_decoder_`）
+- ✅ 示例：TACO硬件解码器从 `metadata["pool_blk_id"]` 提取并调用 `taco_sys_handle2_phys_addr()` 转换
 
 ### PerformanceMonitor API
 
@@ -3456,7 +3542,13 @@ ffmpeg -f rawvideo -pix_fmt nv21 -s 1920x1080 \
 ---
 
 **文档维护：** AI SDK Team  
-**最后更新：** 2025-12-07  
-**架构版本：** v2.2（引入 WorkerConfig + Builder 模式）  
-**上一版本：** v2.1（删除 IBufferFillingWorker 接口，BufferFillingWorkerFacade 不继承接口 + v2.0 Registry 中心化管理）  
+**最后更新：** 2025-12-29  
+**架构版本：** v2.9（软件解码器自动选择 + 物理地址提取重构）  
+**上一版本：** v2.2（引入 WorkerConfig + Builder 模式）  
 **代码规范版本：** v1.0（统一类成员访问控制顺序为 public → private，遵循大厂代码规范）
+
+**v2.9 主要变更**：
+- ✅ **WorkerBase新增虚函数**：`extractHardwareAddressFromMetadata()`，支持硬件解码器物理地址提取扩展
+- ✅ **软件解码器自动选择**：`FfmpegDecodeVideoFileWorker` 在 `initializeDecoder()` 中自动排除硬件解码器，支持所有编解码器（H.264/H.265/VP9/AV1等）
+- ✅ **新增测试用例**：`test_ffmpeg_software_decoder()` 测试纯软件解码路径（含内存拷贝显示）
+- ✅ **VideoProductionLine调优**：`kMaxConsecutiveFailures` 从 10 提升到 100，减少误判

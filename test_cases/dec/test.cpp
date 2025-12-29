@@ -903,6 +903,206 @@ static int test_h264_taco_video(const char* video_path) {
 }
 
 /**
+ * 测试6b：FFmpeg 软件解码器测试（对比硬件解码）
+ * 
+ * 功能：
+ * - 使用 FFmpeg 内置的软件解码器（如 libavcodec）解码视频
+ * - 不使用硬件加速（h264_taco），纯软件解码
+ * - 与 test_h264_taco_video 对比，验证软件解码路径
+ * 
+ * 目的：
+ * - 测试 useSoftware() 配置在实际解码场景中的效果
+ * - 验证 FFmpeg 自动解码器选择机制
+ * - 提供硬件解码失败时的 fallback 方案验证
+ */
+static int test_ffmpeg_software_decoder(const char* video_path) {
+    LOG_INFO("═══════════════════════════════════════════════════════");
+    LOG_INFO_FMT("  Test: FFmpeg Software Decoder - File: %s", video_path);
+    LOG_INFO("  (Using libavcodec, no hardware acceleration)");
+    LOG_INFO("═══════════════════════════════════════════════════════");
+    
+    // 1. 初始化显示设备
+    LOG_INFO("[Test] 初始化显示设备...");
+    LinuxFramebufferDevice display;
+    if (!display.initialize(0)) {
+        return -1;
+    }
+    
+    // 2. 创建 VideoProductionLine
+    LOG_INFO("[Test] 创建VideoProductionLine...");
+    VideoProductionLine producer(false, 1, false);  // loop=false, thread_count=1
+    
+    // 3. 配置 FFmpeg 软件解码
+    LOG_INFO_FMT("[Test] 配置FFmpeg软件解码: %s", video_path);
+    
+    auto workerConfig = WorkerConfigBuilder()
+        .setFileConfig(
+            FileConfigBuilder()
+                .setFilePath(video_path)
+                .build()
+        )
+        .setDisplayConfig(
+            DisplayConfigBuilder()
+                .setDisplayResolution(display.getWidth(), display.getHeight())
+                .setBitsPerPixel(display.getBitsPerPixel())
+                .build()
+        )
+        .setDecoderConfig(
+            DecoderConfigBuilder()
+                .useSoftware()  // ⭐ 使用软件解码器（自动选择，不指定解码器名称）
+                .build()
+        )
+        .setWorkerType(WorkerType::FFMPEG_VIDEO_FILE)  // ⭐ 需要解码
+        .build();
+    
+    // 4. 设置错误回调
+    producer.setErrorCallback([](const std::string& error) {
+        LOG_ERROR_FMT("FFmpeg Software Decoder Error: %s", error.c_str());
+        g_running = false;
+    });
+    
+    // 5. 启动生产者
+    LOG_INFO("[Test] 启动FFmpeg软件解码...");
+    if (!producer.start(workerConfig)) {
+        LOG_ERROR("Failed to start FFmpeg software decoder");
+        return -1;
+    }
+    
+    LOG_INFO("[Test] 视频解码已启动 (Software Decoder), starting playback...");
+    LOG_INFO("[Test] 按Ctrl+C停止");
+    LOG_INFO("[Test] ⚠️ 注意：软件解码输出系统内存，需要拷贝到 framebuffer 显示");
+    
+    // 6. 获取 Display 的 BufferPool（用于显示）
+    LOG_INFO("[Test] 获取 Display BufferPool...");
+    uint64_t display_pool_id = display.getBufferPoolId();
+    if (display_pool_id == 0) {
+        LOG_ERROR("Display BufferPool not initialized");
+        producer.stop();
+        return -1;
+    }
+    auto display_pool_weak = BufferPoolRegistry::getInstance().getPool(display_pool_id);
+    auto display_pool_sptr = display_pool_weak.lock();
+    if (!display_pool_sptr) {
+        LOG_ERROR_FMT("Display BufferPool (ID: %lu) not found or already destroyed", display_pool_id);
+        producer.stop();
+        return -1;
+    }
+    
+    // 7. 获取 Worker 的 BufferPool（软件解码输出）
+    LOG_INFO("[Test] 获取 Worker BufferPool...");
+    uint64_t producer_pool_id = producer.getWorkingBufferPoolId();
+    if (producer_pool_id == 0) {
+        LOG_ERROR("No working BufferPool ID available");
+        producer.stop();
+        return -1;
+    }
+    auto producer_pool_weak = BufferPoolRegistry::getInstance().getPool(producer_pool_id);
+    auto producer_pool_sptr = producer_pool_weak.lock();
+    if (!producer_pool_sptr) {
+        LOG_ERROR("Worker BufferPool not found or destroyed");
+        producer.stop();
+        return -1;
+    }
+    
+    LOG_INFO_FMT("[Test] Worker BufferPool: '%s' (ID: %lu)", 
+                 producer_pool_sptr->getName().c_str(), producer_pool_id);
+    LOG_INFO_FMT("[Test] Display BufferPool: '%s' (ID: %lu)", 
+                 display_pool_sptr->getName().c_str(), display_pool_id);
+    producer_pool_sptr->printStats();
+    display_pool_sptr->printStats();
+    
+    // 8. 消费者循环（内存拷贝显示）
+    int frame_count = 0;
+    
+    while (g_running) {
+        // 步骤1：从 Worker BufferPool 获取解码后的数据
+        Buffer* decoded_buffer = producer_pool_sptr->acquireFilled(true, 100);
+        
+        if (decoded_buffer == nullptr) {
+            // 超时时检查生产者状态
+            if (!producer.isRunning()) {
+                LOG_INFO("Producer stopped naturally, exiting consumer loop...");
+                break;
+            }
+            continue;  // 超时，继续等待
+        }
+        
+        // 步骤2：从 Display BufferPool 获取空闲的 framebuffer
+        Buffer* display_buffer = display_pool_sptr->acquireFree(true, 100);
+        if (display_buffer == nullptr) {
+            LOG_WARN("Failed to acquire free display buffer, skipping frame");
+            producer_pool_sptr->releaseFilled(decoded_buffer);
+            continue;
+        }
+        
+        // 步骤3：⭐ 拷贝数据（软件解码的关键步骤）
+        size_t copy_size = std::min(decoded_buffer->size(), display_buffer->size());
+        memcpy(display_buffer->getVirtualAddress(), 
+               decoded_buffer->getVirtualAddress(), 
+               copy_size);
+        
+        // 步骤4：显示（现在是 Display BufferPool 的 buffer，可以正常显示）
+        display.waitVerticalSync();
+        if (!display.displayFilledFramebuffer(display_buffer)) {
+            LOG_WARN("Display failed");
+        }
+        
+        // 步骤5：归还两个 buffer
+        display_pool_sptr->releaseFree(display_buffer);
+        producer_pool_sptr->releaseFilled(decoded_buffer);
+        
+        frame_count++;
+        
+        // 每100帧打印一次统计
+        if (frame_count % 100 == 0) {
+            LOG_DEBUG_FMT("Frames displayed: %d (%.1f fps)", 
+                          frame_count, producer.getAverageFPS());
+        }
+    }
+    
+    // 9. 排空剩余的已填充 buffer
+    LOG_INFO("Draining remaining buffers from BufferPool...");
+    Buffer* remaining_decoded = nullptr;
+    int drained_count = 0;
+    while ((remaining_decoded = producer_pool_sptr->acquireFilled(false, 0)) != nullptr) {
+        Buffer* display_buffer = display_pool_sptr->acquireFree(false, 0);
+        if (display_buffer) {
+            size_t copy_size = std::min(remaining_decoded->size(), display_buffer->size());
+            memcpy(display_buffer->getVirtualAddress(), 
+                   remaining_decoded->getVirtualAddress(), 
+                   copy_size);
+            
+            display.waitVerticalSync();
+            display.displayFilledFramebuffer(display_buffer);
+            display_pool_sptr->releaseFree(display_buffer);
+        }
+        
+        producer_pool_sptr->releaseFilled(remaining_decoded);
+        frame_count++;
+        drained_count++;
+    }
+    if (drained_count > 0) {
+        LOG_INFO_FMT("Drained %d remaining buffers", drained_count);
+    }
+    
+    // 10. 停止生产者
+    LOG_INFO("Stopping FFmpeg software decoder...");
+    producer.stop();
+    
+    LOG_INFO("FFmpeg software decoder test completed");
+    LOG_INFO_FMT("Total frames displayed: %d", frame_count);
+    LOG_INFO_FMT("Frames produced: %d", producer.getProducedFrames());
+    LOG_INFO_FMT("Frames skipped: %d", producer.getSkippedFrames());
+    LOG_INFO_FMT("Average FPS: %.2f", producer.getAverageFPS());
+    LOG_INFO("💡 Tip: Compare with test_h264_taco_video (hardware decoder) for performance difference");
+    
+    LOG_INFO("Final BufferPool statistics:");
+    producer_pool_sptr->printStats();
+    
+    return 0;
+}
+
+/**
  * 单个生产线的解码工作函数（不显示，仅解码）
  * 
  * @param line_id 生产线ID（用于日志标识）
@@ -1510,6 +1710,7 @@ REGISTER_TEST(producer, "BufferPool + VideoProductionLine test (zero-copy)", tes
 REGISTER_TEST(iouring, "io_uring async I/O mode", test_buffermanager_iouring);
 REGISTER_TEST(rtsp, "RTSP stream playback (zero-copy, FFmpeg)", test_rtsp_stream);
 REGISTER_TEST(ffmpeg, "FFmpeg encoded video playback (MP4/AVI/MKV/etc)", test_h264_taco_video);
+REGISTER_TEST(ffmpeg_software, "FFmpeg software decoder (libavcodec, no hardware acceleration)", test_ffmpeg_software_decoder);
 REGISTER_TEST(ffmpeg_multithread, "Multi-threaded FFmpeg video decoding (no display, decode only)", test_h264_taco_video_multithread);
 REGISTER_TEST(writer, "BufferWriter - Save frames (NV12 format)", test_buffer_writer);
 REGISTER_TEST(writer_rgb, "BufferWriter - 12 RGB formats (ARGB/ABGR/BGRA/RGBA/RGB/BGR/0RGB/0BGR/RGB0/BGR0/RGB48/BGR48)", test_buffer_writer_rgb_formats);

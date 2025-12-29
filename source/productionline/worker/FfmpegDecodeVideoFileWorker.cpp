@@ -378,6 +378,53 @@ bool FfmpegDecodeVideoFileWorker::initializeDecoder() {
             setError("Decoder not found for codec");
             return false;
         }
+        
+        // ⚠️ 调试日志：显示自动选择的解码器
+        LOG_INFO_FMT("[Worker] Auto-selected decoder: %s (use_hardware_decoder_=%d, decoder_name_='%s')", 
+                     codec->name, use_hardware_decoder_, decoder_name_.c_str());
+        
+        // ⭐ 关键问题：如果用户明确要求软件解码，但 FFmpeg 默认返回硬件解码器
+        // 需要重新查找纯软件解码器（通用方案，支持所有编解码器）
+        if (!use_hardware_decoder_ && codec->name && 
+            (strstr(codec->name, "taco") || strstr(codec->name, "cuvid") || 
+             strstr(codec->name, "qsv") || strstr(codec->name, "vaapi") ||
+             strstr(codec->name, "nvdec") || strstr(codec->name, "nvenc") ||
+             strstr(codec->name, "videotoolbox") || strstr(codec->name, "mediacodec"))) {
+            LOG_WARN_FMT("[Worker] ⚠️ WARNING: FFmpeg auto-selected hardware decoder '%s', "
+                        "but user requested software decoding!", codec->name);
+            LOG_WARN("[Worker] Searching for pure software decoder...");
+            
+            // ⭐ 通用方案：遍历所有解码器，找到第一个匹配 codec_id 的纯软件解码器
+            const AVCodec* sw_codec = nullptr;
+            void* opaque = nullptr;
+            
+            while ((sw_codec = av_codec_iterate(&opaque)) != nullptr) {
+                // 检查条件：
+                // 1. 是解码器（不是编码器）
+                // 2. 匹配 codec_id
+                // 3. 不是硬件解码器（名字中不包含硬件关键字）
+                if (av_codec_is_decoder(sw_codec) && 
+                    sw_codec->id == codecpar->codec_id &&
+                    sw_codec->name &&
+                    !strstr(sw_codec->name, "taco") &&
+                    !strstr(sw_codec->name, "cuvid") &&
+                    !strstr(sw_codec->name, "qsv") &&
+                    !strstr(sw_codec->name, "vaapi") &&
+                    !strstr(sw_codec->name, "nvdec") &&
+                    !strstr(sw_codec->name, "nvenc") &&
+                    !strstr(sw_codec->name, "videotoolbox") &&
+                    !strstr(sw_codec->name, "mediacodec")) {
+                    codec = sw_codec;
+                    LOG_INFO_FMT("[Worker] ✅ Found software decoder: %s", codec->name);
+                    break;
+                }
+            }
+            
+            if (!codec || codec == nullptr || strstr(codec->name, "taco")) {
+                LOG_ERROR("[Worker] ❌ Failed to find any software decoder for this codec");
+                return false;
+            }
+        }
     }
     
     // 2. 分配解码器上下文
@@ -725,24 +772,20 @@ bool FfmpegDecodeVideoFileWorker::fillBuffer(int frame_index, Buffer* buffer) {
         if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF || ret < 0) {
             break;
         } 
-        // ✅ 成功！提取物理地址（参考 ids_test_video3:2314-2338）
-        uint64_t phys_addr = 0;
-        uint32_t blk_id = 0;
-        if (frame_ptr->metadata) {
-            AVDictionaryEntry* entry = av_dict_get(frame_ptr->metadata, "pool_blk_id", NULL, 0);
-            if (entry) {
-                blk_id = (uint32_t)atoi(entry->value);
-                phys_addr = taco_sys_handle2_phys_addr(blk_id);
-                
-                // 🎯 保存物理地址到 Buffer
-                buffer->setPhysicalAddress(phys_addr);
+        // ✅ 成功解码！
+        
+        // ⭐ 硬件解码器：提取物理内存地址
+        // 判断条件：decoder_name_ 非空 且 use_hardware_decoder_ == true
+        if (!decoder_name_.empty() && use_hardware_decoder_) {
+            // 明确使用了硬件解码器，尝试提取物理地址
+            if (!extractHardwareAddressFromMetadata(frame_ptr, buffer)) {
+                // ❌ 硬件解码时提取失败是错误
+                LOG_ERROR_FMT("[Worker] Hardware decoder '%s': Failed to extract physical address", 
+                             decoder_name_.c_str());
+                return false;
             }
         }
-        
-        if (phys_addr == 0) {
-            LOG_WARN_FMT("[Worker]  Warning: Failed to extract physical address");
-            return false;
-        }
+        // 软件解码或自动选择：不提取物理地址（正常，物理地址保持为 0）
         
         // ⭐ v2.7改进：先更新虚拟地址为实际数据地址（frame->data[0]）
         buffer->setVirtualAddress(frame_ptr->data[0]);
@@ -803,5 +846,77 @@ void FfmpegDecodeVideoFileWorker::printStats() const {
     LOG_INFO_FMT("[Worker]    Decoded frames: %d", decoded_frames_.load());
     LOG_INFO_FMT("[Worker]    Decode errors: %d", decode_errors_.load());
     LOG_INFO_FMT("[Worker]    EOF: %s", eof_reached_ ? "YES" : "NO");
+}
+
+// ============================================================================
+// 硬件解码器元数据提取（重写基类虚函数）
+// ============================================================================
+
+bool FfmpegDecodeVideoFileWorker::extractHardwareAddressFromMetadata(AVFrame* frame, Buffer* buffer) {
+    // ⭐ 职责：从 AVFrame 中提取硬件解码器的物理内存地址
+    // 
+    // 设计原则：
+    // 1. 此函数只在 decoder_name_ 非空 && use_hardware_decoder_==true 时被调用
+    // 2. 不同硬件解码器有不同的提取方式
+    // 3. 提取失败返回 false，调用者会报错并终止解码
+    
+    if (!frame || !buffer) {
+        LOG_ERROR("[Worker] extractHardwareAddressFromMetadata: Invalid parameters");
+        return false;
+    }
+    
+    // ========== h264_taco 硬件解码器 ==========
+    if (decoder_name_ == "h264_taco") {
+        // TACO 特定逻辑：从 metadata 中提取 pool_blk_id，转换为物理地址
+        uint64_t phys_addr = 0;
+        uint32_t blk_id = 0;
+        
+        if (frame->metadata) {
+            AVDictionaryEntry* entry = av_dict_get(frame->metadata, "pool_blk_id", NULL, 0);
+            if (entry) {
+                blk_id = (uint32_t)atoi(entry->value);
+                phys_addr = taco_sys_handle2_phys_addr(blk_id);
+                
+                if (phys_addr != 0) {
+                    // ✅ 成功提取物理地址
+                    buffer->setPhysicalAddress(phys_addr);
+                    LOG_DEBUG_FMT("[Worker] TACO: Extracted physical address 0x%llx (blk_id=%u)", 
+                                 (unsigned long long)phys_addr, blk_id);
+                    return true;
+                } else {
+                    // ❌ blk_id 有效，但转换失败
+                    LOG_ERROR_FMT("[Worker] TACO: Failed to convert blk_id=%u to physical address", blk_id);
+                    return false;
+                }
+            }
+        }
+        
+        // ❌ TACO 解码器但没有 metadata（异常情况）
+        LOG_ERROR("[Worker] TACO: AVFrame->metadata is missing or no 'pool_blk_id' entry");
+        return false;
+    }
+    
+    // ========== 其他硬件解码器（扩展点）==========
+    // 
+    // 示例：NVIDIA CUDA 解码器
+    // if (decoder_name_ == "h264_cuvid") {
+    //     // CUDA 特定逻辑：从 AVFrame 的 data[0] 获取设备内存指针
+    //     // CUdeviceptr cuda_ptr = (CUdeviceptr)frame->data[0];
+    //     // buffer->setPhysicalAddress((uint64_t)cuda_ptr);
+    //     // return true;
+    // }
+    //
+    // 示例：Intel QSV 解码器
+    // if (decoder_name_ == "h264_qsv") {
+    //     // QSV 特定逻辑：从 AVFrame 的 data[3] 获取 mfxFrameSurface1*
+    //     // mfxFrameSurface1* surface = (mfxFrameSurface1*)frame->data[3];
+    //     // buffer->setPhysicalAddress((uint64_t)surface->Data.MemId);
+    //     // return true;
+    // }
+    
+    // 未识别的硬件解码器
+    LOG_ERROR_FMT("[Worker] Unknown hardware decoder '%s', cannot extract physical address", 
+                 decoder_name_.c_str());
+    return false;
 }
 

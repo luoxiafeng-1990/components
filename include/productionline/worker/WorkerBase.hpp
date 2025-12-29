@@ -95,6 +95,35 @@ public:
     virtual bool fillBuffer(int frame_index, Buffer* buffer) = 0;
     
     /**
+     * @brief 从AVFrame元数据中提取硬件解码器的物理内存地址
+     * 
+     * ⭐ 设计原则：
+     * - 由 Worker 负责提取，因为 Worker 知道解码器类型和上下文
+     * - 默认实现返回 false（不支持硬件地址提取）
+     * - 子类重写实现特定硬件解码器的提取逻辑
+     * 
+     * ⚠️ 调用时机：
+     * - 只在使用硬件解码器时调用（decoder_name 非空且 enable_hardware=true）
+     * - 软件解码不应调用此函数
+     * 
+     * @param frame AVFrame 指针（需要包含 libavcodec/avcodec.h）
+     * @param buffer Buffer 指针（用于存储提取的物理地址）
+     * @return true 成功提取物理地址，false 提取失败或不支持
+     * 
+     * @note 扩展点：不同硬件解码器子类可以重写此方法
+     *       - h264_taco: 从 metadata 提取 pool_blk_id
+     *       - h264_cuvid: 从 CUDA 设备内存获取
+     *       - h264_qsv: 从 QSV 表面获取
+     */
+    virtual bool extractHardwareAddressFromMetadata(struct AVFrame* frame, Buffer* buffer) {
+        // 默认实现：不支持硬件地址提取
+        // 子类（如 FfmpegDecodeVideoFileWorker）可以重写此方法
+        (void)frame;   // 避免未使用参数警告
+        (void)buffer;
+        return false;
+    }
+    
+    /**
      * @brief 获取Worker类型名称（用于调试和日志）
      * 
      * 纯虚函数：强制所有子类必须实现

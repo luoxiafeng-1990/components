@@ -199,6 +199,20 @@ private:
     int estimateTotalFrames();
     
     /**
+     * @brief 从AVFrame元数据中提取硬件解码器的物理内存地址（重写基类）
+     * 
+     * 实现 h264_taco 硬件解码器的物理地址提取逻辑：
+     * - 从 AVFrame->metadata 中提取 "pool_blk_id"
+     * - 调用 taco_sys_handle2_phys_addr() 转换为物理地址
+     * - 将物理地址存储到 Buffer
+     * 
+     * @param frame AVFrame 指针
+     * @param buffer Buffer 指针
+     * @return true 成功提取物理地址，false 提取失败
+     */
+    virtual bool extractHardwareAddressFromMetadata(struct AVFrame* frame, Buffer* buffer) override;
+    
+    /**
      * @brief 设置错误信息
      */
     void setError(const std::string& error, int ffmpeg_error = 0);

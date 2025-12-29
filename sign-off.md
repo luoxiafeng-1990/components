@@ -134,7 +134,9 @@ ProductionLine 组件是一套完整的视频数据处理和测试框架，基�
 #### 1.6 I/O子系统
 - **BufferWriter**
   - 支持将Buffer数据保存到文件
-  - 支持多种像素格式（NV12、ARGB888、BGRA8888、RGBA8888、RGB888、BGR888）
+  - 支持18种像素格式（详细列表见ARCHITECTURE.md）:
+    - YUV格式（6种）: GRAY8, GRAY10LE, NV12, P010LE, NV21, YUV420P10LE
+    - RGB格式（12种）: RGB24, BGR24, ARGB, ABGR, RGBA, BGRA, RGB0, BGR0, 0RGB, 0BGR, RGB48LE, BGR48LE
   - 提供原子计数器功能
 
 ### 2. 配置管理系统（v2.2）
@@ -179,7 +181,7 @@ auto workerConfig = WorkerConfigBuilder()
 | **6** | ffmpeg | FFmpeg编码视频播放测试（MP4/AVI/MKV等） | ✅ 完成 |
 | **7** | ffmpeg_multithread | 多线程FFmpeg视频解码测试（仅解码，不显示） | ✅ 完成 |
 | **8** | writer | BufferWriter保存帧测试（NV12格式） | ✅ 完成 |
-| **8b** | writer_rgb | BufferWriter RGB格式测试（5种RGB格式） | ✅ 完成 |
+| **8b** | writer_rgb | BufferWriter RGB格式测试（12种RGB格式） | ✅ 完成 |
 
 ### 测试覆盖范围
 
@@ -192,7 +194,9 @@ auto workerConfig = WorkerConfigBuilder()
 #### 2. 解码器测试
 - ✅ 软件解码（FFmpeg软解）
 - ✅ 硬件解码（h264_taco硬件解码器）
-- ✅ 多种像素格式输出（NV12, ARGB888, BGRA8888, RGBA8888, RGB888, BGR888）
+- ✅ 多种像素格式输出：
+  - YUV格式（6种）: NV12, NV21, GRAY8, GRAY10LE, P010LE, YUV420P10LE
+  - RGB格式（12种）: RGB24, BGR24, ARGB, ABGR, RGBA, BGRA, RGB0, BGR0, 0RGB, 0BGR, RGB48LE, BGR48LE
 
 #### 3. 显示功能测试
 - ✅ Framebuffer多缓冲显示
@@ -209,7 +213,7 @@ auto workerConfig = WorkerConfigBuilder()
 
 #### 5. I/O功能测试
 - ✅ 视频帧保存到文件（NV12格式）
-- ✅ RGB格式帧保存（5种RGB格式）
+- ✅ RGB格式帧保存（12种RGB格式，全覆盖）
 - ✅ BufferWriter原子计数器
 
 #### 6. 架构功能测试
