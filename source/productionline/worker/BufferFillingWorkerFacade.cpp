@@ -54,24 +54,28 @@ bool BufferFillingWorkerFacade::open() {
     const char* path = file_path.c_str();
     
     // 🎯 智能判断：根据Worker类型选择合适的open方法
-    // - Raw视频Worker（MMAP_RAW, IOURING_RAW）：需要格式参数
-    // - 编码视频Worker（FFMPEG_VIDEO_FILE, FFMPEG_RTSP）：自动检测格式
+    // - 需要格式参数的Worker：MMAP_RAW, IOURING_RAW, FFMPEG_RTSP
+    //   （原始视频文件和RTSP实时流都需要明确指定输出格式）
+    // - 可以自动检测的Worker：FFMPEG_VIDEO_FILE
+    //   （本地编码视频文件有文件头，可以自动检测分辨率和格式）
     
-    bool is_raw_worker = (config_.worker_type == BufferFillingWorkerFactory::WorkerType::MMAP_RAW ||
-                          config_.worker_type == BufferFillingWorkerFactory::WorkerType::IOURING_RAW);
+    bool needs_format_params = (config_.worker_type == BufferFillingWorkerFactory::WorkerType::MMAP_RAW ||
+                                config_.worker_type == BufferFillingWorkerFactory::WorkerType::IOURING_RAW ||
+                                config_.worker_type == BufferFillingWorkerFactory::WorkerType::FFMPEG_RTSP);
     
-    if (is_raw_worker) {
-        // Raw视频Worker：需要格式参数
+    if (needs_format_params) {
+        // 需要格式参数的Worker（原始视频、RTSP流）
         if (width == 0 || height == 0 || bits_per_pixel == 0) {
-            LOG_ERROR_FMT("[Worker] ERROR: Raw video worker requires width, height, and bits_per_pixel in config!");
+            LOG_ERROR_FMT("[Worker] ERROR: Worker type '%s' requires width, height, and bits_per_pixel in config!",
+                         BufferFillingWorkerFactory::typeToString(config_.worker_type));
             return false;
         }
-        LOG_DEBUG_FMT("[Worker] BufferFillingWorkerFacade: Opening raw video with format %dx%d@%dbpp",
+        LOG_DEBUG_FMT("[Worker] BufferFillingWorkerFacade: Opening video with format %dx%d@%dbpp",
                width, height, bits_per_pixel);
         return worker_base_uptr_->open(path, width, height, bits_per_pixel);
     } else {
-        // 编码视频Worker：自动检测格式
-        LOG_DEBUG("[Worker] BufferFillingWorkerFacade: Opening encoded video (auto-detect format)");
+        // 可以自动检测格式的Worker（本地编码视频文件）
+        LOG_DEBUG("[Worker] BufferFillingWorkerFacade: Opening encoded video file (auto-detect format)");
         return worker_base_uptr_->open(path);
     }
 }

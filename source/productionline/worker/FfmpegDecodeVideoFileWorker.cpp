@@ -146,7 +146,7 @@ bool FfmpegDecodeVideoFileWorker::open(const char* path) {
         return false;
     }
     
-    int buffer_count = 16;  // 默认创建4个Buffer
+    int buffer_count = 128;  // ⚠️ 增加到128个以应对慢速消费者（文件写入）
     
     // v2.0: allocatePoolWithBuffers 返回 pool_id
     buffer_pool_id_ = allocator_facade_.allocatePoolWithBuffers(
