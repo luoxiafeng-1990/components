@@ -178,9 +178,9 @@ bool BufferFillingWorkerFacade::isAtEnd() const {
 
 // ============ 提供原材料（BufferPool ID）============
 
-uint64_t BufferFillingWorkerFacade::getOutputBufferPoolId() {
+uint64_t BufferFillingWorkerFacade::getOutputBufferPoolId(BufferPoolType type) {
     if (worker_base_uptr_) {
-        return worker_base_uptr_->getOutputBufferPoolId();
+        return worker_base_uptr_->getOutputBufferPoolId(type);
     }
     return 0;
 }

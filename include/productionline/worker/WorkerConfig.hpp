@@ -11,11 +11,12 @@
  * 注意：此枚举独立定义，避免与 BufferFillingWorkerFactory 的循环依赖
  */
 enum class WorkerType {
-    AUTO,              // 自动检测（默认）
-    MMAP_RAW,          // Mmap Raw 视频文件
-    IOURING_RAW,       // IoUring Raw 视频文件
-    FFMPEG_RTSP,       // FFmpeg RTSP 流
-    FFMPEG_VIDEO_FILE  // FFmpeg 视频文件
+    AUTO,                 // 自动检测（默认）
+    MMAP_RAW,             // Mmap Raw 视频文件
+    IOURING_RAW,          // IoUring Raw 视频文件
+    FFMPEG_RTSP,          // FFmpeg RTSP 流
+    FFMPEG_RTSP_RECORD,   // FFmpeg RTSP 原始码流录制
+    FFMPEG_VIDEO_FILE     // FFmpeg 视频文件
 };
 
 /**
@@ -384,23 +385,30 @@ public:
     // ========== 快捷预设 ==========
     
     /**
-     * @brief 预设：h264_taco 硬件解码（默认配置）
+     * @brief 预设：TACO 硬件解码（通用，支持多种编解码器）
      * 
-     * 设置解码器为 h264_taco，并使用默认 taco 配置：
-     * - reorder_disable = true
-     * - ch0_enable = true (YUV通道)
-     * - ch1_enable = true (RGB通道)
-     * - ch1_rgb = true (输出RGB格式)
-     * - ch1_rgb_format = "argb888"
-     * - ch1_rgb_std = "bt601"
+     * 设置解码器为 TACO 平台的指定编解码器。
+     * TACO 是定制硬件解码器平台，支持多种视频编解码器。
+     * 
+     * @param codec 编解码器类型（如 "h264"、"h265"、"vp9" 等）
      * 
      * 示例：
      * @code
-     * DecoderConfigBuilder().useH264Taco().build()
+     * // H.264 解码
+     * DecoderConfigBuilder().useTaco("h264").build()
+     * 
+     * // H.265/HEVC 解码
+     * DecoderConfigBuilder().useTaco("h265").build()
+     * 
+     * // VP9 解码
+     * DecoderConfigBuilder().useTaco("vp9").build()
      * @endcode
+     * 
+     * 生成的解码器名称格式为：{codec}_taco（如 "h264_taco"、"h265_taco"）
      */
-    DecoderConfigBuilder& useH264Taco() {
-        config_.name = "h264_taco";
+    DecoderConfigBuilder& useTaco(std::string_view codec) {
+        // 拼接解码器名称：codec + "_taco"
+        config_.name = std::string(codec) + "_taco";
         config_.enable_hardware = true;
         
         // 设置默认 taco 配置
@@ -415,22 +423,29 @@ public:
     }
     
     /**
-     * @brief 预设：h264_taco 硬件解码（自定义配置）
+     * @brief 预设：TACO 硬件解码（通用，支持自定义配置）
      * 
-     * 设置解码器为 h264_taco，并使用用户提供的 taco 配置。
+     * 设置解码器为 TACO 平台的指定编解码器，并使用自定义 TACO 配置。
+     * 
+     * @param codec 编解码器类型（如 "h264"、"h265"、"vp9" 等）
+     * @param taco_config 自定义的 TACO 配置对象
      * 
      * 示例：
      * @code
      * auto tacoConfig = TacoConfigBuilder()
-     *     .setRgbConfig(false, "", "bt601")  // 输出YUV
+     *     .setRgbConfig(true, "bgra888", "bt709")
+     *     .setDecoderOutputResolution(1920, 1080)
      *     .build();
-     * DecoderConfigBuilder().useH264Taco(tacoConfig).build()
-     * @endcode
      * 
-     * @param taco_config 自定义的 taco 配置对象
+     * DecoderConfigBuilder().useTaco("h264", tacoConfig).build()
+     * @endcode
      */
-    DecoderConfigBuilder& useH264Taco(const WorkerConfig::DecoderConfig::TacoConfig& taco_config) {
-        config_.name = "h264_taco";
+    DecoderConfigBuilder& useTaco(
+        std::string_view codec,
+        const WorkerConfig::DecoderConfig::TacoConfig& taco_config
+    ) {
+        // 拼接解码器名称：codec + "_taco"
+        config_.name = std::string(codec) + "_taco";
         config_.enable_hardware = true;
         config_.taco = taco_config;
         return *this;
@@ -446,22 +461,95 @@ public:
     }
     
     /**
-     * @brief 预设：NVIDIA CUDA 解码
+     * @brief 预设：NVIDIA CUDA 硬件解码（通用，支持多种编解码器）
+     * 
+     * 设置解码器为 NVIDIA CUDA 平台的指定编解码器。
+     * CUDA 是 NVIDIA GPU 硬件加速平台，支持 H.264、H.265、VP9、AV1 等。
+     * 
+     * @param codec 编解码器类型（如 "h264"、"h265"、"vp9"、"av1" 等）
+     * 
+     * 示例：
+     * @code
+     * // H.264 CUDA 解码
+     * DecoderConfigBuilder().useCuvid("h264").build()
+     * 
+     * // H.265/HEVC CUDA 解码
+     * DecoderConfigBuilder().useCuvid("h265").build()
+     * 
+     * // VP9 CUDA 解码
+     * DecoderConfigBuilder().useCuvid("vp9").build()
+     * 
+     * // AV1 CUDA 解码
+     * DecoderConfigBuilder().useCuvid("av1").build()
+     * @endcode
+     * 
+     * 生成的解码器名称格式为：{codec}_cuvid（如 "h264_cuvid"、"h265_cuvid"）
      */
-    DecoderConfigBuilder& useH264Cuvid() {
-        config_.name = "h264_cuvid";
+    DecoderConfigBuilder& useCuvid(std::string_view codec) {
+        config_.name = std::string(codec) + "_cuvid";
         config_.enable_hardware = true;
         config_.hwaccel_device = "cuda";
         return *this;
     }
     
     /**
-     * @brief 预设：Intel Quick Sync 解码
+     * @brief 预设：Intel Quick Sync Video 硬件解码（通用，支持多种编解码器）
+     * 
+     * 设置解码器为 Intel QSV 平台的指定编解码器。
+     * QSV 是 Intel 集成显卡硬件加速平台，支持 H.264、H.265、VP9、AV1 等。
+     * 
+     * @param codec 编解码器类型（如 "h264"、"h265"、"vp9"、"av1" 等）
+     * 
+     * 示例：
+     * @code
+     * // H.264 QSV 解码
+     * DecoderConfigBuilder().useQsv("h264").build()
+     * 
+     * // H.265/HEVC QSV 解码
+     * DecoderConfigBuilder().useQsv("h265").build()
+     * 
+     * // VP9 QSV 解码
+     * DecoderConfigBuilder().useQsv("vp9").build()
+     * 
+     * // AV1 QSV 解码
+     * DecoderConfigBuilder().useQsv("av1").build()
+     * @endcode
+     * 
+     * 生成的解码器名称格式为：{codec}_qsv（如 "h264_qsv"、"h265_qsv"）
      */
-    DecoderConfigBuilder& useH264Qsv() {
-        config_.name = "h264_qsv";
+    DecoderConfigBuilder& useQsv(std::string_view codec) {
+        config_.name = std::string(codec) + "_qsv";
         config_.enable_hardware = true;
         config_.hwaccel_device = "qsv";
+        return *this;
+    }
+    
+    /**
+     * @brief 预设：VA-API 硬件解码（通用，支持多种编解码器）
+     * 
+     * 设置解码器为 VA-API 平台的指定编解码器。
+     * VA-API 是 Linux 视频加速 API，支持 Intel/AMD GPU 硬件加速。
+     * 
+     * @param codec 编解码器类型（如 "h264"、"h265"、"vp9"、"av1" 等）
+     * 
+     * 示例：
+     * @code
+     * // H.264 VA-API 解码
+     * DecoderConfigBuilder().useVaapi("h264").build()
+     * 
+     * // H.265/HEVC VA-API 解码
+     * DecoderConfigBuilder().useVaapi("h265").build()
+     * 
+     * // VP9 VA-API 解码
+     * DecoderConfigBuilder().useVaapi("vp9").build()
+     * @endcode
+     * 
+     * 生成的解码器名称格式为：{codec}_vaapi（如 "h264_vaapi"、"h265_vaapi"）
+     */
+    DecoderConfigBuilder& useVaapi(std::string_view codec) {
+        config_.name = std::string(codec) + "_vaapi";
+        config_.enable_hardware = true;
+        config_.hwaccel_device = "vaapi";
         return *this;
     }
     

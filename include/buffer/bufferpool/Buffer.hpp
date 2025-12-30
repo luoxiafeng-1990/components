@@ -114,6 +114,20 @@ public:
     size_t size() const { return size_; }
     
     /**
+     * @brief 设置实际使用大小
+     * @param used_size 实际使用的字节数
+     * @note v2.9新增：用于原始码流等可变大小数据
+     */
+    void setUsedSize(size_t used_size) { used_size_ = used_size; }
+    
+    /**
+     * @brief 获取实际使用大小
+     * @return 实际使用的字节数（如果未设置，返回 size_）
+     * @note v2.9新增：用于原始码流等可变大小数据
+     */
+    size_t getUsedSize() const { return used_size_ > 0 ? used_size_ : size_; }
+    
+    /**
      * @brief 获取当前状态
      * @return Buffer当前状态（线程安全）
      */
@@ -294,7 +308,8 @@ private:
     uint32_t id_;                    // 唯一标识
     void* virt_addr_;                // 虚拟地址（真实数据地址，如 frame->data[0]）⭐ v2.7语义修正
     uint64_t phys_addr_;             // 物理地址（硬件/DMA）
-    size_t size_;                    // Buffer 大小
+    size_t size_;                    // Buffer 总大小（分配大小）
+    size_t used_size_;               // 实际使用大小（对于可变大小数据，如原始码流）⭐ v2.9新增
     Ownership ownership_;            // 所有权类型
     
     // ========== 状态管理 ==========

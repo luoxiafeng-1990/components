@@ -50,7 +50,7 @@ class BufferPool;
  * // v2.2: 使用配置构造函数
  * auto config = WorkerConfigBuilder()
  *     .setDecoderConfig(
- *         DecoderConfigBuilder().useH264Taco().build()
+ *         DecoderConfigBuilder().useTaco("h264").build()
  *     )
  *     .build();
  * FfmpegDecodeRtspWorker worker(config);
@@ -85,7 +85,6 @@ public:
     const char* getWorkerType() const override {
         return "FfmpegDecodeRtspWorker";
     }
-    uint64_t getOutputBufferPoolId() override;
     
     // 文件导航功能（继承自IVideoFileNavigator）
     bool open(const char* path) override;

@@ -97,10 +97,10 @@ bool VideoProductionLine::start(const WorkerConfig& worker_config) {
     }
     
     // v2.0: Worker必须在open()时自动创建BufferPool（通过调用Allocator）
-    // 获取 BufferPool ID
-    uint64_t worker_pool_id = worker_facade_sptr_->getOutputBufferPoolId();
+    // 获取主视频解码输出 BufferPool ID（使用新接口）
+    uint64_t worker_pool_id = worker_facade_sptr_->getOutputBufferPoolId(BufferPoolType::DECODE_VIDEO_PRIMARY);
     if (worker_pool_id == 0) {
-        setError("Worker failed to create BufferPool");
+        setError("Worker failed to create DECODE_VIDEO_PRIMARY BufferPool");
         worker_facade_sptr_.reset();
         return false;
     }
@@ -116,6 +116,8 @@ bool VideoProductionLine::start(const WorkerConfig& worker_config) {
         worker_facade_sptr_.reset();
         return false;
     }
+    
+    LOG_INFO_FMT("Using DECODE_VIDEO_PRIMARY pool (ID: %lu)", working_buffer_pool_id_);
     
     total_frames_ = worker_facade_sptr_->getTotalFrames();
     size_t frame_size = worker_facade_sptr_->getFrameSize();

@@ -620,7 +620,7 @@ static int test_rtsp_stream(const char* rtsp_url) {
         )
         .setDecoderConfig(
             DecoderConfigBuilder()
-                .useH264Taco()  // 使用 h264_taco 硬件解码器进行 RTSP 流解码
+                .useTaco("h264")  // 使用 TACO 硬件解码器进行 H.264 RTSP 流解码
                 .build()
         )
         .setWorkerType(WorkerType::FFMPEG_RTSP)
@@ -737,6 +737,163 @@ static int test_rtsp_stream(const char* rtsp_url) {
 }
 
 /**
+ * 测试5.5：RTSP原始码流录制
+ * 
+ * 架构：
+ * - 生产者：FfmpegRecordRtspWorker（读取RTSP原始包 → Buffer）
+ * - 消费者：直接写入文件（Buffer → .h264/.mp4文件）
+ * 
+ * 功能：
+ * - 录制RTSP流的原始编码数据（不解码）
+ * - 保存为 .h264 或 .mp4 格式
+ * - 可用于后续对比测试（相同码流，不同解码器）
+ */
+static int test_rtsp_record(const char* rtsp_url) {
+    using namespace productionline::io;
+    
+    LOG_INFO("╔═══════════════════════════════════════════════════════╗");
+    LOG_INFO("║   Test: RTSP Raw Stream Recording                    ║");
+    LOG_INFO("╚═══════════════════════════════════════════════════════╝\n");
+    
+    const char* output_file = "/tmp/rtsp_recorded.h264";  // 使用 /tmp 目录，确保可写
+    const int duration_seconds = 10;
+    
+    // 1. 创建 VideoProductionLine（生产者）
+    LOG_INFO("[Step 1] Creating VideoProductionLine...");
+    VideoProductionLine producer(false, 1, false);
+    
+    // 2. 配置 Worker
+    LOG_INFO("[Step 2] Configuring FfmpegRecordRtspWorker...");
+    auto workerConfig = WorkerConfigBuilder()
+        .setFileConfig(
+            FileConfigBuilder()
+                .setFilePath(rtsp_url)
+                .build()
+        )
+        .setWorkerType(WorkerType::FFMPEG_RTSP_RECORD)
+        .build();
+    
+    // 3. 设置错误回调
+    producer.setErrorCallback([](const std::string& error) {
+        LOG_ERROR_FMT("Recording Error: %s", error.c_str());
+        g_running = false;
+    });
+    
+    // 4. 启动生产者
+    LOG_INFO("[Step 3] Starting producer...");
+    if (!producer.start(workerConfig)) {
+        LOG_ERROR("Failed to start producer");
+        return -1;
+    }
+    
+    // 5. 获取 BufferPool
+    LOG_INFO("[Step 4] Getting BufferPool...");
+    uint64_t pool_id = producer.getWorkingBufferPoolId();
+    auto pool_sptr = BufferPoolRegistry::getInstance().getPool(pool_id).lock();
+    if (!pool_sptr) {
+        LOG_ERROR("Failed to get BufferPool");
+        producer.stop();
+        return -1;
+    }
+    
+    LOG_INFO_FMT("  BufferPool: '%s' (ID: %lu)", pool_sptr->getName().c_str(), pool_id);
+    
+    // 6. 打开输出文件
+    LOG_INFO("[Step 5] Opening output file...");
+    FILE* fp = fopen(output_file, "wb");
+    if (!fp) {
+        LOG_ERROR_FMT("Failed to open output file: %s", output_file);
+        producer.stop();
+        return -1;
+    }
+    
+    // 7. 消费者线程：保存原始包到文件
+    LOG_INFO("\n[Step 6] Recording...");
+    LOG_INFO("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    
+    auto start_time = std::chrono::steady_clock::now();
+    int packet_count = 0;
+    int64_t total_bytes = 0;
+    int timeout_count = 0;
+    const int MAX_TIMEOUT = 50;
+    
+    while (g_running) {
+        // 检查时长
+        auto now = std::chrono::steady_clock::now();
+        int elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - start_time).count();
+        if (elapsed >= duration_seconds) {
+            LOG_INFO_FMT("\n  ⏱️  Reached duration limit: %d seconds", duration_seconds);
+            break;
+        }
+        
+        // 获取Buffer
+        Buffer* buffer = pool_sptr->acquireFilled(true, 100);
+        
+        if (buffer) {
+            // 写入文件
+            size_t used_size = buffer->getUsedSize();
+            if (used_size > 0) {
+                fwrite(buffer->getVirtualAddress(), 1, used_size, fp);
+                packet_count++;
+                total_bytes += used_size;
+                
+                if (packet_count % 50 == 0) {
+                    double rate_mbps = elapsed > 0 ? (total_bytes * 8.0) / (elapsed * 1000000.0) : 0.0;
+                    LOG_INFO_FMT("  Recorded %d packets | %d seconds | %.2f Mbps",
+                                 packet_count, elapsed, rate_mbps);
+                }
+            }
+            
+            pool_sptr->releaseFilled(buffer);
+            timeout_count = 0;
+        } else {
+            timeout_count++;
+            if (timeout_count >= MAX_TIMEOUT) {
+                LOG_WARN("\n  ⚠️  Stream timeout, stopping...");
+                break;
+            }
+        }
+    }
+    
+    LOG_INFO("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    
+    // 8. 清理
+    fclose(fp);
+    producer.stop();
+    
+    // 9. 统计信息
+    auto end_time = std::chrono::steady_clock::now();
+    double total_duration = std::chrono::duration<double>(end_time - start_time).count();
+    
+    LOG_INFO("\n═══════════════════════════════════════════════════════");
+    LOG_INFO("  Recording Results");
+    LOG_INFO("═══════════════════════════════════════════════════════");
+    LOG_INFO_FMT("  Output file:      %s", output_file);
+    LOG_INFO_FMT("  Packets recorded: %d", packet_count);
+    LOG_INFO_FMT("  Duration:         %.2f seconds", total_duration);
+    LOG_INFO_FMT("  Total bytes:      %.2f MB", total_bytes / (1024.0 * 1024.0));
+    
+    if (total_duration > 0) {
+        LOG_INFO_FMT("  Average bitrate:  %.2f Mbps", 
+                     (total_bytes * 8.0) / (total_duration * 1000000.0));
+    }
+    
+    LOG_INFO("\n💡 Test the recorded file with:");
+    LOG_INFO_FMT("   ./display_test -m ffmpeg %s              # Hardware", output_file);
+    LOG_INFO_FMT("   ./display_test -m ffmpeg_software %s     # Software", output_file);
+    LOG_INFO("\n💡 Or play with ffplay:");
+    LOG_INFO_FMT("   ffplay %s", output_file);
+    LOG_INFO("═══════════════════════════════════════════════════════\n");
+    
+    if (packet_count > 0) {
+        return 0;
+    } else {
+        LOG_ERROR("No packets recorded");
+        return -1;
+    }
+}
+
+/**
  * 测试6：FFmpeg 编码视频文件播放（使用Worker自动创建BufferPool）
  */
 static int test_h264_taco_video(const char* video_path) {
@@ -772,7 +929,7 @@ static int test_h264_taco_video(const char* video_path) {
         )
         .setDecoderConfig(
             DecoderConfigBuilder()
-                .useH264Taco()  // 使用 h264_taco 硬件解码器进行视频文件解码
+                .useTaco("h264")  // 使用 TACO 硬件解码器进行 H.264 视频文件解码
                 .build()
         )
         .setWorkerType(WorkerType::FFMPEG_VIDEO_FILE)
@@ -1142,7 +1299,7 @@ static void decode_production_line_worker(
         )
         .setDecoderConfig(
             DecoderConfigBuilder()
-                .useH264Taco()  // 使用 h264_taco 硬件解码器进行视频文件解码
+                .useTaco("h264")  // 使用 TACO 硬件解码器进行 H.264 视频文件解码
                 .build()
         )
         .setWorkerType(WorkerType::FFMPEG_VIDEO_FILE)
@@ -1394,7 +1551,7 @@ static int test_buffer_writer_format(
         )
         .setDecoderConfig(
             DecoderConfigBuilder()
-                .useH264Taco(taco_config)  // ⭐ 直接使用传入的配置
+                .useTaco("h264", taco_config)  // ⭐ 使用 TACO H.264 解码器 + 自定义配置
                 .build()
         )
         .setWorkerType(WorkerType::FFMPEG_VIDEO_FILE)
@@ -1709,6 +1866,7 @@ REGISTER_TEST(sequential, "Sequential playback (play once)", test_sequential_pla
 REGISTER_TEST(producer, "BufferPool + VideoProductionLine test (zero-copy)", test_buffermanager_producer);
 REGISTER_TEST(iouring, "io_uring async I/O mode", test_buffermanager_iouring);
 REGISTER_TEST(rtsp, "RTSP stream playback (zero-copy, FFmpeg)", test_rtsp_stream);
+REGISTER_TEST(rtsp_record, "RTSP raw stream recording (save H.264/H.265 to file)", test_rtsp_record);
 REGISTER_TEST(ffmpeg, "FFmpeg encoded video playback (MP4/AVI/MKV/etc)", test_h264_taco_video);
 REGISTER_TEST(ffmpeg_software, "FFmpeg software decoder (libavcodec, no hardware acceleration)", test_ffmpeg_software_decoder);
 REGISTER_TEST(ffmpeg_multithread, "Multi-threaded FFmpeg video decoding (no display, decode only)", test_h264_taco_video_multithread);

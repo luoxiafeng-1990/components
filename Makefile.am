@@ -10,6 +10,7 @@ libcomponents_la_SOURCES = \
     source/productionline/worker/MmapRawVideoFileWorker.cpp \
     source/productionline/worker/BufferFillingWorkerFactory.cpp \
     source/productionline/worker/FfmpegDecodeRtspWorker.cpp \
+    source/productionline/worker/FfmpegRecordRtspWorker.cpp \
     source/productionline/worker/FfmpegDecodeVideoFileWorker.cpp \
     source/productionline/worker/IoUringRawVideoFileWorker.cpp \
     source/monitor/PerformanceMonitor.cpp \

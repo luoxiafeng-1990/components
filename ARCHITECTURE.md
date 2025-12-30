@@ -17,6 +17,45 @@
 
 ---
 
+## 版本历史
+
+### v2.3（当前版本）- 多 BufferPool 支持
+**发布日期：** 2024-12
+
+**主要变更：**
+- ✅ **多 BufferPool 管理**：WorkerBase 支持一个 Worker 管理多个不同类型的 BufferPool
+- ✅ **强类型标识**：引入 `BufferPoolType` 枚举，明确区分不同用途的 BufferPool
+- ❌ **破坏性变更**：删除 `getOutputBufferPoolId()` 无参数版本，必须使用 `getOutputBufferPoolId(BufferPoolType)`
+- ❌ **删除遍历接口**：移除 `getAllBufferPoolTypes()` 等方法，强制调用者明确意图
+- ✅ **新增查询方法**：`hasBufferPoolType(BufferPoolType)` 检查是否存在指定类型
+
+**迁移要点：**
+```cpp
+// ❌ v2.0（旧代码）
+uint64_t pool_id = worker->getOutputBufferPoolId();
+
+// ✅ v2.3（新代码）
+uint64_t pool_id = worker->getOutputBufferPoolId(BufferPoolType::DECODE_VIDEO_PRIMARY);
+```
+
+### v2.1 - 门面模式重构
+**主要变更：**
+- ✅ BufferFillingWorkerFacade 不再继承接口，改用组合模式
+- ✅ 简化架构，减少继承层次
+
+### v2.0 - Registry 中心化管理
+**主要变更：**
+- ✅ BufferPoolRegistry 独占持有 BufferPool
+- ✅ Worker 和 ProductionLine 只记录 pool_id
+- ✅ 通过 Registry 获取临时访问（weak_ptr）
+- ✅ WorkerBase 整合 IBufferFillingWorker 接口
+
+### v1.5 - 初始版本
+- Worker 持有 BufferPool 的 unique_ptr
+- 通过 getOutputBufferPool() 转移所有权
+
+---
+
 ## 架构概述
 
 ### 核心理念
@@ -124,17 +163,26 @@
 - ❌ 数据填充（由Worker负责）
 - ❌ 生产流程管理（由ProductionLine负责）
 
-### 3. WorkerBase（Worker统一基类）- v2.0架构
+### 3. WorkerBase（Worker统一基类）- v2.3架构
 
 **职责：**
-- ✅ **定义Buffer填充功能**：通过纯虚函数定义契约 (`fillBuffer()`, `getWorkerType()`, `getOutputBufferPoolId()`)
+- ✅ **定义Buffer填充功能**：通过纯虚函数定义契约 (`fillBuffer()`, `getWorkerType()`, `getOutputBufferPoolId(BufferPoolType)`)
 - ✅ **继承文件导航接口**：继承`IVideoFileNavigator`接口，提供文件操作功能
-- ✅ **BufferPool创建**：在实现`open()`时**必须**自动调用Allocator创建BufferPool
+- ✅ **多BufferPool管理**（v2.3新增）：支持一个Worker创建和管理多个不同类型的BufferPool
   - Worker内部持有`BufferAllocatorFacade`实例（通过构造函数参数指定类型）
   - Worker调用`allocator_facade_.allocatePoolWithBuffers()`创建BufferPool
-  - Worker记录`buffer_pool_id_`（v2.0：Registry 独占持有 Pool）
+  - Worker通过`buffer_pool_type_map_`记录多个BufferPool的映射关系（v2.3：使用枚举类型标识）
+  - 使用者必须明确指定BufferPool类型来获取对应的pool_id
   - 使用者从Registry通过 pool_id 获取临时访问
 - ✅ **统一Allocator管理**：通过构造函数参数传递AllocatorType，父类统一管理
+
+**v2.3架构变更（多BufferPool支持）：**
+- ✅ **数据成员变更**：从 `uint64_t buffer_pool_id_` 改为 `std::map<BufferPoolType, uint64_t> buffer_pool_type_map_`
+- ✅ **强类型标识**：引入 `BufferPoolType` 枚举，明确区分不同用途的BufferPool
+- ✅ **API变更**：`getOutputBufferPoolId(BufferPoolType type)` 必须指定类型参数
+- ❌ **删除无参数版本**：移除 `getOutputBufferPoolId()` 无参数版本（破坏性变更）
+- ❌ **删除遍历接口**：不提供 `getAllBufferPoolTypes()` 等遍历方法（强制调用者明确意图）
+- ✅ **新增查询方法**：`hasBufferPoolType(BufferPoolType)` 检查是否存在指定类型的BufferPool
 
 **v2.0架构变更：**
 - ❌ 删除了独立的`IBufferFillingWorker`接口（已整合到 WorkerBase）
@@ -150,9 +198,44 @@
 - ❌ 生产流程管理（由ProductionLine负责）
 
 **关键设计**：
-- Worker在实现`open()`时**必须**创建BufferPool并记录pool_id
+- Worker在实现`open()`时**必须**创建BufferPool并通过 `registerBufferPool(type, pool_id)` 注册
 - Worker通过调用Allocator创建BufferPool，而不是直接创建
 - Worker根据场景在构造函数中指定合适的AllocatorType（NORMAL、AVFRAME等）
+- Worker可以创建多个不同类型的BufferPool，每个用途独立管理
+
+**BufferPoolType枚举定义（v2.3）**：
+```cpp
+enum class BufferPoolType {
+    DECODE_VIDEO_PRIMARY,    // 主视频解码输出（默认类型）
+    DECODE_VIDEO_SECONDARY,  // 辅助视频解码输出
+    PACKET_VIDEO,            // 视频packet（编码数据，用于RTSP录制等）
+    PACKET_AUDIO,            // 音频packet
+    RAW_DATA,                // 原始数据
+    CUSTOM_1,                // 自定义类型1
+    CUSTOM_2,                // 自定义类型2
+    CUSTOM_3,                // 自定义类型3
+};
+```
+
+**使用示例（v2.3）**：
+```cpp
+// Worker 内部注册 BufferPool
+bool FfmpegDecodeVideoFileWorker::open(const char* path, int width, int height, int bpp) {
+    // ... 创建 BufferPool ...
+    uint64_t pool_id = allocator_facade_.allocatePoolWithBuffers(...);
+    
+    // 注册到类型映射
+    registerBufferPool(BufferPoolType::DECODE_VIDEO_PRIMARY, pool_id);
+    return true;
+}
+
+// 调用者获取 BufferPool
+uint64_t pool_id = worker->getOutputBufferPoolId(BufferPoolType::DECODE_VIDEO_PRIMARY);
+auto pool_weak = BufferPoolRegistry::getInstance().getPool(pool_id);
+if (auto pool = pool_weak.lock()) {
+    // 使用 pool
+}
+```
 
 ### 4. IVideoFileNavigator（文件导航接口）
 
@@ -205,8 +288,8 @@
 │  │  std::shared_ptr<BufferFillingWorkerFacade> worker_      │  │
 │  └─────────────────────────────────────────────────────────┘  │
 │                                                                 │
-│  协作关系（通过WorkerBase，v2.0）：                            │
-│  1. 通过 WorkerBase::getOutputBufferPoolId() 获取Pool ID      │
+│  协作关系（通过WorkerBase，v2.3）：                            │
+│  1. 通过 WorkerBase::getOutputBufferPoolId(type) 获取Pool ID  │
 │  2. 通过 WorkerBase::fillBuffer() 填充Buffer                  │
 │  3. 通过 IVideoFileNavigator::open() 打开视频源               │
 │  4. 通过 BufferPoolRegistry::getPool(pool_id) 获取Pool临时访问 │
@@ -902,10 +985,11 @@ classDiagram
     class WorkerBase {
         <<abstract base>>
         +fillBuffer(int, Buffer*) bool
-        +getOutputBufferPoolId() uint64_t
+        +getOutputBufferPoolId(BufferPoolType) uint64_t
+        +hasBufferPoolType(BufferPoolType) bool
         +open(string) bool
         #allocator_ BufferAllocatorFacade
-        #buffer_pool_id_ uint64_t
+        #buffer_pool_type_map_ map~BufferPoolType,uint64_t~
     }
     
     class WorkerImplementation {
@@ -937,7 +1021,7 @@ classDiagram
         -preferred_type_ WorkerType
         +open(string) bool
         +fillBuffer(int, Buffer*) bool
-        +getOutputBufferPoolId() uint64_t
+        +getOutputBufferPoolId(BufferPoolType) uint64_t
         +所有方法（不使用override）
     }
     
@@ -968,7 +1052,8 @@ classDiagram
     class WorkerBase {
         <<abstract base>>
         +fillBuffer(int, Buffer*) bool
-        +getOutputBufferPoolId() uint64_t
+        +getOutputBufferPoolId(BufferPoolType) uint64_t
+        +hasBufferPoolType(BufferPoolType) bool
         +所有方法...
     }
     
@@ -1436,7 +1521,7 @@ auto workerConfig = WorkerConfigBuilder()
 - `start(config)`：启动生产流水线
   1. 创建Worker（通过Factory）
   2. 打开视频源（调用`IVideoFileNavigator::open()`，Worker在实现时**必须**自动创建BufferPool，通过调用Allocator）
-  3. 从Worker获取BufferPool ID（通过`WorkerBase::getOutputBufferPoolId()`，v2.0返回uint64_t）
+  3. 从Worker获取BufferPool ID（通过`WorkerBase::getOutputBufferPoolId(BufferPoolType)`，v2.3必须指定类型）
   4. 验证Worker是否创建了BufferPool（如果返回0，start()失败）
   5. 从Registry获取临时访问（`BufferPoolRegistry::getInstance().getPool(pool_id)`）
   6. 启动生产者线程
@@ -1502,13 +1587,14 @@ auto workerConfig = WorkerConfigBuilder()
 **架构角色**: 基类层（Base Layer）
 
 **职责**：
-- ✅ **定义Buffer填充功能**：通过纯虚函数定义契约（`fillBuffer()`, `getWorkerType()`, `getOutputBufferPoolId()`）
+- ✅ **定义Buffer填充功能**：通过纯虚函数定义契约（`fillBuffer()`, `getWorkerType()`, `getOutputBufferPoolId(BufferPoolType)`）
 - ✅ **继承文件导航接口**：继承`IVideoFileNavigator`接口，提供文件操作功能
 - ✅ **BufferPool创建**：Worker在`open()`时通过Allocator创建BufferPool，记录pool_id
 
 **核心接口方法**（纯虚函数，子类必须实现）：
 - `fillBuffer(frame_index, buffer)`：**核心功能**，填充Buffer
-- `getOutputBufferPoolId()`：获取Worker的输出BufferPool ID（v2.0返回uint64_t）
+- `getOutputBufferPoolId(BufferPoolType type)`：获取指定类型的BufferPool ID（v2.3必须指定类型）
+- `hasBufferPoolType(BufferPoolType type)`：检查是否存在指定类型的BufferPool（v2.3新增）
 - `getWorkerType()`：获取Worker类型名称（用于调试和日志）
 
 **继承关系（v2.0）**：
@@ -1651,7 +1737,8 @@ return pool_id;
 
 **核心方法**（public，纯虚函数，子类必须实现）：
 - `fillBuffer(frame_index, buffer)`：填充Buffer（纯虚函数）
-- `getOutputBufferPoolId()`：返回 pool_id（默认实现，子类可重写）
+- `getOutputBufferPoolId(BufferPoolType type)`：返回指定类型的 pool_id（v2.3新增type参数）
+- `hasBufferPoolType(BufferPoolType type)`：检查是否存在指定类型（v2.3新增）
 - `getWorkerType()`：获取Worker类型名称（纯虚函数）
 - 所有 `IVideoFileNavigator` 接口方法（纯虚函数）
 
@@ -1692,7 +1779,7 @@ return pool_id;
   - 编码视频：忽略width/height/bpp，自动检测格式
   - Raw视频：使用width/height/bpp参数
 - `fillBuffer(frame_index, buffer)`：填充Buffer（转发到底层Worker）
-- `getOutputBufferPoolId()`：获取Worker的输出BufferPool ID（v2.0返回uint64_t）
+- `getOutputBufferPoolId(BufferPoolType type)`：获取指定类型的BufferPool ID（v2.3必须指定类型）
 - 所有方法不使用 `override` 关键字（v2.1不继承接口）
 
 **设计特点（v2.1）**：
@@ -1700,8 +1787,9 @@ return pool_id;
 - 门面模式：简化复杂子系统接口
 - 智能判断：根据Worker类型自动处理参数
 - 使用WorkerBase：直接通过worker_base_uptr_转发所有方法
-- Registry访问：getOutputBufferPoolId()返回pool_id，调用者从Registry获取临时访问
+- Registry访问：getOutputBufferPoolId(type)返回pool_id，调用者从Registry获取临时访问
 - **架构简化**：减少继承层次，提升灵活性
+- **v2.3强类型**：必须指定BufferPoolType，避免歧义
 
 ### 7. BufferFillingWorkerFactory（工厂）
 
@@ -3135,7 +3223,8 @@ feat(buffer): 新增AVFrame管理功能
 | 方法 | 说明 | 参数 | 返回值 |
 |------|------|------|--------|
 | `fillBuffer(frame_index, buffer)` | 填充Buffer（核心功能，纯虚函数） | `frame_index`: 帧索引<br>`buffer`: Buffer指针 | `bool` |
-| `getOutputBufferPoolId()` | 获取Worker的输出BufferPool ID（v2.0） | 无 | `uint64_t`（0表示未创建） |
+| `getOutputBufferPoolId(type)` | **v2.3**：获取指定类型的BufferPool ID | `type`: BufferPoolType枚举 | `uint64_t`（0表示未创建） |
+| `hasBufferPoolType(type)` | **v2.3新增**：检查是否存在指定类型的BufferPool | `type`: BufferPoolType枚举 | `bool` |
 | `getWorkerType()` | 获取Worker类型名称 | 无 | `const char*` |
 | `extractHardwareAddressFromMetadata(frame, buffer)` | **v2.9新增**：从AVFrame元数据中提取硬件解码器的物理内存地址（虚函数，默认返回false） | `frame`: AVFrame指针<br>`buffer`: Buffer指针 | `bool`（成功true，失败false） |
 
@@ -3304,8 +3393,9 @@ ProductionLine架构通过清晰的职责划分和设计模式应用，实现了
 
 **接口职责分离（v2.0）**：
 - `IVideoFileNavigator`：专注于文件相关操作（`open()`的两个重载版本, `close()`, `seek()`, `getTotalFrames()`等）
-- `WorkerBase`：继承`IVideoFileNavigator`，定义Buffer填充方法（`fillBuffer()`, `getOutputBufferPoolId()`, `getWorkerType()`等）
+- `WorkerBase`：继承`IVideoFileNavigator`，定义Buffer填充方法（`fillBuffer()`, `getOutputBufferPoolId(BufferPoolType)`, `getWorkerType()`等）
 - Worker实现类通过继承 `WorkerBase` 基类实现所有纯虚函数，职责清晰，符合单一职责原则（SRP）
+- **v2.3**：WorkerBase 支持多 BufferPool 管理，通过 `BufferPoolType` 枚举区分不同用途
 - `BufferFillingWorkerFacade` 门面类（v2.1）不继承接口，通过组合模式转发方法，简化架构
 
 **BufferPool 创建权限控制（v2.0）**：

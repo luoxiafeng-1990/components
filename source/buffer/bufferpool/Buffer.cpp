@@ -12,6 +12,7 @@ Buffer::Buffer(uint32_t id,
     , virt_addr_(virt_addr)
     , phys_addr_(phys_addr)
     , size_(size)
+    , used_size_(0)                  // ⭐ v2.9新增：初始化实际使用大小
     , ownership_(ownership)
     , state_(State::IDLE)
     , avframe_(nullptr)              // ⭐ v2.7新增：初始化 AVFrame 指针
@@ -34,6 +35,7 @@ Buffer::Buffer(Buffer&& other) noexcept
     , virt_addr_(other.virt_addr_)
     , phys_addr_(other.phys_addr_)
     , size_(other.size_)
+    , used_size_(other.used_size_)          // ⭐ v2.9新增：移动实际使用大小
     , ownership_(other.ownership_)
     , state_(other.state_.load())           // 从 atomic 读取
     , avframe_(other.avframe_)              // ⭐ v2.7新增：移动 AVFrame 指针

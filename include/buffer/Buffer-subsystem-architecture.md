@@ -2118,10 +2118,16 @@ public:
 };
 
 class WorkerBase {
-    uint64_t buffer_pool_id_;  // ✅ 只记录 ID
+    std::map<BufferPoolType, uint64_t> buffer_pool_type_map_;  // ✅ v2.3: 记录多个 BufferPool 的映射
     
-    uint64_t getOutputBufferPoolId() const {
-        return buffer_pool_id_;
+    // v2.3: 必须指定类型
+    uint64_t getOutputBufferPoolId(BufferPoolType type) const {
+        auto it = buffer_pool_type_map_.find(type);
+        return (it != buffer_pool_type_map_.end()) ? it->second : 0;
+    }
+    
+    bool hasBufferPoolType(BufferPoolType type) const {
+        return buffer_pool_type_map_.find(type) != buffer_pool_type_map_.end();
     }
 };
 
@@ -3668,12 +3674,33 @@ class WorkerBase {
     }
 };
 
-// ✅ 新代码（v2.0）
+// ⚠️ v2.0 代码（单 BufferPool）
 class WorkerBase {
     uint64_t buffer_pool_id_ = 0;  // 只记录 ID
     
     uint64_t getOutputBufferPoolId() const {
         return buffer_pool_id_;  // 返回 ID
+    }
+};
+
+// ✅ v2.3 代码（多 BufferPool 支持）
+class WorkerBase {
+    std::map<BufferPoolType, uint64_t> buffer_pool_type_map_;  // 记录多个 BufferPool
+    
+    // 必须指定类型
+    uint64_t getOutputBufferPoolId(BufferPoolType type) const {
+        auto it = buffer_pool_type_map_.find(type);
+        return (it != buffer_pool_type_map_.end()) ? it->second : 0;
+    }
+    
+    bool hasBufferPoolType(BufferPoolType type) const {
+        return buffer_pool_type_map_.find(type) != buffer_pool_type_map_.end();
+    }
+    
+protected:
+    // Worker 内部使用
+    bool registerBufferPool(BufferPoolType type, uint64_t pool_id) {
+        return buffer_pool_type_map_.insert({type, pool_id}).second;
     }
 };
 ```
@@ -3697,7 +3724,7 @@ class VideoProductionLine {
     }
 };
 
-// ✅ 新代码（v2.0）
+// ⚠️ v2.0 代码（单 BufferPool）
 class VideoProductionLine {
     uint64_t worker_buffer_pool_id_ = 0;  // 只记录 ID
     
@@ -3708,6 +3735,32 @@ class VideoProductionLine {
     
     uint64_t getWorkingBufferPoolId() const {
         return worker_buffer_pool_id_;  // ✅ 返回 ID
+    }
+};
+
+// ✅ v2.3 代码（多 BufferPool 支持）
+class VideoProductionLine {
+    uint64_t working_buffer_pool_id_ = 0;  // 记录工作用的 BufferPool ID
+    
+    bool start(const Config& config) {
+        // ✅ 明确指定需要哪种类型的 BufferPool
+        uint64_t primary_pool_id = worker->getOutputBufferPoolId(BufferPoolType::DECODE_VIDEO_PRIMARY);
+        if (primary_pool_id == 0) {
+            return false;  // Worker 不提供该类型的 BufferPool
+        }
+        
+        // 验证 Pool 是否存在
+        auto pool_weak = BufferPoolRegistry::getInstance().getPool(primary_pool_id);
+        if (pool_weak.expired()) {
+            return false;  // Pool 已销毁
+        }
+        
+        working_buffer_pool_id_ = primary_pool_id;
+        return true;
+    }
+    
+    uint64_t getWorkingBufferPoolId() const {
+        return working_buffer_pool_id_;
     }
 };
 ```
@@ -3796,6 +3849,209 @@ private:
 - 🛠️ 实现自己的Allocator（如GPU、共享内存）
 - 🧪 编写压力测试（多生产者-多消费者场景）
 - 📊 集成性能监控工具（如Prometheus）
+
+---
+
+## 10. v2.3 迁移指南：从单 BufferPool 到多 BufferPool
+
+### 10.1 核心变更
+
+**v2.3 引入的破坏性变更：**
+- ❌ **删除**：`uint64_t getOutputBufferPoolId()` - 无参数版本
+- ✅ **新增**：`uint64_t getOutputBufferPoolId(BufferPoolType type)` - 必须指定类型
+- ✅ **新增**：`bool hasBufferPoolType(BufferPoolType type)` - 检查类型是否存在
+- ❌ **删除**：`getAllBufferPoolTypes()` 和 `getAllBufferPoolMapping()` - 不提供遍历接口
+
+### 10.2 BufferPoolType 枚举
+
+```cpp
+enum class BufferPoolType {
+    DECODE_VIDEO_PRIMARY,    // 主视频解码输出（推荐默认类型）
+    DECODE_VIDEO_SECONDARY,  // 辅助视频解码输出
+    PACKET_VIDEO,            // 视频packet（编码数据）
+    PACKET_AUDIO,            // 音频packet
+    RAW_DATA,                // 原始数据
+    CUSTOM_1,                // 自定义类型1
+    CUSTOM_2,                // 自定义类型2
+    CUSTOM_3,                // 自定义类型3
+};
+```
+
+### 10.3 Worker 实现迁移
+
+**旧代码（v2.0）：**
+```cpp
+bool FfmpegDecodeVideoFileWorker::open(const char* path, int w, int h, int bpp) {
+    // ... 创建 BufferPool ...
+    uint64_t pool_id = allocator_facade_.allocatePoolWithBuffers(...);
+    
+    // ❌ 单一 BufferPool
+    buffer_pool_id_ = pool_id;
+    return true;
+}
+
+void FfmpegDecodeVideoFileWorker::close() {
+    // ❌ 清理单一 BufferPool
+    allocator_facade_.destroyPool(buffer_pool_id_);
+    buffer_pool_id_ = 0;
+}
+```
+
+**新代码（v2.3）：**
+```cpp
+bool FfmpegDecodeVideoFileWorker::open(const char* path, int w, int h, int bpp) {
+    // ... 创建 BufferPool ...
+    uint64_t pool_id = allocator_facade_.allocatePoolWithBuffers(...);
+    
+    // ✅ 注册到类型映射
+    if (!registerBufferPool(BufferPoolType::DECODE_VIDEO_PRIMARY, pool_id)) {
+        LOG_ERROR("Failed to register BufferPool");
+        return false;
+    }
+    
+    LOG_DEBUG_FMT("Registered BufferPool: type=DECODE_VIDEO_PRIMARY, id=%lu", pool_id);
+    return true;
+}
+
+void FfmpegDecodeVideoFileWorker::close() {
+    // ✅ 清理所有 BufferPool
+    for (const auto& [type, pool_id] : buffer_pool_type_map_) {
+        allocator_facade_.destroyPool(pool_id);
+    }
+    clearAllBufferPools();  // 清空映射
+}
+```
+
+### 10.4 调用者迁移
+
+**旧代码（v2.0）：**
+```cpp
+// ❌ 无参数调用
+uint64_t pool_id = worker->getOutputBufferPoolId();
+auto pool_weak = BufferPoolRegistry::getInstance().getPool(pool_id);
+```
+
+**新代码（v2.3）：**
+```cpp
+// ✅ 必须明确指定类型
+uint64_t pool_id = worker->getOutputBufferPoolId(BufferPoolType::DECODE_VIDEO_PRIMARY);
+if (pool_id == 0) {
+    // Worker 不提供该类型的 BufferPool
+    return false;
+}
+
+auto pool_weak = BufferPoolRegistry::getInstance().getPool(pool_id);
+if (pool_weak.expired()) {
+    // Pool 已销毁
+    return false;
+}
+
+auto pool = pool_weak.lock();
+if (pool) {
+    // 使用 pool
+}
+```
+
+### 10.5 ProductionLine 迁移
+
+**旧代码（v2.0）：**
+```cpp
+bool VideoProductionLine::start(const WorkerConfig& config) {
+    // ❌ 无参数调用
+    working_buffer_pool_id_ = worker_facade_sptr_->getOutputBufferPoolId();
+    
+    auto pool_weak = BufferPoolRegistry::getInstance().getPool(working_buffer_pool_id_);
+    // ...
+}
+```
+
+**新代码（v2.3）：**
+```cpp
+bool VideoProductionLine::start(const WorkerConfig& config) {
+    // ✅ 明确指定需要 DECODE_VIDEO_PRIMARY 类型
+    uint64_t primary_pool_id = worker_facade_sptr_->getOutputBufferPoolId(
+        BufferPoolType::DECODE_VIDEO_PRIMARY
+    );
+    
+    if (primary_pool_id == 0) {
+        setError("Worker does not provide DECODE_VIDEO_PRIMARY pool");
+        return false;
+    }
+    
+    // 验证 Pool 是否存在
+    auto pool_weak = BufferPoolRegistry::getInstance().getPool(primary_pool_id);
+    if (pool_weak.expired()) {
+        setError("Failed to get BufferPool from Registry");
+        return false;
+    }
+    
+    working_buffer_pool_id_ = primary_pool_id;
+    return true;
+}
+```
+
+### 10.6 多 BufferPool 使用场景
+
+**示例：RTSP 录制 Worker 使用 PACKET_VIDEO 类型**
+```cpp
+class FfmpegRecordRtspWorker : public WorkerBase {
+public:
+    bool open(const char* url) override {
+        // ... 打开 RTSP 流 ...
+        
+        // 创建用于存储视频 packet 的 BufferPool
+        uint64_t pool_id = allocator_facade_.allocatePoolWithBuffers(
+            buffer_count,
+            max_packet_size,
+            "RtspPacketPool"
+        );
+        
+        // ✅ 注册为 PACKET_VIDEO 类型
+        if (!registerBufferPool(BufferPoolType::PACKET_VIDEO, pool_id)) {
+            return false;
+        }
+        
+        return true;
+    }
+    
+    size_t getFrameSize() const override {
+        // ✅ 从 PACKET_VIDEO 类型获取
+        uint64_t pool_id = getOutputBufferPoolId(BufferPoolType::PACKET_VIDEO);
+        if (pool_id == 0) return 0;
+        
+        auto pool_weak = BufferPoolRegistry::getInstance().getPool(pool_id);
+        auto pool = pool_weak.lock();
+        return pool ? pool->getBufferSize() : 0;
+    }
+};
+```
+
+### 10.7 设计原则
+
+**✅ 推荐做法：**
+- 明确知道需要哪种类型的 BufferPool，直接指定
+- 使用预定义的枚举值（如 `DECODE_VIDEO_PRIMARY`）
+- 在错误处理中检查返回的 `pool_id` 是否为 0
+- 在使用前检查 `weak_ptr` 是否 expired
+
+**❌ 不推荐做法：**
+- 不要遍历所有 BufferPool（v2.3 已移除该功能）
+- 不要假设 Worker 一定提供某种类型的 BufferPool（先检查）
+- 不要在不知道具体类型的情况下盲目调用
+
+### 10.8 常见问题
+
+**Q: 为什么要删除无参数版本的 `getOutputBufferPoolId()`？**
+A: 强制调用者明确意图，避免在多 BufferPool 场景下的歧义。
+
+**Q: 如果 Worker 只有一个 BufferPool，也必须指定类型吗？**
+A: 是的，建议使用 `DECODE_VIDEO_PRIMARY` 作为默认类型。
+
+**Q: 如何知道 Worker 提供了哪些类型的 BufferPool？**
+A: 查看 Worker 的文档或源码，或使用 `hasBufferPoolType()` 检查。
+
+**Q: v2.3 是否向后兼容 v2.0？**
+A: 不完全兼容。API 签名变化（无参数版本被删除），需要修改调用代码。
 
 ---
 

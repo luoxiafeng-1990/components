@@ -133,21 +133,28 @@ bool FfmpegDecodeRtspWorker::open(const char* path, int width, int height, int b
     int buffer_count = 4;  // RTSP流建议4-8个Buffer
     
     // v2.0: allocatePoolWithBuffers 返回 pool_id
-    buffer_pool_id_ = allocator_facade_.allocatePoolWithBuffers(
+    uint64_t pool_id = allocator_facade_.allocatePoolWithBuffers(
         buffer_count,
         frame_size,
         std::string("FfmpegDecodeRtspWorker_") + std::string(path),
         "RTSP"
     );
     
-    if (buffer_pool_id_ == 0) {
+    if (pool_id == 0) {
         setError("Failed to create BufferPool via Allocator");
         closeMediaSource();
         return false;
     }
     
+    // v2.0 新设计：注册为主视频解码输出
+    if (!registerBufferPool(BufferPoolType::DECODE_VIDEO_PRIMARY, pool_id)) {
+        setError("Failed to register BufferPool");
+        closeMediaSource();
+        return false;
+    }
+    
     // v2.0: 从 Registry 获取 Pool 名称（返回 weak_ptr）
-    auto pool_weak = BufferPoolRegistry::getInstance().getPool(buffer_pool_id_);
+    auto pool_weak = BufferPoolRegistry::getInstance().getPool(pool_id);
     auto pool = pool_weak.lock();
     std::string pool_name = pool ? pool->getName() : "Unknown";
     
@@ -160,7 +167,7 @@ bool FfmpegDecodeRtspWorker::open(const char* path, int width, int height, int b
     LOG_DEBUG_FMT("[Worker]    Resolution: %dx%d", width_, height_);
     LOG_DEBUG_FMT("[Worker]    Codec: %s", codec_ctx_ptr_->codec->name);
     LOG_DEBUG_FMT("[Worker]    BufferPool: '%s' (ID: %lu, %d buffers, %zu bytes each)", 
-           pool_name.c_str(), buffer_pool_id_, buffer_count, frame_size);
+           pool_name.c_str(), pool_id, buffer_count, frame_size);
     
     return true;
 }
@@ -177,7 +184,7 @@ void FfmpegDecodeRtspWorker::close() {
     
     // v2.0: BufferPool 生命周期由 Allocator 管理，Worker 不需要调用 destroyPool
     // Allocator 析构时会自动清理所有 Pool
-    buffer_pool_id_ = 0;  // 只清除ID，不调用destroyPool
+    clearAllBufferPools();  // 只清除映射表，不调用destroyPool
     
     // 断开RTSP连接并释放资源
     closeMediaSource();
@@ -406,11 +413,6 @@ bool FfmpegDecodeRtspWorker::fillBuffer(int frame_index, Buffer* buffer) {
 // 提供原材料（BufferPool）
 // ============================================================================
 
-uint64_t FfmpegDecodeRtspWorker::getOutputBufferPoolId() {
-    // 使用基类的实现（返回 pool_id）
-    return WorkerBase::getOutputBufferPoolId();
-}
-
 // ============ RTSP 特有接口 ============
 
 std::string FfmpegDecodeRtspWorker::getLastError() const {
@@ -425,7 +427,9 @@ void FfmpegDecodeRtspWorker::printStats() const {
     LOG_INFO_FMT("   Connected: %s", connected_.load() ? "Yes" : "No");
     LOG_INFO_FMT("   Decoded frames: %d", decoded_frames_.load());
     LOG_INFO_FMT("   Dropped frames: %d", dropped_frames_.load());
-    LOG_INFO_FMT("   BufferPool ID: %lu", buffer_pool_id_);
+    
+    uint64_t pool_id = getOutputBufferPoolId(BufferPoolType::DECODE_VIDEO_PRIMARY);
+    LOG_INFO_FMT("   BufferPool ID: %lu", pool_id);
 }
 
 // ============ 内部实现 ============

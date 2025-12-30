@@ -94,10 +94,10 @@ FfmpegDecodeVideoFileWorker::~FfmpegDecodeVideoFileWorker() {
     // 3. 成员变量自动析构（但 Pool 已清理，destroyPool() 幂等性保证不会重复释放）
     
     // 步骤1：先清理 BufferPool 和 AVFrame
-    if (buffer_pool_id_ != 0) {
+    if (!buffer_pool_type_map_.empty()) {
         LOG_DEBUG("[FfmpegDecodeVideoFileWorker] 手动清理 BufferPool 和 AVFrame...");
         allocator_facade_.destroyPool();  // 释放所有 Pool 中的 Buffer 和 AVFrame
-        buffer_pool_id_ = 0;
+        clearAllBufferPools();
     }
     
     // 步骤2：再关闭解码器（此时 AVFrame 已全部释放）
@@ -149,21 +149,28 @@ bool FfmpegDecodeVideoFileWorker::open(const char* path) {
     int buffer_count = 128;  // ⚠️ 增加到128个以应对慢速消费者（文件写入）
     
     // v2.0: allocatePoolWithBuffers 返回 pool_id
-    buffer_pool_id_ = allocator_facade_.allocatePoolWithBuffers(
+    uint64_t pool_id = allocator_facade_.allocatePoolWithBuffers(
         buffer_count,
         frame_size,
         std::string("FfmpegDecodeVideoFileWorker_") + std::string(path),
         "Video"
     );
     
-    if (buffer_pool_id_ == 0) {
+    if (pool_id == 0) {
         setError("Failed to create BufferPool via Allocator");
         closeMediaSource();
         return false;
     }
     
+    // v2.0 新设计：注册为主视频解码输出
+    if (!registerBufferPool(BufferPoolType::DECODE_VIDEO_PRIMARY, pool_id)) {
+        setError("Failed to register BufferPool");
+        closeMediaSource();
+        return false;
+    }
+    
     // v2.0: 从 Registry 获取 Pool 名称（返回 weak_ptr）
-    auto pool_weak = BufferPoolRegistry::getInstance().getPool(buffer_pool_id_);
+    auto pool_weak = BufferPoolRegistry::getInstance().getPool(pool_id);
     auto pool = pool_weak.lock();
     std::string pool_name = pool ? pool->getName() : "Unknown";
     
@@ -178,7 +185,7 @@ bool FfmpegDecodeVideoFileWorker::open(const char* path) {
     LOG_DEBUG_FMT("[Worker]    Codec: %s", codec_ctx_ptr_->codec->name);
     LOG_DEBUG_FMT("[Worker]    Total frames (estimated): %d", total_frames_);
     LOG_DEBUG_FMT("[Worker]    BufferPool: '%s' (ID: %lu, %d buffers, %zu bytes each)", 
-           pool_name.c_str(), buffer_pool_id_, buffer_count, frame_size);
+           pool_name.c_str(), pool_id, buffer_count, frame_size);
     
     return true;
 }
@@ -221,8 +228,8 @@ void FfmpegDecodeVideoFileWorker::close() {
         // - 符合单一职责原则和 RAII 原则
         closeMediaSource();
         
-        // ⭐ 清除 buffer_pool_id_（标记不再使用）
-        buffer_pool_id_ = 0;
+        // ⭐ 清除所有 BufferPool 注册（标记不再使用）
+        clearAllBufferPools();
     }
     
     // is_open_ 已经在上面设置为 false，不需要再次设置
@@ -801,13 +808,6 @@ bool FfmpegDecodeVideoFileWorker::fillBuffer(int frame_index, Buffer* buffer) {
 
 // ============================================================================
 // 提供原材料（BufferPool）
-// ============================================================================
-
-uint64_t FfmpegDecodeVideoFileWorker::getOutputBufferPoolId() {
-    // v2.0: 使用基类的实现（返回 pool_id）
-    return WorkerBase::getOutputBufferPoolId();
-}
-
 // ============================================================================
 // 辅助方法
 // ============================================================================

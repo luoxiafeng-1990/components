@@ -9,6 +9,81 @@
 #include "buffer/bufferpool/BufferPool.hpp"
 #include <memory>
 #include <utility>  // for std::move
+#include <map>
+#include <vector>
+#include <optional>
+
+/**
+ * @brief BufferPool 类型枚举（统一规范）
+ * 
+ * 定义 Worker 可以创建的所有 BufferPool 类型
+ * 所有 Worker 使用此枚举标识其输出的 BufferPool
+ * 
+ * v2.0 设计原则：
+ * - 统一规范：所有 Worker 共用此枚举
+ * - 类型安全：编译期检查，避免字符串拼写错误
+ * - 易于扩展：添加新类型只需在此枚举中增加
+ */
+enum class BufferPoolType {
+    // ========== 视频相关 ==========
+    DECODE_VIDEO_PRIMARY,      // 主视频解码输出（默认通道）
+    DECODE_VIDEO_SECONDARY,    // 副视频解码输出（如 TACO CH1）
+    DECODE_VIDEO_THUMBNAIL,    // 视频缩略图输出
+    DECODE_VIDEO_PREVIEW,      // 视频预览输出（低分辨率）
+    
+    // ========== 音频相关 ==========
+    DECODE_AUDIO_PRIMARY,      // 主音频解码输出
+    DECODE_AUDIO_SECONDARY,    // 副音频解码输出（多声道）
+    
+    // ========== 数据包相关 ==========
+    PACKET_VIDEO,              // 视频 AVPacket 缓冲池
+    PACKET_AUDIO,              // 音频 AVPacket 缓冲池
+    PACKET_SUBTITLE,           // 字幕 AVPacket 缓冲池
+    
+    // ========== 编码相关 ==========
+    ENCODE_VIDEO_INPUT,        // 编码器输入 BufferPool
+    ENCODE_VIDEO_OUTPUT,       // 编码器输出 BufferPool
+    ENCODE_AUDIO_INPUT,        // 音频编码器输入
+    ENCODE_AUDIO_OUTPUT,       // 音频编码器输出
+    
+    // ========== 特殊用途 ==========
+    RAW_FILE_READ,             // 原始文件读取缓冲池
+    FRAMEBUFFER_OUTPUT,        // Framebuffer 输出缓冲池
+    NETWORK_STREAM,            // 网络流缓冲池
+    
+    // ========== 扩展保留 ==========
+    CUSTOM_1,                  // 自定义类型 1
+    CUSTOM_2,                  // 自定义类型 2
+    CUSTOM_3,                  // 自定义类型 3
+};
+
+/**
+ * @brief BufferPoolType 转字符串（调试用）
+ */
+inline const char* bufferPoolTypeToString(BufferPoolType type) {
+    switch (type) {
+        case BufferPoolType::DECODE_VIDEO_PRIMARY:    return "DECODE_VIDEO_PRIMARY";
+        case BufferPoolType::DECODE_VIDEO_SECONDARY:  return "DECODE_VIDEO_SECONDARY";
+        case BufferPoolType::DECODE_VIDEO_THUMBNAIL:  return "DECODE_VIDEO_THUMBNAIL";
+        case BufferPoolType::DECODE_VIDEO_PREVIEW:    return "DECODE_VIDEO_PREVIEW";
+        case BufferPoolType::DECODE_AUDIO_PRIMARY:    return "DECODE_AUDIO_PRIMARY";
+        case BufferPoolType::DECODE_AUDIO_SECONDARY:  return "DECODE_AUDIO_SECONDARY";
+        case BufferPoolType::PACKET_VIDEO:            return "PACKET_VIDEO";
+        case BufferPoolType::PACKET_AUDIO:            return "PACKET_AUDIO";
+        case BufferPoolType::PACKET_SUBTITLE:         return "PACKET_SUBTITLE";
+        case BufferPoolType::ENCODE_VIDEO_INPUT:      return "ENCODE_VIDEO_INPUT";
+        case BufferPoolType::ENCODE_VIDEO_OUTPUT:     return "ENCODE_VIDEO_OUTPUT";
+        case BufferPoolType::ENCODE_AUDIO_INPUT:      return "ENCODE_AUDIO_INPUT";
+        case BufferPoolType::ENCODE_AUDIO_OUTPUT:     return "ENCODE_AUDIO_OUTPUT";
+        case BufferPoolType::RAW_FILE_READ:           return "RAW_FILE_READ";
+        case BufferPoolType::FRAMEBUFFER_OUTPUT:      return "FRAMEBUFFER_OUTPUT";
+        case BufferPoolType::NETWORK_STREAM:          return "NETWORK_STREAM";
+        case BufferPoolType::CUSTOM_1:                return "CUSTOM_1";
+        case BufferPoolType::CUSTOM_2:                return "CUSTOM_2";
+        case BufferPoolType::CUSTOM_3:                return "CUSTOM_3";
+        default:                                      return "UNKNOWN";
+    }
+}
 
 /**
  * @brief WorkerBase - Worker基类
@@ -74,7 +149,7 @@ public:
         BufferAllocatorFactory::AllocatorType allocator_type,
         const WorkerConfig& config = WorkerConfig()
     ) : allocator_facade_(allocator_type)  // 🎯 父类直接创建Allocator门面
-      , buffer_pool_id_(0)  // v2.0: 记录 pool_id 而不是指针
+      , buffer_pool_type_map_()  // v2.0: 初始化 BufferPool 类型映射表
       , worker_config_(config)  // 🎯 v2.2: 存储配置
     {
     }
@@ -133,18 +208,35 @@ public:
     virtual const char* getWorkerType() const = 0;
     
     /**
-     * @brief 获取输出 BufferPool ID（如果有）
+     * @brief 获取指定类型的 BufferPool ID（主要接口）
      * 
-     * 默认实现：返回 buffer_pool_id_
-     * 子类可以重写此方法
+     * v2.0 设计：
+     * - 使用统一的 BufferPoolType 枚举标识不同用途的 BufferPool
+     * - Worker 只记录 pool_id，不持有 Pool 指针
+     * - 使用者通过枚举获取 pool_id，再从 Registry 获取 Pool
      * 
-     * @return uint64_t pool_id（成功），0（失败或未创建）
+     * @param type BufferPool 类型枚举
+     * @return uint64_t Pool ID，如果不存在返回 0
      * 
-     * @note Worker必须在open()时创建BufferPool，否则返回 0
-     * @note 调用者从 Registry 获取临时访问（getPool(pool_id)）
+     * @note 使用示例：
+     * @code
+     * uint64_t video_pool_id = worker->getOutputBufferPoolId(BufferPoolType::DECODE_VIDEO_PRIMARY);
+     * uint64_t packet_pool_id = worker->getOutputBufferPoolId(BufferPoolType::PACKET_VIDEO);
+     * @endcode
      */
-    virtual uint64_t getOutputBufferPoolId() {
-        return buffer_pool_id_;
+    virtual uint64_t getOutputBufferPoolId(BufferPoolType type) const {
+        auto it = buffer_pool_type_map_.find(type);
+        return (it != buffer_pool_type_map_.end()) ? it->second : 0;
+    }
+    
+    /**
+     * @brief 检查是否存在指定类型的 BufferPool
+     * 
+     * @param type BufferPool 类型
+     * @return true 存在，false 不存在
+     */
+    virtual bool hasBufferPoolType(BufferPoolType type) const {
+        return buffer_pool_type_map_.find(type) != buffer_pool_type_map_.end();
     }
     
     // ==================== 解码器配置功能（v2.2新增）====================
@@ -209,15 +301,65 @@ protected:
     BufferAllocatorFacade allocator_facade_;
     
     /**
-     * @brief Worker创建的BufferPool ID（v2.0 所有Worker子类自动继承）
+     * @brief BufferPool 类型 → Pool ID 映射表（v2.0 新设计）
      * 
      * v2.0 设计变更：
-     * - 使用 pool_id 而不是指针
-     * - Registry 独占持有 BufferPool（shared_ptr，引用计数=1）
-     * - Worker 只记录 pool_id，从 Registry 临时访问
+     * - Worker 只记录 pool_id，不持有 Pool 指针
+     * - 使用统一的 BufferPoolType 枚举标识不同用途的 BufferPool
+     * - 使用者通过枚举获取 pool_id，再从 Registry 获取 Pool
      * - 符合中心化资源管理原则
+     * 
+     * @note 替代了旧的 buffer_pool_id_ 单个变量
      */
-    uint64_t buffer_pool_id_;
+    std::map<BufferPoolType, uint64_t> buffer_pool_type_map_;
+    
+    /**
+     * @brief 注册一个 BufferPool（供子类在 open() 中调用）
+     * 
+     * @param type BufferPool 类型枚举
+     * @param pool_id BufferPool ID（由 allocator_facade_.allocatePoolWithBuffers() 返回）
+     * @return true 注册成功，false 该类型已存在或 pool_id 无效
+     * 
+     * @note 同一类型只能注册一次，重复注册会返回 false
+     * 
+     * @note 使用示例：
+     * @code
+     * uint64_t pool_id = allocator_facade_.allocatePoolWithBuffers(...);
+     * if (pool_id != 0) {
+     *     registerBufferPool(BufferPoolType::DECODE_VIDEO_PRIMARY, pool_id);
+     * }
+     * @endcode
+     */
+    bool registerBufferPool(BufferPoolType type, uint64_t pool_id) {
+        if (pool_id == 0) {
+            return false;  // 无效的 pool_id
+        }
+        
+        // 检查是否已存在
+        if (buffer_pool_type_map_.find(type) != buffer_pool_type_map_.end()) {
+            // 注意：不使用 LOG 宏，因为 Logger.hpp 可能未包含（避免循环依赖）
+            return false;
+        }
+        
+        buffer_pool_type_map_[type] = pool_id;
+        return true;
+    }
+    
+    /**
+     * @brief 注销一个 BufferPool（供子类在 close() 中调用）
+     * 
+     * @param type BufferPool 类型
+     */
+    void unregisterBufferPool(BufferPoolType type) {
+        buffer_pool_type_map_.erase(type);
+    }
+    
+    /**
+     * @brief 清空所有 BufferPool 注册（供子类在 close() 中调用）
+     */
+    void clearAllBufferPools() {
+        buffer_pool_type_map_.clear();
+    }
     
     /**
      * @brief Worker配置（v2.2 所有Worker子类自动继承）

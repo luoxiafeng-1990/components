@@ -91,7 +91,7 @@ public:
      * 获取输出 BufferPool ID
      * @return pool_id（成功），0（失败或未创建）
      */
-    uint64_t getOutputBufferPoolId();
+    uint64_t getOutputBufferPoolId(BufferPoolType type);
     
     // ============ 文件导航方法（原IVideoFileNavigator的方法）============
     

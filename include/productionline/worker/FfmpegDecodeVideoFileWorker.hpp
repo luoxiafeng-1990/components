@@ -83,7 +83,6 @@ public:
     const char* getWorkerType() const override {
         return "FfmpegDecodeVideoFileWorker";
     }
-    uint64_t getOutputBufferPoolId() override;  // v2.0: 返回 pool_id
     
     // 文件导航功能（继承自IVideoFileNavigator）
     bool open(const char* path) override;
