@@ -239,6 +239,28 @@ public:
         return buffer_pool_type_map_.find(type) != buffer_pool_type_map_.end();
     }
     
+    /**
+     * @brief 获取 Worker 的主要 BufferPool 类型
+     * 
+     * 这是一个查询方法，告诉调用者这个 Worker 的主要输出是什么类型。
+     * 子类可以重写此方法以返回正确的主要类型。
+     * 
+     * @return BufferPoolType 主要 BufferPool 类型
+     * 
+     * @note 默认返回 DECODE_VIDEO_PRIMARY（适用于视频解码 Worker）
+     * @note FfmpegRecordRtspWorker 应该重写为 PACKET_VIDEO
+     * 
+     * @note 使用示例：
+     * @code
+     * // 调用者不需要硬编码类型
+     * BufferPoolType type = worker->getPrimaryBufferPoolType();
+     * uint64_t pool_id = worker->getOutputBufferPoolId(type);
+     * @endcode
+     */
+    virtual BufferPoolType getPrimaryBufferPoolType() const {
+        return BufferPoolType::DECODE_VIDEO_PRIMARY;  // 默认值
+    }
+    
     // ==================== 解码器配置功能（v2.2新增）====================
     
     /**

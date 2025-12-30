@@ -185,3 +185,10 @@ uint64_t BufferFillingWorkerFacade::getOutputBufferPoolId(BufferPoolType type) {
     return 0;
 }
 
+BufferPoolType BufferFillingWorkerFacade::getPrimaryBufferPoolType() {
+    if (worker_base_uptr_) {
+        return worker_base_uptr_->getPrimaryBufferPoolType();
+    }
+    return BufferPoolType::DECODE_VIDEO_PRIMARY;  // 默认值
+}
+

@@ -229,8 +229,15 @@ bool FfmpegDecodeVideoFileWorker::open(const char* path, int width, int height, 
     return true;
 }
 
-// 调用者获取 BufferPool
+// 调用者获取 BufferPool（v2.3 推荐方式）
+// 方式1：通过 getPrimaryBufferPoolType() 获取主要类型（推荐）
+BufferPoolType primary_type = worker->getPrimaryBufferPoolType();
+uint64_t pool_id = worker->getOutputBufferPoolId(primary_type);
+
+// 方式2：直接指定类型（当明确知道需要哪种类型时）
 uint64_t pool_id = worker->getOutputBufferPoolId(BufferPoolType::DECODE_VIDEO_PRIMARY);
+
+// 从 Registry 获取 Pool
 auto pool_weak = BufferPoolRegistry::getInstance().getPool(pool_id);
 if (auto pool = pool_weak.lock()) {
     // 使用 pool
@@ -986,6 +993,7 @@ classDiagram
         <<abstract base>>
         +fillBuffer(int, Buffer*) bool
         +getOutputBufferPoolId(BufferPoolType) uint64_t
+        +getPrimaryBufferPoolType() BufferPoolType
         +hasBufferPoolType(BufferPoolType) bool
         +open(string) bool
         #allocator_ BufferAllocatorFacade
@@ -1022,6 +1030,7 @@ classDiagram
         +open(string) bool
         +fillBuffer(int, Buffer*) bool
         +getOutputBufferPoolId(BufferPoolType) uint64_t
+        +getPrimaryBufferPoolType() BufferPoolType
         +所有方法（不使用override）
     }
     
@@ -1053,6 +1062,7 @@ classDiagram
         <<abstract base>>
         +fillBuffer(int, Buffer*) bool
         +getOutputBufferPoolId(BufferPoolType) uint64_t
+        +getPrimaryBufferPoolType() BufferPoolType
         +hasBufferPoolType(BufferPoolType) bool
         +所有方法...
     }
@@ -1594,6 +1604,7 @@ auto workerConfig = WorkerConfigBuilder()
 **核心接口方法**（纯虚函数，子类必须实现）：
 - `fillBuffer(frame_index, buffer)`：**核心功能**，填充Buffer
 - `getOutputBufferPoolId(BufferPoolType type)`：获取指定类型的BufferPool ID（v2.3必须指定类型）
+- `getPrimaryBufferPoolType()`：获取Worker的主要BufferPool类型（v2.3新增，子类可重写）
 - `hasBufferPoolType(BufferPoolType type)`：检查是否存在指定类型的BufferPool（v2.3新增）
 - `getWorkerType()`：获取Worker类型名称（用于调试和日志）
 
@@ -3224,6 +3235,7 @@ feat(buffer): 新增AVFrame管理功能
 |------|------|------|--------|
 | `fillBuffer(frame_index, buffer)` | 填充Buffer（核心功能，纯虚函数） | `frame_index`: 帧索引<br>`buffer`: Buffer指针 | `bool` |
 | `getOutputBufferPoolId(type)` | **v2.3**：获取指定类型的BufferPool ID | `type`: BufferPoolType枚举 | `uint64_t`（0表示未创建） |
+| `getPrimaryBufferPoolType()` | **v2.3新增**：获取Worker的主要BufferPool类型<br>子类可重写返回正确类型 | 无 | `BufferPoolType`（默认DECODE_VIDEO_PRIMARY） |
 | `hasBufferPoolType(type)` | **v2.3新增**：检查是否存在指定类型的BufferPool | `type`: BufferPoolType枚举 | `bool` |
 | `getWorkerType()` | 获取Worker类型名称 | 无 | `const char*` |
 | `extractHardwareAddressFromMetadata(frame, buffer)` | **v2.9新增**：从AVFrame元数据中提取硬件解码器的物理内存地址（虚函数，默认返回false） | `frame`: AVFrame指针<br>`buffer`: Buffer指针 | `bool`（成功true，失败false） |

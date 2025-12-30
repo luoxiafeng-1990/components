@@ -93,6 +93,12 @@ public:
      */
     uint64_t getOutputBufferPoolId(BufferPoolType type);
     
+    /**
+     * 获取 Worker 的主要 BufferPool 类型
+     * @return BufferPoolType 主要类型
+     */
+    BufferPoolType getPrimaryBufferPoolType();
+    
     // ============ 文件导航方法（原IVideoFileNavigator的方法）============
     
     /**

@@ -2126,6 +2126,11 @@ class WorkerBase {
         return (it != buffer_pool_type_map_.end()) ? it->second : 0;
     }
     
+    // v2.3: 获取主要 BufferPool 类型（子类可重写）
+    virtual BufferPoolType getPrimaryBufferPoolType() const {
+        return BufferPoolType::DECODE_VIDEO_PRIMARY;  // 默认值
+    }
+    
     bool hasBufferPoolType(BufferPoolType type) const {
         return buffer_pool_type_map_.find(type) != buffer_pool_type_map_.end();
     }
@@ -3693,10 +3698,15 @@ class WorkerBase {
         return (it != buffer_pool_type_map_.end()) ? it->second : 0;
     }
     
+    // 获取主要 BufferPool 类型（子类可重写）
+    virtual BufferPoolType getPrimaryBufferPoolType() const {
+        return BufferPoolType::DECODE_VIDEO_PRIMARY;  // 默认值
+    }
+    
     bool hasBufferPoolType(BufferPoolType type) const {
         return buffer_pool_type_map_.find(type) != buffer_pool_type_map_.end();
     }
-    
+
 protected:
     // Worker 内部使用
     bool registerBufferPool(BufferPoolType type, uint64_t pool_id) {
@@ -3856,9 +3866,10 @@ private:
 
 ### 10.1 核心变更
 
-**v2.3 引入的破坏性变更：**
-- ❌ **删除**：`uint64_t getOutputBufferPoolId()` - 无参数版本
+**v2.3 引入的变更：**
+- ❌ **删除**：`uint64_t getOutputBufferPoolId()` - 无参数版本（破坏性变更）
 - ✅ **新增**：`uint64_t getOutputBufferPoolId(BufferPoolType type)` - 必须指定类型
+- ✅ **新增**：`BufferPoolType getPrimaryBufferPoolType()` - 获取Worker的主要类型（子类可重写）
 - ✅ **新增**：`bool hasBufferPoolType(BufferPoolType type)` - 检查类型是否存在
 - ❌ **删除**：`getAllBufferPoolTypes()` 和 `getAllBufferPoolMapping()` - 不提供遍历接口
 
@@ -3968,13 +3979,17 @@ bool VideoProductionLine::start(const WorkerConfig& config) {
 **新代码（v2.3）：**
 ```cpp
 bool VideoProductionLine::start(const WorkerConfig& config) {
-    // ✅ 明确指定需要 DECODE_VIDEO_PRIMARY 类型
-    uint64_t primary_pool_id = worker_facade_sptr_->getOutputBufferPoolId(
-        BufferPoolType::DECODE_VIDEO_PRIMARY
-    );
+    // ✅ 方式1：使用 getPrimaryBufferPoolType()（推荐，自动适配不同 Worker）
+    BufferPoolType primary_type = worker_facade_sptr_->getPrimaryBufferPoolType();
+    uint64_t primary_pool_id = worker_facade_sptr_->getOutputBufferPoolId(primary_type);
+    
+    // ✅ 方式2：明确指定类型（当你确切知道需要哪种类型时）
+    // uint64_t primary_pool_id = worker_facade_sptr_->getOutputBufferPoolId(
+    //     BufferPoolType::DECODE_VIDEO_PRIMARY
+    // );
     
     if (primary_pool_id == 0) {
-        setError("Worker does not provide DECODE_VIDEO_PRIMARY pool");
+        setError("Worker failed to create primary BufferPool");
         return false;
     }
     

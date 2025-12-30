@@ -76,6 +76,15 @@ public:
     const char* getWorkerType() const override {
         return "FfmpegRecordRtspWorker";
     }
+    
+    /**
+     * @brief 获取主要 BufferPool 类型
+     * 
+     * RTSP 录制 Worker 的主要输出是编码后的 packet 数据
+     */
+    BufferPoolType getPrimaryBufferPoolType() const override {
+        return BufferPoolType::PACKET_VIDEO;
+    }
 
 private:
     bool openMediaSource();
