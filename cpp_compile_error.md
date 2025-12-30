@@ -25,6 +25,9 @@
 12. [知识点 #11: std::unique_ptr 的解引用和访问操作符](#知识点-11-stduniqueptr-的解引用和访问操作符)
 13. [知识点 #12: explicit 关键字与隐式类型转换](#知识点-12-explicit-关键字与隐式类型转换)
 14. [知识点 #13: 基类成员变量声明顺序对派生类析构的影响](#知识点-13-基类成员变量声明顺序对派生类析构的影响)
+15. [错误 #14: FFmpeg RTSP 流时间戳不从0开始导致 MP4 封装失败](#错误-14-ffmpeg-rtsp-流时间戳不从0开始导致-mp4-封装失败)
+16. [错误 #15: FFmpeg 负时间戳导致 MP4 muxer 报错](#错误-15-ffmpeg-负时间戳导致-mp4-muxer-报错)
+17. [错误 #16: FFmpeg DTS 重复导致单调递增检查失败](#错误-16-ffmpeg-dts-重复导致单调递增检查失败)
 
 ---
 
@@ -2788,9 +2791,332 @@ std::unique_ptr<BufferPool> BufferPool::CreateDynamic(
 
 ---
 
+## 错误 #14: FFmpeg RTSP 流时间戳不从0开始导致 MP4 封装失败
+
+### 错误信息
+
+```
+[INFO ] [BufferWriter] Opened (encoded mode): /tmp/rtsp_recorded.mp4
+[mp4 @ 0x55555582a360] Application provided invalid, non monotonically increasing dts to muxer in stream 0: 15360000 >= 0
+[ERROR] [BufferWriter] Error: Failed to write packet: Invalid argument
+```
+
+### 错误原因
+
+RTSP 流的时间戳（DTS/PTS）通常不是从 0 开始的，而是一个很大的绝对值（如 15360000）。直接将这些时间戳写入 MP4 文件时，FFmpeg muxer 认为时间戳无效，因为它期望时间戳从 0 开始单调递增。
+
+### 问题代码
+
+```cpp
+// BufferWriter.cpp - writeEncoded()
+bool BufferWriter::writeEncoded(const Buffer* buffer) {
+    AVPacket* src_packet = buffer->getAVPacket();
+    
+    AVPacket pkt;
+    av_init_packet(&pkt);
+    av_packet_ref(&pkt, src_packet);
+    
+    pkt.stream_index = video_stream_index_;
+    
+    // ❌ 直接使用源包的时间戳（可能是很大的绝对值）
+    AVStream* out_stream = output_format_ctx_->streams[video_stream_index_];
+    av_packet_rescale_ts(&pkt, time_base_, out_stream->time_base);
+    
+    // 写入失败：时间戳不从 0 开始
+    int ret = av_interleaved_write_frame(output_format_ctx_, &pkt);
+    return (ret >= 0);
+}
+```
+
+### 初步解决方案（手动归一化）
+
+尝试手动记录第一个包的时间戳作为偏移，后续包减去这个偏移：
+
+```cpp
+// BufferWriter.hpp - 添加成员变量
+private:
+    int64_t first_dts_ = AV_NOPTS_VALUE;
+    int64_t first_pts_ = AV_NOPTS_VALUE;
+
+// BufferWriter.cpp - writeEncoded()
+// 记录第一个包的时间戳
+if (first_dts_ == AV_NOPTS_VALUE && pkt.dts != AV_NOPTS_VALUE) {
+    first_dts_ = pkt.dts;
+}
+if (first_pts_ == AV_NOPTS_VALUE && pkt.pts != AV_NOPTS_VALUE) {
+    first_pts_ = pkt.pts;
+}
+
+// 归一化（减去起始偏移）
+if (pkt.dts != AV_NOPTS_VALUE) {
+    pkt.dts -= first_dts_;
+}
+if (pkt.pts != AV_NOPTS_VALUE) {
+    pkt.pts -= first_pts_;
+}
+```
+
+**结果**：导致了新的问题（错误 #15）→ 产生负时间戳
+
+---
+
+## 错误 #15: FFmpeg 负时间戳导致 MP4 muxer 报错
+
+### 错误信息
+
+```
+[DEBUG] [BufferWriter] First DTS recorded: 18000
+[DEBUG] [BufferWriter] First PTS recorded: 18000
+[mp4 @ 0x55558a7078b0] Application provided duration: -9216000 / timestamp: -9216000 is out of range for mov/mp4 format
+[mp4 @ 0x55558a7078b0] pts has no value
+```
+
+### 错误原因
+
+RTSP 流中包的**到达顺序不等于时间戳顺序**（尤其是 B 帧的情况）：
+
+- 第一个到达的包：DTS=18000 → 归一化后 = 0 ✅
+- 后续到达的包：DTS=9000 → 归一化后 = 9000 - 18000 = **-9000** ❌
+
+手动归一化方案无法处理乱序到达的包。
+
+### 最终解决方案
+
+**使用 FFmpeg 内置的 `avoid_negative_ts` 机制**，让 FFmpeg 自动处理时间戳归一化。
+
+#### 1. 移除手动归一化变量
+
+```cpp
+// BufferWriter.hpp
+// ❌ 删除这些成员变量
+// int64_t first_dts_ = AV_NOPTS_VALUE;
+// int64_t first_pts_ = AV_NOPTS_VALUE;
+
+// 只保留必要的成员
+private:
+    AVFormatContext* output_format_ctx_ = nullptr;
+    int video_stream_index_ = -1;
+    int64_t packet_count_ = 0;
+    AVRational time_base_ = {0, 1};
+```
+
+#### 2. 在 open() 中设置自动处理标志
+
+```cpp
+// BufferWriter.cpp - open()
+bool BufferWriter::open(const char* path, 
+                        const AVCodecParameters* codec_params,
+                        const AVRational& time_base) {
+    // ... 创建输出上下文、添加流 ...
+    
+    // ✅ 设置自动处理负时间戳（在写入 header 之前）
+    output_format_ctx_->avoid_negative_ts = AVFMT_AVOID_NEG_TS_MAKE_NON_NEGATIVE;
+    
+    // 写入文件头
+    int ret = avformat_write_header(output_format_ctx_, nullptr);
+    // ...
+}
+```
+
+#### 3. 简化 writeEncoded() 实现
+
+```cpp
+// BufferWriter.cpp - writeEncoded()
+bool BufferWriter::writeEncoded(const Buffer* buffer) {
+    AVPacket* src_packet = buffer->getAVPacket();
+    
+    AVPacket pkt;
+    av_init_packet(&pkt);
+    av_packet_ref(&pkt, src_packet);  // 零拷贝引用
+    
+    pkt.stream_index = video_stream_index_;
+    
+    // ✅ 直接进行时间基转换（FFmpeg 会自动处理负时间戳）
+    AVStream* out_stream = output_format_ctx_->streams[video_stream_index_];
+    av_packet_rescale_ts(&pkt, time_base_, out_stream->time_base);
+    
+    // ✅ 写入成功（FFmpeg 自动归一化时间戳）
+    int ret = av_interleaved_write_frame(output_format_ctx_, &pkt);
+    
+    if (ret < 0) {
+        char errbuf[128];
+        av_strerror(ret, errbuf, sizeof(errbuf));
+        LOG_ERROR_FMT("[BufferWriter] Error: Failed to write packet: %s", errbuf);
+        return false;
+    }
+    
+    packet_count_++;
+    write_count_.fetch_add(1);
+    return true;
+}
+```
+
+### 工作原理
+
+`AVFMT_AVOID_NEG_TS_MAKE_NON_NEGATIVE` 标志让 FFmpeg：
+1. 自动扫描所有包的时间戳
+2. 找到最小的 DTS/PTS
+3. 将所有时间戳平移，确保最小值从 0 开始
+4. 保证单调递增，无论原始流的时间戳如何
+
+### 知识点
+
+- **RTSP 流时间戳特点**：通常不从 0 开始，可能是系统时间戳或相对时间戳
+- **视频帧乱序**：B 帧的 DTS 可能小于前面的 I/P 帧
+- **FFmpeg 时间戳管理**：提供了多种时间戳处理策略
+  - `AVFMT_AVOID_NEG_TS_AUTO`：自动选择策略
+  - `AVFMT_AVOID_NEG_TS_MAKE_NON_NEGATIVE`：强制所有时间戳非负
+  - `AVFMT_AVOID_NEG_TS_MAKE_ZERO`：强制所有时间戳从 0 开始
+
+### 后续问题
+
+设置 `avoid_negative_ts` 后，仍可能出现 **DTS 不单调递增** 的问题（见错误 #16）。
+
+### 参考代码位置
+
+- `BufferWriter.hpp:172-176` - 编码流模式成员变量
+- `BufferWriter.cpp:573` - 设置 `avoid_negative_ts` 标志
+- `BufferWriter.cpp:618-671` - `writeEncoded()` 实现
+
+---
+
+## 错误 #16: FFmpeg DTS 重复导致单调递增检查失败
+
+### 错误信息
+
+```
+[mp4 @ 0x555588a0dbc0] Application provided invalid, non monotonically increasing dts to muxer in stream 0: 9216000 >= 0
+[mp4 @ 0x555588a0dbc0] Application provided invalid, non monotonically increasing dts to muxer in stream 0: 9216000 >= 1843200
+[mp4 @ 0x555588a0dbc0] Application provided invalid, non monotonically increasing dts to muxer in stream 0: 9216000 >= 3686400
+[ERROR] [BufferWriter] Error: Failed to write packet: Invalid argument
+```
+
+### 错误原因
+
+虽然设置了 `avoid_negative_ts`，但 **RTSP 流中某些包的 DTS 值相同或重复**。`avoid_negative_ts` 只能处理负时间戳问题，无法处理：
+- 重复的时间戳（多个包有相同的 DTS）
+- 乱序的时间戳（DTS 不递增）
+- 无效的时间戳（DTS = AV_NOPTS_VALUE）
+
+### 最终解决方案
+
+**添加时间戳校验和单调递增保证**
+
+#### 1. 添加成员变量跟踪上一个 DTS
+
+```cpp
+// BufferWriter.hpp
+private:
+    AVFormatContext* output_format_ctx_ = nullptr;
+    int video_stream_index_ = -1;
+    int64_t packet_count_ = 0;
+    AVRational time_base_ = {0, 1};
+    int64_t last_dts_ = AV_NOPTS_VALUE;  // ✅ 跟踪上一个包的 DTS
+```
+
+#### 2. 在 open() 和构造函数中初始化
+
+```cpp
+// 构造函数
+BufferWriter::BufferWriter()
+    : ...
+    , last_dts_(AV_NOPTS_VALUE)  // 初始化
+{ }
+
+// open()
+bool BufferWriter::open(...) {
+    // ...
+    last_dts_ = AV_NOPTS_VALUE;  // 重置
+    return true;
+}
+```
+
+#### 3. 在 writeEncoded() 中添加校验和修正
+
+```cpp
+bool BufferWriter::writeEncoded(const Buffer* buffer) {
+    // ... 前面的代码 ...
+    
+    AVStream* out_stream = output_format_ctx_->streams[video_stream_index_];
+    
+    // ✅ 转换时间基
+    av_packet_rescale_ts(&pkt, time_base_, out_stream->time_base);
+    
+    // ✅ 检查并修正无效或重复的 DTS
+    if (pkt.dts == AV_NOPTS_VALUE || 
+        (last_dts_ != AV_NOPTS_VALUE && pkt.dts <= last_dts_)) {
+        
+        // 计算帧间隔（基于帧率）
+        int64_t frame_duration = av_rescale_q(
+            1, 
+            av_inv_q(out_stream->avg_frame_rate), 
+            out_stream->time_base
+        );
+        if (frame_duration <= 0) {
+            // 默认25fps
+            frame_duration = av_rescale_q(1, (AVRational){1, 25}, out_stream->time_base);
+        }
+        
+        // 生成单调递增的 DTS
+        if (last_dts_ == AV_NOPTS_VALUE) {
+            pkt.dts = 0;  // 第一个包从 0 开始
+        } else {
+            pkt.dts = last_dts_ + frame_duration;  // 递增一帧
+        }
+        
+        LOG_DEBUG_FMT("[BufferWriter] Corrected DTS: %lld", (long long)pkt.dts);
+    }
+    
+    // ✅ 修正 PTS（确保 PTS >= DTS）
+    if (pkt.pts == AV_NOPTS_VALUE || pkt.pts < pkt.dts) {
+        pkt.pts = pkt.dts;
+    }
+    
+    // ✅ 更新上一个 DTS
+    last_dts_ = pkt.dts;
+    
+    // 写入文件
+    int ret = av_interleaved_write_frame(output_format_ctx_, &pkt);
+    // ...
+}
+```
+
+### 工作原理
+
+1. **跟踪上一个 DTS**：使用 `last_dts_` 记录上一个成功写入的包的 DTS
+2. **检测问题**：
+   - `pkt.dts == AV_NOPTS_VALUE`：DTS 无效
+   - `pkt.dts <= last_dts_`：DTS 不递增或重复
+3. **生成新 DTS**：
+   - 第一个包：DTS = 0
+   - 后续包：DTS = last_dts_ + frame_duration
+4. **确保 PTS >= DTS**：修正 PTS 避免解码器错误
+
+### 知识点
+
+- **DTS vs PTS**：
+  - DTS（Decoding Time Stamp）：解码时间戳，必须单调递增
+  - PTS（Presentation Time Stamp）：显示时间戳，可以乱序（B帧）
+  - 必须保证：PTS >= DTS
+  
+- **FFmpeg 时间戳要求**：
+  - DTS 必须单调递增（每个包的 DTS > 前一个包的 DTS）
+  - DTS 和 PTS 都不能是 `AV_NOPTS_VALUE`（除非是某些特殊格式）
+  
+- **帧率转换**：
+  - `av_inv_q()` - 求倒数（25fps → 1/25）
+  - `av_rescale_q()` - 时间基转换
+
+### 参考代码位置
+
+- `BufferWriter.hpp:176` - `last_dts_` 成员变量
+- `BufferWriter.cpp:656-677` - DTS 校验和修正逻辑
+
+---
+
 ## ✅ 总结
 
-本次重构过程中遇到的 **11 大类编译/运行时错误 + 3 个重要知识点** 涵盖了：
+本次重构过程中遇到的 **14 大类编译/运行时错误 + 3 个重要知识点** 涵盖了：
 - ✅ C++ 语言特性（designated initializers, std::atomic, piecewise_construct）
 - ✅ 类型系统（不完整类型、临时对象、默认参数）
 - ✅ 访问控制（public/private）
@@ -2801,13 +3127,14 @@ std::unique_ptr<BufferPool> BufferPool::CreateDynamic(
 - ✅ explicit 关键字（防止隐式类型转换，提高类型安全）
 - ✅ new vs make_unique（private 构造函数访问权限、内存分配效率）
 - ✅ 类继承与析构顺序（基类成员变量声明顺序的影响、派生类析构控制）
+- ✅ FFmpeg 时间戳处理（RTSP 流时间戳归一化、避免负时间戳、MP4 封装）
 
-这些错误都已成功解决，项目已通过编译并修复运行时错误。智能指针、explicit 关键字、new vs make_unique、线程管理和类继承析构顺序的知识点将帮助开发者更好地理解和使用现代 C++ 特性。🎉
+这些错误都已成功解决，项目已通过编译并修复运行时错误。智能指针、explicit 关键字、new vs make_unique、线程管理、类继承析构顺序以及 FFmpeg 时间戳处理的知识点将帮助开发者更好地理解和使用现代 C++ 特性以及多媒体编程。🎉
 
 ---
 
-**文档版本**: v1.6  
-**最后更新**: 2025-12-25  
+**文档版本**: v1.7  
+**最后更新**: 2025-12-30  
 **维护者**: AI Assistant  
 **状态**: ✅ 完成  
 **更新内容**: 
@@ -2817,6 +3144,7 @@ std::unique_ptr<BufferPool> BufferPool::CreateDynamic(
 - v1.4 (2025-11-17): 新增错误 #10 - `std::atomic` 不可复制导致 `unordered_map::emplace` 失败（包含错误代码、原因分析、解决方案、可视化对比）
 - v1.5 (2025-12-24): 新增错误 #13 - `std::thread` 在 joinable 状态下析构导致 `std::terminate()`（运行时错误、线程生命周期管理、最佳实践）
 - v1.6 (2025-12-25): 新增知识点 #13 - 基类成员变量声明顺序对派生类析构的影响（C++ 析构顺序规则、可复现示例、正确的资源管理方式）
+- v1.7 (2025-12-30): 新增错误 #14/#15/#16 - FFmpeg RTSP 流 MP4 录制的三个时间戳问题（非零起始、负时间戳、DTS 重复），以及完整解决方案
 
 
 

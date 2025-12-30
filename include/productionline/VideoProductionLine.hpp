@@ -114,6 +114,16 @@ public:
      */
     uint64_t getWorkingBufferPoolId() const { return working_buffer_pool_id_; }
     
+    /**
+     * @brief 获取Worker Facade
+     * @return Worker Facade的shared_ptr，如果未启动则返回nullptr
+     * 
+     * @note 用于获取Worker的配置信息（如编解码器参数）
+     */
+    std::shared_ptr<BufferFillingWorkerFacade> getWorkerFacade() const {
+        return worker_facade_sptr_;
+    }
+    
     // ========== 错误处理 ==========
     
     /**

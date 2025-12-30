@@ -8,6 +8,8 @@
 // FFmpeg标准格式定义
 extern "C" {
 #include <libavutil/pixfmt.h>
+#include <libavcodec/avcodec.h>
+#include <libavformat/avformat.h>
 }
 
 namespace productionline {
@@ -88,7 +90,7 @@ public:
     // ============ 核心接口 ============
     
     /**
-     * @brief 打开输出文件
+     * @brief 打开输出文件（图像模式）
      * 
      * @param path 文件路径
      * @param format 像素格式（使用FFmpeg标准AVPixelFormat）
@@ -103,6 +105,22 @@ public:
               AVPixelFormat format,
               int width, 
               int height);
+    
+    /**
+     * @brief 打开输出文件（编码流模式，保存为MP4等容器格式）
+     * 
+     * @param path 文件路径（如 "/tmp/output.mp4"）
+     * @param codec_params 编解码器参数（从Worker获取）
+     * @param time_base 时间基（从Worker获取，用于时间戳转换）
+     * @return true 成功，false 失败
+     * 
+     * @note 支持MP4、MKV等容器格式（通过文件扩展名自动识别）
+     * @note 使用remux方式，不进行转码，性能高效
+     * @note 使用真实的时间戳（从AVPacket获取）
+     */
+    bool open(const char* path, 
+              const AVCodecParameters* codec_params,
+              const AVRational& time_base);
     
     /**
      * @brief 写入Buffer
@@ -144,12 +162,19 @@ public:
     bool isOpen() const { return file_ != nullptr; }
 
 private:
-    // ============ 核心成员 ============
+    // ============ 核心成员（图像模式）============
     FILE* file_;                     // 文件句柄
     AVPixelFormat format_;           // 像素格式（FFmpeg标准）
     int width_;                      // 图像宽度
     int height_;                     // 图像高度
     std::atomic<int> write_count_;   // 写入计数器（原子，线程安全）
+    
+    // ============ 核心成员（编码流模式）============
+    AVFormatContext* output_format_ctx_;  // MP4输出上下文（非空表示编码流模式）
+    int video_stream_index_;              // 输出视频流索引
+    int64_t packet_count_;                // packet计数器（用于生成时间戳）
+    AVRational time_base_;                // 时间基
+    int64_t last_dts_;                    // 上一个包的DTS（用于确保单调递增）
     
     // 对象ID（用于日志区分）
     uint64_t writer_id_;
@@ -250,6 +275,17 @@ private:
      * @note 单plane，只有Y分量
      */
     bool writeGrayscale(const Buffer* buffer, int bytes_per_pixel);
+    
+    /**
+     * @brief 写入编码流数据（封装成MP4等容器格式）
+     * 
+     * @param buffer Buffer指针（包含编码后的packet数据）
+     * @return true 成功，false 失败
+     * 
+     * @note 自动生成时间戳（基于packet_count_）
+     * @note 自动处理remux（无需转码）
+     */
+    bool writeEncoded(const Buffer* buffer);
 };
 
 } // namespace io

@@ -85,6 +85,18 @@ public:
     BufferPoolType getPrimaryBufferPoolType() const override {
         return BufferPoolType::PACKET_VIDEO;
     }
+    
+    /**
+     * @brief 获取编解码器参数（供BufferWriter使用）
+     * @return 编解码器参数指针，如果未打开则返回nullptr
+     */
+    const struct AVCodecParameters* getCodecParameters() const;
+    
+    /**
+     * @brief 获取时间基（供BufferWriter使用）
+     * @return 时间基
+     */
+    struct AVRational getTimeBase() const;
 
 private:
     bool openMediaSource();

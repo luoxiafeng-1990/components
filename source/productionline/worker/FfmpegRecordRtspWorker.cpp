@@ -13,7 +13,7 @@ extern "C" {
 // ============ 构造/析构 ============
 
 FfmpegRecordRtspWorker::FfmpegRecordRtspWorker()
-    : WorkerBase(BufferAllocatorFactory::AllocatorType::NORMAL)
+    : WorkerBase(BufferAllocatorFactory::AllocatorType::AVFRAME)  // ⭐ 使用 AVFrameAllocator（支持 AVPacket）
     , format_ctx_ptr_(nullptr)
     , video_stream_index_(-1)
     , is_open_(false)
@@ -21,11 +21,11 @@ FfmpegRecordRtspWorker::FfmpegRecordRtspWorker()
     , eof_reached_(false)
     , packet_count_(0)
 {
-    LOG_DEBUG("[Worker] FfmpegRecordRtspWorker created");
+    LOG_DEBUG("[Worker] FfmpegRecordRtspWorker created (using AVFrameAllocator)");
 }
 
 FfmpegRecordRtspWorker::FfmpegRecordRtspWorker(const WorkerConfig& config)
-    : WorkerBase(BufferAllocatorFactory::AllocatorType::NORMAL, config)
+    : WorkerBase(BufferAllocatorFactory::AllocatorType::AVFRAME, config)  // ⭐ 使用 AVFrameAllocator（支持 AVPacket）
     , format_ctx_ptr_(nullptr)
     , video_stream_index_(-1)
     , is_open_(false)
@@ -33,7 +33,7 @@ FfmpegRecordRtspWorker::FfmpegRecordRtspWorker(const WorkerConfig& config)
     , eof_reached_(false)
     , packet_count_(0)
 {
-    LOG_DEBUG("[Worker] FfmpegRecordRtspWorker created (with config)");
+    LOG_DEBUG("[Worker] FfmpegRecordRtspWorker created (with config, using AVFrameAllocator)");
 }
 
 FfmpegRecordRtspWorker::~FfmpegRecordRtspWorker() {
@@ -235,55 +235,44 @@ bool FfmpegRecordRtspWorker::fillBuffer(int frame_index, Buffer* buffer) {
         return false;
     }
     
-    std::lock_guard<std::recursive_mutex> lock(mutex_);
-    
-    // ⭐ 录制Worker自己分配AVPacket（不依赖Buffer中的AVPacket*）
-    AVPacket* packet_ptr = av_packet_alloc();
-    if (!packet_ptr) {
-        LOG_ERROR("[Worker] ERROR: Failed to allocate AVPacket");
+    // 1. ⭐ 从 Buffer 获取预分配的 AVPacket（AVFrameAllocator 已经分配）
+    AVPacket* packet = buffer->getAVPacket();
+    if (!packet) {
+        LOG_ERROR("[Worker] ERROR: Buffer has no AVPacket (AVFrameAllocator not used?)");
         return false;
     }
     
-    // 读取一个 packet
-    int ret = av_read_frame(format_ctx_ptr_, packet_ptr);
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
+    
+    // 2. ⭐ 直接读取到 AVPacket（零拷贝）
+    int ret = av_read_frame(format_ctx_ptr_, packet);
     
     if (ret < 0) {
         if (ret == AVERROR_EOF) {
             LOG_DEBUG("🔄 RTSP EOF reached");
-            av_packet_free(&packet_ptr);
             eof_reached_ = true;
             return false;
         } else {
             char err_buf[128];
             av_strerror(ret, err_buf, sizeof(err_buf));
             LOG_ERROR_FMT("[Worker] ERROR: av_read_frame failed: %d (%s)", ret, err_buf);
-            av_packet_free(&packet_ptr);
             return false;
         }
     }
     
-    // 检查是否是视频流
-    if (packet_ptr->stream_index != video_stream_index_) {
-        av_packet_free(&packet_ptr);
+    // 3. 检查是否是视频流
+    if (packet->stream_index != video_stream_index_) {
+        av_packet_unref(packet);  // 清空非视频流的数据
         return false;  // 不是视频流，让调用者继续读取
     }
     
-    // 检查包大小是否超过Buffer容量
-    if ((size_t)packet_ptr->size > buffer->size()) {
-        LOG_ERROR_FMT("[Worker] ERROR: Packet size (%d) exceeds buffer size (%zu)", 
-                      packet_ptr->size, buffer->size());
-        av_packet_free(&packet_ptr);
-        return false;
-    }
+    // 4. ⭐ 更新 Buffer 的地址指向 AVPacket 的数据（零拷贝）
+    //    注意：packet->data 是 FFmpeg 内部管理的内存，Buffer 只是引用
+    buffer->setVirtualAddress(packet->data);
+    buffer->setUsedSize(packet->size);
     
-    // 将 AVPacket 数据拷贝到 Buffer
-    memcpy(buffer->getVirtualAddress(), packet_ptr->data, packet_ptr->size);
-    
-    // 更新 Buffer 的实际使用大小
-    buffer->setUsedSize(packet_ptr->size);
-    
-    // 释放 AVPacket（数据已拷贝）
-    av_packet_free(&packet_ptr);
+    // 5. ⭐ 所有元数据（pts, dts, flags）已在 AVPacket 中，无需额外处理
+    //    BufferWriter 可以直接通过 buffer->getAVPacket() 获取完整信息
     
     // 记录包信息（用于调试）
     packet_count_++;
@@ -386,5 +375,21 @@ void FfmpegRecordRtspWorker::setError(const std::string& error, int ffmpeg_error
 std::string FfmpegRecordRtspWorker::getLastError() const {
     std::lock_guard<std::mutex> lock(error_mutex_);
     return last_error_;
+}
+
+// ============ 编解码器信息获取 ============
+
+const AVCodecParameters* FfmpegRecordRtspWorker::getCodecParameters() const {
+    if (format_ctx_ptr_ && video_stream_index_ >= 0) {
+        return format_ctx_ptr_->streams[video_stream_index_]->codecpar;
+    }
+    return nullptr;
+}
+
+AVRational FfmpegRecordRtspWorker::getTimeBase() const {
+    if (format_ctx_ptr_ && video_stream_index_ >= 0) {
+        return format_ctx_ptr_->streams[video_stream_index_]->time_base;
+    }
+    return {1, 25};  // 默认25fps
 }
 

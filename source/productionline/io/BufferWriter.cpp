@@ -5,6 +5,8 @@
 
 extern "C" {
 #include <libavutil/pixdesc.h>
+#include <libavformat/avformat.h>
+#include <libavcodec/avcodec.h>
 }
 
 namespace productionline {
@@ -21,6 +23,11 @@ BufferWriter::BufferWriter()
     , width_(0)
     , height_(0)
     , write_count_(0)
+    , output_format_ctx_(nullptr)
+    , video_stream_index_(-1)
+    , packet_count_(0)
+    , time_base_({1, 25})
+    , last_dts_(AV_NOPTS_VALUE)
     , writer_id_(++next_id_)
     , log_prefix_("[BufferWriter::" + std::to_string(writer_id_) + "]")
 {
@@ -106,12 +113,23 @@ bool BufferWriter::open(const char* path,
 
 bool BufferWriter::write(const Buffer* buffer) {
     // 1. 参数校验
-    if (!buffer || !file_) {
-        LOG_ERROR("[BufferWriter] Error: Invalid buffer or file not opened");
+    if (!buffer) {
+        LOG_ERROR("[BufferWriter] Error: Invalid buffer");
         return false;
     }
     
-    // 2. ⭐ 检查Buffer是否有图像元数据
+    // 2. ⭐ 编码流模式（MP4等容器格式）
+    if (output_format_ctx_) {
+        return writeEncoded(buffer);
+    }
+    
+    // 3. 图像模式（原有逻辑）
+    if (!file_) {
+        LOG_ERROR("[BufferWriter] Error: file not opened");
+        return false;
+    }
+    
+    // 4. ⭐ 检查Buffer是否有图像元数据
     if (buffer->hasImageMetadata()) {
         // 使用元数据模式（v2.6新功能）
         return writeWithMetadata(buffer);
@@ -337,6 +355,30 @@ bool BufferWriter::writePlane(const uint8_t* data, int stride,
 }
 
 void BufferWriter::close() {
+    // ⭐ 编码流模式
+    if (output_format_ctx_) {
+        // 写入MP4 trailer
+        if (output_format_ctx_->pb) {
+            av_write_trailer(output_format_ctx_);
+        }
+        
+        // 关闭文件
+        if (!(output_format_ctx_->oformat->flags & AVFMT_NOFILE)) {
+            avio_closep(&output_format_ctx_->pb);
+        }
+        
+        // 释放上下文
+        avformat_free_context(output_format_ctx_);
+        output_format_ctx_ = nullptr;
+        video_stream_index_ = -1;
+        packet_count_ = 0;
+        
+        LOG_INFO_FMT("[BufferWriter] Closed (written %d packets)", 
+               write_count_.load());
+        return;
+    }
+    
+    // ========== 图像模式（原有逻辑）==========
     if (file_) {
         fflush(file_);
         fclose(file_);
@@ -472,6 +514,192 @@ const char* BufferWriter::getFormatName(AVPixelFormat format) {
     // 使用FFmpeg的标准函数
     const char* name = av_get_pix_fmt_name(format);
     return name ? name : "UNKNOWN";
+}
+
+// ========== 编码流模式实现 ==========
+
+bool BufferWriter::open(const char* path, const AVCodecParameters* codec_params, const AVRational& time_base) {
+    // 1. 参数校验
+    if (!path || !codec_params) {
+        LOG_ERROR("[BufferWriter] Error: Invalid parameters for encoded mode");
+        return false;
+    }
+    
+    // 1.5 ⭐ 保存时间基（用于时间戳转换）
+    time_base_ = time_base;
+    
+    // 2. 如果已打开，先关闭
+    if (file_ || output_format_ctx_) {
+        close();
+    }
+    
+    // 3. 分配输出上下文（根据文件扩展名自动识别格式）
+    int ret = avformat_alloc_output_context2(&output_format_ctx_, nullptr, nullptr, path);
+    if (ret < 0) {
+        char errbuf[128];
+        av_strerror(ret, errbuf, sizeof(errbuf));
+        LOG_ERROR_FMT("[BufferWriter] Error: Failed to allocate output context: %s", errbuf);
+        return false;
+    }
+    
+    // 4. 创建输出视频流
+    AVStream* out_stream = avformat_new_stream(output_format_ctx_, nullptr);
+    if (!out_stream) {
+        LOG_ERROR("[BufferWriter] Error: Failed to create output stream");
+        avformat_free_context(output_format_ctx_);
+        output_format_ctx_ = nullptr;
+        return false;
+    }
+    
+    video_stream_index_ = out_stream->index;
+    
+    // 5. 复制编解码器参数
+    ret = avcodec_parameters_copy(out_stream->codecpar, codec_params);
+    if (ret < 0) {
+        char errbuf[128];
+        av_strerror(ret, errbuf, sizeof(errbuf));
+        LOG_ERROR_FMT("[BufferWriter] Error: Failed to copy codec parameters: %s", errbuf);
+        avformat_free_context(output_format_ctx_);
+        output_format_ctx_ = nullptr;
+        return false;
+    }
+    
+    // 6. 设置 codec_tag 为 0（让 muxer 自动选择）
+    out_stream->codecpar->codec_tag = 0;
+    
+    // 7. 设置时间基（默认假设25fps）
+    time_base_ = {1, 25};
+    out_stream->time_base = time_base_;
+    
+    // 7.5 ⭐ 设置自动处理负时间戳（让 FFmpeg 自动归一化）
+    //     AVFMT_AVOID_NEG_TS_MAKE_NON_NEGATIVE：自动将所有时间戳平移为非负数
+    //     解决 RTSP 流时间戳不从 0 开始的问题
+    output_format_ctx_->avoid_negative_ts = AVFMT_AVOID_NEG_TS_MAKE_NON_NEGATIVE;
+    
+    // 8. 打开输出文件
+    if (!(output_format_ctx_->oformat->flags & AVFMT_NOFILE)) {
+        ret = avio_open(&output_format_ctx_->pb, path, AVIO_FLAG_WRITE);
+        if (ret < 0) {
+            char errbuf[128];
+            av_strerror(ret, errbuf, sizeof(errbuf));
+            LOG_ERROR_FMT("[BufferWriter] Error: Failed to open output file: %s", errbuf);
+            avformat_free_context(output_format_ctx_);
+            output_format_ctx_ = nullptr;
+            return false;
+        }
+    }
+    
+    // 9. 写入文件头
+    ret = avformat_write_header(output_format_ctx_, nullptr);
+    if (ret < 0) {
+        char errbuf[128];
+        av_strerror(ret, errbuf, sizeof(errbuf));
+        LOG_ERROR_FMT("[BufferWriter] Error: Failed to write header: %s", errbuf);
+        if (!(output_format_ctx_->oformat->flags & AVFMT_NOFILE)) {
+            avio_closep(&output_format_ctx_->pb);
+        }
+        avformat_free_context(output_format_ctx_);
+        output_format_ctx_ = nullptr;
+        return false;
+    }
+    
+    // 10. 重置计数器和时间戳跟踪
+    packet_count_ = 0;
+    write_count_.store(0);
+    last_dts_ = AV_NOPTS_VALUE;  // 重置上一个DTS
+    
+    // 11. 打印成功信息
+    LOG_INFO("");
+    LOG_INFO_FMT("[BufferWriter] Opened (encoded mode): %s", path);
+    LOG_INFO_FMT("  Format: %s", output_format_ctx_->oformat->name);
+    LOG_INFO_FMT("  Codec: %s", avcodec_get_name(out_stream->codecpar->codec_id));
+    LOG_INFO_FMT("  Resolution: %dx%d", out_stream->codecpar->width, out_stream->codecpar->height);
+    
+    return true;
+}
+
+bool BufferWriter::writeEncoded(const Buffer* buffer) {
+    if (!output_format_ctx_) {
+        LOG_ERROR("[BufferWriter] Error: Not in encoded mode");
+        return false;
+    }
+    
+    if (!buffer || !buffer->isValid()) {
+        LOG_ERROR("[BufferWriter] Error: Invalid buffer");
+        return false;
+    }
+    
+    // 1. ⭐ 直接从 Buffer 获取 AVPacket（包含所有数据和元数据）
+    AVPacket* src_packet = buffer->getAVPacket();
+    if (!src_packet || !src_packet->data) {
+        LOG_ERROR("[BufferWriter] Error: Buffer has no AVPacket data");
+        return false;
+    }
+    
+    // 2. ⭐ 创建临时 AVPacket（栈上，零内存分配）
+    AVPacket pkt;
+    av_init_packet(&pkt);
+    
+    // 3. ⭐ 引用源 packet 的数据（零拷贝，只增加引用计数）
+    int ret = av_packet_ref(&pkt, src_packet);
+    if (ret < 0) {
+        char errbuf[128];
+        av_strerror(ret, errbuf, sizeof(errbuf));
+        LOG_ERROR_FMT("[BufferWriter] Error: Failed to reference packet: %s", errbuf);
+        return false;
+    }
+    
+    // 4. 修改流索引（指向输出文件的视频流）
+    pkt.stream_index = video_stream_index_;
+    
+    // 5. ⭐ 时间戳校验和修正（确保单调递增）
+    AVStream* out_stream = output_format_ctx_->streams[video_stream_index_];
+    
+    // 5.1 转换时间基
+    av_packet_rescale_ts(&pkt, time_base_, out_stream->time_base);
+    
+    // 5.2 检查并修正无效或重复的时间戳
+    if (pkt.dts == AV_NOPTS_VALUE || (last_dts_ != AV_NOPTS_VALUE && pkt.dts <= last_dts_)) {
+        // DTS 无效或不单调递增，使用生成的时间戳（基于帧率）
+        // 假设平均每帧的duration（根据输出流的时间基）
+        int64_t frame_duration = av_rescale_q(1, av_inv_q(out_stream->avg_frame_rate), out_stream->time_base);
+        if (frame_duration <= 0) {
+            frame_duration = av_rescale_q(1, (AVRational){1, 25}, out_stream->time_base); // 默认25fps
+        }
+        
+        if (last_dts_ == AV_NOPTS_VALUE) {
+            pkt.dts = 0;  // 第一个包从0开始
+        } else {
+            pkt.dts = last_dts_ + frame_duration;  // 在上一个DTS基础上增加一帧
+        }
+        
+        LOG_DEBUG_FMT("[BufferWriter] Corrected DTS: %lld (packet #%lld, last_dts=%lld)", 
+                     (long long)pkt.dts, (long long)packet_count_, (long long)last_dts_);
+    }
+    
+    if (pkt.pts == AV_NOPTS_VALUE || pkt.pts < pkt.dts) {
+        // PTS 无效或小于 DTS，设置为等于 DTS
+        pkt.pts = pkt.dts;
+    }
+    
+    // 更新 last_dts_
+    last_dts_ = pkt.dts;
+    
+    // 6. ⭐ 写入文件（会自动 unref，但不影响源 Buffer 的 AVPacket）
+    ret = av_interleaved_write_frame(output_format_ctx_, &pkt);
+    
+    if (ret < 0) {
+        char errbuf[128];
+        av_strerror(ret, errbuf, sizeof(errbuf));
+        LOG_ERROR_FMT("[BufferWriter] Error: Failed to write packet: %s", errbuf);
+        return false;
+    }
+    
+    // 7. 累加计数器
+    packet_count_++;
+    write_count_.fetch_add(1);
+    
+    return true;
 }
 
 } // namespace io

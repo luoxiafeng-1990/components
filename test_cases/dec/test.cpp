@@ -26,6 +26,7 @@
 #include "display/LinuxFramebufferDevice.hpp"
 #include "productionline/worker/BufferFillingWorkerFacade.hpp"
 #include "productionline/worker/WorkerConfig.hpp"
+#include "productionline/worker/FfmpegRecordRtspWorker.hpp"
 #include "buffer/bufferpool/BufferPool.hpp"
 #include "buffer/bufferpool/BufferPoolRegistry.hpp"
 #include "productionline/VideoProductionLine.hpp"
@@ -737,25 +738,37 @@ static int test_rtsp_stream(const char* rtsp_url) {
 }
 
 /**
- * 测试5.5：RTSP原始码流录制
+ * 测试5.5：RTSP码流录制为MP4文件
  * 
  * 架构：
- * - 生产者：FfmpegRecordRtspWorker（读取RTSP原始包 → Buffer）
- * - 消费者：直接写入文件（Buffer → .h264/.mp4文件）
+ * - 生产者：FfmpegRecordRtspWorker（读取RTSP编码包 → Buffer）
+ * - 消费者：BufferWriter（Buffer → MP4文件，自动封装容器）
  * 
  * 功能：
- * - 录制RTSP流的原始编码数据（不解码）
- * - 保存为 .h264 或 .mp4 格式
- * - 可用于后续对比测试（相同码流，不同解码器）
+ * - 录制RTSP流的原始编码数据（不解码，remux方式）
+ * - 自动封装为 MP4 格式（包含完整元数据）
+ * - 支持通过环境变量 RTSP_OUTPUT_FILE 指定输出路径
+ * - 可用于后续对比测试或直接播放
+ * 
+ * 使用示例：
+ *   export RTSP_OUTPUT_FILE=/path/to/output.mp4
+ *   ./display_test -m rtsp_record rtsp://...
  */
 static int test_rtsp_record(const char* rtsp_url) {
     using namespace productionline::io;
     
     LOG_INFO("╔═══════════════════════════════════════════════════════╗");
-    LOG_INFO("║   Test: RTSP Raw Stream Recording                    ║");
+    LOG_INFO("║   Test: RTSP Stream Recording to MP4                 ║");
     LOG_INFO("╚═══════════════════════════════════════════════════════╝\n");
     
-    const char* output_file = "/tmp/rtsp_recorded.h264";  // 使用 /tmp 目录，确保可写
+    // 从环境变量获取输出路径，如果没有则使用默认值
+    const char* output_file = std::getenv("RTSP_OUTPUT_FILE");
+    if (!output_file || strlen(output_file) == 0) {
+        output_file = "/tmp/rtsp_recorded.mp4";  // 默认输出为MP4
+    }
+    
+    LOG_INFO_FMT("Output file: %s\n", output_file);
+    
     const int duration_seconds = 10;
     
     // 1. 创建 VideoProductionLine（生产者）
@@ -798,17 +811,52 @@ static int test_rtsp_record(const char* rtsp_url) {
     
     LOG_INFO_FMT("  BufferPool: '%s' (ID: %lu)", pool_sptr->getName().c_str(), pool_id);
     
-    // 6. 打开输出文件
-    LOG_INFO("[Step 5] Opening output file...");
-    FILE* fp = fopen(output_file, "wb");
-    if (!fp) {
-        LOG_ERROR_FMT("Failed to open output file: %s", output_file);
+    // 6. 获取Worker并打开BufferWriter（MP4模式）
+    LOG_INFO("[Step 5] Opening BufferWriter (MP4 mode)...");
+    
+    // 获取Worker的编解码器参数
+    auto worker_facade_sptr = producer.getWorkerFacade();
+    if (!worker_facade_sptr) {
+        LOG_ERROR("Failed to get worker facade");
         producer.stop();
         return -1;
     }
     
-    // 7. 消费者线程：保存原始包到文件
-    LOG_INFO("\n[Step 6] Recording...");
+    // 获取底层Worker并转换为FfmpegRecordRtspWorker
+    WorkerBase* worker_base = worker_facade_sptr->getWorkerBase();
+    if (!worker_base) {
+        LOG_ERROR("Failed to get worker base");
+        producer.stop();
+        return -1;
+    }
+    
+    FfmpegRecordRtspWorker* rtsp_worker = dynamic_cast<FfmpegRecordRtspWorker*>(worker_base);
+    if (!rtsp_worker) {
+        LOG_ERROR("Worker is not FfmpegRecordRtspWorker type");
+        producer.stop();
+        return -1;
+    }
+    
+    const AVCodecParameters* codec_params = rtsp_worker->getCodecParameters();
+    if (!codec_params) {
+        LOG_ERROR("Failed to get codec parameters from worker");
+        producer.stop();
+        return -1;
+    }
+    
+    // 获取时间基
+    AVRational time_base = rtsp_worker->getTimeBase();
+    
+    // 打开BufferWriter（编码流模式）
+    BufferWriter writer;
+    if (!writer.open(output_file, codec_params, time_base)) {
+        LOG_ERROR("Failed to open BufferWriter");
+        producer.stop();
+        return -1;
+    }
+    
+    // 7. 消费者线程：保存编码流到MP4文件
+    LOG_INFO("\n[Step 6] Recording to MP4...");
     LOG_INFO("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
     
     auto start_time = std::chrono::steady_clock::now();
@@ -830,17 +878,20 @@ static int test_rtsp_record(const char* rtsp_url) {
         Buffer* buffer = pool_sptr->acquireFilled(true, 100);
         
         if (buffer) {
-            // 写入文件
+            // 写入MP4文件（BufferWriter自动封装）
             size_t used_size = buffer->getUsedSize();
             if (used_size > 0) {
-                fwrite(buffer->getVirtualAddress(), 1, used_size, fp);
-                packet_count++;
-                total_bytes += used_size;
-                
-                if (packet_count % 50 == 0) {
-                    double rate_mbps = elapsed > 0 ? (total_bytes * 8.0) / (elapsed * 1000000.0) : 0.0;
-                    LOG_INFO_FMT("  Recorded %d packets | %d seconds | %.2f Mbps",
-                                 packet_count, elapsed, rate_mbps);
+                if (writer.write(buffer)) {
+                    packet_count++;
+                    total_bytes += used_size;
+                    
+                    if (packet_count % 50 == 0) {
+                        double rate_mbps = elapsed > 0 ? (total_bytes * 8.0) / (elapsed * 1000000.0) : 0.0;
+                        LOG_INFO_FMT("  Recorded %d packets | %d seconds | %.2f Mbps",
+                                     packet_count, elapsed, rate_mbps);
+                    }
+                } else {
+                    LOG_WARN("Failed to write packet to MP4");
                 }
             }
             
@@ -857,8 +908,8 @@ static int test_rtsp_record(const char* rtsp_url) {
     
     LOG_INFO("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
     
-    // 8. 清理
-    fclose(fp);
+    // 8. 清理（BufferWriter会自动写入MP4 trailer）
+    writer.close();
     producer.stop();
     
     // 9. 统计信息
@@ -868,7 +919,7 @@ static int test_rtsp_record(const char* rtsp_url) {
     LOG_INFO("\n═══════════════════════════════════════════════════════");
     LOG_INFO("  Recording Results");
     LOG_INFO("═══════════════════════════════════════════════════════");
-    LOG_INFO_FMT("  Output file:      %s", output_file);
+    LOG_INFO_FMT("  ✅ MP4 file:      %s", output_file);
     LOG_INFO_FMT("  Packets recorded: %d", packet_count);
     LOG_INFO_FMT("  Duration:         %.2f seconds", total_duration);
     LOG_INFO_FMT("  Total bytes:      %.2f MB", total_bytes / (1024.0 * 1024.0));
@@ -878,11 +929,12 @@ static int test_rtsp_record(const char* rtsp_url) {
                      (total_bytes * 8.0) / (total_duration * 1000000.0));
     }
     
-    LOG_INFO("\n💡 Test the recorded file with:");
-    LOG_INFO_FMT("   ./display_test -m ffmpeg %s              # Hardware", output_file);
-    LOG_INFO_FMT("   ./display_test -m ffmpeg_software %s     # Software", output_file);
-    LOG_INFO("\n💡 Or play with ffplay:");
+    LOG_INFO("\n💡 Play the recorded MP4 file with:");
     LOG_INFO_FMT("   ffplay %s", output_file);
+    LOG_INFO_FMT("   vlc %s", output_file);
+    LOG_INFO("\n💡 Or test with this program:");
+    LOG_INFO_FMT("   ./display_test -m ffmpeg %s              # Hardware decode", output_file);
+    LOG_INFO_FMT("   ./display_test -m ffmpeg_software %s     # Software decode", output_file);
     LOG_INFO("═══════════════════════════════════════════════════════\n");
     
     if (packet_count > 0) {
@@ -1866,7 +1918,7 @@ REGISTER_TEST(sequential, "Sequential playback (play once)", test_sequential_pla
 REGISTER_TEST(producer, "BufferPool + VideoProductionLine test (zero-copy)", test_buffermanager_producer);
 REGISTER_TEST(iouring, "io_uring async I/O mode", test_buffermanager_iouring);
 REGISTER_TEST(rtsp, "RTSP stream playback (zero-copy, FFmpeg)", test_rtsp_stream);
-REGISTER_TEST(rtsp_record, "RTSP raw stream recording (save H.264/H.265 to file)", test_rtsp_record);
+REGISTER_TEST(rtsp_record, "RTSP stream recording to MP4 (use env RTSP_OUTPUT_FILE to specify path)", test_rtsp_record);
 REGISTER_TEST(ffmpeg, "FFmpeg encoded video playback (MP4/AVI/MKV/etc)", test_h264_taco_video);
 REGISTER_TEST(ffmpeg_software, "FFmpeg software decoder (libavcodec, no hardware acceleration)", test_ffmpeg_software_decoder);
 REGISTER_TEST(ffmpeg_multithread, "Multi-threaded FFmpeg video decoding (no display, decode only)", test_h264_taco_video_multithread);

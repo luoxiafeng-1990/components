@@ -99,6 +99,14 @@ public:
      */
     BufferPoolType getPrimaryBufferPoolType();
     
+    /**
+     * 获取底层 Worker 指针（用于访问特定Worker的方法）
+     * @return Worker 基类指针，如果未创建则返回 nullptr
+     */
+    WorkerBase* getWorkerBase() const {
+        return worker_base_uptr_.get();
+    }
+    
     // ============ 文件导航方法（原IVideoFileNavigator的方法）============
     
     /**
