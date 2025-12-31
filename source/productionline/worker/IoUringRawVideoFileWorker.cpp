@@ -1,0 +1,341 @@
+#include "productionline/worker/IoUringRawVideoFileWorker.hpp"
+#include "common/Logger.hpp"
+#include <fcntl.h>
+#include <unistd.h>
+#include <sys/stat.h>
+#include <string.h>
+#include <errno.h>
+
+// ============ 构造/析构 ============
+
+IoUringRawVideoFileWorker::IoUringRawVideoFileWorker(int queue_depth)
+    : WorkerBase(BufferAllocatorFactory::AllocatorType::NORMAL)  // 🎯 只需传递类型！
+    , queue_depth_(queue_depth)
+    , initialized_(false)
+    , video_fd_(-1)
+    , frame_size_(0)
+    , file_size_(0)
+    , total_frames_(0)
+    , current_frame_index_(0)
+    , width_(0)
+    , height_(0)
+    , bits_per_pixel_(0)
+    , is_open_(false)
+{
+    // 🎯 父类已经创建好 NORMAL 类型的 allocator_facade_，无需任何初始化代码
+    // io_uring 延迟初始化，在 open() 时初始化
+}
+
+// v2.2: 配置构造函数（新增）
+IoUringRawVideoFileWorker::IoUringRawVideoFileWorker(const WorkerConfig& config, int queue_depth)
+    : WorkerBase(BufferAllocatorFactory::AllocatorType::NORMAL, config)  // 传递 config 给父类
+    , queue_depth_(queue_depth)
+    , initialized_(false)
+    , video_fd_(-1)
+    , frame_size_(0)
+    , file_size_(0)
+    , total_frames_(0)
+    , current_frame_index_(0)
+    , width_(0)
+    , height_(0)
+    , bits_per_pixel_(0)
+    , is_open_(false)
+{
+    // io_uring 延迟初始化，在 open() 时初始化
+}
+
+IoUringRawVideoFileWorker::~IoUringRawVideoFileWorker() {
+    close();
+}
+
+// ============ IVideoReader 接口实现 ============
+
+bool IoUringRawVideoFileWorker::open(const char* path) {
+    LOG_ERROR_FMT("[Worker] ERROR: IoUringVideoReader does not support auto-detect format");
+    LOG_ERROR("   Please use open(path, width, height, bits_per_pixel) for raw video files");
+    return false;
+}
+
+bool IoUringRawVideoFileWorker::open(const char* path, int width, int height, int bits_per_pixel) {
+    if (is_open_) {
+        LOG_WARN_FMT("[Worker]  Warning: File already opened, closing previous file");
+        close();
+    }
+    
+    if (width <= 0 || height <= 0 || bits_per_pixel <= 0) {
+        LOG_ERROR_FMT("[Worker] ERROR: Invalid parameters");
+        return false;
+    }
+    
+    video_path_ = path;
+    width_ = width;
+    height_ = height;
+    bits_per_pixel_ = bits_per_pixel;
+    
+    frame_size_ = (size_t)width * height * (bits_per_pixel / 8);
+    
+    LOG_INFO_FMT("📂 Opening raw video file: %s", path);
+    LOG_INFO_FMT("   Format: %dx%d, %d bits per pixel", width, height, bits_per_pixel);
+    LOG_INFO_FMT("   Frame size: %zu bytes", frame_size_);
+    LOG_INFO("   Reader: IoUringVideoReader (async I/O)");
+    LOG_INFO_FMT("   Queue depth: %d", queue_depth_);
+    
+    // 打开文件
+    video_fd_ = ::open(path, O_RDONLY);
+    if (video_fd_ < 0) {
+        LOG_ERROR_FMT("[Worker] ERROR: Cannot open file: %s", strerror(errno));
+        return false;
+    }
+    
+    // 获取文件大小
+    struct stat st;
+    if (fstat(video_fd_, &st) < 0) {
+        LOG_ERROR_FMT("[Worker] ERROR: Cannot get file size: %s", strerror(errno));
+        ::close(video_fd_);
+        video_fd_ = -1;
+        return false;
+    }
+    
+    file_size_ = st.st_size;
+    total_frames_ = file_size_ / frame_size_;
+    
+    if (total_frames_ == 0) {
+        LOG_ERROR_FMT("[Worker] ERROR: File too small");
+        ::close(video_fd_);
+        video_fd_ = -1;
+        return false;
+    }
+    
+    // 初始化 io_uring
+    int ret = io_uring_queue_init(queue_depth_, &ring_, 0);
+    if (ret < 0) {
+        LOG_ERROR_FMT("[Worker] ERROR: io_uring_queue_init failed: %s", strerror(-ret));
+        ::close(video_fd_);
+        video_fd_ = -1;
+        return false;
+    }
+    
+    initialized_ = true;
+    is_open_ = true;
+    current_frame_index_ = 0;
+    
+    LOG_DEBUG_FMT("[Worker] Raw video file opened successfully");
+    LOG_INFO_FMT("   File size: %ld bytes", file_size_);
+    LOG_INFO_FMT("   Total frames: %d", total_frames_);
+    
+    return true;
+}
+
+void IoUringRawVideoFileWorker::close() {
+    if (!is_open_) {
+        return;
+    }
+    
+    if (initialized_) {
+        io_uring_queue_exit(&ring_);
+        initialized_ = false;
+    }
+    
+    if (video_fd_ >= 0) {
+        ::close(video_fd_);
+        video_fd_ = -1;
+    }
+    
+    is_open_ = false;
+    current_frame_index_ = 0;
+    
+    LOG_DEBUG_FMT("[Worker] Video file closed: %s", video_path_.c_str());
+}
+
+bool IoUringRawVideoFileWorker::isOpen() const {
+    return is_open_;
+}
+
+bool IoUringRawVideoFileWorker::seek(int frame_index) {
+    if (!is_open_) {
+        return false;
+    }
+    
+    if (frame_index < 0 || frame_index >= total_frames_) {
+        return false;
+    }
+    
+    current_frame_index_ = frame_index;
+    return true;
+}
+
+bool IoUringRawVideoFileWorker::seekToBegin() {
+    return seek(0);
+}
+
+bool IoUringRawVideoFileWorker::seekToEnd() {
+    if (!is_open_) {
+        return false;
+    }
+    
+    current_frame_index_ = total_frames_;
+    return true;
+}
+
+bool IoUringRawVideoFileWorker::skip(int frame_count) {
+    int target_frame = current_frame_index_ + frame_count;
+    return seek(target_frame);
+}
+
+int IoUringRawVideoFileWorker::getTotalFrames() const {
+    return total_frames_;
+}
+
+int IoUringRawVideoFileWorker::getCurrentFrameIndex() const {
+    return current_frame_index_;
+}
+
+size_t IoUringRawVideoFileWorker::getFrameSize() const {
+    return frame_size_;
+}
+
+long IoUringRawVideoFileWorker::getFileSize() const {
+    return file_size_;
+}
+
+int IoUringRawVideoFileWorker::getWidth() const {
+    return width_;
+}
+
+int IoUringRawVideoFileWorker::getHeight() const {
+    return height_;
+}
+
+int IoUringRawVideoFileWorker::getBytesPerPixel() const {
+    return (bits_per_pixel_ + 7) / 8;
+}
+
+const char* IoUringRawVideoFileWorker::getPath() const {
+    return video_path_.c_str();
+}
+
+bool IoUringRawVideoFileWorker::hasMoreFrames() const {
+    return current_frame_index_ < total_frames_;
+}
+
+bool IoUringRawVideoFileWorker::isAtEnd() const {
+    return current_frame_index_ >= total_frames_;
+}
+
+// ============================================================================
+// 核心功能：填充Buffer
+// ============================================================================
+
+bool IoUringRawVideoFileWorker::fillBuffer(int frame_index, Buffer* buffer) {
+    if (!buffer || !buffer->data()) {
+        LOG_ERROR_FMT("[Worker] ERROR: Invalid buffer");
+        return false;
+    }
+    
+    if (!is_open_) {
+        LOG_ERROR_FMT("[Worker] ERROR: Worker is not open");
+        return false;
+    }
+    
+    if (frame_index < 0 || frame_index >= total_frames_) {
+        LOG_ERROR_FMT("[Worker] ERROR: Invalid frame index %d (valid: 0-%d)\n",
+               frame_index, total_frames_ - 1);
+        return false;
+    }
+    
+    if (buffer->size() < frame_size_) {
+        LOG_ERROR_FMT("[Worker] ERROR: Buffer too small (need %zu, got %zu)\n", 
+               frame_size_, buffer->size());
+        return false;
+    }
+    
+    // 使用io_uring异步读取
+    if (!submitReadRequest(frame_index, buffer->data(), buffer->size())) {
+        return false;
+    }
+    
+    // 等待完成
+    return waitForCompletion();
+}
+
+// ============ IoUring 专有接口（保留原有功能）TODO: 需要重新实现 ============
+
+void IoUringRawVideoFileWorker::asyncProducerThread(int thread_id,
+                                            BufferPool* pool,
+                                            const std::vector<int>& frame_indices,
+                                            std::atomic<bool>& running,
+                                            bool loop) {
+    LOG_WARN_FMT("[Worker]  Warning: asyncProducerThread not yet re-implemented");
+}
+
+int IoUringRawVideoFileWorker::submitBatchReads(BufferPool* pool, 
+                                       const std::vector<int>& frame_indices) {
+    LOG_WARN_FMT("[Worker]  Warning: submitBatchReads not yet re-implemented");
+    return 0;
+}
+
+// ============ 内部辅助方法实现 ============
+
+bool IoUringRawVideoFileWorker::submitReadRequest(int frame_index, void* buffer, size_t buffer_size) {
+    if (!initialized_ || video_fd_ < 0) {
+        LOG_ERROR_FMT("[Worker] ERROR: IoUring not initialized or file not open");
+        return false;
+    }
+    
+    // 计算文件偏移量
+    off_t offset = static_cast<off_t>(frame_index) * frame_size_;
+    
+    // 获取 SQE（Submission Queue Entry）
+    struct io_uring_sqe* sqe = io_uring_get_sqe(&ring_);
+    if (!sqe) {
+        LOG_ERROR_FMT("[Worker] ERROR: Failed to get SQE from io_uring");
+        return false;
+    }
+    
+    // 准备读取请求
+    io_uring_prep_read(sqe, video_fd_, buffer, frame_size_, offset);
+    io_uring_sqe_set_data(sqe, buffer);  // 设置用户数据
+    
+    // 提交请求
+    int ret = io_uring_submit(&ring_);
+    if (ret < 0) {
+        LOG_ERROR_FMT("[Worker] ERROR: io_uring_submit failed: %s", strerror(-ret));
+        return false;
+    }
+    
+    return true;
+}
+
+bool IoUringRawVideoFileWorker::waitForCompletion() {
+    if (!initialized_) {
+        LOG_ERROR_FMT("[Worker] ERROR: IoUring not initialized");
+        return false;
+    }
+    
+    // 等待完成事件
+    struct io_uring_cqe* cqe;
+    int ret = io_uring_wait_cqe(&ring_, &cqe);
+    if (ret < 0) {
+        LOG_ERROR_FMT("[Worker] ERROR: io_uring_wait_cqe failed: %s", strerror(-ret));
+        return false;
+    }
+    
+    // 检查读取结果
+    if (cqe->res < 0) {
+        LOG_ERROR_FMT("[Worker] ERROR: Read failed: %s", strerror(-cqe->res));
+        io_uring_cqe_seen(&ring_, cqe);
+        return false;
+    }
+    
+    if ((size_t)cqe->res != frame_size_) {
+        LOG_ERROR_FMT("[Worker] ERROR: Incomplete read: got %d bytes, expected %zu", 
+               cqe->res, frame_size_);
+        io_uring_cqe_seen(&ring_, cqe);
+        return false;
+    }
+    
+    // 标记CQE已处理
+    io_uring_cqe_seen(&ring_, cqe);
+    
+    return true;
+}

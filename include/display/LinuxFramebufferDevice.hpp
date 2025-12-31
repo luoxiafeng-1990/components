@@ -1,9 +1,11 @@
 #ifndef LINUX_FRAMEBUFFER_DEVICE_HPP
 #define LINUX_FRAMEBUFFER_DEVICE_HPP
 
-#include "IDisplayDevice.hpp"
-#include "../buffer/Buffer.hpp"
-#include "../buffer/BufferPool.hpp"
+#include "display/IDisplayDevice.hpp"
+#include "buffer/bufferpool/Buffer.hpp"
+#include "buffer/bufferpool/BufferPool.hpp"
+#include "buffer/BufferAllocatorFacade.hpp"
+#include "buffer/BufferAllocatorFactory.hpp"
 #include <vector>
 #include <memory>
 #include <stdexcept>
@@ -21,55 +23,6 @@
  * - 通过设置yoffset切换不同的buffer
  */
 class LinuxFramebufferDevice : public IDisplayDevice {
-private:
-    // ============ Linux特有资源 ============
-    int fd_;                          // framebuffer文件描述符
-    int fb_index_;                    // framebuffer索引（0或1）
-    
-    // ============ mmap映射管理 ============
-    void* framebuffer_base_;          // mmap返回的基地址
-    size_t framebuffer_total_size_;   // 映射的总大小
-    
-    // ============ Buffer管理（使用BufferPool）============
-    std::unique_ptr<BufferPool> buffer_pool_;  // BufferPool 管理 framebuffer
-    std::vector<void*> fb_mappings_;          // framebuffer 映射地址（用于物理地址查询）
-    int buffer_count_;                        // buffer 数量
-    int current_buffer_index_;                // 当前显示的buffer索引
-    
-    // ============ 显示属性 ============
-    int width_;                       // 显示宽度（像素）
-    int height_;                      // 显示高度（像素）
-    int bits_per_pixel_;              // 每像素位数（可以是非整数字节，如12bit、16bit、24bit、32bit等）
-    size_t buffer_size_;              // 单个buffer大小（字节）
-    
-    // ============ 状态标志 ============
-    bool is_initialized_;
-    
-    // ============ 内部辅助方法 ============
-    
-    /**
-     * 查询硬件显示参数
-     * 通过ioctl从硬件读取分辨率、bits_per_pixel、buffer数量等显示参数
-     */
-    bool queryHardwareDisplayParameters();
-    
-    /**
-     * 执行mmap映射
-     * 将整个硬件framebuffer内存映射到用户空间
-     */
-    bool mapHardwareFramebufferMemory();
-    
-    /**
-     * 计算每个buffer的虚拟地址
-     * buffer[i] = framebuffer_base + (buffer_size * i)
-     */
-    void calculateBufferAddresses();
-    
-    /**
-     * 解除硬件framebuffer内存的mmap映射
-     */
-    void unmapHardwareFramebufferMemory();
-
 public:
     LinuxFramebufferDevice();
     ~LinuxFramebufferDevice() override;
@@ -88,10 +41,8 @@ public:
     int getBufferCount() const override;
     size_t getBufferSize() const override;
     
-    Buffer& getBuffer(int buffer_index) override;
-    const Buffer& getBuffer(int buffer_index) const override;
-    
-    bool displayBuffer(int buffer_index) override;
+    bool displayBuffer(Buffer* buffer) override;
+    bool displayBuffer(BufferPool* pool, int buffer_index) override;
     bool waitVerticalSync() override;
     int getCurrentDisplayBuffer() const override;
     
@@ -159,46 +110,100 @@ public:
      */
     bool displayBufferByMemcpyToFramebuffer(Buffer* buffer);
     
-    // ============ 新接口：BufferPool 访问 ============
+    // ============ 新接口：信息提供和依赖注入 ============
     
     /**
-     * @brief 获取 BufferPool 引用
-     * @return BufferPool& 对内部 BufferPool 的引用
-     * @throws std::runtime_error 如果 BufferPool 未初始化
+     * @brief 获取 mmap 信息（供 FramebufferAllocator 使用）
      * 
-     * @note 生命周期：返回的引用在 LinuxFramebufferDevice 对象存活期间有效
-     * @warning 不要在 cleanup() 或析构后使用返回的引用
-     * @warning 引用的生命周期与 LinuxFramebufferDevice 绑定
+     * @return MappedInfo 包含 mmap 后的内存信息
+     * 
+     * @note 必须在 initialize() 之后调用
+     * 
+     * 使用场景：
+     * - FramebufferAllocator 需要这些信息来创建 BufferPool
      * 
      * 使用示例：
      * @code
-     * LinuxFramebufferDevice display;
-     * display.initialize(0);
-     * BufferPool& pool = display.getBufferPool();  // 注意是引用
-     * VideoProducer producer(pool);
-     * // 或直接传递：
-     * VideoProducer producer2(display.getBufferPool());
+     * auto device = std::make_unique<LinuxFramebufferDevice>();
+     * device->initialize(0);
+     * 
+     * auto info = device->getMappedInfo();
+     * // info.base_addr, info.buffer_size, info.buffer_count
      * @endcode
      */
-    BufferPool& getBufferPool() {
-        if (!buffer_pool_) {
-            throw std::runtime_error("❌ BufferPool not initialized. Call initialize() first.");
-        }
-        return *buffer_pool_;
-    }
+    struct MappedInfo {
+        void* base_addr;        // mmap 后的基地址
+        size_t buffer_size;     // 单个 buffer 大小
+        int buffer_count;       // buffer 数量
+    };
+    MappedInfo getMappedInfo() const;
     
     /**
-     * @brief 获取 BufferPool 常量引用
-     * @return const BufferPool& 对内部 BufferPool 的常量引用
-     * @throws std::runtime_error 如果 BufferPool 未初始化
+     * @brief 获取 framebuffer 索引
+     * 
+     * @return int framebuffer 索引（0 或 1）
      */
-    const BufferPool& getBufferPool() const {
-        if (!buffer_pool_) {
-            throw std::runtime_error("❌ BufferPool not initialized. Call initialize() first.");
-        }
-        return *buffer_pool_;
-    }
+    int getFbIndex() const { return fb_index_; }
+    
+    /**
+     * @brief 获取当前的 BufferPool ID
+     * 
+     * @return uint64_t BufferPool ID，如果未初始化返回 0
+     * 
+     * @note BufferPool 在 initialize() 中自动创建并注册到 Registry
+     * @note 使用 BufferPoolRegistry::getInstance().getPool(pool_id) 获取 Pool
+     */
+    uint64_t getBufferPoolId() const { return buffer_pool_id_; }
+
+private:
+    // ============ Linux特有资源 ============
+    int fd_;                          // framebuffer文件描述符
+    int fb_index_;                    // framebuffer索引（0或1）
+    
+    // ============ mmap映射管理 ============
+    void* framebuffer_base_ptr_;          // mmap返回的基地址
+    size_t framebuffer_total_size_;   // 映射的总大小
+    
+    // ============ Buffer管理（使用BufferPool）============
+    std::unique_ptr<BufferAllocatorFacade> allocator_facade_;  // 门面类对象
+    uint64_t buffer_pool_id_;                                  // v2.0: BufferPool ID（从 Registry 获取）
+    std::vector<void*> fb_mappings_;          // framebuffer 映射地址（用于物理地址查询）
+    int buffer_count_;                        // buffer 数量
+    int current_buffer_index_;                // 当前显示的buffer索引
+    
+    // ============ 显示属性 ============
+    int width_;                       // 显示宽度（像素）
+    int height_;                      // 显示高度（像素）
+    int bits_per_pixel_;              // 每像素位数（可以是非整数字节，如12bit、16bit、24bit、32bit等）
+    size_t buffer_size_;              // 单个buffer大小（字节）
+    
+    // ============ 状态标志 ============
+    bool is_initialized_;
+    
+    // ============ 内部辅助方法 ============
+    
+    /**
+     * 查询硬件显示参数
+     * 通过ioctl从硬件读取分辨率、bits_per_pixel、buffer数量等显示参数
+     */
+    bool queryHardwareDisplayParameters();
+    
+    /**
+     * 执行mmap映射
+     * 将整个硬件framebuffer内存映射到用户空间
+     */
+    bool mapHardwareFramebufferMemory();
+    
+    /**
+     * 计算每个buffer的虚拟地址
+     * buffer[i] = framebuffer_base + (buffer_size * i)
+     */
+    void calculateBufferAddresses();
+    
+    /**
+     * 解除硬件framebuffer内存的mmap映射
+     */
+    void unmapHardwareFramebufferMemory();
 };
 
 #endif // LINUX_FRAMEBUFFER_DEVICE_HPP
-

@@ -1,8 +1,8 @@
-# C++ 编译错误汇总文档
+# C++ 编译/运行时错误汇总文档
 
-> 本文档记录了 BufferPool 架构重构过程中遇到的所有编译错误、原因分析和解决方案
+> 本文档记录了 BufferPool 架构重构过程中遇到的所有编译错误、运行时错误、原因分析和解决方案
 
-**日期**: 2025-11-13  
+**日期**: 2025-11-13 ~ 2025-12-24  
 **项目**: BufferPool 架构重构（从 BufferManager 到 BufferPool + VideoProducer）  
 **编译器**: GCC 14.1.1 (RISC-V 64-bit)  
 **C++ 标准**: C++17
@@ -20,8 +20,14 @@
 7. [错误 #7: 成员变量 buffers_ 未声明](#错误-7-成员变量-buffers_-未声明)
 8. [错误 #8: Makefile 引用已删除的源文件](#错误-8-makefile-引用已删除的源文件)
 9. [错误 #9: 缺少头文件和默认参数类型不匹配](#错误-9-缺少头文件和默认参数类型不匹配)
-10. [知识点 #10: std::unique_ptr 的解引用和访问操作符](#知识点-10-stduniqueptr-的解引用和访问操作符)
-11. [知识点 #11: explicit 关键字与隐式类型转换](#知识点-11-explicit-关键字与隐式类型转换)
+10. [错误 #10: std::atomic 不可复制导致 unordered_map::emplace 失败](#错误-10-stdatomic-不可复制导致-unordered_mapemplace-失败)
+11. [错误 #13: std::thread 在 joinable 状态下析构导致 std::terminate()](#错误-13-stdthread-在-joinable-状态下析构导致-stdterminate)
+12. [知识点 #11: std::unique_ptr 的解引用和访问操作符](#知识点-11-stduniqueptr-的解引用和访问操作符)
+13. [知识点 #12: explicit 关键字与隐式类型转换](#知识点-12-explicit-关键字与隐式类型转换)
+14. [知识点 #13: 基类成员变量声明顺序对派生类析构的影响](#知识点-13-基类成员变量声明顺序对派生类析构的影响)
+15. [错误 #14: FFmpeg RTSP 流时间戳不从0开始导致 MP4 封装失败](#错误-14-ffmpeg-rtsp-流时间戳不从0开始导致-mp4-封装失败)
+16. [错误 #15: FFmpeg 负时间戳导致 MP4 muxer 报错](#错误-15-ffmpeg-负时间戳导致-mp4-muxer-报错)
+17. [错误 #16: FFmpeg DTS 重复导致单调递增检查失败](#错误-16-ffmpeg-dts-重复导致单调递增检查失败)
 
 ---
 
@@ -761,7 +767,537 @@ MyClass obj;  // OK
 
 ---
 
-## 知识点 #10: std::unique_ptr 的解引用和访问操作符
+## 错误 #10: std::atomic 不可复制导致 unordered_map::emplace 失败
+
+### 错误信息
+
+```
+/toolchain/riscv64-unknown-linux-gnu/include/c++/14.1.1/bits/new_allocator.h:191:11: error: no matching function for call to 'std::pair<const std::__cxx11::basic_string<char>, PerformanceMonitor::MetricData>::pair(const std::__cxx11::basic_string<char>&, PerformanceMonitor::MetricData)'
+  191 |         { ::new((void *)__p) _Up(std::forward<_Args>(__args)...); }
+      |           ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+source/monitor/PerformanceMonitor.cpp:292:30:   required from here
+  292 |         it = metrics_.emplace(metric_name, MetricData()).first;
+      |              ~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~
+```
+
+### 错误代码
+
+```cpp
+// PerformanceMonitor.cpp
+#include "monitor/PerformanceMonitor.hpp"
+#include <stdio.h>
+#include <string.h>
+// ❌ 缺少 #include <utility>
+
+// ...
+
+PerformanceMonitor::MetricData& PerformanceMonitor::getOrCreateMetric(const std::string& metric_name) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    auto it = metrics_.find(metric_name);
+    if (it == metrics_.end()) {
+        // ❌ 错误代码：尝试复制构造 MetricData
+        it = metrics_.emplace(metric_name, MetricData()).first;
+        //                              ^^^^^^^^^^^^^^^^
+        //                              先构造临时对象，然后尝试复制到 map 内部
+        //                              但 MetricData 包含 std::atomic 成员，不可复制！
+    }
+    return it->second;
+}
+```
+
+```cpp
+// PerformanceMonitor.hpp
+struct MetricData {
+    std::atomic<int> count{0};                    // ❌ 不可复制
+    std::atomic<long long> total_time_us{0};     // ❌ 不可复制
+    std::chrono::steady_clock::time_point start_time;
+    std::atomic<bool> is_timing{false};          // ❌ 不可复制
+    
+    MetricData() {
+        count.store(0);
+        total_time_us.store(0);
+        is_timing.store(false);
+    }
+};
+
+std::unordered_map<std::string, MetricData> metrics_;  // map 容器
+```
+
+### 错误原因分析
+
+#### 1. 根本原因
+
+**`std::atomic` 类型是**不可复制构造（non-copyable）**的**：
+- `std::atomic` 的复制构造函数和复制赋值运算符被标记为 `= delete`
+- 这是 C++ 标准的设计，因为原子操作需要保证线程安全，复制会破坏原子性
+
+#### 2. 错误发生过程
+
+```cpp
+// 步骤1：MetricData() 在栈上构造一个临时对象
+MetricData temp_object;  // 临时对象，在栈上
+
+// 步骤2：emplace 尝试将这个临时对象放入 map
+metrics_.emplace(metric_name, temp_object);
+//                      ↑              ↑
+//                    key        已构造的 value 对象
+
+// 步骤3：emplace 内部需要将这个对象"复制"到 map 的存储位置
+// 伪代码示意：
+// pair<const string, MetricData> new_pair(metric_name, temp_object);
+//                                                      ↑
+//                                            这里需要复制构造！
+//                                            但 std::atomic 不可复制 → 编译错误
+```
+
+#### 3. 为什么 `emplace` 会触发复制？
+
+**关键理解：`emplace` 有两种用法**
+
+**用法 1：传入已构造的对象（会触发复制/移动）**
+```cpp
+MetricData data;  // 先构造好
+map.emplace("key", data);  // ❌ 需要复制 data 到 map 内部
+// 等价于：map.insert({"key", data});
+```
+
+**用法 2：分段构造（真正的就地构造）**
+```cpp
+map.emplace(
+    std::piecewise_construct,
+    std::forward_as_tuple("key"),      // 告诉编译器：用这些参数构造 key
+    std::forward_as_tuple()            // 告诉编译器：用这些参数构造 value
+);
+// ✅ 直接在 map 内部构造，不复制
+```
+
+#### 4. 为什么错误信息指向 `new_allocator.h`？
+
+- 错误发生在标准库的分配器代码中
+- `emplace` 内部会调用 `allocator::construct` 来构造对象
+- 构造过程中需要复制 `MetricData`，但复制失败
+- 所以错误信息指向了 `new_allocator.h` 中的 `construct` 函数
+
+### 解决方案
+
+**使用 `std::piecewise_construct` 进行就地构造（in-place construction）**
+
+```cpp
+// PerformanceMonitor.cpp
+#include "monitor/PerformanceMonitor.hpp"
+#include <stdio.h>
+#include <string.h>
+#include <utility>  // ✅ 添加：for std::piecewise_construct, std::forward_as_tuple
+
+// ...
+
+PerformanceMonitor::MetricData& PerformanceMonitor::getOrCreateMetric(const std::string& metric_name) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    auto it = metrics_.find(metric_name);
+    if (it == metrics_.end()) {
+        // ✅ 正确代码：使用 piecewise_construct 就地构造，避免复制 std::atomic 成员
+        it = metrics_.emplace(
+            std::piecewise_construct,              // 标记：使用分段构造
+            std::forward_as_tuple(metric_name),    // 构造 key（string）
+            std::forward_as_tuple()                // 就地构造 value（MetricData，不复制）
+        ).first;
+    }
+    return it->second;
+}
+```
+
+### 代码对比
+
+```cpp
+// ============ 错误方式（会触发复制构造）============
+metrics_.emplace(metric_name, MetricData());
+//                              ↑
+//                   先构造临时对象 MetricData()
+//                   然后尝试复制到 map 内部
+//                   但 std::atomic 不可复制 → 编译错误！
+
+// 等价于：
+MetricData temp = MetricData();  // 步骤1：构造临时对象
+// 步骤2：尝试复制 temp 到 map（这里失败！）
+metrics_.emplace(metric_name, temp);  // ❌ 需要复制构造
+
+
+// ============ 正确方式（就地构造，不复制）============
+metrics_.emplace(
+    std::piecewise_construct,
+    std::forward_as_tuple(metric_name),  // 用 metric_name 构造 string
+    std::forward_as_tuple()              // 用无参构造 MetricData
+);
+// ✅ 直接在 map 内部调用 MetricData() 构造函数
+// ✅ 没有临时对象，没有复制操作
+```
+
+### 可视化对比
+
+```
+错误方式（emplace(metric_name, MetricData())）：
+┌─────────────────────────────────────────┐
+│ 栈上临时对象                            │
+│ MetricData temp = MetricData();        │ ← 步骤1：构造临时对象
+└─────────────────────────────────────────┘
+              │
+              │ 尝试复制（❌ 失败！std::atomic 不可复制）
+              ▼
+┌─────────────────────────────────────────┐
+│ map 内部存储位置                         │
+│ pair<string, MetricData>                │ ← 步骤2：需要复制构造（失败）
+└─────────────────────────────────────────┘
+
+
+正确方式（piecewise_construct）：
+┌─────────────────────────────────────────┐
+│ map 内部存储位置                         │
+│ 直接调用 MetricData() 构造函数          │ ← 一步到位，无临时对象
+│ pair<string, MetricData>                │
+└─────────────────────────────────────────┘
+```
+
+### 知识点
+
+#### 1. std::atomic 的特性
+
+```cpp
+#include <atomic>
+#include <iostream>
+
+int main() {
+    std::atomic<int> a(10);
+    std::atomic<int> b = a;  // ❌ 编译错误！
+    // error: use of deleted function 'std::atomic<int>::atomic(const std::atomic<int>&)'
+    return 0;
+}
+```
+
+- `std::atomic` 的复制构造函数被 `= delete`
+- 只能通过 `load()` 和 `store()` 操作值
+- 不可拷贝、不可移动（默认没有 move constructor/assignment）
+
+#### 2. piecewise_construct 的工作原理
+
+```cpp
+// 标准形式：
+map.emplace(
+    std::piecewise_construct,           // 标记：分段构造
+    std::forward_as_tuple(args_for_key), // key 的构造参数（tuple）
+    std::forward_as_tuple(args_for_value) // value 的构造参数（tuple）
+);
+
+// 我们的例子：
+metrics_.emplace(
+    std::piecewise_construct,
+    std::forward_as_tuple(metric_name),  // string 的构造参数
+    std::forward_as_tuple()              // MetricData() 的构造参数（无参构造）
+);
+```
+
+#### 3. 为什么需要 `#include <utility>`
+
+- `std::piecewise_construct` 定义在 `<utility>` 中
+- `std::forward_as_tuple` 定义在 `<tuple>` 中，但通常通过 `<utility>` 间接包含
+
+### 其他可选方案
+
+如果编译器支持 C++17，也可以使用 `try_emplace`：
+
+```cpp
+// C++17 方案（更简洁）
+auto [it, inserted] = metrics_.try_emplace(metric_name);
+return it->second;
+```
+
+但 `piecewise_construct` 方案兼容性更好（C++11 即可）。
+
+### 相关错误
+
+- **错误 #3**: `std::atomic` 不可移动导致 `vector` 操作失败
+  - 类似问题，但发生在 `vector::reserve()` 时
+  - 解决方案：显式实现移动构造函数和移动赋值运算符
+
+### 参考代码位置
+
+- `PerformanceMonitor.cpp:292` - 错误代码位置
+- `PerformanceMonitor.cpp:293-296` - 修复后的代码
+- `PerformanceMonitor.hpp:240-247` - `MetricData` 结构体定义
+
+---
+
+## 错误 #13: std::thread 在 joinable 状态下析构导致 std::terminate()
+
+### 错误信息
+
+```
+[INFO ] [VideoProductionLine] =====================================================================
+terminate called without an active exception
+Aborted
+```
+
+### 错误原因
+
+- **根本原因**: `std::vector<std::thread>` 容器在析构时，其中的 `std::thread` 对象仍处于 `joinable()` 状态
+- **详细分析**:
+  - C++ 标准规定：如果一个 `std::thread` 对象在析构时仍然是 `joinable` 的（即既没有被 `join()` 也没有被 `detach()`），程序会调用 `std::terminate()` 终止进程
+  - 在 `VideoProductionLine::~VideoProductionLine()` 中，只有当 `running_.load()` 为 `true` 时才调用 `stop()` 来 join 线程
+  - 如果 `running_` 为 `false`，但 `threads_` 容器中仍有 `joinable` 的线程，则在析构函数结束时 `threads_` 容器析构会导致 `std::terminate()`
+
+```cpp
+// 问题代码
+VideoProductionLine::~VideoProductionLine() {
+    LOG_INFO_FMT("[VideoProductionLine] Destructor called");
+    if (running_.load()) {
+        stop();  // 只有 running_ 为 true 时才 join 线程
+    }
+    // 如果 running_ 为 false，threads_ 中的 joinable 线程会导致 terminate
+}
+```
+
+### 触发场景
+
+1. `VideoProductionLine` 对象创建后启动了线程（`threads_` 中有线程对象）
+2. 某种原因导致 `running_` 标志被设置为 `false`（或从未设置为 `true`）
+3. 对象析构时，由于 `running_` 为 `false`，`stop()` 未被调用
+4. `threads_` 容器析构，尝试析构其中的 `joinable` 线程对象
+5. 触发 `std::terminate()` → 程序异常终止
+
+### 解决方案
+
+**在析构函数中无条件地 join 所有线程**
+
+```cpp
+// VideoProductionLine.cpp
+
+// ❌ 错误写法
+VideoProductionLine::~VideoProductionLine() {
+    LOG_INFO_FMT("[VideoProductionLine] Destructor called");
+    if (running_.load()) {
+        stop();  // 只在 running_ 为 true 时处理线程
+    }
+    // threads_ 中可能还有 joinable 线程 → std::terminate()
+}
+
+// ✅ 正确写法
+VideoProductionLine::~VideoProductionLine() {
+    LOG_INFO_FMT("[VideoProductionLine] Destructor called");
+    if (running_.load()) {
+        stop();  // 正常停止流程
+    } else {
+        // 即使未运行，也要确保所有线程被 join，防止 std::terminate()
+        std::lock_guard<std::mutex> lock(threads_mutex_);
+        for (auto& thread : threads_) {
+            if (thread.joinable()) {
+                thread.join();
+            }
+        }
+        threads_.clear();
+    }
+}
+```
+
+### 知识点
+
+#### 1. std::thread 的析构行为
+
+```cpp
+#include <thread>
+
+void worker() {
+    // ... 工作代码
+}
+
+int main() {
+    std::thread t(worker);
+    
+    // ❌ 错误：线程仍然 joinable，程序会调用 std::terminate()
+    // t 析构时会检查 joinable() == true，然后终止程序
+    
+    // ✅ 正确方式1：join
+    t.join();  // 等待线程完成
+    
+    // ✅ 正确方式2：detach
+    // t.detach();  // 分离线程，让其在后台运行
+    
+    return 0;
+}
+```
+
+#### 2. joinable() 的含义
+
+```cpp
+std::thread t;
+
+// 默认构造的线程不 joinable
+assert(!t.joinable());
+
+// 启动线程后变为 joinable
+t = std::thread(worker);
+assert(t.joinable());
+
+// join 后不再 joinable
+t.join();
+assert(!t.joinable());
+
+// detach 后也不再 joinable
+std::thread t2(worker);
+t2.detach();
+assert(!t2.joinable());
+```
+
+#### 3. std::vector<std::thread> 的析构
+
+```cpp
+std::vector<std::thread> threads;
+
+// 添加线程
+threads.emplace_back(worker1);
+threads.emplace_back(worker2);
+
+// ❌ 错误：vector 析构时会依次析构每个 thread
+//    如果任何一个 thread 仍然 joinable，程序会终止
+// } ← vector 析构点
+
+// ✅ 正确：析构前 join 所有线程
+for (auto& thread : threads) {
+    if (thread.joinable()) {
+        thread.join();
+    }
+}
+threads.clear();  // 现在安全了
+```
+
+#### 4. 为什么 C++ 标准这样设计？
+
+**设计理由：防止资源泄漏和未定义行为**
+
+```cpp
+// 如果允许 joinable 线程被析构：
+{
+    std::thread t([]() {
+        std::cout << "Thread running\n";  // 访问全局对象
+    });
+    // 假设这里 t 被析构但线程仍在运行
+} // ← 离开作用域
+
+// 问题：线程仍在后台运行，但：
+// 1. 线程可能访问已销毁的局部变量 → 未定义行为
+// 2. 线程可能访问已销毁的对象成员 → 未定义行为
+// 3. 程序退出但线程仍在运行 → 资源泄漏
+
+// C++ 标准选择：宁可 terminate，也不允许这种危险情况
+```
+
+### 调试技巧
+
+#### 1. 检查线程状态
+
+```cpp
+// 添加日志检查线程状态
+for (size_t i = 0; i < threads_.size(); ++i) {
+    LOG_DEBUG_FMT("Thread[{}] joinable: {}", i, threads_[i].joinable());
+}
+```
+
+#### 2. 使用 RAII 封装线程管理
+
+```cpp
+// 自动 join 的线程包装器
+class JoiningThread {
+    std::thread thread_;
+public:
+    template<typename... Args>
+    explicit JoiningThread(Args&&... args) 
+        : thread_(std::forward<Args>(args)...) {}
+    
+    ~JoiningThread() {
+        if (thread_.joinable()) {
+            thread_.join();  // 自动 join
+        }
+    }
+    
+    // 禁止拷贝和移动
+    JoiningThread(const JoiningThread&) = delete;
+    JoiningThread& operator=(const JoiningThread&) = delete;
+};
+```
+
+#### 3. 使用 std::jthread (C++20)
+
+```cpp
+// C++20 引入的自动 join 线程
+#include <thread>
+
+void worker();
+
+int main() {
+    std::jthread t(worker);  // C++20
+    // 析构时自动 join，无需手动调用
+}
+```
+
+### 最佳实践
+
+1. **RAII 原则**：确保线程在对象生命周期结束前被正确清理
+2. **析构函数检查**：在析构函数中无条件检查并 join 所有 `joinable` 线程
+3. **明确的停止流程**：提供明确的 `stop()` 方法，而不是依赖析构
+4. **状态标志与实际状态一致**：确保 `running_` 等状态标志准确反映线程状态
+
+### 常见错误场景
+
+```cpp
+// ❌ 场景1：只在某个条件下 join
+class Worker {
+    std::thread thread_;
+    bool started_ = false;
+public:
+    ~Worker() {
+        if (started_) {  // ❌ 错误：如果 started_ 状态不准确会出问题
+            thread_.join();
+        }
+    }
+};
+
+// ❌ 场景2：忘记处理异常路径
+class Worker {
+    std::thread thread_;
+public:
+    void start() {
+        thread_ = std::thread(worker);
+        // 如果这里抛异常，thread_ 是 joinable 的
+        doSomethingThatMightThrow();  // ❌ 异常导致 ~Worker() 被调用
+    }
+    ~Worker() {
+        // 可能 thread_ 仍然 joinable
+    }
+};
+
+// ✅ 正确：总是检查 joinable()
+class Worker {
+    std::thread thread_;
+public:
+    ~Worker() {
+        if (thread_.joinable()) {  // ✅ 无条件检查
+            thread_.join();
+        }
+    }
+};
+```
+
+### 参考代码位置
+
+- `VideoProductionLine.cpp:~VideoProductionLine()` - 修复的析构函数
+- `VideoProductionLine.hpp` - `threads_` 成员变量定义
+
+### C++ 标准参考
+
+- C++11 标准 §30.3.1.3: "If joinable() then terminate()"
+- C++20: 引入 `std::jthread`，析构时自动 join
+
+---
+
+## 知识点 #11: std::unique_ptr 的解引用和访问操作符
 
 ### 常见困惑
 
@@ -1048,7 +1584,7 @@ BufferPool& ref = *smart_ptr;  // 获取引用
 
 ---
 
-## 知识点 #11: explicit 关键字与隐式类型转换
+## 知识点 #12: explicit 关键字与隐式类型转换
 
 ### 什么是 explicit 关键字？
 
@@ -1568,17 +2104,322 @@ static_assert(!std::is_convertible_v<int, Age>,
 
 ---
 
+## 知识点 #13: 基类成员变量声明顺序对派生类析构的影响
+
+### 背景问题
+
+在修复 `free(): invalid pointer` 错误时，我们尝试通过调整 `WorkerBase` 基类中成员变量的声明顺序，希望让 `allocator_facade_` 在派生类 `FfmpegDecodeVideoFileWorker` 的业务资源（如 FFmpeg 解码器）之前析构，从而先释放 AVFrame，再关闭解码器。
+
+### 问题代码
+
+```cpp
+// WorkerBase.hpp (调整后的成员变量顺序)
+class WorkerBase {
+protected:
+    /**
+     * ⭐ 声明顺序第1位：最后析构
+     */
+    WorkerConfig worker_config_;
+    
+    /**
+     * ⭐ 声明顺序第2位：第2个析构
+     */
+    uint64_t buffer_pool_id_;
+    
+    /**
+     * ⭐ 声明顺序第3位：最先析构（C++ 析构顺序是声明顺序的逆序）
+     * ⭐ 关键设计：Allocator 最先析构，自动清理所有 Pool 和 AVFrame
+     */
+    BufferAllocatorFacade allocator_facade_;
+};
+
+// FfmpegDecodeVideoFileWorker.cpp (派生类析构函数)
+FfmpegDecodeVideoFileWorker::~FfmpegDecodeVideoFileWorker() {
+    LOG_DEBUG("[FfmpegDecodeVideoFileWorker] 析构函数开始");
+    close();  // 关闭 FFmpeg 解码器
+    LOG_DEBUG("[FfmpegDecodeVideoFileWorker] 析构函数体结束");
+    // 期望：这里 allocator_facade_ 先析构，释放 AVFrame
+}
+```
+
+### ❌ 错误的期望
+
+**期望的析构顺序（错误）：**
+```
+1. ~FfmpegDecodeVideoFileWorker() 析构函数体开始
+2. close() - 关闭 FFmpeg 解码器
+3. 基类成员 allocator_facade_ 析构 ← 期望这里先释放 AVFrame
+4. ~FfmpegDecodeVideoFileWorker() 析构函数体结束
+```
+
+### ✅ 实际的析构顺序（C++ 标准规定）
+
+**C++ 标准规定的析构顺序：**
+```
+1️⃣ 派生类析构函数体执行
+   └─ ~FfmpegDecodeVideoFileWorker() {
+          close();  // 关闭 FFmpeg 解码器（avcodec_free_context）
+      }
+
+2️⃣ 派生类成员变量析构（按声明顺序的逆序）
+   └─ 如果派生类有自己的成员变量，在这里析构
+
+3️⃣ 基类 WorkerBase 成员变量析构（按声明顺序的逆序）
+   ├─ allocator_facade_ 析构 ← 实际在这里才释放 AVFrame
+   ├─ buffer_pool_id_ （无析构逻辑）
+   └─ worker_config_ 析构
+
+4️⃣ 基类 WorkerBase 析构函数体执行
+   └─ ~WorkerBase() { }
+```
+
+### 关键问题：基类成员变量永远在派生类析构函数体之后析构
+
+**核心原因：** 无论如何调整基类成员变量的声明顺序，它们的析构都发生在**派生类析构函数体执行完毕之后**，因此无法阻止派生类在析构函数体内先调用 `close()` → `avcodec_free_context()`。
+
+### 可复现示例
+
+```cpp
+#include <iostream>
+#include <memory>
+
+// 基类
+class Base {
+protected:
+    struct Resource1 {
+        ~Resource1() { std::cout << "    3️⃣ Resource1 析构\n"; }
+    };
+    
+    struct Resource2 {
+        ~Resource2() { std::cout << "    2️⃣ Resource2 析构\n"; }
+    };
+    
+    // ⭐ 尝试调整顺序：让 Resource2 最先析构
+    Resource1 res1_;  // 声明顺序第1位
+    Resource2 res2_;  // 声明顺序第2位（期望最先析构）
+    
+public:
+    Base() {
+        std::cout << "Base 构造\n";
+    }
+    
+    ~Base() {
+        std::cout << "  4️⃣ Base 析构函数体\n";
+    }
+};
+
+// 派生类
+class Derived : public Base {
+public:
+    Derived() {
+        std::cout << "Derived 构造\n";
+    }
+    
+    ~Derived() {
+        std::cout << "1️⃣ Derived 析构函数体开始\n";
+        std::cout << "  （期望 Resource2 在这里先析构，但实际不会）\n";
+        // 这里期望 Base 的 Resource2 已经析构，但实际还没有！
+    }
+};
+
+int main() {
+    std::cout << "=== 创建对象 ===\n";
+    {
+        Derived d;
+    }
+    std::cout << "\n=== 析构完成 ===\n";
+    
+    std::cout << "\n实际析构顺序：\n";
+    std::cout << "1️⃣ Derived 析构函数体\n";
+    std::cout << "2️⃣ Base::Resource2 析构（声明顺序靠后，先析构）\n";
+    std::cout << "3️⃣ Base::Resource1 析构（声明顺序靠前，后析构）\n";
+    std::cout << "4️⃣ Base 析构函数体\n";
+    
+    return 0;
+}
+```
+
+### 运行结果
+
+```
+=== 创建对象 ===
+Base 构造
+Derived 构造
+1️⃣ Derived 析构函数体开始
+  （期望 Resource2 在这里先析构，但实际不会）
+    2️⃣ Resource2 析构
+    3️⃣ Resource1 析构
+  4️⃣ Base 析构函数体
+
+=== 析构完成 ===
+```
+
+**结论：基类成员变量的析构发生在派生类析构函数体之后！**
+
+### ✅ 正确的解决方案
+
+**在派生类析构函数体内手动调用清理方法：**
+
+```cpp
+// FfmpegDecodeVideoFileWorker.cpp
+FfmpegDecodeVideoFileWorker::~FfmpegDecodeVideoFileWorker() {
+    LOG_DEBUG("[FfmpegDecodeVideoFileWorker] 析构函数开始");
+    
+    // ✅ 正确：手动清理 BufferPool 和 AVFrame
+    if (buffer_pool_id_ != 0) {
+        LOG_DEBUG("[FfmpegDecodeVideoFileWorker] 手动清理 BufferPool 和 AVFrame...");
+        allocator_facade_.destroyPool();  // ← 在派生类析构函数体内手动调用
+        buffer_pool_id_ = 0;
+    }
+    
+    // ✅ 正确：再关闭解码器（此时 AVFrame 已全部释放）
+    if (is_open_.load(std::memory_order_acquire)) {
+        LOG_DEBUG("[FfmpegDecodeVideoFileWorker] 关闭解码器...");
+        close();
+    }
+    
+    LOG_DEBUG("[FfmpegDecodeVideoFileWorker] 析构函数体结束");
+    
+    // 成员变量自动析构：
+    // - allocator_facade_.destroyPool() 再次被调用（幂等性，直接返回）
+}
+```
+
+### 完整的析构流程
+
+```
+~FfmpegDecodeVideoFileWorker() {
+    // 1️⃣ 派生类析构函数体执行
+    allocator_facade_.destroyPool();  // 手动清理 AVFrame
+    ↓
+    AVFrameAllocator::destroyPool() {
+        遍历所有 Buffer
+        ↓
+        av_frame_free(&frame)  // ✅ 先释放 AVFrame
+    }
+    ↓
+    close();
+    ↓
+    closeMediaSource();
+    ↓
+    avcodec_free_context()  // ✅ 此时 AVFrame 已经全部释放，安全！
+}
+// 2️⃣ 派生类析构函数体结束
+
+// 3️⃣ 基类成员变量析构（逆序）
+~allocator_facade_() {
+    destroyPool();  // ✅ 因为幂等性，第二次调用直接返回，不会重复释放
+}
+~buffer_pool_id_()  // 无析构逻辑
+~worker_config_()
+
+// 4️⃣ 基类析构函数体执行
+~WorkerBase() { }
+```
+
+### C++ 析构顺序规则总结
+
+| 析构阶段 | 执行内容 | 顺序 |
+|---------|---------|------|
+| **1. 派生类析构函数体** | 执行派生类 `~Derived()` 中的代码 | - |
+| **2. 派生类成员变量** | 析构派生类的成员变量 | 声明顺序的**逆序** |
+| **3. 基类成员变量** | 析构基类的成员变量 | 声明顺序的**逆序** |
+| **4. 基类析构函数体** | 执行基类 `~Base()` 中的代码 | - |
+
+**关键点：** 
+- ✅ 基类成员变量的声明顺序**确实影响它们之间的析构顺序**
+- ❌ 但基类成员变量的析构**永远在派生类析构函数体之后**
+- ✅ 所以调整基类成员变量顺序**无法控制派生类析构函数体内的执行顺序**
+
+### 最佳实践
+
+1. **手动控制清理顺序**
+   ```cpp
+   ~DerivedClass() {
+       // ✅ 在析构函数体内显式控制清理顺序
+       cleanupResourceA();
+       cleanupResourceB();
+       // 成员变量会在这之后自动析构
+   }
+   ```
+
+2. **利用 RAII 和幂等性**
+   ```cpp
+   class ResourceManager {
+   public:
+       void cleanup() {
+           if (cleaned_) return;  // 幂等性
+           // 执行清理
+           cleaned_ = true;
+       }
+       
+       ~ResourceManager() {
+           cleanup();  // 自动调用，但可以提前手动调用
+       }
+   private:
+       bool cleaned_ = false;
+   };
+   ```
+
+3. **避免依赖成员变量的析构顺序来实现业务逻辑**
+   ```cpp
+   // ❌ 不好的设计：依赖成员变量析构顺序
+   class BadDesign {
+       Database db_;
+       Connection conn_;  // 期望 conn_ 先析构，断开数据库连接
+       // 但这种隐式依赖不明确，容易出错
+   };
+   
+   // ✅ 好的设计：显式控制清理顺序
+   class GoodDesign {
+       Database db_;
+       Connection conn_;
+       
+       ~GoodDesign() {
+           conn_.close();  // 显式关闭连接
+           db_.cleanup();  // 显式清理数据库
+       }
+   };
+   ```
+
+### 知识点
+
+1. **C++ 析构函数的执行顺序是固定的**
+   - 派生类析构函数体 → 派生类成员 → 基类成员 → 基类析构函数体
+
+2. **成员变量的析构顺序是声明顺序的逆序**
+   - 先声明的后析构，后声明的先析构
+
+3. **基类成员变量的析构发生在派生类析构函数体之后**
+   - 无论如何调整基类成员变量的顺序，都无法让它们在派生类析构函数体执行期间析构
+
+4. **正确的做法是在派生类析构函数体内手动控制清理顺序**
+   - 不要依赖成员变量的自动析构顺序来实现业务逻辑
+
+### 参考代码位置
+
+- `WorkerBase.hpp:189-211` - 基类成员变量声明（调整后的顺序）
+- `FfmpegDecodeVideoFileWorker.cpp:82-115` - 派生类析构函数（正确的手动清理实现）
+- `BufferAllocatorFacade.cpp:22-45` - `destroyPool()` 的幂等性实现
+
+### 结论
+
+**调整基类成员变量的声明顺序对解决此问题意义不大。** 虽然调整顺序可以控制基类成员变量之间的析构顺序（良好实践），但无法让基类成员在派生类析构函数体执行期间析构。真正的解决方案是：**在派生类析构函数体内手动调用清理方法，显式控制资源释放顺序。**
+
+---
+
 ## 📊 错误类型统计
 
 | 错误类型 | 数量 | 占比 | 难度 |
 |---------|------|------|------|
-| **缺少头文件** | 4 | 36% | ⭐ 简单 |
-| **API 不兼容（参数/返回值）** | 2 | 18% | ⭐⭐ 中等 |
-| **访问控制错误** | 1 | 9% | ⭐ 简单 |
-| **C++ 语言特性误用** | 3 | 27% | ⭐⭐⭐ 困难 |
-| **构建系统配置** | 1 | 9% | ⭐⭐ 中等 |
-| **智能指针使用（知识点）** | 1 | 9% | ⭐⭐ 中等 |
-| **explicit 与类型转换（知识点）** | 1 | 9% | ⭐⭐ 中等 |
+| **缺少头文件** | 4 | 33% | ⭐ 简单 |
+| **API 不兼容（参数/返回值）** | 2 | 17% | ⭐⭐ 中等 |
+| **访问控制错误** | 1 | 8% | ⭐ 简单 |
+| **C++ 语言特性误用** | 4 | 33% | ⭐⭐⭐ 困难 |
+| **构建系统配置** | 1 | 8% | ⭐⭐ 中等 |
+| **线程管理错误（运行时）** | 1 | 8% | ⭐⭐⭐ 困难 |
+| **智能指针使用（知识点）** | 1 | 8% | ⭐⭐ 中等 |
+| **explicit 与类型转换（知识点）** | 1 | 8% | ⭐⭐ 中等 |
 
 ---
 
@@ -1592,9 +2433,12 @@ static_assert(!std::is_convertible_v<int, Age>,
 
 ### 2. std::atomic 特殊性
 
-- 不可拷贝、不可移动
+- **不可拷贝、不可移动**（复制构造函数和移动构造函数都被 `= delete`）
 - 需要显式实现移动语义（通过 load/store）
 - 影响包含它的类的语义
+- **在容器操作中需要特别注意**：
+  - `vector::reserve()` 需要移动语义 → 需要显式实现移动构造函数
+  - `unordered_map::emplace(key, value)` 会触发复制 → 需要使用 `piecewise_construct` 就地构造
 
 ### 3. 默认参数限制
 
@@ -1623,7 +2467,17 @@ static_assert(!std::is_convertible_v<int, Age>,
 - **最佳实践**：默认给单参数构造函数加 `explicit`，除非明确需要隐式转换
 - **核心价值**：提高代码可读性、防止意外转换、避免函数重载歧义
 
-### 7. 重构最佳实践
+### 7. 线程生命周期管理
+
+- **`std::thread` 析构行为**: 如果线程在析构时仍然 `joinable()`，程序会调用 `std::terminate()`
+- **joinable() 状态**: 线程启动后为 `joinable`，`join()` 或 `detach()` 后不再 `joinable`
+- **RAII 原则**: 确保线程在对象生命周期结束前被正确清理
+- **最佳实践**: 
+  - 析构函数中无条件检查并 join 所有 `joinable` 线程
+  - 提供明确的 `stop()` 方法，而不是仅依赖析构
+  - 考虑使用 C++20 的 `std::jthread`（自动 join）
+
+### 8. 重构最佳实践
 
 - **小步快跑**: 每次修改编译一次
 - **接口先行**: 先定义新接口，再迁移实现
@@ -1695,28 +2549,602 @@ make
 
 ---
 
+## 知识点 #12: new + unique_ptr vs make_unique 的关键区别
+
+### 背景
+
+在使用 `std::unique_ptr` 时，有两种创建方式：
+
+```cpp
+// 方式1：new + unique_ptr 构造函数
+return std::unique_ptr<BufferPool>(new BufferPool(name, category));
+
+// 方式2：std::make_unique（C++14引入）
+return std::make_unique<BufferPool>(name, category);
+```
+
+虽然 `std::make_unique` 通常是推荐的方式，但在某些场景下**必须使用 new**。
+
+---
+
+### 关键区别 1：访问权限限制
+
+**这是最重要的区别！**
+
+```cpp
+class BufferPool {
+private:
+    // private 构造函数：只有"家人"（类内部）能调用
+    BufferPool(const std::string& name, const std::string& category);
+    
+public:
+    static std::unique_ptr<BufferPool> CreateDynamic(
+        const std::string& name,
+        const std::string& category
+    ) {
+        // ✅ 方式1：new - 在类内部执行，可以访问 private 构造
+        return std::unique_ptr<BufferPool>(new BufferPool(name, category));
+        
+        // ❌ 方式2：make_unique - 是外部函数，无法访问 private 构造
+        // return std::make_unique<BufferPool>(name, category);  // 编译错误！
+    }
+};
+```
+
+#### 为什么 make_unique 无法访问 private？
+
+```cpp
+// make_unique 的实现（在 <memory> 头文件里）
+namespace std {
+    template<typename T, typename... Args>
+    unique_ptr<T> make_unique(Args&&... args) {
+        // 注意：这里是在 std 命名空间，不是你的类内部！
+        return unique_ptr<T>(new T(args...));
+        //                      ^^^^^^
+        //                      这里调用 T 的构造函数
+        //                      如果构造函数是 private，这里就失败了
+    }
+}
+
+// 当你写：
+std::make_unique<BufferPool>(name, category);
+
+// 实际上编译器做的是：
+namespace std {
+    unique_ptr<BufferPool> make_unique(const string& name, const string& category) {
+        return unique_ptr<BufferPool>(new BufferPool(name, category));
+        //                                  ^^^^^^^^^^^^^^^^^^^^^^^^^^
+        //                                  这是在 std 命名空间调用
+        //                                  不是在 BufferPool 类内部！
+        //                                  所以无法访问 private 构造函数
+    }
+}
+```
+
+---
+
+### 关键区别 2：内存分配次数
+
+```cpp
+// 方式1：new + unique_ptr 构造
+std::unique_ptr<BufferPool> ptr1(new BufferPool(...));
+// 内存分配：
+//   - 1次：new BufferPool（对象本身）
+//   - 1次：unique_ptr 内部的控制块（指针管理）
+// 总计：2次内存分配
+
+// 方式2：std::make_unique
+auto ptr2 = std::make_unique<BufferPool>(...);
+// 内存分配：
+//   - 1次：对象本身
+//   - unique_ptr 使用简单指针管理（无控制块）
+// 总计：1次内存分配（更高效）
+```
+
+**注意**：对于 `shared_ptr`，差异更明显：
+
+```cpp
+// shared_ptr + new：2次分配（对象 + 控制块）
+std::shared_ptr<BufferPool> sp1(new BufferPool(...));
+
+// make_shared：1次分配（对象和控制块连续存储）
+auto sp2 = std::make_shared<BufferPool>(...);  // 更高效！
+```
+
+---
+
+### 图解对比（核心理解）
+
+```
+场景1：使用 new（在类内部）
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+class BufferPool {
+private:
+    BufferPool(const string& name);  ← private 构造函数（家里的私密物品）
+    
+public:
+    static unique_ptr<BufferPool> CreateDynamic(const string& name) {
+        │  我们现在在这里（类的静态方法内部）
+        │  ↓
+        │  ┌─────────────────────────────────────┐
+        │  │  这里是"家里"（类内部作用域）      │
+        │  │                                     │
+        │  │  return unique_ptr<BufferPool>(     │
+        │  │      new BufferPool(name)    ← ✅   │
+        │  │      └──────┬──────┘               │
+        │  │             │                       │
+        │  │        "家人"可以访问               │
+        │  │        private 构造函数             │
+        │  └─────────────────────────────────────┘
+        │
+        └── 成功！
+    }
+};
+
+
+场景2：使用 make_unique（外部函数）
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+class BufferPool {
+private:
+    BufferPool(const string& name);  ← private 构造函数（家里的私密物品）
+    
+public:
+    static unique_ptr<BufferPool> CreateDynamic(const string& name) {
+        return std::make_unique<BufferPool>(name);
+               │
+               └──→ 调用外部函数（在 std 命名空间）
+                    │
+                    ┌─────────────────────────────────────┐
+                    │  我们现在在 std 命名空间           │
+                    │  （不是 BufferPool 类内部！）     │
+                    │                                     │
+                    │  template<typename T>              │
+                    │  unique_ptr<T> make_unique(...) {  │
+                    │      return unique_ptr<T>(         │
+                    │          new T(...)  ← ❌          │
+                    │          └─┬─┘                     │
+                    │            │                        │
+                    │       "外人"无法访问                │
+                    │       private 构造函数              │
+                    └─────────────────────────────────────┘
+                    │
+                    └── 编译错误！
+    }
+};
+```
+
+---
+
+### 生活比喻
+
+🏠 **场景：家里的保险柜**
+
+```cpp
+class Safe {
+private:
+    Safe(string password);  // private 构造 = 保险柜的开启方法是私密的
+    
+public:
+    static Safe* OpenSafe(string password) {
+        // 方案A：家人亲手开保险柜
+        return new Safe(password);  // ✅ 家人知道怎么开
+        
+        // 方案B：让快递员开保险柜
+        // return std::make_unique<Safe>(password);  // ❌ 快递员不知道怎么开
+    }
+};
+```
+
+- **new Safe()** = 你（家人）亲手开保险柜 → 你知道密码 ✅
+- **std::make_unique\<Safe\>()** = 你让快递员（外部函数）开保险柜 → 快递员不知道密码 ❌
+
+---
+
+### 实际代码示例
+
+```cpp
+// BufferPool.cpp (实际代码)
+std::unique_ptr<BufferPool> BufferPool::CreateDynamic(
+    const std::string& name,
+    const std::string& category
+) {
+    // 我们现在在"家里"（BufferPool 类的成员函数内部）
+    
+    // ✅ new 在这里执行 = "家人"亲自调用 private 构造
+    return std::unique_ptr<BufferPool>(new BufferPool(name, category));
+    
+    // ❌ make_unique 会跳到外面 = 让"外人"调用 private 构造
+    // return std::make_unique<BufferPool>(name, category);
+    // 编译错误：'BufferPool::BufferPool(const std::string&, const std::string&)' is private
+}
+```
+
+---
+
+### 使用场景总结
+
+| 场景 | 使用 new + unique_ptr | 使用 make_unique |
+|------|---------------------|-----------------|
+| **public 构造函数** | ❌ 不推荐 | ✅ 推荐 |
+| **private 构造函数** | ✅ 必须使用 | ❌ 无法使用 |
+| **内存分配效率** | 较低（可能2次） | 高（1次） |
+
+---
+
+### 核心总结
+
+| | 在哪里执行 | 能否访问 private |
+|---|---|---|
+| **new BufferPool()** | 在 `CreateDynamic()` 函数内部<br>（类的静态成员函数 = "家里"） | ✅ 能 |
+| **std::make_unique\<BufferPool\>()** | 在 `std` 命名空间的模板函数内部<br>（外部函数 = "外面"） | ❌ 不能 |
+
+**一句话总结**：
+- `new` = 你亲手做 → 你有权限
+- `make_unique` = 委托外包公司做 → 外包公司没有权限
+
+---
+
+### 参考代码位置
+
+- `BufferPool.cpp:15` - 使用 `new + unique_ptr` 访问 private 构造函数
+- `BufferPool.hpp:48-50` - CreateDynamic 静态工厂方法
+
+---
+
+## 错误 #14: FFmpeg RTSP 流时间戳不从0开始导致 MP4 封装失败
+
+### 错误信息
+
+```
+[INFO ] [BufferWriter] Opened (encoded mode): /tmp/rtsp_recorded.mp4
+[mp4 @ 0x55555582a360] Application provided invalid, non monotonically increasing dts to muxer in stream 0: 15360000 >= 0
+[ERROR] [BufferWriter] Error: Failed to write packet: Invalid argument
+```
+
+### 错误原因
+
+RTSP 流的时间戳（DTS/PTS）通常不是从 0 开始的，而是一个很大的绝对值（如 15360000）。直接将这些时间戳写入 MP4 文件时，FFmpeg muxer 认为时间戳无效，因为它期望时间戳从 0 开始单调递增。
+
+### 问题代码
+
+```cpp
+// BufferWriter.cpp - writeEncoded()
+bool BufferWriter::writeEncoded(const Buffer* buffer) {
+    AVPacket* src_packet = buffer->getAVPacket();
+    
+    AVPacket pkt;
+    av_init_packet(&pkt);
+    av_packet_ref(&pkt, src_packet);
+    
+    pkt.stream_index = video_stream_index_;
+    
+    // ❌ 直接使用源包的时间戳（可能是很大的绝对值）
+    AVStream* out_stream = output_format_ctx_->streams[video_stream_index_];
+    av_packet_rescale_ts(&pkt, time_base_, out_stream->time_base);
+    
+    // 写入失败：时间戳不从 0 开始
+    int ret = av_interleaved_write_frame(output_format_ctx_, &pkt);
+    return (ret >= 0);
+}
+```
+
+### 初步解决方案（手动归一化）
+
+尝试手动记录第一个包的时间戳作为偏移，后续包减去这个偏移：
+
+```cpp
+// BufferWriter.hpp - 添加成员变量
+private:
+    int64_t first_dts_ = AV_NOPTS_VALUE;
+    int64_t first_pts_ = AV_NOPTS_VALUE;
+
+// BufferWriter.cpp - writeEncoded()
+// 记录第一个包的时间戳
+if (first_dts_ == AV_NOPTS_VALUE && pkt.dts != AV_NOPTS_VALUE) {
+    first_dts_ = pkt.dts;
+}
+if (first_pts_ == AV_NOPTS_VALUE && pkt.pts != AV_NOPTS_VALUE) {
+    first_pts_ = pkt.pts;
+}
+
+// 归一化（减去起始偏移）
+if (pkt.dts != AV_NOPTS_VALUE) {
+    pkt.dts -= first_dts_;
+}
+if (pkt.pts != AV_NOPTS_VALUE) {
+    pkt.pts -= first_pts_;
+}
+```
+
+**结果**：导致了新的问题（错误 #15）→ 产生负时间戳
+
+---
+
+## 错误 #15: FFmpeg 负时间戳导致 MP4 muxer 报错
+
+### 错误信息
+
+```
+[DEBUG] [BufferWriter] First DTS recorded: 18000
+[DEBUG] [BufferWriter] First PTS recorded: 18000
+[mp4 @ 0x55558a7078b0] Application provided duration: -9216000 / timestamp: -9216000 is out of range for mov/mp4 format
+[mp4 @ 0x55558a7078b0] pts has no value
+```
+
+### 错误原因
+
+RTSP 流中包的**到达顺序不等于时间戳顺序**（尤其是 B 帧的情况）：
+
+- 第一个到达的包：DTS=18000 → 归一化后 = 0 ✅
+- 后续到达的包：DTS=9000 → 归一化后 = 9000 - 18000 = **-9000** ❌
+
+手动归一化方案无法处理乱序到达的包。
+
+### 最终解决方案
+
+**使用 FFmpeg 内置的 `avoid_negative_ts` 机制**，让 FFmpeg 自动处理时间戳归一化。
+
+#### 1. 移除手动归一化变量
+
+```cpp
+// BufferWriter.hpp
+// ❌ 删除这些成员变量
+// int64_t first_dts_ = AV_NOPTS_VALUE;
+// int64_t first_pts_ = AV_NOPTS_VALUE;
+
+// 只保留必要的成员
+private:
+    AVFormatContext* output_format_ctx_ = nullptr;
+    int video_stream_index_ = -1;
+    int64_t packet_count_ = 0;
+    AVRational time_base_ = {0, 1};
+```
+
+#### 2. 在 open() 中设置自动处理标志
+
+```cpp
+// BufferWriter.cpp - open()
+bool BufferWriter::open(const char* path, 
+                        const AVCodecParameters* codec_params,
+                        const AVRational& time_base) {
+    // ... 创建输出上下文、添加流 ...
+    
+    // ✅ 设置自动处理负时间戳（在写入 header 之前）
+    output_format_ctx_->avoid_negative_ts = AVFMT_AVOID_NEG_TS_MAKE_NON_NEGATIVE;
+    
+    // 写入文件头
+    int ret = avformat_write_header(output_format_ctx_, nullptr);
+    // ...
+}
+```
+
+#### 3. 简化 writeEncoded() 实现
+
+```cpp
+// BufferWriter.cpp - writeEncoded()
+bool BufferWriter::writeEncoded(const Buffer* buffer) {
+    AVPacket* src_packet = buffer->getAVPacket();
+    
+    AVPacket pkt;
+    av_init_packet(&pkt);
+    av_packet_ref(&pkt, src_packet);  // 零拷贝引用
+    
+    pkt.stream_index = video_stream_index_;
+    
+    // ✅ 直接进行时间基转换（FFmpeg 会自动处理负时间戳）
+    AVStream* out_stream = output_format_ctx_->streams[video_stream_index_];
+    av_packet_rescale_ts(&pkt, time_base_, out_stream->time_base);
+    
+    // ✅ 写入成功（FFmpeg 自动归一化时间戳）
+    int ret = av_interleaved_write_frame(output_format_ctx_, &pkt);
+    
+    if (ret < 0) {
+        char errbuf[128];
+        av_strerror(ret, errbuf, sizeof(errbuf));
+        LOG_ERROR_FMT("[BufferWriter] Error: Failed to write packet: %s", errbuf);
+        return false;
+    }
+    
+    packet_count_++;
+    write_count_.fetch_add(1);
+    return true;
+}
+```
+
+### 工作原理
+
+`AVFMT_AVOID_NEG_TS_MAKE_NON_NEGATIVE` 标志让 FFmpeg：
+1. 自动扫描所有包的时间戳
+2. 找到最小的 DTS/PTS
+3. 将所有时间戳平移，确保最小值从 0 开始
+4. 保证单调递增，无论原始流的时间戳如何
+
+### 知识点
+
+- **RTSP 流时间戳特点**：通常不从 0 开始，可能是系统时间戳或相对时间戳
+- **视频帧乱序**：B 帧的 DTS 可能小于前面的 I/P 帧
+- **FFmpeg 时间戳管理**：提供了多种时间戳处理策略
+  - `AVFMT_AVOID_NEG_TS_AUTO`：自动选择策略
+  - `AVFMT_AVOID_NEG_TS_MAKE_NON_NEGATIVE`：强制所有时间戳非负
+  - `AVFMT_AVOID_NEG_TS_MAKE_ZERO`：强制所有时间戳从 0 开始
+
+### 后续问题
+
+设置 `avoid_negative_ts` 后，仍可能出现 **DTS 不单调递增** 的问题（见错误 #16）。
+
+### 参考代码位置
+
+- `BufferWriter.hpp:172-176` - 编码流模式成员变量
+- `BufferWriter.cpp:573` - 设置 `avoid_negative_ts` 标志
+- `BufferWriter.cpp:618-671` - `writeEncoded()` 实现
+
+---
+
+## 错误 #16: FFmpeg DTS 重复导致单调递增检查失败
+
+### 错误信息
+
+```
+[mp4 @ 0x555588a0dbc0] Application provided invalid, non monotonically increasing dts to muxer in stream 0: 9216000 >= 0
+[mp4 @ 0x555588a0dbc0] Application provided invalid, non monotonically increasing dts to muxer in stream 0: 9216000 >= 1843200
+[mp4 @ 0x555588a0dbc0] Application provided invalid, non monotonically increasing dts to muxer in stream 0: 9216000 >= 3686400
+[ERROR] [BufferWriter] Error: Failed to write packet: Invalid argument
+```
+
+### 错误原因
+
+虽然设置了 `avoid_negative_ts`，但 **RTSP 流中某些包的 DTS 值相同或重复**。`avoid_negative_ts` 只能处理负时间戳问题，无法处理：
+- 重复的时间戳（多个包有相同的 DTS）
+- 乱序的时间戳（DTS 不递增）
+- 无效的时间戳（DTS = AV_NOPTS_VALUE）
+
+### 最终解决方案
+
+**添加时间戳校验和单调递增保证**
+
+#### 1. 添加成员变量跟踪上一个 DTS
+
+```cpp
+// BufferWriter.hpp
+private:
+    AVFormatContext* output_format_ctx_ = nullptr;
+    int video_stream_index_ = -1;
+    int64_t packet_count_ = 0;
+    AVRational time_base_ = {0, 1};
+    int64_t last_dts_ = AV_NOPTS_VALUE;  // ✅ 跟踪上一个包的 DTS
+```
+
+#### 2. 在 open() 和构造函数中初始化
+
+```cpp
+// 构造函数
+BufferWriter::BufferWriter()
+    : ...
+    , last_dts_(AV_NOPTS_VALUE)  // 初始化
+{ }
+
+// open()
+bool BufferWriter::open(...) {
+    // ...
+    last_dts_ = AV_NOPTS_VALUE;  // 重置
+    return true;
+}
+```
+
+#### 3. 在 writeEncoded() 中添加校验和修正
+
+```cpp
+bool BufferWriter::writeEncoded(const Buffer* buffer) {
+    // ... 前面的代码 ...
+    
+    AVStream* out_stream = output_format_ctx_->streams[video_stream_index_];
+    
+    // ✅ 转换时间基
+    av_packet_rescale_ts(&pkt, time_base_, out_stream->time_base);
+    
+    // ✅ 检查并修正无效或重复的 DTS
+    if (pkt.dts == AV_NOPTS_VALUE || 
+        (last_dts_ != AV_NOPTS_VALUE && pkt.dts <= last_dts_)) {
+        
+        // 计算帧间隔（基于帧率）
+        int64_t frame_duration = av_rescale_q(
+            1, 
+            av_inv_q(out_stream->avg_frame_rate), 
+            out_stream->time_base
+        );
+        if (frame_duration <= 0) {
+            // 默认25fps
+            frame_duration = av_rescale_q(1, (AVRational){1, 25}, out_stream->time_base);
+        }
+        
+        // 生成单调递增的 DTS
+        if (last_dts_ == AV_NOPTS_VALUE) {
+            pkt.dts = 0;  // 第一个包从 0 开始
+        } else {
+            pkt.dts = last_dts_ + frame_duration;  // 递增一帧
+        }
+        
+        LOG_DEBUG_FMT("[BufferWriter] Corrected DTS: %lld", (long long)pkt.dts);
+    }
+    
+    // ✅ 修正 PTS（确保 PTS >= DTS）
+    if (pkt.pts == AV_NOPTS_VALUE || pkt.pts < pkt.dts) {
+        pkt.pts = pkt.dts;
+    }
+    
+    // ✅ 更新上一个 DTS
+    last_dts_ = pkt.dts;
+    
+    // 写入文件
+    int ret = av_interleaved_write_frame(output_format_ctx_, &pkt);
+    // ...
+}
+```
+
+### 工作原理
+
+1. **跟踪上一个 DTS**：使用 `last_dts_` 记录上一个成功写入的包的 DTS
+2. **检测问题**：
+   - `pkt.dts == AV_NOPTS_VALUE`：DTS 无效
+   - `pkt.dts <= last_dts_`：DTS 不递增或重复
+3. **生成新 DTS**：
+   - 第一个包：DTS = 0
+   - 后续包：DTS = last_dts_ + frame_duration
+4. **确保 PTS >= DTS**：修正 PTS 避免解码器错误
+
+### 知识点
+
+- **DTS vs PTS**：
+  - DTS（Decoding Time Stamp）：解码时间戳，必须单调递增
+  - PTS（Presentation Time Stamp）：显示时间戳，可以乱序（B帧）
+  - 必须保证：PTS >= DTS
+  
+- **FFmpeg 时间戳要求**：
+  - DTS 必须单调递增（每个包的 DTS > 前一个包的 DTS）
+  - DTS 和 PTS 都不能是 `AV_NOPTS_VALUE`（除非是某些特殊格式）
+  
+- **帧率转换**：
+  - `av_inv_q()` - 求倒数（25fps → 1/25）
+  - `av_rescale_q()` - 时间基转换
+
+### 参考代码位置
+
+- `BufferWriter.hpp:176` - `last_dts_` 成员变量
+- `BufferWriter.cpp:656-677` - DTS 校验和修正逻辑
+
+---
+
 ## ✅ 总结
 
-本次重构过程中遇到的 **9 大类编译错误 + 2 个重要知识点** 涵盖了：
-- ✅ C++ 语言特性（designated initializers, std::atomic）
+本次重构过程中遇到的 **14 大类编译/运行时错误 + 3 个重要知识点** 涵盖了：
+- ✅ C++ 语言特性（designated initializers, std::atomic, piecewise_construct）
 - ✅ 类型系统（不完整类型、临时对象、默认参数）
 - ✅ 访问控制（public/private）
 - ✅ 头文件管理（IWYU 原则）
 - ✅ 构建系统（Automake/Makefile）
+- ✅ 线程管理（`std::thread` 生命周期、joinable 状态、析构行为）
 - ✅ 智能指针操作符（`std::unique_ptr` 的 `.`, `->`, `*` 操作符）
 - ✅ explicit 关键字（防止隐式类型转换，提高类型安全）
+- ✅ new vs make_unique（private 构造函数访问权限、内存分配效率）
+- ✅ 类继承与析构顺序（基类成员变量声明顺序的影响、派生类析构控制）
+- ✅ FFmpeg 时间戳处理（RTSP 流时间戳归一化、避免负时间戳、MP4 封装）
 
-这些错误都已成功解决，项目已通过编译。智能指针和 explicit 关键字的知识点将帮助开发者更好地理解和使用现代 C++ 特性。🎉
+这些错误都已成功解决，项目已通过编译并修复运行时错误。智能指针、explicit 关键字、new vs make_unique、线程管理、类继承析构顺序以及 FFmpeg 时间戳处理的知识点将帮助开发者更好地理解和使用现代 C++ 特性以及多媒体编程。🎉
 
 ---
 
-**文档版本**: v1.2  
-**最后更新**: 2025-11-14  
+**文档版本**: v1.7  
+**最后更新**: 2025-12-30  
 **维护者**: AI Assistant  
 **状态**: ✅ 完成  
 **更新内容**: 
 - v1.1 (2025-11-13): 新增知识点 #10 - `std::unique_ptr` 的解引用和访问操作符详解
 - v1.2 (2025-11-14): 新增知识点 #11 - `explicit` 关键字与隐式类型转换详解
+- v1.3 (2025-11-17): 新增知识点 #12 - `new + unique_ptr` vs `make_unique` 的关键区别（访问权限、内存分配、图解对比）
+- v1.4 (2025-11-17): 新增错误 #10 - `std::atomic` 不可复制导致 `unordered_map::emplace` 失败（包含错误代码、原因分析、解决方案、可视化对比）
+- v1.5 (2025-12-24): 新增错误 #13 - `std::thread` 在 joinable 状态下析构导致 `std::terminate()`（运行时错误、线程生命周期管理、最佳实践）
+- v1.6 (2025-12-25): 新增知识点 #13 - 基类成员变量声明顺序对派生类析构的影响（C++ 析构顺序规则、可复现示例、正确的资源管理方式）
+- v1.7 (2025-12-30): 新增错误 #14/#15/#16 - FFmpeg RTSP 流 MP4 录制的三个时间戳问题（非零起始、负时间戳、DTS 重复），以及完整解决方案
 
 
 

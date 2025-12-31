@@ -1,12 +1,13 @@
 AC_INIT([component], [1.0])
 AM_INIT_AUTOMAKE([foreign subdir-objects])
+LT_INIT
 AC_PROG_CC
 AC_PROG_CXX
 
 AC_ARG_ENABLE([debug],
   [AS_HELP_STRING([--enable-debug],[Enable debug mode])],
   [],
-  [enable_debug=no])
+  [enable_debug=yes])
 
 AM_CONDITIONAL([DEBUG], [test "x$enable_debug" = "xyes"])
 AS_IF([test "x$enable_debug" = "xyes"], [
