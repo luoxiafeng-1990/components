@@ -114,6 +114,13 @@ public:
     size_t size() const { return size_; }
     
     /**
+     * @brief 设置Buffer大小
+     * @param size 新的Buffer大小（字节）
+     * @note v2.10新增：用于软件解码时根据实际帧大小更新Buffer容量
+     */
+    void setSize(size_t size) { size_ = size; }
+    
+    /**
      * @brief 设置实际使用大小
      * @param used_size 实际使用的字节数
      * @note v2.9新增：用于原始码流等可变大小数据

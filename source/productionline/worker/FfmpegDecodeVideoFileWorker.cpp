@@ -137,6 +137,10 @@ bool FfmpegDecodeVideoFileWorker::open(const char* path) {
         return false;
     }
     
+    // ⭐ v2.11新增：检查编解码器类型是否匹配
+    AVCodecParameters* codecpar = format_ctx_ptr_->streams[video_stream_index_]->codecpar;
+    checkCodecMismatch(codecpar->codec_id, decoder_name_);
+    
     // 🎯 Worker职责：在open()时自动创建BufferPool（通过调用Allocator）
     // 计算帧大小（在openMediaSource()后，output_width_和output_height_已设置）
     size_t frame_size = output_width_ * output_height_ * output_bpp_ / 8;
@@ -796,6 +800,21 @@ bool FfmpegDecodeVideoFileWorker::fillBuffer(int frame_index, Buffer* buffer) {
         
         // ⭐ v2.7改进：先更新虚拟地址为实际数据地址（frame->data[0]）
         buffer->setVirtualAddress(frame_ptr->data[0]);
+        
+        // ⭐ v2.10新增：从AVFrame获取实际帧大小并更新Buffer的size
+        int actual_frame_size = av_image_get_buffer_size(
+            (AVPixelFormat)frame_ptr->format,
+            frame_ptr->width,
+            frame_ptr->height,
+            1  // alignment
+        );
+        
+        if (actual_frame_size > 0) {
+            buffer->setSize(actual_frame_size);
+            LOG_TRACE_FMT("[Worker] Updated buffer size to actual frame size: %d bytes", actual_frame_size);
+        } else {
+            LOG_ERROR_FMT("[Worker] Failed to get frame buffer size: %d", actual_frame_size);
+        }
         
         // ⭐ v2.6新增：从AVFrame设置图像元数据到Buffer
         buffer->setImageMetadataFromAVFrame(frame_ptr);

@@ -12,6 +12,12 @@
 #include <map>
 #include <vector>
 #include <optional>
+#include <string>
+
+// FFmpeg 头文件（用于编解码器类型检测）
+extern "C" {
+#include <libavcodec/avcodec.h>
+}
 
 /**
  * @brief BufferPool 类型枚举（统一规范）
@@ -382,6 +388,49 @@ protected:
     void clearAllBufferPools() {
         buffer_pool_type_map_.clear();
     }
+    
+    // ========== 编解码器类型检测工具（v2.11 新增）==========
+    
+    /**
+     * @brief 检查配置的解码器与实际编解码器是否匹配
+     * @param actual_codec_id 实际的编解码器ID（从AVCodecParameters->codec_id获取）
+     * @param decoder_name 配置的解码器名称（从config.decoder.name获取）
+     * 
+     * @note 只打印警告，不影响程序执行
+     * @note 如果decoder_name为空或"auto"，则跳过检查
+     * @note 如果匹配成功，不打印任何信息
+     * 
+     * @note 子类使用示例：
+     * @code
+     * // 在 open() 方法中，openMediaSource() 成功后调用
+     * AVCodecParameters* codecpar = format_ctx_->streams[video_idx]->codecpar;
+     * checkCodecMismatch(codecpar->codec_id, decoder_name_);
+     * @endcode
+     */
+    void checkCodecMismatch(AVCodecID actual_codec_id, const std::string& decoder_name) const;
+    
+    /**
+     * @brief 从解码器名称推断期望的编解码器ID
+     * @param decoder_name 解码器名称（如 "h264_taco", "hevc", "vp9"）
+     * @return 期望的AVCodecID，如果无法确定则返回AV_CODEC_ID_NONE
+     * 
+     * @note 支持常见的解码器名称映射：
+     *       - "h264", "h264_taco", "h264_cuvid" → AV_CODEC_ID_H264
+     *       - "h265", "hevc", "hevc_taco" → AV_CODEC_ID_HEVC
+     *       - "vp8", "vp9", "av1" → 对应的 ID
+     *       - "mpeg2", "mpeg4" → 对应的 ID
+     * @note 名称匹配不区分大小写，使用 std::string::find()
+     */
+    static AVCodecID getExpectedCodecIdFromDecoderName(const std::string& decoder_name);
+    
+    /**
+     * @brief 获取 AVCodecID 的友好名称
+     * @param codec_id 编解码器ID
+     * @return 友好的名称字符串（如 "H.264/AVC", "H.265/HEVC"）
+     * 
+     * @note 对于常见编解码器返回易读名称，其他返回 FFmpeg 原始名称
+     */
+    static std::string getCodecFriendlyName(AVCodecID codec_id);
     
     /**
      * @brief Worker配置（v2.2 所有Worker子类自动继承）

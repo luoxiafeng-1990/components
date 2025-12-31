@@ -121,6 +121,10 @@ bool FfmpegDecodeRtspWorker::open(const char* path, int width, int height, int b
         return false;
     }
     
+    // ⭐ v2.11新增：检查编解码器类型是否匹配
+    AVCodecParameters* codecpar = format_ctx_ptr_->streams[video_stream_index_]->codecpar;
+    checkCodecMismatch(codecpar->codec_id, decoder_name_);
+    
     // 🎯 Worker职责：在open()时自动创建BufferPool（通过调用Allocator）
     // 计算帧大小
     size_t frame_size = width_ * height_ * (bits_per_pixel / 8);

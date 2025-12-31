@@ -14,7 +14,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <signal.h>
-#include <string.h>
+#include <cstring>
 #include <string>
 #include <vector>
 #include <memory>
@@ -1245,11 +1245,36 @@ static int test_ffmpeg_software_decoder(const char* video_path) {
         }
         
         // 步骤3：⭐ 拷贝数据（软件解码的关键步骤）
+        // 前置检查：确保指针有效
+        void* src_addr = decoded_buffer->getVirtualAddress();
+        void* dst_addr = display_buffer->getVirtualAddress();
         size_t copy_size = std::min(decoded_buffer->size(), display_buffer->size());
-        memcpy(display_buffer->getVirtualAddress(), 
-               decoded_buffer->getVirtualAddress(), 
-               copy_size);
         
+        if (!src_addr) {
+            LOG_ERROR_FMT("❌ ERROR: decoded_buffer->getVirtualAddress() is nullptr (buffer #%u)", 
+                          decoded_buffer->id());
+            display_pool_sptr->releaseFree(display_buffer);
+            producer_pool_sptr->releaseFilled(decoded_buffer);
+            continue;
+        }
+        
+        if (!dst_addr) {
+            LOG_ERROR_FMT("❌ ERROR: display_buffer->getVirtualAddress() is nullptr (buffer #%u)", 
+                          display_buffer->id());
+            display_pool_sptr->releaseFree(display_buffer);
+            producer_pool_sptr->releaseFilled(decoded_buffer);
+            continue;
+        }
+        
+        if (copy_size == 0) {
+            LOG_WARN("⚠️  WARNING: copy_size is 0, skipping frame");
+            display_pool_sptr->releaseFree(display_buffer);
+            producer_pool_sptr->releaseFilled(decoded_buffer);
+            continue;
+        }
+        
+        // 使用 C++ 标准库的安全方式拷贝
+        std::memcpy(dst_addr, src_addr, copy_size);
         // 步骤4：显示（现在是 Display BufferPool 的 buffer，可以正常显示）
         display.waitVerticalSync();
         if (!display.displayFilledFramebuffer(display_buffer)) {
@@ -1276,13 +1301,20 @@ static int test_ffmpeg_software_decoder(const char* video_path) {
     while ((remaining_decoded = producer_pool_sptr->acquireFilled(false, 0)) != nullptr) {
         Buffer* display_buffer = display_pool_sptr->acquireFree(false, 0);
         if (display_buffer) {
+            // 前置检查
+            void* src_addr = remaining_decoded->getVirtualAddress();
+            void* dst_addr = display_buffer->getVirtualAddress();
             size_t copy_size = std::min(remaining_decoded->size(), display_buffer->size());
-            memcpy(display_buffer->getVirtualAddress(), 
-                   remaining_decoded->getVirtualAddress(), 
-                   copy_size);
             
-            display.waitVerticalSync();
-            display.displayFilledFramebuffer(display_buffer);
+            if (src_addr && dst_addr && copy_size > 0) {
+                std::memcpy(dst_addr, src_addr, copy_size);
+                
+                display.waitVerticalSync();
+                display.displayFilledFramebuffer(display_buffer);
+            } else {
+                LOG_WARN("⚠️  Skipping invalid buffer during drain");
+            }
+            
             display_pool_sptr->releaseFree(display_buffer);
         }
         

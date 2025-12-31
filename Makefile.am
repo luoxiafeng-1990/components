@@ -6,6 +6,7 @@ noinst_LTLIBRARIES = libcomponents.la
 
 libcomponents_la_SOURCES = \
     source/display/LinuxFramebufferDevice.cpp \
+    source/productionline/worker/WorkerBase.cpp \
     source/productionline/worker/BufferFillingWorkerFacade.cpp \
     source/productionline/worker/MmapRawVideoFileWorker.cpp \
     source/productionline/worker/BufferFillingWorkerFactory.cpp \
@@ -28,7 +29,7 @@ libcomponents_la_SOURCES = \
     source/productionline/io/BufferWriter.cpp
 
 # ========== 测试程序（每个只包含自己的主文件）==========
-bin_PROGRAMS = display_test test01
+bin_PROGRAMS = display_test
 
 # ========== 公共链接库（定义为变量，便于维护）==========
 # 注意：log4cplus 使用动态链接
@@ -42,10 +43,6 @@ COMMON_LIBS = -lpthread -luring -lavformat -lavcodec -lavutil -lswscale -ltacosy
 display_test_SOURCES = test_cases/dec/test.cpp
 display_test_CPPFLAGS = -I$(top_srcdir)/test_cases $(AM_CPPFLAGS)
 display_test_LDADD = libcomponents.la $(COMMON_LIBS)
-
-# test01 测试程序
-test01_SOURCES = test_cases/dec/test01.cpp
-test01_LDADD = libcomponents.la $(COMMON_LIBS)
 
 # ========== 编译选项 ==========
 AM_CPPFLAGS = -I$(top_srcdir)/include

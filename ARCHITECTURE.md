@@ -19,7 +19,46 @@
 
 ## 版本历史
 
-### v2.3（当前版本）- 多 BufferPool 支持
+### v2.11（当前版本）- 编解码器类型检测
+**发布日期：** 2024-12
+
+**主要变更：**
+- ✅ **编解码器匹配检测**：WorkerBase 提供通用的编解码器类型检测工具
+- ✅ **配置验证**：在 Worker 打开媒体文件时自动检查配置的解码器与实际编解码器是否匹配
+- ✅ **友好警告**：不匹配时打印详细的警告信息（包含期望类型 vs 实际类型，以及修复建议），但不中断程序运行
+- ✅ **通用接口**：所有 FFmpeg Worker（FfmpegDecodeVideoFileWorker、FfmpegDecodeRtspWorker）统一使用
+
+**设计原则：**
+- **Fail-Soft**：检测到问题时只警告不中断，允许程序继续运行（FFmpeg 会自动选择正确的解码器）
+- **Protected 方法**：检测工具放在 WorkerBase protected 区域，只供子类使用，避免外部误用
+- **可扩展**：支持常见编解码器（H.264/H.265/VP8/VP9/AV1/MPEG-2/MPEG-4），易于扩展
+
+**使用示例：**
+```cpp
+// Worker 子类在 open() 中调用
+AVCodecParameters* codecpar = format_ctx_->streams[video_idx]->codecpar;
+checkCodecMismatch(codecpar->codec_id, decoder_name_);  // 自动检测并警告
+```
+
+### v2.10 - Buffer 动态大小调整
+**发布日期：** 2024-12
+
+**主要变更：**
+- ✅ **动态大小更新**：Buffer 类添加 `setSize()` 方法，支持根据实际数据大小动态调整容量
+- ✅ **精确的帧大小**：FfmpegDecodeVideoFileWorker 在解码后调用 `av_image_get_buffer_size()` 获取实际帧大小
+- ✅ **安全性提升**：`memcpy` 等操作使用实际数据大小，避免越界访问
+
+**设计原因：**
+- 原设计中 Buffer 的 `size_` 在创建时固定（基于预估的 `width * height * bpp`）
+- 软件解码时，FFmpeg 返回的实际帧大小可能因像素格式、对齐等因素与预估值不同
+- 动态更新 `size_` 确保 `buffer->size()` 返回的是真实可用的数据大小
+
+**与 `setUsedSize()` 的区别：**
+- `setSize()`：更新 Buffer 的**容量**（capacity），表示可用的最大空间
+- `setUsedSize()`：更新 Buffer 的**实际使用大小**（used），表示当前有效数据的大小
+- 两者配合使用，提供完整的大小信息
+
+### v2.3 - 多 BufferPool 支持
 **发布日期：** 2024-12
 
 **主要变更：**
@@ -163,7 +202,7 @@ uint64_t pool_id = worker->getOutputBufferPoolId(BufferPoolType::DECODE_VIDEO_PR
 - ❌ 数据填充（由Worker负责）
 - ❌ 生产流程管理（由ProductionLine负责）
 
-### 3. WorkerBase（Worker统一基类）- v2.3架构
+### 3. WorkerBase（Worker统一基类）- v2.11架构
 
 **职责：**
 - ✅ **定义Buffer填充功能**：通过纯虚函数定义契约 (`fillBuffer()`, `getWorkerType()`, `getOutputBufferPoolId(BufferPoolType)`)
@@ -175,6 +214,12 @@ uint64_t pool_id = worker->getOutputBufferPoolId(BufferPoolType::DECODE_VIDEO_PR
   - 使用者必须明确指定BufferPool类型来获取对应的pool_id
   - 使用者从Registry通过 pool_id 获取临时访问
 - ✅ **统一Allocator管理**：通过构造函数参数传递AllocatorType，父类统一管理
+- ✅ **编解码器类型检测**（v2.11新增）：提供通用的编解码器匹配检测工具
+  - `checkCodecMismatch(actual_codec_id, decoder_name)`：检查配置的解码器与实际编解码器是否匹配
+  - `getExpectedCodecIdFromDecoderName(decoder_name)`：从解码器名称推断期望的编解码器ID
+  - `getCodecFriendlyName(codec_id)`：获取编解码器的友好名称
+  - 所有方法为 `protected`，只供Worker子类使用
+  - 遵循 Fail-Soft 原则：检测到不匹配时只警告不中断
 
 **v2.3架构变更（多BufferPool支持）：**
 - ✅ **数据成员变更**：从 `uint64_t buffer_pool_id_` 改为 `std::map<BufferPoolType, uint64_t> buffer_pool_type_map_`
@@ -2359,6 +2404,225 @@ diff output_test_argb.raw ffmpeg_output.raw
 
 ---
 
+### 10.5. Buffer 动态大小调整机制 - v2.10 新增
+
+**版本**: v2.10  
+**影响范围**: Buffer类、FfmpegDecodeVideoFileWorker类
+
+#### 设计背景
+
+在 v2.10 之前，Buffer 的 `size_` 成员在创建时固定，基于预估值计算（`width * height * bpp / 8`）。这在软件解码场景下存在问题：
+
+1. **预估不准确**：不同像素格式的实际内存布局存在差异（stride、padding、planar vs packed等）
+2. **安全隐患**：`memcpy` 等操作使用预估的 `size_`，可能导致越界访问
+3. **语义混乱**：`size_` 表示的是"预估容量"而非"实际可用大小"
+
+#### 解决方案
+
+**核心思路**：在解码完成后，使用 FFmpeg 的标准 API 计算实际帧大小，并动态更新 Buffer 的 `size_`。
+
+**关键实现**：
+
+1. **Buffer 类新增方法**（`include/buffer/bufferpool/Buffer.hpp`）：
+   ```cpp
+   /**
+    * @brief 设置Buffer大小
+    * @param size 新的Buffer大小（字节）
+    * @note v2.10新增：用于软件解码时根据实际帧大小更新Buffer容量
+    */
+   void setSize(size_t size) { size_ = size; }
+   ```
+
+2. **FfmpegDecodeVideoFileWorker 动态更新大小**（`source/productionline/worker/FfmpegDecodeVideoFileWorker.cpp:fillBuffer()`）：
+   ```cpp
+   // 解码成功后
+   buffer->setVirtualAddress(frame_ptr->data[0]);
+   
+   // ⭐ v2.10新增：从AVFrame获取实际帧大小并更新Buffer的size
+   int actual_frame_size = av_image_get_buffer_size(
+       (AVPixelFormat)frame_ptr->format,
+       frame_ptr->width,
+       frame_ptr->height,
+       1  // alignment
+   );
+   
+   if (actual_frame_size > 0) {
+       buffer->setSize(actual_frame_size);
+   }
+   ```
+
+#### 与 `setUsedSize()` 的区别
+
+| 方法 | 语义 | 使用场景 | 示例值 |
+|------|------|---------|--------|
+| `setSize()` | 更新 Buffer 的**容量**（capacity） | 解码后根据实际格式更新最大可用空间 | 3110400 字节（NV12, 1920x1080） |
+| `setUsedSize()` | 更新 Buffer 的**实际使用大小**（used） | 编码流场景，记录本次写入的有效数据量 | 35678 字节（H.264 单个包） |
+
+**配合使用示例**：
+```cpp
+// 场景1：软件解码（固定大小帧）
+buffer->setSize(actual_frame_size);      // 容量：3110400
+buffer->setUsedSize(actual_frame_size);  // 使用：3110400
+
+// 场景2：编码流录制（可变大小包）
+buffer->setSize(max_packet_size);        // 容量：100000
+buffer->setUsedSize(packet->size);       // 使用：35678（本次实际大小）
+```
+
+#### 设计优势
+
+1. **精确性**：使用 FFmpeg 标准 API 计算，支持所有像素格式
+2. **安全性**：`memcpy` 等操作使用实际大小，避免越界
+3. **语义清晰**：`size_` 表示真实的可用空间，不再是预估值
+4. **向后兼容**：不影响现有的 `setUsedSize()` 功能
+
+---
+
+### 10.6. 编解码器类型检测机制 - v2.11 新增
+
+**版本**: v2.11  
+**影响范围**: WorkerBase类、FfmpegDecodeVideoFileWorker类、FfmpegDecodeRtspWorker类、FfmpegRecordRtspWorker类
+
+#### 设计背景
+
+在 v2.11 之前，用户可能在配置中指定错误的解码器名称（如配置 `"h264_taco"` 但实际流是 H.265），导致：
+
+1. **解码失败**：硬件解码器无法处理错误的编解码器类型
+2. **性能下降**：FFmpeg fallback 到软件解码器，但没有提示用户
+3. **调试困难**：用户不知道配置错误，难以排查问题
+
+#### 解决方案
+
+**设计原则**：
+- **Fail-Soft**：检测到不匹配时只警告不中断，允许程序继续运行
+- **Protected 方法**：检测工具放在 WorkerBase protected 区域，只供子类使用
+- **友好提示**：打印详细的警告信息，包含期望类型 vs 实际类型，以及修复建议
+
+**核心实现**：
+
+1. **WorkerBase 新增 Protected 方法**（`include/productionline/worker/WorkerBase.hpp`）：
+   ```cpp
+   protected:
+       // 检查配置的解码器与实际编解码器是否匹配
+       void checkCodecMismatch(AVCodecID actual_codec_id, 
+                               const std::string& decoder_name) const;
+       
+       // 从解码器名称推断期望的编解码器ID
+       static AVCodecID getExpectedCodecIdFromDecoderName(
+           const std::string& decoder_name);
+       
+       // 获取编解码器的友好名称
+       static std::string getCodecFriendlyName(AVCodecID codec_id);
+   ```
+
+2. **实现编解码器映射逻辑**（`source/productionline/worker/WorkerBase.cpp`）：
+   ```cpp
+   AVCodecID WorkerBase::getExpectedCodecIdFromDecoderName(
+       const std::string& decoder_name) {
+       if (decoder_name.empty() || decoder_name == "auto") {
+           return AV_CODEC_ID_NONE;  // 不检查
+       }
+       
+       // H.264/AVC 系列
+       if (decoder_name.find("h264") != std::string::npos) {
+           return AV_CODEC_ID_H264;
+       }
+       
+       // H.265/HEVC 系列
+       if (decoder_name.find("h265") != std::string::npos ||
+           decoder_name.find("hevc") != std::string::npos) {
+           return AV_CODEC_ID_HEVC;
+       }
+       
+       // ... 其他编解码器 ...
+       
+       return AV_CODEC_ID_NONE;  // 未知，不检查
+   }
+   ```
+
+3. **Worker 子类调用检测**（`source/productionline/worker/FfmpegDecodeVideoFileWorker.cpp:open()`）：
+   ```cpp
+   // 打开媒体文件
+   if (!openMediaSource()) {
+       return false;
+   }
+   
+   // ⭐ v2.11新增：检查编解码器类型是否匹配
+   AVCodecParameters* codecpar = 
+       format_ctx_ptr_->streams[video_stream_index_]->codecpar;
+   checkCodecMismatch(codecpar->codec_id, decoder_name_);
+   
+   // 继续创建 BufferPool...
+   ```
+
+#### 支持的编解码器映射
+
+| 解码器名称 | 映射到的 AVCodecID | 友好名称 |
+|-----------|-------------------|---------|
+| `"h264"`, `"h264_taco"`, `"h264_cuvid"` | `AV_CODEC_ID_H264` | H.264/AVC |
+| `"h265"`, `"hevc"`, `"hevc_taco"` | `AV_CODEC_ID_HEVC` | H.265/HEVC |
+| `"vp8"`, `"libvpx"` | `AV_CODEC_ID_VP8` | VP8 |
+| `"vp9"`, `"libvpx-vp9"` | `AV_CODEC_ID_VP9` | VP9 |
+| `"av1"` 系列 | `AV_CODEC_ID_AV1` | AV1 |
+| `"mpeg2"` 系列 | `AV_CODEC_ID_MPEG2VIDEO` | MPEG-2 |
+| `"mpeg4"` 系列 | `AV_CODEC_ID_MPEG4` | MPEG-4 |
+| 空字符串或 `"auto"` | `AV_CODEC_ID_NONE` | 跳过检查 |
+
+#### 警告信息示例
+
+当检测到不匹配时，打印如下警告：
+
+```
+[WARN ] ╔═══════════════════════════════════════════════════════════════╗
+[WARN ] ║  ⚠️  Codec Mismatch Detected                                ║
+[WARN ] ╚═══════════════════════════════════════════════════════════════╝
+[WARN ]   Configured decoder: 'h264_taco' (expects H.264/AVC)
+[WARN ]   Actual stream codec: H.265/HEVC
+[WARN ] 
+[WARN ]   💡 Suggestions:
+[WARN ]   - Update config to use 'hevc' decoder
+[WARN ]   - Or remove decoder name from config for auto-detection
+[WARN ] 
+[WARN ]   ⚙️  Continuing with auto-selected decoder...
+[WARN ] ╚═══════════════════════════════════════════════════════════════╝
+```
+
+#### Protected 方法设计的优势
+
+**为什么使用 Protected 而不是 Public？**
+
+1. **封装性**：隐藏内部实现细节，外部不需要关心"如何检查编解码器"
+2. **防止误用**：外部调用者可能传入错误的参数，导致误报
+3. **接口简洁**：公共接口保持简洁，只暴露核心功能（`open()`, `close()`, `fillBuffer()`）
+4. **正确的上下文**：子类在 `open()` 中调用，此时上下文正确（已解析媒体文件）
+
+**使用示例**：
+```cpp
+// ✅ 子类内部使用（正确）
+class FfmpegDecodeVideoFileWorker : public WorkerBase {
+    bool open(const char* path) {
+        openMediaSource();
+        AVCodecParameters* codecpar = ...;
+        checkCodecMismatch(codecpar->codec_id, decoder_name_);  // ✅ 合理
+        return true;
+    }
+};
+
+// ❌ 外部使用（编译错误）
+auto worker = getWorker();
+worker->checkCodecMismatch(...);  // ❌ Error: 'checkCodecMismatch' is protected
+```
+
+#### 设计优势
+
+1. **用户友好**：清晰的警告信息，包含修复建议
+2. **Fail-Soft**：不中断程序运行，FFmpeg 会自动选择正确的解码器
+3. **易扩展**：新增编解码器只需在 `getExpectedCodecIdFromDecoderName()` 中添加映射
+4. **统一管理**：所有 FFmpeg Worker 共享同一套检测逻辑
+5. **遵循 OOP 原则**：Protected 访问控制确保方法在正确的上下文中被调用
+
+---
+
 ### 11. BufferWriter（Buffer输出工具）- v2.5 新增（v2.6增强）
 
 **文件位置**：
@@ -3644,10 +3908,20 @@ ffmpeg -f rawvideo -pix_fmt nv21 -s 1920x1080 \
 ---
 
 **文档维护：** AI SDK Team  
-**最后更新：** 2025-12-29  
-**架构版本：** v2.9（软件解码器自动选择 + 物理地址提取重构）  
-**上一版本：** v2.2（引入 WorkerConfig + Builder 模式）  
+**最后更新：** 2024-12-31  
+**架构版本：** v2.11（编解码器类型检测 + Buffer动态大小调整）  
+**上一版本：** v2.9（软件解码器自动选择 + 物理地址提取重构）  
 **代码规范版本：** v1.0（统一类成员访问控制顺序为 public → private，遵循大厂代码规范）
+
+**v2.11 主要变更**：
+- ✅ **编解码器类型检测**：WorkerBase 提供 `checkCodecMismatch()` 等工具，在 Worker 打开媒体文件时自动检查配置的解码器与实际编解码器是否匹配，不匹配时打印友好警告
+- ✅ **Buffer 动态大小调整**：Buffer 类新增 `setSize()` 方法，FfmpegDecodeVideoFileWorker 在解码后调用 `av_image_get_buffer_size()` 获取实际帧大小并动态更新 Buffer 容量
+- ✅ **Fail-Soft 设计原则**：检测到配置问题时只警告不中断，允许程序继续运行（FFmpeg 会自动选择正确的解码器）
+- ✅ **Protected 方法设计**：检测工具放在 WorkerBase protected 区域，避免外部误用，只供子类在正确的上下文中调用
+
+**v2.10 主要变更**：
+- ✅ **Buffer 动态大小调整**：新增 `setSize()` 方法支持根据实际数据大小动态更新容量
+- ✅ **精确的帧大小计算**：使用 `av_image_get_buffer_size()` 获取实际帧大小，提升 `memcpy` 等操作的安全性
 
 **v2.9 主要变更**：
 - ✅ **WorkerBase新增虚函数**：`extractHardwareAddressFromMetadata()`，支持硬件解码器物理地址提取扩展
