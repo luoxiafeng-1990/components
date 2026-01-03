@@ -89,6 +89,8 @@ struct WorkerConfig {
             bool ch1_rgb = true;                       // 通道1输出RGB
             std::string ch1_rgb_format = "argb888";   // RGB格式（使用 std::string）
             std::string ch1_rgb_std = "bt601";        // 色彩标准（使用 std::string）
+            std::string ch0_yuv_format = "YUV420 8-bit NV12";  // YUV格式（PP0，ch0支持的格式）
+            std::string ch0_yuv_std = "bt601";        // YUV色彩标准（bt601, bt709, bt2020等）
             int ch1_crop_x = 0;                        // 裁剪参数
             int ch1_crop_y = 0;
             int ch1_crop_width = 0;
@@ -281,6 +283,52 @@ public:
         if (std) {
             config_.ch1_rgb_std = std;
         }
+        return *this;
+    }
+    
+    /**
+     * @brief 设置 YUV 格式配置（通道0，PP0）
+     * 
+     * @param format YUV格式名称（硬件格式名称，如 "YUV420 8-bit NV12", "YUV420 NV12 P010" 等）
+     * @param std 色彩标准（如 "bt601", "bt709", "bt2020"）
+     * @return TacoConfigBuilder& 链式调用
+     * 
+     * 支持的格式（PP0，ch0）：
+     * - YUV400 系列：YUV400 P010, YUV400 I010, YUV400 L010, YUV400 Pack10, YUV400 8-bit
+     * - YUV420 NV12 系列：YUV420 NV12 P010, YUV420 NV12 I010, YUV420 NV12 L010, 
+     *                     YUV420 NV12 Pack10, YUV420 8-bit NV12
+     * - YUV420 NV21 系列：YUV420 NV21 P010 Tiled-4×4, YUV420 NV21 I011, YUV420 NV21 L010,
+     *                     YUV420 8-bit NV21
+     * - YUV420 P010
+     * 
+     * @example
+     * ```cpp
+     * TacoConfigBuilder()
+     *     .setYuvConfig("YUV420 8-bit NV12", "bt601")  // 输出 NV12 格式
+     *     .setDecoderOutputResolution(1920, 1080)
+     *     .build()
+     * ```
+     */
+    // 接受 std::string_view（推荐）
+    TacoConfigBuilder& setYuvConfig(
+        std::string_view format = "YUV420 8-bit NV12", 
+        std::string_view std = "bt601"
+    ) {
+        config_.ch0_yuv_format = std::string(format);
+        config_.ch0_yuv_std = std::string(std);
+        config_.ch1_rgb = false;  // 自动设置 ch1_rgb=false，启用 YUV 输出
+        return *this;
+    }
+    
+    // 兼容 const char*（保持向后兼容）
+    TacoConfigBuilder& setYuvConfig(const char* format, const char* std) {
+        if (format) {
+            config_.ch0_yuv_format = format;
+        }
+        if (std) {
+            config_.ch0_yuv_std = std;
+        }
+        config_.ch1_rgb = false;
         return *this;
     }
     

@@ -899,8 +899,6 @@ bool FfmpegDecodeVideoFileWorker::extractHardwareAddressFromMetadata(AVFrame* fr
                 if (phys_addr != 0) {
                     // ✅ 成功提取物理地址
                     buffer->setPhysicalAddress(phys_addr);
-                    LOG_DEBUG_FMT("[Worker] TACO: Extracted physical address 0x%llx (blk_id=%u)", 
-                                 (unsigned long long)phys_addr, blk_id);
                     return true;
                 } else {
                     // ❌ blk_id 有效，但转换失败

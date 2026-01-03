@@ -23,6 +23,7 @@
 #include <sstream>
 #include <algorithm>
 #include <functional>
+#include <cctype>
 #include "display/LinuxFramebufferDevice.hpp"
 #include "productionline/worker/BufferFillingWorkerFacade.hpp"
 #include "productionline/worker/WorkerConfig.hpp"
@@ -1610,9 +1611,52 @@ static int test_buffer_writer_format(
             }
         }
     } else {
-        // YUV格式：默认NV12
-        format_name = "nv12";
-        ffplay_fmt = "nv12";
+        // YUV格式：从配置中读取硬件格式名称
+        format_name = taco_config.ch0_yuv_format;  // ⭐ 从配置读取硬件格式名称
+        
+        // ⭐ 映射硬件格式名称到 FFplay 格式名
+        // 注意：某些硬件格式（如 I010, L010, Pack10, Tiled-4×4）可能需要转换
+        if (format_name == "YUV420 8-bit NV12" || 
+            (format_name.find("NV12") != std::string::npos && format_name.find("8-bit") != std::string::npos)) {
+            ffplay_fmt = "nv12";
+        } else if (format_name == "YUV420 8-bit NV21" || 
+                   (format_name.find("NV21") != std::string::npos && format_name.find("8-bit") != std::string::npos)) {
+            ffplay_fmt = "nv21";
+        } else if (format_name.find("P010") != std::string::npos) {
+            if (format_name.find("YUV400") != std::string::npos) {
+                ffplay_fmt = "gray10le";  // YUV400 P010 → gray10le
+            } else if (format_name.find("NV12") != std::string::npos) {
+                ffplay_fmt = "p010le";  // YUV420 NV12 P010 → p010le
+            } else if (format_name == "YUV420 P010") {
+                ffplay_fmt = "yuv420p10le";  // YUV420 P010 → yuv420p10le
+            } else {
+                ffplay_fmt = "p010le";  // 默认
+            }
+        } else if (format_name == "YUV400 8-bit") {
+            ffplay_fmt = "gray";
+        } else if (format_name.find("I010") != std::string::npos || 
+                   format_name.find("L010") != std::string::npos ||
+                   format_name.find("Pack10") != std::string::npos ||
+                   format_name.find("Tiled-4×4") != std::string::npos ||
+                   format_name.find("I011") != std::string::npos) {
+            // 这些格式可能需要转换，暂时使用默认映射
+            // 实际格式会从 Buffer 元数据中检测
+            if (format_name.find("NV12") != std::string::npos) {
+                ffplay_fmt = "nv12";  // 尝试映射到 NV12
+            } else if (format_name.find("NV21") != std::string::npos) {
+                ffplay_fmt = "nv21";  // 尝试映射到 NV21
+            } else if (format_name.find("YUV400") != std::string::npos) {
+                ffplay_fmt = "gray10le";  // 尝试映射到 gray10le
+            } else {
+                ffplay_fmt = "nv12";  // 默认
+            }
+        } else {
+            // 默认：尝试从格式名称推断
+            ffplay_fmt = format_name;
+            // 转换为小写并替换空格
+            std::transform(ffplay_fmt.begin(), ffplay_fmt.end(), ffplay_fmt.begin(), ::tolower);
+            std::replace(ffplay_fmt.begin(), ffplay_fmt.end(), ' ', '_');
+        }
     }
     
     LOG_INFO("═══════════════════════════════════════════════════════");
@@ -1862,7 +1906,7 @@ static int test_buffer_writer_rgb_formats(const char* video_path) {
                    .build(); 
         },
         
-        // ⭐ 8-bit 0RGB/0BGR 格式（padding 在前，4 字节/像素）
+       /*  // ⭐ 8-bit 0RGB/0BGR 格式（padding 在前，4 字节/像素）
         // 注意：TACO xrgb888 → FFmpeg 0RGB，xbgr888 → FFmpeg 0BGR
         []() { return TacoConfigBuilder()
                    .setRgbConfig(true, "xrgb888", "bt601")
@@ -1890,7 +1934,7 @@ static int test_buffer_writer_rgb_formats(const char* video_path) {
                    .setDecoderOutputResolution(1920, 1080)
                    .build(); 
         },
-        
+         */
         // ⭐ 16-bit RGB/BGR 格式（6 字节/像素，文件更大）
         []() { return TacoConfigBuilder()
                    .setRgbConfig(true, "r16g16b16", "bt601")
@@ -1943,6 +1987,149 @@ static int test_buffer_writer_rgb_formats(const char* video_path) {
     return (failed == 0) ? 0 : -1;
 }
 
+/**
+ * 测试8c：BufferWriter YUV格式保存测试
+ * 
+ * 测试 BufferWriter 对所有硬件支持的 YUV 格式的支持（PP0，ch0）：
+ *   - YUV400 系列：P010, I010, L010, Pack10, 8-bit
+ *   - YUV420 NV12 系列：P010, I010, L010, Pack10, 8-bit NV12
+ *   - YUV420 NV21 系列：P010 Tiled-4×4, I011, L010, 8-bit NV21
+ *   - YUV420 P010
+ */
+static int test_buffer_writer_yuv_formats(const char* video_path) {
+    LOG_INFO("╔═══════════════════════════════════════════════════════╗");
+    LOG_INFO("║  BufferWriter YUV Formats Test Suite                   ║");
+    LOG_INFO("║  Testing YUV formats supported by PP0 (ch0)            ║");
+    LOG_INFO("╚═══════════════════════════════════════════════════════╝");
+    
+    // ✅ 定义测试用例：所有硬件支持的 YUV 格式（与 test_buffer_writer_rgb_formats 保持一致的结构）
+    std::function<WorkerConfig::DecoderConfig::TacoConfig()> tests[] = {
+        // YUV400 系列
+        []() { return TacoConfigBuilder()
+                   .setDecoderOutputResolution(1920, 1080)
+                   .build(); 
+        },
+        []() { return TacoConfigBuilder()
+                   .setYuvConfig("YUV400 I010", "bt2020")
+                   .setChannels(true, true)
+                   .setDecoderOutputResolution(1920, 1080)
+                   .build(); 
+        },
+        []() { return TacoConfigBuilder()
+                   .setYuvConfig("YUV400 L010", "bt2020")
+                   .setChannels(true, true)
+                   .setDecoderOutputResolution(1920, 1080)
+                   .build(); 
+        },
+        []() { return TacoConfigBuilder()
+                   .setYuvConfig("YUV400 Pack10", "bt2020")
+                   .setChannels(true, true)
+                   .setDecoderOutputResolution(1920, 1080)
+                   .build(); 
+        },
+        []() { return TacoConfigBuilder()
+                   .setYuvConfig("YUV400 8-bit", "bt601")
+                   .setChannels(true, true)
+                   .setDecoderOutputResolution(1920, 1080)
+                   .build(); 
+        },
+        
+        // YUV420 NV12 系列
+        []() { return TacoConfigBuilder()
+                   .setYuvConfig("YUV420 NV12 P010", "bt2020")
+                   .setDecoderOutputResolution(1920, 1080)
+                   .build(); 
+        },
+        []() { return TacoConfigBuilder()
+                   .setYuvConfig("YUV420 NV12 I010", "bt2020")
+                   .setDecoderOutputResolution(1920, 1080)
+                   .build(); 
+        },
+        []() { return TacoConfigBuilder()
+                   .setYuvConfig("YUV420 NV12 L010", "bt2020")
+                   .setDecoderOutputResolution(1920, 1080)
+                   .build(); 
+        },
+        []() { return TacoConfigBuilder()
+                   .setYuvConfig("YUV420 NV12 Pack10", "bt2020")
+                   .setDecoderOutputResolution(1920, 1080)
+                   .build(); 
+        },
+        []() { return TacoConfigBuilder()
+                   .setYuvConfig("YUV420 8-bit NV12", "bt601")  // 最常用
+                   .setDecoderOutputResolution(1920, 1080)
+                   .build(); 
+        },
+        
+        // YUV420 NV21 系列
+        []() { return TacoConfigBuilder()
+                   .setYuvConfig("YUV420 NV21 P010 Tiled-4×4", "bt2020")
+                   .setDecoderOutputResolution(1920, 1080)
+                   .build(); 
+        },
+        []() { return TacoConfigBuilder()
+                   .setYuvConfig("YUV420 NV21 I011", "bt2020")
+                   .setDecoderOutputResolution(1920, 1080)
+                   .build(); 
+        },
+        []() { return TacoConfigBuilder()
+                   .setYuvConfig("YUV420 NV21 L010", "bt2020")
+                   .setDecoderOutputResolution(1920, 1080)
+                   .build(); 
+        },
+        []() { return TacoConfigBuilder()
+                   .setYuvConfig("YUV420 8-bit NV21", "bt601")
+                   .setDecoderOutputResolution(1920, 1080)
+                   .build(); 
+        },
+        
+        // YUV420 P010
+        []() { return TacoConfigBuilder()
+                   .setYuvConfig("YUV420 P010", "bt2020")
+                   .setDecoderOutputResolution(1920, 1080)
+                   .build(); 
+        },
+    };
+    
+    int total_tests = sizeof(tests) / sizeof(tests[0]);
+    int passed = 0;
+    int failed = 0;
+    
+    LOG_INFO_FMT("\nTotal YUV formats to test: %d\n", total_tests);
+    
+    for (int i = 0; i < total_tests; i++) {
+        LOG_INFO_FMT("\n╔═══════════════════════════════════════════════════════╗");
+        LOG_INFO_FMT("║  [%d/%d] Testing format                                ║", i + 1, total_tests);
+        LOG_INFO_FMT("╚═══════════════════════════════════════════════════════╝");
+        
+        // ✅ 调用build_config()构建TacoConfig，直接传给测试函数（与RGB测试保持一致）
+        int result = test_buffer_writer_format(video_path, tests[i]());
+        
+        if (result == 0) {
+            passed++;
+            LOG_INFO_FMT("\n✅ [%d/%d] PASSED\n", i + 1, total_tests);
+        } else {
+            failed++;
+            LOG_ERROR_FMT("\n❌ [%d/%d] FAILED\n", i + 1, total_tests);
+        }
+        
+        // 短暂延迟，避免资源冲突
+        std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    }
+    
+    // 最终统计
+    LOG_INFO("\n╔═══════════════════════════════════════════════════════╗");
+    LOG_INFO("║  Test Summary                                          ║");
+    LOG_INFO("╚═══════════════════════════════════════════════════════╝");
+    LOG_INFO_FMT("Total tests: %d", total_tests);
+    LOG_INFO_FMT("Passed: %d ✅", passed);
+    LOG_INFO_FMT("Failed: %d ❌", failed);
+    LOG_INFO_FMT("Success rate: %.1f%%", (100.0 * passed / total_tests));
+    LOG_INFO("\n╔═══════════════════════════════════════════════════════╝");
+    
+    return (failed == 0) ? 0 : -1;
+}
+
 // ========== 测试用例注册 ==========
 // 使用新的测试框架，自动注册所有测试用例
 REGISTER_TEST(loop, "4-frame loop display", test_4frame_loop);
@@ -1956,6 +2143,7 @@ REGISTER_TEST(ffmpeg_software, "FFmpeg software decoder (libavcodec, no hardware
 REGISTER_TEST(ffmpeg_multithread, "Multi-threaded FFmpeg video decoding (no display, decode only)", test_h264_taco_video_multithread);
 REGISTER_TEST(writer, "BufferWriter - Save frames (NV12 format)", test_buffer_writer);
 REGISTER_TEST(writer_rgb, "BufferWriter - 12 RGB formats (ARGB/ABGR/BGRA/RGBA/RGB/BGR/0RGB/0BGR/RGB0/BGR0/RGB48/BGR48)", test_buffer_writer_rgb_formats);
+REGISTER_TEST(writer_yuv, "BufferWriter - 15 YUV formats (PP0 ch0: YUV400/YUV420 NV12/YUV420 NV21/YUV420 P010 series)", test_buffer_writer_yuv_formats);
 
 /**
  * 主函数

@@ -120,7 +120,6 @@ bool AVFrameAllocator::releaseAVFrame(Buffer* buffer, BufferPool* pool) {
     if (frame) {
         av_frame_free(&frame);
         buffer->setAVFrame(nullptr);  // 清空 Buffer 的 AVFrame 引用
-        LOG_DEBUG_FMT("[AVFrameAllocator] Released AVFrame for Buffer #%u", buffer->id());
     } else {
         LOG_WARN_FMT("[AVFrameAllocator]  No AVFrame found for Buffer #%u", buffer->id());
     }
@@ -170,7 +169,6 @@ void AVFrameAllocator::deallocateBuffer(Buffer* buffer) {
     if (frame) {
         av_frame_free(&frame);
         buffer->setAVFrame(nullptr);  // 清空 Buffer 的 AVFrame 引用
-        LOG_DEBUG_FMT("[AVFrameAllocator] Released AVFrame for Buffer #%u", buffer->id());
     }
     
     // 3. ⭐ v2.8新增：释放 AVPacket
@@ -178,7 +176,6 @@ void AVFrameAllocator::deallocateBuffer(Buffer* buffer) {
     if (packet) {
         av_packet_free(&packet);
         buffer->setAVPacket(nullptr);  // 清空 Buffer 的 AVPacket 引用
-        LOG_DEBUG_FMT("[AVFrameAllocator] Released AVPacket for Buffer #%u", buffer->id());
     }
     
     // 4. 删除 Buffer 对象
