@@ -13,6 +13,8 @@ libcomponents_la_SOURCES = \
     source/productionline/worker/FfmpegDecodeRtspWorker.cpp \
     source/productionline/worker/FfmpegRecordRtspWorker.cpp \
     source/productionline/worker/FfmpegDecodeVideoFileWorker.cpp \
+    source/productionline/worker/FilePacketSource.cpp \
+    source/productionline/worker/BufferPacketSource.cpp \
     source/productionline/worker/IoUringRawVideoFileWorker.cpp \
     source/monitor/PerformanceMonitor.cpp \
     source/common/Timer.cpp \

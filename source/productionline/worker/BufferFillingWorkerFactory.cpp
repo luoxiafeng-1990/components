@@ -38,23 +38,6 @@ std::unique_ptr<WorkerBase> BufferFillingWorkerFactory::create(const WorkerConfi
     return autoDetect(config);
 }
 
-/* std::unique_ptr<WorkerBase> BufferFillingWorkerFactory::createByName(const char* name) {
-    if (strcmp(name, "mmap") == 0 || strcmp(name, "mmap_raw") == 0) {
-        return std::make_unique<MmapRawVideoFileWorker>();
-    } else if (strcmp(name, "iouring") == 0 || strcmp(name, "iouring_raw") == 0) {
-        return std::make_unique<IoUringRawVideoFileWorker>();
-    } else if (strcmp(name, "rtsp") == 0 || strcmp(name, "ffmpeg_rtsp") == 0) {
-        return std::make_unique<FfmpegDecodeRtspWorker>();
-    } else if (strcmp(name, "ffmpeg") == 0 || strcmp(name, "ffmpeg_video_file") == 0) {
-        return std::make_unique<FfmpegDecodeVideoFileWorker>();
-    } else if (strcmp(name, "auto") == 0) {
-        return create(WorkerType::AUTO);
-    }
-    
-    LOG_WARN_FMT("[Worker]  Unknown worker type: %s, using mmap", name);
-    return std::make_unique<MmapRawVideoFileWorker>();
-} */
-
 bool BufferFillingWorkerFactory::isIoUringAvailable() {
     struct io_uring ring;
     int ret = io_uring_queue_init(1, &ring, 0);

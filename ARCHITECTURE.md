@@ -19,7 +19,51 @@
 
 ## 版本历史
 
-### v2.11（当前版本）- 编解码器类型检测
+### v2.12（当前版本）- 数据源抽象模式重构
+**发布日期：** 2024-12
+
+**主要变更：**
+- ✅ **数据源抽象接口**：引入 `IPacketSource` 接口，支持策略模式，实现数据源与 Worker 的解耦
+- ✅ **文件数据源实现**：`FilePacketSource` 管理 `AVFormatContext` 和文件相关状态（视频流索引、总帧数、EOF 状态等）
+- ✅ **Buffer 数据源实现**：`BufferPacketSource` 用于 MultiWorkerProductionLine 场景，从 BufferPool 获取 AVPacket
+- ✅ **Worker 重构**：`FfmpegDecodeVideoFileWorker` 使用数据源抽象，移除冗余状态变量
+  - 移除：`format_ctx_ptr_`、`file_path_`、`width_`、`height_`、`total_frames_`、`video_stream_index_`、`is_open_`、`eof_reached_`
+  - 所有状态统一由数据源管理，避免状态不一致
+- ✅ **状态管理优化**：单一数据源管理状态，Worker 直接查询数据源，避免缓存导致的不一致
+- ✅ **线程安全改进**：数据源的 `is_open_` 使用 `std::atomic<bool>`，保证线程安全的状态检查
+- ✅ **配置系统增强**：`WorkerConfig` 添加 `use_buffer_mode`（默认 false）和 `codec_params` 配置项
+
+**设计原则：**
+- **单一职责**：Worker 专注解码逻辑，数据源负责数据访问和元数据管理
+- **依赖倒置**：Worker 依赖 `IPacketSource` 接口，不依赖具体实现
+- **易于扩展**：新增数据源类型（如网络流）无需修改 Worker 代码
+- **状态一致**：单一数据源管理状态，避免冗余和不同步
+
+**架构优势：**
+- **职责分离**：Worker 和数据源职责清晰，符合 SOLID 原则
+- **状态一致**：单一数据源管理状态，避免缓存导致的不一致
+- **线程安全**：使用原子变量保证状态检查的线程安全
+- **代码简化**：Worker 代码更简洁，职责更清晰
+
+**使用示例：**
+```cpp
+// 文件模式（默认）
+auto config = WorkerConfigBuilder()
+    .setFileConfig(FileConfigBuilder().setFilePath("video.mp4").build())
+    .build();
+// Worker 内部创建 FilePacketSource
+
+// Buffer 模式（MultiWorkerProductionLine）
+auto config = WorkerConfigBuilder()
+    .setDecoderConfig(DecoderConfigBuilder()
+        .setUseBufferMode(true)
+        .setCodecParams(record_codec_params)
+        .build())
+    .build();
+// Worker 内部创建 BufferPacketSource
+```
+
+### v2.11 - 编解码器类型检测
 **发布日期：** 2024-12
 
 **主要变更：**
@@ -307,9 +351,10 @@ if (auto pool = pool_weak.lock()) {
 - 文档明确：通过接口名称明确表达职责
 
 **注意**：
-- Worker在实现`open()`时，需要同时处理文件打开逻辑和BufferPool创建逻辑
+- Worker在实现`open()`时，需要同时处理数据源打开逻辑和BufferPool创建逻辑（v2.12：数据源通过 `IPacketSource` 接口管理）
 - 文件操作方法与Buffer填充操作分离，但都在WorkerBase中定义
 - 所有Worker实现类（`FfmpegDecodeVideoFileWorker`, `MmapRawVideoFileWorker`, `FfmpegDecodeRtspWorker`, `IoUringRawVideoFileWorker`）都继承`WorkerBase`基类
+- **v2.12新增**：`FfmpegDecodeVideoFileWorker` 使用数据源抽象（`IPacketSource`），支持文件模式和 Buffer 模式
 
 ### 5. BufferAllocator（分配器）
 
@@ -340,11 +385,12 @@ if (auto pool = pool_weak.lock()) {
 │  │  std::shared_ptr<BufferFillingWorkerFacade> worker_      │  │
 │  └─────────────────────────────────────────────────────────┘  │
 │                                                                 │
-│  协作关系（通过WorkerBase，v2.3）：                            │
+│  协作关系（通过WorkerBase，v2.3；数据源抽象，v2.12）：         │
 │  1. 通过 WorkerBase::getOutputBufferPoolId(type) 获取Pool ID  │
 │  2. 通过 WorkerBase::fillBuffer() 填充Buffer                  │
 │  3. 通过 IVideoFileNavigator::open() 打开视频源               │
 │  4. 通过 BufferPoolRegistry::getPool(pool_id) 获取Pool临时访问 │
+│  5. Worker 使用 IPacketSource 接口访问数据源（v2.12新增）     │
 └───────────────────────┬───────────────────────────────────────┘
                         │
                         │ 使用基类（不依赖具体实现）
@@ -358,12 +404,23 @@ if (auto pool = pool_weak.lock()) {
 │ 通过接口协作 │ │ 定义方法     │ │ 定义接口     │
 └──────────────┘ └─────────────┘ └─────────────┘
                         │               │
-                        │ 继承           │ 继承
-                        │               │
+                        │ 使用接口       │ 继承
+                        │ (v2.12)       │
         ┌───────────────┼───────────────┼───────────────┐
         │               │               │               │
-    Worker实现类    Worker实现类    Allocator实现类  Allocator实现类
-    (具体实现)      (具体实现)      (具体实现)      (具体实现)
+┌───────▼──────┐   Worker实现类    Allocator实现类  Allocator实现类
+│IPacketSource │   (具体实现)      (具体实现)      (具体实现)
+│ (数据源接口) │   (如FfmpegDecodeVideoFileWorker使用数据源)
+│              │
+│ 策略模式     │
+└───────┬──────┘
+        │ 实现
+        │
+┌───────┼───────┐
+│       │       │
+FilePacketSource BufferPacketSource (未来可扩展网络流等)
+(文件数据源)    (Buffer数据源)
+```
         │               │               │               │
         └───────────────┴───────────────┴───────────────┘
                         │
@@ -532,7 +589,7 @@ Worker内部解码循环（适用于RTSP流等）：
 
 ### 1. 策略模式（Strategy Pattern）
 
-**应用位置**：`WorkerBase` 基类及其实现类
+**应用位置1**：`WorkerBase` 基类及其实现类
 
 **设计意图**：将填充Buffer的不同算法封装成独立的策略类，使它们可以互相替换。
 
@@ -548,6 +605,24 @@ Worker内部解码循环（适用于RTSP流等）：
 - 可扩展：新增Worker只需继承WorkerBase实现纯虚函数
 - 可替换：不同Worker可以互相替换
 - 解耦合：ProductionLine依赖WorkerBase基类，不依赖具体实现
+
+**应用位置2**：数据源抽象（v2.12新增）
+
+**设计意图**：将不同数据源的访问方式封装成独立的策略类，使 Worker 可以支持多种数据源。
+
+**实现方式**：
+- **策略接口**：`IPacketSource` 定义统一的数据源操作接口（纯虚函数）
+- **具体策略**：
+  - `FilePacketSource`：文件数据源策略（管理 `AVFormatContext`、文件路径、视频流索引等）
+  - `BufferPacketSource`：Buffer 数据源策略（从 BufferPool 获取 AVPacket，用于 MultiWorkerProductionLine）
+  - 未来可扩展：网络流数据源策略等
+- **应用位置**：`FfmpegDecodeVideoFileWorker` 使用数据源抽象，支持文件模式和 Buffer 模式
+
+**优势**：
+- 可扩展：新增数据源类型只需实现 `IPacketSource` 接口
+- 可替换：不同数据源可以互相替换，无需修改 Worker 代码
+- 解耦合：Worker 依赖 `IPacketSource` 接口，不依赖具体数据源实现
+- 状态管理：单一数据源管理状态，避免 Worker 和数据源状态不一致
 
 ### 2. 工厂模式（Factory Pattern）
 
@@ -1426,6 +1501,8 @@ struct WorkerConfig {
         const char* name = nullptr;           // 解码器名称
         bool enable_hardware = true;          // 启用硬件加速
         const char* hwaccel_device = nullptr; // 硬件设备
+        bool use_buffer_mode = false;          // ⭐ v2.12新增：是否使用Buffer模式（默认false，文件模式）
+        const AVCodecParameters* codec_params = nullptr;  // ⭐ v2.12新增：Buffer模式的编解码器参数
         
         // h264_taco 特定配置
         struct TacoConfig {
@@ -1551,6 +1628,27 @@ auto workerConfig = WorkerConfigBuilder()
             .build()
     )
     .build();
+```
+
+**场景4：Buffer 模式（MultiWorkerProductionLine，v2.12新增）**
+```cpp
+// 消费者 Worker 配置（从 Record Worker 的 BufferPool 获取 packet）
+auto consumer_config = WorkerConfigBuilder()
+    .setOutputConfig(
+        OutputConfigBuilder()
+            .setResolution(1920, 1080)
+            .setBitsPerPixel(32)
+            .build()
+    )
+    .setDecoderConfig(
+        DecoderConfigBuilder()
+            .setUseBufferMode(true)  // ⭐ 启用 Buffer 模式
+            .setCodecParams(record_codec_params)  // ⭐ 从 Record Worker 获取编解码器参数
+            .build()
+    )
+    .build();
+
+// Worker 内部会创建 BufferPacketSource，从 BufferPool 获取 AVPacket
 ```
 
 ---
@@ -2540,20 +2638,23 @@ buffer->setUsedSize(packet->size);       // 使用：35678（本次实际大小�
    }
    ```
 
-3. **Worker 子类调用检测**（`source/productionline/worker/FfmpegDecodeVideoFileWorker.cpp:open()`）：
-   ```cpp
-   // 打开媒体文件
-   if (!openMediaSource()) {
-       return false;
-   }
-   
-   // ⭐ v2.11新增：检查编解码器类型是否匹配
-   AVCodecParameters* codecpar = 
-       format_ctx_ptr_->streams[video_stream_index_]->codecpar;
-   checkCodecMismatch(codecpar->codec_id, decoder_name_);
-   
-   // 继续创建 BufferPool...
-   ```
+3. **Worker 子类调用检测**（`source/productionline/worker/FfmpegDecodeVideoFileWorker.cpp:open()`，v2.12更新）：
+```cpp
+// ⭐ v2.12重构：使用数据源抽象打开
+if (!packet_source_->open()) {
+    return false;
+}
+
+// 从数据源获取编解码器参数
+const AVCodecParameters* codecpar = packet_source_->getCodecParameters();
+
+// ⭐ v2.11新增：检查编解码器类型是否匹配（仅文件模式）
+if (auto* file_source = dynamic_cast<FilePacketSource*>(packet_source_.get())) {
+    checkCodecMismatch(codecpar->codec_id, decoder_name_);
+}
+
+// 继续创建 BufferPool...
+```
 
 #### 支持的编解码器映射
 

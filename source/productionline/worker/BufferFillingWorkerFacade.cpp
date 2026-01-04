@@ -40,7 +40,16 @@ bool BufferFillingWorkerFacade::open() {
         return false;
     }
     
-    // 从 config_ 获取所有参数
+    // ⭐ v2.9新增：检查是否是 Buffer 模式
+    bool is_buffer_mode = config_.decoder.use_buffer_mode;
+    
+    if (is_buffer_mode) {
+        // Buffer 模式：不需要文件路径，直接调用 open(nullptr)
+        LOG_DEBUG("[Worker] BufferFillingWorkerFacade: Opening in Buffer mode (no file path needed)");
+        return worker_base_uptr_->open(nullptr);
+    }
+    
+    // 文件模式：从 config_ 获取所有参数
     const std::string& file_path = config_.file.file_path;
     int width = config_.display.width;
     int height = config_.display.height;

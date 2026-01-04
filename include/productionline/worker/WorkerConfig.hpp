@@ -80,6 +80,12 @@ struct WorkerConfig {
         int decode_threads = 0;                        // 解码线程数（0=自动）
         
         // ========================================
+        // 数据源配置（v2.9新增：支持数据源抽象模式）
+        // ========================================
+        bool use_buffer_mode = false;                  // true=从Buffer获取packet, false=从文件读取
+        const struct AVCodecParameters* codec_params = nullptr;  // Buffer模式下的编解码器参数（从Record Worker获取）
+        
+        // ========================================
         // h264_taco 特定配置（子子结构体）
         // ========================================
         struct TacoConfig {

@@ -1,4 +1,5 @@
 #include "productionline/MultiWorkerProductionLine.hpp"
+#include "productionline/worker/FfmpegRecordRtspWorker.hpp"
 #include "buffer/bufferpool/BufferPoolRegistry.hpp"
 #include "common/Logger.hpp"
 #include <algorithm>
@@ -104,15 +105,40 @@ bool MultiWorkerProductionLine::start() {
     
     LOG4CPLUS_INFO(logger, log_prefix_ << " Record Worker 已启动，BufferPool ID: " << record_buffer_pool_id_);
     
+    // 1.5 从 Record Worker 获取编解码器参数（用于 Buffer 模式）
+    const AVCodecParameters* record_codec_params = nullptr;
+    auto worker_facade_sptr = record_production_line_->getWorkerFacade();
+    if (worker_facade_sptr) {
+        WorkerBase* worker_base = worker_facade_sptr->getWorkerBase();
+        if (worker_base) {
+            // 尝试转换为 FfmpegRecordRtspWorker
+            FfmpegRecordRtspWorker* rtsp_worker = dynamic_cast<FfmpegRecordRtspWorker*>(worker_base);
+            if (rtsp_worker) {
+                record_codec_params = rtsp_worker->getCodecParameters();
+                if (record_codec_params) {
+                    LOG4CPLUS_INFO(logger, log_prefix_ << " 获取到 Record Worker 的编解码器参数 (codec_id=" 
+                                   << record_codec_params->codec_id << ")");
+                } else {
+                    LOG4CPLUS_WARN(logger, log_prefix_ << " Record Worker 的编解码器参数为 nullptr");
+                }
+            }
+        }
+    }
+    
     // 2. 创建所有消费者 worker
     LOG4CPLUS_INFO(logger, log_prefix_ << " 创建 " << config_.consumer_configs.size() << " 个消费者 Worker...");
     consumer_workers_.reserve(config_.consumer_configs.size());
     
     for (size_t i = 0; i < config_.consumer_configs.size(); i++) {
-        const auto& consumer_config = config_.consumer_configs[i];
+        // ⭐ v2.9新增：复制配置并设置 Buffer 模式参数
+        WorkerConfig consumer_config = config_.consumer_configs[i];
+        
+        // 设置 Buffer 模式
+        consumer_config.decoder.use_buffer_mode = true;
+        consumer_config.decoder.codec_params = record_codec_params;
         
         LOG4CPLUS_INFO(logger, log_prefix_ << "  创建消费者 Worker #" << i << " (类型: " 
-                       << static_cast<int>(consumer_config.worker_type) << ")");
+                       << static_cast<int>(consumer_config.worker_type) << ", Buffer模式)");
         
         // 创建消费者 worker facade
         auto consumer_worker = std::make_shared<BufferFillingWorkerFacade>(consumer_config);
