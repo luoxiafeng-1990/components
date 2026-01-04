@@ -26,6 +26,7 @@ libcomponents_la_SOURCES = \
     source/buffer/bufferpool/BufferPool.cpp \
     source/buffer/bufferpool/BufferPoolRegistry.cpp \
     source/productionline/VideoProductionLine.cpp \
+    source/productionline/MultiWorkerProductionLine.cpp \
     source/productionline/io/BufferWriter.cpp
 
 # ========== 测试程序（每个只包含自己的主文件）==========
