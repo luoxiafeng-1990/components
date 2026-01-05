@@ -103,7 +103,7 @@ static int test_4frame_loop(const char* raw_video_path) {
                 .useSoftware()  // 原始文件无需解码，使用软件解码作为默认配置
                 .build()
         )
-        .setWorkerType(WorkerType::MMAP_RAW)
+        .setWorkerType(WorkerType::FFMPEG_VIDEO_FILE)  // 使用 FFmpeg Worker（MMAP_RAW 已删除）
         .build();
     
     // 设置错误回调
@@ -227,7 +227,7 @@ static int test_sequential_playback(const char* raw_video_path) {
                 .useSoftware()  // 原始文件无需解码，使用软件解码作为默认配置
                 .build()
         )
-        .setWorkerType(WorkerType::MMAP_RAW)
+        .setWorkerType(WorkerType::FFMPEG_VIDEO_FILE)  // 使用 FFmpeg Worker（MMAP_RAW 已删除）
         .build();
     
     // 设置错误回调
@@ -371,7 +371,7 @@ static int test_buffermanager_producer(const char* raw_video_path) {
                 .useSoftware()  // 原始文件无需解码，使用软件解码作为默认配置
                 .build()
         )
-        .setWorkerType(WorkerType::MMAP_RAW)
+        .setWorkerType(WorkerType::FFMPEG_VIDEO_FILE)  // 使用 FFmpeg Worker（MMAP_RAW 已删除）
         .build();
     
     // 设置错误回调
@@ -501,7 +501,7 @@ static int test_buffermanager_iouring(const char* raw_video_path) {
                 .useSoftware()  // 原始文件无需解码，使用软件解码作为默认配置
                 .build()
         )
-        .setWorkerType(WorkerType::IOURING_RAW)
+        .setWorkerType(WorkerType::FFMPEG_VIDEO_FILE)  // 使用 FFmpeg Worker（IOURING_RAW 已删除）
         .build();
     
     producer.setErrorCallback([](const std::string& error) {

@@ -12,8 +12,6 @@
  */
 enum class WorkerType {
     AUTO,                 // 自动检测（默认）
-    MMAP_RAW,             // Mmap Raw 视频文件
-    IOURING_RAW,          // IoUring Raw 视频文件
     FFMPEG_RTSP,          // FFmpeg RTSP 流
     FFMPEG_RTSP_RECORD,   // FFmpeg RTSP 原始码流录制
     FFMPEG_VIDEO_FILE     // FFmpeg 视频文件
@@ -407,11 +405,6 @@ public:
     // 清除解码器名称（使用自动选择）
     DecoderConfigBuilder& clearDecoderName() {
         config_.name = std::nullopt;
-        return *this;
-    }
-    
-    DecoderConfigBuilder& enableHardware(bool enable = true) {
-        config_.enable_hardware = enable;
         return *this;
     }
     

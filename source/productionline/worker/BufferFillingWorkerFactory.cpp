@@ -1,13 +1,10 @@
 #include "productionline/worker/BufferFillingWorkerFactory.hpp"
 #include "common/Logger.hpp"
-#include "productionline/worker/MmapRawVideoFileWorker.hpp"
-#include "productionline/worker/IoUringRawVideoFileWorker.hpp"
 #include "productionline/worker/FfmpegDecodeRtspWorker.hpp"
 #include "productionline/worker/FfmpegRecordRtspWorker.hpp"
 #include "productionline/worker/FfmpegDecodeVideoFileWorker.hpp"
 #include <stdlib.h>
 #include <string.h>
-#include <liburing.h>
 
 // ============ 公共接口 ============
 
@@ -38,33 +35,14 @@ std::unique_ptr<WorkerBase> BufferFillingWorkerFactory::create(const WorkerConfi
     return autoDetect(config);
 }
 
-bool BufferFillingWorkerFactory::isIoUringAvailable() {
-    struct io_uring ring;
-    int ret = io_uring_queue_init(1, &ring, 0);
-    if (ret == 0) {
-        io_uring_queue_exit(&ring);
-        return true;
-    }
-    return false;
-}
-
-bool BufferFillingWorkerFactory::isMmapAvailable() {
-    // mmap 在所有现代 Linux 系统上都可用
-    return true;
-}
-
 BufferFillingWorkerFactory::WorkerType BufferFillingWorkerFactory::getRecommendedType() {
-    if (isIoUringAvailable() && isIoUringSuitable()) {
-        return WorkerType::IOURING_RAW;
-    }
-    return WorkerType::MMAP_RAW;
+    // 推荐使用 FFmpeg Video File Worker
+    return WorkerType::FFMPEG_VIDEO_FILE;
 }
 
 const char* BufferFillingWorkerFactory::typeToString(WorkerType type) {
     switch (type) {
         case WorkerType::AUTO:                return "AUTO";
-        case WorkerType::MMAP_RAW:            return "MMAP_RAW";
-        case WorkerType::IOURING_RAW:         return "IOURING_RAW";
         case WorkerType::FFMPEG_RTSP:         return "FFMPEG_RTSP";
         case WorkerType::FFMPEG_RTSP_RECORD:  return "FFMPEG_RTSP_RECORD";
         case WorkerType::FFMPEG_VIDEO_FILE:   return "FFMPEG_VIDEO_FILE";
@@ -75,53 +53,25 @@ const char* BufferFillingWorkerFactory::typeToString(WorkerType type) {
 // ============ 私有辅助方法 ============
 
 std::unique_ptr<WorkerBase> BufferFillingWorkerFactory::autoDetect(const WorkerConfig& config) {
-    LOG_INFO("🔍 Detecting system capabilities:");
+    LOG_INFO("🔍 Auto-detecting Worker type...");
+    LOG_INFO("   Using FfmpegDecodeVideoFileWorker as default");
     
-    // 检查 io_uring
-    bool iouring_available = isIoUringAvailable();
-    LOG_INFO_FMT("   - io_uring: %s", iouring_available ? "✓ Available" : "✗ Not available");
-    
-    // 检查 mmap
-    bool mmap_available = isMmapAvailable();
-    LOG_INFO_FMT("   - mmap: %s", mmap_available ? "✓ Available" : "✗ Not available");
-    
-    // 决策逻辑
-    if (iouring_available && isIoUringSuitable()) {
-        LOG_DEBUG("[Worker] Selected: IoUringRawVideoFileWorker (high-performance async I/O)\n");
-        return std::make_unique<IoUringRawVideoFileWorker>();
-    }
-    
-    if (mmap_available) {
-        LOG_DEBUG("[Worker] Selected: MmapRawVideoFileWorker (memory-mapped I/O)\n");
-        return std::make_unique<MmapRawVideoFileWorker>();
-    }
-    
-    // 默认降级
-    LOG_WARN_FMT("[Worker]  Warning: No optimal worker available, using MmapRawVideoFileWorker");
-    return std::make_unique<MmapRawVideoFileWorker>();
+    // 默认使用 FFmpeg Video File Worker
+    return std::make_unique<FfmpegDecodeVideoFileWorker>(config);
 }
 
 std::unique_ptr<WorkerBase> BufferFillingWorkerFactory::createByType(WorkerType type, const WorkerConfig& config) {
     switch (type) {
-        case WorkerType::MMAP_RAW:
-            return std::make_unique<MmapRawVideoFileWorker>(config);  // ✅ 传递 config
-            
-        case WorkerType::IOURING_RAW:
-            if (!isIoUringAvailable()) {
-                LOG_WARN_FMT("[Worker]  Warning: io_uring not available, falling back to mmap");
-                return std::make_unique<MmapRawVideoFileWorker>(config);  // ✅ 传递 config
-            }
-            return std::make_unique<IoUringRawVideoFileWorker>(config);  // ✅ 传递 config
-            
         case WorkerType::FFMPEG_RTSP:
-            return std::make_unique<FfmpegDecodeRtspWorker>(config);  // ✅ 传递 config
+            return std::make_unique<FfmpegDecodeRtspWorker>(config);
             
         case WorkerType::FFMPEG_RTSP_RECORD:
-            return std::make_unique<FfmpegRecordRtspWorker>(config);  // ✅ 传递 config
+            return std::make_unique<FfmpegRecordRtspWorker>(config);
             
         case WorkerType::FFMPEG_VIDEO_FILE:
-            return std::make_unique<FfmpegDecodeVideoFileWorker>(config);  // ✅ 已经传递 config
+            return std::make_unique<FfmpegDecodeVideoFileWorker>(config);
             
+        case WorkerType::AUTO:
         default:
             return autoDetect(config);
     }
@@ -133,12 +83,10 @@ BufferFillingWorkerFactory::WorkerType BufferFillingWorkerFactory::getTypeFromEn
         return WorkerType::AUTO;
     }
     
-    if (strcmp(env, "mmap") == 0 || strcmp(env, "mmap_raw") == 0) {
-        return WorkerType::MMAP_RAW;
-    } else if (strcmp(env, "iouring") == 0 || strcmp(env, "iouring_raw") == 0) {
-        return WorkerType::IOURING_RAW;
-    } else if (strcmp(env, "rtsp") == 0 || strcmp(env, "ffmpeg_rtsp") == 0) {
+    if (strcmp(env, "rtsp") == 0 || strcmp(env, "ffmpeg_rtsp") == 0) {
         return WorkerType::FFMPEG_RTSP;
+    } else if (strcmp(env, "rtsp_record") == 0 || strcmp(env, "ffmpeg_rtsp_record") == 0) {
+        return WorkerType::FFMPEG_RTSP_RECORD;
     } else if (strcmp(env, "ffmpeg") == 0 || strcmp(env, "ffmpeg_video_file") == 0) {
         return WorkerType::FFMPEG_VIDEO_FILE;
     }
@@ -151,18 +99,6 @@ BufferFillingWorkerFactory::WorkerType BufferFillingWorkerFactory::getTypeFromCo
     // 这里简化实现，返回 AUTO
     // 实际项目中可以实现配置文件解析
     return WorkerType::AUTO;
-}
-
-bool BufferFillingWorkerFactory::isIoUringSuitable() {
-    // 简化的适用性检查
-    // 实际项目中可以根据以下因素判断：
-    // - 系统负载
-    // - 可用内存
-    // - 并发线程数
-    // - 文件大小
-    
-    // 目前默认认为 io_uring 总是适合（如果可用的话）
-    return true;
 }
 
 

@@ -2,6 +2,7 @@
 #define FFMPEG_DECODE_RTSP_WORKER_HPP
 
 #include "productionline/worker/WorkerBase.hpp"
+#include "productionline/worker/IPacketSource.hpp"
 #include "buffer/bufferpool/Buffer.hpp"
 #include "buffer/bufferpool/BufferPool.hpp"
 #include <string>
@@ -13,12 +14,10 @@
 #include <memory>
 
 // FFmpeg 前向声明
-struct AVFormatContext;
 struct AVCodecContext;
 struct AVCodecParameters;
 struct AVPacket;
 struct AVFrame;
-struct SwsContext;
 
 // 前向声明 BufferPool（避免循环依赖）
 class BufferPool;
@@ -70,8 +69,13 @@ class FfmpegDecodeRtspWorker : public WorkerBase {
 public:
     // ============ 构造/析构 ============
     
-    FfmpegDecodeRtspWorker();
-    FfmpegDecodeRtspWorker(const WorkerConfig& config);  // v2.2: 配置构造函数
+    /**
+     * @brief 构造函数（必须提供配置）
+     * @param config Worker配置（包含解码器配置、RTSP配置等）
+     * 
+     * 注意：不再提供默认构造函数，所有 Worker 必须通过配置创建
+     */
+    explicit FfmpegDecodeRtspWorker(const WorkerConfig& config);
     virtual ~FfmpegDecodeRtspWorker();
     
     // 禁止拷贝
@@ -121,7 +125,7 @@ public:
     /**
      * 获取连接状态
      */
-    bool isConnected() const { return connected_.load(); }
+    bool isConnected() const;
     
     /**
      * 获取最后错误信息
@@ -134,32 +138,25 @@ public:
     void printStats() const;
 
 private:
+    // ============ 数据源抽象（v2.12新增）============
+    std::unique_ptr<IPacketSource> packet_source_;  // 数据源抽象（RTSP流）
+    
     // ============ FFmpeg 资源 ============
-    AVFormatContext* format_ctx_ptr_;
     AVCodecContext* codec_ctx_ptr_;
-    SwsContext* sws_ctx_ptr_;              // 图像格式转换
-    int video_stream_index_;
     
     // ============ RTSP 连接信息 ============
-    std::string rtsp_url_;            // RTSP URL（使用 std::string 更安全）
     int width_;                        // 输出宽度
     int height_;                       // 输出高度
     int output_pixel_format_;          // 输出像素格式（如AV_PIX_FMT_BGRA）
     int output_bpp_;                   // 输出每像素位数
     
     // ============ 解码器配置（v2.2新增）============
-    bool use_hardware_decoder_;        // 是否使用硬件解码
     std::string decoder_name_;         // 指定解码器名称（如 "h264_taco"），空字符串表示自动选择
     struct AVDictionary* codec_options_ptr_;  // 解码器选项（用于 h264_taco 配置）
     
     // ============ 统计信息 ============
     std::atomic<int> decoded_frames_;
     std::atomic<int> dropped_frames_;
-    
-    // ============ 状态 ============
-    std::atomic<bool> connected_;
-    bool is_open_;
-    std::atomic<bool> eof_reached_;    // 流结束标志
     
     // ============ 线程安全 ============
     mutable std::recursive_mutex mutex_;  // 使用递归锁避免死锁
@@ -171,24 +168,10 @@ private:
     // ============ 内部辅助方法 ============
     
     /**
-     * 打开媒体源（RTSP 流）
-     */
-    bool openMediaSource();
-    
-    /**
-     * 关闭媒体源并释放资源
-     */
-    void closeMediaSource();
-    
-    /**
-     * 查找视频流
-     */
-    bool findVideoStream();
-    
-    /**
      * 初始化解码器（支持硬件解码和配置）
+     * @param codec_params 编解码器参数（从 packet_source_ 获取）
      */
-    bool initializeDecoder();
+    bool initializeDecoder(const AVCodecParameters* codec_params);
     
     /**
      * 配置特殊解码器（如 h264_taco）
@@ -200,6 +183,24 @@ private:
      * 设置错误信息
      */
     void setError(const std::string& error, int ffmpeg_error = 0);
+    
+    /**
+     * @brief 从 AVFrame 中提取硬件解码器的物理内存地址（重写基类虚函数）
+     * 
+     * 职责：从 AVFrame 中提取硬件解码器的物理内存地址
+     * 
+     * 设计原则：
+     * - 此函数只在使用硬件解码器时调用（decoder_name_ 非空）
+     * - 不同硬件解码器有不同的提取方式
+     * - 提取失败返回 false，调用者会报错并终止解码
+     * 
+     * @param frame AVFrame 指针（需要包含 libavcodec/avcodec.h）
+     * @param buffer Buffer 指针（用于存储提取的物理地址）
+     * @return true 成功提取物理地址，false 提取失败或不支持
+     * 
+     * @note 与 FfmpegDecodeVideoFileWorker 保持一致的架构
+     */
+    virtual bool extractHardwareAddressFromMetadata(struct AVFrame* frame, Buffer* buffer) override;
 };
 
 #endif // FFMPEG_DECODE_RTSP_WORKER_HPP
