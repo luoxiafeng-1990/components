@@ -9,6 +9,7 @@
 extern "C" {
 #include <libavutil/pixfmt.h>
 #include <libavutil/frame.h>
+#include <libavcodec/packet.h>  // ⭐ v2.8新增：AVPacket 定义
 }
 
 /**
@@ -113,6 +114,27 @@ public:
     size_t size() const { return size_; }
     
     /**
+     * @brief 设置Buffer大小
+     * @param size 新的Buffer大小（字节）
+     * @note v2.10新增：用于软件解码时根据实际帧大小更新Buffer容量
+     */
+    void setSize(size_t size) { size_ = size; }
+    
+    /**
+     * @brief 设置实际使用大小
+     * @param used_size 实际使用的字节数
+     * @note v2.9新增：用于原始码流等可变大小数据
+     */
+    void setUsedSize(size_t used_size) { used_size_ = used_size; }
+    
+    /**
+     * @brief 获取实际使用大小
+     * @return 实际使用的字节数（如果未设置，返回 size_）
+     * @note v2.9新增：用于原始码流等可变大小数据
+     */
+    size_t getUsedSize() const { return used_size_ > 0 ? used_size_ : size_; }
+    
+    /**
      * @brief 获取当前状态
      * @return Buffer当前状态（线程安全）
      */
@@ -159,6 +181,22 @@ public:
      * @return AVFrame 指针，如果没有关联则返回 nullptr
      */
     AVFrame* getAVFrame() const { return avframe_; }
+    
+    // ========== AVPacket 关联接口 ⭐ v2.8新增 ==========
+    
+    /**
+     * @brief 设置关联的 AVPacket（仅用于 AVFrameAllocator）
+     * @param packet AVPacket 指针
+     * 
+     * @note Buffer 持有引用但不拥有所有权，释放由 Allocator 负责
+     */
+    void setAVPacket(AVPacket* packet) { avpacket_ = packet; }
+    
+    /**
+     * @brief 获取关联的 AVPacket
+     * @return AVPacket 指针，如果没有关联则返回 nullptr
+     */
+    AVPacket* getAVPacket() const { return avpacket_; }
     
     /**
      * @brief 更新虚拟地址（解码后更新为 frame->data[0]）
@@ -277,7 +315,8 @@ private:
     uint32_t id_;                    // 唯一标识
     void* virt_addr_;                // 虚拟地址（真实数据地址，如 frame->data[0]）⭐ v2.7语义修正
     uint64_t phys_addr_;             // 物理地址（硬件/DMA）
-    size_t size_;                    // Buffer 大小
+    size_t size_;                    // Buffer 总大小（分配大小）
+    size_t used_size_;               // 实际使用大小（对于可变大小数据，如原始码流）⭐ v2.9新增
     Ownership ownership_;            // 所有权类型
     
     // ========== 状态管理 ==========
@@ -285,6 +324,7 @@ private:
     
     // ========== AVFrame 关联 ⭐ v2.7新增 ==========
     AVFrame* avframe_;               // 关联的 AVFrame 指针（引用，不拥有所有权）
+    AVPacket* avpacket_;             // ⭐ v2.8新增：关联的 AVPacket 指针（引用，不拥有所有权）
     
     // ========== 图像元数据 ⭐ v2.6新增 ==========
     bool has_image_metadata_;        // 是否包含图像元数据

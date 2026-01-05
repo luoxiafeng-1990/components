@@ -9,6 +9,12 @@
 #include <algorithm>
 
 // ============================================================
+// 所有权跟踪（静态全局变量，所有 AVFrameAllocator 实例共享）
+// ============================================================
+static std::unordered_map<Buffer*, BufferAllocatorBase*> avframe_buffer_ownership_;
+static std::mutex avframe_ownership_mutex_;
+
+// ============================================================
 // 构造/析构函数
 // ============================================================
 
@@ -69,6 +75,16 @@ Buffer* AVFrameAllocator::injectAVFrameToPool(AVFrame* frame, BufferPool* pool) 
     // 3.5 ⭐ v2.7新增：设置 Buffer 关联的 AVFrame 指针
     buffer->setAVFrame(frame);
     
+    // 3.5.1 ⭐ v2.8新增：为 Buffer 分配关联的 AVPacket
+    AVPacket* packet = av_packet_alloc();
+    if (!packet) {
+        LOG_ERROR_FMT("[AVFrameAllocator] Failed to allocate AVPacket for Buffer #%u", id);
+        delete buffer;
+        return nullptr;
+    }
+    buffer->setAVPacket(packet);
+    LOG_TRACE_FMT("[AVFrameAllocator]   AVPacket allocated at %p for Buffer #%u", packet, id);
+    
     // 4. 将 Buffer 添加到 pool 的 filled 队列（使用基类静态方法）
     if (!BufferAllocatorBase::addBufferToPoolQueue(pool, buffer, QueueType::FILLED)) {
         LOG_ERROR_FMT("[AVFrameAllocator] Failed to add buffer #%u to pool '%s'", 
@@ -79,12 +95,10 @@ Buffer* AVFrameAllocator::injectAVFrameToPool(AVFrame* frame, BufferPool* pool) 
     
     // 5. ⭐ v2.7移除：不再需要记录 buffer_to_frame_ 映射，Buffer 自己持有 AVFrame*
     
-    // 6. 记录所有权（使用静态所有权跟踪）
+    // 6. ⭐ 关键修复：注册 Buffer 所有权（用于 destroyPool 时识别）
     {
-        static std::unordered_map<Buffer*, BufferAllocatorBase*> buffer_ownership_;
-        static std::mutex ownership_mutex_;
-        std::lock_guard<std::mutex> lock(ownership_mutex_);
-        buffer_ownership_[buffer] = this;
+        std::lock_guard<std::mutex> lock(avframe_ownership_mutex_);
+        avframe_buffer_ownership_[buffer] = this;
     }
     
     LOG_DEBUG_FMT("[AVFrameAllocator] AVFrame injected to pool '%s' as Buffer #%u (size=%zu)",
@@ -106,7 +120,6 @@ bool AVFrameAllocator::releaseAVFrame(Buffer* buffer, BufferPool* pool) {
     if (frame) {
         av_frame_free(&frame);
         buffer->setAVFrame(nullptr);  // 清空 Buffer 的 AVFrame 引用
-        LOG_DEBUG_FMT("[AVFrameAllocator] Released AVFrame for Buffer #%u", buffer->id());
     } else {
         LOG_WARN_FMT("[AVFrameAllocator]  No AVFrame found for Buffer #%u", buffer->id());
     }
@@ -156,20 +169,22 @@ void AVFrameAllocator::deallocateBuffer(Buffer* buffer) {
     if (frame) {
         av_frame_free(&frame);
         buffer->setAVFrame(nullptr);  // 清空 Buffer 的 AVFrame 引用
-        LOG_DEBUG_FMT("[AVFrameAllocator] Released AVFrame for Buffer #%u", buffer->id());
     }
     
-    // 3. 删除 Buffer 对象
+    // 3. ⭐ v2.8新增：释放 AVPacket
+    AVPacket* packet = buffer->getAVPacket();
+    if (packet) {
+        av_packet_free(&packet);
+        buffer->setAVPacket(nullptr);  // 清空 Buffer 的 AVPacket 引用
+    }
+    
+    // 4. 删除 Buffer 对象
     delete buffer;
 }
 
 // ============================================================
 // 实现基类纯虚函数
 // ============================================================
-
-// 所有权跟踪（静态成员，所有Allocator共享）
-static std::unordered_map<Buffer*, BufferAllocatorBase*> avframe_buffer_ownership_;
-static std::mutex avframe_ownership_mutex_;
 
 uint64_t AVFrameAllocator::allocatePoolWithBuffers(
     int count,
@@ -225,6 +240,24 @@ uint64_t AVFrameAllocator::allocatePoolWithBuffers(
         
         // 4.4 ⭐ v2.7新增：设置 Buffer 关联的 AVFrame 指针
         buffer->setAVFrame(frame_ptr);
+        
+        // 4.4.1 ⭐ v2.8新增：为 Buffer 分配关联的 AVPacket
+        AVPacket* packet_ptr = av_packet_alloc();
+        if (!packet_ptr) {
+            LOG_ERROR_FMT("[AVFrameAllocator] ERROR: Failed to allocate AVPacket for buffer #%u", buffer_id);
+            av_frame_free(&frame_ptr);
+            delete buffer;
+            // TODO: 清理已分配的 buffers
+            return 0;
+        }
+        buffer->setAVPacket(packet_ptr);
+        LOG_TRACE_FMT("[AVFrameAllocator]   AVPacket allocated at %p for Buffer #%u", packet_ptr, buffer_id);
+        
+        // 4.4.2 ⭐ 关键修复：注册 Buffer 所有权（用于 destroyPool 时识别）
+        {
+            std::lock_guard<std::mutex> lock(avframe_ownership_mutex_);
+            avframe_buffer_ownership_[buffer] = this;
+        }
         
         // 4.5 🎯 关键：将 Buffer 添加到 BufferPool 的 FREE 队列
         if (!BufferAllocatorBase::addBufferToPoolQueue(pool.get(), buffer, QueueType::FREE)) {
@@ -307,12 +340,10 @@ Buffer* AVFrameAllocator::injectExternalBufferToPool(
         return nullptr;
     }
     
-    // 4. 记录所有权（外部内存由外部管理，但 Buffer 对象由 Allocator 管理）
+    // 4. ⭐ 关键修复：注册 Buffer 所有权（用于 destroyPool 时识别）
     {
-        static std::unordered_map<Buffer*, BufferAllocatorBase*> buffer_ownership_;
-        static std::mutex ownership_mutex_;
-        std::lock_guard<std::mutex> lock(ownership_mutex_);
-        buffer_ownership_[buffer] = this;
+        std::lock_guard<std::mutex> lock(avframe_ownership_mutex_);
+        avframe_buffer_ownership_[buffer] = this;
     }
     
     // 仅在TRACE级别输出详细信息

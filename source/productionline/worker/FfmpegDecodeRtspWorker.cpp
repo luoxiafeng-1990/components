@@ -117,37 +117,48 @@ bool FfmpegDecodeRtspWorker::open(const char* path, int width, int height, int b
     LOG_INFO_FMT("   Bits per pixel: %d", bits_per_pixel);
     
     // 连接RTSP流并初始化解码器
-    if (!connectRTSP()) {
+    if (!openMediaSource()) {
         return false;
     }
+    
+    // ⭐ v2.11新增：检查编解码器类型是否匹配
+    AVCodecParameters* codecpar = format_ctx_ptr_->streams[video_stream_index_]->codecpar;
+    checkCodecMismatch(codecpar->codec_id, decoder_name_);
     
     // 🎯 Worker职责：在open()时自动创建BufferPool（通过调用Allocator）
     // 计算帧大小
     size_t frame_size = width_ * height_ * (bits_per_pixel / 8);
     if (frame_size == 0) {
         setError("Invalid frame size, cannot create BufferPool");
-        disconnectRTSP();
+        closeMediaSource();
         return false;
     }
     
     int buffer_count = 4;  // RTSP流建议4-8个Buffer
     
     // v2.0: allocatePoolWithBuffers 返回 pool_id
-    buffer_pool_id_ = allocator_facade_.allocatePoolWithBuffers(
+    uint64_t pool_id = allocator_facade_.allocatePoolWithBuffers(
         buffer_count,
         frame_size,
         std::string("FfmpegDecodeRtspWorker_") + std::string(path),
         "RTSP"
     );
     
-    if (buffer_pool_id_ == 0) {
+    if (pool_id == 0) {
         setError("Failed to create BufferPool via Allocator");
-        disconnectRTSP();
+        closeMediaSource();
+        return false;
+    }
+    
+    // v2.0 新设计：注册为主视频解码输出
+    if (!registerBufferPool(BufferPoolType::DECODE_VIDEO_PRIMARY, pool_id)) {
+        setError("Failed to register BufferPool");
+        closeMediaSource();
         return false;
     }
     
     // v2.0: 从 Registry 获取 Pool 名称（返回 weak_ptr）
-    auto pool_weak = BufferPoolRegistry::getInstance().getPool(buffer_pool_id_);
+    auto pool_weak = BufferPoolRegistry::getInstance().getPool(pool_id);
     auto pool = pool_weak.lock();
     std::string pool_name = pool ? pool->getName() : "Unknown";
     
@@ -160,7 +171,7 @@ bool FfmpegDecodeRtspWorker::open(const char* path, int width, int height, int b
     LOG_DEBUG_FMT("[Worker]    Resolution: %dx%d", width_, height_);
     LOG_DEBUG_FMT("[Worker]    Codec: %s", codec_ctx_ptr_->codec->name);
     LOG_DEBUG_FMT("[Worker]    BufferPool: '%s' (ID: %lu, %d buffers, %zu bytes each)", 
-           pool_name.c_str(), buffer_pool_id_, buffer_count, frame_size);
+           pool_name.c_str(), pool_id, buffer_count, frame_size);
     
     return true;
 }
@@ -177,10 +188,10 @@ void FfmpegDecodeRtspWorker::close() {
     
     // v2.0: BufferPool 生命周期由 Allocator 管理，Worker 不需要调用 destroyPool
     // Allocator 析构时会自动清理所有 Pool
-    buffer_pool_id_ = 0;  // 只清除ID，不调用destroyPool
+    clearAllBufferPools();  // 只清除映射表，不调用destroyPool
     
     // 断开RTSP连接并释放资源
-    disconnectRTSP();
+    closeMediaSource();
     
     is_open_ = false;
     connected_ = false;
@@ -293,102 +304,118 @@ bool FfmpegDecodeRtspWorker::fillBuffer(int frame_index, Buffer* buffer) {
         return false;
     }
     
-    // 步骤2: 读取 packet（循环读取直到是视频流）
-    AVPacket* packet = av_packet_alloc();
-    if (!packet) {
-        setError("Failed to allocate AVPacket");
+    // 步骤1.1: ⭐ v2.8新增：从 Buffer 获取关联的 AVPacket*
+    AVPacket* packet_ptr = buffer->getAVPacket();
+    if (!packet_ptr) {
+        LOG_ERROR("[Worker] ERROR: buffer->getAVPacket() is nullptr");
         return false;
     }
     
+    // 步骤2: 读取一个 packet（参考 FfmpegDecodeVideoFileWorker）
+    // 🔧 修复：对于损坏帧，在内部循环尝试读取，而不是返回 false
+    const int AVERROR_INVALIDDATA_VALUE = -1094995529;  // AVERROR(0x41444e49)
+    const int MAX_CORRUPTED_RETRIES = 10;  // 最大重试次数，避免无限循环
+    
+    int corrupted_retries = 0;
+    int read_ret;
+    
     while (true) {
-        int ret = av_read_frame(format_ctx_ptr_, packet);
-        if (ret < 0) {
-            av_packet_free(&packet);
-            if (ret == AVERROR_EOF) {
+        read_ret = av_read_frame(format_ctx_ptr_, packet_ptr);
+        
+        if (read_ret < 0) {
+            if (read_ret == AVERROR_EOF) {
+                LOG_DEBUG("🔄 RTSP EOF reached");
+                av_packet_unref(packet_ptr);
                 eof_reached_ = true;
-                LOG_DEBUG("[Worker] RTSP EOF reached");
+                return false;
+            } else if (read_ret == AVERROR_INVALIDDATA_VALUE) {
+                // 🔧 修复：遇到损坏帧时，在内部循环跳过，继续读取下一个 packet
+                corrupted_retries++;
+                if (corrupted_retries <= MAX_CORRUPTED_RETRIES) {
+                    LOG_WARN_FMT("[Worker]  WARNING: Corrupted packet detected (attempt %d/%d), skipping...", 
+                           corrupted_retries, MAX_CORRUPTED_RETRIES);
+                    av_packet_unref(packet_ptr);
+                    // 继续循环，尝试读取下一个 packet
+                    continue;
+                } else {
+                    // 连续多次都是损坏帧，可能流确实损坏严重，返回失败
+                    LOG_ERROR_FMT("[Worker] ERROR: Too many corrupted packets (%d), giving up", corrupted_retries);
+                    av_packet_unref(packet_ptr);
+                    return false;
+                }
             } else {
-                char errbuf[128];
-                av_strerror(ret, errbuf, sizeof(errbuf));
-                setError(std::string("av_read_frame failed: ") + errbuf, ret);
+                // 其他错误（非 EOF，非损坏帧）：记录错误并返回
+                char err_buf[128];
+                av_strerror(read_ret, err_buf, sizeof(err_buf));
+                LOG_ERROR_FMT("[Worker] ERROR: av_read_frame failed: %d (%s)", read_ret, err_buf);
+                av_packet_unref(packet_ptr);
+                return false;
             }
+        } else {
+            // 成功读取到 packet，退出循环
+            break;
+        }
+    }
+    
+    // 步骤3: 检查是否是视频流
+    if (packet_ptr->stream_index != video_stream_index_) {
+        // 🔧 修复：不是视频流的packet需要释放，然后继续读取下一个
+        av_packet_unref(packet_ptr);
+        return false;  // 让调用者再次调用以读取下一个packet
+    }
+    
+    // 步骤4: 发送 packet 到解码器（参考 FfmpegDecodeVideoFileWorker）
+    int ret = avcodec_send_packet(codec_ctx_ptr_, packet_ptr);
+    
+    // 🔧 修复：无论成功与否，都要释放packet引用
+    // avcodec_send_packet 会复制数据，不再需要原始packet
+    av_packet_unref(packet_ptr);
+    
+    if (ret < 0) {
+        LOG_ERROR_FMT("[Worker] ERROR: avcodec_send_packet failed: %d", ret);
+        return false;
+    }
+    
+    bool recv_frm = false;
+    // 步骤5: 🎯 循环调用 receive_frame，直到成功或需要更多数据（参考 FfmpegDecodeVideoFileWorker）
+    while (true) {
+        ret = avcodec_receive_frame(codec_ctx_ptr_, frame_ptr);
+        if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF || ret < 0) {
+            break;
+        } 
+        // ✅ 成功！提取物理地址
+        uint64_t phys_addr = 0;
+        uint32_t blk_id = 0;
+        if (frame_ptr->metadata) {
+            AVDictionaryEntry* entry = av_dict_get(frame_ptr->metadata, "pool_blk_id", NULL, 0);
+            if (entry) {
+                blk_id = (uint32_t)atoi(entry->value);
+                phys_addr = taco_sys_handle2_phys_addr(blk_id);
+                
+                // 🎯 保存物理地址到 Buffer
+                buffer->setPhysicalAddress(phys_addr);
+            }
+        }
+        
+        if (phys_addr == 0) {
+            LOG_WARN("[Worker]  Warning: Failed to extract physical address");
             return false;
         }
         
-        if (packet->stream_index == video_stream_index_) {
-            break;  // 找到视频流
-        }
-        av_packet_unref(packet);
+        // ⭐ v2.7改进：先更新虚拟地址为实际数据地址（frame->data[0]）
+        buffer->setVirtualAddress(frame_ptr->data[0]);
+        
+        // ⭐ v2.6新增：从AVFrame设置图像元数据到Buffer
+        buffer->setImageMetadataFromAVFrame(frame_ptr);
+        decoded_frames_++;
+        recv_frm = true;
     }
-    
-    // 步骤3: 发送 packet 到解码器
-    int ret = avcodec_send_packet(codec_ctx_ptr_, packet);
-    av_packet_unref(packet);
-    av_packet_free(&packet);
-    
-    if (ret < 0) {
-        char errbuf[128];
-        av_strerror(ret, errbuf, sizeof(errbuf));
-        setError(std::string("avcodec_send_packet failed: ") + errbuf, ret);
-        return false;
-    }
-    
-    // 步骤4: 接收解码后的帧（循环直到成功）
-    while (true) {
-        ret = avcodec_receive_frame(codec_ctx_ptr_, frame_ptr);
-        if (ret == 0) {
-            // ✅ 成功解码
-            break;
-        } else if (ret == AVERROR(EAGAIN)) {
-            // 需要更多数据，返回false让调用者再次调用
-            return false;
-        } else if (ret == AVERROR_EOF) {
-            eof_reached_ = true;
-            LOG_DEBUG("[Worker] Decoder EOF reached");
-            return false;
-        } else {
-            char errbuf[128];
-            av_strerror(ret, errbuf, sizeof(errbuf));
-            setError(std::string("avcodec_receive_frame failed: ") + errbuf, ret);
-            return false;
-        }
-    }
-    
-    // 步骤5: 提取物理地址（零拷贝模式）
-    uint64_t phys_addr = 0;
-    uint32_t blk_id = 0;
-    
-    if (frame_ptr->metadata) {
-        AVDictionaryEntry* entry = av_dict_get(frame_ptr->metadata, "pool_blk_id", NULL, 0);
-        if (entry) {
-            blk_id = (uint32_t)atoi(entry->value);
-            phys_addr = taco_sys_handle2_phys_addr(blk_id);
-            buffer->setPhysicalAddress(phys_addr);
-        }
-    }
-    
-    if (phys_addr == 0) {
-        LOG_WARN("[Worker]  Warning: Failed to extract physical address");
-    }
-    
-    // 步骤6: ⭐ v2.7改进：先更新虚拟地址为实际数据地址（frame->data[0]）
-    buffer->setVirtualAddress(frame_ptr->data[0]);
-    
-    // 步骤7: 设置图像元数据（v2.6新增）
-    buffer->setImageMetadataFromAVFrame(frame_ptr);
-    
-    decoded_frames_++;
-    return true;
+    return recv_frm;
 }
 
 // ============================================================================
 // 提供原材料（BufferPool）
 // ============================================================================
-
-uint64_t FfmpegDecodeRtspWorker::getOutputBufferPoolId() {
-    // 使用基类的实现（返回 pool_id）
-    return WorkerBase::getOutputBufferPoolId();
-}
 
 // ============ RTSP 特有接口 ============
 
@@ -404,12 +431,14 @@ void FfmpegDecodeRtspWorker::printStats() const {
     LOG_INFO_FMT("   Connected: %s", connected_.load() ? "Yes" : "No");
     LOG_INFO_FMT("   Decoded frames: %d", decoded_frames_.load());
     LOG_INFO_FMT("   Dropped frames: %d", dropped_frames_.load());
-    LOG_INFO_FMT("   BufferPool ID: %lu", buffer_pool_id_);
+    
+    uint64_t pool_id = getOutputBufferPoolId(BufferPoolType::DECODE_VIDEO_PRIMARY);
+    LOG_INFO_FMT("   BufferPool ID: %lu", pool_id);
 }
 
 // ============ 内部实现 ============
 
-bool FfmpegDecodeRtspWorker::connectRTSP() {
+bool FfmpegDecodeRtspWorker::openMediaSource() {
     // 1. 分配格式上下文
     format_ctx_ptr_ = avformat_alloc_context();
     if (!format_ctx_ptr_) {
@@ -472,7 +501,7 @@ bool FfmpegDecodeRtspWorker::connectRTSP() {
     
     connected_ = true;
     
-    LOG_DEBUG("[Worker] Connected to RTSP stream");
+    LOG_DEBUG("[Worker] Opened RTSP media source");
     LOG_INFO_FMT("   Codec: %s", codec_ctx_ptr_->codec->name);
     LOG_INFO_FMT("   Stream resolution: %dx%d", codec_ctx_ptr_->width, codec_ctx_ptr_->height);
     LOG_INFO_FMT("   Output resolution: %dx%d", width_, height_);
@@ -480,7 +509,7 @@ bool FfmpegDecodeRtspWorker::connectRTSP() {
     return true;
 }
 
-void FfmpegDecodeRtspWorker::disconnectRTSP() {
+void FfmpegDecodeRtspWorker::closeMediaSource() {
     if (sws_ctx_ptr_) {
         sws_freeContext(sws_ctx_ptr_);
         sws_ctx_ptr_ = nullptr;

@@ -1,4 +1,6 @@
 #include "productionline/worker/FfmpegDecodeVideoFileWorker.hpp"
+#include "productionline/worker/FilePacketSource.hpp"
+#include "productionline/worker/BufferPacketSource.hpp"
 #include "common/Logger.hpp"
 #include "buffer/bufferpool/BufferPoolRegistry.hpp"
 #include <cstring>
@@ -19,68 +21,74 @@ extern "C" {
 // 构造/析构
 // ============================================================================
 
-// 默认构造函数（向后兼容）
-FfmpegDecodeVideoFileWorker::FfmpegDecodeVideoFileWorker()
-    : WorkerBase(BufferAllocatorFactory::AllocatorType::AVFRAME)
-    , format_ctx_ptr_(nullptr)
-    , codec_ctx_ptr_(nullptr)
-    , packet_ptr_(nullptr)
-    , sws_ctx_ptr_(nullptr)
-    , video_stream_index_(-1)
-    , width_(0)
-    , height_(0)
-    , output_width_(0)
-    , output_height_(0)
-    , output_bpp_(32)  // 默认ARGB888
-    , output_pixel_format_(AV_PIX_FMT_BGRA)
-    , total_frames_(-1)
-    , current_frame_index_(0)
-    , is_open_(false)
-    , is_ffmpeg_opened_(false)
-    , eof_reached_(false)
-    , zero_copy_buffer_pool_ptr_(nullptr)
-    , use_hardware_decoder_(true)  // 默认启用硬件解码
-    , decoder_name_()              // 默认自动选择（空字符串）
-    , codec_options_ptr_(nullptr)
-    , decoded_frames_(0)
-    , decode_errors_(0)
-    , last_ffmpeg_error_(0)
-{
-    // file_path_ 使用 std::string，无需手动初始化
-}
-
-// 配置构造函数（v2.2新增）
+// 构造函数（v2.2新增，v2.9支持数据源抽象）
 FfmpegDecodeVideoFileWorker::FfmpegDecodeVideoFileWorker(const WorkerConfig& config)
     : WorkerBase(BufferAllocatorFactory::AllocatorType::AVFRAME, config)
-    , format_ctx_ptr_(nullptr)
+    , packet_source_(nullptr)  // 将在下面根据配置创建
     , codec_ctx_ptr_(nullptr)
-    , packet_ptr_(nullptr)
-    , sws_ctx_ptr_(nullptr)
-    , video_stream_index_(-1)
-    , width_(0)
-    , height_(0)
-    , output_width_(0)
-    , output_height_(0)
-    , output_bpp_(32)
-    , output_pixel_format_(AV_PIX_FMT_BGRA)
-    , total_frames_(-1)
+    // ⚠️ 注意：video_stream_index_ 已移除，视频流索引从数据源获取
+    , output_width_(config.display.width)      // 🎯 从配置读取输出宽度
+    , output_height_(config.display.height)   // 🎯 从配置读取输出高度
+    , output_bpp_(config.display.bits_per_pixel > 0 ? config.display.bits_per_pixel : 32)  // 🎯 从配置读取位深，默认32
+    // ⚠️ 注意：total_frames_ 已移除，总帧数从数据源获取
     , current_frame_index_(0)
-    , is_open_(false)
-    , is_ffmpeg_opened_(false)
-    , eof_reached_(false)
-    , zero_copy_buffer_pool_ptr_(nullptr)
+    // ⚠️ 注意：is_open_ 已移除，打开状态从数据源获取
     , use_hardware_decoder_(config.decoder.enable_hardware)  // 🎯 从配置读取
     , decoder_name_(config.decoder.name.value_or(""))  // 🎯 从配置读取（使用 optional 的 value_or）
     , codec_options_ptr_(nullptr)
     , decoded_frames_(0)
-    , decode_errors_(0)
-    , last_ffmpeg_error_(0)
 {
-    // file_path_ 使用 std::string，无需手动初始化
+    // ⚠️ 注意：file_path_ 已移除，文件路径由数据源类管理
+    
+    // ⭐ v2.9新增：根据配置创建数据源
+    if (config.decoder.use_buffer_mode) {
+        // Buffer 模式：从 Buffer 获取 packet
+        if (config.decoder.codec_params) {
+            packet_source_ = std::make_unique<BufferPacketSource>(config.decoder.codec_params);
+            LOG_DEBUG("[FfmpegDecodeVideoFileWorker] Created BufferPacketSource");
+        } else {
+            LOG_WARN("[FfmpegDecodeVideoFileWorker] use_buffer_mode=true but codec_params is nullptr");
+        }
+    } else {
+        // 文件模式：从文件读取 packet
+        packet_source_ = std::make_unique<FilePacketSource>(config.file.file_path);
+        LOG_DEBUG_FMT("[FfmpegDecodeVideoFileWorker] Created FilePacketSource for '%s'", config.file.file_path.c_str());
+    }
 }
 
 FfmpegDecodeVideoFileWorker::~FfmpegDecodeVideoFileWorker() {
-    close();
+    LOG_DEBUG("[FfmpegDecodeVideoFileWorker] 析构函数开始");
+    
+    // ⭐ 关键修改：正确的清理顺序
+    //
+    // 问题根源：
+    // - 成员变量的析构永远在析构函数体执行完毕后
+    // - 如果在函数体内先调用 close()，再让成员变量析构
+    // - 顺序就变成：关闭解码器 → 释放 AVFrame
+    // - 但此时 AVFrame 可能还引用了解码器的资源，导致 free(): invalid pointer
+    //
+    // 正确顺序：
+    // 1. 手动调用 allocator_facade_.destroyPool() 先释放所有 AVFrame
+    // 2. 再调用 close() 关闭解码器和数据源
+    // 3. 成员变量自动析构（但 Pool 已清理，destroyPool() 幂等性保证不会重复释放）
+    
+    // 步骤1：先清理 BufferPool 和 AVFrame
+    if (!buffer_pool_type_map_.empty()) {
+        LOG_DEBUG("[FfmpegDecodeVideoFileWorker] 手动清理 BufferPool 和 AVFrame...");
+        allocator_facade_.destroyPool();  // 释放所有 Pool 中的 Buffer 和 AVFrame
+        clearAllBufferPools();
+    }
+    
+    // 步骤2：再关闭解码器和数据源（此时 AVFrame 已全部释放）
+    if (packet_source_ && packet_source_->isOpen()) {
+        LOG_DEBUG("[FfmpegDecodeVideoFileWorker] 关闭解码器和数据源...");
+        close();  // 关闭解码器和数据源，不再清理 Pool（已在上面清理）
+    }
+    
+    LOG_DEBUG("[FfmpegDecodeVideoFileWorker] 析构函数体结束");
+    
+    // ⭐ 函数体执行完毕后，成员变量自动析构
+    // ⭐ 但由于 Pool 已经手动清理，allocator_facade_.destroyPool() 会因为幂等性直接返回
 }
 
 // ============================================================================
@@ -88,68 +96,124 @@ FfmpegDecodeVideoFileWorker::~FfmpegDecodeVideoFileWorker() {
 // ============================================================================
 
 bool FfmpegDecodeVideoFileWorker::open(const char* path) {
-    if (!path) {
-        setError("Invalid file path (nullptr)");
-        return false;
-    }
-    
     std::lock_guard<std::recursive_mutex> lock(mutex_);
     
     // 如果已经打开，先关闭
-    if (is_open_.load(std::memory_order_acquire)) {
-        closeFfmpegResources();
+    if (packet_source_ && packet_source_->isOpen()) {
+        close();
     }
     
-    // 保存路径（使用 std::string 自动管理）
-    file_path_ = path;
-    
-    // 打开FFmpeg资源
-    if (!openFfmpegResources()) {
+    // ⭐ v2.9修改：使用数据源抽象
+    // 数据源应该在构造函数中已经创建（必须通过配置构造函数创建）
+    if (!packet_source_) {
+        setError("Cannot open: packet source is nullptr. Worker must be created with WorkerConfig");
         return false;
+    }
+    // 数据源已创建，直接使用
+    // Buffer 模式：忽略 path 参数
+    // 文件模式：使用构造函数中创建的数据源
+    
+    // 1. 打开数据源
+    if (!packet_source_->open()) {
+        setError("Failed to open packet source");
+        return false;
+    }
+    
+    // 2. 从数据源获取编解码器参数
+    const AVCodecParameters* codecpar = packet_source_->getCodecParameters();
+    if (!codecpar) {
+        setError("Failed to get codec parameters from packet source");
+        packet_source_->close();
+        return false;
+    }
+    
+    // 3. 获取视频流信息
+    // ⚠️ 注意：video_stream_index_ 已移除，视频流索引从数据源获取（不缓存）
+    // ⚠️ 注意：total_frames_ 已移除，总帧数从数据源获取（不缓存）
+    
+    // 4. 宽高信息从数据源获取（不再缓存，保持数据源一致性）
+    // ⚠️ 注意：width_ 和 height_ 已移除，使用 getOriginalWidth()/getOriginalHeight() 获取
+    
+    // 5. 检查编解码器类型是否匹配（仅文件模式需要）
+    if (auto* file_source = dynamic_cast<FilePacketSource*>(packet_source_.get())) {
+        (void)file_source;  // 仅用于类型检查
+        checkCodecMismatch(codecpar->codec_id, decoder_name_);
+    }
+    
+    // 6. 初始化解码器（使用从数据源获取的 codec_params）
+    if (!initializeDecoder(codecpar)) {
+        packet_source_->close();
+        return false;
+    }
+    
+    // 6. 设置输出分辨率（如果配置中未设置，使用原始分辨率）
+    // ⚠️ 注意：output_width_ 和 output_height_ 已在构造函数中从 config.display 读取
+    // 只有在配置中未设置（为0）的情况下，才使用原始分辨率
+    if (output_width_ == 0 || output_height_ == 0) {
+        output_width_ = getOriginalWidth();
+        output_height_ = getOriginalHeight();
+        LOG_DEBUG_FMT("[Worker] Output resolution not set in config, using original resolution: %dx%d", 
+                      output_width_, output_height_);
+    } else {
+        LOG_DEBUG_FMT("[Worker] Output resolution from config: %dx%d", output_width_, output_height_);
     }
     
     // 🎯 Worker职责：在open()时自动创建BufferPool（通过调用Allocator）
-    // 计算帧大小（在openFfmpegResources()后，output_width_和output_height_已设置）
+    // 计算帧大小
     size_t frame_size = output_width_ * output_height_ * output_bpp_ / 8;
     if (frame_size == 0) {
         setError("Invalid frame size, cannot create BufferPool");
-        closeFfmpegResources();
+        packet_source_->close();
         return false;
     }
     
-    int buffer_count = 1;  // 默认创建4个Buffer
+    int buffer_count = 128;  // ⚠️ 增加到128个以应对慢速消费者（文件写入）
     
     // v2.0: allocatePoolWithBuffers 返回 pool_id
-    buffer_pool_id_ = allocator_facade_.allocatePoolWithBuffers(
+    std::string pool_name;
+    if (path) {
+        pool_name = std::string("FfmpegDecodeVideoFileWorker_") + std::string(path);
+    } else {
+        // Buffer 模式：使用默认名称
+        pool_name = "FfmpegDecodeVideoFileWorker_BufferMode";
+    }
+    
+    uint64_t pool_id = allocator_facade_.allocatePoolWithBuffers(
         buffer_count,
         frame_size,
-        std::string("FfmpegDecodeVideoFileWorker_") + std::string(path),
+        pool_name,
         "Video"
     );
     
-    if (buffer_pool_id_ == 0) {
+    if (pool_id == 0) {
         setError("Failed to create BufferPool via Allocator");
-        closeFfmpegResources();
+        packet_source_->close();
+        return false;
+    }
+    
+    // v2.0 新设计：注册为主视频解码输出
+    if (!registerBufferPool(BufferPoolType::DECODE_VIDEO_PRIMARY, pool_id)) {
+        setError("Failed to register BufferPool");
+        packet_source_->close();
         return false;
     }
     
     // v2.0: 从 Registry 获取 Pool 名称（返回 weak_ptr）
-    auto pool_weak = BufferPoolRegistry::getInstance().getPool(buffer_pool_id_);
+    auto pool_weak = BufferPoolRegistry::getInstance().getPool(pool_id);
     auto pool = pool_weak.lock();
-    std::string pool_name = pool ? pool->getName() : "Unknown";
+    std::string actual_pool_name = pool ? pool->getName() : "Unknown";
     
-    is_open_.store(true, std::memory_order_release);
+    // ⚠️ 注意：is_open_ 已移除，打开状态由数据源管理
+    // 此时 packet_source_->isOpen() 应该已经返回 true（在 packet_source_->open() 成功后）
     current_frame_index_ = 0;
-    eof_reached_ = false;
     decoded_frames_ = 0;
-    decode_errors_ = 0;
     
     LOG_DEBUG_FMT("[Worker] FfmpegDecodeVideoFileWorker: Opened '%s'", path);
-    LOG_DEBUG_FMT("[Worker]    Resolution: %dx%d → %dx%d", width_, height_, output_width_, output_height_);
+    LOG_DEBUG_FMT("[Worker]    Resolution: %dx%d → %dx%d", getOriginalWidth(), getOriginalHeight(), output_width_, output_height_);
     LOG_DEBUG_FMT("[Worker]    Codec: %s", codec_ctx_ptr_->codec->name);
-    LOG_DEBUG_FMT("[Worker]    Total frames (estimated): %d", total_frames_);
+    LOG_DEBUG_FMT("[Worker]    Total frames (estimated): %d", packet_source_ ? packet_source_->getTotalFrames() : -1);
     LOG_DEBUG_FMT("[Worker]    BufferPool: '%s' (ID: %lu, %d buffers, %zu bytes each)", 
-           pool_name.c_str(), buffer_pool_id_, buffer_count, frame_size);
+           actual_pool_name.c_str(), pool_id, buffer_count, frame_size);
     
     return true;
 }
@@ -163,175 +227,77 @@ bool FfmpegDecodeVideoFileWorker::open(const char* path, int width, int height, 
 }
 
 void FfmpegDecodeVideoFileWorker::close() {
-    // 🎯 原子检查并设置：如果 is_open_ 是 true，则设置为 false
-    // 返回值表示是否成功设置（即之前是 true）
-    bool expected = true;
-    if (!is_open_.compare_exchange_strong(expected, false,
-                                         std::memory_order_acq_rel,
-                                         std::memory_order_acquire)) {
-        // is_open_ 已经是 false，说明已经关闭过了，直接返回
-        return;
+    // ⚠️ 注意：is_open_ 已移除，打开状态由数据源管理
+    // 检查数据源是否已打开，如果未打开则直接返回
+    if (!packet_source_ || !packet_source_->isOpen()) {
+        return;  // 已经关闭过了
     }
-    
-    // 🎯 只有第一个线程能执行到这里（is_open_ 从 true 变为 false）
-    // 此时 is_open_ == false，其他线程调用 close() 会直接返回
     
     {
         std::lock_guard<std::recursive_mutex> lock(mutex_);
         
-        // v2.0: BufferPool 生命周期由 Allocator 管理，Worker 不需要调用 destroyPool
-        // Allocator 析构时会自动清理所有 Pool
-        buffer_pool_id_ = 0;  // 只清除ID，不调用destroyPool
+        // ⭐ v2.9新增：关闭数据源（数据源的 close() 内部会处理线程安全）
+        if (packet_source_) {
+            packet_source_->close();
+        }
         
-        closeFfmpegResources();
+        // ⭐ 关键修改：Worker 只负责业务逻辑（关闭解码器）
+        //    BufferPool 和 AVFrame 的清理由 allocator_facade_ 析构时自动处理
+        //
+        // 资源释放顺序（析构时）：
+        // 1. 关闭数据源和解码器（业务资源）
+        // 2. ~allocator_facade_() - 释放 BufferPool 和 AVFrame（底层内存资源）
+        //
+        // 设计原则：
+        // - Worker::close() 只负责业务逻辑清理
+        // - Allocator::~Allocator() 负责内存资源清理
+        // - 符合单一职责原则和 RAII 原则
+        
+        // ⚠️ 注意：sws_ctx_ptr_ 已移除（当前未使用格式转换功能）
+        
+        // 释放解码器
+        if (codec_ctx_ptr_) {
+            avcodec_free_context(&codec_ctx_ptr_);
+            codec_ctx_ptr_ = nullptr;
+        }
+        
+        // 释放解码器选项
+        if (codec_options_ptr_) {
+            av_dict_free(&codec_options_ptr_);
+            codec_options_ptr_ = nullptr;
+        }
+        
+        // ⚠️ 注意：video_stream_index_ 已移除，视频流索引由数据源管理
+        
+        // ⭐ 清除所有 BufferPool 注册（标记不再使用）
+        clearAllBufferPools();
     }
     
-    // is_open_ 已经在上面设置为 false，不需要再次设置
+    // ⚠️ 注意：is_open_ 已移除，打开状态由数据源管理
+    // 此时 packet_source_->isOpen() 应该已经返回 false（在 packet_source_->close() 后）
 }
 
 bool FfmpegDecodeVideoFileWorker::isOpen() const {
-    return is_open_.load(std::memory_order_acquire);
+    // ⚠️ 注意：is_open_ 已移除，直接查询数据源状态
+    if (!packet_source_) {
+        return false;
+    }
+    return packet_source_->isOpen();  // 🎯 数据源的 isOpen() 是线程安全的（使用原子变量）
 }
 
 // ============================================================================
-// 内部方法：打开FFmpeg资源
+// 内部方法：初始化解码器
 // ============================================================================
+// ⚠️ 注意：openMediaSource()、closeMediaSource()、findVideoStream() 已移除
+// 这些功能已由数据源抽象（IPacketSource）接管
 
-bool FfmpegDecodeVideoFileWorker::openFfmpegResources() {
-    // 🎯 重置FFmpeg资源状态标志
-    is_ffmpeg_opened_.store(false, std::memory_order_release);
-    
-    // 1. 打开输入文件
-    format_ctx_ptr_ = avformat_alloc_context();
-    if (!format_ctx_ptr_) {
-        setError("Failed to allocate AVFormatContext");
+bool FfmpegDecodeVideoFileWorker::initializeDecoder(const AVCodecParameters* codec_params) {
+    // ⭐ v2.9修改：codec_params 必须提供（从 packet_source_ 获取）
+    if (!codec_params) {
+        setError("Cannot initialize decoder: codec_params is nullptr");
         return false;
     }
-    
-    int ret = avformat_open_input(&format_ctx_ptr_, file_path_.c_str(), nullptr, nullptr);
-    if (ret < 0) {
-        setError("Failed to open video file", ret);
-        format_ctx_ptr_ = nullptr;
-        return false;
-    }
-    
-    // 2. 读取流信息
-    ret = avformat_find_stream_info(format_ctx_ptr_, nullptr);
-    if (ret < 0) {
-        setError("Failed to find stream info", ret);
-        closeFfmpegResources();
-        return false;
-    }
-    
-    // 3. 查找视频流
-    if (!findVideoStream()) {
-        closeFfmpegResources();
-        return false;
-    }
-    
-    // 4. 初始化解码器
-    if (!initializeDecoder()) {
-        closeFfmpegResources();
-        return false;
-    }
-    
-    // 5. 估算总帧数
-    total_frames_ = estimateTotalFrames();
-    
-    // 6. 设置输出分辨率（如果未设置，使用原始分辨率）
-    if (output_width_ == 0 || output_height_ == 0) {
-        output_width_ = width_;
-        output_height_ = height_;
-    }
-   
-    // 8. 🎯 分配 AVPacket（用于 fillBuffer）
-    packet_ptr_ = av_packet_alloc();
-    if (!packet_ptr_) {
-        setError("Failed to allocate AVPacket");
-        closeFfmpegResources();
-        return false;
-    }
-    
-    // 🎯 成功打开FFmpeg资源，设置标志位
-    is_ffmpeg_opened_.store(true, std::memory_order_release);
-    
-    return true;
-}
-
-void FfmpegDecodeVideoFileWorker::closeFfmpegResources() {
-    // 🎯 原子检查并设置：如果 is_ffmpeg_opened_ 是 true，则设置为 false
-    // 返回值表示是否成功设置（即之前是 true）
-    bool expected = true;
-    if (!is_ffmpeg_opened_.compare_exchange_strong(expected, false,
-                                                   std::memory_order_acq_rel,
-                                                   std::memory_order_acquire)) {
-        // is_ffmpeg_opened_ 已经是 false，说明已经关闭过了，直接返回
-        return;
-    }
-    
-    // 🎯 只有第一个线程能执行到这里（is_ffmpeg_opened_ 从 true 变为 false）
-    // 此时 is_ffmpeg_opened_ == false，其他线程调用 closeFfmpegResources() 会直接返回
-    
-    std::lock_guard<std::recursive_mutex> lock(mutex_);
-    
-    // 释放 AVPacket
-    if (packet_ptr_) {
-        av_packet_free(&packet_ptr_);
-        packet_ptr_ = nullptr;
-    }
-    
-    // 释放格式转换器
-    if (sws_ctx_ptr_) {
-        sws_freeContext(sws_ctx_ptr_);
-        sws_ctx_ptr_ = nullptr;
-    }
-    
-    // 释放解码器
-    if (codec_ctx_ptr_) {
-        avcodec_flush_buffers(codec_ctx_ptr_);
-        avcodec_free_context(&codec_ctx_ptr_);
-        codec_ctx_ptr_ = nullptr;
-    }
-    
-    // 释放格式上下文
-    if (format_ctx_ptr_) {
-        avformat_close_input(&format_ctx_ptr_);
-        format_ctx_ptr_ = nullptr;
-    }
-    
-    // 释放解码器选项
-    if (codec_options_ptr_) {
-        av_dict_free(&codec_options_ptr_);
-        codec_options_ptr_ = nullptr;
-    }
-    
-    video_stream_index_ = -1;
-}
-
-bool FfmpegDecodeVideoFileWorker::findVideoStream() {
-    video_stream_index_ = -1;
-    
-    for (unsigned int i = 0; i < format_ctx_ptr_->nb_streams; i++) {
-        if (format_ctx_ptr_->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_VIDEO) {
-            video_stream_index_ = (int)i;
-            break;
-        }
-    }
-    
-    if (video_stream_index_ == -1) {
-        setError("No video stream found in file");
-        return false;
-    }
-    
-    AVCodecParameters* codecpar = format_ctx_ptr_->streams[video_stream_index_]->codecpar;
-    width_ = codecpar->width;
-    height_ = codecpar->height;
-    
-    return true;
-}
-
-bool FfmpegDecodeVideoFileWorker::initializeDecoder() {
-    AVCodecParameters* codecpar = format_ctx_ptr_->streams[video_stream_index_]->codecpar;
+    const AVCodecParameters* codecpar = codec_params;
     
     // 1. 查找解码器
     const AVCodec* codec = nullptr;
@@ -352,6 +318,53 @@ bool FfmpegDecodeVideoFileWorker::initializeDecoder() {
         if (!codec) {
             setError("Decoder not found for codec");
             return false;
+        }
+        
+        // ⚠️ 调试日志：显示自动选择的解码器
+        LOG_INFO_FMT("[Worker] Auto-selected decoder: %s (use_hardware_decoder_=%d, decoder_name_='%s')", 
+                     codec->name, use_hardware_decoder_, decoder_name_.c_str());
+        
+        // ⭐ 关键问题：如果用户明确要求软件解码，但 FFmpeg 默认返回硬件解码器
+        // 需要重新查找纯软件解码器（通用方案，支持所有编解码器）
+        if (!use_hardware_decoder_ && codec->name && 
+            (strstr(codec->name, "taco") || strstr(codec->name, "cuvid") || 
+             strstr(codec->name, "qsv") || strstr(codec->name, "vaapi") ||
+             strstr(codec->name, "nvdec") || strstr(codec->name, "nvenc") ||
+             strstr(codec->name, "videotoolbox") || strstr(codec->name, "mediacodec"))) {
+            LOG_WARN_FMT("[Worker] ⚠️ WARNING: FFmpeg auto-selected hardware decoder '%s', "
+                        "but user requested software decoding!", codec->name);
+            LOG_WARN("[Worker] Searching for pure software decoder...");
+            
+            // ⭐ 通用方案：遍历所有解码器，找到第一个匹配 codec_id 的纯软件解码器
+            const AVCodec* sw_codec = nullptr;
+            void* opaque = nullptr;
+            
+            while ((sw_codec = av_codec_iterate(&opaque)) != nullptr) {
+                // 检查条件：
+                // 1. 是解码器（不是编码器）
+                // 2. 匹配 codec_id
+                // 3. 不是硬件解码器（名字中不包含硬件关键字）
+                if (av_codec_is_decoder(sw_codec) && 
+                    sw_codec->id == codecpar->codec_id &&
+                    sw_codec->name &&
+                    !strstr(sw_codec->name, "taco") &&
+                    !strstr(sw_codec->name, "cuvid") &&
+                    !strstr(sw_codec->name, "qsv") &&
+                    !strstr(sw_codec->name, "vaapi") &&
+                    !strstr(sw_codec->name, "nvdec") &&
+                    !strstr(sw_codec->name, "nvenc") &&
+                    !strstr(sw_codec->name, "videotoolbox") &&
+                    !strstr(sw_codec->name, "mediacodec")) {
+                    codec = sw_codec;
+                    LOG_INFO_FMT("[Worker] ✅ Found software decoder: %s", codec->name);
+                    break;
+                }
+            }
+            
+            if (!codec || codec == nullptr || strstr(codec->name, "taco")) {
+                LOG_ERROR("[Worker] ❌ Failed to find any software decoder for this codec");
+                return false;
+            }
         }
     }
     
@@ -401,8 +414,8 @@ bool FfmpegDecodeVideoFileWorker::configureSpecialDecoder() {
         return false;
     }
     
-    // 🎯 从 worker_config_ 获取 taco 配置
-    const auto& taco = worker_config_.decoder.taco;
+    // 🎯 从 worker_config_ 获取 taco 配置（非 const，可能需要修改）
+    auto& taco = worker_config_.decoder.taco;
     
     LOG_DEBUG_FMT("[Worker] Configuring h264_taco decoder options from config...");
     
@@ -436,11 +449,31 @@ bool FfmpegDecodeVideoFileWorker::configureSpecialDecoder() {
                taco.ch1_crop_width, taco.ch1_crop_height);
     }
     
-    // 配置通道1缩放参数（从 config 读取）
+    // ⭐ 配置通道1缩放参数（从 config 读取）
+    // ⚠️ TACO 硬件限制：只能缩小，不能放大
     if (taco.ch1_scale_width > 0 && taco.ch1_scale_height > 0) {
-        av_opt_set_int(codec_ctx_ptr_->priv_data, "ch1_scale_width", taco.ch1_scale_width, 0);
-        av_opt_set_int(codec_ctx_ptr_->priv_data, "ch1_scale_height", taco.ch1_scale_height, 0);
-        LOG_DEBUG_FMT("[Worker]    ch1_scale: (%d, %d)", taco.ch1_scale_width, taco.ch1_scale_height);
+        // 验证缩放配置是否超出原始分辨率
+        int orig_width = getOriginalWidth();
+        int orig_height = getOriginalHeight();
+        if (taco.ch1_scale_width > orig_width || taco.ch1_scale_height > orig_height) {
+            LOG_WARN("═══════════════════════════════════════════════════════════════");
+            LOG_WARN("  ⚠️  TACO 硬件缩放限制：只能缩小，不能放大");
+            LOG_WARN("═══════════════════════════════════════════════════════════════");
+            LOG_WARN_FMT("  原始分辨率: %dx%d", orig_width, orig_height);
+            LOG_WARN_FMT("  请求分辨率: %dx%d (超出限制)", 
+                         taco.ch1_scale_width, taco.ch1_scale_height);
+            LOG_WARN_FMT("  自动回退：使用原始分辨率 %dx%d", orig_width, orig_height);
+            LOG_WARN("═══════════════════════════════════════════════════════════════");
+            
+            // 清除缩放配置，使用原始分辨率
+            taco.ch1_scale_width = 0;
+            taco.ch1_scale_height = 0;
+        } else {
+            // 配置有效，设置缩放参数
+            av_opt_set_int(codec_ctx_ptr_->priv_data, "ch1_scale_width", taco.ch1_scale_width, 0);
+            av_opt_set_int(codec_ctx_ptr_->priv_data, "ch1_scale_height", taco.ch1_scale_height, 0);
+            LOG_DEBUG_FMT("[Worker]    ch1_scale: (%d, %d)", taco.ch1_scale_width, taco.ch1_scale_height);
+        }
     }
     
     // 配置通道1 RGB（从 config 读取）
@@ -469,34 +502,8 @@ bool FfmpegDecodeVideoFileWorker::configureSpecialDecoder() {
 }
 
 
-int FfmpegDecodeVideoFileWorker::estimateTotalFrames() {
-    if (!format_ctx_ptr_ || video_stream_index_ < 0) {
-        return -1;
-    }
-    
-    AVStream* stream = format_ctx_ptr_->streams[video_stream_index_];
-    
-    // 方法1：从流的 nb_frames 获取
-    if (stream->nb_frames > 0) {
-        return (int)stream->nb_frames;
-    }
-    
-    // 方法2：根据时长和帧率估算
-    if (stream->duration != AV_NOPTS_VALUE && stream->avg_frame_rate.num > 0) {
-        double duration_sec = stream->duration * av_q2d(stream->time_base);
-        double fps = av_q2d(stream->avg_frame_rate);
-        return (int)(duration_sec * fps);
-    }
-    
-    // 方法3：根据文件大小和比特率估算（不太准确）
-    if (format_ctx_ptr_->duration != AV_NOPTS_VALUE && stream->avg_frame_rate.num > 0) {
-        double duration_sec = format_ctx_ptr_->duration / (double)AV_TIME_BASE;
-        double fps = av_q2d(stream->avg_frame_rate);
-        return (int)(duration_sec * fps);
-    }
-    
-    return -1;  // 无法估算
-}
+// ⚠️ 注意：estimateTotalFrames() 已移除
+// 总帧数现在从 packet_source_->getTotalFrames() 获取
 
 // ============================================================================
 // 导航操作
@@ -504,8 +511,34 @@ int FfmpegDecodeVideoFileWorker::estimateTotalFrames() {
 
 bool FfmpegDecodeVideoFileWorker::seek(int frame_index) {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
-    close();
-    open(file_path_.c_str());
+    
+    if (!packet_source_) {
+        setError("Cannot seek: packet source is nullptr");
+        return false;
+    }
+    
+    if (!packet_source_->isOpen()) {
+        setError("Cannot seek: worker is not open");
+        return false;
+    }
+    
+    // ⭐ v2.9重构：委托给数据源实现真正的 seek
+    if (!packet_source_->seek(frame_index)) {
+        setError("Seek failed or not supported by packet source");
+        return false;
+    }
+    
+    // seek 成功后，需要清理解码器状态
+    // 1. flush 解码器（清空内部缓冲区）
+    if (codec_ctx_ptr_) {
+        avcodec_flush_buffers(codec_ctx_ptr_);
+    }
+    
+    // 2. 重置 Worker 状态
+    current_frame_index_ = frame_index;
+    // ⚠️ 注意：EOF 状态由数据源的 seek() 自动重置，不需要手动重置
+    
+    LOG_DEBUG_FMT("[Worker] Successfully seeked to frame %d", frame_index);
     return true;
 }
 
@@ -514,8 +547,12 @@ bool FfmpegDecodeVideoFileWorker::seekToBegin() {
 }
 
 bool FfmpegDecodeVideoFileWorker::seekToEnd() {
-    if (total_frames_ > 0) {
-        return seek(total_frames_ - 1);
+    // ⭐ v2.9修改：从数据源获取总帧数
+    if (packet_source_) {
+        int total = packet_source_->getTotalFrames();
+        if (total > 0) {
+            return seek(total - 1);
+        }
     }
     return false;
 }
@@ -529,7 +566,11 @@ bool FfmpegDecodeVideoFileWorker::skip(int frame_count) {
 // ============================================================================
 
 int FfmpegDecodeVideoFileWorker::getTotalFrames() const {
-    return total_frames_;
+    // ⭐ v2.9修改：从数据源获取总帧数（适配器模式）
+    if (packet_source_) {
+        return packet_source_->getTotalFrames();
+    }
+    return -1;
 }
 
 int FfmpegDecodeVideoFileWorker::getCurrentFrameIndex() const {
@@ -541,16 +582,10 @@ size_t FfmpegDecodeVideoFileWorker::getFrameSize() const {
 }
 
 long FfmpegDecodeVideoFileWorker::getFileSize() const {
-    if (!format_ctx_ptr_) {
-        return -1;
+    // ⭐ v2.9修改：从数据源获取文件大小
+    if (packet_source_) {
+        return packet_source_->getFileSize();
     }
-    
-    // 尝试从格式上下文获取
-    AVIOContext* io_ctx = format_ctx_ptr_->pb;
-    if (io_ctx) {
-        return avio_size(io_ctx);
-    }
-    
     return -1;
 }
 
@@ -567,15 +602,37 @@ int FfmpegDecodeVideoFileWorker::getBytesPerPixel() const {
 }
 
 const char* FfmpegDecodeVideoFileWorker::getPath() const {
-    return file_path_.c_str();
+    // ⭐ v2.9修改：从数据源获取文件路径
+    if (!packet_source_) {
+        return nullptr;
+    }
+    
+    // Buffer 模式：返回 nullptr（无文件路径）
+    if (dynamic_cast<BufferPacketSource*>(packet_source_.get())) {
+        return nullptr;
+    }
+    
+    // 文件模式：从数据源获取路径
+    // 注意：返回的指针需要保证生命周期，这里使用静态变量存储
+    static thread_local std::string cached_path;
+    cached_path = packet_source_->getFilePath();
+    return cached_path.empty() ? nullptr : cached_path.c_str();
 }
 
 bool FfmpegDecodeVideoFileWorker::hasMoreFrames() const {
-    return !eof_reached_;
+    // ⭐ v2.9修改：从数据源获取 EOF 状态
+    if (!packet_source_) {
+        return false;
+    }
+    return !packet_source_->isEof();
 }
 
 bool FfmpegDecodeVideoFileWorker::isAtEnd() const {
-    return eof_reached_;
+    // ⭐ v2.9修改：从数据源获取 EOF 状态
+    if (!packet_source_) {
+        return true;
+    }
+    return packet_source_->isEof();
 }
 
 // ============================================================================
@@ -588,7 +645,7 @@ bool FfmpegDecodeVideoFileWorker::fillBuffer(int frame_index, Buffer* buffer) {
         return false;
     }
     
-    if (!is_open_.load(std::memory_order_acquire)) {
+    if (!packet_source_->isOpen()) {
         LOG_ERROR_FMT("[Worker] ERROR: Worker is not open");
         return false;
     }
@@ -602,8 +659,25 @@ bool FfmpegDecodeVideoFileWorker::fillBuffer(int frame_index, Buffer* buffer) {
         return false;
     }
     
-    // 步骤2: 读取一个 packet（参考 ids_test_video3:2240）
-    // 🔧 修复：对于损坏帧，在内部循环尝试读取，而不是返回 false
+    // 步骤1.1: ⭐ v2.8新增：从 Buffer 获取关联的 AVPacket*
+    AVPacket* packet_ptr = buffer->getAVPacket();
+    if (!packet_ptr) {
+        LOG_ERROR_FMT("[Worker] ERROR: buffer->getAVPacket() is nullptr");
+        return false;
+    }
+    
+    // ⭐ v2.9新增：使用数据源抽象读取 packet
+    if (!packet_source_) {
+        LOG_ERROR_FMT("[Worker] ERROR: packet_source_ is nullptr");
+        return false;
+    }
+    
+    // 如果是 Buffer 模式，设置当前 buffer
+    if (auto* buffer_source = dynamic_cast<BufferPacketSource*>(packet_source_.get())) {
+        buffer_source->setCurrentBuffer(buffer);
+    }
+    
+    // 步骤2: 从数据源读取 packet
     const int AVERROR_INVALIDDATA_VALUE = -1094995529;  // AVERROR(0x41444e49)
     const int MAX_CORRUPTED_RETRIES = 10;  // 最大重试次数，避免无限循环
     
@@ -611,15 +685,16 @@ bool FfmpegDecodeVideoFileWorker::fillBuffer(int frame_index, Buffer* buffer) {
     int read_ret;
     
     while (true) {
-        read_ret = av_read_frame(format_ctx_ptr_, packet_ptr_);
+        // 使用数据源抽象读取 packet
+        read_ret = packet_source_->readPacket(packet_ptr);
         
         if (read_ret < 0) {
             if (read_ret == AVERROR_EOF) {
                 LOG_DEBUG("🔄 EOF reached");
-                // 🔧 修复：Worker 不应该决定是否循环，只设置 EOF 标志并返回 false
+                // 🔧 修复：Worker 不应该决定是否循环，只返回 false
+                // EOF 状态由数据源管理（通过 isEof() 查询）
                 // 循环逻辑由 ProductionLine 根据 loop_ 变量控制
-                av_packet_unref(packet_ptr_);
-                eof_reached_ = true;
+                av_packet_unref(packet_ptr);
                 return false;
             } else if (read_ret == AVERROR_INVALIDDATA_VALUE) {
                 // 🔧 修复：遇到损坏帧时，在内部循环跳过，继续读取下一个 packet
@@ -627,21 +702,21 @@ bool FfmpegDecodeVideoFileWorker::fillBuffer(int frame_index, Buffer* buffer) {
                 if (corrupted_retries <= MAX_CORRUPTED_RETRIES) {
                     LOG_WARN_FMT("[Worker]  WARNING: Corrupted packet detected (attempt %d/%d), skipping...\n", 
                            corrupted_retries, MAX_CORRUPTED_RETRIES);
-                    av_packet_unref(packet_ptr_);
+                    av_packet_unref(packet_ptr);
                     // 继续循环，尝试读取下一个 packet
                     continue;
                 } else {
                     // 连续多次都是损坏帧，可能文件确实损坏严重，返回失败
                     LOG_ERROR_FMT("[Worker] ERROR: Too many corrupted packets (%d), giving up\n", corrupted_retries);
-                    av_packet_unref(packet_ptr_);
+                    av_packet_unref(packet_ptr);
                     return false;
                 }
             } else {
                 // 其他错误（非 EOF，非损坏帧）：记录错误并返回
                 char err_buf[AV_ERROR_MAX_STRING_SIZE];
                 av_strerror(read_ret, err_buf, sizeof(err_buf));
-                LOG_ERROR_FMT("[Worker] ERROR: av_read_frame failed: %d (%s)\n", read_ret, err_buf);
-                av_packet_unref(packet_ptr_);
+                LOG_ERROR_FMT("[Worker] ERROR: readPacket failed: %d (%s)\n", read_ret, err_buf);
+                av_packet_unref(packet_ptr);
                 return false;
             }
         } else {
@@ -650,19 +725,24 @@ bool FfmpegDecodeVideoFileWorker::fillBuffer(int frame_index, Buffer* buffer) {
         }
     }
     
-    // 步骤3: 检查是否是视频流
-    if (packet_ptr_->stream_index != video_stream_index_) {
-        // 🔧 修复：不是视频流的packet需要释放，然后继续读取下一个
-        av_packet_unref(packet_ptr_);
-        return false;  // 让调用者再次调用以读取下一个packet
+    // 步骤3: 检查是否是视频流（仅文件模式需要，Buffer 模式已经过滤）
+    if (auto* file_source = dynamic_cast<FilePacketSource*>(packet_source_.get())) {
+        (void)file_source;  // 仅用于类型检查
+        // ⚠️ 注意：video_stream_index_ 已移除，直接从数据源获取
+        if (packet_ptr->stream_index != packet_source_->getVideoStreamIndex()) {
+            // 🔧 修复：不是视频流的packet需要释放，然后继续读取下一个
+            av_packet_unref(packet_ptr);
+            return false;  // 让调用者再次调用以读取下一个packet
+        }
     }
+    // Buffer 模式：packet 已经是视频流，不需要检查
     
     // 步骤4: 发送 packet 到解码器（参考 ids_test_video3:2270）
-    int ret = avcodec_send_packet(codec_ctx_ptr_, packet_ptr_);
+    int ret = avcodec_send_packet(codec_ctx_ptr_, packet_ptr);
     
     // 🔧 修复：无论成功与否，都要释放packet引用
     // avcodec_send_packet 会复制数据，不再需要原始packet
-    av_packet_unref(packet_ptr_);
+    av_packet_unref(packet_ptr);
     
     if (ret < 0) {
         LOG_ERROR_FMT("[Worker] ERROR: avcodec_send_packet failed: %d", ret);
@@ -675,32 +755,41 @@ bool FfmpegDecodeVideoFileWorker::fillBuffer(int frame_index, Buffer* buffer) {
         if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF || ret < 0) {
             break;
         } 
-        // ✅ 成功！提取物理地址（参考 ids_test_video3:2314-2338）
-        uint64_t phys_addr = 0;
-        uint32_t blk_id = 0;
+        // ✅ 成功解码！
         
-        if (frame_ptr->metadata) {
-            AVDictionaryEntry* entry = av_dict_get(frame_ptr->metadata, "pool_blk_id", NULL, 0);
-            if (entry) {
-                blk_id = (uint32_t)atoi(entry->value);
-                phys_addr = taco_sys_handle2_phys_addr(blk_id);
-                
-                // 🎯 保存物理地址到 Buffer
-                buffer->setPhysicalAddress(phys_addr);
+        // ⭐ 硬件解码器：提取物理内存地址
+        // 判断条件：decoder_name_ 非空 且 use_hardware_decoder_ == true
+        if (!decoder_name_.empty() && use_hardware_decoder_) {
+            // 明确使用了硬件解码器，尝试提取物理地址
+            if (!extractHardwareAddressFromMetadata(frame_ptr, buffer)) {
+                // ❌ 硬件解码时提取失败是错误
+                LOG_ERROR_FMT("[Worker] Hardware decoder '%s': Failed to extract physical address", 
+                             decoder_name_.c_str());
+                return false;
             }
         }
-        
-        if (phys_addr == 0) {
-            LOG_WARN_FMT("[Worker]  Warning: Failed to extract physical address");
-            return false;
-        }
+        // 软件解码或自动选择：不提取物理地址（正常，物理地址保持为 0）
         
         // ⭐ v2.7改进：先更新虚拟地址为实际数据地址（frame->data[0]）
         buffer->setVirtualAddress(frame_ptr->data[0]);
         
+        // ⭐ v2.10新增：从AVFrame获取实际帧大小并更新Buffer的size
+        int actual_frame_size = av_image_get_buffer_size(
+            (AVPixelFormat)frame_ptr->format,
+            frame_ptr->width,
+            frame_ptr->height,
+            1  // alignment
+        );
+        
+        if (actual_frame_size > 0) {
+            buffer->setSize(actual_frame_size);
+            LOG_TRACE_FMT("[Worker] Updated buffer size to actual frame size: %d bytes", actual_frame_size);
+        } else {
+            LOG_ERROR_FMT("[Worker] Failed to get frame buffer size: %d", actual_frame_size);
+        }
+        
         // ⭐ v2.6新增：从AVFrame设置图像元数据到Buffer
         buffer->setImageMetadataFromAVFrame(frame_ptr);
-        
         decoded_frames_++;
         current_frame_index_++;
         recv_frm = true;
@@ -711,19 +800,11 @@ bool FfmpegDecodeVideoFileWorker::fillBuffer(int frame_index, Buffer* buffer) {
 // ============================================================================
 // 提供原材料（BufferPool）
 // ============================================================================
-
-uint64_t FfmpegDecodeVideoFileWorker::getOutputBufferPoolId() {
-    // v2.0: 使用基类的实现（返回 pool_id）
-    return WorkerBase::getOutputBufferPoolId();
-}
-
-// ============================================================================
 // 辅助方法
 // ============================================================================
 
 void FfmpegDecodeVideoFileWorker::setError(const std::string& error, int ffmpeg_error) {
     last_error_ = error;
-    last_ffmpeg_error_ = ffmpeg_error;
     
     if (ffmpeg_error != 0) {
         char err_buf[AV_ERROR_MAX_STRING_SIZE];
@@ -745,15 +826,106 @@ const char* FfmpegDecodeVideoFileWorker::getCodecName() const {
     return "unknown";
 }
 
+int FfmpegDecodeVideoFileWorker::getOriginalWidth() const {
+    if (packet_source_) {
+        const AVCodecParameters* codecpar = packet_source_->getCodecParameters();
+        if (codecpar) {
+            return codecpar->width;
+        }
+    }
+    return 0;
+}
+
+int FfmpegDecodeVideoFileWorker::getOriginalHeight() const {
+    if (packet_source_) {
+        const AVCodecParameters* codecpar = packet_source_->getCodecParameters();
+        if (codecpar) {
+            return codecpar->height;
+        }
+    }
+    return 0;
+}
+
 void FfmpegDecodeVideoFileWorker::printStats() const {
     LOG_INFO("\n[Worker] 📊 FfmpegDecodeVideoFileWorker Statistics:");
-    LOG_INFO_FMT("[Worker]    File: %s", file_path_.c_str());
+    // ⭐ v2.9修改：从数据源获取文件路径
+    std::string file_path = packet_source_ ? packet_source_->getFilePath() : std::string();
+    LOG_INFO_FMT("[Worker]    File: %s", file_path.empty() ? "(Buffer Mode)" : file_path.c_str());
     LOG_INFO_FMT("[Worker]    Codec: %s", getCodecName());
-    LOG_INFO_FMT("[Worker]    Resolution: %dx%d → %dx%d", width_, height_, output_width_, output_height_);
-    LOG_INFO_FMT("[Worker]    Total frames: %d", total_frames_);
+    LOG_INFO_FMT("[Worker]    Resolution: %dx%d → %dx%d", getOriginalWidth(), getOriginalHeight(), output_width_, output_height_);
+    LOG_INFO_FMT("[Worker]    Total frames: %d", packet_source_ ? packet_source_->getTotalFrames() : -1);
     LOG_INFO_FMT("[Worker]    Current frame: %d", current_frame_index_);
     LOG_INFO_FMT("[Worker]    Decoded frames: %d", decoded_frames_.load());
-    LOG_INFO_FMT("[Worker]    Decode errors: %d", decode_errors_.load());
-    LOG_INFO_FMT("[Worker]    EOF: %s", eof_reached_ ? "YES" : "NO");
+    LOG_INFO_FMT("[Worker]    EOF: %s", packet_source_ && packet_source_->isEof() ? "YES" : "NO");
+}
+
+// ============================================================================
+// 硬件解码器元数据提取（重写基类虚函数）
+// ============================================================================
+
+bool FfmpegDecodeVideoFileWorker::extractHardwareAddressFromMetadata(AVFrame* frame, Buffer* buffer) {
+    // ⭐ 职责：从 AVFrame 中提取硬件解码器的物理内存地址
+    // 
+    // 设计原则：
+    // 1. 此函数只在 decoder_name_ 非空 && use_hardware_decoder_==true 时被调用
+    // 2. 不同硬件解码器有不同的提取方式
+    // 3. 提取失败返回 false，调用者会报错并终止解码
+    
+    if (!frame || !buffer) {
+        LOG_ERROR("[Worker] extractHardwareAddressFromMetadata: Invalid parameters");
+        return false;
+    }
+    
+    // ========== h264_taco 硬件解码器 ==========
+    if (decoder_name_ == "h264_taco") {
+        // TACO 特定逻辑：从 metadata 中提取 pool_blk_id，转换为物理地址
+        uint64_t phys_addr = 0;
+        uint32_t blk_id = 0;
+        
+        if (frame->metadata) {
+            AVDictionaryEntry* entry = av_dict_get(frame->metadata, "pool_blk_id", NULL, 0);
+            if (entry) {
+                blk_id = (uint32_t)atoi(entry->value);
+                phys_addr = taco_sys_handle2_phys_addr(blk_id);
+                
+                if (phys_addr != 0) {
+                    // ✅ 成功提取物理地址
+                    buffer->setPhysicalAddress(phys_addr);
+                    return true;
+                } else {
+                    // ❌ blk_id 有效，但转换失败
+                    LOG_ERROR_FMT("[Worker] TACO: Failed to convert blk_id=%u to physical address", blk_id);
+                    return false;
+                }
+            }
+        }
+        
+        // ❌ TACO 解码器但没有 metadata（异常情况）
+        LOG_ERROR("[Worker] TACO: AVFrame->metadata is missing or no 'pool_blk_id' entry");
+        return false;
+    }
+    
+    // ========== 其他硬件解码器（扩展点）==========
+    // 
+    // 示例：NVIDIA CUDA 解码器
+    // if (decoder_name_ == "h264_cuvid") {
+    //     // CUDA 特定逻辑：从 AVFrame 的 data[0] 获取设备内存指针
+    //     // CUdeviceptr cuda_ptr = (CUdeviceptr)frame->data[0];
+    //     // buffer->setPhysicalAddress((uint64_t)cuda_ptr);
+    //     // return true;
+    // }
+    //
+    // 示例：Intel QSV 解码器
+    // if (decoder_name_ == "h264_qsv") {
+    //     // QSV 特定逻辑：从 AVFrame 的 data[3] 获取 mfxFrameSurface1*
+    //     // mfxFrameSurface1* surface = (mfxFrameSurface1*)frame->data[3];
+    //     // buffer->setPhysicalAddress((uint64_t)surface->Data.MemId);
+    //     // return true;
+    // }
+    
+    // 未识别的硬件解码器
+    LOG_ERROR_FMT("[Worker] Unknown hardware decoder '%s', cannot extract physical address", 
+                 decoder_name_.c_str());
+    return false;
 }
 

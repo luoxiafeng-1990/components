@@ -3,6 +3,7 @@
 #include "productionline/worker/MmapRawVideoFileWorker.hpp"
 #include "productionline/worker/IoUringRawVideoFileWorker.hpp"
 #include "productionline/worker/FfmpegDecodeRtspWorker.hpp"
+#include "productionline/worker/FfmpegRecordRtspWorker.hpp"
 #include "productionline/worker/FfmpegDecodeVideoFileWorker.hpp"
 #include <stdlib.h>
 #include <string.h>
@@ -37,23 +38,6 @@ std::unique_ptr<WorkerBase> BufferFillingWorkerFactory::create(const WorkerConfi
     return autoDetect(config);
 }
 
-/* std::unique_ptr<WorkerBase> BufferFillingWorkerFactory::createByName(const char* name) {
-    if (strcmp(name, "mmap") == 0 || strcmp(name, "mmap_raw") == 0) {
-        return std::make_unique<MmapRawVideoFileWorker>();
-    } else if (strcmp(name, "iouring") == 0 || strcmp(name, "iouring_raw") == 0) {
-        return std::make_unique<IoUringRawVideoFileWorker>();
-    } else if (strcmp(name, "rtsp") == 0 || strcmp(name, "ffmpeg_rtsp") == 0) {
-        return std::make_unique<FfmpegDecodeRtspWorker>();
-    } else if (strcmp(name, "ffmpeg") == 0 || strcmp(name, "ffmpeg_video_file") == 0) {
-        return std::make_unique<FfmpegDecodeVideoFileWorker>();
-    } else if (strcmp(name, "auto") == 0) {
-        return create(WorkerType::AUTO);
-    }
-    
-    LOG_WARN_FMT("[Worker]  Unknown worker type: %s, using mmap", name);
-    return std::make_unique<MmapRawVideoFileWorker>();
-} */
-
 bool BufferFillingWorkerFactory::isIoUringAvailable() {
     struct io_uring ring;
     int ret = io_uring_queue_init(1, &ring, 0);
@@ -78,12 +62,13 @@ BufferFillingWorkerFactory::WorkerType BufferFillingWorkerFactory::getRecommende
 
 const char* BufferFillingWorkerFactory::typeToString(WorkerType type) {
     switch (type) {
-        case WorkerType::AUTO:            return "AUTO";
-        case WorkerType::MMAP_RAW:        return "MMAP_RAW";
-        case WorkerType::IOURING_RAW:     return "IOURING_RAW";
-        case WorkerType::FFMPEG_RTSP:     return "FFMPEG_RTSP";
-        case WorkerType::FFMPEG_VIDEO_FILE: return "FFMPEG_VIDEO_FILE";
-        default:                          return "UNKNOWN";
+        case WorkerType::AUTO:                return "AUTO";
+        case WorkerType::MMAP_RAW:            return "MMAP_RAW";
+        case WorkerType::IOURING_RAW:         return "IOURING_RAW";
+        case WorkerType::FFMPEG_RTSP:         return "FFMPEG_RTSP";
+        case WorkerType::FFMPEG_RTSP_RECORD:  return "FFMPEG_RTSP_RECORD";
+        case WorkerType::FFMPEG_VIDEO_FILE:   return "FFMPEG_VIDEO_FILE";
+        default:                              return "UNKNOWN";
     }
 }
 
@@ -130,6 +115,9 @@ std::unique_ptr<WorkerBase> BufferFillingWorkerFactory::createByType(WorkerType 
             
         case WorkerType::FFMPEG_RTSP:
             return std::make_unique<FfmpegDecodeRtspWorker>(config);  // ✅ 传递 config
+            
+        case WorkerType::FFMPEG_RTSP_RECORD:
+            return std::make_unique<FfmpegRecordRtspWorker>(config);  // ✅ 传递 config
             
         case WorkerType::FFMPEG_VIDEO_FILE:
             return std::make_unique<FfmpegDecodeVideoFileWorker>(config);  // ✅ 已经传递 config

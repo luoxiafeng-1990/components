@@ -50,7 +50,7 @@ class BufferPool;
  * // v2.2: 使用配置构造函数
  * auto config = WorkerConfigBuilder()
  *     .setDecoderConfig(
- *         DecoderConfigBuilder().useH264Taco().build()
+ *         DecoderConfigBuilder().useTaco("h264").build()
  *     )
  *     .build();
  * FfmpegDecodeRtspWorker worker(config);
@@ -85,7 +85,6 @@ public:
     const char* getWorkerType() const override {
         return "FfmpegDecodeRtspWorker";
     }
-    uint64_t getOutputBufferPoolId() override;
     
     // 文件导航功能（继承自IVideoFileNavigator）
     bool open(const char* path) override;
@@ -172,14 +171,14 @@ private:
     // ============ 内部辅助方法 ============
     
     /**
-     * 连接 RTSP 流
+     * 打开媒体源（RTSP 流）
      */
-    bool connectRTSP();
+    bool openMediaSource();
     
     /**
-     * 断开 RTSP 连接并释放资源
+     * 关闭媒体源并释放资源
      */
-    void disconnectRTSP();
+    void closeMediaSource();
     
     /**
      * 查找视频流

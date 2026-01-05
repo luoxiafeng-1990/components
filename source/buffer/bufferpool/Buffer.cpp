@@ -12,9 +12,11 @@ Buffer::Buffer(uint32_t id,
     , virt_addr_(virt_addr)
     , phys_addr_(phys_addr)
     , size_(size)
+    , used_size_(0)                  // ⭐ v2.9新增：初始化实际使用大小
     , ownership_(ownership)
     , state_(State::IDLE)
     , avframe_(nullptr)              // ⭐ v2.7新增：初始化 AVFrame 指针
+    , avpacket_(nullptr)             // ⭐ v2.8新增：初始化 AVPacket 指针
     , has_image_metadata_(false)
     , width_(0)
     , height_(0)
@@ -33,9 +35,11 @@ Buffer::Buffer(Buffer&& other) noexcept
     , virt_addr_(other.virt_addr_)
     , phys_addr_(other.phys_addr_)
     , size_(other.size_)
+    , used_size_(other.used_size_)          // ⭐ v2.9新增：移动实际使用大小
     , ownership_(other.ownership_)
     , state_(other.state_.load())           // 从 atomic 读取
     , avframe_(other.avframe_)              // ⭐ v2.7新增：移动 AVFrame 指针
+    , avpacket_(other.avpacket_)            // ⭐ v2.8新增：移动 AVPacket 指针
     , has_image_metadata_(other.has_image_metadata_)
     , width_(other.width_)
     , height_(other.height_)
@@ -50,6 +54,7 @@ Buffer::Buffer(Buffer&& other) noexcept
     other.phys_addr_ = 0;
     other.size_ = 0;
     other.avframe_ = nullptr;              // ⭐ v2.7新增：清空 AVFrame 指针
+    other.avpacket_ = nullptr;             // ⭐ v2.8新增：清空 AVPacket 指针
     other.has_image_metadata_ = false;
     other.validation_magic_ = 0;
 }

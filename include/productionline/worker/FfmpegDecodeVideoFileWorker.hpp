@@ -2,13 +2,13 @@
 #define FFMPEG_DECODE_VIDEO_FILE_WORKER_HPP
 
 #include "productionline/worker/WorkerBase.hpp"
+#include "productionline/worker/IPacketSource.hpp"
 #include "buffer/bufferpool/Buffer.hpp"
 #include "buffer/bufferpool/BufferPool.hpp"
 #include <string>
 #include <memory>
 #include <atomic>
 #include <mutex>
-#include <map>
 
 // FFmpeg 前向声明
 struct AVFormatContext;
@@ -60,13 +60,12 @@ public:
     // ============ 构造/析构 ============
     
     /**
-     * @brief 默认构造函数（向后兼容）
-     */
-    FfmpegDecodeVideoFileWorker();
-    
-    /**
-     * @brief 配置构造函数（v2.2新增）
-     * @param config Worker配置（包含解码器配置等）
+     * @brief 构造函数（必须提供配置）
+     * @param config Worker配置（包含解码器配置、数据源配置等）
+     * 
+     * 注意：不再提供默认构造函数，所有 Worker 必须通过配置创建
+     * - 文件模式：config.decoder.use_buffer_mode = false
+     * - Buffer 模式：config.decoder.use_buffer_mode = true
      */
     explicit FfmpegDecodeVideoFileWorker(const WorkerConfig& config);
     
@@ -83,7 +82,6 @@ public:
     const char* getWorkerType() const override {
         return "FfmpegDecodeVideoFileWorker";
     }
-    uint64_t getOutputBufferPoolId() override;  // v2.0: 返回 pool_id
     
     // 文件导航功能（继承自IVideoFileNavigator）
     bool open(const char* path) override;
@@ -123,32 +121,17 @@ public:
     void printStats() const;
 
 private:
-    // ============ FFmpeg 资源 ============
-    AVFormatContext* format_ctx_ptr_;
-    AVCodecContext* codec_ctx_ptr_;
-    AVPacket* packet_ptr_;                 // 用于读取和解码的数据包
-    std::map<int, std::pair<AVFrame*, AVPacket*>> frame_packet_map_;    // 用于存储解码后的帧和对应的packet
-    SwsContext* sws_ctx_ptr_;              // 图像格式转换
-    int video_stream_index_;
+    // ============ 数据源抽象（v2.9新增）============
+    std::unique_ptr<IPacketSource> packet_source_;  // 数据源抽象（文件或Buffer）
     
-    // ============ 文件信息 ============
-    std::string file_path_;            // 文件路径（使用 std::string 更安全）
-    int width_;                        // 视频原始宽度
-    int height_;                       // 视频原始高度
+    
+    AVCodecContext* codec_ctx_ptr_;
+  
     int output_width_;                 // 输出宽度（可能缩放）
     int output_height_;                 // 输出高度（可能缩放）
     int output_bpp_;                   // 输出位深（如 32 for ARGB888）
-    int output_pixel_format_;          // 输出像素格式（如 AV_PIX_FMT_BGRA）
-    
-    // ============ 解码状态 ============
-    int total_frames_;                 // 总帧数（估算）
     int current_frame_index_;          // 当前帧索引
-    std::atomic<bool> is_open_;        // 🎯 原子变量，保证线程安全的状态检查（Worker业务层面）
-    std::atomic<bool> is_ffmpeg_opened_;  // 🎯 原子变量，保证线程安全的FFmpeg资源状态检查
-    bool eof_reached_;
-    
-    // ============ 零拷贝模式 ============
-    BufferPool* zero_copy_buffer_pool_ptr_;            // 可选：零拷贝模式的BufferPool（外部提供）
+   
     
     // ============ 解码器配置（用于特殊解码器）============
     bool use_hardware_decoder_;        // 是否使用硬件解码
@@ -161,33 +144,17 @@ private:
     
     // ============ 统计信息 ============
     std::atomic<int> decoded_frames_;
-    std::atomic<int> decode_errors_;
     
     // ============ 错误处理 ============
     std::string last_error_;
-    int last_ffmpeg_error_;
     
     // ============ 内部辅助方法 ============
     
     /**
-     * @brief 打开FFmpeg资源并初始化解码器
-     */
-    bool openFfmpegResources();
-    
-    /**
-     * @brief 关闭FFmpeg资源并释放资源
-     */
-    void closeFfmpegResources();
-    
-    /**
-     * @brief 查找视频流
-     */
-    bool findVideoStream();
-    
-    /**
      * @brief 初始化解码器
+     * @param codec_params 编解码器参数（必须提供，从 packet_source_ 获取）
      */
-    bool initializeDecoder();
+    bool initializeDecoder(const AVCodecParameters* codec_params);
     
     /**
      * @brief 配置特殊解码器（如 h264_taco）
@@ -195,14 +162,35 @@ private:
     bool configureSpecialDecoder();
     
     /**
-     * @brief 估算总帧数
+     * @brief 从AVFrame元数据中提取硬件解码器的物理内存地址（重写基类）
+     * 
+     * 实现 h264_taco 硬件解码器的物理地址提取逻辑：
+     * - 从 AVFrame->metadata 中提取 "pool_blk_id"
+     * - 调用 taco_sys_handle2_phys_addr() 转换为物理地址
+     * - 将物理地址存储到 Buffer
+     * 
+     * @param frame AVFrame 指针
+     * @param buffer Buffer 指针
+     * @return true 成功提取物理地址，false 提取失败
      */
-    int estimateTotalFrames();
+    virtual bool extractHardwareAddressFromMetadata(struct AVFrame* frame, Buffer* buffer) override;
     
     /**
      * @brief 设置错误信息
      */
     void setError(const std::string& error, int ffmpeg_error = 0);
+    
+    /**
+     * @brief 获取原始宽度（从数据源获取）
+     * @return 原始宽度，如果不可用则返回 0
+     */
+    int getOriginalWidth() const;
+    
+    /**
+     * @brief 获取原始高度（从数据源获取）
+     * @return 原始高度，如果不可用则返回 0
+     */
+    int getOriginalHeight() const;
 };
 
 #endif // FFMPEG_DECODE_VIDEO_FILE_WORKER_HPP

@@ -20,7 +20,29 @@ BufferAllocatorFacade::BufferAllocatorFacade(
 }
 
 BufferAllocatorFacade::~BufferAllocatorFacade() {
+    // ⭐ 关键修改：析构时自动清理所有 Pool（包括 AVFrame）
+    //
+    // 设计原则：
+    // 1. Allocator 负责创建的资源，由 Allocator 负责清理（RAII 原则）
+    // 2. Worker 析构时，allocator_facade_ 最先析构（成员变量声明顺序的逆序）
+    // 3. allocator_facade_ 析构时调用 destroyPool() 清理所有 Pool
+    // 4. 每个 Pool 中的 Buffer 和 AVFrame 被正确释放
+    //
+    // 清理流程：
+    // ~Worker() → ~allocator_facade_() → destroyPool() → 遍历所有 Pool → 
+    // 遍历 Pool 中所有 Buffer → deallocateBuffer() → av_frame_free()
+    
+    LOG_DEBUG("[BufferAllocatorFacade] 析构: 自动清理所有 Pool...");
+    
+    if (allocator_base_uptr_) {
+        // 调用底层 Allocator 的 destroyPool()
+        // 会自动查询 Registry 获取所有归属的 Pool 并清理
+        // 对于 AVFrameAllocator，会释放所有 Buffer 中的 AVFrame
+        allocator_base_uptr_->destroyPool();
+    }
+    
     // allocator_base_uptr_ 通过 unique_ptr 自动释放
+    LOG_DEBUG("[BufferAllocatorFacade] 析构完成");
 }
 
 // ============================================================================

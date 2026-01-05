@@ -114,6 +114,16 @@ public:
      */
     uint64_t getWorkingBufferPoolId() const { return working_buffer_pool_id_; }
     
+    /**
+     * @brief 获取Worker Facade
+     * @return Worker Facade的shared_ptr，如果未启动则返回nullptr
+     * 
+     * @note 用于获取Worker的配置信息（如编解码器参数）
+     */
+    std::shared_ptr<BufferFillingWorkerFacade> getWorkerFacade() const {
+        return worker_facade_sptr_;
+    }
+    
     // ========== 错误处理 ==========
     
     /**
@@ -138,35 +148,21 @@ public:
      */
     void printStats() const;
     
-private:
-    // ========== 内部方法 ==========
+protected:
+    // ========== 内部方法（protected 以支持派生类重写）==========
     
     /**
-     * @brief 生产者线程函数
+     * @brief 生产者线程函数（virtual 以支持派生类重写）
      * @param thread_id 线程ID
      */
-    void producerThreadFunc(int thread_id);
+    virtual void producerThreadFunc(int thread_id);
+    
+    // ========== 成员变量（protected 以支持派生类访问）==========
     
     /**
-     * @brief 获取下一个有效的帧索引
-     * @return 有效的帧索引，如果无更多帧则返回 std::nullopt
-     * 
-     * 职责：
-     * - 原子地获取下一个原始索引（使用 next_frame_index_）
-     * - 使用已缓存的总帧数（total_frames_，在 start() 时从 Worker 获取）
-     * - 处理循环模式和文件边界
-     * - 处理溢出保护
-     * 
-     * 注意：这是生产者线程的进度管理逻辑，完全由 ProductionLine 负责
+     * @brief 连续失败次数阈值（超过此值则停止生产者线程）
      */
-    std::optional<int> getNextFrameIndex();
-    
-    /**
-     * @brief 设置错误信息并触发回调
-     */
-    void setError(const std::string& error_msg);
-    
-    // ========== 成员变量 ==========
+    static constexpr int kMaxConsecutiveFailures = 100;
     
     /**
      * v2.0: Worker创建的BufferPool ID（Registry持有）
@@ -223,5 +219,25 @@ private:
     
     // 日志前缀（用于清晰标识对象）
     std::string log_prefix_;
+    
+private:
+    /**
+     * @brief 获取下一个有效的帧索引
+     * @return 有效的帧索引，如果无更多帧则返回 std::nullopt
+     * 
+     * 职责：
+     * - 原子地获取下一个原始索引（使用 next_frame_index_）
+     * - 使用已缓存的总帧数（total_frames_，在 start() 时从 Worker 获取）
+     * - 处理循环模式和文件边界
+     * - 处理溢出保护
+     * 
+     * 注意：这是生产者线程的进度管理逻辑，完全由 ProductionLine 负责
+     */
+    std::optional<int> getNextFrameIndex();
+    
+    /**
+     * @brief 设置错误信息并触发回调
+     */
+    void setError(const std::string& error_msg);
 };
 

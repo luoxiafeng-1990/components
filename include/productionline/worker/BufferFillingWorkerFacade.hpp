@@ -91,7 +91,21 @@ public:
      * 获取输出 BufferPool ID
      * @return pool_id（成功），0（失败或未创建）
      */
-    uint64_t getOutputBufferPoolId();
+    uint64_t getOutputBufferPoolId(BufferPoolType type);
+    
+    /**
+     * 获取 Worker 的主要 BufferPool 类型
+     * @return BufferPoolType 主要类型
+     */
+    BufferPoolType getPrimaryBufferPoolType();
+    
+    /**
+     * 获取底层 Worker 指针（用于访问特定Worker的方法）
+     * @return Worker 基类指针，如果未创建则返回 nullptr
+     */
+    WorkerBase* getWorkerBase() const {
+        return worker_base_uptr_.get();
+    }
     
     // ============ 文件导航方法（原IVideoFileNavigator的方法）============
     
