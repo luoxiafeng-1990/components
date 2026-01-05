@@ -37,8 +37,6 @@ FfmpegDecodeVideoFileWorker::FfmpegDecodeVideoFileWorker(const WorkerConfig& con
     , decoder_name_(config.decoder.name.value_or(""))  // 🎯 从配置读取（使用 optional 的 value_or）
     , codec_options_ptr_(nullptr)
     , decoded_frames_(0)
-    , decode_errors_(0)
-    , last_ffmpeg_error_(0)
 {
     // ⚠️ 注意：file_path_ 已移除，文件路径由数据源类管理
     
@@ -138,6 +136,7 @@ bool FfmpegDecodeVideoFileWorker::open(const char* path) {
     
     // 5. 检查编解码器类型是否匹配（仅文件模式需要）
     if (auto* file_source = dynamic_cast<FilePacketSource*>(packet_source_.get())) {
+        (void)file_source;  // 仅用于类型检查
         checkCodecMismatch(codecpar->codec_id, decoder_name_);
     }
     
@@ -208,7 +207,6 @@ bool FfmpegDecodeVideoFileWorker::open(const char* path) {
     // 此时 packet_source_->isOpen() 应该已经返回 true（在 packet_source_->open() 成功后）
     current_frame_index_ = 0;
     decoded_frames_ = 0;
-    decode_errors_ = 0;
     
     LOG_DEBUG_FMT("[Worker] FfmpegDecodeVideoFileWorker: Opened '%s'", path);
     LOG_DEBUG_FMT("[Worker]    Resolution: %dx%d → %dx%d", getOriginalWidth(), getOriginalHeight(), output_width_, output_height_);
@@ -729,6 +727,7 @@ bool FfmpegDecodeVideoFileWorker::fillBuffer(int frame_index, Buffer* buffer) {
     
     // 步骤3: 检查是否是视频流（仅文件模式需要，Buffer 模式已经过滤）
     if (auto* file_source = dynamic_cast<FilePacketSource*>(packet_source_.get())) {
+        (void)file_source;  // 仅用于类型检查
         // ⚠️ 注意：video_stream_index_ 已移除，直接从数据源获取
         if (packet_ptr->stream_index != packet_source_->getVideoStreamIndex()) {
             // 🔧 修复：不是视频流的packet需要释放，然后继续读取下一个
@@ -806,7 +805,6 @@ bool FfmpegDecodeVideoFileWorker::fillBuffer(int frame_index, Buffer* buffer) {
 
 void FfmpegDecodeVideoFileWorker::setError(const std::string& error, int ffmpeg_error) {
     last_error_ = error;
-    last_ffmpeg_error_ = ffmpeg_error;
     
     if (ffmpeg_error != 0) {
         char err_buf[AV_ERROR_MAX_STRING_SIZE];
@@ -858,7 +856,6 @@ void FfmpegDecodeVideoFileWorker::printStats() const {
     LOG_INFO_FMT("[Worker]    Total frames: %d", packet_source_ ? packet_source_->getTotalFrames() : -1);
     LOG_INFO_FMT("[Worker]    Current frame: %d", current_frame_index_);
     LOG_INFO_FMT("[Worker]    Decoded frames: %d", decoded_frames_.load());
-    LOG_INFO_FMT("[Worker]    Decode errors: %d", decode_errors_.load());
     LOG_INFO_FMT("[Worker]    EOF: %s", packet_source_ && packet_source_->isEof() ? "YES" : "NO");
 }
 

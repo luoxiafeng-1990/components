@@ -1,6 +1,7 @@
 #include "productionline/worker/FilePacketSource.hpp"
 #include "common/Logger.hpp"
 #include <cstring>
+#include <sys/stat.h>
 
 extern "C" {
 #include <libavformat/avformat.h>
@@ -189,7 +190,7 @@ int FilePacketSource::estimateTotalFrames() {
         return -1;
     }
     
-    // 估算总帧数（参考 FfmpegDecodeVideoFileWorker 的逻辑）
+    // 方法1：基于容器元数据估算（适用于MP4、AVI、MKV等容器格式）
     int64_t duration = stream->duration;
     AVRational time_base = stream->time_base;
     AVRational frame_rate = stream->avg_frame_rate;
@@ -198,21 +199,121 @@ int FilePacketSource::estimateTotalFrames() {
         double duration_seconds = (double)duration * time_base.num / time_base.den;
         double fps = (double)frame_rate.num / frame_rate.den;
         int frames = (int)(duration_seconds * fps);
-        return frames > 0 ? frames : -1;
+        if (frames > 0) {
+            LOG_DEBUG_FMT("[FilePacketSource] Estimated frames from metadata: %d", frames);
+            return frames;
+        }
     }
     
-    return -1;
-}
-
-long FilePacketSource::getFileSize() const {
-    if (!is_open_.load(std::memory_order_acquire) || !format_ctx_ptr_) {
+    // 方法2：基于文件大小估算（适用于裸数据流：.h264/.h265/.yuv等）
+    LOG_DEBUG("[FilePacketSource] Cannot estimate from metadata, trying file size method...");
+    
+    // 获取文件大小
+    long file_size = getFileSize();
+    if (file_size <= 0) {
+        LOG_WARN("[FilePacketSource] Cannot get file size, total frames unknown");
         return -1;
     }
     
-    // 尝试从格式上下文获取
-    AVIOContext* io_ctx = format_ctx_ptr_->pb;
-    if (io_ctx) {
-        return avio_size(io_ctx);
+    // 获取编解码器参数
+    const AVCodecParameters* codecpar = stream->codecpar;
+    if (!codecpar) {
+        LOG_WARN("[FilePacketSource] Cannot get codec parameters");
+        return -1;
+    }
+    
+    int width = codecpar->width;
+    int height = codecpar->height;
+    
+    if (width <= 0 || height <= 0) {
+        LOG_WARN_FMT("[FilePacketSource] Invalid resolution: %dx%d", width, height);
+        return -1;
+    }
+    
+    // 根据编解码器类型估算
+    int estimated_frames = -1;
+    
+    // 情况A：裸YUV数据（未编码）
+    if (codecpar->codec_id == AV_CODEC_ID_RAWVIDEO) {
+        // 每帧大小固定 = width * height * bytes_per_pixel
+        int bytes_per_pixel = 1;  // 默认YUV420
+        
+        // 根据像素格式确定 bytes_per_pixel
+        switch (codecpar->format) {
+            case AV_PIX_FMT_YUV420P:
+            case AV_PIX_FMT_NV12:
+            case AV_PIX_FMT_NV21:
+                bytes_per_pixel = 3;  // YUV420: 1.5 bytes per pixel (实际是 width*height*3/2)
+                estimated_frames = (int)(file_size / (width * height * bytes_per_pixel / 2));
+                break;
+            case AV_PIX_FMT_YUV422P:
+                bytes_per_pixel = 2;  // YUV422: 2 bytes per pixel
+                estimated_frames = (int)(file_size / (width * height * bytes_per_pixel));
+                break;
+            case AV_PIX_FMT_RGB24:
+            case AV_PIX_FMT_BGR24:
+                bytes_per_pixel = 3;  // RGB24: 3 bytes per pixel
+                estimated_frames = (int)(file_size / (width * height * bytes_per_pixel));
+                break;
+            case AV_PIX_FMT_RGBA:
+            case AV_PIX_FMT_BGRA:
+            case AV_PIX_FMT_ARGB:
+            case AV_PIX_FMT_ABGR:
+                bytes_per_pixel = 4;  // RGBA: 4 bytes per pixel
+                estimated_frames = (int)(file_size / (width * height * bytes_per_pixel));
+                break;
+            default:
+                // 默认假设YUV420
+                estimated_frames = (int)(file_size / (width * height * 3 / 2));
+                break;
+        }
+        
+        LOG_DEBUG_FMT("[FilePacketSource] Raw video detected, estimated frames from file size: %d (resolution: %dx%d)",
+                     estimated_frames, width, height);
+    }
+    // 情况B：编码数据（H.264/H.265/VP9等）
+    else {
+        // 编码数据的帧大小不固定，但可以基于平均码率估算
+        // 假设平均每帧大小（这是个粗略估算）
+        
+        // 如果有码率信息，使用码率估算
+        if (codecpar->bit_rate > 0 && frame_rate.num > 0 && frame_rate.den > 0) {
+            double fps = (double)frame_rate.num / frame_rate.den;
+            double avg_frame_size = codecpar->bit_rate / 8.0 / fps;  // bytes per frame
+            estimated_frames = (int)(file_size / avg_frame_size);
+            LOG_DEBUG_FMT("[FilePacketSource] Encoded video, estimated frames from bitrate: %d (bitrate: %ld, fps: %.2f)",
+                         estimated_frames, codecpar->bit_rate, fps);
+        } else {
+            // 没有码率信息，使用经验值
+            // 假设压缩比：H.264通常是原始数据的1/100 ~ 1/200
+            // 原始YUV420大小 = width * height * 1.5
+            // 压缩后平均每帧 = width * height * 1.5 / 压缩比
+            int yuv420_frame_size = width * height * 3 / 2;
+            int compression_ratio = 100;  // 假设100:1的压缩比
+            int avg_encoded_frame_size = yuv420_frame_size / compression_ratio;
+            
+            // 保证最小帧大小（避免过小）
+            if (avg_encoded_frame_size < 1024) {
+                avg_encoded_frame_size = width * height / 10;  // 更保守的估算
+            }
+            
+            estimated_frames = (int)(file_size / avg_encoded_frame_size);
+            LOG_DEBUG_FMT("[FilePacketSource] Encoded video (no bitrate), estimated frames from file size: %d (resolution: %dx%d, avg_frame_size: %d)",
+                         estimated_frames, width, height, avg_encoded_frame_size);
+        }
+    }
+    
+    return estimated_frames > 0 ? estimated_frames : -1;
+}
+
+long FilePacketSource::getFileSize() const {
+    if (!file_path_.empty()) {
+        struct stat st;
+        if (stat(file_path_.c_str(), &st) == 0) {
+            LOG_DEBUG_FMT("[FilePacketSource] Got file size from stat(): %lld bytes", (long long)st.st_size);
+            return (long)st.st_size;
+        }
+        LOG_WARN_FMT("[FilePacketSource] stat() failed for file: %s", file_path_.c_str());
     }
     
     return -1;

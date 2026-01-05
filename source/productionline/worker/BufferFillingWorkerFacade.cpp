@@ -200,4 +200,3 @@ BufferPoolType BufferFillingWorkerFacade::getPrimaryBufferPoolType() {
     }
     return BufferPoolType::DECODE_VIDEO_PRIMARY;  // 默认值
 }
-

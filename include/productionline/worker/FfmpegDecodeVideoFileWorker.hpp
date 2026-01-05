@@ -124,29 +124,14 @@ private:
     // ============ 数据源抽象（v2.9新增）============
     std::unique_ptr<IPacketSource> packet_source_;  // 数据源抽象（文件或Buffer）
     
-    // ============ FFmpeg 资源 ============
-    // ⚠️ 注意：format_ctx_ptr_ 已移除，由 FilePacketSource 管理
-    AVCodecContext* codec_ctx_ptr_;
-    // ⚠️ 注意：frame_packet_map_ 已移除（未使用）
-    // ⚠️ 注意：sws_ctx_ptr_ 已移除（当前未使用格式转换功能，如需要可在未来添加）
-    // ⚠️ 注意：video_stream_index_ 已移除，视频流索引从数据源（IPacketSource::getVideoStreamIndex()）获取
     
-    // ============ 文件信息 ============
-    // ⚠️ 注意：file_path_ 已移除，文件路径由数据源类（FilePacketSource）管理
-    // ⚠️ 注意：width_ 和 height_ 已移除，原始宽高从数据源（IPacketSource）获取
+    AVCodecContext* codec_ctx_ptr_;
+  
     int output_width_;                 // 输出宽度（可能缩放）
     int output_height_;                 // 输出高度（可能缩放）
     int output_bpp_;                   // 输出位深（如 32 for ARGB888）
-    // ⚠️ 注意：output_pixel_format_ 已移除（未使用）
-    
-    // ============ 解码状态 ============
-    // ⚠️ 注意：total_frames_ 已移除，总帧数从数据源（IPacketSource::getTotalFrames()）获取
     int current_frame_index_;          // 当前帧索引
-    // ⚠️ 注意：is_open_ 已移除，打开状态从数据源（IPacketSource::isOpen()）获取
-    // ⚠️ 注意：eof_reached_ 已移除，EOF 状态从数据源（IPacketSource::isEof()）获取
-    
-    // ============ 零拷贝模式 ============
-    // ⚠️ 注意：zero_copy_buffer_pool_ptr_ 已移除（未使用）
+   
     
     // ============ 解码器配置（用于特殊解码器）============
     bool use_hardware_decoder_;        // 是否使用硬件解码
@@ -159,11 +144,9 @@ private:
     
     // ============ 统计信息 ============
     std::atomic<int> decoded_frames_;
-    std::atomic<int> decode_errors_;
     
     // ============ 错误处理 ============
     std::string last_error_;
-    int last_ffmpeg_error_;
     
     // ============ 内部辅助方法 ============
     
