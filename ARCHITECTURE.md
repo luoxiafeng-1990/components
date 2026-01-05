@@ -1524,10 +1524,11 @@ auto config = WorkerConfigBuilder()
     .useH264TacoPreset()
     .build();
 
-// 方式2：自定义配置
+// 方式2：自定义配置（使用预设方法）
 auto config = WorkerConfigBuilder()
-    .setDecoderName("h264_taco")
-    .enableHardwareDecoder(true)
+    .setDecoderConfig(
+        DecoderConfigBuilder().useTaco("h264").build()
+    )
     .build();
 
 // 方式3：详细配置
@@ -2954,8 +2955,7 @@ int main() {
     // 或者自定义配置
     // .setDecoderConfig(
     //     DecoderConfigBuilder()
-    //         .setDecoderName("h264_taco")
-    //         .enableHardware(true)
+    //         .useTaco("h264")           // 自动设置 enable_hardware=true
     //         .setDecodeThreads(4)
     //         .build()
     // )
@@ -3113,9 +3113,9 @@ config.worker_config = WorkerConfigBuilder()
     .build();
 
 // ✅ 推荐：根据场景选择合适的预设
-// - h264_taco 硬件解码：useH264TacoPreset()
-// - 软件解码：useSoftwarePreset()
-// - 自定义：setDecoderName() + enableHardwareDecoder()
+// - h264_taco 硬件解码：useTaco("h264")
+// - 软件解码：useSoftware()
+// - 其他硬件解码器：useCuvid("h264"), useQsv("h264"), useVaapi("h264")
 ```
 
 **不推荐做法：**

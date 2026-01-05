@@ -63,17 +63,14 @@ bool BufferFillingWorkerFacade::open() {
     const char* path = file_path.c_str();
     
     // 🎯 智能判断：根据Worker类型选择合适的open方法
-    // - 需要格式参数的Worker：MMAP_RAW, IOURING_RAW, FFMPEG_RTSP
-    //   （原始视频文件和RTSP实时流都需要明确指定输出格式）
+    // - 需要格式参数的Worker：FFMPEG_RTSP
+    //   （RTSP实时流需要明确指定输出格式）
     // - 可以自动检测的Worker：FFMPEG_VIDEO_FILE
     //   （本地编码视频文件有文件头，可以自动检测分辨率和格式）
     
-    bool needs_format_params = (config_.worker_type == BufferFillingWorkerFactory::WorkerType::MMAP_RAW ||
-                                config_.worker_type == BufferFillingWorkerFactory::WorkerType::IOURING_RAW ||
-                                config_.worker_type == BufferFillingWorkerFactory::WorkerType::FFMPEG_RTSP);
-    
+    bool needs_format_params = (config_.worker_type == BufferFillingWorkerFactory::WorkerType::FFMPEG_RTSP);
     if (needs_format_params) {
-        // 需要格式参数的Worker（原始视频、RTSP流）
+        // 需要格式参数的Worker（RTSP流）
         if (width == 0 || height == 0 || bits_per_pixel == 0) {
             LOG_ERROR_FMT("[Worker] ERROR: Worker type '%s' requires width, height, and bits_per_pixel in config!",
                          BufferFillingWorkerFactory::typeToString(config_.worker_type));

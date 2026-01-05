@@ -8,14 +8,13 @@ libcomponents_la_SOURCES = \
     source/display/LinuxFramebufferDevice.cpp \
     source/productionline/worker/WorkerBase.cpp \
     source/productionline/worker/BufferFillingWorkerFacade.cpp \
-    source/productionline/worker/MmapRawVideoFileWorker.cpp \
     source/productionline/worker/BufferFillingWorkerFactory.cpp \
     source/productionline/worker/FfmpegDecodeRtspWorker.cpp \
     source/productionline/worker/FfmpegRecordRtspWorker.cpp \
     source/productionline/worker/FfmpegDecodeVideoFileWorker.cpp \
     source/productionline/worker/FilePacketSource.cpp \
     source/productionline/worker/BufferPacketSource.cpp \
-    source/productionline/worker/IoUringRawVideoFileWorker.cpp \
+    source/productionline/worker/RtspPacketSource.cpp \
     source/monitor/PerformanceMonitor.cpp \
     source/common/Timer.cpp \
     source/buffer/bufferpool/Buffer.cpp \
