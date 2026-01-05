@@ -10,6 +10,12 @@ extern "C" {
 #include <libavutil/dict.h>
 }
 
+// ============ 静态成员定义 ============
+
+std::atomic<bool> RtspPacketSource::interrupt_requested_(false);
+
+// ============ 构造/析构 ============
+
 RtspPacketSource::RtspPacketSource(const std::string& rtsp_url)
     : rtsp_url_(rtsp_url)
     , format_ctx_ptr_(nullptr)
@@ -45,7 +51,12 @@ bool RtspPacketSource::open() {
         return false;
     }
     
-    // 2. 设置 RTSP 选项（超时、传输协议等）
+    // 2. 设置中断回调（用于响应 Ctrl+C）
+    format_ctx_ptr_->interrupt_callback.callback = interrupt_callback;
+    format_ctx_ptr_->interrupt_callback.opaque = this;
+    LOG_DEBUG("[RtspPacketSource] ✅ 已设置 FFmpeg 中断回调");
+    
+    // 3. 设置 RTSP 选项（超时、传输协议等）
     AVDictionary* options = nullptr;
     av_dict_set(&options, "rtsp_transport", "tcp", 0);  // 使用 TCP 传输
     av_dict_set(&options, "stimeout", "5000000", 0);    // 5秒超时
@@ -235,4 +246,36 @@ bool RtspPacketSource::findVideoStream() {
     
     LOG_ERROR("[RtspPacketSource] No video stream found in RTSP source");
     return false;
+}
+
+// ============ 中断控制实现 ============
+
+int RtspPacketSource::interrupt_callback(void* ctx) {
+    (void)ctx;  // 暂时不使用上下文参数
+    
+    // FFmpeg 会定期调用此函数检查是否需要中断
+    bool should_interrupt = interrupt_requested_.load(std::memory_order_acquire);
+    
+    if (should_interrupt) {
+        // 仅在第一次中断时输出日志，避免刷屏
+        static bool logged = false;
+        if (!logged) {
+            LOG_INFO("[RtspPacketSource] 🛑 FFmpeg 中断回调: 检测到中断请求，正在中断操作...");
+            logged = true;
+        }
+    }
+    
+    return should_interrupt ? 1 : 0;
+}
+
+void RtspPacketSource::requestInterrupt() {
+    bool was_interrupted = interrupt_requested_.exchange(true, std::memory_order_release);
+    if (!was_interrupted) {
+        LOG_INFO("[RtspPacketSource] 🛑 收到中断请求: 所有 RTSP 流操作将被中断");
+    }
+}
+
+void RtspPacketSource::clearInterrupt() {
+    interrupt_requested_.store(false, std::memory_order_release);
+    LOG_DEBUG("[RtspPacketSource] ✅ 中断标志已清除");
 }

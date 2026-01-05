@@ -56,7 +56,44 @@ public:
     bool seek(int frame_index) override;      // 返回 false（实时流不支持 seek）
     bool isEof() const override;
     
+    // ============ 中断控制接口 ============
+    
+    /**
+     * @brief 请求中断所有 RTSP 流操作（用于响应 Ctrl+C）
+     * 
+     * 当用户按 Ctrl+C 时，信号处理器应调用此方法。
+     * FFmpeg 会在下一次 I/O 检查时中断阻塞操作。
+     */
+    static void requestInterrupt();
+    
+    /**
+     * @brief 清除中断标志（用于重新开始）
+     */
+    static void clearInterrupt();
+    
 private:
+    // ============ 中断机制（静态，所有实例共享） ============
+    
+    /**
+     * @brief 中断标志（静态成员，所有 RtspPacketSource 实例共享）
+     * 
+     * 当设置为 true 时，所有正在进行的 RTSP 流读取操作都会被中断。
+     * 这是响应 Ctrl+C 的核心机制。
+     */
+    static std::atomic<bool> interrupt_requested_;
+    
+    /**
+     * @brief FFmpeg 中断回调函数
+     * @param ctx 用户自定义上下文（可选）
+     * @return 1 表示需要中断，0 表示继续
+     * 
+     * FFmpeg 在执行阻塞 I/O 操作时会定期调用此函数。
+     * 如果返回 1，FFmpeg 会立即中断操作并返回 AVERROR_EXIT。
+     */
+    static int interrupt_callback(void* ctx);
+    
+    // ============ 实例成员 ============
+    
     std::string rtsp_url_;              // RTSP 流地址
     AVFormatContext* format_ctx_ptr_;   // FFmpeg 格式上下文
     int video_stream_index_;            // 视频流索引

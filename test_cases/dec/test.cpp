@@ -28,6 +28,7 @@
 #include "productionline/worker/BufferFillingWorkerFacade.hpp"
 #include "productionline/worker/WorkerConfig.hpp"
 #include "productionline/worker/FfmpegRecordRtspWorker.hpp"
+#include "productionline/worker/RtspPacketSource.hpp"
 #include "buffer/bufferpool/BufferPool.hpp"
 #include "buffer/bufferpool/BufferPoolRegistry.hpp"
 #include "productionline/VideoProductionLine.hpp"
@@ -44,8 +45,47 @@ extern "C" {
 #include <libavutil/pixdesc.h>  // av_get_pix_fmt_name() 函数
 }
 
+// ============ 全局变量和信号处理 ============
+
 // 全局标志，用于处理 Ctrl+C 退出
 static volatile bool g_running = true;
+
+// RTSP 中断标志（用于快速响应 Ctrl+C）
+static std::atomic<bool> g_rtsp_interrupted(false);
+
+/**
+ * @brief 信号处理器（用于 Ctrl+C）
+ * 
+ * 当用户按 Ctrl+C 时：
+ * 1. 设置全局中断标志
+ * 2. 请求 FFmpeg 中断所有 RTSP 流操作
+ * 3. 第二次按 Ctrl+C 强制退出
+ */
+static void signal_handler(int signum) {
+    if (signum == SIGINT) {
+        if (!g_rtsp_interrupted.load()) {
+            // 第一次 Ctrl+C：优雅退出
+            LOG_INFO("\n");
+            LOG_INFO("🛑 ═══════════════════════════════════════════════════════");
+            LOG_INFO("🛑   收到中断信号 (Ctrl+C)，正在停止程序...");
+            LOG_INFO("🛑   再次按 Ctrl+C 可强制退出");
+            LOG_INFO("🛑 ═══════════════════════════════════════════════════════");
+            
+            g_running = false;
+            g_rtsp_interrupted = true;
+            
+            // 请求 FFmpeg 中断所有 RTSP 流操作
+            RtspPacketSource::requestInterrupt();
+        } else {
+            // 第二次 Ctrl+C：强制退出
+            LOG_INFO("\n🛑 强制退出...");
+            signal(SIGINT, SIG_DFL);
+            raise(SIGINT);
+        }
+    }
+}
+
+// ============ 测试用例 ============
 
 /**
  * 测试1：多缓冲循环播放测试
@@ -588,6 +628,13 @@ static int test_rtsp_stream(const char* rtsp_url) {
     LOG_INFO("  Test: RTSP Stream Playback (Independent BufferPool + DMA)");
     LOG_INFO("═══════════════════════════════════════════════════════");
     
+    // 注册信号处理器（用于 Ctrl+C）
+    signal(SIGINT, signal_handler);
+    g_running = true;
+    g_rtsp_interrupted = false;
+    RtspPacketSource::clearInterrupt();
+    LOG_DEBUG("[Test] ✅ 已注册 Ctrl+C 信号处理器");
+    
     LOG_INFO("Zero-Copy Workflow:");
     LOG_INFO("  1. Worker opens RTSP stream and automatically creates BufferPool (if needed)");
     LOG_INFO("  2. Worker decodes RTSP → AVFrame with phys_addr");
@@ -669,11 +716,21 @@ static int test_rtsp_stream(const char* rtsp_url) {
     int dma_failed = 0;
     
     while (g_running) {
+        // 检查中断标志
+        if (g_rtsp_interrupted.load()) {
+            LOG_INFO("⚠️  检测到中断请求，停止播放...");
+            break;
+        }
+        
         // 从工作BufferPool获取已解码的buffer（带物理地址）
         Buffer* decoded_buffer = producer_pool_sptr->acquireFilled(true, 100);
         
         if (decoded_buffer == nullptr) {
-            // 超时时检查生产者状态
+            // 超时时检查生产者状态和中断标志
+            if (g_rtsp_interrupted.load()) {
+                LOG_INFO("⚠️  检测到中断请求，停止播放...");
+                break;
+            }
             if (!producer.isRunning()) {
                 LOG_INFO("Producer stopped naturally, exiting consumer loop...");
                 break;
@@ -762,6 +819,13 @@ static int test_rtsp_record(const char* rtsp_url) {
     LOG_INFO("╔═══════════════════════════════════════════════════════╗");
     LOG_INFO("║   Test: RTSP Stream Recording to MP4                 ║");
     LOG_INFO("╚═══════════════════════════════════════════════════════╝\n");
+    
+    // 注册信号处理器（用于 Ctrl+C）
+    signal(SIGINT, signal_handler);
+    g_running = true;
+    g_rtsp_interrupted = false;
+    RtspPacketSource::clearInterrupt();
+    LOG_DEBUG("[Test] ✅ 已注册 Ctrl+C 信号处理器");
     
     // 从环境变量获取输出路径，如果没有则使用默认值
     const char* output_file = std::getenv("RTSP_OUTPUT_FILE");
@@ -868,6 +932,12 @@ static int test_rtsp_record(const char* rtsp_url) {
     const int MAX_TIMEOUT = 50;
     
     while (g_running) {
+        // 检查中断标志
+        if (g_rtsp_interrupted.load()) {
+            LOG_INFO("\n  ⚠️  检测到中断请求，停止录制...");
+            break;
+        }
+        
         // 检查时长
         auto now = std::chrono::steady_clock::now();
         int elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - start_time).count();
@@ -2157,6 +2227,13 @@ static int test_multi_worker(const char* rtsp_url) {
     LOG_INFO("║   Test: MultiWorkerProductionLine - Multi Worker     ║");
     LOG_INFO("╚═══════════════════════════════════════════════════════╝\n");
     
+    // 注册信号处理器（用于 Ctrl+C）
+    signal(SIGINT, signal_handler);
+    g_running = true;
+    g_rtsp_interrupted = false;
+    RtspPacketSource::clearInterrupt();
+    LOG_DEBUG("[Test] ✅ 已注册 Ctrl+C 信号处理器");
+    
     LOG_INFO_FMT("RTSP URL: %s\n", rtsp_url);
     
     const int duration_seconds = 10;  // 录制时长（秒）
@@ -2366,6 +2443,12 @@ static int test_multi_worker(const char* rtsp_url) {
     LOG_INFO("  Starting consumer loop (Ctrl+C to stop)...\n");
     
     while (g_running) {
+        // 检查中断标志
+        if (g_rtsp_interrupted.load()) {
+            LOG_INFO("\n  ⚠️  检测到中断请求，停止测试...");
+            break;
+        }
+        
         // 检查时长
         auto now = std::chrono::steady_clock::now();
         int elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - start_time).count();
