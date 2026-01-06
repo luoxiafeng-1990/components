@@ -84,8 +84,19 @@ public:
     }
     
     // 文件导航功能（继承自IVideoFileNavigator）
+    /**
+     * @brief 打开视频文件（单参数版本，支持覆盖 config 中的路径）
+     * 
+     * v2.13 架构：Worker 从 worker_config_ 读取配置参数
+     * - worker_config_.display.width/height/bits_per_pixel
+     * - worker_config_.decoder.name（解码器名称）
+     * - worker_config_.decoder.taco（TACO 配置）
+     * 
+     * @param path 视频文件路径（可以覆盖 config 中的路径）
+     * @return 成功返回 true
+     */
     bool open(const char* path) override;
-    bool open(const char* path, int width, int height, int bits_per_pixel) override;
+    
     void close() override;
     bool isOpen() const override;
     bool seek(int frame_index) override;
@@ -98,7 +109,7 @@ public:
     long getFileSize() const override;
     int getWidth() const override;
     int getHeight() const override;
-    int getBytesPerPixel() const override;
+    double getBytesPerPixel() const override;
     const char* getPath() const override;
     bool hasMoreFrames() const override;
     bool isAtEnd() const override;
@@ -127,9 +138,8 @@ private:
     
     AVCodecContext* codec_ctx_ptr_;
   
-    int output_width_;                 // 输出宽度（可能缩放）
-    int output_height_;                 // 输出高度（可能缩放）
-    int output_bpp_;                   // 输出位深（如 32 for ARGB888）
+    int output_width_;                 // 输出宽度（运行时状态，可能缩放）
+    int output_height_;                // 输出高度（运行时状态，可能缩放）
     int current_frame_index_;          // 当前帧索引
    
     
@@ -144,6 +154,7 @@ private:
     
     // ============ 统计信息 ============
     std::atomic<int> decoded_frames_;
+    std::atomic<int> dropped_frames_;  // 丢帧计数
     
     // ============ 错误处理 ============
     std::string last_error_;

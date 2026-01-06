@@ -14,6 +14,7 @@ extern "C" {
 #include <libavcodec/avcodec.h>
 #include <libavutil/imgutils.h>
 #include <libavutil/opt.h>
+#include <libavutil/pixdesc.h>
 #include "taco_sys_api.h"
 }
 
@@ -24,10 +25,9 @@ FfmpegDecodeRtspWorker::FfmpegDecodeRtspWorker(const WorkerConfig& config)
     : WorkerBase(BufferAllocatorFactory::AllocatorType::AVFRAME, config)  // 传递 config 给父类
     , packet_source_(nullptr)  // ⚠️ 数据源将在 open() 时根据 RTSP URL 创建
     , codec_ctx_ptr_(nullptr)
-    , width_(0)
-    , height_(0)
-    , output_pixel_format_(AV_PIX_FMT_BGRA)
-    , output_bpp_(32)
+    , output_width_(0)
+    , output_height_(0)
+    , use_hardware_decoder_(config.decoder.enable_hardware)  // 🎯 从配置读取
     , decoder_name_(config.decoder.name.value_or(""))  // 🎯 从配置读取（使用 optional 的 value_or）
     , codec_options_ptr_(nullptr)
     , decoded_frames_(0)
@@ -44,52 +44,52 @@ FfmpegDecodeRtspWorker::~FfmpegDecodeRtspWorker() {
 // ============ IVideoReader 接口实现 ============
 
 bool FfmpegDecodeRtspWorker::open(const char* path) {
-    LOG_ERROR("[Worker] ERROR: RTSP stream requires explicit format specification");
-    LOG_ERROR("   Please use: open(rtsp_url, width, height, bits_per_pixel)");
+    LOG_ERROR("[Worker] ❌ RTSP stream does not support single-parameter open()");
+    LOG_ERROR("[Worker]    RTSP requires display resolution and format configuration");
+    LOG_ERROR("[Worker]    Please configure WorkerConfig and use open() without parameters");
+    (void)path;  // 避免未使用参数警告
     return false;
 }
 
-bool FfmpegDecodeRtspWorker::open(const char* path, int width, int height, int bits_per_pixel) {
+bool FfmpegDecodeRtspWorker::open() {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
     
     // 如果已经打开，先关闭
     if (packet_source_ && packet_source_->isOpen()) {
-        LOG_WARN_FMT("[Worker] Warning: Stream already open, closing previous stream");
+        LOG_WARN("[Worker] ⚠️  Stream already open, closing previous stream");
         close();
     }
     
-    // ⭐ v2.12新增：创建 RTSP 数据源
-    if (!path) {
-        setError("Cannot open: path is nullptr");
+    // ✅ 从 worker_config_ 读取所有参数
+    const char* rtsp_url = worker_config_.file.file_path.c_str();
+    int width = worker_config_.display.width;
+    int height = worker_config_.display.height;
+    int bits_per_pixel = worker_config_.display.bits_per_pixel;
+    
+    // 验证参数
+    if (!rtsp_url || strlen(rtsp_url) == 0) {
+        setError("RTSP URL not configured in worker_config_.file.file_path");
         return false;
     }
     
-    packet_source_ = std::make_unique<RtspPacketSource>(std::string(path));
-    LOG_DEBUG_FMT("[Worker] Created RtspPacketSource for '%s'", path);
-    
-    // 保存输出参数
-    width_ = width;
-    height_ = height;
-    
-    // 根据 bits_per_pixel 确定输出格式
-    switch (bits_per_pixel) {
-        case 24:
-            output_pixel_format_ = AV_PIX_FMT_BGR24;
-            break;
-        case 32:
-            output_pixel_format_ = AV_PIX_FMT_BGRA;
-            break;
-        default:
-            LOG_ERROR_FMT("[Worker] ERROR: Unsupported bits_per_pixel: %d", bits_per_pixel);
-            return false;
+    if (width == 0 || height == 0 || bits_per_pixel == 0) {
+        setError("Display resolution and bits_per_pixel must be configured for RTSP stream");
+        LOG_ERROR_FMT("[Worker] ❌ Current config: %dx%d@%dbpp", width, height, bits_per_pixel);
+        LOG_ERROR("[Worker]    Please set worker_config_.display.width/height/bits_per_pixel");
+        return false;
     }
     
-    output_bpp_ = bits_per_pixel;
+    // 保存输出参数（运行时状态）
+    output_width_ = width;
+    output_height_ = height;
     
     LOG_INFO("");
-    LOG_INFO_FMT("📡 Opening RTSP stream: %s", path);
-    LOG_INFO_FMT("   Output resolution: %dx%d", width_, height_);
-    LOG_INFO_FMT("   Bits per pixel: %d", bits_per_pixel);
+    LOG_INFO_FMT("📡 Opening RTSP stream: %s", rtsp_url);
+    LOG_INFO_FMT("   Output resolution: %dx%d@%dbpp", width, height, bits_per_pixel);
+    
+    // ⭐ 创建 RTSP 数据源
+    packet_source_ = std::make_unique<RtspPacketSource>(std::string(rtsp_url));
+    LOG_DEBUG_FMT("[Worker] Created RtspPacketSource for '%s'", rtsp_url);
     
     // 1. 打开数据源
     if (!packet_source_->open()) {
@@ -116,7 +116,7 @@ bool FfmpegDecodeRtspWorker::open(const char* path, int width, int height, int b
     
     // 5. 🎯 Worker职责：在open()时自动创建BufferPool（通过调用Allocator）
     // 计算帧大小
-    size_t frame_size = width_ * height_ * (bits_per_pixel / 8);
+    size_t frame_size = output_width_ * output_height_ * (bits_per_pixel / 8);
     if (frame_size == 0) {
         setError("Invalid frame size, cannot create BufferPool");
         packet_source_->close();
@@ -129,7 +129,7 @@ bool FfmpegDecodeRtspWorker::open(const char* path, int width, int height, int b
     uint64_t pool_id = allocator_facade_.allocatePoolWithBuffers(
         buffer_count,
         frame_size,
-        std::string("FfmpegDecodeRtspWorker_") + std::string(path),
+        std::string("FfmpegDecodeRtspWorker_") + std::string(rtsp_url),
         "RTSP"
     );
     
@@ -155,7 +155,7 @@ bool FfmpegDecodeRtspWorker::open(const char* path, int width, int height, int b
     dropped_frames_ = 0;
     
     LOG_DEBUG("[Worker] RTSP stream opened successfully");
-    LOG_DEBUG_FMT("[Worker]    Resolution: %dx%d", width_, height_);
+    LOG_DEBUG_FMT("[Worker]    Resolution: %dx%d", output_width_, output_height_);
     LOG_DEBUG_FMT("[Worker]    Codec: %s", codec_ctx_ptr_->codec->name);
     LOG_DEBUG_FMT("[Worker]    BufferPool: '%s' (ID: %lu, %d buffers, %zu bytes each)", 
            pool_name.c_str(), pool_id, buffer_count, frame_size);
@@ -244,7 +244,8 @@ int FfmpegDecodeRtspWorker::getCurrentFrameIndex() const {
 }
 
 size_t FfmpegDecodeRtspWorker::getFrameSize() const {
-    return width_ * height_ * getBytesPerPixel();
+    // ✅ 使用实际解码输出格式计算（getBytesPerPixel从实际格式获取）
+    return (size_t)(output_width_ * output_height_ * getBytesPerPixel());
 }
 
 long FfmpegDecodeRtspWorker::getFileSize() const {
@@ -256,22 +257,54 @@ long FfmpegDecodeRtspWorker::getFileSize() const {
 }
 
 int FfmpegDecodeRtspWorker::getWidth() const {
-    return width_;
+    return output_width_;
 }
 
 int FfmpegDecodeRtspWorker::getHeight() const {
-    return height_;
+    return output_height_;
 }
 
-int FfmpegDecodeRtspWorker::getBytesPerPixel() const {
-    switch (output_pixel_format_) {
-        case AV_PIX_FMT_BGR24:
-            return 3;
-        case AV_PIX_FMT_BGRA:
-        case AV_PIX_FMT_RGBA:
-            return 4;
-        default:
-            return 4;
+double FfmpegDecodeRtspWorker::getBytesPerPixel() const {
+    // 1️⃣ 优先：从解码器实际输出格式计算（最准确）
+    if (codec_ctx_ptr_ && codec_ctx_ptr_->pix_fmt != AV_PIX_FMT_NONE) {
+        const AVPixFmtDescriptor* desc = av_pix_fmt_desc_get(codec_ctx_ptr_->pix_fmt);
+        if (desc) {
+            int bits_per_pixel = av_get_bits_per_pixel(desc);
+            return bits_per_pixel / 8.0;  // 返回浮点数，支持1.5字节等
+        }
+    }
+    
+    // 2️⃣ Fallback：从 worker_config_.decoder.taco 的格式字符串推断
+    if (worker_config_.decoder.taco.ch1_rgb) {
+        // RGB 模式：根据 ch1_rgb_format 推断
+        const std::string& fmt = worker_config_.decoder.taco.ch1_rgb_format;
+        if (fmt == "argb888" || fmt == "bgra888" || fmt == "rgba888" || 
+            fmt == "abgr888" || fmt == "xrgb888" || fmt == "xbgr888") {
+            return 4.0;  // 32-bit RGBA/XRGB
+        } else if (fmt == "rgb888" || fmt == "bgr888") {
+            return 3.0;  // 24-bit RGB
+        } else if (fmt == "r16g16b16" || fmt == "b16g16r16") {
+            return 6.0;  // 48-bit RGB
+        }
+        // 默认 RGB
+        return 4.0;
+    } else {
+        // YUV 模式：根据 ch0_yuv_format 推断
+        const std::string& fmt = worker_config_.decoder.taco.ch0_yuv_format;
+        if (fmt.find("NV12") != std::string::npos || fmt.find("NV21") != std::string::npos) {
+            return 1.5;  // YUV420: 1.5 bytes/pixel
+        } else if (fmt.find("P010") != std::string::npos || fmt.find("I010") != std::string::npos ||
+                   fmt.find("L010") != std::string::npos || fmt.find("Pack10") != std::string::npos) {
+            return 3.0;  // YUV420 10-bit: 3 bytes/pixel
+        } else if (fmt.find("YUV400") != std::string::npos) {
+            if (fmt.find("8-bit") != std::string::npos) {
+                return 1.0;  // YUV400 8-bit: 1 byte/pixel
+            } else {
+                return 2.0;  // YUV400 10-bit: 2 bytes/pixel
+            }
+        }
+        // 默认 YUV420
+        return 1.5;
     }
 }
 
@@ -419,7 +452,7 @@ bool FfmpegDecodeRtspWorker::fillBuffer(int frame_index, Buffer* buffer) {
 // ============ RTSP 特有接口 ============
 
 std::string FfmpegDecodeRtspWorker::getLastError() const {
-    std::lock_guard<std::mutex> lock(error_mutex_);
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     return last_error_;
 }
 
@@ -507,7 +540,7 @@ bool FfmpegDecodeRtspWorker::initializeDecoder(const AVCodecParameters* codec_pa
     LOG_DEBUG("[Worker] Initialized decoder");
     LOG_INFO_FMT("   Codec: %s", codec_ctx_ptr_->codec->name);
     LOG_INFO_FMT("   Stream resolution: %dx%d", codec_ctx_ptr_->width, codec_ctx_ptr_->height);
-    LOG_INFO_FMT("   Output resolution: %dx%d", width_, height_);
+    LOG_INFO_FMT("   Output resolution: %dx%d", output_width_, output_height_);
     
     return true;
 }
@@ -587,7 +620,7 @@ bool FfmpegDecodeRtspWorker::configureSpecialDecoder() {
 }
 
 void FfmpegDecodeRtspWorker::setError(const std::string& error, int ffmpeg_error) {
-    std::lock_guard<std::mutex> lock(error_mutex_);
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     last_error_ = error;
     
     if (ffmpeg_error != 0) {

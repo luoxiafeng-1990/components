@@ -44,8 +44,8 @@ public:
     virtual ~FfmpegRecordRtspWorker() override;
     
     // ============ IVideoReader 接口实现 ============
+    virtual bool open() override;
     virtual bool open(const char* path) override;
-    virtual bool open(const char* path, int width, int height, int bits_per_pixel) override;
     virtual void close() override;
     virtual bool isOpen() const override;
     
@@ -61,7 +61,7 @@ public:
     
     virtual int getWidth() const override;
     virtual int getHeight() const override;
-    virtual int getBytesPerPixel() const override;
+    virtual double getBytesPerPixel() const override;
     virtual const char* getPath() const override;
     
     virtual bool hasMoreFrames() const override;

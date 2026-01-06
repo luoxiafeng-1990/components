@@ -303,8 +303,29 @@ public:
     
     // ==================== 文件导航功能（继承自IVideoFileNavigator）====================
     // 以下方法继承自 IVideoFileNavigator，子类必须实现
+    
+    /**
+     * @brief 打开视频文件（从 worker_config_ 读取所有参数）
+     * 
+     * v2.13设计：
+     * - Worker 从自己的 worker_config_ 读取所有参数
+     * - 默认实现：调用 open(path)，从 config 中提取路径
+     * - 子类可以重写此方法以实现更复杂的初始化逻辑
+     */
+    virtual bool open() override {
+        // 默认实现：调用 open(path)，从 config 中提取路径
+        return open(worker_config_.file.file_path.c_str());
+    }
+    
+    /**
+     * @brief 打开视频文件（指定路径）
+     * 
+     * @param path 文件路径（可以覆盖 config 中的路径）
+     * @return 成功返回true
+     * 
+     * @note 子类必须实现此方法
+     */
     virtual bool open(const char* path) override = 0;
-    virtual bool open(const char* path, int width, int height, int bits_per_pixel) override = 0;
     virtual void close() override = 0;
     virtual bool isOpen() const override = 0;
     virtual bool seek(int frame_index) override = 0;
@@ -317,7 +338,7 @@ public:
     virtual long getFileSize() const override = 0;
     virtual int getWidth() const override = 0;
     virtual int getHeight() const override = 0;
-    virtual int getBytesPerPixel() const override = 0;
+    virtual double getBytesPerPixel() const override = 0;
     virtual const char* getPath() const override = 0;
     virtual bool hasMoreFrames() const override = 0;
     virtual bool isAtEnd() const override = 0;

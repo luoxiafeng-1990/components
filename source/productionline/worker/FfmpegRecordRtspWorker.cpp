@@ -42,6 +42,20 @@ FfmpegRecordRtspWorker::~FfmpegRecordRtspWorker() {
 }
 
 // ============ IVideoReader 接口实现 ============
+bool FfmpegRecordRtspWorker::open() {
+    // ✅ 从 worker_config_ 读取 RTSP URL
+    const char* rtsp_url = worker_config_.file.file_path.c_str();
+    
+    if (!rtsp_url || strlen(rtsp_url) == 0) {
+        setError("RTSP URL not configured in worker_config_.file.file_path");
+        LOG_ERROR("[Worker] ❌ Please configure RTSP URL in WorkerConfig");
+        return false;
+    }
+    
+    // 调用带参数的 open(path)
+    return open(rtsp_url);
+}
+
 
 bool FfmpegRecordRtspWorker::open(const char* path) {
     if (is_open_) {
@@ -111,13 +125,6 @@ bool FfmpegRecordRtspWorker::open(const char* path) {
     return true;
 }
 
-bool FfmpegRecordRtspWorker::open(const char* path, int width, int height, int bits_per_pixel) {
-    // 录制不需要这些参数，直接调用简单版本
-    (void)width;
-    (void)height;
-    (void)bits_per_pixel;
-    return open(path);
-}
 
 void FfmpegRecordRtspWorker::close() {
     if (!is_open_) {
@@ -204,8 +211,8 @@ int FfmpegRecordRtspWorker::getHeight() const {
     return format_ctx_ptr_->streams[video_stream_index_]->codecpar->height;
 }
 
-int FfmpegRecordRtspWorker::getBytesPerPixel() const {
-    return 0;  // 原始码流没有像素概念
+double FfmpegRecordRtspWorker::getBytesPerPixel() const {
+    return 0.0;  // 原始码流没有像素概念
 }
 
 const char* FfmpegRecordRtspWorker::getPath() const {
