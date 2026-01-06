@@ -311,7 +311,8 @@ void VideoProductionLine::producerThreadFunc(int thread_id) {
             buffer = pool_sptr->acquireFree(true, 100);  // 100ms 超时
             if (buffer == nullptr && running_.load()) {
                 // 超时但仍在运行，继续等待
-                LOG_DEBUG_FMT("[Thread #%d] Waiting for free buffer...", thread_id);
+                LOG_DEBUG_FMT("[VideoProductionLine][Thread #%d] Waiting for free buffer from pool '%s' (frame_index=%d)...", 
+                              thread_id, pool_sptr->getName().c_str(), frame_index);
             }
         }
         
