@@ -1895,25 +1895,174 @@ static int test_buffer_writer_format(
 }
 
 /**
- * 测试8：BufferWriter保存帧测试（默认NV12格式）
+ * 打印支持的像素格式列表
+ */
+static void print_supported_formats() {
+    LOG_INFO("╔═══════════════════════════════════════════════════════╗");
+    LOG_INFO("║  支持的像素格式 (Supported Pixel Formats)            ║");
+    LOG_INFO("╚═══════════════════════════════════════════════════════╝");
+    LOG_INFO("");
+    LOG_INFO("YUV 格式:");
+    LOG_INFO("  nv12         - YUV420 NV12 (默认格式)");
+    LOG_INFO("  nv21         - YUV420 NV21");
+    LOG_INFO("");
+    LOG_INFO("RGB 格式 (8-bit, Alpha 通道):");
+    LOG_INFO("  argb888      - ARGB (4字节/像素)");
+    LOG_INFO("  abgr888      - ABGR (4字节/像素)");
+    LOG_INFO("  bgra888      - BGRA (4字节/像素)");
+    LOG_INFO("  rgba888      - RGBA (4字节/像素)");
+    LOG_INFO("");
+    LOG_INFO("RGB 格式 (8-bit, 无 Alpha):");
+    LOG_INFO("  rgb888       - RGB24 (3字节/像素)");
+    LOG_INFO("  bgr888       - BGR24 (3字节/像素)");
+    LOG_INFO("");
+    LOG_INFO("RGB 格式 (16-bit):");
+    LOG_INFO("  r16g16b16    - RGB48LE (6字节/像素)");
+    LOG_INFO("  b16g16r16    - BGR48LE (6字节/像素)");
+    LOG_INFO("");
+    LOG_INFO("使用示例:");
+    LOG_INFO("  ./test writer nv12 /path/to/video.mp4");
+    LOG_INFO("  ./test writer rgb888 /path/to/video.mp4");
+    LOG_INFO("  ./test writer argb888 /path/to/video.mp4");
+    LOG_INFO("╚═══════════════════════════════════════════════════════╝");
+}
+
+/**
+ * 根据格式名称创建 TacoConfig
+ * 
+ * @param format_name 格式名称（如 "nv12", "rgb888", "argb888" 等）
+ * @param taco_config 输出参数，构建的配置
+ * @return 成功返回 true，格式不支持返回 false
+ */
+static bool create_taco_config_by_format(
+    const std::string& format_name,
+    WorkerConfig::DecoderConfig::TacoConfig& taco_config
+) {
+    // 转换为小写便于比较
+    std::string fmt = format_name;
+    std::transform(fmt.begin(), fmt.end(), fmt.begin(), ::tolower);
+    
+    // YUV 格式
+    if (fmt == "nv12") {
+        taco_config = TacoConfigBuilder()
+            .setRgbConfig(false, "", "bt601")
+            .build();
+        return true;
+    }
+    if (fmt == "nv21") {
+        taco_config = TacoConfigBuilder()
+            .setRgbConfig(false, "", "bt601")
+            // NV21 需要特殊配置，暂时使用 NV12
+            .build();
+        return true;
+    }
+    
+    // RGB 8-bit Alpha 格式
+    if (fmt == "argb888") {
+        taco_config = TacoConfigBuilder()
+            .setRgbConfig(true, "argb888", "bt601")
+            .setDecoderOutputResolution(1920, 1080)
+            .build();
+        return true;
+    }
+    if (fmt == "abgr888") {
+        taco_config = TacoConfigBuilder()
+            .setRgbConfig(true, "abgr888", "bt601")
+            .setDecoderOutputResolution(1920, 1080)
+            .build();
+        return true;
+    }
+    if (fmt == "bgra888") {
+        taco_config = TacoConfigBuilder()
+            .setRgbConfig(true, "bgra888", "bt601")
+            .setDecoderOutputResolution(1920, 1080)
+            .build();
+        return true;
+    }
+    if (fmt == "rgba888") {
+        taco_config = TacoConfigBuilder()
+            .setRgbConfig(true, "rgba888", "bt601")
+            .setDecoderOutputResolution(1920, 1080)
+            .build();
+        return true;
+    }
+    
+    // RGB 8-bit 无 Alpha 格式
+    if (fmt == "rgb888") {
+        taco_config = TacoConfigBuilder()
+            .setRgbConfig(true, "rgb888", "bt601")
+            .setDecoderOutputResolution(1920, 1080)
+            .build();
+        return true;
+    }
+    if (fmt == "bgr888") {
+        taco_config = TacoConfigBuilder()
+            .setRgbConfig(true, "bgr888", "bt601")
+            .setDecoderOutputResolution(1920, 1080)
+            .build();
+        return true;
+    }
+    
+    // RGB 16-bit 格式
+    if (fmt == "r16g16b16") {
+        taco_config = TacoConfigBuilder()
+            .setRgbConfig(true, "r16g16b16", "bt601")
+            .setDecoderOutputResolution(1920, 1080)
+            .build();
+        return true;
+    }
+    if (fmt == "b16g16r16") {
+        taco_config = TacoConfigBuilder()
+            .setRgbConfig(true, "b16g16r16", "bt601")
+            .setDecoderOutputResolution(1920, 1080)
+            .build();
+        return true;
+    }
+    
+    // 不支持的格式
+    return false;
+}
+
+/**
+ * 测试8：BufferWriter保存帧测试（支持命令行指定格式）
  * 
  * 功能：
  * - 使用VideoProductionLine解码视频
  * - 使用BufferWriter将解码后的帧保存到文件
- * - 演示BufferWriter的简化接口（open/write/close）
+ * - 支持命令行指定像素格式
  * 
- * 目的：
- * - 展示如何使用BufferWriter保存Buffer数据
- * - 验证FFmpeg格式标准的使用
- * - 测试原子计数器功能
+ * 命令行格式：
+ *   ./test writer <format> <video_path>
+ * 
+ * 示例：
+ *   ./test writer nv12 /path/to/video.mp4
+ *   ./test writer rgb888 /path/to/video.mp4
+ *   ./test writer argb888 /path/to/video.mp4
  */
-static int test_buffer_writer(const char* video_path) {
-    // ✅ 直接使用TacoConfigBuilder配置NV12格式（YUV输出）
-    auto tacoConfig = TacoConfigBuilder()
-        .setRgbConfig(false, "", "bt601")  // ch1_rgb=false，输出YUV
-        .build();
+static int test_buffer_writer(const std::vector<std::string>& args) {
+    // 检查参数数量（框架已经检查过，这里只需处理业务逻辑）
+    if (args.size() < 2) {
+        // 这个分支不应该被触发，因为框架会先检查
+        LOG_ERROR("错误：缺少参数");
+        return -1;
+    }
     
-    return test_buffer_writer_format(video_path, tacoConfig);
+    std::string format_name = args[0];
+    const char* video_path = args[1].c_str();
+    
+    // 根据格式名称创建配置
+    WorkerConfig::DecoderConfig::TacoConfig taco_config;
+    if (!create_taco_config_by_format(format_name, taco_config)) {
+        LOG_ERROR("╔═══════════════════════════════════════════════════════╗");
+        LOG_ERROR_FMT("║  错误：不支持的格式 '%s'", format_name.c_str());
+        LOG_ERROR("╚═══════════════════════════════════════════════════════╝");
+        LOG_ERROR("");
+        print_supported_formats();
+        return -1;
+    }
+    
+    // 调用实际的测试函数
+    return test_buffer_writer_format(video_path, taco_config);
 }
 
 /**
@@ -2819,7 +2968,7 @@ REGISTER_TEST(rtsp_record, "RTSP stream recording to MP4 (use env RTSP_OUTPUT_FI
 REGISTER_TEST(ffmpeg, "FFmpeg encoded video playback (MP4/AVI/MKV/etc)", test_h264_taco_video);
 REGISTER_TEST(ffmpeg_software, "FFmpeg software decoder (libavcodec, no hardware acceleration)", test_ffmpeg_software_decoder);
 REGISTER_TEST(ffmpeg_multithread, "Multi-threaded FFmpeg video decoding (no display, decode only)", test_h264_taco_video_multithread);
-REGISTER_TEST(writer, "BufferWriter - Save frames (NV12 format)", test_buffer_writer);
+REGISTER_TEST_MULTI_ARG(writer, "BufferWriter - Save frames (specify format)", "<format> <video_path>", test_buffer_writer, print_supported_formats);
 REGISTER_TEST(writer_rgb, "BufferWriter - 12 RGB formats (ARGB/ABGR/BGRA/RGBA/RGB/BGR/0RGB/0BGR/RGB0/BGR0/RGB48/BGR48)", test_buffer_writer_rgb_formats);
 REGISTER_TEST(writer_yuv, "BufferWriter - 15 YUV formats (PP0 ch0: YUV400/YUV420 NV12/YUV420 NV21/YUV420 P010 series)", test_buffer_writer_yuv_formats);
 REGISTER_TEST(multi_worker, "MultiWorkerProductionLine - Multi worker test (hardware + software decoder from same RTSP stream)", test_multi_worker);
