@@ -1,12 +1,13 @@
 #pragma once
 
 #include "productionline/worker/WorkerBase.hpp"
+#include "productionline/worker/IPacketSource.hpp"
 #include <string>
 #include <atomic>
 #include <mutex>
+#include <memory>
 
 // Forward declarations
-struct AVFormatContext;
 struct AVPacket;
 
 /**
@@ -99,25 +100,15 @@ public:
     struct AVRational getTimeBase() const;
 
 private:
-    bool openMediaSource();
-    void closeMediaSource();
-    bool findVideoStream();
-    
     std::string getLastError() const;
     void setError(const std::string& error, int ffmpeg_error = 0);
 
 private:
-    // FFmpeg 上下文
-    AVFormatContext* format_ctx_ptr_;
-    int video_stream_index_;
-    
-    // RTSP 配置
-    std::string rtsp_url_;
+    // ============ v2.12 数据源抽象 ============
+    std::unique_ptr<IPacketSource> packet_source_;  // RTSP 数据源
     
     // 状态
     std::atomic<bool> is_open_;
-    std::atomic<bool> connected_;
-    std::atomic<bool> eof_reached_;
     std::atomic<int> packet_count_;
     
     // 错误信息
