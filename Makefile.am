@@ -28,7 +28,8 @@ libcomponents_la_SOURCES = \
     source/buffer/bufferpool/BufferPoolRegistry.cpp \
     source/productionline/VideoProductionLine.cpp \
     source/productionline/MultiWorkerProductionLine.cpp \
-    source/productionline/io/BufferWriter.cpp
+    source/productionline/io/BufferWriter.cpp \
+    source/productionline/io/BufferComparator.cpp
 
 # ========== 测试程序（每个只包含自己的主文件）==========
 bin_PROGRAMS = display_test

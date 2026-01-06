@@ -34,6 +34,7 @@
 #include "productionline/VideoProductionLine.hpp"
 #include "productionline/MultiWorkerProductionLine.hpp"
 #include "productionline/io/BufferWriter.hpp"
+#include "productionline/io/BufferComparator.hpp"
 #include "monitor/PerformanceMonitor.hpp"
 #include "common/Logger.hpp"
 #include "framework/TestMacros.hpp"
@@ -2565,6 +2566,248 @@ static int test_multi_worker(const char* rtsp_url) {
     }
 }
 
+/**
+ * 测试11：解码器对比验证（硬件 vs 软件）
+ * 
+ * 功能：
+ * - 使用 MultiWorkerProductionLine 同时解码同一个视频
+ * - Consumer Worker 1：硬件解码器（h264_taco）
+ * - Consumer Worker 2：软件解码器（libavcodec）
+ * - 使用 BufferComparator 对比两个解码器的输出
+ * - 输出验证报告（PSNR等质量指标）
+ * 
+ * 架构：
+ * - Record Worker → BufferPool A (AVPacket，用于RTSP)
+ *   或直接从文件解码（本地文件模式）
+ * - Consumer Worker 1 → BufferPool B1 (硬件解码)
+ * - Consumer Worker 2 → BufferPool B2 (软件解码)
+ * - 测试程序从 B1 和 B2 获取 buffer 并使用 BufferComparator 对比
+ * 
+ * 特性：
+ * - 格式自适应：自动检测YUV/RGB并选择对比算法
+ * - 2层验证：快速验证（PSNR-Y）→ 深度验证（PSNR-YUV）
+ * - 详细报告：保存到文件，包含失败帧详情
+ * 
+ * 使用示例：
+ *   ./display_test -m decoder_compare video.mp4
+ *   ./display_test -m decoder_compare rtsp://...
+ */
+static int test_decoder_compare(const char* video_source) {
+    using namespace productionline::io;
+    
+    LOG_INFO("╔═══════════════════════════════════════════════════════╗");
+    LOG_INFO("║   Test: Decoder Comparison (Hardware vs Software)    ║");
+    LOG_INFO("╚═══════════════════════════════════════════════════════╝\n");
+    
+    // 判断是RTSP流还是本地文件
+    bool is_rtsp = (strncmp(video_source, "rtsp://", 7) == 0);
+    
+    if (is_rtsp) {
+        LOG_INFO_FMT("Video source: RTSP stream - %s", video_source);
+        // 注册信号处理器
+        signal(SIGINT, signal_handler);
+        g_running = true;
+        g_rtsp_interrupted = false;
+        RtspPacketSource::clearInterrupt();
+    } else {
+        LOG_INFO_FMT("Video source: Local file - %s", video_source);
+    }
+    
+    // 1. 配置 MultiWorkerConfig
+    LOG_INFO("\n[Step 1] Configuring MultiWorkerProductionLine...");
+    
+    MultiWorkerProductionLine::MultiWorkerConfig config;
+    
+    if (is_rtsp) {
+        // RTSP模式：需要Record Worker
+        config.record_worker_config = WorkerConfigBuilder()
+            .setFileConfig(FileConfigBuilder().setFilePath(video_source).build())
+            .setWorkerType(WorkerType::FFMPEG_RTSP_RECORD)
+            .build();
+    }
+    // 文件模式：不需要Record Worker（MultiWorkerProductionLine会自动处理）
+    
+    // Consumer Worker 1：硬件解码器
+    LOG_INFO("  Configuring Consumer Worker 1 (Hardware Decoder - h264_taco)...");
+    auto consumer1_config = WorkerConfigBuilder()
+        .setFileConfig(FileConfigBuilder().setFilePath(video_source).build())
+        .setDisplayConfig(DisplayConfigBuilder()
+            .setDisplayResolution(1920, 1080)
+            .setBitsPerPixel(32)
+            .build())
+        .setDecoderConfig(DecoderConfigBuilder()
+            .useTaco("h264")  // 硬件解码
+            .build())
+        .setWorkerType(is_rtsp ? WorkerType::FFMPEG_RTSP : WorkerType::FFMPEG_VIDEO_FILE)
+        .build();
+    config.consumer_configs.push_back(consumer1_config);
+    
+    // Consumer Worker 2：软件解码器
+    LOG_INFO("  Configuring Consumer Worker 2 (Software Decoder - libavcodec)...");
+    auto consumer2_config = WorkerConfigBuilder()
+        .setFileConfig(FileConfigBuilder().setFilePath(video_source).build())
+        .setDisplayConfig(DisplayConfigBuilder()
+            .setDisplayResolution(1920, 1080)
+            .setBitsPerPixel(32)
+            .build())
+        .setDecoderConfig(DecoderConfigBuilder()
+            .useSoftware()  // 软件解码
+            .build())
+        .setWorkerType(is_rtsp ? WorkerType::FFMPEG_RTSP : WorkerType::FFMPEG_VIDEO_FILE)
+        .build();
+    config.consumer_configs.push_back(consumer2_config);
+    
+    config.thread_pool_size = 4;
+    config.max_pending_tasks = 100;
+    
+    LOG_INFO("  ✅ Hardware Decoder: h264_taco");
+    LOG_INFO("  ✅ Software Decoder: libavcodec");
+    
+    // 2. 创建 MultiWorkerProductionLine
+    LOG_INFO("\n[Step 2] Starting MultiWorkerProductionLine...");
+    MultiWorkerProductionLine multi_worker(config, false, 1, false);
+    
+    if (!multi_worker.start()) {
+        LOG_ERROR("Failed to start MultiWorkerProductionLine");
+        return -1;
+    }
+    
+    // 3. 获取两个BufferPool
+    LOG_INFO("\n[Step 3] Getting BufferPools...");
+    uint64_t hw_pool_id = multi_worker.getConsumerBufferPoolId(0);
+    uint64_t sw_pool_id = multi_worker.getConsumerBufferPoolId(1);
+    
+    auto hw_pool = BufferPoolRegistry::getInstance().getPool(hw_pool_id).lock();
+    auto sw_pool = BufferPoolRegistry::getInstance().getPool(sw_pool_id).lock();
+    
+    if (!hw_pool || !sw_pool) {
+        LOG_ERROR("Failed to get BufferPools");
+        multi_worker.stop();
+        return -1;
+    }
+    
+    LOG_INFO_FMT("  Hardware BufferPool: '%s' (ID: %lu)", 
+                 hw_pool->getName().c_str(), hw_pool_id);
+    LOG_INFO_FMT("  Software BufferPool: '%s' (ID: %lu)", 
+                 sw_pool->getName().c_str(), sw_pool_id);
+    
+    // 4. 创建 BufferComparator（⭐ 核心，类似BufferWriter）
+    LOG_INFO("\n[Step 4] Creating BufferComparator...");
+    
+    CompareConfig compare_config;
+    compare_config.strategy = CompareConfig::AUTO_LAYERED;  // 自动分层验证
+    compare_config.format_strategy = CompareConfig::AUTO;   // 格式自适应
+    compare_config.quick_psnr_threshold = 38.0;             // >= 38dB 通过
+    compare_config.quick_warn_threshold = 35.0;             // 35~38dB 警告
+    compare_config.use_perceptual_weighting = true;         // 感知加权
+    compare_config.verbose = true;                          // 详细日志
+    compare_config.save_report = true;                      // 保存报告
+    compare_config.report_path = "./decoder_compare_report.txt";
+    
+    BufferComparator comparator;
+    if (!comparator.open(compare_config)) {
+        LOG_ERROR("Failed to open BufferComparator");
+        multi_worker.stop();
+        return -1;
+    }
+    
+    LOG_INFO("  ✅ BufferComparator initialized");
+    LOG_INFO("  Strategy: AUTO_LAYERED (fast → deep)");
+    LOG_INFO("  Format: AUTO (YUV/RGB adaptive)");
+    LOG_INFO_FMT("  PSNR threshold: %.1f dB (pass), %.1f dB (warn)", 
+                 compare_config.quick_psnr_threshold,
+                 compare_config.quick_warn_threshold);
+    
+    // 5. 消费者循环：对比两个解码器的输出
+    LOG_INFO("\n[Step 5] Comparing decoder outputs...");
+    LOG_INFO("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    
+    int frame_count = 0;
+    const int MAX_FRAMES = 300;  // 对比300帧
+    int timeout_count = 0;
+    const int MAX_TIMEOUT = 50;
+    
+    while (g_running && frame_count < MAX_FRAMES) {
+        // 检查中断标志（RTSP模式）
+        if (is_rtsp && g_rtsp_interrupted.load()) {
+            LOG_INFO("\n  ⚠️  检测到中断请求，停止对比...");
+            break;
+        }
+        
+        // 从两个Pool获取Buffer
+        Buffer* sw_buffer = sw_pool->acquireFilled(true, 1000);
+        Buffer* hw_buffer = hw_pool->acquireFilled(true, 1000);
+        
+        if (!sw_buffer || !hw_buffer) {
+            if (!sw_buffer) LOG_DEBUG("Software decoder timeout");
+            if (!hw_buffer) LOG_DEBUG("Hardware decoder timeout");
+            
+            if (sw_buffer) sw_pool->releaseFilled(sw_buffer);
+            if (hw_buffer) hw_pool->releaseFilled(hw_buffer);
+            
+            timeout_count++;
+            if (timeout_count >= MAX_TIMEOUT) {
+                LOG_INFO("\n  Decoders finished or timeout");
+                break;
+            }
+            
+            // 检查是否自然结束
+            if (!multi_worker.isRunning()) {
+                LOG_INFO("\n  Decoders finished naturally");
+                break;
+            }
+            continue;
+        }
+        
+        timeout_count = 0;
+        
+        // ⭐ 关键调用：对比两个Buffer（类似BufferWriter::write）
+        FrameCompareResult result = comparator.compare(sw_buffer, hw_buffer);
+        
+        // 释放Buffer
+        sw_pool->releaseFilled(sw_buffer);
+        hw_pool->releaseFilled(hw_buffer);
+        
+        frame_count++;
+        
+        // 每50帧打印一次进度
+        if (frame_count % 50 == 0) {
+            LOG_INFO_FMT("  Progress: %d/%d frames (passed: %d, warned: %d, failed: %d)",
+                         frame_count, MAX_FRAMES,
+                         comparator.getPassedCount(),
+                         comparator.getCompareCount() - comparator.getPassedCount() - comparator.getFailedCount(),
+                         comparator.getFailedCount());
+        }
+    }
+    
+    LOG_INFO("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    
+    // 6. 关闭并打印结果
+    LOG_INFO("\n[Step 6] Finalizing...");
+    comparator.close();
+    multi_worker.stop();
+    
+    // 7. 打印摘要（⭐ 类似BufferWriter的统计输出）
+    LOG_INFO("\n═══════════════════════════════════════════════════════");
+    LOG_INFO("  Decoder Comparison Results");
+    LOG_INFO("═══════════════════════════════════════════════════════");
+    comparator.printSummary();
+    LOG_INFO("═══════════════════════════════════════════════════════\n");
+    
+    if (compare_config.save_report) {
+        LOG_INFO_FMT("💡 Detailed report saved to: %s", 
+                     compare_config.report_path.c_str());
+        LOG_INFO("   View the report for frame-by-frame analysis");
+    }
+    
+    LOG_INFO("\n💡 Interpretation:");
+    LOG_INFO("   PSNR >= 38 dB: Excellent quality (visually lossless)");
+    LOG_INFO("   PSNR 35-38 dB: Good quality (minor differences)");
+    LOG_INFO("   PSNR < 35 dB:  Poor quality (visible artifacts)");
+    
+    return comparator.isPassed() ? 0 : 1;
+}
+
 // ========== 测试用例注册 ==========
 // 使用新的测试框架，自动注册所有测试用例
 REGISTER_TEST(loop, "4-frame loop display", test_4frame_loop);
@@ -2580,6 +2823,7 @@ REGISTER_TEST(writer, "BufferWriter - Save frames (NV12 format)", test_buffer_wr
 REGISTER_TEST(writer_rgb, "BufferWriter - 12 RGB formats (ARGB/ABGR/BGRA/RGBA/RGB/BGR/0RGB/0BGR/RGB0/BGR0/RGB48/BGR48)", test_buffer_writer_rgb_formats);
 REGISTER_TEST(writer_yuv, "BufferWriter - 15 YUV formats (PP0 ch0: YUV400/YUV420 NV12/YUV420 NV21/YUV420 P010 series)", test_buffer_writer_yuv_formats);
 REGISTER_TEST(multi_worker, "MultiWorkerProductionLine - Multi worker test (hardware + software decoder from same RTSP stream)", test_multi_worker);
+REGISTER_TEST(decoder_compare, "Decoder Comparison - Hardware vs Software (PSNR validation, format adaptive)", test_decoder_compare);
 
 /**
  * 主函数

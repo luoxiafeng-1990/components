@@ -13,6 +13,7 @@ extern "C" {
 #include <libavutil/opt.h>
 #include <libavutil/dict.h>
 #include <libavutil/error.h>  // 用于 av_strerror
+#include <libavutil/pixdesc.h>  // 用于 av_pix_fmt_desc_get, av_get_bits_per_pixel
 #include <libswscale/swscale.h>
 #include "taco_sys_api.h"
 }
@@ -27,9 +28,8 @@ FfmpegDecodeVideoFileWorker::FfmpegDecodeVideoFileWorker(const WorkerConfig& con
     , packet_source_(nullptr)  // 将在下面根据配置创建
     , codec_ctx_ptr_(nullptr)
     // ⚠️ 注意：video_stream_index_ 已移除，视频流索引从数据源获取
-    , output_width_(config.display.width)      // 🎯 从配置读取输出宽度
-    , output_height_(config.display.height)   // 🎯 从配置读取输出高度
-    , output_bpp_(config.display.bits_per_pixel > 0 ? config.display.bits_per_pixel : 32)  // 🎯 从配置读取位深，默认32
+    , output_width_(config.display.width)      // 🎯 从配置读取输出宽度（初始值）
+    , output_height_(config.display.height)   // 🎯 从配置读取输出高度（初始值）
     // ⚠️ 注意：total_frames_ 已移除，总帧数从数据源获取
     , current_frame_index_(0)
     // ⚠️ 注意：is_open_ 已移除，打开状态从数据源获取
@@ -37,6 +37,7 @@ FfmpegDecodeVideoFileWorker::FfmpegDecodeVideoFileWorker(const WorkerConfig& con
     , decoder_name_(config.decoder.name.value_or(""))  // 🎯 从配置读取（使用 optional 的 value_or）
     , codec_options_ptr_(nullptr)
     , decoded_frames_(0)
+    , dropped_frames_(0)  // 初始化丢帧计数
 {
     // ⚠️ 注意：file_path_ 已移除，文件路径由数据源类管理
     
@@ -159,8 +160,8 @@ bool FfmpegDecodeVideoFileWorker::open(const char* path) {
     }
     
     // 🎯 Worker职责：在open()时自动创建BufferPool（通过调用Allocator）
-    // 计算帧大小
-    size_t frame_size = output_width_ * output_height_ * output_bpp_ / 8;
+    // 计算帧大小（使用配置值）
+    size_t frame_size = output_width_ * output_height_ * (worker_config_.display.bits_per_pixel / 8);
     if (frame_size == 0) {
         setError("Invalid frame size, cannot create BufferPool");
         packet_source_->close();
@@ -216,14 +217,6 @@ bool FfmpegDecodeVideoFileWorker::open(const char* path) {
            actual_pool_name.c_str(), pool_id, buffer_count, frame_size);
     
     return true;
-}
-
-bool FfmpegDecodeVideoFileWorker::open(const char* path, int width, int height, int bits_per_pixel) {
-    // FfmpegDecodeVideoFileWorker 忽略 width/height/bpp 参数，自动检测格式
-    (void)width;
-    (void)height;
-    (void)bits_per_pixel;
-    return open(path);
 }
 
 void FfmpegDecodeVideoFileWorker::close() {
@@ -578,7 +571,8 @@ int FfmpegDecodeVideoFileWorker::getCurrentFrameIndex() const {
 }
 
 size_t FfmpegDecodeVideoFileWorker::getFrameSize() const {
-    return output_width_ * output_height_ * (output_bpp_ / 8);
+    // ✅ 使用实际解码输出格式计算（getBytesPerPixel从实际格式获取）
+    return (size_t)(output_width_ * output_height_ * getBytesPerPixel());
 }
 
 long FfmpegDecodeVideoFileWorker::getFileSize() const {
@@ -597,8 +591,48 @@ int FfmpegDecodeVideoFileWorker::getHeight() const {
     return output_height_;
 }
 
-int FfmpegDecodeVideoFileWorker::getBytesPerPixel() const {
-    return output_bpp_ / 8;
+double FfmpegDecodeVideoFileWorker::getBytesPerPixel() const {
+    // 1️⃣ 优先：从解码器实际输出格式计算（最准确）
+    if (codec_ctx_ptr_ && codec_ctx_ptr_->pix_fmt != AV_PIX_FMT_NONE) {
+        const AVPixFmtDescriptor* desc = av_pix_fmt_desc_get(codec_ctx_ptr_->pix_fmt);
+        if (desc) {
+            int bits_per_pixel = av_get_bits_per_pixel(desc);
+            return bits_per_pixel / 8.0;  // 返回浮点数，支持1.5字节等
+        }
+    }
+    
+    // 2️⃣ Fallback：从 worker_config_.decoder.taco 的格式字符串推断
+    if (worker_config_.decoder.taco.ch1_rgb) {
+        // RGB 模式：根据 ch1_rgb_format 推断
+        const std::string& fmt = worker_config_.decoder.taco.ch1_rgb_format;
+        if (fmt == "argb888" || fmt == "bgra888" || fmt == "rgba888" || 
+            fmt == "abgr888" || fmt == "xrgb888" || fmt == "xbgr888") {
+            return 4.0;  // 32-bit RGBA/XRGB
+        } else if (fmt == "rgb888" || fmt == "bgr888") {
+            return 3.0;  // 24-bit RGB
+        } else if (fmt == "r16g16b16" || fmt == "b16g16r16") {
+            return 6.0;  // 48-bit RGB
+        }
+        // 默认 RGB
+        return 4.0;
+    } else {
+        // YUV 模式：根据 ch0_yuv_format 推断
+        const std::string& fmt = worker_config_.decoder.taco.ch0_yuv_format;
+        if (fmt.find("NV12") != std::string::npos || fmt.find("NV21") != std::string::npos) {
+            return 1.5;  // YUV420: 1.5 bytes/pixel
+        } else if (fmt.find("P010") != std::string::npos || fmt.find("I010") != std::string::npos ||
+                   fmt.find("L010") != std::string::npos || fmt.find("Pack10") != std::string::npos) {
+            return 3.0;  // YUV420 10-bit: 3 bytes/pixel
+        } else if (fmt.find("YUV400") != std::string::npos) {
+            if (fmt.find("8-bit") != std::string::npos) {
+                return 1.0;  // YUV400 8-bit: 1 byte/pixel
+            } else {
+                return 2.0;  // YUV400 10-bit: 2 bytes/pixel
+            }
+        }
+        // 默认 YUV420
+        return 1.5;
+    }
 }
 
 const char* FfmpegDecodeVideoFileWorker::getPath() const {

@@ -91,8 +91,30 @@ public:
     }
     
     // 文件导航功能（继承自IVideoFileNavigator）
+    /**
+     * @brief 打开 RTSP 流（无参版本，从 worker_config_ 读取所有参数）
+     * 
+     * v2.13 架构：Worker 从 worker_config_ 读取所有配置参数
+     * 包括：
+     * - worker_config_.file.file_path（RTSP URL）
+     * - worker_config_.display.width/height/bits_per_pixel
+     * - worker_config_.decoder.name（解码器名称）
+     * - worker_config_.decoder.taco（TACO 配置）
+     * 
+     * @return 成功返回 true
+     */
+    bool open() override;
+    
+    /**
+     * @brief 打开 RTSP 流（单参数版本）
+     * 
+     * ❌ RTSP 流不支持此方法，因为必须指定输出分辨率和格式
+     * 请使用无参的 open()，并在 WorkerConfig 中配置参数
+     * 
+     * @return false（不支持）
+     */
     bool open(const char* path) override;
-    bool open(const char* path, int width, int height, int bits_per_pixel) override;
+    
     void close() override;
     bool isOpen() const override;
     bool seek(int frame_index) override;
@@ -105,7 +127,7 @@ public:
     long getFileSize() const override;
     int getWidth() const override;
     int getHeight() const override;
-    int getBytesPerPixel() const override;
+    double getBytesPerPixel() const override;
     const char* getPath() const override;
     bool hasMoreFrames() const override;
     bool isAtEnd() const override;
@@ -144,13 +166,12 @@ private:
     // ============ FFmpeg 资源 ============
     AVCodecContext* codec_ctx_ptr_;
     
-    // ============ RTSP 连接信息 ============
-    int width_;                        // 输出宽度
-    int height_;                       // 输出高度
-    int output_pixel_format_;          // 输出像素格式（如AV_PIX_FMT_BGRA）
-    int output_bpp_;                   // 输出每像素位数
+    // ============ 输出参数（运行时状态）============
+    int output_width_;                 // 输出宽度（运行时状态，可能与config不同）
+    int output_height_;                // 输出高度（运行时状态，可能与config不同）
     
     // ============ 解码器配置（v2.2新增）============
+    bool use_hardware_decoder_;        // 是否使用硬件解码器（从WorkerConfig获取）
     std::string decoder_name_;         // 指定解码器名称（如 "h264_taco"），空字符串表示自动选择
     struct AVDictionary* codec_options_ptr_;  // 解码器选项（用于 h264_taco 配置）
     
@@ -163,7 +184,6 @@ private:
     
     // ============ 错误处理 ============
     std::string last_error_;
-    mutable std::mutex error_mutex_;
     
     // ============ 内部辅助方法 ============
     

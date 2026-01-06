@@ -182,8 +182,9 @@ public:
     
     /**
      * 获取每像素字节数
+     * @return 每像素字节数（浮点数，支持如NV12的1.5字节/像素）
      */
-    int getBytesPerPixel() const;
+    double getBytesPerPixel() const;
     
     /**
      * 获取文件路径
