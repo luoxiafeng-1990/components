@@ -45,6 +45,14 @@ public:
     virtual std::string getUsage() const {
         return "";
     }
+    
+    /**
+     * 打印详细帮助信息（可选实现）
+     * 当参数不足或无效时调用
+     */
+    virtual void printHelp() const {
+        // 默认不打印额外帮助
+    }
 };
 
 /**
@@ -80,6 +88,53 @@ private:
     std::string name_;
     std::string description_;
     TestFunction func_;
+};
+
+/**
+ * 多参数函数式测试用例适配器
+ * 
+ * 支持接收多个命令行参数的测试函数
+ */
+class MultiArgFunctionTestCase : public TestCase {
+public:
+    using MultiArgTestFunction = std::function<int(const std::vector<std::string>&)>;
+    using HelpFunction = std::function<void()>;
+    
+    MultiArgFunctionTestCase(const std::string& name, 
+                             const std::string& description,
+                             const std::string& usage,
+                             MultiArgTestFunction func,
+                             HelpFunction help_func = nullptr)
+        : name_(name), description_(description), usage_(usage), func_(func), help_func_(help_func) {}
+    
+    int run(const std::vector<std::string>& args) override {
+        return func_(args);
+    }
+    
+    const std::string& getName() const override {
+        return name_;
+    }
+    
+    const std::string& getDescription() const override {
+        return description_;
+    }
+    
+    std::string getUsage() const override {
+        return usage_;
+    }
+    
+    void printHelp() const override {
+        if (help_func_) {
+            help_func_();
+        }
+    }
+    
+private:
+    std::string name_;
+    std::string description_;
+    std::string usage_;
+    MultiArgTestFunction func_;
+    HelpFunction help_func_;
 };
 
 } // namespace TestFramework

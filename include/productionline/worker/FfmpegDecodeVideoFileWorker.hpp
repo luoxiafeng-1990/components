@@ -64,8 +64,8 @@ public:
      * @param config Worker配置（包含解码器配置、数据源配置等）
      * 
      * 注意：不再提供默认构造函数，所有 Worker 必须通过配置创建
-     * - 文件模式：config.decoder.use_buffer_mode = false
-     * - Buffer 模式：config.decoder.use_buffer_mode = true
+     * - 文件数据源模式：config.decoder.datasource_buffer_mode = false
+     * - Buffer 数据源模式：config.decoder.datasource_buffer_mode = true
      */
     explicit FfmpegDecodeVideoFileWorker(const WorkerConfig& config);
     
@@ -113,6 +113,35 @@ public:
     const char* getPath() const override;
     bool hasMoreFrames() const override;
     bool isAtEnd() const override;
+    
+    // ============ v2.13 BufferPacketSource 配置 ============
+    
+    /**
+     * @brief 设置 BufferPacketSource 的源 BufferPool（用于 Buffer 模式）
+     * @param pool_weak Record Worker 的 BufferPool（weak_ptr）
+     * @return 成功返回 true，如果不是 Buffer 模式或数据源类型不对，返回 false
+     * 
+     * 使用场景：
+     * - MultiWorkerProductionLine 创建消费者 Worker 后，需要关联 Record Worker 的 BufferPool
+     * - 必须在 open() 之前调用
+     * 
+     * 示例：
+     * ```cpp
+     * // 1. 创建 Record Worker 并获取 BufferPool
+     * uint64_t record_pool_id = record_worker.getOutputBufferPoolId(BufferPoolType::PACKET_VIDEO);
+     * auto record_pool_weak = BufferPoolRegistry::getInstance().getPool(record_pool_id);
+     * 
+     * // 2. 创建消费者 Worker（Buffer 模式）
+     * FfmpegDecodeVideoFileWorker consumer_worker(config);
+     * 
+     * // 3. 关联 Record BufferPool
+     * consumer_worker.setSourceBufferPool(record_pool_weak);
+     * 
+     * // 4. 打开并使用
+     * consumer_worker.open();
+     * ```
+     */
+    bool setSourceBufferPool(std::weak_ptr<BufferPool> pool_weak);
     
     // ============ 信息查询 ============
     

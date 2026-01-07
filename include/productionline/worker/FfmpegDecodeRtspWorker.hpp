@@ -96,7 +96,7 @@ public:
      * 
      * v2.13 架构：Worker 从 worker_config_ 读取所有配置参数
      * 包括：
-     * - worker_config_.file.file_path（RTSP URL）
+     * - worker_config_.data_source.path（RTSP URL）
      * - worker_config_.display.width/height/bits_per_pixel
      * - worker_config_.decoder.name（解码器名称）
      * - worker_config_.decoder.taco（TACO 配置）

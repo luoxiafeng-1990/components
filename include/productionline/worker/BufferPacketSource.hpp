@@ -7,24 +7,30 @@
 #include <string>
 #include <atomic>
 
-// FFmpeg 前向声明
+// 前向声明
 struct AVCodecParameters;
 struct AVPacket;
+class BufferPool;
 
 /**
  * @brief BufferPacketSource - Buffer 数据源实现
  * 
- * 功能：从 Buffer 中获取 AVPacket（已由 Record Worker 填充）
+ * 功能：直接从 BufferPool 获取 filled Buffer（已由 Record Worker 填充）
  * 
  * 使用场景：
  * - MultiWorkerProductionLine 场景
- * - 从 Record Worker 的 BufferPool 获取 packet
+ * - 从 Record Worker 的 BufferPool 直接获取 packet
  * 
- * 工作流程：
+ * 工作流程（v2.13 重构后）：
  * 1. Record Worker 读取 RTSP 流，填充 AVPacket 到 BufferPool
- * 2. MultiWorkerProductionLine 从 Record BufferPool 获取 Buffer
- * 3. BufferPacketSource 从 Buffer 中读取 AVPacket
+ * 2. BufferPacketSource 关联 Record Worker 的 BufferPool
+ * 3. readPacket() 时：acquireFilled() → 复制 AVPacket → releaseFilled()
  * 4. 传递给解码器进行解码
+ * 
+ * 优势：
+ * - 数据源自己负责从哪里获取数据（符合抽象语义）
+ * - 无需 MultiWorkerPL 做中间复制
+ * - 代码更简洁，职责更清晰
  */
 class BufferPacketSource : public IPacketSource {
 public:
@@ -63,20 +69,17 @@ public:
     bool isEof() const override;
     
     /**
-     * @brief 设置当前要读取的 Buffer
-     * @param buffer 包含 AVPacket 的 Buffer（由 Record Worker 填充）
+     * @brief 设置数据源 BufferPool（v2.13 新增）
+     * @param pool_weak Record Worker 的 BufferPool（weak_ptr）
+     * 
+     * 说明：BufferPacketSource 会直接从这个 BufferPool 的 filled queue 获取数据
      */
-    void setCurrentBuffer(Buffer* buffer);
-    
-    /**
-     * @brief 清除当前 Buffer
-     */
-    void clearCurrentBuffer();
+    void setSourceBufferPool(std::weak_ptr<BufferPool> pool_weak);
     
 private:
-    const AVCodecParameters* codec_params_;  // 编解码器参数（从 Record Worker 获取）
-    Buffer* current_buffer_;                 // 当前要读取的 Buffer
-    std::atomic<bool> is_open_;              // 🎯 原子变量，保证线程安全的状态检查
+    const AVCodecParameters* codec_params_;     // 编解码器参数（从 Record Worker 获取）
+    std::weak_ptr<BufferPool> source_pool_;     // ⭐ v2.13：关联的 BufferPool（从 Record Worker）
+    std::atomic<bool> is_open_;                 // 🎯 原子变量，保证线程安全的状态检查
     
     /**
      * @brief 从当前 Buffer 复制 packet 数据
