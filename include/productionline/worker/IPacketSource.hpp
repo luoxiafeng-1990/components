@@ -104,7 +104,7 @@ public:
      * 
      * 注意：
      * - 文件模式：基于最后一次 readPacket() 的返回值，在 seek() 时重置
-     * - Buffer 模式：基于当前 buffer 的状态（current_buffer_ 是否为 nullptr 或无效）
+     * - Buffer 模式：基于 BufferPool 的可用性，无法准确判断（让 readPacket() 超时返回）
      * - 网络流模式：基于连接状态
      */
     virtual bool isEof() const = 0;

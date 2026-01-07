@@ -42,19 +42,36 @@ FfmpegDecodeVideoFileWorker::FfmpegDecodeVideoFileWorker(const WorkerConfig& con
     // ⚠️ 注意：file_path_ 已移除，文件路径由数据源类管理
     
     // ⭐ v2.9新增：根据配置创建数据源
-    if (config.decoder.use_buffer_mode) {
-        // Buffer 模式：从 Buffer 获取 packet
+    if (config.decoder.datasource_buffer_mode) {
+        // Buffer 数据源模式：从 BufferPacketSource 获取 packet
         if (config.decoder.codec_params) {
             packet_source_ = std::make_unique<BufferPacketSource>(config.decoder.codec_params);
-            LOG_DEBUG("[FfmpegDecodeVideoFileWorker] Created BufferPacketSource");
+            LOG_DEBUG("[FfmpegDecodeVideoFileWorker] Created BufferPacketSource (v2.13: 需要调用 setSourceBufferPool 关联源 Pool)");
         } else {
-            LOG_WARN("[FfmpegDecodeVideoFileWorker] use_buffer_mode=true but codec_params is nullptr");
+            LOG_WARN("[FfmpegDecodeVideoFileWorker] datasource_buffer_mode=true but codec_params is nullptr");
         }
     } else {
         // 文件模式：从文件读取 packet
-        packet_source_ = std::make_unique<FilePacketSource>(config.file.file_path);
-        LOG_DEBUG_FMT("[FfmpegDecodeVideoFileWorker] Created FilePacketSource for '%s'", config.file.file_path.c_str());
+        packet_source_ = std::make_unique<FilePacketSource>(config.data_source.path);
+        LOG_DEBUG_FMT("[FfmpegDecodeVideoFileWorker] Created FilePacketSource for '%s'", config.data_source.path.c_str());
     }
+}
+
+// ============ v2.13 BufferPacketSource 配置 ============
+
+bool FfmpegDecodeVideoFileWorker::setSourceBufferPool(std::weak_ptr<BufferPool> pool_weak) {
+    // 检查是否是 BufferPacketSource
+    auto* buffer_source = dynamic_cast<BufferPacketSource*>(packet_source_.get());
+    if (!buffer_source) {
+        LOG_WARN("[FfmpegDecodeVideoFileWorker] setSourceBufferPool 失败：不是 Buffer 模式");
+        return false;
+    }
+    
+    // 设置源 BufferPool
+    buffer_source->setSourceBufferPool(pool_weak);
+    LOG_DEBUG("[FfmpegDecodeVideoFileWorker] ✅ 已设置源 BufferPool（v2.13 Pool 模式）");
+    
+    return true;
 }
 
 FfmpegDecodeVideoFileWorker::~FfmpegDecodeVideoFileWorker() {
@@ -168,7 +185,11 @@ bool FfmpegDecodeVideoFileWorker::open(const char* path) {
         return false;
     }
     
-    int buffer_count = 128;  // ⚠️ 增加到128个以应对慢速消费者（文件写入）
+    // ✅ 从配置读取 buffer_count，如果未配置则使用默认值
+    int buffer_count = worker_config_.data_source.buffer_count;
+    if (buffer_count <= 0) {
+        buffer_count = 128;  // 默认值：文件解码建议 128 个 Buffer（应对慢速消费者）
+    }
     
     // v2.0: allocatePoolWithBuffers 返回 pool_id
     std::string pool_name;
@@ -704,11 +725,6 @@ bool FfmpegDecodeVideoFileWorker::fillBuffer(int frame_index, Buffer* buffer) {
     if (!packet_source_) {
         LOG_ERROR_FMT("[Worker] ERROR: packet_source_ is nullptr");
         return false;
-    }
-    
-    // 如果是 Buffer 模式，设置当前 buffer
-    if (auto* buffer_source = dynamic_cast<BufferPacketSource*>(packet_source_.get())) {
-        buffer_source->setCurrentBuffer(buffer);
     }
     
     // 步骤2: 从数据源读取 packet

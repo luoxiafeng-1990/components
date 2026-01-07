@@ -1,7 +1,7 @@
 #include "productionline/worker/BufferFillingWorkerFactory.hpp"
 #include "common/Logger.hpp"
 #include "productionline/worker/FfmpegDecodeRtspWorker.hpp"
-#include "productionline/worker/FfmpegRecordRtspWorker.hpp"
+#include "productionline/worker/FfmpegPacketRecorderWorker.hpp"
 #include "productionline/worker/FfmpegDecodeVideoFileWorker.hpp"
 #include <stdlib.h>
 #include <string.h>
@@ -42,11 +42,11 @@ BufferFillingWorkerFactory::WorkerType BufferFillingWorkerFactory::getRecommende
 
 const char* BufferFillingWorkerFactory::typeToString(WorkerType type) {
     switch (type) {
-        case WorkerType::AUTO:                return "AUTO";
-        case WorkerType::FFMPEG_RTSP:         return "FFMPEG_RTSP";
-        case WorkerType::FFMPEG_RTSP_RECORD:  return "FFMPEG_RTSP_RECORD";
-        case WorkerType::FFMPEG_VIDEO_FILE:   return "FFMPEG_VIDEO_FILE";
-        default:                              return "UNKNOWN";
+        case WorkerType::AUTO:                  return "AUTO";
+        case WorkerType::FFMPEG_RTSP:           return "FFMPEG_RTSP";
+        case WorkerType::FFMPEG_PACKET_RECORDER: return "FFMPEG_PACKET_RECORDER";
+        case WorkerType::FFMPEG_VIDEO_FILE:     return "FFMPEG_VIDEO_FILE";
+        default:                                return "UNKNOWN";
     }
 }
 
@@ -65,8 +65,8 @@ std::unique_ptr<WorkerBase> BufferFillingWorkerFactory::createByType(WorkerType 
         case WorkerType::FFMPEG_RTSP:
             return std::make_unique<FfmpegDecodeRtspWorker>(config);
             
-        case WorkerType::FFMPEG_RTSP_RECORD:
-            return std::make_unique<FfmpegRecordRtspWorker>(config);
+        case WorkerType::FFMPEG_PACKET_RECORDER:
+            return std::make_unique<FfmpegPacketRecorderWorker>(config);
             
         case WorkerType::FFMPEG_VIDEO_FILE:
             return std::make_unique<FfmpegDecodeVideoFileWorker>(config);
@@ -85,8 +85,8 @@ BufferFillingWorkerFactory::WorkerType BufferFillingWorkerFactory::getTypeFromEn
     
     if (strcmp(env, "rtsp") == 0 || strcmp(env, "ffmpeg_rtsp") == 0) {
         return WorkerType::FFMPEG_RTSP;
-    } else if (strcmp(env, "rtsp_record") == 0 || strcmp(env, "ffmpeg_rtsp_record") == 0) {
-        return WorkerType::FFMPEG_RTSP_RECORD;
+    } else if (strcmp(env, "packet_recorder") == 0 || strcmp(env, "ffmpeg_packet_recorder") == 0) {
+        return WorkerType::FFMPEG_PACKET_RECORDER;
     } else if (strcmp(env, "ffmpeg") == 0 || strcmp(env, "ffmpeg_video_file") == 0) {
         return WorkerType::FFMPEG_VIDEO_FILE;
     }

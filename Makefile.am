@@ -10,7 +10,7 @@ libcomponents_la_SOURCES = \
     source/productionline/worker/BufferFillingWorkerFacade.cpp \
     source/productionline/worker/BufferFillingWorkerFactory.cpp \
     source/productionline/worker/FfmpegDecodeRtspWorker.cpp \
-    source/productionline/worker/FfmpegRecordRtspWorker.cpp \
+    source/productionline/worker/FfmpegPacketRecorderWorker.cpp \
     source/productionline/worker/FfmpegDecodeVideoFileWorker.cpp \
     source/productionline/worker/FilePacketSource.cpp \
     source/productionline/worker/BufferPacketSource.cpp \

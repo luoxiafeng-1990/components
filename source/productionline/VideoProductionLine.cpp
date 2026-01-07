@@ -83,7 +83,7 @@ bool VideoProductionLine::start(const WorkerConfig& worker_config) {
         return false;
     }
     
-    LOG4CPLUS_INFO(logger, log_prefix_ << " BufferFillingWorkerFacade: " << worker_config.file.file_path);
+    LOG4CPLUS_INFO(logger, log_prefix_ << " BufferFillingWorkerFacade: " << worker_config.data_source.path);
     
     // 创建共享的 BufferFillingWorkerFacade 对象（v2.2：只传入完整配置）
     worker_facade_sptr_ = std::make_shared<BufferFillingWorkerFacade>(worker_config);
@@ -91,7 +91,7 @@ bool VideoProductionLine::start(const WorkerConfig& worker_config) {
     
     // v2.2：简化的 open 接口（所有参数从 config 获取）
     if (!worker_facade_sptr_->open()) {
-        setError(std::string("Failed to open video file: ") + worker_config.file.file_path);
+        setError(std::string("Failed to open data source: ") + worker_config.data_source.path);
         worker_facade_sptr_.reset();
         return false;
     }

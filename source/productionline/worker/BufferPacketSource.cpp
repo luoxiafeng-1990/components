@@ -1,4 +1,5 @@
 #include "productionline/worker/BufferPacketSource.hpp"
+#include "buffer/bufferpool/BufferPool.hpp"
 #include "common/Logger.hpp"
 #include <cstring>
 
@@ -9,13 +10,13 @@ extern "C" {
 
 BufferPacketSource::BufferPacketSource(const AVCodecParameters* codec_params)
     : codec_params_(codec_params)
-    , current_buffer_(nullptr)
+    , source_pool_()
     , is_open_(false)  // 🎯 原子变量初始化
 {
     if (!codec_params_) {
         LOG_WARN("[BufferPacketSource] codec_params is nullptr");
     }
-    LOG_DEBUG("[BufferPacketSource] 构造函数");
+    LOG_DEBUG("[BufferPacketSource] 构造函数（v2.13：Pool 模式）");
 }
 
 BufferPacketSource::~BufferPacketSource() {
@@ -42,7 +43,6 @@ bool BufferPacketSource::open() {
 }
 
 void BufferPacketSource::close() {
-    current_buffer_ = nullptr;
     // 🎯 原子检查并设置：如果 is_open_ 是 true，则设置为 false
     bool expected = true;
     if (!is_open_.compare_exchange_strong(expected, false,
@@ -62,26 +62,34 @@ int BufferPacketSource::readPacket(AVPacket* packet) {
         return AVERROR(EINVAL);
     }
     
-    if (!current_buffer_) {
-        LOG_DEBUG("[BufferPacketSource] No current buffer set, returning EOF");
+    // ⭐ v2.13：Pool 模式 - 直接从 BufferPool 获取数据
+    auto pool = source_pool_.lock();
+    if (!pool) {
+        LOG_ERROR("[BufferPacketSource] Source BufferPool已销毁");
         return AVERROR_EOF;
     }
     
-    // 从 Buffer 获取 packet
-    AVPacket* src_packet = current_buffer_->getAVPacket();
-    if (!src_packet) {
-        LOG_WARN("[BufferPacketSource] Buffer has no AVPacket");
+    // 1. 从 filled queue 获取 Buffer（带超时，避免死锁）
+    Buffer* filled_buffer = pool->acquireFilled(true, 100);  // 100ms 超时
+    if (!filled_buffer) {
+        // 超时或 Pool 关闭
+        return AVERROR(EAGAIN);  // 返回 EAGAIN 表示暂时无数据，可以重试
+    }
+    
+    // 2. 从 Buffer 获取 AVPacket
+    AVPacket* src_packet = filled_buffer->getAVPacket();
+    if (!src_packet || src_packet->data == nullptr || src_packet->size == 0) {
+        LOG_WARN("[BufferPacketSource] Buffer 中的 AVPacket 无效");
+        pool->releaseFilled(filled_buffer);  // 释放 Buffer
         return AVERROR_EOF;
     }
     
-    // 检查 packet 是否有效
-    if (src_packet->data == nullptr || src_packet->size == 0) {
-        LOG_DEBUG("[BufferPacketSource] Packet is empty, returning EOF");
-        return AVERROR_EOF;
-    }
-    
-    // 复制 packet 数据（使用 av_packet_ref）
+    // 3. 复制 packet 数据（使用 av_packet_ref，零拷贝）
     int ret = copyPacket(packet, src_packet);
+    
+    // 4. ⭐ 立即释放 Buffer 回 filled queue（已完成复制）
+    pool->releaseFilled(filled_buffer);
+    
     if (ret < 0) {
         char err_buf[AV_ERROR_MAX_STRING_SIZE];
         av_strerror(ret, err_buf, sizeof(err_buf));
@@ -123,30 +131,25 @@ bool BufferPacketSource::seek(int frame_index) {
 }
 
 bool BufferPacketSource::isEof() const {
-    // Buffer 模式的 EOF 状态：当前 buffer 为空或无效
+    // Buffer 模式的 EOF 状态：检查 Pool 是否还有数据
     if (!is_open_.load(std::memory_order_acquire)) {
-        return true;
+        return true;  // 未打开，视为 EOF
     }
     
-    if (!current_buffer_) {
-        return true;  // 没有当前 buffer，视为 EOF
+    // 检查 BufferPool 是否可用
+    auto pool = source_pool_.lock();
+    if (!pool) {
+        return true;  // Pool 已销毁，视为 EOF
     }
     
-    // 检查 buffer 中的 packet 是否有效
-    AVPacket* src_packet = current_buffer_->getAVPacket();
-    if (!src_packet || src_packet->data == nullptr || src_packet->size == 0) {
-        return true;  // packet 无效，视为 EOF
-    }
-    
-    return false;  // 有有效的 packet，不是 EOF
+    // ⭐ 注意：无法在不阻塞的情况下准确判断 Pool 是否有数据
+    // 因此返回 false，让 readPacket() 尝试获取（会超时返回）
+    return false;
 }
 
-void BufferPacketSource::setCurrentBuffer(Buffer* buffer) {
-    current_buffer_ = buffer;
-}
-
-void BufferPacketSource::clearCurrentBuffer() {
-    current_buffer_ = nullptr;
+void BufferPacketSource::setSourceBufferPool(std::weak_ptr<BufferPool> pool_weak) {
+    source_pool_ = pool_weak;
+    LOG_DEBUG("[BufferPacketSource] ⭐ v2.13：已设置源 BufferPool");
 }
 
 int BufferPacketSource::copyPacket(AVPacket* dst_packet, const AVPacket* src_packet) {

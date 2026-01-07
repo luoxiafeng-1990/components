@@ -314,7 +314,7 @@ public:
      */
     virtual bool open() override {
         // 默认实现：调用 open(path)，从 config 中提取路径
-        return open(worker_config_.file.file_path.c_str());
+        return open(worker_config_.data_source.path.c_str());
     }
     
     /**

@@ -11,10 +11,10 @@
  * 注意：此枚举独立定义，避免与 BufferFillingWorkerFactory 的循环依赖
  */
 enum class WorkerType {
-    AUTO,                 // 自动检测（默认）
-    FFMPEG_RTSP,          // FFmpeg RTSP 流
-    FFMPEG_RTSP_RECORD,   // FFmpeg RTSP 原始码流录制
-    FFMPEG_VIDEO_FILE     // FFmpeg 视频文件
+    AUTO,                   // 自动检测（默认）
+    FFMPEG_RTSP,            // FFmpeg RTSP 流
+    FFMPEG_PACKET_RECORDER, // FFmpeg Packet 录制器（支持 RTSP/文件/HTTP 等多种数据源）
+    FFMPEG_VIDEO_FILE       // FFmpeg 视频文件
 };
 
 /**
@@ -22,31 +22,35 @@ enum class WorkerType {
  * 
  * 设计理念：
  * - 完全独立：包含 Worker 需要的所有配置
- * - 配置分离：文件、输出、解码器配置独立
+ * - 配置分离：数据源、显示设备、解码器配置独立
  * - Builder 构建：链式调用，易用易读
  * - 职责清晰：每个 Builder 只负责自己层级的配置
  * 
  * 配置结构：
- * - FileConfig: 文件路径和导航参数
- * - OutputConfig: 输出分辨率和格式
+ * - DataSourceConfig: 数据源路径和 BufferPool 参数
+ * - DisplayConfig: 显示设备分辨率和格式
  * - DecoderConfig: 解码器类型和参数
  * - worker_type: Worker 实现类型
  */
 struct WorkerConfig {
     // ========================================
-    // 文件配置
+    // 数据源配置
     // ========================================
-    struct FileConfig {
-        std::string file_path;                // 文件路径（使用 std::string 保证生命周期安全）
-        int start_frame = 0;                   // 起始帧
-        int end_frame = -1;                    // 结束帧（-1=全部）
+    /**
+     * @brief 数据源配置
+     * 
+     * 用于配置 Worker 的数据源（RTSP 流、HTTP 流、本地文件等）及其相关参数。
+     */
+    struct DataSourceConfig {
+        std::string path;                     ///< 数据源路径/URL（RTSP/HTTP/文件等）
+        int buffer_count = 0;                 ///< BufferPool 的 Buffer 数量（0=使用 Worker 默认值）
         
-        FileConfig() = default;
-        FileConfig(const FileConfig&) = default;
-        FileConfig& operator=(const FileConfig&) = default;
-        FileConfig(FileConfig&&) = default;
-        FileConfig& operator=(FileConfig&&) = default;
-    } file;
+        DataSourceConfig() = default;
+        DataSourceConfig(const DataSourceConfig&) = default;
+        DataSourceConfig& operator=(const DataSourceConfig&) = default;
+        DataSourceConfig(DataSourceConfig&&) = default;
+        DataSourceConfig& operator=(DataSourceConfig&&) = default;
+    } data_source;
     
     // ========================================
     // 显示设备配置
@@ -80,7 +84,7 @@ struct WorkerConfig {
         // ========================================
         // 数据源配置（v2.9新增：支持数据源抽象模式）
         // ========================================
-        bool use_buffer_mode = false;                  // true=从Buffer获取packet, false=从文件读取
+        bool datasource_buffer_mode = false;           // true=从Buffer数据源获取packet, false=从文件数据源读取
         const struct AVCodecParameters* codec_params = nullptr;  // Buffer模式下的编解码器参数（从Record Worker获取）
         
         // ========================================
@@ -133,56 +137,62 @@ struct WorkerConfig {
 // ========================================
 
 /**
- * @brief 文件配置构建器
+ * @brief 数据源配置构建器
  */
-class FileConfigBuilder {
+class DataSourceConfigBuilder {
 public:
-    FileConfigBuilder() = default;
+    DataSourceConfigBuilder() = default;
     
-    // 接受 std::string_view（推荐，C++17+）
-    FileConfigBuilder& setFilePath(std::string_view path) {
-        config_.file_path = std::string(path);
+    /**
+     * @brief 设置数据源路径/URL
+     * @param path 数据源路径（支持 RTSP、HTTP、本地文件等）
+     * 
+     * @example
+     * - RTSP 流：`rtsp://192.168.1.100/stream`
+     * - HTTP/HLS 流：`http://example.com/playlist.m3u8`
+     * - 本地文件：`/data/video.mp4`
+     */
+    DataSourceConfigBuilder& setPath(std::string_view path) {
+        config_.path = std::string(path);
         return *this;
     }
     
     // 兼容 const char*（保持向后兼容）
-    FileConfigBuilder& setFilePath(const char* path) {
+    DataSourceConfigBuilder& setPath(const char* path) {
         if (path) {
-            config_.file_path = path;
+            config_.path = path;
         } else {
-            config_.file_path.clear();
+            config_.path.clear();
         }
         return *this;
     }
     
     // 兼容 std::string
-    FileConfigBuilder& setFilePath(const std::string& path) {
-        config_.file_path = path;
+    DataSourceConfigBuilder& setPath(const std::string& path) {
+        config_.path = path;
         return *this;
     }
     
-    FileConfigBuilder& setStartFrame(int frame) {
-        config_.start_frame = frame;
+    /**
+     * @brief 设置 BufferPool 的 Buffer 数量
+     * @param count Buffer 数量（0=使用 Worker 默认值）
+     * 
+     * 建议值：
+     * - RTSP 流解码：4-8
+     * - 本地文件解码：128
+     * - Packet 录制：64
+     */
+    DataSourceConfigBuilder& setBufferCount(int count) {
+        config_.buffer_count = count;
         return *this;
     }
     
-    FileConfigBuilder& setEndFrame(int frame) {
-        config_.end_frame = frame;
-        return *this;
-    }
-    
-    FileConfigBuilder& setFrameRange(int start, int end) {
-        config_.start_frame = start;
-        config_.end_frame = end;
-        return *this;
-    }
-    
-    WorkerConfig::FileConfig build() const {
+    WorkerConfig::DataSourceConfig build() const {
         return config_;
     }
     
 private:
-    WorkerConfig::FileConfig config_;
+    WorkerConfig::DataSourceConfig config_;
 };
 
 /**
@@ -320,7 +330,6 @@ public:
     ) {
         config_.ch0_yuv_format = std::string(format);
         config_.ch0_yuv_std = std::string(std);
-        config_.ch1_rgb = false;  // 自动设置 ch1_rgb=false，启用 YUV 输出
         return *this;
     }
     
@@ -332,7 +341,6 @@ public:
         if (std) {
             config_.ch0_yuv_std = std;
         }
-        config_.ch1_rgb = false;
         return *this;
     }
     
@@ -618,10 +626,10 @@ public:
     WorkerConfigBuilder() = default;
     
     /**
-     * @brief 设置文件配置
+     * @brief 设置数据源配置
      */
-    WorkerConfigBuilder& setFileConfig(const WorkerConfig::FileConfig& file_config) {
-        config_.file = file_config;
+    WorkerConfigBuilder& setDataSourceConfig(const WorkerConfig::DataSourceConfig& data_source_config) {
+        config_.data_source = data_source_config;
         return *this;
     }
     

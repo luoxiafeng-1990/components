@@ -88,13 +88,35 @@ double bpp = worker.getBytesPerPixel();
   - 所有状态统一由数据源管理，避免状态不一致
 - ✅ **状态管理优化**：单一数据源管理状态，Worker 直接查询数据源，避免缓存导致的不一致
 - ✅ **线程安全改进**：数据源的 `is_open_` 使用 `std::atomic<bool>`，保证线程安全的状态检查
-- ✅ **配置系统增强**：`WorkerConfig` 添加 `use_buffer_mode`（默认 false）和 `codec_params` 配置项
+- ✅ **配置系统增强**：`WorkerConfig` 添加 `datasource_buffer_mode`（默认 false）和 `codec_params` 配置项
 
 **设计原则：**
 - **单一职责**：Worker 专注解码逻辑，数据源负责数据访问和元数据管理
 - **依赖倒置**：Worker 依赖 `IPacketSource` 接口，不依赖具体实现
 - **易于扩展**：新增数据源类型（如网络流）无需修改 Worker 代码
 - **状态一致**：单一数据源管理状态，避免冗余和不同步
+
+**数据源职责边界（重要）：**
+
+`IPacketSource` 数据源**仅负责数据读取和元数据管理**，职责明确限定为：
+
+✅ **数据源应该做的**：
+- **打开/关闭数据源**：管理文件、网络流、Buffer 等数据源的生命周期
+- **读取原始数据包**：从数据源读取 `AVPacket`（编码数据），不进行任何转换
+- **提供元数据查询**：编解码器参数、总帧数、文件大小、视频流索引等
+- **管理读取状态**：EOF 状态、打开状态、连接状态等
+- **提供导航功能**：`seek()` 定位到指定帧（仅文件模式支持）
+
+❌ **数据源不应该做的**：
+- ❌ **解码数据**：解码是 Worker 的职责（如 `FfmpegDecodeVideoFileWorker`）
+- ❌ **编码数据**：编码是编码器 Worker 的职责
+- ❌ **数据格式转换**：像素格式转换由 `SwsContext` 或解码器处理
+- ❌ **写入数据**：写入是 `BufferWriter` 的职责
+- ❌ **业务逻辑处理**：业务逻辑由应用层负责
+
+**职责边界原则**：
+> 数据源是"**纯粹的数据提供者**"，只管"**读**"，不管"**写**"和"**转换**"。  
+> 数据源与 Worker 的关系：数据源提供原材料（`AVPacket`），Worker 负责加工（解码、编码）。
 
 **架构优势：**
 - **职责分离**：Worker 和数据源职责清晰，符合 SOLID 原则
@@ -1567,7 +1589,7 @@ struct WorkerConfig {
         const char* name = nullptr;           // 解码器名称
         bool enable_hardware = true;          // 启用硬件加速
         const char* hwaccel_device = nullptr; // 硬件设备
-        bool use_buffer_mode = false;          // ⭐ v2.12新增：是否使用Buffer模式（默认false，文件模式）
+        bool datasource_buffer_mode = false;   // ⭐ v2.12新增：数据源模式（默认false=文件数据源，true=Buffer数据源）
         const AVCodecParameters* codec_params = nullptr;  // ⭐ v2.12新增：Buffer模式的编解码器参数
         
         // h264_taco 特定配置

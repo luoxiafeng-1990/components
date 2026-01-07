@@ -61,14 +61,14 @@ bool FfmpegDecodeRtspWorker::open() {
     }
     
     // ✅ 从 worker_config_ 读取所有参数
-    const char* rtsp_url = worker_config_.file.file_path.c_str();
+    const char* rtsp_url = worker_config_.data_source.path.c_str();
     int width = worker_config_.display.width;
     int height = worker_config_.display.height;
     int bits_per_pixel = worker_config_.display.bits_per_pixel;
     
     // 验证参数
     if (!rtsp_url || strlen(rtsp_url) == 0) {
-        setError("RTSP URL not configured in worker_config_.file.file_path");
+        setError("RTSP URL not configured in worker_config_.data_source.path");
         return false;
     }
     
@@ -123,7 +123,11 @@ bool FfmpegDecodeRtspWorker::open() {
         return false;
     }
     
-    int buffer_count = 4;  // RTSP流建议4-8个Buffer
+    // ✅ 从配置读取 buffer_count，如果未配置则使用默认值
+    int buffer_count = worker_config_.data_source.buffer_count;
+    if (buffer_count <= 0) {
+        buffer_count = 4;  // 默认值：RTSP 流建议 4-8 个 Buffer
+    }
     
     // v2.0: allocatePoolWithBuffers 返回 pool_id
     uint64_t pool_id = allocator_facade_.allocatePoolWithBuffers(
