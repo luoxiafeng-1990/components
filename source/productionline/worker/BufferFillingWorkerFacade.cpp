@@ -1,5 +1,6 @@
 #include "productionline/worker/BufferFillingWorkerFacade.hpp"
 #include "common/Logger.hpp"
+#include "productionline/worker/FfmpegDecodeVideoFileWorker.hpp"
 #include <stdio.h>
 
 // ============ 构造/析构 ============
@@ -41,7 +42,7 @@ bool BufferFillingWorkerFacade::open() {
     }
     
     // ⭐ v2.9新增：检查是否是 Buffer 模式
-    bool is_buffer_mode = config_.decoder.use_buffer_mode;
+    bool is_buffer_mode = config_.decoder.datasource_buffer_mode;
     
     if (is_buffer_mode) {
         // Buffer 模式：不需要文件路径，直接调用 open(nullptr)
@@ -50,10 +51,7 @@ bool BufferFillingWorkerFacade::open() {
     }
     
     // 文件模式：从 config_ 获取所有参数
-    const std::string& file_path = config_.file.file_path;
-    int width = config_.display.width;
-    int height = config_.display.height;
-    int bits_per_pixel = config_.display.bits_per_pixel;
+    const std::string& file_path = config_.data_source.path;
     
     if (file_path.empty()) {
         LOG_ERROR("[Worker] ERROR: File path not set in config");
@@ -62,35 +60,30 @@ bool BufferFillingWorkerFacade::open() {
     
     const char* path = file_path.c_str();
     
-    // 🎯 智能判断：根据Worker类型选择合适的open方法
-    // - 需要格式参数的Worker：FFMPEG_RTSP
-    //   （RTSP实时流需要明确指定输出格式）
-    // - 可以自动检测的Worker：FFMPEG_VIDEO_FILE
-    //   （本地编码视频文件有文件头，可以自动检测分辨率和格式）
-    
-    bool needs_format_params = (config_.worker_type == BufferFillingWorkerFactory::WorkerType::FFMPEG_RTSP);
-    
-    if (needs_format_params) {
-        // 需要格式参数的Worker（RTSP流）
-        if (width == 0 || height == 0 || bits_per_pixel == 0) {
-            LOG_ERROR_FMT("[Worker] ERROR: Worker type '%s' requires width, height, and bits_per_pixel in config!",
-                         BufferFillingWorkerFactory::typeToString(config_.worker_type));
-            return false;
-        }
-        LOG_DEBUG_FMT("[Worker] BufferFillingWorkerFacade: Opening video with format %dx%d@%dbpp",
-               width, height, bits_per_pixel);
-        return worker_base_uptr_->open(path, width, height, bits_per_pixel);
-    } else {
-        // 可以自动检测格式的Worker（本地编码视频文件）
-        LOG_DEBUG("[Worker] BufferFillingWorkerFacade: Opening encoded video file (auto-detect format)");
-        return worker_base_uptr_->open(path);
-    }
+    LOG_DEBUG_FMT("[Worker] BufferFillingWorkerFacade: Opening file: %s", path);
+    return worker_base_uptr_->open(path);
 }
 
 void BufferFillingWorkerFacade::close() {
     if (worker_base_uptr_) {
         worker_base_uptr_->close();
     }
+}
+bool BufferFillingWorkerFacade::setSourceBufferPool(std::weak_ptr<BufferPool> pool_weak) {
+    if (!worker_base_uptr_) {
+        LOG_ERROR("[Worker] ERROR: Worker not initialized");
+        return false;
+    }
+    
+    // 转发调用到底层 Worker（如果支持）
+    // 注意：只有支持 Buffer 模式的 Worker 才有这个方法
+    auto* decode_worker = dynamic_cast<FfmpegDecodeVideoFileWorker*>(worker_base_uptr_.get());
+    if (decode_worker) {
+        return decode_worker->setSourceBufferPool(pool_weak);
+    }
+    
+    LOG_WARN("[Worker] setSourceBufferPool: Worker 不支持此操作");
+    return false;
 }
 
 bool BufferFillingWorkerFacade::isOpen() const {
@@ -167,7 +160,7 @@ int BufferFillingWorkerFacade::getHeight() const {
     return worker_base_uptr_ ? worker_base_uptr_->getHeight() : 0;
 }
 
-int BufferFillingWorkerFacade::getBytesPerPixel() const {
+double BufferFillingWorkerFacade::getBytesPerPixel() const {
     return worker_base_uptr_ ? worker_base_uptr_->getBytesPerPixel() : 0;
 }
 

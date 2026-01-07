@@ -24,17 +24,19 @@ namespace io {
  * - 接口极简化（open/close/write）
  * - 原子计数器（线程安全）
  * 
- * 支持的格式（共18种，基于ARCHITECTURE.md表格）：
+ * 支持的格式（共21种）：
  * 
- * YUV格式（6种）：
+ * YUV格式（8种）：
  *   - AV_PIX_FMT_GRAY8       (YUV400 8-bit)
  *   - AV_PIX_FMT_GRAY10LE    (YUV400 P010)
  *   - AV_PIX_FMT_NV12        (YUV420 8-bit NV12) ⭐ 最常用
  *   - AV_PIX_FMT_P010LE      (YUV420 NV12 P010)
  *   - AV_PIX_FMT_NV21        (YUV420 8-bit NV21)
  *   - AV_PIX_FMT_YUV420P10LE (YUV420 P010 planar)
+ *   - AV_PIX_FMT_YUV422P     (YUV422 Planar) ⭐ 新增
+ *   - AV_PIX_FMT_YUV444P     (YUV444 Planar) ⭐ 新增
  * 
- * RGB格式（12种）：
+ * RGB格式（13种）：
  *   - AV_PIX_FMT_RGB24       (RGB888)
  *   - AV_PIX_FMT_BGR24       (BGR888)
  *   - AV_PIX_FMT_ARGB        (ARGB8888)
@@ -47,6 +49,7 @@ namespace io {
  *   - AV_PIX_FMT_0BGR        (XBGR8888)
  *   - AV_PIX_FMT_RGB48LE     (RGB161616)
  *   - AV_PIX_FMT_BGR48LE     (BGR161616)
+ *   - AV_PIX_FMT_GBRP        (GBR Planar) ⭐ 新增
  * 
  * 使用示例：
  * ```cpp

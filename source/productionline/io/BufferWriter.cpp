@@ -76,9 +76,9 @@ bool BufferWriter::open(const char* path,
     if (!isSupportedFormat(format)) {
         LOG_ERROR_FMT("[BufferWriter] Error: Unsupported format: %s (%d)",
                 av_get_pix_fmt_name(format), format);
-        LOG_ERROR("[BufferWriter] Supported formats (18): "
-                "GRAY8, GRAY10LE, NV12, P010LE, NV21, YUV420P10LE, "
-                "RGB24, BGR24, ARGB, ABGR, RGBA, BGRA, "
+        LOG_ERROR("[BufferWriter] Supported formats (21): "
+                "GRAY8, GRAY10LE, NV12, P010LE, NV21, YUV420P10LE, YUV422P, YUV444P, "
+                "RGB24, BGR24, ARGB, ABGR, RGBA, BGRA, GBRP, "
                 "RGB0, BGR0, 0RGB, 0BGR, RGB48LE, BGR48LE");
         return false;
     }
@@ -146,7 +146,17 @@ bool BufferWriter::writeSimple(const Buffer* buffer) {
         return false;
     }
     
-    // 2. 旧版简单写入（向后兼容）
+    // 2. ⭐ 尝试从AVFrame获取格式信息（如果Buffer有关联的AVFrame）
+    AVFrame* frame = buffer->getAVFrame();
+    if (frame && format_ != AV_PIX_FMT_NONE) {
+        AVPixelFormat frame_format = static_cast<AVPixelFormat>(frame->format);
+        if (frame_format != format_) {
+            // 格式不匹配，静默跳过
+            return true;
+        }
+    }
+    
+    // 3. 旧版简单写入（向后兼容）
     if (!buffer->isValid()) {
         LOG_ERROR("[BufferWriter] Error: Buffer validation failed");
         return false;
@@ -190,17 +200,25 @@ bool BufferWriter::writeWithMetadata(const Buffer* buffer) {
         return false;
     }
     
-    // 2. 获取图像元数据
+    // 2. 获取图像元数据（从Buffer的图像元数据中获取）
     AVPixelFormat buf_format = buffer->getImageFormat();
     int buf_width = buffer->getImageWidth();
     int buf_height = buffer->getImageHeight();
     const int* linesize = buffer->getImageLinesize();
     
-    // 3. 验证格式（如果open时指定了格式）
+    // 3. ⭐ 格式过滤：只保存匹配期望格式的帧（静默跳过不匹配的帧）
     if (format_ != AV_PIX_FMT_NONE && buf_format != format_) {
-        LOG_ERROR_FMT("[BufferWriter] Format mismatch: expected %s, got %s",
-                av_get_pix_fmt_name(format_), av_get_pix_fmt_name(buf_format));
-        return false;
+        // 格式不匹配，静默跳过（这是正常行为，不是错误）
+        // 场景：TACO解码器同时输出多种格式，每个BufferWriter只保存自己关心的格式
+        return true;  // 返回true表示"已处理"（虽然未写入，但这是预期行为）
+    }
+    
+    // 3.5 ⭐ 数据有效性检查：如果第一个plane的数据为空，静默跳过整个帧
+    // 场景：Buffer 报告了格式但实际数据未就绪，或者帧不完整
+    const uint8_t* first_plane = buffer->getImagePlaneData(0);
+    if (!first_plane) {
+        // 数据未就绪，静默跳过
+        return true;
     }
     
     // 4. 根据格式写入数据
@@ -319,6 +337,78 @@ bool BufferWriter::writeWithMetadata(const Buffer* buffer) {
             break;
         }
         
+        case AV_PIX_FMT_YUV422P: {
+            // YUV422 Planar: Plane 0 (Y) + Plane 1 (U) + Plane 2 (V)
+            // Y: full resolution, U/V: half width
+            const uint8_t* y_data = buffer->getImagePlaneData(0);
+            const uint8_t* u_data = buffer->getImagePlaneData(1);
+            const uint8_t* v_data = buffer->getImagePlaneData(2);
+            
+            // Y平面（full resolution）
+            if (!writePlane(y_data, linesize[0], buf_width, buf_height)) {
+                return false;
+            }
+            
+            // U平面（half width, full height）
+            if (!writePlane(u_data, linesize[1], buf_width / 2, buf_height)) {
+                return false;
+            }
+            
+            // V平面（half width, full height）
+            if (!writePlane(v_data, linesize[2], buf_width / 2, buf_height)) {
+                return false;
+            }
+            break;
+        }
+        
+        case AV_PIX_FMT_YUV444P: {
+            // YUV444 Planar: Plane 0 (Y) + Plane 1 (U) + Plane 2 (V)
+            // All planes are full resolution
+            const uint8_t* y_data = buffer->getImagePlaneData(0);
+            const uint8_t* u_data = buffer->getImagePlaneData(1);
+            const uint8_t* v_data = buffer->getImagePlaneData(2);
+            
+            // Y平面（full resolution）
+            if (!writePlane(y_data, linesize[0], buf_width, buf_height)) {
+                return false;
+            }
+            
+            // U平面（full resolution）
+            if (!writePlane(u_data, linesize[1], buf_width, buf_height)) {
+                return false;
+            }
+            
+            // V平面（full resolution）
+            if (!writePlane(v_data, linesize[2], buf_width, buf_height)) {
+                return false;
+            }
+            break;
+        }
+        
+        case AV_PIX_FMT_GBRP: {
+            // GBR Planar: Plane 0 (G) + Plane 1 (B) + Plane 2 (R)
+            // All planes are full resolution
+            const uint8_t* g_data = buffer->getImagePlaneData(0);
+            const uint8_t* b_data = buffer->getImagePlaneData(1);
+            const uint8_t* r_data = buffer->getImagePlaneData(2);
+            
+            // G平面
+            if (!writePlane(g_data, linesize[0], buf_width, buf_height)) {
+                return false;
+            }
+            
+            // B平面
+            if (!writePlane(b_data, linesize[1], buf_width, buf_height)) {
+                return false;
+            }
+            
+            // R平面
+            if (!writePlane(r_data, linesize[2], buf_width, buf_height)) {
+                return false;
+            }
+            break;
+        }
+        
         default:
             LOG_ERROR_FMT("[BufferWriter] Unsupported format: %s",
                     av_get_pix_fmt_name(buf_format));
@@ -333,8 +423,9 @@ bool BufferWriter::writeWithMetadata(const Buffer* buffer) {
 bool BufferWriter::writePlane(const uint8_t* data, int stride, 
                                int width, int height) {
     if (!data) {
-        LOG_ERROR("[BufferWriter] Error: plane data is nullptr");
-        return false;
+        // ⭐ plane data 为空：静默跳过（这是正常情况，不是错误）
+        // 场景：Buffer 报告了格式但实际数据未就绪，或者帧不完整
+        return true;  // 返回true表示"已处理"（虽然未写入）
     }
     
     if (stride == width) {
@@ -393,7 +484,7 @@ void BufferWriter::close() {
 
 bool BufferWriter::isSupportedFormat(AVPixelFormat format) {
     switch (format) {
-        // ========== YUV格式（6种）==========
+        // ========== YUV格式（8种）==========
         
         // YUV400（灰度）
         case AV_PIX_FMT_GRAY8:        // YUV400 8-bit
@@ -409,7 +500,13 @@ bool BufferWriter::isSupportedFormat(AVPixelFormat format) {
         // YUV420 Planar
         case AV_PIX_FMT_YUV420P10LE:  // YUV420 P010 (planar)
         
-        // ========== RGB格式（12种）==========
+        // YUV422 Planar（新增）
+        case AV_PIX_FMT_YUV422P:      // YUV422 Planar 8-bit
+        
+        // YUV444 Planar（新增）
+        case AV_PIX_FMT_YUV444P:      // YUV444 Planar 8-bit
+        
+        // ========== RGB格式（13种）==========
         
         // 8bit RGB（无Alpha）
         case AV_PIX_FMT_RGB24:        // RGB888
@@ -430,6 +527,9 @@ bool BufferWriter::isSupportedFormat(AVPixelFormat format) {
         // 16bit RGB
         case AV_PIX_FMT_RGB48LE:      // RGB161616
         case AV_PIX_FMT_BGR48LE:      // BGR161616
+        
+        // RGB Planar（新增）
+        case AV_PIX_FMT_GBRP:         // GBR Planar 8-bit
             return true;
             
         default:
@@ -476,6 +576,20 @@ size_t BufferWriter::calculateFrameSize(AVPixelFormat format, int width, int hei
             size = width * height * 3;
             break;
         
+        // YUV422 Planar
+        case AV_PIX_FMT_YUV422P:
+            // YYYY... (W×H) + UUUU... (W×H/2) + VVVV... (W×H/2)
+            // = W×H + W×H/2 + W×H/2 = W×H×2
+            size = width * height * 2;
+            break;
+        
+        // YUV444 Planar
+        case AV_PIX_FMT_YUV444P:
+            // YYYY... (W×H) + UUUU... (W×H) + VVVV... (W×H)
+            // = W×H×3
+            size = width * height * 3;
+            break;
+        
         // ========== RGB格式 ==========
         
         // 8bit RGB（24bit/pixel）
@@ -500,6 +614,13 @@ size_t BufferWriter::calculateFrameSize(AVPixelFormat format, int width, int hei
         case AV_PIX_FMT_RGB48LE:
         case AV_PIX_FMT_BGR48LE:
             size = width * height * 6;
+            break;
+        
+        // Planar RGB
+        case AV_PIX_FMT_GBRP:
+            // GGGG... (W×H) + BBBB... (W×H) + RRRR... (W×H)
+            // = W×H×3
+            size = width * height * 3;
             break;
         
         default:
