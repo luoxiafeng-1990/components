@@ -881,7 +881,7 @@ static int test_rtsp_record(const char* rtsp_url) {
     // 6. 获取Worker并打开BufferWriter（MP4模式）
     LOG_INFO("[Step 5] Opening BufferWriter (MP4 mode)...");
     
-    // 获取Worker的编解码器参数
+    // 获取Worker的编解码器参数（v2.14: 通过门面类直接获取，无需类型转换）
     auto worker_facade_sptr = producer.getWorkerFacade();
     if (!worker_facade_sptr) {
         LOG_ERROR("Failed to get worker facade");
@@ -889,30 +889,15 @@ static int test_rtsp_record(const char* rtsp_url) {
         return -1;
     }
     
-    // 获取底层Worker并转换为FfmpegPacketRecorderWorker
-    WorkerBase* worker_base = worker_facade_sptr->getWorkerBase();
-    if (!worker_base) {
-        LOG_ERROR("Failed to get worker base");
-        producer.stop();
-        return -1;
-    }
-    
-    FfmpegPacketRecorderWorker* rtsp_worker = dynamic_cast<FfmpegPacketRecorderWorker*>(worker_base);
-    if (!rtsp_worker) {
-        LOG_ERROR("Worker is not FfmpegPacketRecorderWorker type");
-        producer.stop();
-        return -1;
-    }
-    
-    const AVCodecParameters* codec_params = rtsp_worker->getCodecParameters();
+    // 直接从门面类获取编解码器参数和时间基
+    const AVCodecParameters* codec_params = worker_facade_sptr->getCodecParameters();
     if (!codec_params) {
         LOG_ERROR("Failed to get codec parameters from worker");
         producer.stop();
         return -1;
     }
     
-    // 获取时间基
-    AVRational time_base = rtsp_worker->getTimeBase();
+    AVRational time_base = worker_facade_sptr->getTimeBase();
     
     // 打开BufferWriter（编码流模式）
     BufferWriter writer;
@@ -1101,7 +1086,7 @@ static int test_file_record(const char* input_file) {
     // 6. 获取Worker并打开BufferWriter（MP4模式）
     LOG_INFO("[Step 5] Opening BufferWriter (MP4 mode)...");
     
-    // 获取Worker的编解码器参数
+    // 获取Worker的编解码器参数（v2.14: 通过门面类直接获取，无需类型转换）
     auto worker_facade_sptr = producer.getWorkerFacade();
     if (!worker_facade_sptr) {
         LOG_ERROR("Failed to get worker facade");
@@ -1109,30 +1094,15 @@ static int test_file_record(const char* input_file) {
         return -1;
     }
     
-    // 获取底层Worker并转换为FfmpegPacketRecorderWorker
-    WorkerBase* worker_base = worker_facade_sptr->getWorkerBase();
-    if (!worker_base) {
-        LOG_ERROR("Failed to get worker base");
-        producer.stop();
-        return -1;
-    }
-    
-    FfmpegPacketRecorderWorker* file_worker = dynamic_cast<FfmpegPacketRecorderWorker*>(worker_base);
-    if (!file_worker) {
-        LOG_ERROR("Worker is not FfmpegPacketRecorderWorker type");
-        producer.stop();
-        return -1;
-    }
-    
-    const AVCodecParameters* codec_params = file_worker->getCodecParameters();
+    // 直接从门面类获取编解码器参数和时间基
+    const AVCodecParameters* codec_params = worker_facade_sptr->getCodecParameters();
     if (!codec_params) {
         LOG_ERROR("Failed to get codec parameters from worker");
         producer.stop();
         return -1;
     }
     
-    // 获取时间基
-    AVRational time_base = file_worker->getTimeBase();
+    AVRational time_base = worker_facade_sptr->getTimeBase();
     
     // 打开BufferWriter（编码流模式）
     BufferWriter writer;

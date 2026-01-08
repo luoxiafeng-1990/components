@@ -191,3 +191,20 @@ BufferPoolType BufferFillingWorkerFacade::getPrimaryBufferPoolType() {
     }
     return BufferPoolType::DECODE_VIDEO_PRIMARY;  // 默认值
 }
+// ============ 编解码器参数获取（v2.14新增）============
+
+const AVCodecParameters* BufferFillingWorkerFacade::getCodecParameters() const {
+    if (!worker_base_uptr_) {
+        return nullptr;
+    }
+    // 直接调用基类方法，通过多态机制自动调用正确的实现
+    return worker_base_uptr_->getCodecParameters();
+}
+
+AVRational BufferFillingWorkerFacade::getTimeBase() const {
+    if (!worker_base_uptr_) {
+        return {1, 25};  // 默认值
+    }
+    // 直接调用基类方法，通过多态机制自动调用正确的实现
+    return worker_base_uptr_->getTimeBase();
+}

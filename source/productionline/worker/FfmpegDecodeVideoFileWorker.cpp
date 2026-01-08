@@ -876,6 +876,30 @@ const char* FfmpegDecodeVideoFileWorker::getCodecName() const {
     return "unknown";
 }
 
+const AVCodecParameters* FfmpegDecodeVideoFileWorker::getCodecParameters() const {
+    if (!packet_source_) {
+        return nullptr;
+    }
+    return packet_source_->getCodecParameters();
+}
+
+AVRational FfmpegDecodeVideoFileWorker::getTimeBase() const {
+    if (!packet_source_) {
+        return {1, 25};  // 默认值
+    }
+    
+    // 从数据源获取编解码器参数
+    const AVCodecParameters* codecpar = packet_source_->getCodecParameters();
+    if (!codecpar) {
+        return {1, 25};  // 默认值
+    }
+    
+    // 对于视频流，通常使用帧率的倒数作为时间基
+    // 这里返回一个通用的时间基（可以根据实际需求调整）
+    // 注意：如果需要更精确的时间基，应该从 AVStream 获取
+    return {1, 25};  // 默认25fps
+}
+
 int FfmpegDecodeVideoFileWorker::getOriginalWidth() const {
     if (packet_source_) {
         const AVCodecParameters* codecpar = packet_source_->getCodecParameters();

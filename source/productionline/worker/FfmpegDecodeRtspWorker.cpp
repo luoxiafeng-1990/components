@@ -460,6 +460,29 @@ std::string FfmpegDecodeRtspWorker::getLastError() const {
     return last_error_;
 }
 
+const AVCodecParameters* FfmpegDecodeRtspWorker::getCodecParameters() const {
+    if (!packet_source_) {
+        return nullptr;
+    }
+    return packet_source_->getCodecParameters();
+}
+
+AVRational FfmpegDecodeRtspWorker::getTimeBase() const {
+    if (!packet_source_) {
+        return {1, 25};  // 默认值
+    }
+    
+    // 从数据源获取编解码器参数
+    const AVCodecParameters* codecpar = packet_source_->getCodecParameters();
+    if (!codecpar) {
+        return {1, 25};  // 默认值
+    }
+    
+    // 对于 RTSP 流，通常使用帧率的倒数作为时间基
+    // 这里返回一个通用的时间基（可以根据实际需求调整）
+    return {1, 25};  // 默认25fps
+}
+
 void FfmpegDecodeRtspWorker::printStats() const {
     LOG_INFO("");
     LOG_INFO("📊 FfmpegDecodeRtspWorker Statistics:");

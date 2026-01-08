@@ -267,6 +267,54 @@ public:
         return BufferPoolType::DECODE_VIDEO_PRIMARY;  // 默认值
     }
     
+    // ==================== 编解码器参数获取功能（v2.14新增）====================
+    
+    /**
+     * @brief 获取编解码器参数（用于 BufferWriter 等场景）
+     * 
+     * v2.14 设计：
+     * - 虚函数：子类根据实际情况重写
+     * - 默认实现：返回 nullptr（不支持编解码器参数的 Worker）
+     * - 适用场景：Packet录制、编码器等需要提供编解码器信息的 Worker
+     * 
+     * @return AVCodecParameters* 编解码器参数指针，如果不可用则返回 nullptr
+     * 
+     * @note 子类实现示例：
+     * @code
+     * // FfmpegPacketRecorderWorker 实现
+     * const AVCodecParameters* getCodecParameters() const override {
+     *     return packet_source_ ? packet_source_->getCodecParameters() : nullptr;
+     * }
+     * @endcode
+     */
+    virtual const struct AVCodecParameters* getCodecParameters() const {
+        // 默认实现：不支持编解码器参数
+        return nullptr;
+    }
+    
+    /**
+     * @brief 获取时间基（用于 BufferWriter 等场景）
+     * 
+     * v2.14 设计：
+     * - 虚函数：子类根据实际情况重写
+     * - 默认实现：返回 {1, 25}（25fps）
+     * - 适用场景：Packet录制、编码器等需要提供时间基的 Worker
+     * 
+     * @return AVRational 时间基
+     * 
+     * @note 子类实现示例：
+     * @code
+     * // FfmpegPacketRecorderWorker 实现
+     * AVRational getTimeBase() const override {
+     *     return packet_source_ ? packet_source_->getTimeBase() : AVRational{1, 25};
+     * }
+     * @endcode
+     */
+    virtual struct AVRational getTimeBase() const {
+        // 默认实现：返回 25fps
+        return {1, 25};
+    }
+    
     // ==================== 解码器配置功能（v2.2新增）====================
     
     /**

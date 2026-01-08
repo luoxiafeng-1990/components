@@ -211,6 +211,40 @@ public:
      * 检查是否到达文件末尾
      */
     bool isAtEnd() const;
+    
+    // ============ 编解码器参数获取（v2.14新增）============
+    
+    /**
+     * 获取编解码器参数（用于 BufferWriter 等场景）
+     * 
+     * v2.14 设计：
+     * - 门面类转发调用到底层 Worker
+     * - 通过多态机制，自动调用正确的实现
+     * - 不需要类型转换，符合开闭原则
+     * 
+     * @return AVCodecParameters* 编解码器参数指针，如果不可用则返回 nullptr
+     * 
+     * @note 使用场景：配合 BufferWriter 保存编码流到文件
+     * @note 必须在 open() 之后调用
+     * 
+     * @note 使用示例：
+     * @code
+     * auto worker_facade = producer.getWorkerFacade();
+     * const AVCodecParameters* codec_params = worker_facade->getCodecParameters();
+     * AVRational time_base = worker_facade->getTimeBase();
+     * 
+     * BufferWriter writer;
+     * writer.open(output_file, codec_params, time_base);
+     * @endcode
+     */
+    const struct AVCodecParameters* getCodecParameters() const;
+    
+    /**
+     * 获取时间基（用于 BufferWriter 等场景）
+     * 
+     * @return AVRational 时间基
+     */
+    struct AVRational getTimeBase() const;
 };
 
 #endif // BUFFER_FILLING_WORKER_FACADE_HPP
