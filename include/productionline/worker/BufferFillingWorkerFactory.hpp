@@ -51,13 +51,6 @@ public:
     static std::unique_ptr<WorkerBase> create(const WorkerConfig& config = WorkerConfig());
     
     /**
-     * 从名称创建Worker
-     * @param name 类型名称（"mmap_raw", "iouring_raw", "ffmpeg_rtsp", "ffmpeg_video_file"）
-     * @return Worker实例
-     */
-    static std::unique_ptr<WorkerBase> createByName(const char* name);
-    
-    /**
      * 检查 io_uring 是否可用
      * @return 可用返回true
      */

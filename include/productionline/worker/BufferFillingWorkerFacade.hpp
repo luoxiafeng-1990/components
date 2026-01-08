@@ -40,7 +40,7 @@
  * // 通过 WorkerConfig 配置 Worker 类型和所有参数
  * WorkerConfig config;
  * config.worker_type = WorkerType::FFMPEG_VIDEO_FILE;
- * config.file.file_path = "video.mp4";
+ * config.data_source.path = "video.mp4";
  * 
  * BufferFillingWorkerFacade worker(config);
  * worker.open();  // 所有参数从 config 获取
@@ -106,6 +106,17 @@ public:
     WorkerBase* getWorkerBase() const {
         return worker_base_uptr_.get();
     }
+    
+    /**
+     * v2.13新增：设置 BufferPacketSource 的源 BufferPool（用于 Buffer 模式）
+     * @param pool_weak Record Worker 的 BufferPool（weak_ptr）
+     * @return 成功返回 true，如果底层 Worker 不支持，返回 false
+     * 
+     * 使用场景：
+     * - MultiWorkerProductionLine 创建消费者 Worker 后，需要关联 Record Worker 的 BufferPool
+     * - 必须在 open() 之前调用
+     */
+    bool setSourceBufferPool(std::weak_ptr<BufferPool> pool_weak);
     
     // ============ 文件导航方法（原IVideoFileNavigator的方法）============
     
@@ -182,8 +193,9 @@ public:
     
     /**
      * 获取每像素字节数
+     * @return 每像素字节数（浮点数，支持如NV12的1.5字节/像素）
      */
-    int getBytesPerPixel() const;
+    double getBytesPerPixel() const;
     
     /**
      * 获取文件路径

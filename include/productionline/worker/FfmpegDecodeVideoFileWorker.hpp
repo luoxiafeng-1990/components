@@ -2,13 +2,13 @@
 #define FFMPEG_DECODE_VIDEO_FILE_WORKER_HPP
 
 #include "productionline/worker/WorkerBase.hpp"
+#include "productionline/worker/IPacketSource.hpp"
 #include "buffer/bufferpool/Buffer.hpp"
 #include "buffer/bufferpool/BufferPool.hpp"
 #include <string>
 #include <memory>
 #include <atomic>
 #include <mutex>
-#include <map>
 
 // FFmpeg 前向声明
 struct AVFormatContext;
@@ -60,13 +60,12 @@ public:
     // ============ 构造/析构 ============
     
     /**
-     * @brief 默认构造函数（向后兼容）
-     */
-    FfmpegDecodeVideoFileWorker();
-    
-    /**
-     * @brief 配置构造函数（v2.2新增）
-     * @param config Worker配置（包含解码器配置等）
+     * @brief 构造函数（必须提供配置）
+     * @param config Worker配置（包含解码器配置、数据源配置等）
+     * 
+     * 注意：不再提供默认构造函数，所有 Worker 必须通过配置创建
+     * - 文件数据源模式：config.decoder.datasource_buffer_mode = false
+     * - Buffer 数据源模式：config.decoder.datasource_buffer_mode = true
      */
     explicit FfmpegDecodeVideoFileWorker(const WorkerConfig& config);
     
@@ -85,8 +84,19 @@ public:
     }
     
     // 文件导航功能（继承自IVideoFileNavigator）
+    /**
+     * @brief 打开视频文件（单参数版本，支持覆盖 config 中的路径）
+     * 
+     * v2.13 架构：Worker 从 worker_config_ 读取配置参数
+     * - worker_config_.display.width/height/bits_per_pixel
+     * - worker_config_.decoder.name（解码器名称）
+     * - worker_config_.decoder.taco（TACO 配置）
+     * 
+     * @param path 视频文件路径（可以覆盖 config 中的路径）
+     * @return 成功返回 true
+     */
     bool open(const char* path) override;
-    bool open(const char* path, int width, int height, int bits_per_pixel) override;
+    
     void close() override;
     bool isOpen() const override;
     bool seek(int frame_index) override;
@@ -99,10 +109,39 @@ public:
     long getFileSize() const override;
     int getWidth() const override;
     int getHeight() const override;
-    int getBytesPerPixel() const override;
+    double getBytesPerPixel() const override;
     const char* getPath() const override;
     bool hasMoreFrames() const override;
     bool isAtEnd() const override;
+    
+    // ============ v2.13 BufferPacketSource 配置 ============
+    
+    /**
+     * @brief 设置 BufferPacketSource 的源 BufferPool（用于 Buffer 模式）
+     * @param pool_weak Record Worker 的 BufferPool（weak_ptr）
+     * @return 成功返回 true，如果不是 Buffer 模式或数据源类型不对，返回 false
+     * 
+     * 使用场景：
+     * - MultiWorkerProductionLine 创建消费者 Worker 后，需要关联 Record Worker 的 BufferPool
+     * - 必须在 open() 之前调用
+     * 
+     * 示例：
+     * ```cpp
+     * // 1. 创建 Record Worker 并获取 BufferPool
+     * uint64_t record_pool_id = record_worker.getOutputBufferPoolId(BufferPoolType::PACKET_VIDEO);
+     * auto record_pool_weak = BufferPoolRegistry::getInstance().getPool(record_pool_id);
+     * 
+     * // 2. 创建消费者 Worker（Buffer 模式）
+     * FfmpegDecodeVideoFileWorker consumer_worker(config);
+     * 
+     * // 3. 关联 Record BufferPool
+     * consumer_worker.setSourceBufferPool(record_pool_weak);
+     * 
+     * // 4. 打开并使用
+     * consumer_worker.open();
+     * ```
+     */
+    bool setSourceBufferPool(std::weak_ptr<BufferPool> pool_weak);
     
     // ============ 信息查询 ============
     
@@ -122,31 +161,16 @@ public:
     void printStats() const;
 
 private:
-    // ============ FFmpeg 资源 ============
-    AVFormatContext* format_ctx_ptr_;
+    // ============ 数据源抽象（v2.9新增）============
+    std::unique_ptr<IPacketSource> packet_source_;  // 数据源抽象（文件或Buffer）
+    
+    
     AVCodecContext* codec_ctx_ptr_;
-    std::map<int, std::pair<AVFrame*, AVPacket*>> frame_packet_map_;    // 用于存储解码后的帧和对应的packet
-    SwsContext* sws_ctx_ptr_;              // 图像格式转换
-    int video_stream_index_;
-    
-    // ============ 文件信息 ============
-    std::string file_path_;            // 文件路径（使用 std::string 更安全）
-    int width_;                        // 视频原始宽度
-    int height_;                       // 视频原始高度
-    int output_width_;                 // 输出宽度（可能缩放）
-    int output_height_;                 // 输出高度（可能缩放）
-    int output_bpp_;                   // 输出位深（如 32 for ARGB888）
-    int output_pixel_format_;          // 输出像素格式（如 AV_PIX_FMT_BGRA）
-    
-    // ============ 解码状态 ============
-    int total_frames_;                 // 总帧数（估算）
+  
+    int output_width_;                 // 输出宽度（运行时状态，可能缩放）
+    int output_height_;                // 输出高度（运行时状态，可能缩放）
     int current_frame_index_;          // 当前帧索引
-    std::atomic<bool> is_open_;        // 🎯 原子变量，保证线程安全的状态检查（Worker业务层面）
-    std::atomic<bool> is_ffmpeg_opened_;  // 🎯 原子变量，保证线程安全的FFmpeg资源状态检查
-    bool eof_reached_;
-    
-    // ============ 零拷贝模式 ============
-    BufferPool* zero_copy_buffer_pool_ptr_;            // 可选：零拷贝模式的BufferPool（外部提供）
+   
     
     // ============ 解码器配置（用于特殊解码器）============
     bool use_hardware_decoder_;        // 是否使用硬件解码
@@ -159,43 +183,23 @@ private:
     
     // ============ 统计信息 ============
     std::atomic<int> decoded_frames_;
-    std::atomic<int> decode_errors_;
+    std::atomic<int> dropped_frames_;  // 丢帧计数
     
     // ============ 错误处理 ============
     std::string last_error_;
-    int last_ffmpeg_error_;
     
     // ============ 内部辅助方法 ============
     
     /**
-     * @brief 打开媒体源（视频文件）并初始化解码器
-     */
-    bool openMediaSource();
-    
-    /**
-     * @brief 关闭媒体源并释放资源
-     */
-    void closeMediaSource();
-    
-    /**
-     * @brief 查找视频流
-     */
-    bool findVideoStream();
-    
-    /**
      * @brief 初始化解码器
+     * @param codec_params 编解码器参数（必须提供，从 packet_source_ 获取）
      */
-    bool initializeDecoder();
+    bool initializeDecoder(const AVCodecParameters* codec_params);
     
     /**
      * @brief 配置特殊解码器（如 h264_taco）
      */
     bool configureSpecialDecoder();
-    
-    /**
-     * @brief 估算总帧数
-     */
-    int estimateTotalFrames();
     
     /**
      * @brief 从AVFrame元数据中提取硬件解码器的物理内存地址（重写基类）
@@ -215,6 +219,18 @@ private:
      * @brief 设置错误信息
      */
     void setError(const std::string& error, int ffmpeg_error = 0);
+    
+    /**
+     * @brief 获取原始宽度（从数据源获取）
+     * @return 原始宽度，如果不可用则返回 0
+     */
+    int getOriginalWidth() const;
+    
+    /**
+     * @brief 获取原始高度（从数据源获取）
+     * @return 原始高度，如果不可用则返回 0
+     */
+    int getOriginalHeight() const;
 };
 
 #endif // FFMPEG_DECODE_VIDEO_FILE_WORKER_HPP

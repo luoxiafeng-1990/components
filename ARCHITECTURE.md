@@ -19,7 +19,130 @@
 
 ## 版本历史
 
-### v2.11（当前版本）- 编解码器类型检测
+### v2.13（当前版本）- 配置单一数据源与接口简化
+**发布日期：** 2025-01
+
+**主要变更：**
+- ✅ **接口简化**：删除 `open(path, width, height, bits_per_pixel)` 重载，统一使用 `open()` 和 `open(path)` 两个版本
+  - `open()`：Worker 从 `worker_config_` 读取所有参数（推荐）
+  - `open(path)`：快速指定文件路径（可选，RTSP Worker 不支持）
+- ✅ **配置单一数据源原则**：Worker 统一从 `worker_config_` 读取所有参数，消除 Facade 与 Worker 的配置冗余
+  - 删除 `BufferFillingWorkerFacade::open()` 中的参数提取逻辑
+  - Facade 直接调用 `worker->open()`，不再充当"参数转发器"
+- ✅ **getBytesPerPixel() 优化（方案A）**：
+  - 返回类型改为 `double`，支持 NV12 等格式的 1.5 字节/像素
+  - 优先从解码器实际输出格式 `codec_ctx_ptr_->pix_fmt` 计算
+  - Fallback 从 `worker_config_.decoder.taco` 的格式字符串推断（RGB/YUV）
+  - 删除冗余的 `output_bits_per_pixel_` 成员变量
+- ✅ **架构一致性改进**：所有 Worker（`FfmpegDecodeVideoFileWorker`、`FfmpegDecodeRtspWorker`、`FfmpegRecordRtspWorker`）统一实现无参 `open()`
+
+**设计原则：**
+- **单一数据源**：Worker 只从 `worker_config_` 读取配置，不接受外部参数传递
+- **接口简化**：`open()` 无参数或只有一个可选的 `path` 参数，降低接口复杂度
+- **精确计算**：`getBytesPerPixel()` 支持 `double` 类型，准确表示各种像素格式（如 NV12=1.5）
+- **职责分离**：Facade 不再提取和转发参数，只负责创建和转发调用
+
+**架构优势：**
+- **消除冗余**：不再有两份 config（Facade 的 `config_` 和 Worker 的 `worker_config_`）
+- **数据一致**：单一数据源保证参数来源统一，避免同步问题
+- **类型安全**：`double` 类型支持非整数字节/像素比例
+- **易于维护**：接口更简洁，职责更清晰，符合单一职责原则
+
+**使用示例：**
+```cpp
+// ✅ v2.13 推荐方式：无参 open()，所有参数从 config 读取
+auto config = WorkerConfigBuilder()
+    .setFileConfig(FileConfigBuilder().setFilePath("rtsp://...").build())
+    .setDisplayConfig(DisplayConfigBuilder()
+        .setDisplayResolution(1920, 1080)
+        .setBitsPerPixel(32)
+        .build())
+    .setDecoderConfig(DecoderConfigBuilder().useTaco("h264").build())
+    .build();
+
+BufferFillingWorkerFacade worker(config);
+worker.open();  // Worker 自动从 worker_config_ 读取所有参数
+
+// ❌ v2.12 旧方式（已废弃）
+// worker.open("rtsp://...", 1920, 1080, 32);  // 不再支持
+```
+
+**getBytesPerPixel() 计算示例：**
+```cpp
+double bpp = worker.getBytesPerPixel();
+// NV12: 1.5 字节/像素
+// ARGB8888: 4.0 字节/像素  
+// RGB888: 3.0 字节/像素
+// RGB48LE: 6.0 字节/像素
+```
+
+### v2.12 - 数据源抽象模式重构
+**发布日期：** 2024-12
+
+**主要变更：**
+- ✅ **数据源抽象接口**：引入 `IPacketSource` 接口，支持策略模式，实现数据源与 Worker 的解耦
+- ✅ **文件数据源实现**：`FilePacketSource` 管理 `AVFormatContext` 和文件相关状态（视频流索引、总帧数、EOF 状态等）
+- ✅ **Buffer 数据源实现**：`BufferPacketSource` 用于 MultiWorkerProductionLine 场景，从 BufferPool 获取 AVPacket
+- ✅ **Worker 重构**：`FfmpegDecodeVideoFileWorker` 使用数据源抽象，移除冗余状态变量
+  - 移除：`format_ctx_ptr_`、`file_path_`、`width_`、`height_`、`total_frames_`、`video_stream_index_`、`is_open_`、`eof_reached_`
+  - 所有状态统一由数据源管理，避免状态不一致
+- ✅ **状态管理优化**：单一数据源管理状态，Worker 直接查询数据源，避免缓存导致的不一致
+- ✅ **线程安全改进**：数据源的 `is_open_` 使用 `std::atomic<bool>`，保证线程安全的状态检查
+- ✅ **配置系统增强**：`WorkerConfig` 添加 `datasource_buffer_mode`（默认 false）和 `codec_params` 配置项
+
+**设计原则：**
+- **单一职责**：Worker 专注解码逻辑，数据源负责数据访问和元数据管理
+- **依赖倒置**：Worker 依赖 `IPacketSource` 接口，不依赖具体实现
+- **易于扩展**：新增数据源类型（如网络流）无需修改 Worker 代码
+- **状态一致**：单一数据源管理状态，避免冗余和不同步
+
+**数据源职责边界（重要）：**
+
+`IPacketSource` 数据源**仅负责数据读取和元数据管理**，职责明确限定为：
+
+✅ **数据源应该做的**：
+- **打开/关闭数据源**：管理文件、网络流、Buffer 等数据源的生命周期
+- **读取原始数据包**：从数据源读取 `AVPacket`（编码数据），不进行任何转换
+- **提供元数据查询**：编解码器参数、总帧数、文件大小、视频流索引等
+- **管理读取状态**：EOF 状态、打开状态、连接状态等
+- **提供导航功能**：`seek()` 定位到指定帧（仅文件模式支持）
+
+❌ **数据源不应该做的**：
+- ❌ **解码数据**：解码是 Worker 的职责（如 `FfmpegDecodeVideoFileWorker`）
+- ❌ **编码数据**：编码是编码器 Worker 的职责
+- ❌ **数据格式转换**：像素格式转换由 `SwsContext` 或解码器处理
+- ❌ **写入数据**：写入是 `BufferWriter` 的职责
+- ❌ **业务逻辑处理**：业务逻辑由应用层负责
+
+**职责边界原则**：
+> 数据源是"**纯粹的数据提供者**"，只管"**读**"，不管"**写**"和"**转换**"。  
+> 数据源与 Worker 的关系：数据源提供原材料（`AVPacket`），Worker 负责加工（解码、编码）。
+
+**架构优势：**
+- **职责分离**：Worker 和数据源职责清晰，符合 SOLID 原则
+- **状态一致**：单一数据源管理状态，避免缓存导致的不一致
+- **线程安全**：使用原子变量保证状态检查的线程安全
+- **代码简化**：Worker 代码更简洁，职责更清晰
+
+**使用示例：**
+```cpp
+// 文件模式（默认）
+auto config = WorkerConfigBuilder()
+    .setFileConfig(FileConfigBuilder().setFilePath("video.mp4").build())
+    .build();
+// Worker 内部创建 FilePacketSource
+
+// Buffer 模式（MultiWorkerProductionLine）
+auto config = WorkerConfigBuilder()
+    .setDecoderConfig(DecoderConfigBuilder()
+        .setUseBufferMode(true)
+        .setCodecParams(record_codec_params)
+        .build())
+    .build();
+// Worker 内部创建 BufferPacketSource
+```
+
+### v2.11 - 编解码器类型检测
 **发布日期：** 2024-12
 
 **主要变更：**
@@ -262,10 +385,15 @@ enum class BufferPoolType {
 };
 ```
 
-**使用示例（v2.3）**：
+**使用示例（v2.13）**：
 ```cpp
 // Worker 内部注册 BufferPool
-bool FfmpegDecodeVideoFileWorker::open(const char* path, int width, int height, int bpp) {
+bool FfmpegDecodeVideoFileWorker::open(const char* path) {
+    // ✅ v2.13：从 worker_config_ 读取参数
+    int width = worker_config_.display.width;
+    int height = worker_config_.display.height;
+    int bpp = worker_config_.display.bits_per_pixel;
+    
     // ... 创建 BufferPool ...
     uint64_t pool_id = allocator_facade_.allocatePoolWithBuffers(...);
     
@@ -292,9 +420,11 @@ if (auto pool = pool_weak.lock()) {
 ### 4. IVideoFileNavigator（文件导航接口）
 
 **职责**：
-- ✅ **文件打开/关闭**：`open(path)` 和 `open(path, width, height, bits_per_pixel)`（两个重载），`close()`, `isOpen()`
+- ✅ **文件打开/关闭**：`open()` 和 `open(path)`（v2.13 简化），`close()`, `isOpen()`
+  - `open()`：Worker 从 `worker_config_` 读取所有参数（推荐）
+  - `open(path)`：快速指定文件路径（可选）
 - ✅ **文件导航**：`seek()`, `seekToBegin()`, `seekToEnd()`, `skip()`
-- ✅ **文件状态查询**：`getTotalFrames()`, `getCurrentFrameIndex()`, `getFrameSize()`, `getFileSize()`, `getWidth()`, `getHeight()`, `getBytesPerPixel()`, `getPath()`, `hasMoreFrames()`, `isAtEnd()`
+- ✅ **文件状态查询**：`getTotalFrames()`, `getCurrentFrameIndex()`, `getFrameSize()`, `getFileSize()`, `getWidth()`, `getHeight()`, `getBytesPerPixel()` (返回 `double`，v2.13)，`getPath()`, `hasMoreFrames()`, `isAtEnd()`
 
 **继承关系（v2.0）**：
 - `WorkerBase`继承`IVideoFileNavigator`接口
@@ -307,9 +437,10 @@ if (auto pool = pool_weak.lock()) {
 - 文档明确：通过接口名称明确表达职责
 
 **注意**：
-- Worker在实现`open()`时，需要同时处理文件打开逻辑和BufferPool创建逻辑
+- Worker在实现`open()`时，需要同时处理数据源打开逻辑和BufferPool创建逻辑（v2.12：数据源通过 `IPacketSource` 接口管理）
 - 文件操作方法与Buffer填充操作分离，但都在WorkerBase中定义
-- 所有Worker实现类（`FfmpegDecodeVideoFileWorker`, `MmapRawVideoFileWorker`, `FfmpegDecodeRtspWorker`, `IoUringRawVideoFileWorker`）都继承`WorkerBase`基类
+- 所有Worker实现类（`FfmpegDecodeVideoFileWorker`, `FfmpegDecodeRtspWorker`, `FfmpegRecordRtspWorker`）都继承`WorkerBase`基类
+- **v2.12新增**：`FfmpegDecodeVideoFileWorker` 使用数据源抽象（`IPacketSource`），支持文件模式和 Buffer 模式
 
 ### 5. BufferAllocator（分配器）
 
@@ -340,11 +471,12 @@ if (auto pool = pool_weak.lock()) {
 │  │  std::shared_ptr<BufferFillingWorkerFacade> worker_      │  │
 │  └─────────────────────────────────────────────────────────┘  │
 │                                                                 │
-│  协作关系（通过WorkerBase，v2.3）：                            │
+│  协作关系（通过WorkerBase，v2.3；数据源抽象，v2.12）：         │
 │  1. 通过 WorkerBase::getOutputBufferPoolId(type) 获取Pool ID  │
 │  2. 通过 WorkerBase::fillBuffer() 填充Buffer                  │
 │  3. 通过 IVideoFileNavigator::open() 打开视频源               │
 │  4. 通过 BufferPoolRegistry::getPool(pool_id) 获取Pool临时访问 │
+│  5. Worker 使用 IPacketSource 接口访问数据源（v2.12新增）     │
 └───────────────────────┬───────────────────────────────────────┘
                         │
                         │ 使用基类（不依赖具体实现）
@@ -358,12 +490,23 @@ if (auto pool = pool_weak.lock()) {
 │ 通过接口协作 │ │ 定义方法     │ │ 定义接口     │
 └──────────────┘ └─────────────┘ └─────────────┘
                         │               │
-                        │ 继承           │ 继承
-                        │               │
+                        │ 使用接口       │ 继承
+                        │ (v2.12)       │
         ┌───────────────┼───────────────┼───────────────┐
         │               │               │               │
-    Worker实现类    Worker实现类    Allocator实现类  Allocator实现类
-    (具体实现)      (具体实现)      (具体实现)      (具体实现)
+┌───────▼──────┐   Worker实现类    Allocator实现类  Allocator实现类
+│IPacketSource │   (具体实现)      (具体实现)      (具体实现)
+│ (数据源接口) │   (如FfmpegDecodeVideoFileWorker使用数据源)
+│              │
+│ 策略模式     │
+└───────┬──────┘
+        │ 实现
+        │
+┌───────┼───────┐
+│       │       │
+FilePacketSource BufferPacketSource (未来可扩展网络流等)
+(文件数据源)    (Buffer数据源)
+```
         │               │               │               │
         └───────────────┴───────────────┴───────────────┘
                         │
@@ -532,7 +675,7 @@ Worker内部解码循环（适用于RTSP流等）：
 
 ### 1. 策略模式（Strategy Pattern）
 
-**应用位置**：`WorkerBase` 基类及其实现类
+**应用位置1**：`WorkerBase` 基类及其实现类
 
 **设计意图**：将填充Buffer的不同算法封装成独立的策略类，使它们可以互相替换。
 
@@ -540,14 +683,33 @@ Worker内部解码循环（适用于RTSP流等）：
 - **策略基类**：`WorkerBase` 定义统一的填充Buffer接口（纯虚函数）
 - **具体策略**：
   - `FfmpegDecodeVideoFileWorker`：FFmpeg解码策略
-  - `MmapRawVideoFileWorker`：内存映射策略
-  - `IoUringRawVideoFileWorker`：异步I/O策略
   - `FfmpegDecodeRtspWorker`：RTSP流解码策略
+  - `FfmpegRecordRtspWorker`：RTSP录制策略
+  - ~~`MmapRawVideoFileWorker`~~：_（未实现）_
+  - ~~`IoUringRawVideoFileWorker`~~：_（未实现）_
 
 **优势**：
 - 可扩展：新增Worker只需继承WorkerBase实现纯虚函数
 - 可替换：不同Worker可以互相替换
 - 解耦合：ProductionLine依赖WorkerBase基类，不依赖具体实现
+
+**应用位置2**：数据源抽象（v2.12新增）
+
+**设计意图**：将不同数据源的访问方式封装成独立的策略类，使 Worker 可以支持多种数据源。
+
+**实现方式**：
+- **策略接口**：`IPacketSource` 定义统一的数据源操作接口（纯虚函数）
+- **具体策略**：
+  - `FilePacketSource`：文件数据源策略（管理 `AVFormatContext`、文件路径、视频流索引等）
+  - `BufferPacketSource`：Buffer 数据源策略（从 BufferPool 获取 AVPacket，用于 MultiWorkerProductionLine）
+  - 未来可扩展：网络流数据源策略等
+- **应用位置**：`FfmpegDecodeVideoFileWorker` 使用数据源抽象，支持文件模式和 Buffer 模式
+
+**优势**：
+- 可扩展：新增数据源类型只需实现 `IPacketSource` 接口
+- 可替换：不同数据源可以互相替换，无需修改 Worker 代码
+- 解耦合：Worker 依赖 `IPacketSource` 接口，不依赖具体数据源实现
+- 状态管理：单一数据源管理状态，避免 Worker 和数据源状态不一致
 
 ### 2. 工厂模式（Factory Pattern）
 
@@ -588,9 +750,10 @@ Worker内部解码循环（适用于RTSP流等）：
 
 **隐藏的子系统**：
 - `FfmpegDecodeVideoFileWorker` - FFmpeg解码视频文件
-- `MmapRawVideoFileWorker` - Mmap方式读取raw视频
-- `IoUringRawVideoFileWorker` - IoUring方式读取raw视频
 - `FfmpegDecodeRtspWorker` - FFmpeg解码RTSP流
+- `FfmpegRecordRtspWorker` - FFmpeg录制RTSP流
+- ~~`MmapRawVideoFileWorker`~~ - _（未实现）_
+- ~~`IoUringRawVideoFileWorker`~~ - _（未实现）_
 
 ### 4. 依赖注入（Dependency Injection）
 
@@ -745,10 +908,9 @@ private:
     
 public:
     // 直接定义所有方法，不使用 override 关键字
-    bool open(const char* path);
-    bool open(const char* path, int width, int height, int bits_per_pixel);
+    bool open();  // v2.13 主要接口
     bool fillBuffer(int frame_index, Buffer* buffer);
-    uint64_t getOutputBufferPoolId();
+    uint64_t getOutputBufferPoolId(BufferPoolType type);
     // ... 其他方法
     // 所有方法转发给 worker_base_uptr_
 };
@@ -776,10 +938,10 @@ class BufferFillingWorkerFactory {
 public:
     enum class WorkerType {
         AUTO,              // 自动检测
-        MMAP_RAW,          // MmapRawVideoFileWorker
-        IOURING_RAW,       // IoUringRawVideoFileWorker
         FFMPEG_RTSP,       // FfmpegDecodeRtspWorker
+        FFMPEG_RECORD_RTSP,// FfmpegRecordRtspWorker
         FFMPEG_VIDEO_FILE  // FfmpegDecodeVideoFileWorker
+        // MMAP_RAW 和 IOURING_RAW 已删除（未实现）
     };
     
     // 工厂方法（返回WorkerBase基类）
@@ -793,10 +955,11 @@ private:
 ```
 
 **创建的产品**:
-- `MmapRawVideoFileWorker`
-- `IoUringRawVideoFileWorker`
-- `FfmpegDecodeRtspWorker`
 - `FfmpegDecodeVideoFileWorker`
+- `FfmpegDecodeRtspWorker`
+- `FfmpegRecordRtspWorker`
+- ~~`MmapRawVideoFileWorker`~~ _（未实现）_
+- ~~`IoUringRawVideoFileWorker`~~ _（未实现）_
 
 #### ✅ BufferAllocatorBase（Allocator接口，纯抽象基类）
 
@@ -924,15 +1087,14 @@ BufferFillingWorkerFacade::BufferFillingWorkerFacade(BufferFillingWorkerFactory:
     }
 }
 
-bool BufferFillingWorkerFacade::open(const char* path, int width, int height, int bits_per_pixel) {
+bool BufferFillingWorkerFacade::open() {
     // 创建 worker（如果还没创建）
-    if (!worker_) {
+    if (!worker_base_uptr_) {
         // 🎯 门面类使用工厂创建具体实现（返回WorkerBase）
-        worker_ = BufferFillingWorkerFactory::create(preferred_type_);
+        worker_base_uptr_ = BufferFillingWorkerFactory::create(config_);
     }
-    // 直接通过 worker_ 调用两个接口的方法
-    return worker_->open(path, width, height, bits_per_pixel);
-    // 或 worker_->open(path);  // 单参数重载
+    // ✅ v2.13：直接调用 worker_ 的 open()，Worker 从 worker_config_ 读取参数
+    return worker_base_uptr_->open();  // 无参数，单一数据源
 }
 ```
 
@@ -1257,11 +1419,12 @@ sequenceDiagram
     participant Worker as WorkerBase<br/>(基类/具体实现)
     participant BufferPool as BufferPool
     
-    Client->>Facade: open(path, width, height, bpp)
-    Facade->>Factory: create(WorkerType)
-    Factory->>Worker: new MmapRawVideoFileWorker()
+    Client->>Facade: open()
+    Facade->>Factory: create(WorkerConfig)
+    Factory->>Worker: new FfmpegDecodeVideoFileWorker(config)
     Factory-->>Facade: worker instance
-    Facade->>Worker: open(path, width, height, bpp)
+    Facade->>Worker: open()
+    Note over Worker: 从 worker_config_ 读取参数
     Worker->>BufferPool: 创建或获取 BufferPool
     Worker-->>Facade: success
     
@@ -1370,8 +1533,8 @@ ProductionLine（生产管理）
    │   （BufferPool由Worker在open()时自动创建）
    ↓
 3. worker_->fillBuffer(frame_index, buffer)  // Worker填充Buffer
-   │   ├── MmapRawVideoFileWorker: 从mmap区域memcpy到buffer->data()
-   │   ├── IoUringRawVideoFileWorker: 异步读取到buffer->data()
+   │   ├── FfmpegDecodeVideoFileWorker: 解码后写入buffer->data()
+   │   ├── FfmpegDecodeRtspWorker: 从RTSP流解码后写入buffer->data()
    │   ├── FfmpegDecodeVideoFileWorker: 解码后memcpy到buffer->data()
    │   └── FfmpegDecodeRtspWorker: 解码后填充buffer元数据
    ↓
@@ -1426,6 +1589,8 @@ struct WorkerConfig {
         const char* name = nullptr;           // 解码器名称
         bool enable_hardware = true;          // 启用硬件加速
         const char* hwaccel_device = nullptr; // 硬件设备
+        bool datasource_buffer_mode = false;   // ⭐ v2.12新增：数据源模式（默认false=文件数据源，true=Buffer数据源）
+        const AVCodecParameters* codec_params = nullptr;  // ⭐ v2.12新增：Buffer模式的编解码器参数
         
         // h264_taco 特定配置
         struct TacoConfig {
@@ -1447,10 +1612,11 @@ auto config = WorkerConfigBuilder()
     .useH264TacoPreset()
     .build();
 
-// 方式2：自定义配置
+// 方式2：自定义配置（使用预设方法）
 auto config = WorkerConfigBuilder()
-    .setDecoderName("h264_taco")
-    .enableHardwareDecoder(true)
+    .setDecoderConfig(
+        DecoderConfigBuilder().useTaco("h264").build()
+    )
     .build();
 
 // 方式3：详细配置
@@ -1551,6 +1717,27 @@ auto workerConfig = WorkerConfigBuilder()
             .build()
     )
     .build();
+```
+
+**场景4：Buffer 模式（MultiWorkerProductionLine，v2.12新增）**
+```cpp
+// 消费者 Worker 配置（从 Record Worker 的 BufferPool 获取 packet）
+auto consumer_config = WorkerConfigBuilder()
+    .setOutputConfig(
+        OutputConfigBuilder()
+            .setResolution(1920, 1080)
+            .setBitsPerPixel(32)
+            .build()
+    )
+    .setDecoderConfig(
+        DecoderConfigBuilder()
+            .setUseBufferMode(true)  // ⭐ 启用 Buffer 模式
+            .setCodecParams(record_codec_params)  // ⭐ 从 Record Worker 获取编解码器参数
+            .build()
+    )
+    .build();
+
+// Worker 内部会创建 BufferPacketSource，从 BufferPool 获取 AVPacket
 ```
 
 ---
@@ -1666,7 +1853,7 @@ auto workerConfig = WorkerConfigBuilder()
 **注意**：
 - Worker在实现`open()`时，需要同时处理文件打开逻辑和BufferPool创建逻辑（通过Allocator）
 - 文件操作方法与Buffer填充操作分离，但都在WorkerBase中定义
-- 所有Worker实现类（`FfmpegDecodeVideoFileWorker`, `MmapRawVideoFileWorker`, `FfmpegDecodeRtspWorker`, `IoUringRawVideoFileWorker`）都继承`WorkerBase`基类
+- 所有Worker实现类（`FfmpegDecodeVideoFileWorker`, `FfmpegDecodeRtspWorker`, `FfmpegRecordRtspWorker`）都继承`WorkerBase`基类
 
 ### 4. IVideoFileNavigator（Worker文件导航接口）
 
@@ -1681,9 +1868,9 @@ auto workerConfig = WorkerConfigBuilder()
 - ✅ **职责分离**：文件操作与Buffer填充操作完全分离
 
 **核心接口方法**（纯虚函数，子类必须实现）：
-- **文件打开/关闭**：`open(path)`, `open(path, width, height, bits_per_pixel)`, `close()`, `isOpen()`
+- **文件打开/关闭**：`open()`, `open(path)`, `close()`, `isOpen()` (v2.13 简化)
 - **文件导航**：`seek()`, `seekToBegin()`, `seekToEnd()`, `skip()`
-- **文件状态查询**：`getTotalFrames()`, `getCurrentFrameIndex()`, `getFrameSize()`, `getFileSize()`, `getWidth()`, `getHeight()`, `getBytesPerPixel()`, `getPath()`, `hasMoreFrames()`, `isAtEnd()`
+- **文件状态查询**：`getTotalFrames()`, `getCurrentFrameIndex()`, `getFrameSize()`, `getFileSize()`, `getWidth()`, `getHeight()`, `getBytesPerPixel()` (返回 `double`，v2.13), `getPath()`, `hasMoreFrames()`, `isAtEnd()`
 
 **设计特点**：
 - ✅ **纯虚函数**：所有方法都是纯虚函数，强制子类实现
@@ -1828,12 +2015,14 @@ return pool_id;
 - `std::unique_ptr<WorkerBase> worker_`：实际的Worker实现（统一基类）
 - `WorkerType preferred_type_`：用户偏好的Worker类型
 
-**核心方法**：
-- `open(path)`：打开编码视频文件（自动检测格式）
-- `open(path, width, height, bpp)`：统一智能接口
-  - 根据Worker类型自动判断参数用途
-  - 编码视频：忽略width/height/bpp，自动检测格式
-  - Raw视频：使用width/height/bpp参数
+**核心方法（v2.13 简化）**：
+- `open()`：打开视频文件或流（推荐）
+  - Worker 从 `worker_config_` 读取所有参数（路径、分辨率、像素格式等）
+  - 编码视频：自动检测格式
+  - Raw 视频：使用配置的分辨率和格式
+  - RTSP 流：使用配置的 RTSP URL 和参数
+- `open(path)`：快速指定文件路径（可选）
+  - 其他参数仍从 `worker_config_` 读取
 - `fillBuffer(frame_index, buffer)`：填充Buffer（转发到底层Worker）
 - `getOutputBufferPoolId(BufferPoolType type)`：获取指定类型的BufferPool ID（v2.3必须指定类型）
 - 所有方法不使用 `override` 关键字（v2.1不继承接口）
@@ -2540,20 +2729,23 @@ buffer->setUsedSize(packet->size);       // 使用：35678（本次实际大小�
    }
    ```
 
-3. **Worker 子类调用检测**（`source/productionline/worker/FfmpegDecodeVideoFileWorker.cpp:open()`）：
-   ```cpp
-   // 打开媒体文件
-   if (!openMediaSource()) {
-       return false;
-   }
-   
-   // ⭐ v2.11新增：检查编解码器类型是否匹配
-   AVCodecParameters* codecpar = 
-       format_ctx_ptr_->streams[video_stream_index_]->codecpar;
-   checkCodecMismatch(codecpar->codec_id, decoder_name_);
-   
-   // 继续创建 BufferPool...
-   ```
+3. **Worker 子类调用检测**（`source/productionline/worker/FfmpegDecodeVideoFileWorker.cpp:open()`，v2.12更新）：
+```cpp
+// ⭐ v2.12重构：使用数据源抽象打开
+if (!packet_source_->open()) {
+    return false;
+}
+
+// 从数据源获取编解码器参数
+const AVCodecParameters* codecpar = packet_source_->getCodecParameters();
+
+// ⭐ v2.11新增：检查编解码器类型是否匹配（仅文件模式）
+if (auto* file_source = dynamic_cast<FilePacketSource*>(packet_source_.get())) {
+    checkCodecMismatch(codecpar->codec_id, decoder_name_);
+}
+
+// 继续创建 BufferPool...
+```
 
 #### 支持的编解码器映射
 
@@ -2853,8 +3045,7 @@ int main() {
     // 或者自定义配置
     // .setDecoderConfig(
     //     DecoderConfigBuilder()
-    //         .setDecoderName("h264_taco")
-    //         .enableHardware(true)
+    //         .useTaco("h264")           // 自动设置 enable_hardware=true
     //         .setDecodeThreads(4)
     //         .build()
     // )
@@ -2902,20 +3093,23 @@ int main() {
 #include "buffer/BufferPoolRegistry.hpp"
 
 int main() {
-    // 1. 构建 Worker 配置
+    // 1. 构建 Worker 配置（v2.13）
     auto workerConfig = WorkerConfigBuilder()
         .setFileConfig(
             FileConfigBuilder()
-                .setFilePath("/path/to/video.raw")
+                .setFilePath("/path/to/video.h264")  // 编码视频文件
                 .build()
         )
-        .setOutputConfig(
-            OutputConfigBuilder()
-                .setResolution(1920, 1080)
+        .setDisplayConfig(
+            DisplayConfigBuilder()
+                .setDisplayResolution(1920, 1080)
                 .setBitsPerPixel(32)  // ARGB888
                 .build()
         )
-        .setWorkerType(WorkerType::MMAP_RAW)
+        .setDecoderConfig(
+            DecoderConfigBuilder().useTaco("h264").build()  // 硬件解码
+        )
+        .setWorkerType(WorkerType::FFMPEG_VIDEO_FILE)
         .build();
     
     // 2. 创建并启动生产线
@@ -3012,9 +3206,9 @@ config.worker_config = WorkerConfigBuilder()
     .build();
 
 // ✅ 推荐：根据场景选择合适的预设
-// - h264_taco 硬件解码：useH264TacoPreset()
-// - 软件解码：useSoftwarePreset()
-// - 自定义：setDecoderName() + enableHardwareDecoder()
+// - h264_taco 硬件解码：useTaco("h264")
+// - 软件解码：useSoftware()
+// - 其他硬件解码器：useCuvid("h264"), useQsv("h264"), useVaapi("h264")
 ```
 
 **不推荐做法：**
@@ -3067,10 +3261,9 @@ auto config = WorkerConfigBuilder().setDecoderName(decoder).build();
 
 | 场景 | Worker类型 | Worker内部使用的Allocator | 理由 |
 |------|-----------|-------------------------|------|
-| Raw视频文件（小文件） | `MMAP_RAW` | NormalAllocator（Worker自动选择） | 实现简单，随机访问性能优秀 |
-| Raw视频文件（大文件） | `IOURING_RAW` | NormalAllocator（Worker自动选择） | 零拷贝异步I/O，提高吞吐量 |
 | 编码视频文件 | `FFMPEG_VIDEO_FILE` | NormalAllocator（Worker自动选择） | 支持多种编码格式，硬件加速 |
 | RTSP流 | `FFMPEG_RTSP` | AVFrameAllocator（Worker自动选择） | 实时流处理，零拷贝模式 |
+| Raw视频文件 | ~~`MMAP_RAW`~~ / ~~`IOURING_RAW`~~ | _（未实现）_ | _计划中的功能_ |
 
 ### 2. BufferPool创建策略
 
@@ -3222,7 +3415,7 @@ private:
 | `PerformanceMonitor.hpp` | 将 `private` 移到 `public` 之后 | 符合 public → private 顺序 |
 | `LinuxFramebufferDevice.hpp` | 将 `private` 移到 `public` 之后 | 符合 public → private 顺序 |
 | `FfmpegDecodeRtspWorker.hpp` | 将 `private` 移到 `public` 之后 | 符合 public → private 顺序 |
-| `MmapRawVideoFileWorker.hpp` | 将 `private` 移到 `public` 之后 | 符合 public → private 顺序 |
+| ~~`MmapRawVideoFileWorker.hpp`~~ | 将 `private` 移到 `public` 之后 | _（文件已删除，未实现）_ |
 | `FfmpegDecodeVideoFileWorker.hpp` | 将 `private` 移到 `public` 之后 | 符合 public → private 顺序 |
 
 **调整前示例**：
@@ -3574,7 +3767,7 @@ feat(buffer): 新增AVFrame管理功能
 | `getFileSize()` | 获取文件大小（字节） | 无 | `long` |
 | `getWidth()` | 获取视频宽度 | 无 | `int` |
 | `getHeight()` | 获取视频高度 | 无 | `int` |
-| `getBytesPerPixel()` | 获取每像素字节数 | 无 | `int` |
+| `getBytesPerPixel()` | 获取每像素字节数 | 无 | `double` (v2.13) |
 | `getPath()` | 获取文件路径 | 无 | `const char*` |
 | `hasMoreFrames()` | 检查是否还有更多帧 | 无 | `bool` |
 | `isAtEnd()` | 检查是否到达文件末尾 | 无 | `bool` |
@@ -3637,12 +3830,11 @@ feat(buffer): 新增AVFrame管理功能
 ### Q4: 如何选择合适的Worker类型？
 
 **A**:
-- **Raw视频文件**：
-  - 小文件（<1GB）：`MMAP_RAW`
-  - 大文件、高并发：`IOURING_RAW`
-- **编码视频文件**：`FFMPEG_VIDEO_FILE`
-- **RTSP流**：`FFMPEG_RTSP`
+- **编码视频文件**：`FFMPEG_VIDEO_FILE`（支持 H.264/H.265 等，自动检测格式）
+- **RTSP 流（解码）**：`FFMPEG_RTSP`（实时解码 RTSP 流）
+- **RTSP 流（录制）**：`FFMPEG_RECORD_RTSP`（录制 RTSP 流）
 - **自动选择**：`AUTO`（工厂会自动检测最优类型）
+- ~~**Raw 视频文件**~~：_（`MMAP_RAW` 和 `IOURING_RAW` 未实现）_
 
 ### Q5: 多线程生产时如何保证线程安全？
 

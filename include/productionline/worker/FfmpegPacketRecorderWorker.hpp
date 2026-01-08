@@ -1,18 +1,25 @@
 #pragma once
 
 #include "productionline/worker/WorkerBase.hpp"
+#include "productionline/worker/IPacketSource.hpp"
 #include <string>
 #include <atomic>
 #include <mutex>
+#include <memory>
 
 // Forward declarations
-struct AVFormatContext;
 struct AVPacket;
 
 /**
- * @brief RTSP原始码流录制Worker
+ * @brief FFmpeg Packet 录制器 Worker（支持多种数据源）
  * 
- * 功能：从RTSP流读取原始编码数据（AVPacket），不解码，填充到Buffer中
+ * 功能：从多种数据源读取原始编码数据（AVPacket），不解码，填充到Buffer中
+ * 
+ * 支持的数据源：
+ * - RTSP/RTSPS 流：`rtsp://...` 或 `rtsps://...`
+ * - 本地文件：`/path/to/video.mp4`、`.h264`、`.h265` 等
+ * - HTTP/HTTPS 流：`http://...` 或 `https://...`（如 HLS）
+ * - 未来可扩展：RTMP、其他网络协议
  * 
  * 使用场景：
  * - 配合 VideoProductionLine 作为生产者
@@ -20,10 +27,16 @@ struct AVPacket;
  * - 用于对比测试（相同码流，不同解码器）
  * 
  * @example
- * // 创建 Worker
- * auto config = WorkerConfigBuilder()
- *     .setFileConfig(FileConfigBuilder().setFilePath("rtsp://...").build())
- *     .setWorkerType(WorkerType::FFMPEG_RTSP_RECORD)
+ * // RTSP 流
+ * auto config1 = WorkerConfigBuilder()
+ *     .setDataSourceConfig(DataSourceConfigBuilder().setPath("rtsp://192.168.1.100/stream").build())
+ *     .setWorkerType(WorkerType::FFMPEG_PACKET_RECORDER)
+ *     .build();
+ * 
+ * // 本地文件
+ * auto config2 = WorkerConfigBuilder()
+ *     .setDataSourceConfig(DataSourceConfigBuilder().setPath("/data/video.mp4").build())
+ *     .setWorkerType(WorkerType::FFMPEG_PACKET_RECORDER)
  *     .build();
  * 
  * // 在 ProductionLine 中运行
@@ -37,15 +50,15 @@ struct AVPacket;
  *     pool->releaseFilled(buffer);
  * }
  */
-class FfmpegRecordRtspWorker : public WorkerBase {
+class FfmpegPacketRecorderWorker : public WorkerBase {
 public:
-    FfmpegRecordRtspWorker();
-    explicit FfmpegRecordRtspWorker(const WorkerConfig& config);
-    virtual ~FfmpegRecordRtspWorker() override;
+    FfmpegPacketRecorderWorker();
+    explicit FfmpegPacketRecorderWorker(const WorkerConfig& config);
+    virtual ~FfmpegPacketRecorderWorker() override;
     
     // ============ IVideoReader 接口实现 ============
+    virtual bool open() override;
     virtual bool open(const char* path) override;
-    virtual bool open(const char* path, int width, int height, int bits_per_pixel) override;
     virtual void close() override;
     virtual bool isOpen() const override;
     
@@ -61,7 +74,7 @@ public:
     
     virtual int getWidth() const override;
     virtual int getHeight() const override;
-    virtual int getBytesPerPixel() const override;
+    virtual double getBytesPerPixel() const override;
     virtual const char* getPath() const override;
     
     virtual bool hasMoreFrames() const override;
@@ -74,13 +87,13 @@ public:
      * @brief 获取 Worker 类型名称
      */
     const char* getWorkerType() const override {
-        return "FfmpegRecordRtspWorker";
+        return "FfmpegPacketRecorderWorker";
     }
     
     /**
      * @brief 获取主要 BufferPool 类型
      * 
-     * RTSP 录制 Worker 的主要输出是编码后的 packet 数据
+     * Packet 录制 Worker 的主要输出是编码后的 packet 数据
      */
     BufferPoolType getPrimaryBufferPoolType() const override {
         return BufferPoolType::PACKET_VIDEO;
@@ -99,25 +112,22 @@ public:
     struct AVRational getTimeBase() const;
 
 private:
-    bool openMediaSource();
-    void closeMediaSource();
-    bool findVideoStream();
-    
     std::string getLastError() const;
     void setError(const std::string& error, int ffmpeg_error = 0);
+    
+    /**
+     * @brief 根据路径自动创建合适的数据源
+     * @param path 数据源路径（RTSP URL、文件路径等）
+     * @return 数据源指针，失败返回 nullptr
+     */
+    std::unique_ptr<IPacketSource> createPacketSource(const std::string& path);
 
 private:
-    // FFmpeg 上下文
-    AVFormatContext* format_ctx_ptr_;
-    int video_stream_index_;
-    
-    // RTSP 配置
-    std::string rtsp_url_;
+    // ============ v2.13 数据源抽象（支持自动选择） ============
+    std::unique_ptr<IPacketSource> packet_source_;  // 数据源（RTSP/文件/Buffer）
     
     // 状态
     std::atomic<bool> is_open_;
-    std::atomic<bool> connected_;
-    std::atomic<bool> eof_reached_;
     std::atomic<int> packet_count_;
     
     // 错误信息
@@ -127,4 +137,3 @@ private:
     // 互斥锁
     mutable std::recursive_mutex mutex_;
 };
-

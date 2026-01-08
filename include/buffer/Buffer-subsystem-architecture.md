@@ -3892,7 +3892,11 @@ enum class BufferPoolType {
 
 **旧代码（v2.0）：**
 ```cpp
-bool FfmpegDecodeVideoFileWorker::open(const char* path, int w, int h, int bpp) {
+bool FfmpegDecodeVideoFileWorker::open(const char* path) {
+    // ✅ v2.13：从 worker_config_ 读取参数
+    int w = worker_config_.display.width;
+    int h = worker_config_.display.height;
+    int bpp = worker_config_.display.bits_per_pixel;
     // ... 创建 BufferPool ...
     uint64_t pool_id = allocator_facade_.allocatePoolWithBuffers(...);
     
@@ -3910,7 +3914,11 @@ void FfmpegDecodeVideoFileWorker::close() {
 
 **新代码（v2.3）：**
 ```cpp
-bool FfmpegDecodeVideoFileWorker::open(const char* path, int w, int h, int bpp) {
+bool FfmpegDecodeVideoFileWorker::open(const char* path) {
+    // ✅ v2.13：从 worker_config_ 读取参数
+    int w = worker_config_.display.width;
+    int h = worker_config_.display.height;
+    int bpp = worker_config_.display.bits_per_pixel;
     // ... 创建 BufferPool ...
     uint64_t pool_id = allocator_facade_.allocatePoolWithBuffers(...);
     

@@ -8,12 +8,13 @@ libcomponents_la_SOURCES = \
     source/display/LinuxFramebufferDevice.cpp \
     source/productionline/worker/WorkerBase.cpp \
     source/productionline/worker/BufferFillingWorkerFacade.cpp \
-    source/productionline/worker/MmapRawVideoFileWorker.cpp \
     source/productionline/worker/BufferFillingWorkerFactory.cpp \
     source/productionline/worker/FfmpegDecodeRtspWorker.cpp \
-    source/productionline/worker/FfmpegRecordRtspWorker.cpp \
+    source/productionline/worker/FfmpegPacketRecorderWorker.cpp \
     source/productionline/worker/FfmpegDecodeVideoFileWorker.cpp \
-    source/productionline/worker/IoUringRawVideoFileWorker.cpp \
+    source/productionline/worker/FilePacketSource.cpp \
+    source/productionline/worker/BufferPacketSource.cpp \
+    source/productionline/worker/RtspPacketSource.cpp \
     source/monitor/PerformanceMonitor.cpp \
     source/common/Timer.cpp \
     source/buffer/bufferpool/Buffer.cpp \
@@ -26,7 +27,9 @@ libcomponents_la_SOURCES = \
     source/buffer/bufferpool/BufferPool.cpp \
     source/buffer/bufferpool/BufferPoolRegistry.cpp \
     source/productionline/VideoProductionLine.cpp \
-    source/productionline/io/BufferWriter.cpp
+    source/productionline/MultiWorkerProductionLine.cpp \
+    source/productionline/io/BufferWriter.cpp \
+    source/productionline/io/BufferComparator.cpp
 
 # ========== 测试程序（每个只包含自己的主文件）==========
 bin_PROGRAMS = display_test

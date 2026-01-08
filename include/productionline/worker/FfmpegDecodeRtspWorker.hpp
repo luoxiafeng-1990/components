@@ -2,6 +2,7 @@
 #define FFMPEG_DECODE_RTSP_WORKER_HPP
 
 #include "productionline/worker/WorkerBase.hpp"
+#include "productionline/worker/IPacketSource.hpp"
 #include "buffer/bufferpool/Buffer.hpp"
 #include "buffer/bufferpool/BufferPool.hpp"
 #include <string>
@@ -13,12 +14,10 @@
 #include <memory>
 
 // FFmpeg 前向声明
-struct AVFormatContext;
 struct AVCodecContext;
 struct AVCodecParameters;
 struct AVPacket;
 struct AVFrame;
-struct SwsContext;
 
 // 前向声明 BufferPool（避免循环依赖）
 class BufferPool;
@@ -70,8 +69,13 @@ class FfmpegDecodeRtspWorker : public WorkerBase {
 public:
     // ============ 构造/析构 ============
     
-    FfmpegDecodeRtspWorker();
-    FfmpegDecodeRtspWorker(const WorkerConfig& config);  // v2.2: 配置构造函数
+    /**
+     * @brief 构造函数（必须提供配置）
+     * @param config Worker配置（包含解码器配置、RTSP配置等）
+     * 
+     * 注意：不再提供默认构造函数，所有 Worker 必须通过配置创建
+     */
+    explicit FfmpegDecodeRtspWorker(const WorkerConfig& config);
     virtual ~FfmpegDecodeRtspWorker();
     
     // 禁止拷贝
@@ -87,8 +91,30 @@ public:
     }
     
     // 文件导航功能（继承自IVideoFileNavigator）
+    /**
+     * @brief 打开 RTSP 流（无参版本，从 worker_config_ 读取所有参数）
+     * 
+     * v2.13 架构：Worker 从 worker_config_ 读取所有配置参数
+     * 包括：
+     * - worker_config_.data_source.path（RTSP URL）
+     * - worker_config_.display.width/height/bits_per_pixel
+     * - worker_config_.decoder.name（解码器名称）
+     * - worker_config_.decoder.taco（TACO 配置）
+     * 
+     * @return 成功返回 true
+     */
+    bool open() override;
+    
+    /**
+     * @brief 打开 RTSP 流（单参数版本）
+     * 
+     * ❌ RTSP 流不支持此方法，因为必须指定输出分辨率和格式
+     * 请使用无参的 open()，并在 WorkerConfig 中配置参数
+     * 
+     * @return false（不支持）
+     */
     bool open(const char* path) override;
-    bool open(const char* path, int width, int height, int bits_per_pixel) override;
+    
     void close() override;
     bool isOpen() const override;
     bool seek(int frame_index) override;
@@ -101,7 +127,7 @@ public:
     long getFileSize() const override;
     int getWidth() const override;
     int getHeight() const override;
-    int getBytesPerPixel() const override;
+    double getBytesPerPixel() const override;
     const char* getPath() const override;
     bool hasMoreFrames() const override;
     bool isAtEnd() const override;
@@ -121,7 +147,7 @@ public:
     /**
      * 获取连接状态
      */
-    bool isConnected() const { return connected_.load(); }
+    bool isConnected() const;
     
     /**
      * 获取最后错误信息
@@ -134,21 +160,18 @@ public:
     void printStats() const;
 
 private:
-    // ============ FFmpeg 资源 ============
-    AVFormatContext* format_ctx_ptr_;
-    AVCodecContext* codec_ctx_ptr_;
-    SwsContext* sws_ctx_ptr_;              // 图像格式转换
-    int video_stream_index_;
+    // ============ 数据源抽象（v2.12新增）============
+    std::unique_ptr<IPacketSource> packet_source_;  // 数据源抽象（RTSP流）
     
-    // ============ RTSP 连接信息 ============
-    std::string rtsp_url_;            // RTSP URL（使用 std::string 更安全）
-    int width_;                        // 输出宽度
-    int height_;                       // 输出高度
-    int output_pixel_format_;          // 输出像素格式（如AV_PIX_FMT_BGRA）
-    int output_bpp_;                   // 输出每像素位数
+    // ============ FFmpeg 资源 ============
+    AVCodecContext* codec_ctx_ptr_;
+    
+    // ============ 输出参数（运行时状态）============
+    int output_width_;                 // 输出宽度（运行时状态，可能与config不同）
+    int output_height_;                // 输出高度（运行时状态，可能与config不同）
     
     // ============ 解码器配置（v2.2新增）============
-    bool use_hardware_decoder_;        // 是否使用硬件解码
+    bool use_hardware_decoder_;        // 是否使用硬件解码器（从WorkerConfig获取）
     std::string decoder_name_;         // 指定解码器名称（如 "h264_taco"），空字符串表示自动选择
     struct AVDictionary* codec_options_ptr_;  // 解码器选项（用于 h264_taco 配置）
     
@@ -156,39 +179,19 @@ private:
     std::atomic<int> decoded_frames_;
     std::atomic<int> dropped_frames_;
     
-    // ============ 状态 ============
-    std::atomic<bool> connected_;
-    bool is_open_;
-    std::atomic<bool> eof_reached_;    // 流结束标志
-    
     // ============ 线程安全 ============
     mutable std::recursive_mutex mutex_;  // 使用递归锁避免死锁
     
     // ============ 错误处理 ============
     std::string last_error_;
-    mutable std::mutex error_mutex_;
     
     // ============ 内部辅助方法 ============
     
     /**
-     * 打开媒体源（RTSP 流）
-     */
-    bool openMediaSource();
-    
-    /**
-     * 关闭媒体源并释放资源
-     */
-    void closeMediaSource();
-    
-    /**
-     * 查找视频流
-     */
-    bool findVideoStream();
-    
-    /**
      * 初始化解码器（支持硬件解码和配置）
+     * @param codec_params 编解码器参数（从 packet_source_ 获取）
      */
-    bool initializeDecoder();
+    bool initializeDecoder(const AVCodecParameters* codec_params);
     
     /**
      * 配置特殊解码器（如 h264_taco）
@@ -200,6 +203,24 @@ private:
      * 设置错误信息
      */
     void setError(const std::string& error, int ffmpeg_error = 0);
+    
+    /**
+     * @brief 从 AVFrame 中提取硬件解码器的物理内存地址（重写基类虚函数）
+     * 
+     * 职责：从 AVFrame 中提取硬件解码器的物理内存地址
+     * 
+     * 设计原则：
+     * - 此函数只在使用硬件解码器时调用（decoder_name_ 非空）
+     * - 不同硬件解码器有不同的提取方式
+     * - 提取失败返回 false，调用者会报错并终止解码
+     * 
+     * @param frame AVFrame 指针（需要包含 libavcodec/avcodec.h）
+     * @param buffer Buffer 指针（用于存储提取的物理地址）
+     * @return true 成功提取物理地址，false 提取失败或不支持
+     * 
+     * @note 与 FfmpegDecodeVideoFileWorker 保持一致的架构
+     */
+    virtual bool extractHardwareAddressFromMetadata(struct AVFrame* frame, Buffer* buffer) override;
 };
 
 #endif // FFMPEG_DECODE_RTSP_WORKER_HPP

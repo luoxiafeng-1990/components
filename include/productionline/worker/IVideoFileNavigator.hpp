@@ -31,25 +31,26 @@ public:
     // ============ 文件打开/关闭操作 ============
     
     /**
-     * 打开编码视频文件（自动检测格式）
-     * @param path 文件路径
-     * @return 成功返回true
-     */
-    virtual bool open(const char* path) = 0;
-    
-    /**
-     * 打开视频文件（统一智能接口）
-     * @param path 文件路径
-     * @param width 视频宽度（可选，用于raw视频）
-     * @param height 视频高度（可选，用于raw视频）
-     * @param bits_per_pixel 每像素位数（可选，用于raw视频）
+     * 打开视频文件（从 WorkerConfig 读取所有参数）
      * @return 成功返回true
      * 
-     * @note 实现类应根据Worker类型自动判断：
-     *       - 编码视频Worker（FFMPEG_VIDEO_FILE, FFMPEG_RTSP）：忽略 width/height/bpp，自动检测格式
-     *       - Raw视频Worker（MMAP_RAW, IOURING_RAW）：使用传入的 width/height/bpp 参数
+     * @note v2.13设计：
+     *       - Worker 从自己的 worker_config_ 读取所有参数（路径、分辨率等）
+     *       - 符合单一数据源原则
+     *       - 子类可以选择性地支持 open(path) 作为快捷方式
      */
-    virtual bool open(const char* path, int width, int height, int bits_per_pixel) = 0;
+    virtual bool open() = 0;
+    
+    /**
+     * 打开视频文件（指定路径，可选）
+     * @param path 文件路径（可以覆盖 config 中的路径）
+     * @return 成功返回true
+     * 
+     * @note 这是一个便捷方法，用于快速打开指定文件
+     *       - 对于 VideoFileWorker，可以覆盖 config 中的路径
+     *       - 对于 RtspWorker，需要完整配置，不支持单路径 open
+     */
+    virtual bool open(const char* path) = 0;
     
     /**
      * 关闭视频文件
@@ -121,8 +122,9 @@ public:
     
     /**
      * 获取每像素字节数
+     * @return 每像素字节数（浮点数，支持如NV12的1.5字节/像素）
      */
-    virtual int getBytesPerPixel() const = 0;
+    virtual double getBytesPerPixel() const = 0;
     
     /**
      * 获取文件路径
