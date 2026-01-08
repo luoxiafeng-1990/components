@@ -213,6 +213,10 @@ private:
     AVRational time_base_;                // 时间基
     int64_t last_dts_;                    // 上一个包的DTS（用于确保单调递增）
     
+    // ⭐ v2.15：时间戳重置支持（解决 RTSP 流时间戳不从 0 开始的问题）
+    int64_t first_pts_;                   // 第一个包的原始 PTS（用于时间戳重置）
+    int64_t first_dts_;                   // 第一个包的原始 DTS（用于时间戳重置）
+    
     // 对象ID（用于日志区分）
     uint64_t writer_id_;
     static std::atomic<uint64_t> next_id_;

@@ -28,6 +28,8 @@ BufferWriter::BufferWriter()
     , packet_count_(0)
     , time_base_({1, 25})
     , last_dts_(AV_NOPTS_VALUE)
+    , first_pts_(AV_NOPTS_VALUE)
+    , first_dts_(AV_NOPTS_VALUE)
     , writer_id_(++next_id_)
     , log_prefix_("[BufferWriter::" + std::to_string(writer_id_) + "]")
 {
@@ -759,6 +761,10 @@ bool BufferWriter::saveEncoded(const char* path, const AVCodecParameters* codec_
     write_count_.store(0);
     last_dts_ = AV_NOPTS_VALUE;  // 重置上一个DTS
     
+    // ⭐ v2.15: 重置时间戳偏移量（用于处理 RTSP 流从非零时间戳开始的情况）
+    first_pts_ = AV_NOPTS_VALUE;
+    first_dts_ = AV_NOPTS_VALUE;
+    
     // 11. 打印成功信息
     LOG_INFO("");
     LOG_INFO_FMT("[BufferWriter] Opened (encoded mode): %s", path);
@@ -809,29 +815,29 @@ bool BufferWriter::writeEncoded(const Buffer* buffer) {
     // 5.1 转换时间基
     av_packet_rescale_ts(&pkt, time_base_, out_stream->time_base);
     
-    // 5.2 检查并修正无效或重复的时间戳
-    if (pkt.dts == AV_NOPTS_VALUE || (last_dts_ != AV_NOPTS_VALUE && pkt.dts <= last_dts_)) {
-        // DTS 无效或不单调递增，使用生成的时间戳（基于帧率）
-        // 假设平均每帧的duration（根据输出流的时间基）
-        int64_t frame_duration = av_rescale_q(1, av_inv_q(out_stream->avg_frame_rate), out_stream->time_base);
-        if (frame_duration <= 0) {
-            frame_duration = av_rescale_q(1, (AVRational){1, 25}, out_stream->time_base); // 默认25fps
-        }
-        
-        if (last_dts_ == AV_NOPTS_VALUE) {
-            pkt.dts = 0;  // 第一个包从0开始
-        } else {
-            pkt.dts = last_dts_ + frame_duration;  // 在上一个DTS基础上增加一帧
-        }
-        
-        LOG_DEBUG_FMT("[BufferWriter] Corrected DTS: %lld (packet #%lld, last_dts=%lld)", 
-                     (long long)pkt.dts, (long long)packet_count_, (long long)last_dts_);
+    // 5.2 ⭐⭐ v2.16: 生成单调递增的时间戳（替代源时间戳）
+    //     解决 RTSP 流时间戳不连续/混乱的问题
+    //     策略：完全忽略源时间戳，基于帧率生成新的时间戳序列
+    //     - 假设恒定帧率（从输出流的 avg_frame_rate 获取）
+    //     - 时间戳从 0 开始，每帧递增固定 duration
+    
+    // 计算每帧的 duration（基于输出流的时间基）
+    int64_t frame_duration = av_rescale_q(1, av_inv_q(out_stream->avg_frame_rate), out_stream->time_base);
+    if (frame_duration <= 0) {
+        frame_duration = av_rescale_q(1, (AVRational){1, 25}, out_stream->time_base); // 默认25fps
     }
     
-    if (pkt.pts == AV_NOPTS_VALUE || pkt.pts < pkt.dts) {
-        // PTS 无效或小于 DTS，设置为等于 DTS
-        pkt.pts = pkt.dts;
+    // 生成新的时间戳
+    pkt.dts = packet_count_ * frame_duration;
+    pkt.pts = pkt.dts;  // 假设无 B 帧，PTS = DTS
+    
+    // ⭐ 调试：打印前几个包的时间戳
+    if (packet_count_ < 3) {
+        LOG_DEBUG_FMT("[BufferWriter] Packet #%lld: Generated DTS=%lld, PTS=%lld (frame_duration=%lld)",
+                     (long long)packet_count_, (long long)pkt.dts, (long long)pkt.pts, (long long)frame_duration);
     }
+    
+    // ⭐ v2.16: 时间戳已由上面的代码生成，无需额外检查
     
     // 更新 last_dts_
     last_dts_ = pkt.dts;

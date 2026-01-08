@@ -37,6 +37,7 @@
 #include "productionline/io/BufferWriter.hpp"
 #include "productionline/io/BufferComparator.hpp"
 #include "monitor/PerformanceMonitor.hpp"
+#include "monitor/Timer.hpp"
 #include "common/Logger.hpp"
 #include "framework/TestMacros.hpp"
 
@@ -305,6 +306,10 @@ static int test_rtsp_record_stream(const char* rtsp_url) {
     
     const int duration_seconds = 10;
     
+    // ⭐ 创建定时器用于控制录制时长
+    Timer recording_timer;
+    recording_timer.start();
+    
     // 1. 创建 VideoProductionLine（生产者）
     LOG_INFO("[Step 1] Creating VideoProductionLine...");
     VideoProductionLine producer(false, 1, false);
@@ -378,6 +383,17 @@ static int test_rtsp_record_stream(const char* rtsp_url) {
     LOG_INFO("\n[Step 6] Recording to MP4...");
     LOG_INFO("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
     
+    // ⭐ 设置录制时长定时器
+    auto timer_id = recording_timer.scheduleOnce(
+        duration_seconds * 1000,  // 毫秒
+        []() {
+            g_running = false;  // 时间到，停止录制
+            LOG_INFO("\n  ⏱️  Recording duration reached, stopping...");
+        }
+    );
+    
+    LOG_INFO_FMT("  Recording for %d seconds (timer-controlled)...\n", duration_seconds);
+    
     auto start_time = std::chrono::steady_clock::now();
     int packet_count = 0;
     int64_t total_bytes = 0;
@@ -388,14 +404,6 @@ static int test_rtsp_record_stream(const char* rtsp_url) {
         // 检查中断标志
         if (g_rtsp_interrupted.load()) {
             LOG_INFO("\n  ⚠️  检测到中断请求，停止录制...");
-            break;
-        }
-        
-        // 检查时长
-        auto now = std::chrono::steady_clock::now();
-        int elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - start_time).count();
-        if (elapsed >= duration_seconds) {
-            LOG_INFO_FMT("\n  ⏱️  Reached duration limit: %d seconds", duration_seconds);
             break;
         }
         
@@ -411,6 +419,9 @@ static int test_rtsp_record_stream(const char* rtsp_url) {
                     total_bytes += used_size;
                     
                     if (packet_count % 50 == 0) {
+                        // 计算已录制时长
+                        auto now = std::chrono::steady_clock::now();
+                        int elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - start_time).count();
                         double rate_mbps = elapsed > 0 ? (total_bytes * 8.0) / (elapsed * 1000000.0) : 0.0;
                         LOG_INFO_FMT("  Recorded %d packets | %d seconds | %.2f Mbps",
                                      packet_count, elapsed, rate_mbps);
@@ -433,7 +444,12 @@ static int test_rtsp_record_stream(const char* rtsp_url) {
     
     LOG_INFO("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
     
-    // 8. 清理（BufferWriter会自动写入MP4 trailer）
+    // 8. 清理
+    // ⭐ 停止定时器
+    recording_timer.cancel(timer_id);
+    recording_timer.stop();
+    
+    // BufferWriter会自动写入MP4 trailer
     writer.close();
     producer.stop();
     
@@ -2401,6 +2417,10 @@ static int test_rtsp_record_all_formats(const char* rtsp_url) {
     
     LOG_INFO_FMT("RTSP URL: %s\n", rtsp_url);
     
+    // ⭐ 创建定时器（每次格式测试时会重新设置）
+    Timer recording_timer;
+    recording_timer.start();
+    
     // 1. 创建输出目录
     const char* output_dir = "./test_output_videos";
     LOG_INFO_FMT("[Step 1] Creating output directory: %s", output_dir);
@@ -2440,7 +2460,7 @@ static int test_rtsp_record_all_formats(const char* rtsp_url) {
     };
     
     const int num_formats = sizeof(formats) / sizeof(formats[0]);
-    const int duration_seconds = 10;  // 每种格式录制 10 秒
+    const int duration_seconds = 30;  // 每种格式录制 10 秒
     
     LOG_INFO_FMT("[Step 2] Testing %d container formats (%d seconds each)...\n", 
                  num_formats, duration_seconds);
@@ -2502,7 +2522,7 @@ static int test_rtsp_record_all_formats(const char* rtsp_url) {
             continue;
         }
         
-        // 获取 Worker 的编解码器参数
+        // 获取 Worker 的编解码器参数（v2.14: 通过门面类直接获取）
         auto worker_facade_sptr = producer.getWorkerFacade();
         if (!worker_facade_sptr) {
             LOG_ERROR_FMT("  ❌ Failed to get worker facade");
@@ -2511,31 +2531,16 @@ static int test_rtsp_record_all_formats(const char* rtsp_url) {
             continue;
         }
         
-        WorkerBase* worker_base = worker_facade_sptr->getWorkerBase();
-        if (!worker_base) {
-            LOG_ERROR_FMT("  ❌ Failed to get worker base");
-            producer.stop();
-            failed_count++;
-            continue;
-        }
-        
-        FfmpegPacketRecorderWorker* recorder_worker = dynamic_cast<FfmpegPacketRecorderWorker*>(worker_base);
-        if (!recorder_worker) {
-            LOG_ERROR_FMT("  ❌ Worker is not FfmpegPacketRecorderWorker type");
-            producer.stop();
-            failed_count++;
-            continue;
-        }
-        
-        const AVCodecParameters* codec_params = recorder_worker->getCodecParameters();
-        AVRational time_base = recorder_worker->getTimeBase();
-        
+        // ⭐ 直接从门面类获取编解码器参数和时间基
+        const AVCodecParameters* codec_params = worker_facade_sptr->getCodecParameters();
         if (!codec_params) {
-            LOG_ERROR_FMT("  ❌ Failed to get codec parameters");
+            LOG_ERROR_FMT("  ❌ Failed to get codec parameters from worker");
             producer.stop();
             failed_count++;
             continue;
         }
+        
+        AVRational time_base = worker_facade_sptr->getTimeBase();
         
         // 打开 BufferWriter
         BufferWriter writer;
@@ -2547,7 +2552,16 @@ static int test_rtsp_record_all_formats(const char* rtsp_url) {
         }
         
         // 录制循环（10秒）
-        auto start_time = std::chrono::steady_clock::now();
+        // ⭐ 设置录制时长定时器
+        auto timer_id = recording_timer.scheduleOnce(
+            duration_seconds * 1000,  // 毫秒
+            [&producer]() {  // 捕获 producer 引用
+                g_running = false;  // 时间到，停止录制
+                producer.stop();
+                LOG_INFO("\n  ⏱️  Recording duration reached, stopping...");
+            }
+        );
+        
         int packet_count = 0;
         int timeout_count = 0;
         const int MAX_TIMEOUT = 50;
@@ -2555,13 +2569,6 @@ static int test_rtsp_record_all_formats(const char* rtsp_url) {
         while (g_running) {
             // 检查中断
             if (g_rtsp_interrupted.load()) {
-                break;
-            }
-            
-            // 检查时长
-            auto now = std::chrono::steady_clock::now();
-            int elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - start_time).count();
-            if (elapsed >= duration_seconds) {
                 break;
             }
             
@@ -2583,8 +2590,10 @@ static int test_rtsp_record_all_formats(const char* rtsp_url) {
         }
         
         // 关闭
+        // ⭐ 停止定时器
+        recording_timer.cancel(timer_id);
+        
         writer.close();
-        producer.stop();
         
         // 检查结果
         if (packet_count > 0) {
@@ -2649,6 +2658,9 @@ static int test_rtsp_record_all_formats(const char* rtsp_url) {
     LOG_INFO_FMT("   ls -lh %s/", output_dir);
     LOG_INFO_FMT("   ffprobe %s/test_output.mp4", output_dir);
     LOG_INFO("╚═══════════════════════════════════════════════════════╝\n");
+    
+    // ⭐ 停止定时器服务
+    recording_timer.stop();
     
     return (failed_count == 0) ? 0 : -1;
 }
