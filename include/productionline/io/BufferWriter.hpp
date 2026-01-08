@@ -53,8 +53,9 @@ namespace io {
  * 
  * 使用示例：
  * ```cpp
+ * // 保存原始 YUV 数据
  * BufferWriter writer;
- * writer.open("output.yuv", AV_PIX_FMT_NV12, 1920, 1080);
+ * writer.saveRaw("output.yuv", AV_PIX_FMT_NV12, 1920, 1080);
  * 
  * while (running) {
  *     Buffer* buffer = pool->acquireFilled(true, 100);
@@ -93,7 +94,10 @@ public:
     // ============ 核心接口 ============
     
     /**
-     * @brief 打开输出文件（图像模式）
+     * @brief 保存原始图像数据（裸数据模式）
+     * 
+     * 用途：将解码后的裸数据（YUV/RGB）保存到原始文件
+     * 输出格式：.yuv, .rgb 等原始文件
      * 
      * @param path 文件路径
      * @param format 像素格式（使用FFmpeg标准AVPixelFormat）
@@ -101,29 +105,59 @@ public:
      * @param height 图像高度
      * @return true 成功，false 失败
      * 
-     * @note 支持18种格式，详见类注释
+     * @note 支持21种格式，详见类注释
      * @note 如果文件已打开，会先关闭再重新打开
+     * @note 后续调用 write() 追加帧数据，最后调用 close() 完成保存
+     * 
+     * @example
+     *   writer.saveRaw("output.yuv", AV_PIX_FMT_NV12, 1920, 1080);
+     *   for (auto buf : buffers) writer.write(buf);
+     *   writer.close();
      */
-    bool open(const char* path, 
-              AVPixelFormat format,
-              int width, 
-              int height);
+    bool saveRaw(const char* path, 
+                 AVPixelFormat format,
+                 int width, 
+                 int height);
     
     /**
-     * @brief 打开输出文件（编码流模式，保存为MP4等容器格式）
+     * @brief 保存编码流数据（容器格式模式）
      * 
-     * @param path 文件路径（如 "/tmp/output.mp4"）
+     * 用途：将编码后的压缩数据（H.264/H.265）封装到容器文件（remux）
+     * 输出格式：.mp4, .mkv, .avi 等容器文件
+     * 
+     * 支持的容器格式（H.264/H.265 编码，共7种）：
+     * 
+     *   Phase 1 - 主流格式（3种）：
+     *     - MP4  (.mp4)  - MPEG-4 Part 14
+     *     - MKV  (.mkv)  - Matroska
+     *     - MOV  (.mov)  - QuickTime
+     * 
+     *   Phase 2 - 流媒体格式（2种）：
+     *     - TS   (.ts)   - MPEG Transport Stream
+     *     - FLV  (.flv)  - Flash Video
+     * 
+     *   Phase 3 - 特殊格式（2种）：
+     *     - AVI  (.avi)  - Audio Video Interleave
+     *     - 3GP  (.3gp)  - 3GPP
+     * 
+     * @param path 文件路径（如 "/tmp/output.mp4"，扩展名决定容器格式）
      * @param codec_params 编解码器参数（从Worker获取）
      * @param time_base 时间基（从Worker获取，用于时间戳转换）
      * @return true 成功，false 失败
      * 
-     * @note 支持MP4、MKV等容器格式（通过文件扩展名自动识别）
      * @note 使用remux方式，不进行转码，性能高效
+     * @note 容器格式必须支持源流的编码格式（如H.264/H.265）
      * @note 使用真实的时间戳（从AVPacket获取）
+     * @note 后续调用 write() 追加编码包，最后调用 close() 完成保存
+     * 
+     * @example
+     *   writer.saveEncoded("output.mp4", codec_params, time_base);
+     *   while (recording) writer.write(packet_buffer);
+     *   writer.close();
      */
-    bool open(const char* path, 
-              const AVCodecParameters* codec_params,
-              const AVRational& time_base);
+    bool saveEncoded(const char* path, 
+                     const AVCodecParameters* codec_params,
+                     const AVRational& time_base);
     
     /**
      * @brief 写入Buffer

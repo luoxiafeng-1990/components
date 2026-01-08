@@ -209,16 +209,16 @@ int main(int argc, char* argv[]) {
     // 创建两个 BufferWriter
     BufferWriter hw_writer, sw_writer;
     
-    if (!hw_writer.open("/tmp/hw_decoder_output.yuv", hw_format, hw_width, hw_height)) {
-        LOG_ERROR("❌ 打开硬件解码器 BufferWriter 失败");
+    if (!hw_writer.saveRaw("/tmp/hw_decoder_output.yuv", hw_format, hw_width, hw_height)) {
+        LOG_ERROR("❌ 保存硬件解码器输出失败");
         hw_pool_sptr->releaseFilled(first_hw_buffer);
         sw_pool_sptr->releaseFilled(first_sw_buffer);
         multi_worker.stop();
         return -1;
     }
     
-    if (!sw_writer.open("/tmp/sw_decoder_output.yuv", sw_format, sw_width, sw_height)) {
-        LOG_ERROR("❌ 打开软件解码器 BufferWriter 失败");
+    if (!sw_writer.saveRaw("/tmp/sw_decoder_output.yuv", sw_format, sw_width, sw_height)) {
+        LOG_ERROR("❌ 保存软件解码器输出失败");
         hw_writer.close();
         hw_pool_sptr->releaseFilled(first_hw_buffer);
         sw_pool_sptr->releaseFilled(first_sw_buffer);

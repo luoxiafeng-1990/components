@@ -234,7 +234,7 @@ public:
      * AVRational time_base = worker_facade->getTimeBase();
      * 
      * BufferWriter writer;
-     * writer.open(output_file, codec_params, time_base);
+     * writer.saveEncoded(output_file, codec_params, time_base);
      * @endcode
      */
     const struct AVCodecParameters* getCodecParameters() const;

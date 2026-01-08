@@ -56,10 +56,10 @@ BufferWriter::~BufferWriter() {
 
 // ========== 核心接口实现 ==========
 
-bool BufferWriter::open(const char* path, 
-                        AVPixelFormat format,
-                        int width, 
-                        int height) {
+bool BufferWriter::saveRaw(const char* path, 
+                           AVPixelFormat format,
+                           int width, 
+                           int height) {
     // 1. 参数校验
     if (!path) {
         LOG_ERROR("[BufferWriter] Error: Invalid path (nullptr)");
@@ -639,7 +639,37 @@ const char* BufferWriter::getFormatName(AVPixelFormat format) {
 
 // ========== 编码流模式实现 ==========
 
-bool BufferWriter::open(const char* path, const AVCodecParameters* codec_params, const AVRational& time_base) {
+/**
+ * @brief 保存编码流数据（容器格式模式）
+ * 
+ * 用途：将编码后的压缩数据（H.264/H.265）封装到容器文件（remux）
+ * 
+ * 支持的容器格式（H.264/H.265 编码，共7种）：
+ * 
+ *   Phase 1 - 主流格式（3种）：
+ *     - MP4  (.mp4)  - MPEG-4 Part 14
+ *     - MKV  (.mkv)  - Matroska
+ *     - MOV  (.mov)  - QuickTime
+ * 
+ *   Phase 2 - 流媒体格式（2种）：
+ *     - TS   (.ts)   - MPEG Transport Stream
+ *     - FLV  (.flv)  - Flash Video
+ * 
+ *   Phase 3 - 特殊格式（2种）：
+ *     - AVI  (.avi)  - Audio Video Interleave
+ *     - 3GP  (.3gp)  - 3GPP
+ * 
+ * 注意：
+ *   - 此函数仅进行容器复用（remux），不进行转码（transcode）
+ *   - 容器格式必须支持源流的编码格式（如H.264/H.265）
+ *   - 不支持 WebM（需要VP8/VP9/AV1编码）和 OGG（需要Theora/VP8编码）
+ * 
+ * @param path 文件路径（扩展名决定容器格式）
+ * @param codec_params 编解码器参数
+ * @param time_base 时间基
+ * @return true 成功，false 失败
+ */
+bool BufferWriter::saveEncoded(const char* path, const AVCodecParameters* codec_params, const AVRational& time_base) {
     // 1. 参数校验
     if (!path || !codec_params) {
         LOG_ERROR("[BufferWriter] Error: Invalid parameters for encoded mode");
