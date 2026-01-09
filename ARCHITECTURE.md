@@ -19,7 +19,471 @@
 
 ## 版本历史
 
-### v2.13（当前版本）- 配置单一数据源与接口简化
+### v2.18（当前版本）- 输入源信息查询与动态适配
+**发布日期：** 2025-01
+
+**主要变更：**
+- ✅ **输入源信息查询接口**：`IPacketSource` 新增 `getSourceWidth()`、`getSourceHeight()`、`getSourcePixelFormat()` 方法
+  - 查询输入数据源（文件/流）的原始分辨率和像素格式
+  - 区别于解码器输出格式（可能经过缩放/格式转换）
+  - 所有 PacketSource 实现类（FilePacketSource、RtspPacketSource、BufferPacketSource）实现此接口
+  - WorkerBase 和 BufferFillingWorkerFacade 提供转发方法
+- ✅ **三级优先级动态适配机制**：自动适配输入源分辨率和格式
+  - Priority 1（最高）：`taco_config.chX_scale_width/height` - 用户显式配置
+  - Priority 2（次高）：`getSourceWidth/Height/PixelFormat()` - 输入源自动检测
+  - Priority 3（兜底）：`1920x1080 / AV_PIX_FMT_NV12` - 默认值
+- ✅ **测试代码优化**：移除硬编码分辨率，支持任意分辨率输入（720p/1080p/4K/8K）
+
+**设计原则：**
+- **信息透明**：输入源信息可直接查询，无需解析复杂结构
+- **配置优先**：用户显式配置优先级最高，保证可控性
+- **智能适配**：未配置时自动适配输入特性，提升易用性
+- **层次化设计**：三级优先级清晰，易于理解和维护
+
+**架构优势：**
+- **灵活性**：支持多种分辨率输入，无需硬编码
+- **易用性**：自动适配减少配置复杂度
+- **可控性**：显式配置优先，保证用户控制权
+- **可测试性**：便于测试不同分辨率/格式的视频
+
+**使用示例：**
+```cpp
+// 示例1：查询输入源信息
+auto worker = std::make_shared<BufferFillingWorkerFacade>(config);
+worker->open();
+
+int source_width = worker->getSourceWidth();       // 如 3840（4K视频）
+int source_height = worker->getSourceHeight();     // 如 2160
+AVPixelFormat source_fmt = worker->getSourcePixelFormat();  // 如 AV_PIX_FMT_YUV420P
+
+// 示例2：优先级自动适配（BufferWriter 创建场景）
+int output_width, output_height;
+AVPixelFormat output_format;
+
+// Priority 1: 显式配置优先
+if (taco_config.ch1_scale_width > 0) {
+    output_width = taco_config.ch1_scale_width;
+    output_height = taco_config.ch1_scale_height;
+}
+// Priority 2: 自动检测输入源
+else if (worker->getSourceWidth() > 0) {
+    output_width = worker->getSourceWidth();
+    output_height = worker->getSourceHeight();
+    output_format = worker->getSourcePixelFormat();
+}
+// Priority 3: 默认值兜底
+else {
+    output_width = 1920;
+    output_height = 1080;
+    output_format = AV_PIX_FMT_NV12;
+}
+
+// 示例3：测试不同分辨率视频无需修改代码
+// 输入720p视频 → 自动适配为720p输出
+// 输入4K视频 → 自动适配为4K输出
+// 显式设置 setCh1ScaleResolution(1920, 1080) → 强制1080p输出
+```
+
+**典型应用场景：**
+- **多分辨率测试**：测试同一套代码对不同分辨率视频的处理能力
+- **智能转码**：根据输入源自动确定输出参数
+- **向后兼容**：旧代码显式配置仍然有效
+
+---
+
+### v2.17 - TacoConfig 类型安全重构
+**发布日期：** 2025-01
+
+**主要变更：**
+- ✅ **字段类型改变**：`TacoConfig` 配置字段从字符串改为整型枚举
+  - 旧：`ch1_pixel_format = "argb888"`（字符串）→ 新：`ch1_rgb_format = 9`（整型）
+  - 旧：`ch1_std = "bt601"`（字符串）→ 新：`ch1_rgb_std = 1`（整型）
+  - YUV 格式（ch0）由解码器自动决定，无配置字段
+- ✅ **通道配置完善**：新增 ch0/ch1 的裁剪和缩放配置
+  - ch0（YUV通道）：`ch0_crop_x/y/width/height`、`ch0_scale_width/height`
+  - ch1（RGB通道）：`ch1_crop_x/y/width/height`、`ch1_scale_width/height`
+- ✅ **TacoConfigBuilder 增强**：新增通道专用配置方法
+  - `setCh0CropRegion()`、`setCh0ScaleResolution()` - 通道0配置
+  - `setCh1RgbConfig()`、`setCh1CropRegion()`、`setCh1ScaleResolution()` - 通道1配置
+- ✅ **向后兼容支持**：保留字符串接口，内部映射为整型
+  - `mapRgbFormatNameToInt()` - 支持15种RGB格式名映射
+  - `mapRgbStdNameToInt()` - 支持6种颜色标准映射
+- ✅ **Buffer 通道判断**：`Buffer` 新增 `getOutputChannel()` 方法，从 AVFrame metadata 读取通道号
+
+**设计原则：**
+- **类型安全**：编译时类型检查，避免字符串拼写错误
+- **性能优化**：整型比较替代字符串比较
+- **配置完整**：支持通道裁剪、缩放等完整功能
+- **向后兼容**：旧代码仍可使用字符串接口
+
+**架构优势：**
+- **编译时安全**：类型错误在编译期发现，而非运行时
+- **性能提升**：整型操作效率高于字符串操作
+- **配置清晰**：ch0/ch1 配置独立，职责明确
+- **易于维护**：枚举值集中管理，便于扩展
+
+**使用示例：**
+```cpp
+// ✅ v2.17 推荐方式：使用整型枚举
+auto taco_config = TacoConfigBuilder()
+    .setChannels(false, true)  // 启用ch1（RGB），禁用ch0
+    .setCh1RgbConfig(true, 9, 1)  // enable=true, format=9(argb888), std=1(bt601)
+    .setCh1ScaleResolution(1920, 1080)
+    .build();
+
+// ✅ v2.17 向后兼容方式：使用字符串（自动映射为整型）
+auto taco_config = TacoConfigBuilder()
+    .setRgbConfig(true, "argb888", "bt601")  // 内部映射为 (9, 1)
+    .setDecoderOutputResolution(1920, 1080)  // 映射为 setCh1ScaleResolution
+    .build();
+
+// ✅ 完整配置示例：ch0 + ch1 双通道
+auto taco_config = TacoConfigBuilder()
+    .setChannels(true, true)  // 同时启用ch0和ch1
+    .setCh0ScaleResolution(1920, 1080)  // ch0输出YUV 1080p
+    .setCh1RgbConfig(true, 9, 1)  // ch1输出ARGB888
+    .setCh1ScaleResolution(1920, 1080)
+    .build();
+
+// ✅ Buffer 通道判断
+int channel = buffer->getOutputChannel();  // 0=ch0(YUV), 1=ch1(RGB), -1=不支持
+if (channel == 0 && taco_config.ch0_enable) {
+    // 处理 YUV 输出
+} else if (channel == 1 && taco_config.ch1_enable) {
+    // 处理 RGB 输出
+}
+```
+
+**RGB 格式枚举映射表**（部分）：
+| 字符串名称 | 整型值 | 说明 |
+|-----------|-------|------|
+| `"rgb888"` | 1 | 24-bit RGB |
+| `"bgr888"` | 3 | 24-bit BGR |
+| `"argb888"` | 9 | 32-bit ARGB（默认） |
+| `"abgr888"` | 11 | 32-bit ABGR |
+| `"r16g16b16"` | 17 | 48-bit RGB |
+
+**颜色标准枚举映射表**：
+| 字符串名称 | 整型值 | 说明 |
+|-----------|-------|------|
+| `"bt601"` | 1 | BT.601（默认） |
+| `"bt709"` | 3 | BT.709（HD） |
+| `"bt2020"` | 5 | BT.2020（4K/8K） |
+
+---
+
+### v2.16 - BufferWriter 多格式支持与时间戳修复
+**发布日期：** 2025-01
+
+**主要变更：**
+- ✅ **多容器格式支持**：扩展 `BufferWriter::openEncoded()` 支持7种容器格式
+  - 支持格式：MP4, AVI, MKV, FLV, MOV, TS, MPEG
+  - H.264 remux：不重新编码，直接封装（高效）
+  - 自动格式推断：根据文件扩展名自动选择容器
+- ✅ **时间戳修复策略**："Retain + Supplement" 策略
+  - 保留原有修复：`AVFMT_AVOID_NEG_TS_MAKE_NON_NEGATIVE`（处理负时间戳）
+  - 补充新修复：记录第一帧的 PTS/DTS 偏移量，所有后续帧减去此偏移量
+  - 解决 RTSP 流时间戳从非零开始（如720秒）导致播放器显示异常时长的问题
+- ✅ **函数命名规范化**：`BufferWriter` 方法重命名
+  - `open()` → `openRaw()` - 打开原始数据流（raw格式）
+  - `open()` → `openEncoded()` - 打开编码数据流（容器格式）
+- ✅ **定时器录制控制**：使用 `PerformanceMonitor::Timer` 替代手动时间检查
+  - 优雅的定时停止机制
+  - 代码更简洁、更可维护
+- ✅ **Raw 格式测试增强**：完善原始格式保存测试
+  - 分类目录：`./test_output_raw/rgb/`, `./test_output_raw/yuv/`, `./test_output_raw/gray/`
+  - 文件命名规范：`ch0_nv12_1920x1080.raw`, `ch1_argb_3840x2160.raw`
+  - 格式验证：`BufferWriter::write()` 内部验证格式/分辨率匹配
+
+**设计原则：**
+- **格式通用性**：一套代码支持多种容器格式
+- **时间一致性**：修复时间戳异常，确保播放正确
+- **职责清晰**：函数命名明确表达操作类型（raw vs encoded）
+- **自动化**：自动格式推断，减少配置复杂度
+
+**架构优势：**
+- **兼容性强**：支持主流容器格式，满足不同场景需求
+- **播放正确**：时间戳修复确保播放器正确显示时长
+- **代码规范**：函数命名清晰，易于理解和维护
+- **测试完善**：覆盖 RGB/YUV/灰度等多种原始格式
+
+**使用示例：**
+```cpp
+// 示例1：保存编码流到多种容器格式
+BufferWriter writer_mp4, writer_avi, writer_mkv;
+
+// MP4 格式（最常用）
+writer_mp4.openEncoded("output.mp4", codec_params, time_base);
+
+// AVI 格式（兼容性好）
+writer_avi.openEncoded("output.avi", codec_params, time_base);
+
+// MKV 格式（开源免费）
+writer_mkv.openEncoded("output.mkv", codec_params, time_base);
+
+// 写入数据
+while (running) {
+    producer.waitForFilled(buffer, timeout);
+    writer_mp4.write(buffer);
+    writer_avi.write(buffer);
+    writer_mkv.write(buffer);
+    producer.releaseFilled(buffer);
+}
+
+// 示例2：使用 Timer 控制录制时长
+Timer recording_timer;
+recording_timer.start();
+
+auto timer_id = recording_timer.scheduleOnce(
+    30000,  // 30秒
+    []() {
+        g_running = false;
+        LOG_INFO("Recording duration reached, stopping...");
+    }
+);
+
+// ... 录制循环 ...
+
+recording_timer.cancel(timer_id);
+recording_timer.stop();
+
+// 示例3：保存原始数据（通道区分）
+BufferWriter ch0_writer, ch1_writer;
+
+// ch0: YUV 通道
+ch0_writer.openRaw("./test_output_raw/yuv/ch0_nv12_1920x1080.raw", 
+                   AV_PIX_FMT_NV12, 1920, 1080);
+
+// ch1: RGB 通道
+ch1_writer.openRaw("./test_output_raw/rgb/ch1_argb_1920x1080.raw", 
+                   AV_PIX_FMT_ARGB, 1920, 1080);
+
+// 写入时根据通道过滤
+int channel = buffer->getOutputChannel();
+if (channel == 0) ch0_writer.write(buffer);
+if (channel == 1) ch1_writer.write(buffer);
+```
+
+**时间戳修复原理**：
+```cpp
+// Retain: 保留原有修复（处理负时间戳）
+output_format_ctx_->avoid_negative_ts = AVFMT_AVOID_NEG_TS_MAKE_NON_NEGATIVE;
+
+// Supplement: 补充新修复（处理非零起始时间戳）
+if (first_pts_offset_ == AV_NOPTS_VALUE) {
+    first_pts_offset_ = packet->pts;  // 记录第一帧偏移量
+    first_dts_offset_ = packet->dts;
+}
+packet->pts -= first_pts_offset_;  // 减去偏移量，确保从0开始
+packet->dts -= first_dts_offset_;
+```
+
+**支持的容器格式列表**：
+| 格式 | 扩展名 | 特点 | 适用场景 |
+|------|-------|------|---------|
+| MP4 | `.mp4` | 兼容性最好 | 通用场景、网络传输 |
+| AVI | `.avi` | Windows原生支持 | Windows环境 |
+| MKV | `.mkv` | 开源、功能强大 | 高级用户、存档 |
+| FLV | `.flv` | 流媒体友好 | 直播、点播 |
+| MOV | `.mov` | macOS原生支持 | macOS环境 |
+| TS | `.ts` | 流式传输 | IPTV、HLS |
+| MPEG | `.mpeg` | 标准格式 | 广播、DVD |
+
+---
+
+### v2.15 - MultiWorkerProductionLine WorkerGroup 多组并行架构
+**发布日期：** 2025-01
+
+**主要变更：**
+- ✅ **WorkerGroup 概念**：引入"工作组"概念，支持多组独立并行
+  - 每组包含：1个生产者（Producer）+ N个消费者（Consumers）
+  - 配置结构：`WorkerGroup { group_id, producer_config, consumer_configs, sync_timeout_ms, ... }`
+- ✅ **组间并行架构**：每个 WorkerGroup 运行在独立线程中
+  - 组线程函数：`groupThreadFunc(WorkerGroupRuntime* group)`
+  - 组间完全独立，互不干扰
+  - 共享线程池：所有组共享 `BS::thread_pool` 执行消费者任务
+- ✅ **组内强同步机制**：使用 `CountDownLatch` 确保同步
+  - 一个 buffer 必须被组内所有消费者处理完成后才释放
+  - 避免 buffer 提前释放或内存泄漏
+  - 生产者 buffer 生命周期严格控制
+- ✅ **零拷贝直连**：消费者直接关联生产者的 BufferPool
+  - 消费者自动配置：`datasource_buffer_mode = true`
+  - 直接调用：`consumer->setSourceBufferPool(producer_buffer_pool_weak)`
+  - 避免中间拷贝，真正的零拷贝数据流
+- ✅ **配置驱动型设计**：灵活的配置系统
+  - 支持多组配置：`MultiWorkerConfig.groups = { group1, group2, ... }`
+  - 每组独立配置：超时时间、错误容忍、错误处理策略
+  - JSON/代码配置均可
+
+**设计原则：**
+- **组间独立**：每组独立线程，互不干扰
+- **组内同步**：强同步保证 buffer 生命周期安全
+- **零拷贝**：消费者直接读取生产者 BufferPool，避免中间拷贝
+- **配置灵活**：支持任意多组，每组独立配置
+
+**架构优势：**
+- **可扩展性**：支持任意多组，每组任意多消费者
+- **高性能**：组间并行+共享线程池，充分利用多核
+- **资源安全**：CountDownLatch 保证 buffer 生命周期安全
+- **易于维护**：配置驱动，易于动态调整
+
+**使用示例：**
+```cpp
+// 示例1：单组配置（1个生产者 + 2个消费者）
+MultiWorkerProductionLine::WorkerGroup group;
+group.group_id = "group1";
+group.producer_config = record_config;  // RTSP 录制
+group.consumer_configs = {
+    decode_hw_config,  // 硬件解码器
+    decode_sw_config   // 软件解码器
+};
+
+MultiWorkerProductionLine::MultiWorkerConfig config;
+config.groups.push_back(group);
+
+MultiWorkerProductionLine pipeline(config);
+pipeline.start();
+
+// 示例2：多组配置（组间并行）
+MultiWorkerProductionLine::WorkerGroup group1, group2;
+
+// 组1：RTSP录制 → 硬件解码 + 软件解码（对比测试）
+group1.group_id = "compare_test";
+group1.producer_config = rtsp_record_config;
+group1.consumer_configs = { hw_decode_config, sw_decode_config };
+
+// 组2：文件解码 → 多路缩放（多分辨率输出）
+group2.group_id = "multi_resolution";
+group2.producer_config = file_decode_config;
+group2.consumer_configs = { 
+    scale_720p_config, 
+    scale_1080p_config, 
+    scale_4k_config 
+};
+
+MultiWorkerProductionLine::MultiWorkerConfig config;
+config.groups = { group1, group2 };
+
+// 组1和组2并行执行，互不干扰
+MultiWorkerProductionLine pipeline(config);
+pipeline.start();
+
+// 示例3：访问组内 BufferPool
+// 获取组0的生产者 BufferPool ID
+int producer_pool_id = pipeline.getGroupProducerBufferPoolId(0);
+
+// 获取组0的第1个消费者 BufferPool ID
+int consumer_pool_id = pipeline.getGroupConsumerBufferPoolId(0, 1);
+
+BufferPoolRegistry& registry = BufferPoolRegistry::getInstance();
+auto producer_pool = registry.getBufferPool(producer_pool_id);
+auto consumer_pool = registry.getBufferPool(consumer_pool_id);
+```
+
+**核心流程图**：
+```
+MultiWorkerProductionLine
+  ├─ WorkerGroup 1 (独立线程)
+  │   ├─ Producer: RTSP录制 → BufferPool
+  │   └─ Consumers:
+  │       ├─ Consumer 1: 硬件解码 (从 BufferPool 读取)
+  │       └─ Consumer 2: 软件解码 (从 BufferPool 读取)
+  │   └─ CountDownLatch (等待所有消费者完成后释放 buffer)
+  │
+  ├─ WorkerGroup 2 (独立线程)
+  │   ├─ Producer: 文件解码 → BufferPool
+  │   └─ Consumers:
+  │       ├─ Consumer 1: 720p缩放
+  │       ├─ Consumer 2: 1080p缩放
+  │       └─ Consumer 3: 4K缩放
+  │   └─ CountDownLatch (等待所有消费者完成后释放 buffer)
+  │
+  └─ 共享线程池 (BS::thread_pool)
+      └─ 所有消费者任务在线程池中执行
+```
+
+**典型应用场景：**
+1. **对比测试**：硬件解码 vs 软件解码性能对比
+2. **多路输出**：同一视频输出多种分辨率/格式
+3. **实时处理**：实时流 → AI推理 + 显示 + 存储
+4. **批量处理**：多个视频文件同时处理，互不干扰
+
+---
+
+### v2.14 - BufferPacketSource 零拷贝直连架构
+**发布日期：** 2025-01
+
+**主要变更：**
+- ✅ **BufferPacketSource 重新设计**：移除中间缓存，直接关联 BufferPool
+  - 删除：`current_buffer_`（中间缓存变量）
+  - 删除：`use_pool_mode_`（兼容模式标志）
+  - 删除：`setCurrentBuffer()` / `clearCurrentBuffer()` 方法
+  - 新增：`std::weak_ptr<BufferPool> source_pool_`（直接关联）
+  - 新增：`setSourceBufferPool(std::weak_ptr<BufferPool> pool_weak)` 方法
+- ✅ **真正的零拷贝数据流**：`readPacket()` 直接从 BufferPool 获取，立即释放
+  - 获取：`Buffer* buffer = pool->acquireFilled(true, 100);`
+  - 使用：`copyPacket(packet, buffer->getAVPacket());`
+  - 释放：`pool->releaseFilled(buffer);`（立即释放，避免积压）
+- ✅ **配置字段重命名**：`use_buffer_mode` → `datasource_buffer_mode`（更清晰语义）
+- ✅ **MultiWorkerProductionLine 简化**：移除中间拷贝逻辑
+  - 删除：`producerThreadFunc()` 中的 `buffer_source->setCurrentBuffer()`
+  - 消费者直接从生产者 BufferPool 读取
+
+**设计原则：**
+- **真正零拷贝**：消除所有中间拷贝环节
+- **职责清晰**：BufferPacketSource 自主管理数据获取
+- **资源高效**：buffer 使用后立即释放，避免积压
+- **架构简化**：删除兼容模式，代码更清晰
+
+**架构优势：**
+- **内存效率**：无中间缓存，内存占用最小
+- **性能优化**：减少拷贝次数，提升吞吐量
+- **代码简洁**：删除冗余逻辑，易于维护
+- **职责分离**：数据源自主管理，不依赖外部设置
+
+**使用示例：**
+```cpp
+// v2.14 零拷贝架构
+// 1. 创建 BufferPacketSource（消费者数据源）
+auto buffer_source = std::make_unique<BufferPacketSource>(codec_params);
+
+// 2. 关联生产者的 BufferPool
+buffer_source->setSourceBufferPool(producer_buffer_pool_weak);
+
+// 3. BufferPacketSource 内部自动处理获取和释放
+int ret = buffer_source->readPacket(packet);
+// 内部逻辑：
+// - acquireFilled() 获取 buffer
+// - copyPacket() 拷贝数据
+// - releaseFilled() 立即释放 ⭐ 关键改进
+
+// ❌ v2.13 旧方式（已废弃）
+// buffer_source->setCurrentBuffer(buffer);  // 需要外部设置
+// buffer_source->readPacket(packet);
+// buffer_source->clearCurrentBuffer();      // 需要外部清理
+```
+
+**架构对比**：
+| 项目 | v2.13 旧架构 | v2.14 新架构 |
+|------|-------------|-------------|
+| 中间缓存 | ✗ 需要 `current_buffer_` | ✓ 无中间缓存 |
+| 设置方式 | ✗ 外部调用 `setCurrentBuffer()` | ✓ 内部自动获取 |
+| 释放方式 | ✗ 外部调用 `clearCurrentBuffer()` | ✓ 内部立即释放 |
+| 拷贝次数 | ✗ 2次（Producer→中间→Consumer） | ✓ 1次（Producer→Consumer） |
+| 代码复杂度 | ✗ 需要手动管理生命周期 | ✓ 自动管理 |
+
+**职责变化**：
+```
+v2.13 旧架构：
+MultiWorkerProductionLine → 获取 buffer → 设置到 BufferPacketSource → Consumer 读取 → 清理
+
+v2.14 新架构：
+MultiWorkerProductionLine → 触发 Consumer → BufferPacketSource 自主获取/释放 → Consumer 读取
+```
+
+---
+
+### v2.13 - 配置单一数据源与接口简化
 **发布日期：** 2025-01
 
 **主要变更：**
@@ -32,8 +496,9 @@
 - ✅ **getBytesPerPixel() 优化（方案A）**：
   - 返回类型改为 `double`，支持 NV12 等格式的 1.5 字节/像素
   - 优先从解码器实际输出格式 `codec_ctx_ptr_->pix_fmt` 计算
-  - Fallback 从 `worker_config_.decoder.taco` 的格式字符串推断（RGB/YUV）
+  - Fallback 从 `worker_config_.decoder.taco` 的格式枚举推断（RGB整型枚举/YUV自动）
   - 删除冗余的 `output_bits_per_pixel_` 成员变量
+  - **注**：v2.17 后，TacoConfig 使用整型枚举而非字符串
 - ✅ **架构一致性改进**：所有 Worker（`FfmpegDecodeVideoFileWorker`、`FfmpegDecodeRtspWorker`、`FfmpegRecordRtspWorker`）统一实现无参 `open()`
 
 **设计原则：**
@@ -88,7 +553,7 @@ double bpp = worker.getBytesPerPixel();
   - 所有状态统一由数据源管理，避免状态不一致
 - ✅ **状态管理优化**：单一数据源管理状态，Worker 直接查询数据源，避免缓存导致的不一致
 - ✅ **线程安全改进**：数据源的 `is_open_` 使用 `std::atomic<bool>`，保证线程安全的状态检查
-- ✅ **配置系统增强**：`WorkerConfig` 添加 `datasource_buffer_mode`（默认 false）和 `codec_params` 配置项
+- ✅ **配置系统增强**：`WorkerConfig` 添加 `use_buffer_mode`（默认 false，v2.14 重命名为 `datasource_buffer_mode`）和 `codec_params` 配置项
 
 **设计原则：**
 - **单一职责**：Worker 专注解码逻辑，数据源负责数据访问和元数据管理
@@ -135,7 +600,7 @@ auto config = WorkerConfigBuilder()
 // Buffer 模式（MultiWorkerProductionLine）
 auto config = WorkerConfigBuilder()
     .setDecoderConfig(DecoderConfigBuilder()
-        .setUseBufferMode(true)
+        .setDataSourceBufferMode(true)  // v2.14: 字段重命名
         .setCodecParams(record_codec_params)
         .build())
     .build();
@@ -1597,7 +2062,7 @@ struct WorkerConfig {
             bool reorder_disable = true;
             bool ch0_enable = true;
             bool ch1_enable = true;
-            const char* ch1_rgb_format = "argb888";
+            const char* ch1_pixel_format = "argb888";
             // ... 更多参数
         } taco;
     } decoder;

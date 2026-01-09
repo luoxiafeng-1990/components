@@ -165,6 +165,9 @@ public:
      * @return 时间基
      */
     struct AVRational getTimeBase() const override;
+    int getSourceWidth() const override;
+    int getSourceHeight() const override;
+    AVPixelFormat getSourcePixelFormat() const override;
     
     /**
      * 打印统计信息

@@ -386,3 +386,18 @@ bool FilePacketSource::isEof() const {
     return eof_reached_;
 }
 
+// ⭐ v2.18: 新增获取输入源信息的接口
+int FilePacketSource::getSourceWidth() const {
+    const AVCodecParameters* params = getCodecParameters();
+    return params ? params->width : 0;
+}
+
+int FilePacketSource::getSourceHeight() const {
+    const AVCodecParameters* params = getCodecParameters();
+    return params ? params->height : 0;
+}
+
+AVPixelFormat FilePacketSource::getSourcePixelFormat() const {
+    const AVCodecParameters* params = getCodecParameters();
+    return params ? static_cast<AVPixelFormat>(params->format) : AV_PIX_FMT_NONE;
+}

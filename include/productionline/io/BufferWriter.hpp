@@ -55,7 +55,7 @@ namespace io {
  * ```cpp
  * // 保存原始 YUV 数据
  * BufferWriter writer;
- * writer.saveRaw("output.yuv", AV_PIX_FMT_NV12, 1920, 1080);
+ * writer.openRaw("output.yuv", AV_PIX_FMT_NV12, 1920, 1080);
  * 
  * while (running) {
  *     Buffer* buffer = pool->acquireFilled(true, 100);
@@ -94,68 +94,36 @@ public:
     // ============ 核心接口 ============
     
     /**
-     * @brief 保存原始图像数据（裸数据模式）
+     * @brief 打开原始图像数据文件（裸数据模式）
      * 
-     * 用途：将解码后的裸数据（YUV/RGB）保存到原始文件
-     * 输出格式：.yuv, .rgb 等原始文件
-     * 
-     * @param path 文件路径
-     * @param format 像素格式（使用FFmpeg标准AVPixelFormat）
-     * @param width 图像宽度
-     * @param height 图像高度
+     * @param path 输出文件路径（建议扩展名：.raw）
+     * @param format 像素格式（AVPixelFormat，支持21种格式：YUV 8种 + RGB 13种）
+     * @param width 图像宽度（像素，必须与实际输出一致）
+     * @param height 图像高度（像素，必须与实际输出一致）
      * @return true 成功，false 失败
      * 
-     * @note 支持21种格式，详见类注释
-     * @note 如果文件已打开，会先关闭再重新打开
-     * @note 后续调用 write() 追加帧数据，最后调用 close() 完成保存
-     * 
-     * @example
-     *   writer.saveRaw("output.yuv", AV_PIX_FMT_NV12, 1920, 1080);
-     *   for (auto buf : buffers) writer.write(buf);
-     *   writer.close();
+     * @note 调用顺序：openRaw() → write() × N → close()
+     * @note 播放方式：ffplay -f rawvideo -pixel_format nv12 -video_size 1920x1080 output.raw
      */
-    bool saveRaw(const char* path, 
+    bool openRaw(const char* path, 
                  AVPixelFormat format,
                  int width, 
                  int height);
     
     /**
-     * @brief 保存编码流数据（容器格式模式）
+     * @brief 打开编码流文件（容器格式模式）
      * 
-     * 用途：将编码后的压缩数据（H.264/H.265）封装到容器文件（remux）
-     * 输出格式：.mp4, .mkv, .avi 等容器文件
-     * 
-     * 支持的容器格式（H.264/H.265 编码，共7种）：
-     * 
-     *   Phase 1 - 主流格式（3种）：
-     *     - MP4  (.mp4)  - MPEG-4 Part 14
-     *     - MKV  (.mkv)  - Matroska
-     *     - MOV  (.mov)  - QuickTime
-     * 
-     *   Phase 2 - 流媒体格式（2种）：
-     *     - TS   (.ts)   - MPEG Transport Stream
-     *     - FLV  (.flv)  - Flash Video
-     * 
-     *   Phase 3 - 特殊格式（2种）：
-     *     - AVI  (.avi)  - Audio Video Interleave
-     *     - 3GP  (.3gp)  - 3GPP
-     * 
-     * @param path 文件路径（如 "/tmp/output.mp4"，扩展名决定容器格式）
-     * @param codec_params 编解码器参数（从Worker获取）
-     * @param time_base 时间基（从Worker获取，用于时间戳转换）
+     * @param path 输出文件路径（扩展名决定容器格式）
+     * @param codec_params 编解码器参数（从 Worker 的 getCodecParameters() 获取）
+     * @param time_base 时间基（从 Worker 的 getTimeBase() 获取）
      * @return true 成功，false 失败
      * 
-     * @note 使用remux方式，不进行转码，性能高效
-     * @note 容器格式必须支持源流的编码格式（如H.264/H.265）
-     * @note 使用真实的时间戳（从AVPacket获取）
-     * @note 后续调用 write() 追加编码包，最后调用 close() 完成保存
-     * 
-     * @example
-     *   writer.saveEncoded("output.mp4", codec_params, time_base);
-     *   while (recording) writer.write(packet_buffer);
-     *   writer.close();
+     * @note 支持的容器格式（H.264/H.265，共7种）：
+     *       MP4, MKV, MOV, TS, FLV, AVI, 3GP
+     * @note 不支持：WebM（需VP8/VP9）, OGG（需Theora）
+     * @note 调用顺序：openEncoded() → write() × N → close()
      */
-    bool saveEncoded(const char* path, 
+    bool openEncoded(const char* path, 
                      const AVCodecParameters* codec_params,
                      const AVRational& time_base);
     
@@ -193,6 +161,16 @@ public:
     int getWriteCount() const { return write_count_.load(); }
     
     /**
+     * @brief 获取格式不匹配的帧数
+     * 
+     * @return 格式不匹配的统计数量
+     * 
+     * @note ⭐ v2.17：用于统计write()时因格式/尺寸不匹配而拒绝写入的帧数
+     * @note 原子操作，线程安全
+     */
+    int64_t getMismatchCount() const { return mismatch_count_.load(); }
+    
+    /**
      * @brief 检查文件是否已打开
      * @return true 如果文件已打开，否则返回 false
      */
@@ -205,6 +183,7 @@ private:
     int width_;                      // 图像宽度
     int height_;                     // 图像高度
     std::atomic<int> write_count_;   // 写入计数器（原子，线程安全）
+    std::atomic<int64_t> mismatch_count_;  // ⭐ v2.17：格式不匹配统计（原子，线程安全）
     
     // ============ 核心成员（编码流模式）============
     AVFormatContext* output_format_ctx_;  // MP4输出上下文（非空表示编码流模式）

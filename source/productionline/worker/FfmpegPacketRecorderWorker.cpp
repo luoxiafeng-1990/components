@@ -379,3 +379,15 @@ AVRational FfmpegPacketRecorderWorker::getTimeBase() const {
     // 注意：需要从 AVStream 获取，这里简化处理返回默认值
     return {1, 25};  // 默认25fps（TODO: 如需精确时间基，需要扩展 IPacketSource 接口）
 }
+
+int FfmpegPacketRecorderWorker::getSourceWidth() const {
+    return packet_source_ ? packet_source_->getSourceWidth() : 0;
+}
+
+int FfmpegPacketRecorderWorker::getSourceHeight() const {
+    return packet_source_ ? packet_source_->getSourceHeight() : 0;
+}
+
+AVPixelFormat FfmpegPacketRecorderWorker::getSourcePixelFormat() const {
+    return packet_source_ ? packet_source_->getSourcePixelFormat() : AV_PIX_FMT_NONE;
+}

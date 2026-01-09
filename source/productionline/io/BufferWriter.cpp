@@ -23,6 +23,7 @@ BufferWriter::BufferWriter()
     , width_(0)
     , height_(0)
     , write_count_(0)
+    , mismatch_count_(0)
     , output_format_ctx_(nullptr)
     , video_stream_index_(-1)
     , packet_count_(0)
@@ -58,8 +59,12 @@ BufferWriter::~BufferWriter() {
 
 // ========== 核心接口实现 ==========
 
-bool BufferWriter::saveRaw(const char* path, 
-                           AVPixelFormat format,
+/**
+ * @brief 打开原始图像数据文件（裸数据模式）
+ * 详细说明参见头文件注释
+ */
+bool BufferWriter::openRaw(const char* path, 
+                           AVPixelFormat save_format,
                            int width, 
                            int height) {
     // 1. 参数校验
@@ -75,9 +80,9 @@ bool BufferWriter::saveRaw(const char* path,
     }
     
     // 2. 检查格式支持
-    if (!isSupportedFormat(format)) {
-        LOG_ERROR_FMT("[BufferWriter] Error: Unsupported format: %s (%d)",
-                av_get_pix_fmt_name(format), format);
+    if (!isSupportedFormat(save_format)) {
+        LOG_ERROR_FMT("[BufferWriter] Error: Unsupported save_format: %s (%d)",
+                av_get_pix_fmt_name(save_format), save_format);
         LOG_ERROR("[BufferWriter] Supported formats (21): "
                 "GRAY8, GRAY10LE, NV12, P010LE, NV21, YUV420P10LE, YUV422P, YUV444P, "
                 "RGB24, BGR24, ARGB, ABGR, RGBA, BGRA, GBRP, "
@@ -99,10 +104,11 @@ bool BufferWriter::saveRaw(const char* path,
     }
     
     // 5. 保存配置
-    format_ = format;
+    format_ = save_format;
     width_ = width;
     height_ = height;
     write_count_.store(0);  // 重置计数器
+    mismatch_count_.store(0);  // ⭐ v2.17：重置格式不匹配计数器
     
     // 6. 打印成功信息
     LOG_INFO_FMT("[BufferWriter] Opened: %s", path);
@@ -131,7 +137,39 @@ bool BufferWriter::write(const Buffer* buffer) {
         return false;
     }
     
-    // 4. ⭐ 检查Buffer是否有图像元数据
+    // 4. ⭐⭐⭐ v2.17 需求4：格式和尺寸验证（在 BufferWriter 内部完成）
+    if (buffer->hasImageMetadata()) {
+        AVPixelFormat actual_format = buffer->getImageFormat();
+        int actual_width = buffer->getImageWidth();
+        int actual_height = buffer->getImageHeight();
+        
+        bool format_match = (actual_format == format_);
+        bool size_match = (actual_width == width_ && actual_height == height_);
+        
+        if (!format_match || !size_match) {
+            mismatch_count_.fetch_add(1);
+            int64_t current_count = mismatch_count_.load();
+            
+            // 只打印前5次错误，避免刷屏
+            if (current_count <= 5) {
+                LOG_ERROR_FMT("[BufferWriter] ❌ Format/size mismatch (count: %lld):", 
+                             (long long)current_count);
+                if (!format_match) {
+                    LOG_ERROR_FMT("  Expected format: %s, got: %s",
+                                 av_get_pix_fmt_name(format_),
+                                 av_get_pix_fmt_name(actual_format));
+                }
+                if (!size_match) {
+                    LOG_ERROR_FMT("  Expected size: %dx%d, got: %dx%d",
+                                 width_, height_, actual_width, actual_height);
+                }
+            }
+            
+            return false;  // ⭐ 不匹配则拒绝写入
+        }
+    }
+    
+    // 5. ⭐ 检查Buffer是否有图像元数据
     if (buffer->hasImageMetadata()) {
         // 使用元数据模式（v2.6新功能）
         return writeWithMetadata(buffer);
@@ -212,6 +250,8 @@ bool BufferWriter::writeWithMetadata(const Buffer* buffer) {
     if (format_ != AV_PIX_FMT_NONE && buf_format != format_) {
         // 格式不匹配，静默跳过（这是正常行为，不是错误）
         // 场景：TACO解码器同时输出多种格式，每个BufferWriter只保存自己关心的格式
+        LOG_INFO_FMT("[BufferWriter] Format not matched: %s (expected: %s)",
+                av_get_pix_fmt_name(buf_format), av_get_pix_fmt_name(format_));
         return true;  // 返回true表示"已处理"（虽然未写入，但这是预期行为）
     }
     
@@ -220,6 +260,7 @@ bool BufferWriter::writeWithMetadata(const Buffer* buffer) {
     const uint8_t* first_plane = buffer->getImagePlaneData(0);
     if (!first_plane) {
         // 数据未就绪，静默跳过
+        LOG_ERROR("[BufferWriter] Warning: First image plane data is null, skipping frame");
         return true;
     }
     
@@ -233,11 +274,13 @@ bool BufferWriter::writeWithMetadata(const Buffer* buffer) {
             
             // 写入Y平面（去除stride）
             if (!writePlane(y_data, linesize[0], buf_width, buf_height)) {
+                LOG_ERROR("[BufferWriter] Error: Write Y plane failed");
                 return false;
             }
             
             // 写入UV平面（去除stride，高度为height/2）
             if (!writePlane(uv_data, linesize[1], buf_width, buf_height / 2)) {
+                LOG_ERROR("[BufferWriter] Error: Write UV plane failed");
                 return false;
             }
             break;
@@ -425,9 +468,7 @@ bool BufferWriter::writeWithMetadata(const Buffer* buffer) {
 bool BufferWriter::writePlane(const uint8_t* data, int stride, 
                                int width, int height) {
     if (!data) {
-        // ⭐ plane data 为空：静默跳过（这是正常情况，不是错误）
-        // 场景：Buffer 报告了格式但实际数据未就绪，或者帧不完整
-        return true;  // 返回true表示"已处理"（虽然未写入）
+        return false;  // 返回true表示"已处理"（虽然未写入）
     }
     
     if (stride == width) {
@@ -439,12 +480,12 @@ bool BufferWriter::writePlane(const uint8_t* data, int stride,
         for (int y = 0; y < height; y++) {
             size_t written = fwrite(data + y * stride, 1, width, file_);
             if (written != (size_t)width) {
-                LOG_ERROR_FMT("[BufferWriter] Error: Write plane failed at row %d", y);
                 return false;
             }
         }
         return true;
     }
+    return false;
 }
 
 void BufferWriter::close() {
@@ -642,36 +683,10 @@ const char* BufferWriter::getFormatName(AVPixelFormat format) {
 // ========== 编码流模式实现 ==========
 
 /**
- * @brief 保存编码流数据（容器格式模式）
- * 
- * 用途：将编码后的压缩数据（H.264/H.265）封装到容器文件（remux）
- * 
- * 支持的容器格式（H.264/H.265 编码，共7种）：
- * 
- *   Phase 1 - 主流格式（3种）：
- *     - MP4  (.mp4)  - MPEG-4 Part 14
- *     - MKV  (.mkv)  - Matroska
- *     - MOV  (.mov)  - QuickTime
- * 
- *   Phase 2 - 流媒体格式（2种）：
- *     - TS   (.ts)   - MPEG Transport Stream
- *     - FLV  (.flv)  - Flash Video
- * 
- *   Phase 3 - 特殊格式（2种）：
- *     - AVI  (.avi)  - Audio Video Interleave
- *     - 3GP  (.3gp)  - 3GPP
- * 
- * 注意：
- *   - 此函数仅进行容器复用（remux），不进行转码（transcode）
- *   - 容器格式必须支持源流的编码格式（如H.264/H.265）
- *   - 不支持 WebM（需要VP8/VP9/AV1编码）和 OGG（需要Theora/VP8编码）
- * 
- * @param path 文件路径（扩展名决定容器格式）
- * @param codec_params 编解码器参数
- * @param time_base 时间基
- * @return true 成功，false 失败
+ * @brief 打开编码流文件（容器格式模式）
+ * 详细说明参见头文件注释
  */
-bool BufferWriter::saveEncoded(const char* path, const AVCodecParameters* codec_params, const AVRational& time_base) {
+bool BufferWriter::openEncoded(const char* path, const AVCodecParameters* codec_params, const AVRational& time_base) {
     // 1. 参数校验
     if (!path || !codec_params) {
         LOG_ERROR("[BufferWriter] Error: Invalid parameters for encoded mode");

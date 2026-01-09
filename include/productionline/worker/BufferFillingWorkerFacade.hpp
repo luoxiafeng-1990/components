@@ -234,7 +234,7 @@ public:
      * AVRational time_base = worker_facade->getTimeBase();
      * 
      * BufferWriter writer;
-     * writer.saveEncoded(output_file, codec_params, time_base);
+     * writer.openEncoded(output_file, codec_params, time_base);
      * @endcode
      */
     const struct AVCodecParameters* getCodecParameters() const;
@@ -245,6 +245,30 @@ public:
      * @return AVRational 时间基
      */
     struct AVRational getTimeBase() const;
+    
+    /**
+     * 获取输入数据源的原始视频宽度
+     * 
+     * @return 视频宽度（像素），如果不可用则返回 0
+     * @note 这是输入数据源（文件/流）的原始分辨率，不是解码器输出分辨率
+     */
+    int getSourceWidth() const;
+    
+    /**
+     * 获取输入数据源的原始视频高度
+     * 
+     * @return 视频高度（像素），如果不可用则返回 0
+     * @note 这是输入数据源（文件/流）的原始分辨率，不是解码器输出分辨率
+     */
+    int getSourceHeight() const;
+    
+    /**
+     * 获取输入数据源的原始像素格式
+     * 
+     * @return AVPixelFormat，如果不可用则返回 AV_PIX_FMT_NONE
+     * @note 这是输入数据源的编码格式，不是解码器输出格式
+     */
+    AVPixelFormat getSourcePixelFormat() const;
 };
 
 #endif // BUFFER_FILLING_WORKER_FACADE_HPP

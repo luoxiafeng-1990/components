@@ -4,6 +4,11 @@
 #include <memory>
 #include <string>
 
+// FFmpeg 头文件
+extern "C" {
+#include <libavutil/pixfmt.h>  // ⭐ AVPixelFormat 需要完整定义，不能前向声明
+}
+
 // FFmpeg 前向声明
 struct AVPacket;
 struct AVCodecParameters;
@@ -108,6 +113,33 @@ public:
      * - 网络流模式：基于连接状态
      */
     virtual bool isEof() const = 0;
+    
+    /**
+     * @brief 获取输入数据源的原始视频宽度
+     * @return 视频宽度（像素），如果不可用则返回 0
+     * 
+     * @note 这是输入数据源（文件/流）的原始分辨率，不是解码器输出分辨率
+     * @example 输入视频是 1920x1080，即使 TACO 配置了缩放，此方法仍返回 1920
+     */
+    virtual int getSourceWidth() const = 0;
+    
+    /**
+     * @brief 获取输入数据源的原始视频高度
+     * @return 视频高度（像素），如果不可用则返回 0
+     * 
+     * @note 这是输入数据源（文件/流）的原始分辨率，不是解码器输出分辨率
+     * @example 输入视频是 1920x1080，即使 TACO 配置了缩放，此方法仍返回 1080
+     */
+    virtual int getSourceHeight() const = 0;
+    
+    /**
+     * @brief 获取输入数据源的原始像素格式
+     * @return AVPixelFormat，如果不可用则返回 AV_PIX_FMT_NONE
+     * 
+     * @note 这是输入数据源的编码格式，不是解码器输出格式
+     * @example H.264 编码的视频通常是 AV_PIX_FMT_YUV420P（编码前的格式）
+     */
+    virtual AVPixelFormat getSourcePixelFormat() const = 0;
 };
 
 #endif // IPACKET_SOURCE_HPP

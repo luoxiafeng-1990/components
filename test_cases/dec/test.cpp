@@ -373,7 +373,7 @@ static int test_rtsp_record_stream(const char* rtsp_url) {
     
     // 保存编码流到 MP4 文件
     BufferWriter writer;
-    if (!writer.saveEncoded(output_file, codec_params, time_base)) {
+    if (!writer.openEncoded(output_file, codec_params, time_base)) {
         LOG_ERROR("Failed to save encoded stream");
         producer.stop();
         return -1;
@@ -589,7 +589,7 @@ static int test_file_record(const char* input_file) {
     
     // 保存编码流到 MP4 文件
     BufferWriter writer;
-    if (!writer.saveEncoded(output_file, codec_params, time_base)) {
+    if (!writer.openEncoded(output_file, codec_params, time_base)) {
         LOG_ERROR("Failed to save encoded stream");
         producer.stop();
         return -1;
@@ -1293,6 +1293,49 @@ static int test_h264_taco_video_multithread(const char* video_path) {
 }
 
 /**
+ * ⭐ v2.17：辅助函数 - TACO格式名转FFmpeg标准格式
+ * 
+ * @param taco_format TACO格式字符串（如 "YUV420 NV12 8-bit"）
+ * @param is_rgb 是否是RGB格式
+ * @return AVPixelFormat，失败返回 AV_PIX_FMT_NONE
+ */
+// ⭐ v2.18: 此函数已移除，因为现在直接从 Buffer 实际格式获取 AVPixelFormat
+
+/**
+ * ⭐ v2.17：辅助函数 - 生成输出文件路径
+ * 
+ * @param channel 通道号（0 或 1）
+ * @param format AVPixelFormat
+ * @param width 宽度
+ * @param height 高度
+ * @return 输出路径字符串
+ */
+static std::string generateOutputPath(int channel, AVPixelFormat format, int width, int height) {
+    const char* format_name = av_get_pix_fmt_name(format);
+    
+    // 判断子目录
+    const char* subdir = "yuv";
+    if (format == AV_PIX_FMT_RGB24 || format == AV_PIX_FMT_BGR24 ||
+        format == AV_PIX_FMT_ARGB || format == AV_PIX_FMT_RGBA ||
+        format == AV_PIX_FMT_ABGR || format == AV_PIX_FMT_BGRA ||
+        format == AV_PIX_FMT_RGB0 || format == AV_PIX_FMT_BGR0 ||
+        format == AV_PIX_FMT_0RGB || format == AV_PIX_FMT_0BGR ||
+        format == AV_PIX_FMT_RGB48LE || format == AV_PIX_FMT_BGR48LE ||
+        format == AV_PIX_FMT_GBRP) {
+        subdir = "rgb";
+    } else if (format == AV_PIX_FMT_GRAY8 || format == AV_PIX_FMT_GRAY10LE) {
+        subdir = "gray";
+    }
+    
+    char path[512];
+    snprintf(path, sizeof(path), 
+             "./test_output_raw/%s/ch%d_%s_%dx%d.raw",
+             subdir, channel, format_name, width, height);
+    
+    return std::string(path);
+}
+
+/**
  * 测试8a：BufferWriter单格式保存测试
  * 
  * 通过配置h264_taco解码器输出指定格式，测试BufferWriter保存功能
@@ -1307,104 +1350,14 @@ static int test_buffer_writer_format(
 ) {
     using namespace productionline::io;
     
-    // ⭐ 从 taco_config 推导格式信息
-    std::string format_name;
-    std::string ffplay_fmt;
-    
-    if (taco_config.ch1_rgb) {
-        // RGB格式：使用配置的格式名
-        format_name = taco_config.ch1_rgb_format;
-        
-        // ⭐ 映射 TACO 格式名到 FFplay 格式名
-        // TACO: argb888/bgra888/rgba888/rgb888/bgr888/xrgb888/xbgr888/r16g16b16/b16g16r16
-        // FFplay: argb/bgra/rgba/rgb24/bgr24/0rgb/0bgr/rgb0/bgr0/rgb48le/bgr48le
-        // ⚠️ 特殊注意：xrgb888/xbgr888 由于字节序转换，实际有两种映射
-        if (format_name == "argb888") {
-            ffplay_fmt = "argb";
-        } else if (format_name == "abgr888") {
-            ffplay_fmt = "abgr";
-        } else if (format_name == "bgra888") {
-            ffplay_fmt = "bgra";
-        } else if (format_name == "rgba888") {
-            ffplay_fmt = "rgba";
-        } else if (format_name == "rgb888") {
-            ffplay_fmt = "rgb24";
-        } else if (format_name == "bgr888") {
-            ffplay_fmt = "bgr24";
-        } else if (format_name == "xrgb888") {
-            // xrgb888 可能是 0rgb (padding 在前) 或 bgr0 (实际内存 BGRX)
-            // 根据 Buffer 的实际格式元数据决定
-            ffplay_fmt = "0rgb";  // 默认按命名理解
-        } else if (format_name == "xbgr888") {
-            // xbgr888 可能是 0bgr (padding 在前) 或 rgb0 (实际内存 RGBX)
-            // 根据 Buffer 的实际格式元数据决定
-            ffplay_fmt = "0bgr";  // 默认按命名理解
-        } else if (format_name == "r16g16b16") {
-            ffplay_fmt = "rgb48le";  // ⭐ 16-bit RGB (little endian)
-        } else if (format_name == "b16g16r16") {
-            ffplay_fmt = "bgr48le";  // ⭐ 16-bit BGR (little endian)
-        } else {
-            // 默认：尝试去掉 888 后缀
-            ffplay_fmt = format_name;
-            if (ffplay_fmt.size() > 3 && ffplay_fmt.substr(ffplay_fmt.size() - 3) == "888") {
-                ffplay_fmt = ffplay_fmt.substr(0, ffplay_fmt.size() - 3);
-            }
-        }
-    } else {
-        // YUV格式：从配置中读取硬件格式名称
-        format_name = taco_config.ch0_yuv_format;  // ⭐ 从配置读取硬件格式名称
-        
-        // ⭐ 映射硬件格式名称到 FFplay 格式名
-        // 注意：某些硬件格式（如 I010, L010, Pack10, Tiled-4×4）可能需要转换
-        if (format_name == "YUV420 8-bit NV12" || 
-            (format_name.find("NV12") != std::string::npos && format_name.find("8-bit") != std::string::npos)) {
-            ffplay_fmt = "nv12";
-        } else if (format_name == "YUV420 8-bit NV21" || 
-                   (format_name.find("NV21") != std::string::npos && format_name.find("8-bit") != std::string::npos)) {
-            ffplay_fmt = "nv21";
-        } else if (format_name.find("P010") != std::string::npos) {
-            if (format_name.find("YUV400") != std::string::npos) {
-                ffplay_fmt = "gray10le";  // YUV400 P010 → gray10le
-            } else if (format_name.find("NV12") != std::string::npos) {
-                ffplay_fmt = "p010le";  // YUV420 NV12 P010 → p010le
-            } else if (format_name == "YUV420 P010") {
-                ffplay_fmt = "yuv420p10le";  // YUV420 P010 → yuv420p10le
-            } else {
-                ffplay_fmt = "p010le";  // 默认
-            }
-        } else if (format_name == "YUV400 8-bit") {
-            ffplay_fmt = "gray";
-        } else if (format_name.find("I010") != std::string::npos || 
-                   format_name.find("L010") != std::string::npos ||
-                   format_name.find("Pack10") != std::string::npos ||
-                   format_name.find("Tiled-4×4") != std::string::npos ||
-                   format_name.find("I011") != std::string::npos) {
-            // 这些格式可能需要转换，暂时使用默认映射
-            // 实际格式会从 Buffer 元数据中检测
-            if (format_name.find("NV12") != std::string::npos) {
-                ffplay_fmt = "nv12";  // 尝试映射到 NV12
-            } else if (format_name.find("NV21") != std::string::npos) {
-                ffplay_fmt = "nv21";  // 尝试映射到 NV21
-            } else if (format_name.find("YUV400") != std::string::npos) {
-                ffplay_fmt = "gray10le";  // 尝试映射到 gray10le
-            } else {
-                ffplay_fmt = "nv12";  // 默认
-            }
-        } else {
-            // 默认：尝试从格式名称推断
-            ffplay_fmt = format_name;
-            // 转换为小写并替换空格
-            std::transform(ffplay_fmt.begin(), ffplay_fmt.end(), ffplay_fmt.begin(), ::tolower);
-            std::replace(ffplay_fmt.begin(), ffplay_fmt.end(), ' ', '_');
-        }
-    }
-    
     LOG_INFO("═══════════════════════════════════════════════════════");
-    LOG_INFO_FMT("  BufferWriter Format Test: %s", format_name.c_str());
+    LOG_INFO("  BufferWriter Format Test (v2.18 - 优先级逻辑)");
     LOG_INFO_FMT("  Video: %s", video_path);
     LOG_INFO("═══════════════════════════════════════════════════════");
     
-    // 1. 配置VideoProductionLine（使用传入的taco配置）
+    // ========== Step 1: 启动 VideoProductionLine 并获取输入源信息 ==========
+    LOG_INFO("\nStep 1: Starting VideoProductionLine and getting source info...");
+    
     auto workerConfig = WorkerConfigBuilder()
         .setDataSourceConfig(
             DataSourceConfigBuilder()
@@ -1419,26 +1372,173 @@ static int test_buffer_writer_format(
         )
         .setDecoderConfig(
             DecoderConfigBuilder()
-                .useTaco("h264", taco_config)  // ⭐ 使用 TACO H.264 解码器 + 自定义配置
+                .useTaco("h264", taco_config)
                 .build()
         )
         .setWorkerType(WorkerType::FFMPEG_VIDEO_FILE)
         .build();
     
-    LOG_INFO_FMT("Decoder config: ch1_rgb=%s, format=%s", 
-                 taco_config.ch1_rgb ? "true" : "false",
-                 format_name.c_str());
-    
-    // 2. 启动生产线
-    LOG_INFO("Step 2: Starting VideoProductionLine...");
     VideoProductionLine producer(false, 1, false);
     if (!producer.start(workerConfig)) {
         LOG_ERROR("Failed to start VideoProductionLine");
         return -1;
     }
     
-    // 3. 获取BufferPool
-    LOG_INFO("Step 3: Getting BufferPool...");
+    // 获取 Worker Facade 以访问输入源信息
+    auto worker_facade_sptr = producer.getWorkerFacade();
+    if (!worker_facade_sptr) {
+        LOG_ERROR("Failed to get WorkerFacade");
+        producer.stop();
+        return -1;
+    }
+    
+    // ⭐⭐⭐ 从输入数据源获取原始信息 ⭐⭐⭐
+    int source_width = worker_facade_sptr->getSourceWidth();
+    int source_height = worker_facade_sptr->getSourceHeight();
+    AVPixelFormat source_format = worker_facade_sptr->getSourcePixelFormat();
+    
+    LOG_INFO("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    LOG_INFO_FMT("  Input source resolution: %dx%d", source_width, source_height);
+    LOG_INFO_FMT("  Input source format: %s", av_get_pix_fmt_name(source_format));
+    LOG_INFO("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    
+    // ========== Step 2: 使用优先级逻辑确定输出参数 ==========
+    LOG_INFO("\nStep 2: Determining output parameters with priority logic...");
+    system("mkdir -p ./test_output_raw/yuv ./test_output_raw/rgb ./test_output_raw/gray");
+    
+    // ========== 通道0变量 ==========
+    bool ch0_writer_created = false;
+    std::unique_ptr<BufferWriter> ch0_writer;
+    AVPixelFormat ch0_expected_format = AV_PIX_FMT_NONE;
+    int ch0_expected_width = 0;
+    int ch0_expected_height = 0;
+    std::string ch0_output_path;
+    int ch0_saved_count = 0;
+    
+    // ========== 通道1变量 ==========
+    bool ch1_writer_created = false;
+    std::unique_ptr<BufferWriter> ch1_writer;
+    AVPixelFormat ch1_expected_format = AV_PIX_FMT_NONE;
+    int ch1_expected_width = 0;
+    int ch1_expected_height = 0;
+    std::string ch1_output_path;
+    int ch1_saved_count = 0;
+    
+    // ========== 统计变量 ==========
+    int skipped_count = 0;
+    
+    // ⭐⭐⭐ ch0 配置（YUV 格式，支持 scaler）- 使用优先级逻辑 ⭐⭐⭐
+    if (taco_config.ch0_enable) {
+        // ch0 输出 YUV 格式，格式由解码器自动决定，默认 NV12
+        ch0_expected_format = AV_PIX_FMT_NV12;
+        
+        // 优先级1: taco_config 配置的缩放分辨率
+        // 优先级2: 输入源的原始分辨率
+        // 优先级3: 默认 1920x1080
+        if (taco_config.ch0_scale_width > 0 && taco_config.ch0_scale_height > 0) {
+            ch0_expected_width = taco_config.ch0_scale_width;
+            ch0_expected_height = taco_config.ch0_scale_height;
+            LOG_INFO_FMT("  ch0: Using taco_config scale: %dx%d (Priority 1)", 
+                         ch0_expected_width, ch0_expected_height);
+        } else if (source_width > 0 && source_height > 0) {
+            ch0_expected_width = source_width;
+            ch0_expected_height = source_height;
+            LOG_INFO_FMT("  ch0: Using input source resolution: %dx%d (Priority 2)", 
+                         ch0_expected_width, ch0_expected_height);
+        } else {
+            ch0_expected_width = 1920;
+            ch0_expected_height = 1080;
+            LOG_INFO_FMT("  ch0: Using default resolution: %dx%d (Priority 3)", 
+                         ch0_expected_width, ch0_expected_height);
+        }
+        ch0_output_path = generateOutputPath(0, ch0_expected_format, ch0_expected_width, ch0_expected_height);
+        ch0_writer = std::make_unique<BufferWriter>();
+        
+        if (ch0_writer->openRaw(ch0_output_path.c_str(), ch0_expected_format, 
+                                ch0_expected_width, ch0_expected_height)) {
+            ch0_writer_created = true;
+            LOG_INFO_FMT("✅ Created ch0 writer: %s (%dx%d)", 
+                         av_get_pix_fmt_name(ch0_expected_format),
+                         ch0_expected_width, ch0_expected_height);
+            LOG_INFO_FMT("   Output: %s", ch0_output_path.c_str());
+        } else {
+            LOG_ERROR("Failed to create ch0 writer");
+            producer.stop();
+            return -1;
+        }
+    }
+    
+    // ⭐ ch1 配置（RGB 格式，支持 scaler）
+    if (taco_config.ch1_enable) {
+        // ch1 根据配置推导 RGB 格式
+        ch1_expected_format = AV_PIX_FMT_ARGB;  // 默认 ARGB (对应 ch1_rgb_format=9)
+        if (taco_config.ch1_rgb) {
+            // RGB 格式需要根据 ch1_rgb_format 映射
+            switch (taco_config.ch1_rgb_format) {
+                case 1:  ch1_expected_format = AV_PIX_FMT_RGB24; break;    // rgb888
+                case 3:  ch1_expected_format = AV_PIX_FMT_BGR24; break;    // bgr888
+                case 9:  ch1_expected_format = AV_PIX_FMT_ARGB; break;     // argb888
+                case 11: ch1_expected_format = AV_PIX_FMT_ABGR; break;     // abgr888
+                case 13: ch1_expected_format = AV_PIX_FMT_RGBA; break;     // rgba888
+                case 15: ch1_expected_format = AV_PIX_FMT_BGRA; break;     // bgra888
+                case 17: ch1_expected_format = AV_PIX_FMT_RGB48LE; break;  // r16g16b16
+                case 19: ch1_expected_format = AV_PIX_FMT_BGR48LE; break;  // b16g16r16
+                case 21: ch1_expected_format = AV_PIX_FMT_RGB0; break;     // rgbx888
+                case 23: ch1_expected_format = AV_PIX_FMT_BGR0; break;     // bgrx888
+                case 25: ch1_expected_format = AV_PIX_FMT_0RGB; break;     // xrgb888
+                case 27: ch1_expected_format = AV_PIX_FMT_0BGR; break;     // xbgr888
+                case 28: ch1_expected_format = AV_PIX_FMT_GBRP; break;     // gbrp
+                default: ch1_expected_format = AV_PIX_FMT_ARGB; break;
+            }
+        } else {
+            // ch1 输出 YUV 格式
+            ch1_expected_format = AV_PIX_FMT_NV12;  // 默认 YUV420 NV12
+        }
+        
+        // 优先级1: taco_config 配置的缩放分辨率
+        // 优先级2: 输入源的原始分辨率
+        // 优先级3: 默认 1920x1080
+        if (taco_config.ch1_scale_width > 0 && taco_config.ch1_scale_height > 0) {
+            ch1_expected_width = taco_config.ch1_scale_width;
+            ch1_expected_height = taco_config.ch1_scale_height;
+            LOG_INFO_FMT("  ch1: Using taco_config scale: %dx%d (Priority 1)", 
+                         ch1_expected_width, ch1_expected_height);
+        } else if (source_width > 0 && source_height > 0) {
+            ch1_expected_width = source_width;
+            ch1_expected_height = source_height;
+            LOG_INFO_FMT("  ch1: Using input source resolution: %dx%d (Priority 2)", 
+                         ch1_expected_width, ch1_expected_height);
+        } else {
+            ch1_expected_width = 1920;
+            ch1_expected_height = 1080;
+            LOG_INFO_FMT("  ch1: Using default resolution: %dx%d (Priority 3)", 
+                         ch1_expected_width, ch1_expected_height);
+        }
+        ch1_output_path = generateOutputPath(1, ch1_expected_format, ch1_expected_width, ch1_expected_height);
+        ch1_writer = std::make_unique<BufferWriter>();
+        
+        if (ch1_writer->openRaw(ch1_output_path.c_str(), ch1_expected_format, 
+                                ch1_expected_width, ch1_expected_height)) {
+            ch1_writer_created = true;
+            LOG_INFO_FMT("✅ Created ch1 writer: %s (%dx%d)", 
+                         av_get_pix_fmt_name(ch1_expected_format),
+                         ch1_expected_width, ch1_expected_height);
+            LOG_INFO_FMT("   Output: %s", ch1_output_path.c_str());
+        } else {
+            LOG_ERROR("Failed to create ch1 writer");
+            producer.stop();
+            return -1;
+        }
+    }
+    
+    if (!ch0_writer_created && !ch1_writer_created) {
+        LOG_ERROR("No channels enabled in taco_config!");
+        producer.stop();
+        return -1;
+    }
+    
+    // ========== Step 3: 获取 BufferPool ==========
+    LOG_INFO("\nStep 3: Getting BufferPool...");
     uint64_t pool_id = producer.getWorkingBufferPoolId();
     auto pool_sptr = BufferPoolRegistry::getInstance().getPool(pool_id).lock();
     if (!pool_sptr) {
@@ -1450,73 +1550,49 @@ static int test_buffer_writer_format(
     LOG_INFO_FMT("BufferPool: %s (ID: %lu)", 
                  pool_sptr->getName().c_str(), pool_id);
     
-    // 4. 等待第一个Buffer，获取实际格式
-    LOG_INFO("Step 4: Waiting for first buffer to detect format...");
-    Buffer* first_buffer = pool_sptr->acquireFilled(true, 5000);  // 5秒超时
-    if (!first_buffer) {
-        LOG_ERROR("Failed to get first buffer (timeout)");
-        producer.stop();
-        return -1;
-    }
-    
-    // 5. 从Buffer元数据获取实际格式
-    AVPixelFormat actual_format = AV_PIX_FMT_NONE;
-    int actual_width = 1920;
-    int actual_height = 1080;
-    
-    if (first_buffer->hasImageMetadata()) {
-        actual_format = first_buffer->getImageFormat();
-        actual_width = first_buffer->getImageWidth();
-        actual_height = first_buffer->getImageHeight();
-        LOG_INFO_FMT("Detected format from buffer: %s (%dx%d)", 
-                    av_get_pix_fmt_name(actual_format),
-                    actual_width, actual_height);
-    } else {
-        LOG_WARN("Buffer has no metadata, using default NV12");
-        actual_format = AV_PIX_FMT_NV12;
-    }
-    
-    // 6. 创建BufferWriter（使用检测到的格式）
-    LOG_INFO("Step 5: Creating BufferWriter...");
-    BufferWriter writer;
-    char output_path[256];
-    snprintf(output_path, sizeof(output_path), 
-             "output_test_%s.yuv", format_name.c_str());
-    
-    if (!writer.saveRaw(output_path, actual_format, actual_width, actual_height)) {
-        LOG_ERROR_FMT("Failed to save raw format %s", 
-                     av_get_pix_fmt_name(actual_format));
-        pool_sptr->releaseFilled(first_buffer);
-        producer.stop();
-        return -1;
-    }
-    
-    LOG_INFO_FMT("Saving to: %s (format: %s)", 
-                 output_path, av_get_pix_fmt_name(actual_format));
-    
-    // 7. 保存第一帧
-    LOG_INFO("\nStep 6: Saving frames...");
+    // ========== Step 4: 消费循环（通道过滤 + 格式验证在 BufferWriter 内部） ==========
+    LOG_INFO("\nStep 4: Saving frames...");
     LOG_INFO("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-    if (writer.write(first_buffer)) {
-        LOG_INFO("  ✅ Saved frame 1");
-    }
-    pool_sptr->releaseFilled(first_buffer);
     
-    // 8. 消费者循环：保存剩余帧（直到视频播放完毕）
     int timeout_count = 0;
     const int MAX_TIMEOUT = 10;
     
-    while (g_running) {  // ⭐ 移除 max_frames 限制，让视频自然结束
+    while (g_running) {
         Buffer* buffer = pool_sptr->acquireFilled(true, 100);
         
         if (buffer) {
-            if (writer.write(buffer)) {
-                if (writer.getWriteCount() % 10 == 0) {
-                    LOG_INFO_FMT("  Saved %d frames", writer.getWriteCount());
+            int buffer_channel = buffer->getOutputChannel();
+            
+            // 根据通道号分发
+            if (buffer_channel == 0 && ch0_writer_created) {
+                // ⭐ 直接调用 write，格式验证在 BufferWriter 内部完成（需求4）
+                if (ch0_writer->write(buffer)) {
+                    ch0_saved_count++;
+                    if (ch0_saved_count % 10 == 0) {
+                        LOG_INFO_FMT("  ch0: Saved %d frames", ch0_saved_count);
+                    }
+                }
+            } else if (buffer_channel == 1 && ch1_writer_created) {
+                // ⭐ 直接调用 write，格式验证在 BufferWriter 内部完成（需求4）
+                if (ch1_writer->write(buffer)) {
+                    ch1_saved_count++;
+                    if (ch1_saved_count % 10 == 0) {
+                        LOG_INFO_FMT("  ch1: Saved %d frames", ch1_saved_count);
+                    }
+                }
+            } else if (buffer_channel < 0) {
+                // 无通道信息（软件解码器等），尝试写入第一个可用的 writer
+                if (ch0_writer_created && ch0_writer->write(buffer)) {
+                    ch0_saved_count++;
+                } else if (ch1_writer_created && ch1_writer->write(buffer)) {
+                    ch1_saved_count++;
                 }
             } else {
-                LOG_ERROR_FMT("Failed to write frame %d", 
-                             writer.getWriteCount() + 1);
+                skipped_count++;
+                if (skipped_count % 50 == 1) {
+                    LOG_WARN_FMT("  ⚠️  Skipping frame from ch%d (total: %d)", 
+                                buffer_channel, skipped_count);
+                }
             }
             
             pool_sptr->releaseFilled(buffer);
@@ -1527,37 +1603,42 @@ static int test_buffer_writer_format(
                 LOG_INFO("Video finished, stopping...");
                 break;
             }
+            usleep(10000);
         }
     }
     
     LOG_INFO("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
     
-    // 9. 关闭
-    LOG_INFO("\nStep 7: Cleaning up...");
-    writer.close();
+    // 4. 关闭
+    LOG_INFO("\nStep 4: Cleaning up...");
+    if (ch0_writer) ch0_writer->close();
+    if (ch1_writer) ch1_writer->close();
     producer.stop();
     
-    // 10. 打印结果
-    LOG_INFO("═══════════════════════════════════════════════════════");
+    // 5. ========== 最终统计 ==========
+    LOG_INFO("\n═══════════════════════════════════════════════════════");
     LOG_INFO("  Test Results");
     LOG_INFO("═══════════════════════════════════════════════════════");
-    LOG_INFO_FMT("Format requested: %s", format_name.c_str());
-    LOG_INFO_FMT("Format actual: %s", av_get_pix_fmt_name(actual_format));
-    LOG_INFO_FMT("Output file: %s", output_path);
-    LOG_INFO_FMT("Frames saved: %d", writer.getWriteCount());
+    if (ch0_writer_created) {
+        LOG_INFO_FMT("  ch0: Saved %d frames", ch0_saved_count);
+        LOG_INFO_FMT("       Format mismatches: %lld", (long long)ch0_writer->getMismatchCount());
+        LOG_INFO_FMT("       Output: %s", ch0_output_path.c_str());
+    }
+    if (ch1_writer_created) {
+        LOG_INFO_FMT("  ch1: Saved %d frames", ch1_saved_count);
+        LOG_INFO_FMT("       Format mismatches: %lld", (long long)ch1_writer->getMismatchCount());
+        LOG_INFO_FMT("       Output: %s", ch1_output_path.c_str());
+    }
+    LOG_INFO_FMT("  Skipped frames: %d (channel mismatch)", skipped_count);
+    LOG_INFO("═══════════════════════════════════════════════════════");
     
-    bool success = (writer.getWriteCount() > 0);
+    bool success = (ch0_saved_count > 0 || ch1_saved_count > 0);
     if (success) {
         LOG_INFO("\n✅ Test PASSED");
-        LOG_INFO_FMT("   - Successfully saved %d frames", writer.getWriteCount());
-        LOG_INFO("\n💡 Tip: Verify the output with FFmpeg:");
-        LOG_INFO_FMT("   ffplay -f rawvideo -pixel_format %s -video_size %dx%d %s",
-                     ffplay_fmt.c_str(), actual_width, actual_height, output_path);
     } else {
         LOG_ERROR("\n❌ Test FAILED: No frames saved");
+        LOG_ERROR("   💡 Tip: Check TACO configuration and decoder output");
     }
-    
-    LOG_INFO("═══════════════════════════════════════════════════════");
     
     return success ? 0 : -1;
 }
@@ -1626,31 +1707,28 @@ static bool create_taco_config_by_format(
     }
     
     // RGB 8-bit Alpha 格式
+    // ⭐ v2.18：移除硬编码分辨率，让优先级逻辑自动适配输入视频分辨率
     if (fmt == "argb888") {
         taco_config = TacoConfigBuilder()
             .setRgbConfig(true, "argb888", "bt601")
-            .setDecoderOutputResolution(1920, 1080)
             .build();
         return true;
     }
     if (fmt == "abgr888") {
         taco_config = TacoConfigBuilder()
             .setRgbConfig(true, "abgr888", "bt601")
-            .setDecoderOutputResolution(1920, 1080)
             .build();
         return true;
     }
     if (fmt == "bgra888") {
         taco_config = TacoConfigBuilder()
             .setRgbConfig(true, "bgra888", "bt601")
-            .setDecoderOutputResolution(1920, 1080)
             .build();
         return true;
     }
     if (fmt == "rgba888") {
         taco_config = TacoConfigBuilder()
             .setRgbConfig(true, "rgba888", "bt601")
-            .setDecoderOutputResolution(1920, 1080)
             .build();
         return true;
     }
@@ -1659,14 +1737,12 @@ static bool create_taco_config_by_format(
     if (fmt == "rgb888") {
         taco_config = TacoConfigBuilder()
             .setRgbConfig(true, "rgb888", "bt601")
-            .setDecoderOutputResolution(1920, 1080)
             .build();
         return true;
     }
     if (fmt == "bgr888") {
         taco_config = TacoConfigBuilder()
             .setRgbConfig(true, "bgr888", "bt601")
-            .setDecoderOutputResolution(1920, 1080)
             .build();
         return true;
     }
@@ -1675,14 +1751,12 @@ static bool create_taco_config_by_format(
     if (fmt == "r16g16b16") {
         taco_config = TacoConfigBuilder()
             .setRgbConfig(true, "r16g16b16", "bt601")
-            .setDecoderOutputResolution(1920, 1080)
             .build();
         return true;
     }
     if (fmt == "b16g16r16") {
         taco_config = TacoConfigBuilder()
             .setRgbConfig(true, "b16g16r16", "bt601")
-            .setDecoderOutputResolution(1920, 1080)
             .build();
         return true;
     }
@@ -1760,38 +1834,39 @@ static int test_buffer_writer_rgb_formats(const char* video_path) {
     LOG_INFO("╚═══════════════════════════════════════════════════════╝");
     
     // ✅ 定义测试用例：所有 RGB 格式（NV12 由 test_buffer_writer 单独测试）
+    // ⭐ v2.18：移除硬编码分辨率，让优先级逻辑自动适配输入视频分辨率
     std::function<WorkerConfig::DecoderConfig::TacoConfig()> tests[] = {
         // 8-bit ARGB/ABGR/BGRA/RGBA 格式（Alpha 通道，4 字节/像素）
         []() { return TacoConfigBuilder()
                    .setRgbConfig(true, "argb888", "bt601")
-                   .setDecoderOutputResolution(1920, 1080)
+                   .setChannels(false, true)
                    .build(); 
         },
         []() { return TacoConfigBuilder()
                    .setRgbConfig(true, "abgr888", "bt601")
-                   .setDecoderOutputResolution(1920, 1080)
+                   .setChannels(false, true)
                    .build(); 
         },
         []() { return TacoConfigBuilder()
                    .setRgbConfig(true, "bgra888", "bt601")
-                   .setDecoderOutputResolution(1920, 1080)
+                   .setChannels(false, true)
                    .build(); 
         },
         []() { return TacoConfigBuilder()
                    .setRgbConfig(true, "rgba888", "bt601")
-                   .setDecoderOutputResolution(1920, 1080)
+                   .setChannels(false, true)
                    .build(); 
         },
         
         // 8-bit RGB/BGR 格式（3 字节/像素）
         []() { return TacoConfigBuilder()
                    .setRgbConfig(true, "rgb888", "bt601")
-                   .setDecoderOutputResolution(1920, 1080)
+                   .setChannels(false, true)
                    .build(); 
         },
         []() { return TacoConfigBuilder()
                    .setRgbConfig(true, "bgr888", "bt601")
-                   .setDecoderOutputResolution(1920, 1080)
+                   .setChannels(false, true)
                    .build(); 
         },
         
@@ -1827,12 +1902,12 @@ static int test_buffer_writer_rgb_formats(const char* video_path) {
         // ⭐ 16-bit RGB/BGR 格式（6 字节/像素，文件更大）
         []() { return TacoConfigBuilder()
                    .setRgbConfig(true, "r16g16b16", "bt601")
-                   .setDecoderOutputResolution(1920, 1080)
+                   .setChannels(false, true)
                    .build(); 
         },
         []() { return TacoConfigBuilder()
                    .setRgbConfig(true, "b16g16r16", "bt601")
-                   .setDecoderOutputResolution(1920, 1080)
+                   .setChannels(false, true)
                    .build(); 
         },
     };
@@ -1892,86 +1967,83 @@ static int test_buffer_writer_yuv_formats(const char* video_path) {
     LOG_INFO("╚═══════════════════════════════════════════════════════╝");
     
     // ✅ 定义测试用例：所有硬件支持的 YUV 格式（与 test_buffer_writer_rgb_formats 保持一致的结构）
+    // ⭐ v2.18：移除硬编码分辨率，让优先级逻辑自动适配输入视频分辨率
     std::function<WorkerConfig::DecoderConfig::TacoConfig()> tests[] = {
         // YUV400 系列
         []() { return TacoConfigBuilder()
+                   .setChannels(true, false)  // ⭐ 第一步：启用 ch0（YUV），关闭 ch1
                    .setYuvConfig("YUV400 I010", "bt2020")
-                   .setChannels(true, false)
-                   .setDecoderOutputResolution(1920, 1080)
                    .build(); 
         },
         []() { return TacoConfigBuilder()
+                   .setChannels(true, false)  // ⭐ 第一步：启用 ch0（YUV），关闭 ch1
                    .setYuvConfig("YUV400 L010", "bt2020")
-                   .setChannels(true, true)
-                   .setDecoderOutputResolution(1920, 1080)
                    .build(); 
         },
         []() { return TacoConfigBuilder()
+                   .setChannels(true, false)  // ⭐ 第一步：启用 ch0（YUV），关闭 ch1
                    .setYuvConfig("YUV400 Pack10", "bt2020")
-                   .setChannels(true, true)
-                   .setDecoderOutputResolution(1920, 1080)
                    .build(); 
         },
         []() { return TacoConfigBuilder()
+                   .setChannels(true, false)  // ⭐ 第一步：启用 ch0（YUV），关闭 ch1
                    .setYuvConfig("YUV400 8-bit", "bt601")
-                   .setChannels(true, true)
-                   .setDecoderOutputResolution(1920, 1080)
                    .build(); 
         },
         
         // YUV420 NV12 系列
         []() { return TacoConfigBuilder()
+                   .setChannels(true, false)  // ⭐ 第一步：启用 ch0（YUV），关闭 ch1
                    .setYuvConfig("YUV420 NV12 P010", "bt2020")
-                   .setDecoderOutputResolution(1920, 1080)
                    .build(); 
         },
         []() { return TacoConfigBuilder()
+                   .setChannels(true, false)  // ⭐ 第一步：启用 ch0（YUV），关闭 ch1
                    .setYuvConfig("YUV420 NV12 I010", "bt2020")
-                   .setDecoderOutputResolution(1920, 1080)
                    .build(); 
         },
         []() { return TacoConfigBuilder()
+                   .setChannels(true, false)  // ⭐ 第一步：启用 ch0（YUV），关闭 ch1
                    .setYuvConfig("YUV420 NV12 L010", "bt2020")
-                   .setDecoderOutputResolution(1920, 1080)
                    .build(); 
         },
         []() { return TacoConfigBuilder()
+                   .setChannels(true, false)  // ⭐ 第一步：启用 ch0（YUV），关闭 ch1
                    .setYuvConfig("YUV420 NV12 Pack10", "bt2020")
-                   .setDecoderOutputResolution(1920, 1080)
                    .build(); 
         },
         []() { return TacoConfigBuilder()
+                   .setChannels(true, false)  // ⭐ 第一步：启用 ch0（YUV），关闭 ch1
                    .setYuvConfig("YUV420 8-bit NV12", "bt601")  // 最常用
-                   .setDecoderOutputResolution(1920, 1080)
                    .build(); 
         },
         
         // YUV420 NV21 系列
         []() { return TacoConfigBuilder()
+                   .setChannels(true, false)  // ⭐ 第一步：启用 ch0（YUV），关闭 ch1
                    .setYuvConfig("YUV420 NV21 P010 Tiled-4×4", "bt2020")
-                   .setDecoderOutputResolution(1920, 1080)
                    .build(); 
         },
         []() { return TacoConfigBuilder()
+                   .setChannels(true, false)  // ⭐ 第一步：启用 ch0（YUV），关闭 ch1
                    .setYuvConfig("YUV420 NV21 I011", "bt2020")
-                   .setDecoderOutputResolution(1920, 1080)
                    .build(); 
         },
         []() { return TacoConfigBuilder()
+                   .setChannels(true, false)  // ⭐ 第一步：启用 ch0（YUV），关闭 ch1
                    .setYuvConfig("YUV420 NV21 L010", "bt2020")
-                   .setDecoderOutputResolution(1920, 1080)
                    .build(); 
         },
         []() { return TacoConfigBuilder()
+                   .setChannels(true, false)  // ⭐ 第一步：启用 ch0（YUV），关闭 ch1
                    .setYuvConfig("YUV420 8-bit NV21", "bt601")
-                   .setDecoderOutputResolution(1920, 1080)
                    .build(); 
         },
         
         // YUV420 P010
         []() { return TacoConfigBuilder()
+                   .setChannels(true, false)  // ⭐ 第一步：启用 ch0（YUV），关闭 ch1
                    .setYuvConfig("YUV420 P010", "bt2020")
-                   .setDecoderOutputResolution(1920, 1080)
                    .build(); 
         },
     };
@@ -2219,7 +2291,7 @@ static int test_multi_worker(const char* rtsp_url) {
     
     BufferWriter writer1, writer2;
     
-    if (!writer1.saveRaw(output_file1, format1, width1, height1)) {
+    if (!writer1.openRaw(output_file1, format1, width1, height1)) {
         LOG_ERROR_FMT("Failed to open BufferWriter for Producer 1: %s", output_file1);
         producer1_pool_sptr->releaseFilled(first_buffer1);
         producer2_pool_sptr->releaseFilled(first_buffer2);
@@ -2227,7 +2299,7 @@ static int test_multi_worker(const char* rtsp_url) {
         return -1;
     }
     
-    if (!writer2.saveRaw(output_file2, format2, width2, height2)) {
+    if (!writer2.openRaw(output_file2, format2, width2, height2)) {
         LOG_ERROR_FMT("Failed to open BufferWriter for Producer 2: %s", output_file2);
         writer1.close();
         producer1_pool_sptr->releaseFilled(first_buffer1);
@@ -2544,7 +2616,7 @@ static int test_rtsp_record_all_formats(const char* rtsp_url) {
         
         // 打开 BufferWriter
         BufferWriter writer;
-        if (!writer.saveEncoded(output_file, codec_params, time_base)) {
+        if (!writer.openEncoded(output_file, codec_params, time_base)) {
             LOG_ERROR_FMT("  ❌ Failed to open BufferWriter for format %s", fmt.extension);
             producer.stop();
             failed_count++;

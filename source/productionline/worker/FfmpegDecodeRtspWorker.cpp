@@ -278,36 +278,30 @@ double FfmpegDecodeRtspWorker::getBytesPerPixel() const {
         }
     }
     
-    // 2️⃣ Fallback：从 worker_config_.decoder.taco 的格式字符串推断
+    // 2️⃣ Fallback：从 worker_config_.decoder.taco 的格式枚举推断（⭐ v2.17）
     if (worker_config_.decoder.taco.ch1_rgb) {
-        // RGB 模式：根据 ch1_rgb_format 推断
-        const std::string& fmt = worker_config_.decoder.taco.ch1_rgb_format;
-        if (fmt == "argb888" || fmt == "bgra888" || fmt == "rgba888" || 
-            fmt == "abgr888" || fmt == "xrgb888" || fmt == "xbgr888") {
-            return 4.0;  // 32-bit RGBA/XRGB
-        } else if (fmt == "rgb888" || fmt == "bgr888") {
-            return 3.0;  // 24-bit RGB
-        } else if (fmt == "r16g16b16" || fmt == "b16g16r16") {
-            return 6.0;  // 48-bit RGB
+        // RGB 模式：根据 ch1_rgb_format 整型枚举推断
+        int rgb_fmt = worker_config_.decoder.taco.ch1_rgb_format;
+        
+        // RGB 8-bit 有 Alpha 通道（4 字节/像素）
+        if (rgb_fmt == 9 || rgb_fmt == 10 || rgb_fmt == 11 || rgb_fmt == 12 ||  // argb888/abgr888/bgra888/rgba888
+            rgb_fmt == 21 || rgb_fmt == 22) {  // xrgb888/xbgr888
+            return 4.0;
         }
-        // 默认 RGB
+        // RGB 8-bit 无 Alpha 通道（3 字节/像素）
+        else if (rgb_fmt == 1 || rgb_fmt == 3) {  // rgb888/bgr888
+            return 3.0;
+        }
+        // RGB 16-bit（6 字节/像素）
+        else if (rgb_fmt == 2 || rgb_fmt == 4) {  // r16g16b16/b16g16r16
+            return 6.0;
+        }
+        // 默认 ARGB888（4 字节/像素）
         return 4.0;
     } else {
-        // YUV 模式：根据 ch0_yuv_format 推断
-        const std::string& fmt = worker_config_.decoder.taco.ch0_yuv_format;
-        if (fmt.find("NV12") != std::string::npos || fmt.find("NV21") != std::string::npos) {
-            return 1.5;  // YUV420: 1.5 bytes/pixel
-        } else if (fmt.find("P010") != std::string::npos || fmt.find("I010") != std::string::npos ||
-                   fmt.find("L010") != std::string::npos || fmt.find("Pack10") != std::string::npos) {
-            return 3.0;  // YUV420 10-bit: 3 bytes/pixel
-        } else if (fmt.find("YUV400") != std::string::npos) {
-            if (fmt.find("8-bit") != std::string::npos) {
-                return 1.0;  // YUV400 8-bit: 1 byte/pixel
-            } else {
-                return 2.0;  // YUV400 10-bit: 2 bytes/pixel
-            }
-        }
-        // 默认 YUV420
+        // YUV 模式：格式由解码器自动决定，无配置字段
+        // 默认假设 YUV420（最常见，1.5 字节/像素）
+        LOG_WARN("[Worker] getBytesPerPixel() fallback: assuming YUV420 (1.5 bytes/pixel)");
         return 1.5;
     }
 }
@@ -627,19 +621,19 @@ bool FfmpegDecodeRtspWorker::configureSpecialDecoder() {
     LOG_DEBUG_FMT("[Worker]    ch1_rgb=%d: %s", taco.ch1_rgb ? 1 : 0, 
            ret < 0 ? "FAILED" : "OK");
     
-    // 设置RGB格式（从 config 读取）
-    if (taco.ch1_rgb && !taco.ch1_rgb_format.empty()) {
-        ret = av_opt_set(codec_ctx_ptr_->priv_data, "ch1_rgb_format", 
-                         taco.ch1_rgb_format.c_str(), 0);
-        LOG_DEBUG_FMT("[Worker]    ch1_rgb_format=%s: %s", taco.ch1_rgb_format.c_str(), 
+    // ⭐ v2.17: 设置 RGB 格式（使用整型枚举）
+    if (taco.ch1_rgb && taco.ch1_rgb_format > 0) {
+        ret = av_opt_set_int(codec_ctx_ptr_->priv_data, "ch1_rgb_format", 
+                             taco.ch1_rgb_format, 0);
+        LOG_DEBUG_FMT("[Worker]    ch1_rgb_format=%d: %s", taco.ch1_rgb_format, 
                ret < 0 ? "FAILED" : "OK");
     }
     
-    // 设置颜色标准（从 config 读取）
-    if (taco.ch1_rgb && !taco.ch1_rgb_std.empty()) {
-        ret = av_opt_set(codec_ctx_ptr_->priv_data, "ch1_rgb_std", 
-                         taco.ch1_rgb_std.c_str(), 0);
-        LOG_DEBUG_FMT("[Worker]    ch1_rgb_std=%s: %s", taco.ch1_rgb_std.c_str(), 
+    // ⭐ v2.17: 设置颜色标准（使用整型枚举）
+    if (taco.ch1_rgb && taco.ch1_rgb_std > 0) {
+        ret = av_opt_set_int(codec_ctx_ptr_->priv_data, "ch1_rgb_std", 
+                             taco.ch1_rgb_std, 0);
+        LOG_DEBUG_FMT("[Worker]    ch1_rgb_std=%d: %s", taco.ch1_rgb_std, 
                ret < 0 ? "FAILED" : "OK");
     }
     
@@ -731,3 +725,15 @@ bool FfmpegDecodeRtspWorker::extractHardwareAddressFromMetadata(AVFrame* frame, 
 
 
 
+
+int FfmpegDecodeRtspWorker::getSourceWidth() const {
+    return packet_source_ ? packet_source_->getSourceWidth() : 0;
+}
+
+int FfmpegDecodeRtspWorker::getSourceHeight() const {
+    return packet_source_ ? packet_source_->getSourceHeight() : 0;
+}
+
+AVPixelFormat FfmpegDecodeRtspWorker::getSourcePixelFormat() const {
+    return packet_source_ ? packet_source_->getSourcePixelFormat() : AV_PIX_FMT_NONE;
+}

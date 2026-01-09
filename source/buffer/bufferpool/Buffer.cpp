@@ -131,3 +131,32 @@ void Buffer::setImageMetadataFromAVFrame(const AVFrame* frame) {
     has_image_metadata_ = true;
 }
 
+// ========== 硬件平台相关接口实现 ⭐ v2.17新增 ==========
+
+int Buffer::getOutputChannel() const {
+    // 1. 检查是否有关联的 AVFrame
+    if (!avframe_) {
+        return -1;
+    }
+    
+    // 2. 检查 AVFrame 是否有 metadata
+    if (!avframe_->metadata) {
+        return -1;
+    }
+    
+    // 3. 从 metadata 中查找 "output_channel" 键
+    AVDictionaryEntry* channel_entry = av_dict_get(
+        avframe_->metadata,    // 元数据字典
+        "output_channel",      // 键名
+        nullptr,               // 从头开始查找
+        0                      // 精确匹配
+    );
+    
+    // 4. 如果找到且有值，转换为整数；否则返回 -1
+    if (channel_entry && channel_entry->value) {
+        return atoi(channel_entry->value);  // "0" -> 0, "1" -> 1
+    }
+    
+    return -1;  // 未找到或值为空
+}
+

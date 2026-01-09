@@ -4,6 +4,7 @@
 #include <string>
 #include <string_view>
 #include <optional>
+#include "common/Logger.hpp"
 
 /**
  * @brief Worker 类型枚举
@@ -91,20 +92,64 @@ struct WorkerConfig {
         // h264_taco 特定配置（子子结构体）
         // ========================================
         struct TacoConfig {
-            bool reorder_disable = true;               // 禁用重排序
-            bool ch0_enable = true;                    // 启用通道0（YUV）
-            bool ch1_enable = true;                    // 启用通道1（RGB）
-            bool ch1_rgb = true;                       // 通道1输出RGB
-            std::string ch1_rgb_format = "argb888";   // RGB格式（使用 std::string）
-            std::string ch1_rgb_std = "bt601";        // 色彩标准（使用 std::string）
-            std::string ch0_yuv_format = "YUV420 8-bit NV12";  // YUV格式（PP0，ch0支持的格式）
-            std::string ch0_yuv_std = "bt601";        // YUV色彩标准（bt601, bt709, bt2020等）
-            int ch1_crop_x = 0;                        // 裁剪参数
-            int ch1_crop_y = 0;
-            int ch1_crop_width = 0;
-            int ch1_crop_height = 0;
-            int ch1_scale_width = 0;                   // 缩放参数
-            int ch1_scale_height = 0;
+            // ========================================
+            // 解码器行为配置
+            // ========================================
+            bool reorder_disable = true;  // 禁用重排序（推荐保持 true）
+
+            // ========================================
+            // 通道0配置（Channel 0 - YUV Output）
+            // ========================================
+            bool ch0_enable = true;                    // 启用通道0（YUV 格式输出）
+            
+            // YUV 格式由解码器自动决定（NV12/NV21/P010等），无需手动配置
+            // 输出格式取决于输入流的编码格式和位深度
+            
+            // 裁剪参数（Crop）
+            int ch0_crop_x = 0;                        // 裁剪起始X坐标（0=不裁剪）
+            int ch0_crop_y = 0;                        // 裁剪起始Y坐标（0=不裁剪）
+            int ch0_crop_width = 0;                    // 裁剪宽度（0=不裁剪）
+            int ch0_crop_height = 0;                   // 裁剪高度（0=不裁剪）
+            
+            // 缩放参数（Scale）
+            int ch0_scale_width = 0;                   // 缩放目标宽度（0=不缩放）
+            int ch0_scale_height = 0;                  // 缩放目标高度（0=不缩放）
+
+            // ========================================
+            // 通道1配置（Channel 1 - RGB/YUV Output）
+            // ========================================
+            bool ch1_enable = false;                   // 启用通道1（默认禁用）
+            bool ch1_rgb = false;                      // 是否输出RGB格式（false=YUV）
+            
+            // RGB 格式配置（仅当 ch1_rgb=true 时有效）
+            int ch1_rgb_format = 9;                    // RGB格式类型（默认 9=argb888 packed）
+                                                       // 常用值：
+                                                       // 9  = argb888 (ARGB8888 packed)
+                                                       // 11 = abgr888 (ABGR8888 packed)
+                                                       // 13 = rgba888 (RGBA8888 packed)
+                                                       // 15 = bgra888 (BGRA8888 packed)
+                                                       // 1  = rgb888  (RGB888 packed)
+                                                       // 3  = bgr888  (BGR888 packed)
+                                                       // 完整列表见 TACO 解码器文档
+            
+            int ch1_rgb_std = 1;                       // RGB颜色标准（默认 1=BT.601 full range）
+                                                       // 0 = none (无标准)
+                                                       // 1 = bt601    (BT.601 full range)
+                                                       // 2 = bt601_l  (BT.601 limited range)
+                                                       // 3 = bt709    (BT.709 full range)
+                                                       // 4 = bt709_l  (BT.709 limited range)
+                                                       // 5 = bt2020   (BT.2020 full range)
+                                                       // 6 = bt2020_l (BT.2020 limited range)
+            
+            // 裁剪参数（Crop）
+            int ch1_crop_x = 0;                        // 裁剪起始X坐标（0=不裁剪）
+            int ch1_crop_y = 0;                        // 裁剪起始Y坐标（0=不裁剪）
+            int ch1_crop_width = 0;                    // 裁剪宽度（0=不裁剪）
+            int ch1_crop_height = 0;                   // 裁剪高度（0=不裁剪）
+            
+            // 缩放参数（Scale）
+            int ch1_scale_width = 0;                   // 缩放目标宽度（0=不缩放）
+            int ch1_scale_height = 0;                  // 缩放目标高度（0=不缩放）
             
             TacoConfig() = default;
             TacoConfig(const TacoConfig&) = default;
@@ -153,23 +198,23 @@ public:
      * - 本地文件：`/data/video.mp4`
      */
     DataSourceConfigBuilder& setPath(std::string_view path) {
-        config_.path = std::string(path);
+        data_source_config_.path = std::string(path);
         return *this;
     }
     
     // 兼容 const char*（保持向后兼容）
     DataSourceConfigBuilder& setPath(const char* path) {
         if (path) {
-            config_.path = path;
+            data_source_config_.path = path;
         } else {
-            config_.path.clear();
+            data_source_config_.path.clear();
         }
         return *this;
     }
     
     // 兼容 std::string
     DataSourceConfigBuilder& setPath(const std::string& path) {
-        config_.path = path;
+        data_source_config_.path = path;
         return *this;
     }
     
@@ -183,16 +228,16 @@ public:
      * - Packet 录制：64
      */
     DataSourceConfigBuilder& setBufferCount(int count) {
-        config_.buffer_count = count;
+        data_source_config_.buffer_count = count;
         return *this;
     }
     
     WorkerConfig::DataSourceConfig build() const {
-        return config_;
+        return data_source_config_;
     }
     
 private:
-    WorkerConfig::DataSourceConfig config_;
+    WorkerConfig::DataSourceConfig data_source_config_;
 };
 
 /**
@@ -207,7 +252,7 @@ public:
      * @param width 显示设备宽度（像素）
      */
     DisplayConfigBuilder& setDisplayWidth(int width) {
-        config_.width = width;
+        display_config_.width = width;
         return *this;
     }
     
@@ -216,7 +261,7 @@ public:
      * @param height 显示设备高度（像素）
      */
     DisplayConfigBuilder& setDisplayHeight(int height) {
-        config_.height = height;
+        display_config_.height = height;
         return *this;
     }
     
@@ -236,8 +281,8 @@ public:
      * ```
      */
     DisplayConfigBuilder& setDisplayResolution(int width, int height) {
-        config_.width = width;
-        config_.height = height;
+        display_config_.width = width;
+        display_config_.height = height;
         return *this;
     }
     
@@ -246,16 +291,16 @@ public:
      * @param bpp 每像素位数（如 32 表示 ARGB8888）
      */
     DisplayConfigBuilder& setBitsPerPixel(int bpp) {
-        config_.bits_per_pixel = bpp;
+        display_config_.bits_per_pixel = bpp;
         return *this;
     }
     
     WorkerConfig::DisplayConfig build() const {
-        return config_;
+        return display_config_;
     }
     
 private:
-    WorkerConfig::DisplayConfig config_;
+    WorkerConfig::DisplayConfig display_config_;
 };
 
 /**
@@ -266,123 +311,169 @@ public:
     TacoConfigBuilder() = default;
     
     TacoConfigBuilder& setReorderDisable(bool disable = true) {
-        config_.reorder_disable = disable;
+        taco_config_.reorder_disable = disable;
         return *this;
     }
     
     TacoConfigBuilder& setChannels(bool ch0, bool ch1) {
-        config_.ch0_enable = ch0;
-        config_.ch1_enable = ch1;
+        taco_config_.ch0_enable = ch0;
+        taco_config_.ch1_enable = ch1;
         return *this;
     }
     
-    // 接受 std::string_view（推荐）
-    TacoConfigBuilder& setRgbConfig(
-        bool enable, 
-        std::string_view format = "argb888", 
-        std::string_view std = "bt601"
-    ) {
-        config_.ch1_rgb = enable;
-        config_.ch1_rgb_format = std::string(format);
-        config_.ch1_rgb_std = std::string(std);
-        return *this;
-    }
+    // ========== 通道0配置 ==========
     
-    // 兼容 const char*（保持向后兼容）
-    TacoConfigBuilder& setRgbConfig(bool enable, const char* format, const char* std) {
-        config_.ch1_rgb = enable;
-        if (format) {
-            config_.ch1_rgb_format = format;
-        }
-        if (std) {
-            config_.ch1_rgb_std = std;
-        }
+    /**
+     * @brief 设置通道0裁剪区域
+     */
+    TacoConfigBuilder& setCh0CropRegion(int x, int y, int width, int height) {
+        taco_config_.ch0_crop_x = x;
+        taco_config_.ch0_crop_y = y;
+        taco_config_.ch0_crop_width = width;
+        taco_config_.ch0_crop_height = height;
         return *this;
     }
     
     /**
-     * @brief 设置 YUV 格式配置（通道0，PP0）
-     * 
-     * @param format YUV格式名称（硬件格式名称，如 "YUV420 8-bit NV12", "YUV420 NV12 P010" 等）
-     * @param std 色彩标准（如 "bt601", "bt709", "bt2020"）
-     * @return TacoConfigBuilder& 链式调用
-     * 
-     * 支持的格式（PP0，ch0）：
-     * - YUV400 系列：YUV400 P010, YUV400 I010, YUV400 L010, YUV400 Pack10, YUV400 8-bit
-     * - YUV420 NV12 系列：YUV420 NV12 P010, YUV420 NV12 I010, YUV420 NV12 L010, 
-     *                     YUV420 NV12 Pack10, YUV420 8-bit NV12
-     * - YUV420 NV21 系列：YUV420 NV21 P010 Tiled-4×4, YUV420 NV21 I011, YUV420 NV21 L010,
-     *                     YUV420 8-bit NV21
-     * - YUV420 P010
-     * 
-     * @example
-     * ```cpp
-     * TacoConfigBuilder()
-     *     .setYuvConfig("YUV420 8-bit NV12", "bt601")  // 输出 NV12 格式
-     *     .setDecoderOutputResolution(1920, 1080)
-     *     .build()
-     * ```
+     * @brief 设置通道0缩放分辨率
      */
-    // 接受 std::string_view（推荐）
+    TacoConfigBuilder& setCh0ScaleResolution(int width, int height) {
+        taco_config_.ch0_scale_width = width;
+        taco_config_.ch0_scale_height = height;
+        return *this;
+    }
+    
+    // ========== 通道1配置 ==========
+    
+    /**
+     * @brief 设置通道1 RGB配置
+     * @param enable 是否输出RGB
+     * @param format RGB格式类型（0-28），默认 9=argb888
+     * @param std 颜色标准（0-6），默认 1=bt601
+     */
+    TacoConfigBuilder& setCh1RgbConfig(bool enable, int format = 9, int std = 1) {
+        taco_config_.ch1_rgb = enable;
+        taco_config_.ch1_rgb_format = format;
+        taco_config_.ch1_rgb_std = std;
+        return *this;
+    }
+    
+    /**
+     * @brief 设置通道1裁剪区域
+     */
+    TacoConfigBuilder& setCh1CropRegion(int x, int y, int width, int height) {
+        if (taco_config_.ch1_enable) {
+            taco_config_.ch1_crop_x = x;
+            taco_config_.ch1_crop_y = y;
+            taco_config_.ch1_crop_width = width;
+            taco_config_.ch1_crop_height = height;
+            return *this;
+        }
+        LOG_ERROR_FMT("TacoConfigBuilder::setCh1CropRegion() failed, ch1 is not enabled");
+        return *this;
+    }
+    
+    /**
+     * @brief 设置通道1缩放分辨率（解码器输出分辨率）
+     */
+    TacoConfigBuilder& setCh1ScaleResolution(int width, int height) {
+        if (taco_config_.ch1_enable) {
+            taco_config_.ch1_scale_width = width;
+            taco_config_.ch1_scale_height = height;
+            return *this;
+        }
+        LOG_ERROR_FMT("TacoConfigBuilder::setCh1ScaleResolution() failed, ch1 is not enabled");
+        return *this;
+    }
+    
+    // ========== 向后兼容的快捷方法（保留旧接口） ==========
+    
+    /**
+     * @brief 设置RGB配置（简化版，向后兼容）
+     * @deprecated 请使用 setCh1RgbConfig()
+     */
+    TacoConfigBuilder& setRgbConfig(bool enable, std::string_view format = "argb888", std::string_view std_name = "bt601") {
+        taco_config_.ch1_rgb = enable;
+        taco_config_.ch1_rgb_format = mapRgbFormatNameToInt(format);
+        taco_config_.ch1_rgb_std = mapRgbStdNameToInt(std_name);
+        return *this;
+    }
+    
+    /**
+     * @brief 设置YUV配置（简化版，向后兼容）
+     * @note YUV格式由解码器自动决定，此方法仅为兼容性保留
+     * @deprecated YUV格式无需手动配置
+     */
     TacoConfigBuilder& setYuvConfig(
         std::string_view format = "YUV420 8-bit NV12", 
         std::string_view std = "bt601"
     ) {
-        config_.ch0_yuv_format = std::string(format);
-        config_.ch0_yuv_std = std::string(std);
-        return *this;
-    }
-    
-    // 兼容 const char*（保持向后兼容）
-    TacoConfigBuilder& setYuvConfig(const char* format, const char* std) {
-        if (format) {
-            config_.ch0_yuv_format = format;
-        }
-        if (std) {
-            config_.ch0_yuv_std = std;
-        }
-        return *this;
-    }
-    
-    TacoConfigBuilder& setCropRegion(int x, int y, int width, int height) {
-        config_.ch1_crop_x = x;
-        config_.ch1_crop_y = y;
-        config_.ch1_crop_width = width;
-        config_.ch1_crop_height = height;
+        // YUV 格式由解码器自动决定，不需要设置
+        // 保留此方法仅为向后兼容
         return *this;
     }
     
     /**
-     * @brief 设置解码器输出分辨率（硬件缩放）
-     * 
-     * ⚠️ 重要：此方法设置的是解码器输出分辨率，不是显示设备分辨率！
-     * 
-     * TACO 解码器会将视频通过硬件缩放到指定分辨率后输出。
-     * 
-     * @param width  解码器输出宽度（像素）
-     * @param height 解码器输出高度（像素）
-     * @return TacoConfigBuilder& 链式调用
-     * 
-     * @example
-     * ```cpp
-     * TacoConfigBuilder()
-     *     .setRgbConfig(true, "argb888", "bt601")
-     *     .setDecoderOutputResolution(1920, 1080)  // 解码器输出 1920×1080
-     *     .build()
-     * ```
+     * @brief 设置裁剪区域（简化版，向后兼容，作用于ch1）
+     * @deprecated 请使用 setCh1CropRegion()
+     */
+    TacoConfigBuilder& setCropRegion(int x, int y, int width, int height) {
+        return setCh1CropRegion(x, y, width, height);
+    }
+    
+    /**
+     * @brief 设置解码器输出分辨率（简化版，向后兼容，作用于ch1）
+     * @deprecated 请使用 setCh1ScaleResolution()
      */
     TacoConfigBuilder& setDecoderOutputResolution(int width, int height) {
-        config_.ch1_scale_width = width;
-        config_.ch1_scale_height = height;
-        return *this;
+        return setCh1ScaleResolution(width, height);
     }
     
     WorkerConfig::DecoderConfig::TacoConfig build() const {
-        return config_;
+        return taco_config_;
     }
     
+    // ========== 辅助映射函数（public，供外部使用） ==========
+    
+    /**
+     * @brief 将RGB格式名称映射为整数（向后兼容）
+     */
+    static int mapRgbFormatNameToInt(std::string_view format) {
+        if (format == "argb888") return 9;
+        if (format == "abgr888") return 11;
+        if (format == "rgba888") return 13;
+        if (format == "bgra888") return 15;
+        if (format == "rgb888") return 1;
+        if (format == "bgr888") return 3;
+        if (format == "xrgb888") return 25;
+        if (format == "xbgr888") return 27;
+        if (format == "rgb888_planar") return 2;
+        if (format == "bgr888_planar") return 4;
+        if (format == "r16g16b16") return 17;
+        if (format == "b16g16r16") return 19;
+        if (format == "rgbx888") return 21;
+        if (format == "bgrx888") return 23;
+        if (format == "gbrp") return 28;
+        // 默认返回 argb888
+        return 9;
+    }
+    
+    /**
+     * @brief 将颜色标准名称映射为整数（向后兼容）
+     */
+    static int mapRgbStdNameToInt(std::string_view std_name) {
+        if (std_name == "bt601") return 1;
+        if (std_name == "bt601_l") return 2;
+        if (std_name == "bt709") return 3;
+        if (std_name == "bt709_l") return 4;
+        if (std_name == "bt2020") return 5;
+        if (std_name == "bt2020_l") return 6;
+        // 默认返回 bt601
+        return 1;
+    }
+
 private:
-    WorkerConfig::DecoderConfig::TacoConfig config_;
+    WorkerConfig::DecoderConfig::TacoConfig taco_config_;
 };
 
 /**
@@ -396,44 +487,44 @@ public:
     
     // 接受 std::string_view（推荐）
     DecoderConfigBuilder& setDecoderName(std::string_view name) {
-        config_.name = std::string(name);
+        decoder_config_.name = std::string(name);
         return *this;
     }
     
     // 兼容 const char*（保持向后兼容）
     DecoderConfigBuilder& setDecoderName(const char* name) {
         if (name) {
-            config_.name = name;
+            decoder_config_.name = name;
         } else {
-            config_.name = std::nullopt;
+            decoder_config_.name = std::nullopt;
         }
         return *this;
     }
     
     // 清除解码器名称（使用自动选择）
     DecoderConfigBuilder& clearDecoderName() {
-        config_.name = std::nullopt;
+        decoder_config_.name = std::nullopt;
         return *this;
     }
     
     // 接受 std::string_view（推荐）
     DecoderConfigBuilder& setHwaccelDevice(std::string_view device) {
-        config_.hwaccel_device = std::string(device);
+        decoder_config_.hwaccel_device = std::string(device);
         return *this;
     }
     
     // 兼容 const char*（保持向后兼容）
     DecoderConfigBuilder& setHwaccelDevice(const char* device) {
         if (device) {
-            config_.hwaccel_device = device;
+            decoder_config_.hwaccel_device = device;
         } else {
-            config_.hwaccel_device = std::nullopt;
+            decoder_config_.hwaccel_device = std::nullopt;
         }
         return *this;
     }
     
     DecoderConfigBuilder& setDecodeThreads(int threads) {
-        config_.decode_threads = threads;
+        decoder_config_.decode_threads = threads;
         return *this;
     }
     
@@ -463,16 +554,16 @@ public:
      */
     DecoderConfigBuilder& useTaco(std::string_view codec) {
         // 拼接解码器名称：codec + "_taco"
-        config_.name = std::string(codec) + "_taco";
-        config_.enable_hardware = true;
+        decoder_config_.name = std::string(codec) + "_taco";
+        decoder_config_.enable_hardware = true;
         
         // 设置默认 taco 配置
-        config_.taco.reorder_disable = true;
-        config_.taco.ch0_enable = true;
-        config_.taco.ch1_enable = true;
-        config_.taco.ch1_rgb = true;
-        config_.taco.ch1_rgb_format = "argb888";
-        config_.taco.ch1_rgb_std = "bt601";
+        decoder_config_.taco.reorder_disable = true;
+        decoder_config_.taco.ch0_enable = true;
+        decoder_config_.taco.ch1_enable = true;
+        decoder_config_.taco.ch1_rgb = true;
+        decoder_config_.taco.ch1_rgb_format = TacoConfigBuilder::mapRgbFormatNameToInt("argb888");  // 9
+        decoder_config_.taco.ch1_rgb_std = TacoConfigBuilder::mapRgbStdNameToInt("bt601");          // 1
         
         return *this;
     }
@@ -500,9 +591,9 @@ public:
         const WorkerConfig::DecoderConfig::TacoConfig& taco_config
     ) {
         // 拼接解码器名称：codec + "_taco"
-        config_.name = std::string(codec) + "_taco";
-        config_.enable_hardware = true;
-        config_.taco = taco_config;
+        decoder_config_.name = std::string(codec) + "_taco";
+        decoder_config_.enable_hardware = true;
+        decoder_config_.taco = taco_config;
         return *this;
     }
     
@@ -510,8 +601,8 @@ public:
      * @brief 预设：软件解码（自动选择）
      */
     DecoderConfigBuilder& useSoftware() {
-        config_.name = std::nullopt;
-        config_.enable_hardware = false;
+        decoder_config_.name = std::nullopt;
+        decoder_config_.enable_hardware = false;
         return *this;
     }
     
@@ -541,9 +632,9 @@ public:
      * 生成的解码器名称格式为：{codec}_cuvid（如 "h264_cuvid"、"h265_cuvid"）
      */
     DecoderConfigBuilder& useCuvid(std::string_view codec) {
-        config_.name = std::string(codec) + "_cuvid";
-        config_.enable_hardware = true;
-        config_.hwaccel_device = "cuda";
+        decoder_config_.name = std::string(codec) + "_cuvid";
+        decoder_config_.enable_hardware = true;
+        decoder_config_.hwaccel_device = "cuda";
         return *this;
     }
     
@@ -573,9 +664,9 @@ public:
      * 生成的解码器名称格式为：{codec}_qsv（如 "h264_qsv"、"h265_qsv"）
      */
     DecoderConfigBuilder& useQsv(std::string_view codec) {
-        config_.name = std::string(codec) + "_qsv";
-        config_.enable_hardware = true;
-        config_.hwaccel_device = "qsv";
+        decoder_config_.name = std::string(codec) + "_qsv";
+        decoder_config_.enable_hardware = true;
+        decoder_config_.hwaccel_device = "qsv";
         return *this;
     }
     
@@ -602,18 +693,18 @@ public:
      * 生成的解码器名称格式为：{codec}_vaapi（如 "h264_vaapi"、"h265_vaapi"）
      */
     DecoderConfigBuilder& useVaapi(std::string_view codec) {
-        config_.name = std::string(codec) + "_vaapi";
-        config_.enable_hardware = true;
-        config_.hwaccel_device = "vaapi";
+        decoder_config_.name = std::string(codec) + "_vaapi";
+        decoder_config_.enable_hardware = true;
+        decoder_config_.hwaccel_device = "vaapi";
         return *this;
     }
     
     WorkerConfig::DecoderConfig build() const {
-        return config_;
+        return decoder_config_;
     }
     
 private:
-    WorkerConfig::DecoderConfig config_;
+    WorkerConfig::DecoderConfig decoder_config_;
 };
 
 /**
@@ -629,7 +720,7 @@ public:
      * @brief 设置数据源配置
      */
     WorkerConfigBuilder& setDataSourceConfig(const WorkerConfig::DataSourceConfig& data_source_config) {
-        config_.data_source = data_source_config;
+        worker_config_.data_source = data_source_config;
         return *this;
     }
     
@@ -638,7 +729,7 @@ public:
      * @param display_config 显示设备配置
      */
     WorkerConfigBuilder& setDisplayConfig(const WorkerConfig::DisplayConfig& display_config) {
-        config_.display = display_config;
+        worker_config_.display = display_config;
         return *this;
     }
     
@@ -646,7 +737,7 @@ public:
      * @brief 设置解码器配置
      */
     WorkerConfigBuilder& setDecoderConfig(const WorkerConfig::DecoderConfig& decoder_config) {
-        config_.decoder = decoder_config;
+        worker_config_.decoder = decoder_config;
         return *this;
     }
     
@@ -654,7 +745,7 @@ public:
      * @brief 设置 Worker 类型
      */
     WorkerConfigBuilder& setWorkerType(WorkerType type) {
-        config_.worker_type = type;
+        worker_config_.worker_type = type;
         return *this;
     }
     
@@ -662,11 +753,11 @@ public:
      * @brief 构建最终配置
      */
     WorkerConfig build() const {
-        return config_;
+        return worker_config_;
     }
     
 private:
-    WorkerConfig config_;
+    WorkerConfig worker_config_;
 };
 
 #endif // WORKER_CONFIG_HPP

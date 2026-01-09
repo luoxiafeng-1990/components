@@ -293,6 +293,36 @@ public:
     }
     
     /**
+     * @brief 获取输入数据源的原始视频宽度
+     * @return 视频宽度（像素），如果不可用则返回 0
+     * 
+     * @note 这是输入数据源（文件/流）的原始分辨率，不是解码器输出分辨率
+     */
+    virtual int getSourceWidth() const {
+        return 0;
+    }
+    
+    /**
+     * @brief 获取输入数据源的原始视频高度
+     * @return 视频高度（像素），如果不可用则返回 0
+     * 
+     * @note 这是输入数据源（文件/流）的原始分辨率，不是解码器输出分辨率
+     */
+    virtual int getSourceHeight() const {
+        return 0;
+    }
+    
+    /**
+     * @brief 获取输入数据源的原始像素格式
+     * @return AVPixelFormat，如果不可用则返回 AV_PIX_FMT_NONE
+     * 
+     * @note 这是输入数据源的编码格式，不是解码器输出格式
+     */
+    virtual AVPixelFormat getSourcePixelFormat() const {
+        return AV_PIX_FMT_NONE;
+    }
+    
+    /**
      * @brief 获取时间基（用于 BufferWriter 等场景）
      * 
      * v2.14 设计：

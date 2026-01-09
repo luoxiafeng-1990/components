@@ -10,6 +10,7 @@ extern "C" {
 #include <libavutil/pixfmt.h>
 #include <libavutil/frame.h>
 #include <libavcodec/packet.h>  // ⭐ v2.8新增：AVPacket 定义
+#include <libavutil/dict.h>     // ⭐ v2.17新增：AVDictionary 定义（用于 metadata）
 }
 
 /**
@@ -288,6 +289,30 @@ public:
         if (!virt_addr_) return nullptr;
         return (uint8_t*)virt_addr_ + plane_offset_[plane];
     }
+    
+    // ========== 硬件平台相关接口 ⭐ v2.17新增 ==========
+    
+    /**
+     * @brief 获取输出通道号（硬件平台相关）
+     * @return 通道号（0=YUV通道, 1=RGB通道, ...），-1 表示不支持或无 AVFrame
+     * 
+     * @note 仅在支持多通道输出的硬件平台有效（如 TACO 解码器）
+     * @note 从 AVFrame->metadata["output_channel"] 实时读取，零存储开销
+     * @note 调用开销：微秒级（哈希表查找），可忽略
+     * 
+     * @example 基本用法
+     * @code
+     *   int channel = buffer->getOutputChannel();
+     *   if (channel == 0) {
+     *       // 处理 YUV 通道
+     *   } else if (channel == 1) {
+     *       // 处理 RGB 通道
+     *   } else {
+     *       // channel == -1，不支持或未设置
+     *   }
+     * @endcode
+     */
+    int getOutputChannel() const;
     
     // ========== 校验接口 ==========
     

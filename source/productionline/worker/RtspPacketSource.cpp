@@ -228,6 +228,21 @@ bool RtspPacketSource::isEof() const {
     return eof_reached_.load(std::memory_order_acquire);
 }
 
+int RtspPacketSource::getSourceWidth() const {
+    const AVCodecParameters* params = getCodecParameters();
+    return params ? params->width : 0;
+}
+
+int RtspPacketSource::getSourceHeight() const {
+    const AVCodecParameters* params = getCodecParameters();
+    return params ? params->height : 0;
+}
+
+AVPixelFormat RtspPacketSource::getSourcePixelFormat() const {
+    const AVCodecParameters* params = getCodecParameters();
+    return params ? static_cast<AVPixelFormat>(params->format) : AV_PIX_FMT_NONE;
+}
+
 bool RtspPacketSource::findVideoStream() {
     if (!format_ctx_ptr_) {
         LOG_ERROR("[RtspPacketSource] format_ctx_ptr_ is nullptr");
