@@ -10,6 +10,7 @@ extern "C" {
 #include <libavutil/pixfmt.h>
 #include <libavutil/frame.h>
 #include <libavcodec/packet.h>  // ⭐ v2.8新增：AVPacket 定义
+#include <libavcodec/avcodec.h> // ⭐ v2.19新增：av_packet_unref 函数定义
 #include <libavutil/dict.h>     // ⭐ v2.17新增：AVDictionary 定义（用于 metadata）
 }
 
@@ -313,6 +314,31 @@ public:
      * @endcode
      */
     int getOutputChannel() const;
+    
+    // ========== 生命周期管理接口 ⭐ v2.19新增 ==========
+    
+    /**
+     * @brief 清理 Buffer 中的引用计数和元数据（用于归还到 free 队列前）
+     * 
+     * 职责：
+     * 1. 清空 AVFrame 的引用计数（av_frame_unref），但不释放 AVFrame 结构体
+     * 2. 清空 AVPacket 的引用计数（av_packet_unref），但不释放 AVPacket 结构体
+     * 3. 重置虚拟地址为 nullptr（因为 AVFrame 数据已被清空）
+     * 4. 清空图像元数据标志和相关字段
+     * 
+     * 使用场景：
+     * - 在 BufferPool::releaseFilled() 时调用，确保 buffer 回到 free 队列时是"干净"的
+     * - 在 BufferPool::releaseFree() 时调用，确保填充失败的 buffer 也是"干净"的
+     * 
+     * 注意事项：
+     * - 不释放 AVFrame/AVPacket 结构体本身（所有权在 AVFrameAllocator）
+     * - 不修改 buffer ID、size、ownership 等基本信息
+     * - 不修改 buffer 状态（由 BufferPool 管理）
+     * 
+     * @note 线程安全：此函数不涉及线程同步，调用者需要保证线程安全
+     * @note v2.19新增：用于解决 AVFrame 数据被清空的问题
+     */
+    void freeBuffer();
     
     // ========== 校验接口 ==========
     

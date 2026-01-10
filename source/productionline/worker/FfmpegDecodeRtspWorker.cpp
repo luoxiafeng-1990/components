@@ -597,6 +597,28 @@ bool FfmpegDecodeRtspWorker::configureSpecialDecoder() {
     LOG_DEBUG_FMT("[Worker]    ch1_enable=%d: %s", taco.ch1_enable ? 1 : 0, 
            ret < 0 ? "FAILED" : "OK");
     
+    // ========== 通道0配置 ==========
+    
+    // 配置通道0裁剪参数（从 config 读取）
+    if (taco.ch0_crop_width > 0 && taco.ch0_crop_height > 0) {
+        av_opt_set_int(codec_ctx_ptr_->priv_data, "ch0_crop_x", taco.ch0_crop_x, 0);
+        av_opt_set_int(codec_ctx_ptr_->priv_data, "ch0_crop_y", taco.ch0_crop_y, 0);
+        av_opt_set_int(codec_ctx_ptr_->priv_data, "ch0_crop_width", taco.ch0_crop_width, 0);
+        av_opt_set_int(codec_ctx_ptr_->priv_data, "ch0_crop_height", taco.ch0_crop_height, 0);
+        LOG_DEBUG_FMT("[Worker]    ch0_crop: (%d, %d, %d, %d)", 
+               taco.ch0_crop_x, taco.ch0_crop_y, 
+               taco.ch0_crop_width, taco.ch0_crop_height);
+    }
+    
+    // 配置通道0缩放参数（从 config 读取）
+    if (taco.ch0_scale_width > 0 && taco.ch0_scale_height > 0) {
+        av_opt_set_int(codec_ctx_ptr_->priv_data, "ch0_scale_width", taco.ch0_scale_width, 0);
+        av_opt_set_int(codec_ctx_ptr_->priv_data, "ch0_scale_height", taco.ch0_scale_height, 0);
+        LOG_DEBUG_FMT("[Worker]    ch0_scale: (%d, %d)", taco.ch0_scale_width, taco.ch0_scale_height);
+    }
+    
+    // ========== 通道1配置 ==========
+    
     // 配置通道1裁剪参数（从 config 读取）
     if (taco.ch1_crop_width > 0 && taco.ch1_crop_height > 0) {
         av_opt_set_int(codec_ctx_ptr_->priv_data, "ch1_crop_x", taco.ch1_crop_x, 0);

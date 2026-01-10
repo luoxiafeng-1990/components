@@ -1362,6 +1362,7 @@ static int test_buffer_writer_format(
         .setDataSourceConfig(
             DataSourceConfigBuilder()
                 .setPath(video_path)
+                .setBufferCount(16)
                 .build()
         )
         .setDisplayConfig(

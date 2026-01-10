@@ -160,3 +160,50 @@ int Buffer::getOutputChannel() const {
     return -1;  // 未找到或值为空
 }
 
+// ========== 生命周期管理接口实现 ⭐ v2.19新增 ==========
+
+void Buffer::freeBuffer() {
+    // 1. 清空 AVFrame 的引用计数（清空数据，但不释放结构体）
+    // av_frame_unref() 会：
+    //   - 清空 frame->data[0] 到 frame->data[7]
+    //   - 清空 frame->buf[0] 到 frame->buf[7]（释放引用计数）
+    //   - 但保留 AVFrame 结构体本身（不调用 av_frame_free）
+    if (avframe_) {
+        av_frame_unref(avframe_);
+    }
+    
+    // 2. 清空 AVPacket 的引用计数（清空数据，但不释放结构体）
+    // av_packet_unref() 会：
+    //   - 清空 packet->data
+    //   - 清空 packet->buf（释放引用计数）
+    //   - 但保留 AVPacket 结构体本身（不调用 av_packet_free）
+    if (avpacket_) {
+        av_packet_unref(avpacket_);
+    }
+    
+    // 3. 重置虚拟地址（因为 AVFrame 的数据已被清空）
+    // virt_addr_ 之前指向 frame->data[0]，现在 frame->data[0] 已被清空，所以重置为 nullptr
+    virt_addr_ = nullptr;
+    
+    // 4. 清空图像元数据
+    has_image_metadata_ = false;
+    width_ = 0;
+    height_ = 0;
+    format_ = AV_PIX_FMT_NONE;
+    linesize_[0] = 0;
+    linesize_[1] = 0;
+    linesize_[2] = 0;
+    linesize_[3] = 0;
+    nb_planes_ = 0;
+    
+    // 5. 注意：不修改以下内容：
+    //    - avframe_ 指针（结构体还在，只是数据被清空）
+    //    - avpacket_ 指针（结构体还在，只是数据被清空）
+    //    - id_（buffer ID 不变）
+    //    - size_（buffer 大小不变）
+    //    - used_size_（实际使用大小不变）
+    //    - ownership_（所有权类型不变）
+    //    - phys_addr_（物理地址可能保留，取决于使用场景）
+    //    - state_（由 BufferPool 管理）
+    //    - validation_magic_（魔数不变）
+}

@@ -188,7 +188,7 @@ bool FfmpegDecodeVideoFileWorker::open(const char* path) {
     // ✅ 从配置读取 buffer_count，如果未配置则使用默认值
     int buffer_count = worker_config_.data_source.buffer_count;
     if (buffer_count <= 0) {
-        buffer_count = 128;  // 默认值：文件解码建议 128 个 Buffer（应对慢速消费者）
+        buffer_count = 64;  // 默认值：文件解码建议 128 个 Buffer（应对慢速消费者）
     }
     
     // v2.0: allocatePoolWithBuffers 返回 pool_id
@@ -451,6 +451,28 @@ bool FfmpegDecodeVideoFileWorker::configureSpecialDecoder() {
                          taco.ch1_enable ? 1 : 0, 0);
     LOG_DEBUG_FMT("[Worker]    ch1_enable=%d: %s", taco.ch1_enable ? 1 : 0, 
            ret < 0 ? "FAILED" : "OK");
+    
+    // ========== 通道0配置 ==========
+    
+    // 配置通道0裁剪参数（从 config 读取）
+    if (taco.ch0_crop_width > 0 && taco.ch0_crop_height > 0) {
+        av_opt_set_int(codec_ctx_ptr_->priv_data, "ch0_crop_x", taco.ch0_crop_x, 0);
+        av_opt_set_int(codec_ctx_ptr_->priv_data, "ch0_crop_y", taco.ch0_crop_y, 0);
+        av_opt_set_int(codec_ctx_ptr_->priv_data, "ch0_crop_width", taco.ch0_crop_width, 0);
+        av_opt_set_int(codec_ctx_ptr_->priv_data, "ch0_crop_height", taco.ch0_crop_height, 0);
+        LOG_DEBUG_FMT("[Worker]    ch0_crop: (%d, %d, %d, %d)", 
+               taco.ch0_crop_x, taco.ch0_crop_y, 
+               taco.ch0_crop_width, taco.ch0_crop_height);
+    }
+    
+    // 配置通道0缩放参数（从 config 读取）
+    if (taco.ch0_scale_width > 0 && taco.ch0_scale_height > 0) {
+        av_opt_set_int(codec_ctx_ptr_->priv_data, "ch0_scale_width", taco.ch0_scale_width, 0);
+        av_opt_set_int(codec_ctx_ptr_->priv_data, "ch0_scale_height", taco.ch0_scale_height, 0);
+        LOG_DEBUG_FMT("[Worker]    ch0_scale: (%d, %d)", taco.ch0_scale_width, taco.ch0_scale_height);
+    }
+    
+    // ========== 通道1配置 ==========
     
     // 配置通道1裁剪参数（从 config 读取）
     if (taco.ch1_crop_width > 0 && taco.ch1_crop_height > 0) {
@@ -783,10 +805,7 @@ bool FfmpegDecodeVideoFileWorker::fillBuffer(int frame_index, Buffer* buffer) {
     
     // 步骤4: 发送 packet 到解码器（参考 ids_test_video3:2270）
     int ret = avcodec_send_packet(codec_ctx_ptr_, packet_ptr);
-    
-    // 🔧 修复：无论成功与否，都要释放packet引用
-    // avcodec_send_packet 会复制数据，不再需要原始packet
-    av_packet_unref(packet_ptr);
+
     
     if (ret < 0) {
         LOG_ERROR_FMT("[Worker] ERROR: avcodec_send_packet failed: %d", ret);
