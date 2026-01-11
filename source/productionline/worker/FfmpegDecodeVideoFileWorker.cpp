@@ -805,37 +805,49 @@ bool FfmpegDecodeVideoFileWorker::fillBuffer(int frame_index, Buffer* buffer) {
     
     // 步骤4: 发送 packet 到解码器（参考 ids_test_video3:2270）
     int ret = avcodec_send_packet(codec_ctx_ptr_, packet_ptr);
-
-    
     if (ret < 0) {
         LOG_ERROR_FMT("[Worker] ERROR: avcodec_send_packet failed: %d", ret);
         return false;
     }
     bool recv_frm = false;
-    // 步骤5: 🎯 循环调用 receive_frame，直到成功或需要更多数据（参考 ids_test_video3:2276-2354）
+
+    // 🎯 在循环前创建临时 AVFrame（只创建一次）
+    AVFrame* temp_frame = av_frame_alloc();
+    if (!temp_frame) {
+        LOG_ERROR("[Worker] ERROR: Failed to allocate temporary AVFrame");
+        return false;
+    }
+
+    // 步骤5: 🎯 循环调用 receive_frame，直到成功或需要更多数据
     while (true) {
-        ret = avcodec_receive_frame(codec_ctx_ptr_, frame_ptr);
+        // 🎯 使用临时 AVFrame 进行解码
+        ret = avcodec_receive_frame(codec_ctx_ptr_, temp_frame);
         if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF || ret < 0) {
             break;
-        } 
-        // ✅ 成功解码！
-        
+        }
+
+        // ✅ 成功解码到临时 AVFrame！
+
+        // 🎯 使用 move 操作将数据转移到 buffer 的 AVFrame
+        av_frame_move_ref(frame_ptr, temp_frame);
+
         // ⭐ 硬件解码器：提取物理内存地址
         // 判断条件：decoder_name_ 非空 且 use_hardware_decoder_ == true
         if (!decoder_name_.empty() && use_hardware_decoder_) {
             // 明确使用了硬件解码器，尝试提取物理地址
             if (!extractHardwareAddressFromMetadata(frame_ptr, buffer)) {
                 // ❌ 硬件解码时提取失败是错误
-                LOG_ERROR_FMT("[Worker] Hardware decoder '%s': Failed to extract physical address", 
+                LOG_ERROR_FMT("[Worker] Hardware decoder '%s': Failed to extract physical address",
                              decoder_name_.c_str());
+                av_frame_free(&temp_frame);  // 🔧 清理临时 AVFrame
                 return false;
             }
         }
         // 软件解码或自动选择：不提取物理地址（正常，物理地址保持为 0）
-        
+
         // ⭐ v2.7改进：先更新虚拟地址为实际数据地址（frame->data[0]）
         buffer->setVirtualAddress(frame_ptr->data[0]);
-        
+
         // ⭐ v2.10新增：从AVFrame获取实际帧大小并更新Buffer的size
         int actual_frame_size = av_image_get_buffer_size(
             (AVPixelFormat)frame_ptr->format,
@@ -843,20 +855,26 @@ bool FfmpegDecodeVideoFileWorker::fillBuffer(int frame_index, Buffer* buffer) {
             frame_ptr->height,
             1  // alignment
         );
-        
+
         if (actual_frame_size > 0) {
             buffer->setSize(actual_frame_size);
             LOG_TRACE_FMT("[Worker] Updated buffer size to actual frame size: %d bytes", actual_frame_size);
         } else {
             LOG_ERROR_FMT("[Worker] Failed to get frame buffer size: %d", actual_frame_size);
         }
-        
+
         // ⭐ v2.6新增：从AVFrame设置图像元数据到Buffer
         buffer->setImageMetadataFromAVFrame(frame_ptr);
         decoded_frames_++;
         current_frame_index_++;
         recv_frm = true;
+
+        // 🎯 处理完一帧后立即退出循环，避免覆盖
+        break;
     }
+
+    // 🔧 在循环结束后清理临时 AVFrame
+    av_frame_free(&temp_frame);
     return recv_frm;
 }
 

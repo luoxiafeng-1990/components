@@ -412,34 +412,53 @@ bool FfmpegDecodeRtspWorker::fillBuffer(int frame_index, Buffer* buffer) {
     }
     
     bool recv_frm = false;
-    // 步骤5: 🎯 循环调用 receive_frame，直到成功或需要更多数据（参考 FfmpegDecodeVideoFileWorker）
+
+    // 🎯 在循环前创建临时 AVFrame（只创建一次）
+    AVFrame* temp_frame = av_frame_alloc();
+    if (!temp_frame) {
+        LOG_ERROR("[Worker] ERROR: Failed to allocate temporary AVFrame");
+        return false;
+    }
+
+    // 步骤5: 🎯 循环调用 receive_frame，直到成功或需要更多数据
     while (true) {
-        ret = avcodec_receive_frame(codec_ctx_ptr_, frame_ptr);
+        // 🎯 使用临时 AVFrame 进行解码
+        ret = avcodec_receive_frame(codec_ctx_ptr_, temp_frame);
         if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF || ret < 0) {
             break;
-        } 
-        
-        // ✅ 成功解码！
-        
+        }
+
+        // ✅ 成功解码到临时 AVFrame！
+
+        // 🎯 使用 move 操作将数据转移到 buffer 的 AVFrame
+        av_frame_move_ref(frame_ptr, temp_frame);
+
         // ⭐ v2.13新增：通过虚函数提取硬件物理地址（与 FileWorker 保持一致）
         if (!decoder_name_.empty()) {
             // 使用了硬件解码器，尝试提取物理地址
             if (!extractHardwareAddressFromMetadata(frame_ptr, buffer)) {
                 // ❌ 硬件解码时提取失败是错误
-                LOG_ERROR_FMT("[Worker] Hardware decoder '%s': Failed to extract physical address", 
+                LOG_ERROR_FMT("[Worker] Hardware decoder '%s': Failed to extract physical address",
                              decoder_name_.c_str());
+                av_frame_free(&temp_frame);  // 🔧 清理临时 AVFrame
                 return false;
             }
         }
-        
+
         // ⭐ v2.7改进：先更新虚拟地址为实际数据地址（frame->data[0]）
         buffer->setVirtualAddress(frame_ptr->data[0]);
-        
+
         // ⭐ v2.6新增：从AVFrame设置图像元数据到Buffer
         buffer->setImageMetadataFromAVFrame(frame_ptr);
         decoded_frames_++;
         recv_frm = true;
+
+        // 🎯 处理完一帧后立即退出循环，避免覆盖
+        break;
     }
+
+    // 🔧 在循环结束后清理临时 AVFrame
+    av_frame_free(&temp_frame);
     return recv_frm;
 }
 
