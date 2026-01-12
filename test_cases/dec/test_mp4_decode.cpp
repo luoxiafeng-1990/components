@@ -1,8 +1,8 @@
 /**
  * Multi-Codec Video Decode Test
- * 
+ *
  * 通用视频解码测试程序，支持多种编码格式和灵活配置
- * 
+ *
  * 功能：
  * - 支持多种编码格式：H264, H265(HEVC), MJPEG
  * - 使用硬件解码器（h264_taco, hevc_taco, mjpeg_taco）
@@ -12,38 +12,38 @@
  * - 保存解码后的数据用于验证
  * - 性能监控和详细统计报告
  * - 自动验证解码 FPS 是否达标
- * 
+ *
  * 编译：
  *   通过 Buildroot 构建系统：
  *     cd /home/zyko/workshop-debian
  *     make components-rebuild
- * 
+ *
  *   或手动编译（不推荐）：
  *     g++ -o test_mp4_decode test_mp4_decode.cpp \
  *         -I../../include -L../../build/lib \
  *         -lcomponents -lavformat -lavcodec -lavutil -lpthread -std=c++17
- * 
+ *
  * 使用方法：
  *   # H264 解码
  *   ./test_mp4_decode video.mp4
  *   ./test_mp4_decode video.mp4 --codec h264
- *   
+ *
  *   # H265 解码
  *   ./test_mp4_decode video.mp4 --codec h265
- *   
+ *
  *   # MJPEG 解码
  *   ./test_mp4_decode video.mjpeg --codec mjpeg
- *   
+ *
  *   # 自定义参数
  *   ./test_mp4_decode video.mp4 --codec h264 --resolution 1280x720 --fps 30
  *   ./test_mp4_decode video.mp4 --save-frames 100 --max-frames 500
  *   ./test_mp4_decode video.mp4 --no-display --threads 4
  *   ./test_mp4_decode video.mp4 --output /tmp/my.rgb --save-frames -1
- *   
+ *
  *   # PSNR 验证（需要FFmpeg）
  *   ./test_mp4_decode video.mp4 --enable-psnr --save-frames -1
  *   ./test_mp4_decode video.mp4 --enable-psnr --min-psnr 35.0 --save-frames -1
- * 
+ *
  * 验证解码结果：
  *   ffplay -f rawvideo -pix_fmt argb -s 1920x1080 /tmp/decoded_*.rgb
  */
@@ -60,1559 +60,2622 @@
 #include <cmath>
 #include <chrono>
 #include <thread>
-#include <atomic>
 #include <memory>
+#include <algorithm>
+#include <numeric>
+#include <cctype>
+#include <vector>
+#include <atomic>
 
 // Components 头文件
 #include "productionline/VideoProductionLine.hpp"
+#include "productionline/MultiWorkerProductionLine.hpp"
 #include "productionline/worker/WorkerConfig.hpp"
+#include "productionline/worker/WorkerBase.hpp"
+#include "productionline/worker/RtspPacketSource.hpp"
 #include "productionline/io/BufferWriter.hpp"
+#include "productionline/io/BufferComparator.hpp"
 #include "buffer/bufferpool/BufferPool.hpp"
 #include "buffer/bufferpool/BufferPoolRegistry.hpp"
 #include "display/LinuxFramebufferDevice.hpp"
 #include "monitor/PerformanceMonitor.hpp"
 #include "common/Logger.hpp"
+#include "framework/TestMacros.hpp"
 
-// FFmpeg 头文件（用于 av_get_pix_fmt_name）
+// FFmpeg 头文件
 extern "C" {
 #include <libavutil/pixdesc.h>
+#include <libavcodec/avcodec.h>
 }
 
 // 全局变量
-static std::atomic<bool> g_running(true);
-
-// 信号处理函数
-void signal_handler(int signum) {
-    printf("\n[Signal] Caught signal %d, stopping...\n", signum);
-    g_running = false;
-}
+static volatile bool g_running = true;
+static std::atomic<bool> g_rtsp_interrupted(false);
 
 /**
- * @brief 将 Buffer 中的帧数据转换为 YUV420P 并写入文件
- * @param fp 输出文件指针
- * @param buffer Buffer对象（可能包含NV12或YUV420P数据）
- * @param width 图像宽度
- * @param height 图像高度
- * @param is_software_decoder 是否为软件解码器（用于正确计算stride）
- * @return true 成功，false 失败
- * 
- * @note 自动检测像素格式：
- *       - 如果已经是 YUV420P，直接写入
- *       - 如果是 NV12，转换为 YUV420P 后写入
- * @note NV12 格式：数据连续存储，[Y plane] [UV interleaved]
- * @note YUV420P 格式：三个独立平面 [Y plane] [U plane] [V plane]
- * @note 软件解码器即使使用DMA buffer，stride通常也是width（未对齐）
- * @note 硬件解码器通常要求stride对齐到128字节边界
+ * @brief 检测输入是否为RTSP流
  */
-bool write_nv12_as_yuv420p(FILE* fp, Buffer* buffer, int width, int height, bool is_software_decoder = false) {
-    if (!fp || !buffer) {
-        return false;
-    }
-    
-    AVFrame* frame = buffer->getAVFrame();
-    if (!frame) {
-        LOG_ERROR("[ERROR] AVFrame not available");
-        return false;
-    }
-    
-    // 检测像素格式
-    // 主要通过data指针布局判断：
-    // YUV420P: data[0]=Y, data[1]=U, data[2]=V (三个独立指针，U和V指针不同)
-    // NV12: data[0]=Y, data[1]=UV交错 (通常只有两个data指针，或data[2]为空)
-    bool is_yuv420p = false;
-    bool is_nv12 = false;
-    
-    uint8_t* base_addr = (uint8_t*)buffer->getVirtualAddress();
-    
-    // 详细日志（前几次调用记录详细信息）
-    // 使用两个独立的计数器：一个用于硬件解码器，一个用于软件解码器
-    static int hw_call_count = 0;
-    static int sw_call_count = 0;
-    static bool hw_detailed_logged = false;
-    static bool sw_detailed_logged = false;
-    
-    // 使用传入的参数来判断是硬件还是软件解码器（更可靠）
-    // 如果参数未指定，则通过AVFrame特征判断
-    bool is_hardware_decoder = !is_software_decoder;
-    
-    // 如果未指定参数，尝试通过AVFrame特征判断
-    if (!is_software_decoder) {
-        if (frame->format == -1 && frame->linesize[0] == 0 && !frame->data[0] && base_addr) {
-            // 典型的硬件解码器特征：format=-1, linesize=0, data指针为nil
-            is_hardware_decoder = true;
-        } else if (frame->data[0] && frame->data[0] != base_addr && frame->linesize[0] > 0) {
-            // 典型的软件解码器特征：data指针有效且不等于base_addr，linesize>0
-            is_hardware_decoder = false;
-        } else if (!frame->data[0] && base_addr) {
-            // 如果data指针为nil但有base_addr，可能是硬件解码器
-            is_hardware_decoder = true;
-        } else {
-            // 默认：如果有有效的data指针，假设是软件解码器
-            is_hardware_decoder = !frame->data[0];
-        }
-    }
-    
-    if (is_hardware_decoder) {
-        hw_call_count++;
-    } else {
-        sw_call_count++;
-    }
-    
-    // 强制输出前几次的详细日志（硬件和软件各3次）
-    bool should_log_detail = false;
-    if (is_hardware_decoder) {
-        should_log_detail = (hw_call_count <= 3) || (!hw_detailed_logged && hw_call_count == 1);
-    } else {
-        should_log_detail = (sw_call_count <= 3) || (!sw_detailed_logged && sw_call_count == 1);
-        // 软件解码器：强制输出前3次，确保能看到格式信息
-        if (sw_call_count <= 3) {
-            should_log_detail = true;
-        }
-    }
-    
-    if (should_log_detail) {
-        int current_count = is_hardware_decoder ? hw_call_count : sw_call_count;
-        LOG_INFO_FMT("[DEBUG] Frame #%d (%s decoder): AVFrame format=%d", 
-                    current_count, is_hardware_decoder ? "hardware" : "software", frame->format);
-        LOG_INFO_FMT("[DEBUG]   data[0]=%p, data[1]=%p, data[2]=%p, base_addr=%p",
-                    frame->data[0], frame->data[1], frame->data[2], base_addr);
-        LOG_INFO_FMT("[DEBUG]   linesize[0]=%d, linesize[1]=%d, linesize[2]=%d",
-                    frame->linesize[0], frame->linesize[1], frame->linesize[2]);
-    }
-    
-    // 方法1：检查format字段（最可靠）
-    // AV_PIX_FMT_YUV420P = 0, AV_PIX_FMT_NV12 = 23
-    if (frame->format == 0) {  // AV_PIX_FMT_YUV420P
-        is_yuv420p = true;
-        if (should_log_detail) {
-            LOG_INFO("[DEBUG]   Detected YUV420P by format field (format=0)");
-        }
-    } else if (frame->format == 23) {  // AV_PIX_FMT_NV12
-        is_nv12 = true;
-        if (should_log_detail) {
-            LOG_INFO("[DEBUG]   Detected NV12 by format field (format=23)");
-        }
-    }
-    
-    // 方法2：通过data指针布局判断（如果format字段不可靠）
-    if (!is_yuv420p && !is_nv12) {
-        // YUV420P: 必须有三个独立的data指针，且U和V指针不同
-        if (frame->data[0] && frame->data[1] && frame->data[2] && 
-            frame->data[1] != frame->data[2] &&
-            frame->linesize[1] > 0 && frame->linesize[2] > 0 &&
-            frame->linesize[1] == frame->linesize[2]) {  // U和V的stride应该相同
-            is_yuv420p = true;
-            if (should_log_detail) {
-                LOG_INFO("[DEBUG]   Detected YUV420P by data pointer layout (3 independent planes)");
-            }
-        }
-        // NV12: 通常只有两个data指针，或data[2]为空/与data[1]相同
-        else if (frame->data[0] && frame->data[1] && 
-                 (!frame->data[2] || frame->data[1] == frame->data[2])) {
-            is_nv12 = true;
-            if (should_log_detail) {
-                LOG_INFO("[DEBUG]   Detected NV12 by data pointer layout (2 planes, UV interleaved)");
-            }
-        }
-    }
-    
-    // 方法3：如果仍无法确定，使用启发式规则
-    if (!is_yuv420p && !is_nv12) {
-        if (base_addr && frame->data[0] == base_addr) {
-            // 如果data[0]指向连续内存的起始地址，可能是NV12（硬件解码器常见）
-            is_nv12 = true;
-            if (should_log_detail) {
-                LOG_INFO("[DEBUG]   Detected NV12 by heuristic (data[0] == base_addr)");
-            }
-        } else if (frame->data[0] && frame->data[1] && frame->data[2]) {
-            // 否则如果有三个data指针，假设是YUV420P
-            is_yuv420p = true;
-            if (should_log_detail) {
-                LOG_INFO("[DEBUG]   Detected YUV420P by heuristic (3 data pointers)");
-            }
-        } else {
-            // 默认假设NV12（硬件解码器常见）
-            is_nv12 = true;
-            if (should_log_detail) {
-                LOG_INFO("[DEBUG]   Default to NV12 (hardware decoder common)");
-            }
-        }
-    }
-    
-    if (should_log_detail) {
-        LOG_INFO_FMT("[DEBUG]   Final decision: %s (%s decoder)", 
-                    is_yuv420p ? "YUV420P" : "NV12",
-                    is_hardware_decoder ? "hardware" : "software");
-        if (is_hardware_decoder) {
-            hw_detailed_logged = true;
-        } else {
-            sw_detailed_logged = true;
-        }
-    }
-    
-    // 获取 stride 信息
-    // 如果linesize为0（DMA buffer常见情况），需要手动计算对齐后的stride
-    // 硬件解码器通常要求stride对齐到128字节边界
-    int y_stride, u_stride, v_stride, uv_stride;
-    
-    if (frame->linesize[0] > 0) {
-        y_stride = frame->linesize[0];
-    } else {
-        // linesize=0：需要手动计算stride
-        // ⚠️ 关键发现：两个解码器都使用DMA buffer（format=-1, linesize=0, data=nil）
-        // 对于DMA buffer，stride通常需要对齐到128字节边界（硬件要求）
-        // 即使软件解码器也使用DMA buffer，它的stride也需要对齐
-        y_stride = ((width + 127) / 128) * 128;  // 对齐到128字节 = 384
-        if (should_log_detail) {
-            int current_count = is_hardware_decoder ? hw_call_count : sw_call_count;
-            size_t buffer_size = buffer->getUsedSize();
-            size_t calculated_size = y_stride * height + y_stride * (height / 2);  // Y + UV
-            if (current_count <= 2) {
-                LOG_INFO_FMT("[DEBUG]   Calculated Y stride: %d (width=%d, %s decoder, DMA buffer aligned to 128)", 
-                            y_stride, width, is_hardware_decoder ? "hardware" : "software");
-                LOG_INFO_FMT("[DEBUG]   Buffer size: %zu bytes, Calculated NV12 size: %zu bytes", 
-                            buffer_size, calculated_size);
-            }
-        }
-    }
-    
-    if (frame->linesize[1] > 0) {
-        uv_stride = frame->linesize[1];
-        u_stride = frame->linesize[1];
-    } else {
-        // NV12的UV stride通常是Y stride（因为UV是交错的，每两个字节是一个UV对）
-        // 对于YUV420P，U和V的stride通常也需要对齐
-        if (is_yuv420p) {
-            // DMA buffer：U和V的stride也需要对齐到128字节
-            u_stride = ((width / 2 + 127) / 128) * 128;
-            v_stride = u_stride;
-        } else {
-            // NV12: UV stride = Y stride（已经对齐）
-            uv_stride = y_stride;
-        }
-        if (should_log_detail) {
-            int current_count = is_hardware_decoder ? hw_call_count : sw_call_count;
-            if (current_count <= 2) {
-                LOG_INFO_FMT("[DEBUG]   Calculated UV stride: %d (for %s)", 
-                            is_yuv420p ? u_stride : uv_stride, is_yuv420p ? "YUV420P" : "NV12");
-            }
-        }
-    }
-    
-    if (frame->linesize[2] > 0) {
-        v_stride = frame->linesize[2];
-    } else if (is_yuv420p && frame->linesize[1] == 0) {
-        // 已经在上面计算了
-    } else {
-        v_stride = u_stride;  // 默认与U stride相同
-    }
-    
-    // ========== 情况1：已经是 YUV420P，直接写入 ==========
-    if (is_yuv420p) {
-        // YUV420P格式：data[0]=Y, data[1]=U, data[2]=V
-        uint8_t* y_plane = frame->data[0];
-        uint8_t* u_plane = frame->data[1];
-        uint8_t* v_plane = frame->data[2];
-        
-        if (!y_plane || !u_plane || !v_plane) {
-            LOG_ERROR("[ERROR] YUV420P data pointers invalid");
-            return false;
-        }
-        
-        // 写入 Y 平面
-        for (int row = 0; row < height; row++) {
-            if (fwrite(y_plane + row * y_stride, 1, width, fp) != (size_t)width) {
-                LOG_ERROR_FMT("[ERROR] Failed to write Y plane row %d", row);
-                return false;
-            }
-        }
-        
-        // 写入 U 平面
-        int uv_width = width / 2;
-        int uv_height = height / 2;
-        for (int row = 0; row < uv_height; row++) {
-            if (fwrite(u_plane + row * u_stride, 1, uv_width, fp) != (size_t)uv_width) {
-                LOG_ERROR_FMT("[ERROR] Failed to write U plane row %d", row);
-                return false;
-            }
-        }
-        
-        // 写入 V 平面
-        for (int row = 0; row < uv_height; row++) {
-            if (fwrite(v_plane + row * v_stride, 1, uv_width, fp) != (size_t)uv_width) {
-                LOG_ERROR_FMT("[ERROR] Failed to write V plane row %d", row);
-                return false;
-            }
-        }
-        
-        return true;
-    }
-    
-    // ========== 情况2：NV12 格式，需要转换 ==========
-    // base_addr 已经在函数开头获取，这里直接使用
-    if (!base_addr) {
-        // 如果没有连续内存，尝试使用AVFrame的data指针
-        if (frame->data[0] && frame->data[1]) {
-            // NV12: data[0]=Y, data[1]=UV交错
-            uint8_t* y_plane = frame->data[0];
-            uint8_t* uv_plane = frame->data[1];
-            
-            // 写入 Y 平面
-            for (int row = 0; row < height; row++) {
-                if (fwrite(y_plane + row * y_stride, 1, width, fp) != (size_t)width) {
-                    LOG_ERROR_FMT("[ERROR] Failed to write Y plane row %d", row);
-                    return false;
-                }
-            }
-            
-            // 分离 UV 交错数据
-            int uv_width = width / 2;
-            int uv_height = height / 2;
-            size_t uv_plane_size = uv_width * uv_height;
-            
-            uint8_t* u_buffer = new uint8_t[uv_plane_size];
-            uint8_t* v_buffer = new uint8_t[uv_plane_size];
-            
-            for (int row = 0; row < uv_height; row++) {
-                uint8_t* uv_row = uv_plane + row * uv_stride;
-                for (int col = 0; col < uv_width; col++) {
-                    u_buffer[row * uv_width + col] = uv_row[col * 2];
-                    v_buffer[row * uv_width + col] = uv_row[col * 2 + 1];
-                }
-            }
-            
-            bool success = true;
-            if (fwrite(u_buffer, 1, uv_plane_size, fp) != uv_plane_size) {
-                LOG_ERROR("[ERROR] Failed to write U plane");
-                success = false;
-            }
-            if (success && fwrite(v_buffer, 1, uv_plane_size, fp) != uv_plane_size) {
-                LOG_ERROR("[ERROR] Failed to write V plane");
-                success = false;
-            }
-            
-            delete[] u_buffer;
-            delete[] v_buffer;
-            return success;
-        } else {
-            LOG_ERROR("[ERROR] No virtual address or AVFrame data available");
-            return false;
-        }
-    }
-    
-    // NV12 内存布局（连续内存）：
-    // - Y 平面：从 base_addr 开始，每行 y_stride 字节
-    // - UV 平面：在 Y 平面之后，每行 uv_stride 字节
-    uint8_t* y_plane = base_addr;
-    size_t y_stride_total = y_stride * height;
-    uint8_t* uv_plane = base_addr + y_stride_total;
-    
-    // 1. 写入 Y 平面（按行读取，跳过 padding）
-    for (int row = 0; row < height; row++) {
-        uint8_t* y_row = y_plane + row * y_stride;
-        if (fwrite(y_row, 1, width, fp) != (size_t)width) {
-            LOG_ERROR_FMT("[ERROR] Failed to write Y plane row %d", row);
-            return false;
-        }
-    }
-    
-    // 2. 分离 UV 交错数据，写入 U 平面和 V 平面
-    int uv_width = width / 2;
-    int uv_height = height / 2;
-    size_t uv_plane_size = uv_width * uv_height;
-    
-    uint8_t* u_buffer = new uint8_t[uv_plane_size];
-    uint8_t* v_buffer = new uint8_t[uv_plane_size];
-    
-    // 按行分离交错的 UV 数据（考虑 stride）
-    // NV12: UVUVUVUV... -> U: UUUU..., V: VVVV...
-    for (int row = 0; row < uv_height; row++) {
-        uint8_t* uv_row = uv_plane + row * uv_stride;
-        for (int col = 0; col < uv_width; col++) {
-            u_buffer[row * uv_width + col] = uv_row[col * 2];      // U 在偶数位置
-            v_buffer[row * uv_width + col] = uv_row[col * 2 + 1];  // V 在奇数位置
-        }
-    }
-    
-    // 写入 U 平面
-    bool success = true;
-    if (fwrite(u_buffer, 1, uv_plane_size, fp) != uv_plane_size) {
-        LOG_ERROR("[ERROR] Failed to write U plane");
-        success = false;
-    }
-    
-    // 写入 V 平面
-    if (success && fwrite(v_buffer, 1, uv_plane_size, fp) != uv_plane_size) {
-        LOG_ERROR("[ERROR] Failed to write V plane");
-        success = false;
-    }
-    
-    delete[] u_buffer;
-    delete[] v_buffer;
-    
-    return success;
+static bool is_rtsp_stream(const char *path) {
+  if (!path)
+    return false;
+  return (strncmp(path, "rtsp://", 7) == 0) ||
+         (strncmp(path, "rtsps://", 8) == 0);
 }
 
 /**
- * @brief 手动计算两个YUV420P帧之间的PSNR
- * @param frame1 第一帧数据
- * @param frame2 第二帧数据
- * @param width 视频宽度
- * @param height 视频高度
- * @param psnr_y 输出：Y平面PSNR
- * @param psnr_u 输出：U平面PSNR
- * @param psnr_v 输出：V平面PSNR
- * @param psnr_avg 输出：平均PSNR
- * @return true 计算成功，false 计算失败
- */
-bool calculate_psnr_manual(const uint8_t* frame1, const uint8_t* frame2, 
-                           int width, int height,
-                           double& psnr_y, double& psnr_u, double& psnr_v, double& psnr_avg) {
-    // YUV420P格式：Y平面是width*height，U和V平面各是width*height/4
-    size_t y_size = width * height;
-    size_t uv_size = (width / 2) * (height / 2);
-    
-    // 计算Y平面的MSE
-    double mse_y = 0.0;
-    for (size_t i = 0; i < y_size; i++) {
-        double diff = (double)frame1[i] - (double)frame2[i];
-        mse_y += diff * diff;
-    }
-    mse_y /= y_size;
-    
-    // 计算U平面的MSE
-    const uint8_t* u1 = frame1 + y_size;
-    const uint8_t* u2 = frame2 + y_size;
-    double mse_u = 0.0;
-    for (size_t i = 0; i < uv_size; i++) {
-        double diff = (double)u1[i] - (double)u2[i];
-        mse_u += diff * diff;
-    }
-    mse_u /= uv_size;
-    
-    // 计算V平面的MSE
-    const uint8_t* v1 = frame1 + y_size + uv_size;
-    const uint8_t* v2 = frame2 + y_size + uv_size;
-    double mse_v = 0.0;
-    for (size_t i = 0; i < uv_size; i++) {
-        double diff = (double)v1[i] - (double)v2[i];
-        mse_v += diff * diff;
-    }
-    mse_v /= uv_size;
-    
-    // 将MSE转换为PSNR（单位：dB）
-    // PSNR = 10 * log10(MAX^2 / MSE)，对于8位数据MAX=255
-    const double MAX = 255.0;
-    
-    if (mse_y > 0.0) {
-        psnr_y = 10.0 * log10((MAX * MAX) / mse_y);
-    } else {
-        psnr_y = 100.0;  // 完全相同
-    }
-    
-    if (mse_u > 0.0) {
-        psnr_u = 10.0 * log10((MAX * MAX) / mse_u);
-    } else {
-        psnr_u = 100.0;
-    }
-    
-    if (mse_v > 0.0) {
-        psnr_v = 10.0 * log10((MAX * MAX) / mse_v);
-    } else {
-        psnr_v = 100.0;
-    }
-    
-    // 计算加权平均PSNR（Y权重更高，因为Y包含更多像素）
-    double mse_avg = (mse_y * y_size + mse_u * uv_size + mse_v * uv_size) / (y_size + uv_size + uv_size);
-    if (mse_avg > 0.0) {
-        psnr_avg = 10.0 * log10((MAX * MAX) / mse_avg);
-    } else {
-        psnr_avg = 100.0;
-    }
-    
-    return true;
-}
-
-/**
- * @brief 使用FFmpeg psnr滤镜进行PSNR验证（采样处理，逐帧加载释放）
- * @param hw_yuv_path 硬件解码输出的YUV420P文件
+ * @brief 使用两个独立的 VideoProductionLine + BufferComparator 进行PSNR验证
  * @param source_video 原始视频文件
  * @param width 视频宽度
  * @param height 视频高度
- * @param frame_count 帧数
+ * @param decoder_name 硬件解码器名称（h264_taco, hevc_taco, mjpeg_taco等）
+ * @param max_frames 最大对比帧数
  * @param min_psnr 最小PSNR要求
  * @return true PSNR达标，false 不达标
- * 
- * @note 采样策略以避免内存不足（每隔10帧采样1帧）
- * @note 使用FFmpeg的psnr滤镜计算PSNR，更加精确可靠
- * @note 逐帧提取、计算、清理，不会将所有帧同时加载到内存
+ *
+ * @note 使用两个独立的 VideoProductionLine
+ * 同时运行硬件和软件解码器（都直接从文件读取）
+ * @note 使用 BufferComparator 组件进行对比，自动计算PSNR
+ * @note 格式自适应，支持YUV和RGB格式
  */
-bool validate_psnr_streaming(const char* hw_yuv_path, const char* source_video,
-                              int width, int height, int frame_count, double min_psnr) {
-    LOG_INFO("");
-    LOG_INFO("╔═══════════════════════════════════════════════════════╗");
-    LOG_INFO("║  PSNR Validation (Frame Sampling Mode)                ║");
-    LOG_INFO("╚═══════════════════════════════════════════════════════╝");
-    LOG_INFO_FMT("Hardware YUV: %s", hw_yuv_path);
-    LOG_INFO_FMT("Source video: %s", source_video);
-    LOG_INFO_FMT("Resolution: %dx%d, Frames: %d", width, height, frame_count);
-    LOG_INFO_FMT("Minimum PSNR requirement: %.2f dB", min_psnr);
-    LOG_INFO("");
-    
-    // 生成完整的参考YUV文件（使用组件的软件解码器）
-    char ref_yuv_path[256];
-    snprintf(ref_yuv_path, sizeof(ref_yuv_path), "/tmp/ref_%dx%d_%d.yuv", width, height, getpid());
-    
-    LOG_INFO("[1/3] Generating reference YUV with software decoder (component)...");
-    LOG_INFO_FMT("   Source: %s", source_video);
-    LOG_INFO_FMT("   Output: %s", ref_yuv_path);
-    LOG_INFO_FMT("   Frames: %d", frame_count);
-    
-    // 创建软件解码生产者
-    VideoProductionLine sw_producer(false, 1, false);  // loop=false, thread_count=1
-    
-    // 配置软件解码器
-    auto sw_workerConfig = WorkerConfigBuilder()
-        .setFileConfig(
-            FileConfigBuilder()
-                .setFilePath(source_video)
-                .build()
-        )
-        .setDisplayConfig(
-            DisplayConfigBuilder()
-                .setDisplayResolution(width, height)
-                .setBitsPerPixel(12)  // YUV420P/NV12
-                .build()
-        )
-        .setDecoderConfig(
-            DecoderConfigBuilder()
-                .useSoftware()  // ⭐ 使用软件解码器
-                .build()
-        )
-        .setWorkerType(WorkerType::FFMPEG_VIDEO_FILE)
-        .build();
-    
-    // 启动软件解码
-    bool sw_started = sw_producer.start(sw_workerConfig);
-    if (!sw_started) {
-        LOG_ERROR("❌ Failed to start software decoder");
-        return false;
-    }
-    
-    // 获取软件解码的 BufferPool
-    uint64_t sw_pool_id = sw_producer.getWorkingBufferPoolId();
-    if (sw_pool_id == 0) {
-        LOG_ERROR("❌ Software decoder BufferPool not available");
-        sw_producer.stop();
-        return false;
-    }
-    
-    auto sw_pool_weak = BufferPoolRegistry::getInstance().getPool(sw_pool_id);
-    auto sw_pool_sptr = sw_pool_weak.lock();
-    if (!sw_pool_sptr) {
-        LOG_ERROR("❌ Software decoder BufferPool not found");
-        sw_producer.stop();
-        return false;
-    }
-    
-    LOG_INFO_FMT("   BufferPool: '%s' (ID: %lu)", 
-                sw_pool_sptr->getName().c_str(), sw_pool_id);
-    
-    // 打开输出文件
-    FILE* sw_yuv_fp = fopen(ref_yuv_path, "wb");
-    if (!sw_yuv_fp) {
-        LOG_ERROR_FMT("❌ Failed to open output file: %s", ref_yuv_path);
-        sw_producer.stop();
-        return false;
-    }
-    
-    // 消费帧并保存到文件
-    int sw_frame_count = 0;
-    
-    LOG_INFO("   Decoding frames...");
-    while (sw_frame_count < frame_count && sw_producer.isRunning()) {
-        Buffer* buffer = sw_pool_sptr->acquireFilled(true, 1000);  // 1秒超时
-        
-        if (buffer == nullptr) {
-            // 超时，检查是否还在运行
-            if (!sw_producer.isRunning()) {
-                LOG_INFO("   Software decoder stopped naturally");
-                break;
-            }
-            continue;
-        }
-        
-        // 保存帧数据（NV12 -> YUV420P 转换）
-        // ⚠️ 软件解码器可能也输出 NV12 格式（尤其是FFmpeg 4.x+），需要统一转换
-        static int sw_write_count = 0;
-        sw_write_count++;
-        if (sw_write_count <= 3) {
-            AVFrame* sw_frame = buffer->getAVFrame();
-            LOG_INFO_FMT("[DEBUG] Software decoder write #%d: format=%d, linesize[0]=%d, data[0]=%p", 
-                        sw_write_count, sw_frame ? sw_frame->format : -999, 
-                        sw_frame ? sw_frame->linesize[0] : -1,
-                        sw_frame ? sw_frame->data[0] : nullptr);
-        }
-        // ⭐ 明确标识这是软件解码器，使用未对齐的stride
-        if (write_nv12_as_yuv420p(sw_yuv_fp, buffer, width, height, true)) {
-            sw_frame_count++;
-        } else {
-            LOG_WARN("Failed to write software decoded frame");
-        }
-        
-        sw_pool_sptr->releaseFilled(buffer);  // ⭐ 消费者归还：LOCKED_BY_CONSUMER → IDLE → free queue
-        
-        // 显示进度
-        if (sw_frame_count % 50 == 0 || sw_frame_count == frame_count) {
-            LOG_INFO_FMT("   Progress: %d/%d frames (%.1f fps)", 
-                        sw_frame_count, frame_count, sw_producer.getAverageFPS());
-        }
-    }
-    
-    fclose(sw_yuv_fp);
-    
-    // 停止软件解码
-    sw_producer.stop();
-    
-    if (sw_frame_count < frame_count) {
-        LOG_WARN_FMT("⚠️  Software decoder produced fewer frames than expected: %d/%d", 
-                    sw_frame_count, frame_count);
-        // 更新实际帧数
-        frame_count = sw_frame_count;
-    }
-    
-    LOG_INFO_FMT("✅ Reference YUV generated: %s (%d frames)", ref_yuv_path, sw_frame_count);
-    
-    // 计算PSNR（使用手动C++计算，处理每一帧，避免FFmpeg滤镜的内存问题）
-    LOG_INFO("[2/3] Calculating PSNR with manual C++ computation (all frames)...");
-    const int sample_interval = 1;  // 处理每一帧
-    int num_samples = (frame_count + sample_interval - 1) / sample_interval;
-    
-    double total_psnr_y = 0.0, total_psnr_u = 0.0, total_psnr_v = 0.0, total_psnr_avg = 0.0;
-    int valid_samples = 0;
-    
-    size_t frame_size = width * height * 3 / 2;  // YUV420P: 1.5 bytes per pixel
-    
-    for (int sample = 0; sample < num_samples; sample++) {
-        int frame_idx = sample * sample_interval;
-        if (frame_idx >= frame_count) break;
-        
-        if (sample % 20 == 0 || sample == num_samples - 1) {
-            LOG_INFO_FMT("   Progress: %d/%d frames", 
-                        sample + 1, num_samples);
-        }
-        
-        // 创建临时单帧文件
-        char hw_frame_path[256], ref_frame_path[256];
-        snprintf(hw_frame_path, sizeof(hw_frame_path), "/tmp/hw_frame_%d_%d.yuv", getpid(), sample);
-        snprintf(ref_frame_path, sizeof(ref_frame_path), "/tmp/ref_frame_%d_%d.yuv", getpid(), sample);
-        
-        // 提取硬件输出单帧
-        char cmd_extract_hw[512];
-        snprintf(cmd_extract_hw, sizeof(cmd_extract_hw),
-            "dd if='%s' of='%s' bs=%zu skip=%d count=1 2>/dev/null",
-            hw_yuv_path, hw_frame_path, frame_size, frame_idx);
-        system(cmd_extract_hw);
-        
-        // 提取参考单帧
-        char cmd_extract_ref[512];
-        snprintf(cmd_extract_ref, sizeof(cmd_extract_ref),
-            "dd if='%s' of='%s' bs=%zu skip=%d count=1 2>/dev/null",
-            ref_yuv_path, ref_frame_path, frame_size, frame_idx);
-        system(cmd_extract_ref);
-        
-        // 使用手动C++计算PSNR（读取两帧到内存，直接计算，避免FFmpeg滤镜的内存问题）
-        uint8_t* hw_frame = new uint8_t[frame_size];
-        uint8_t* ref_frame = new uint8_t[frame_size];
-        
-        bool calc_success = false;
-        double psnr_y = 0.0, psnr_u = 0.0, psnr_v = 0.0, psnr_avg = 0.0;
-        
-        // 读取硬件帧
-        FILE* hw_file = fopen(hw_frame_path, "rb");
-        if (hw_file) {
-            size_t read_hw = fread(hw_frame, 1, frame_size, hw_file);
-            fclose(hw_file);
-            
-            // 读取参考帧
-            FILE* ref_file = fopen(ref_frame_path, "rb");
-            if (ref_file) {
-                size_t read_ref = fread(ref_frame, 1, frame_size, ref_file);
-                fclose(ref_file);
-                
-                // 两帧都成功读取，计算PSNR
-                if (read_hw == frame_size && read_ref == frame_size) {
-                    calc_success = calculate_psnr_manual(hw_frame, ref_frame, 
-                                                         width, height,
-                                                         psnr_y, psnr_u, psnr_v, psnr_avg);
-                }
-            }
-        }
-        
-        // 释放帧缓冲区
-        delete[] hw_frame;
-        delete[] ref_frame;
-        
-        if (calc_success) {
-            total_psnr_y += psnr_y;
-            total_psnr_u += psnr_u;
-            total_psnr_v += psnr_v;
-            total_psnr_avg += psnr_avg;
-            valid_samples++;
-        } else {
-            // 计算失败，记录警告
-            if (valid_samples == 0 && sample == 0) {
-                LOG_WARN_FMT("      Failed to calculate PSNR for frame %d", frame_idx);
-            }
-        }
-        
-        // 清理单帧临时文件
-        unlink(hw_frame_path);
-        unlink(ref_frame_path);
-    }
-    
-    // 清理参考文件
-    unlink(ref_yuv_path);
-    
-    LOG_INFO("");
-    LOG_INFO("[3/3] Computing overall PSNR...");
-    
-    if (valid_samples == 0) {
-        LOG_ERROR("❌ Failed to calculate PSNR for any frame");
-        return false;
-    }
-    
-    // 计算平均PSNR
-    double avg_psnr_y = total_psnr_y / valid_samples;
-    double avg_psnr_u = total_psnr_u / valid_samples;
-    double avg_psnr_v = total_psnr_v / valid_samples;
-    double avg_psnr_avg = total_psnr_avg / valid_samples;
-    
-    LOG_INFO("");
-    LOG_INFO("--- Overall PSNR Results ---");
-    LOG_INFO_FMT("Samples processed: %d/%d (every %d frames)", valid_samples, num_samples, sample_interval);
-    LOG_INFO_FMT("PSNR Y (luma):       %.2f dB", avg_psnr_y);
-    LOG_INFO_FMT("PSNR U (chroma):     %.2f dB", avg_psnr_u);
-    LOG_INFO_FMT("PSNR V (chroma):     %.2f dB", avg_psnr_v);
-    LOG_INFO_FMT("PSNR Average:        %.2f dB", avg_psnr_avg);
-    LOG_INFO("");
-    
-    if (avg_psnr_avg >= min_psnr) {
-        LOG_INFO_FMT("✅ PSNR PASS: Average PSNR (%.2f dB) >= Requirement (%.2f dB)",
-                    avg_psnr_avg, min_psnr);
-        return true;
-    } else {
-        LOG_WARN_FMT("❌ PSNR FAIL: Average PSNR (%.2f dB) < Requirement (%.2f dB)",
-                    avg_psnr_avg, min_psnr);
-        return false;
-    }
-}
+bool validate_psnr_streaming(const char *source_video, int width, int height,
+                             const char *decoder_name, int max_frames,
+                             double min_psnr) {
+  using namespace productionline::io;
 
+  // ⭐ 重置运行标志（PSNR验证是独立的流程，不受主解码流程影响）
+  g_running = true;
+
+  // ⭐ 检测是否为RTSP流
+  bool is_rtsp = is_rtsp_stream(source_video);
+  if (is_rtsp) {
+    LOG_INFO("📡 Detected RTSP stream for PSNR validation");
+    g_rtsp_interrupted = false;
+    RtspPacketSource::clearInterrupt();
+  }
+
+  LOG_INFO("");
+  LOG_INFO("╔═══════════════════════════════════════════════════════╗");
+  LOG_INFO(
+      "║  PSNR Validation (Dual VideoProductionLine + BufferComparator)     ║");
+  LOG_INFO("╚═══════════════════════════════════════════════════════╝");
+  LOG_INFO_FMT("Source: %s", source_video);
+  LOG_INFO_FMT("Type: %s", is_rtsp ? "RTSP Stream" : "Video File");
+  LOG_INFO_FMT("Resolution: %dx%d", width, height);
+  LOG_INFO_FMT("Hardware decoder: %s", decoder_name ? decoder_name : "unknown");
+  LOG_INFO_FMT("Max frames: %d", max_frames);
+  LOG_INFO_FMT("Minimum PSNR requirement: %.2f dB", min_psnr);
+  LOG_INFO("");
+
+  // ========================================================================
+  // 步骤1：同时启动硬件和软件解码器（确保帧序列对齐）
+  // ========================================================================
+  LOG_INFO(
+      "[Step 1] Starting hardware and software decoders simultaneously...");
+  if (is_rtsp) {
+    LOG_INFO("  (RTSP stream: both decoders will read from the same stream)");
+  } else {
+    LOG_INFO(
+        "  (Both decoders will start from frame 0 for sequence alignment)");
+  }
+
+  // 1.1 配置硬件解码器
+  VideoProductionLine hw_producer(false, 1);
+  DecoderConfigBuilder hw_decoderConfigBuilder;
+  if (decoder_name && decoder_name[0] != '\0') {
+    std::string dname(decoder_name);
+    if (dname == "h264_taco") {
+      auto tacoConfig = TacoConfigBuilder()
+                            .setRgbConfig(false, "", "bt601")
+                            .setDecoderOutputResolution(width, height)
+                            .build();
+      hw_decoderConfigBuilder.useTaco("h264", tacoConfig);
+    } else if (dname == "hevc_taco") {
+      auto tacoConfig = TacoConfigBuilder()
+                            .setRgbConfig(false, "", "bt601")
+                            .setDecoderOutputResolution(width, height)
+                            .build();
+      hw_decoderConfigBuilder.useTaco("hevc", tacoConfig);
+    } else if (dname == "jpeg_taco") {
+      hw_decoderConfigBuilder.useTaco("jpeg");
+    } else {
+      if (dname.length() > 5 && dname.substr(dname.length() - 5) == "_taco") {
+        std::string codec = dname.substr(0, dname.length() - 5);
+        hw_decoderConfigBuilder.useTaco(codec);
+      } else {
+        hw_decoderConfigBuilder.setDecoderName(decoder_name);
+      }
+    }
+  } else {
+    hw_decoderConfigBuilder.useSoftware();
+  }
+
+  // ⭐ 根据输入类型选择WorkerType
+  WorkerType worker_type =
+      is_rtsp ? WorkerType::FFMPEG_RTSP : WorkerType::FFMPEG_VIDEO_FILE;
+
+  // ⭐ RTSP流：使用更大的BufferPool（32个Buffer）以支持PSNR对比
+  DataSourceConfigBuilder hw_dataSourceBuilder;
+  hw_dataSourceBuilder.setPath(source_video);
+  if (is_rtsp) {
+    hw_dataSourceBuilder.setBufferCount(32); // PSNR对比需要更大的BufferPool
+  }
+
+  auto hw_workerConfig =
+      WorkerConfigBuilder()
+          .setDataSourceConfig(hw_dataSourceBuilder.build())
+          .setDisplayConfig(DisplayConfigBuilder()
+                                .setDisplayResolution(width, height)
+                                .setBitsPerPixel(32)
+                                .build())
+          .setDecoderConfig(hw_decoderConfigBuilder.build())
+          .setWorkerType(worker_type)
+          .build();
+
+  hw_producer.setErrorCallback([](const std::string &error) {
+    LOG_ERROR_FMT("Hardware Decoder Error: %s", error.c_str());
+    g_running = false;
+  });
+
+  // 1.2 配置软件解码器
+  VideoProductionLine sw_producer(false, 1);
+
+  // ⭐ RTSP流：使用更大的BufferPool（32个Buffer）以支持PSNR对比
+  DataSourceConfigBuilder sw_dataSourceBuilder;
+  sw_dataSourceBuilder.setPath(source_video);
+  if (is_rtsp) {
+    sw_dataSourceBuilder.setBufferCount(32); // PSNR对比需要更大的BufferPool
+  }
+
+  auto sw_workerConfig =
+      WorkerConfigBuilder()
+          .setDataSourceConfig(sw_dataSourceBuilder.build())
+          .setDisplayConfig(DisplayConfigBuilder()
+                                .setDisplayResolution(width, height)
+                                .setBitsPerPixel(32)
+                                .build())
+          .setDecoderConfig(DecoderConfigBuilder().useSoftware().build())
+          .setWorkerType(worker_type)
+          .build();
+
+  sw_producer.setErrorCallback([](const std::string &error) {
+    LOG_ERROR_FMT("Software Decoder Error: %s", error.c_str());
+    g_running = false;
+  });
+
+  // ⭐ 关键：同时启动两个解码器（都从视频文件的第0帧开始）
+  LOG_INFO("  Starting hardware decoder...");
+  if (!hw_producer.start(hw_workerConfig)) {
+    LOG_ERROR("Failed to start hardware decoder");
+    return false;
+  }
+
+  LOG_INFO("  Starting software decoder...");
+  if (!sw_producer.start(sw_workerConfig)) {
+    LOG_ERROR("Failed to start software decoder");
+    hw_producer.stop();
+    return false;
+  }
+
+  LOG_INFO("  ✅ Both decoders started (frame sequence aligned from frame 0)");
+
+  // ========================================================================
+  // 步骤2：同时获取两个解码器的第一个Buffer（确保都是第0帧）
+  // ========================================================================
+  LOG_INFO("\n[Step 2] Getting BufferPools and acquiring first buffers (frame "
+           "0)...");
+
+  uint64_t hw_pool_id = hw_producer.getWorkingBufferPoolId();
+  uint64_t sw_pool_id = sw_producer.getWorkingBufferPoolId();
+
+  if (hw_pool_id == 0 || sw_pool_id == 0) {
+    LOG_ERROR("No working BufferPool ID available");
+    if (hw_pool_id == 0)
+      hw_producer.stop();
+    if (sw_pool_id == 0)
+      sw_producer.stop();
+    return false;
+  }
+
+  auto hw_pool = BufferPoolRegistry::getInstance().getPool(hw_pool_id).lock();
+  auto sw_pool = BufferPoolRegistry::getInstance().getPool(sw_pool_id).lock();
+
+  if (!hw_pool || !sw_pool) {
+    LOG_ERROR("BufferPool not found");
+    hw_producer.stop();
+    sw_producer.stop();
+    return false;
+  }
+
+  LOG_INFO_FMT("  Hardware BufferPool: '%s' (ID: %lu)",
+               hw_pool->getName().c_str(), hw_pool_id);
+  LOG_INFO_FMT("  Software BufferPool: '%s' (ID: %lu)",
+               sw_pool->getName().c_str(), sw_pool_id);
+
+  // ⭐ RTSP流：等待两个解码器都生产足够的帧（至少5帧）再开始对比
+  if (is_rtsp) {
+    LOG_INFO(
+        "  ⏳ Waiting for decoders to produce initial frames (RTSP stream)...");
+    int wait_count = 0;
+    while (wait_count < 30 && g_running) { // 最多等待30次（30秒）
+      int hw_filled = hw_pool->getFilledCount();
+      int sw_filled = sw_pool->getFilledCount();
+      if (hw_filled >= 5 && sw_filled >= 5) {
+        LOG_INFO_FMT("  ✅ Decoders ready: HW=%d frames, SW=%d frames",
+                     hw_filled, sw_filled);
+        break;
+      }
+      if (wait_count % 5 == 0) {
+        LOG_INFO_FMT("  ⏳ Waiting... HW=%d frames, SW=%d frames", hw_filled,
+                     sw_filled);
+      }
+      std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+      wait_count++;
+    }
+    if (wait_count >= 30) {
+      LOG_WARN("  ⚠️  Timeout waiting for decoders to produce initial frames");
+    }
+  }
+
+  // ⭐ 关键：同时等待两个解码器的第0帧
+  LOG_INFO("  Acquiring first buffers (frame 0) from both decoders...");
+  Buffer *first_hw_buf = hw_pool->acquireFilled(true, 5000);
+  Buffer *first_sw_buf = sw_pool->acquireFilled(true, 5000);
+
+  if (!first_hw_buf || !first_sw_buf) {
+    LOG_ERROR("Failed to get first buffers (frame 0) from both decoders");
+    if (first_hw_buf)
+      hw_pool->releaseFilled(first_hw_buf);
+    if (first_sw_buf)
+      sw_pool->releaseFilled(first_sw_buf);
+    hw_producer.stop();
+    sw_producer.stop();
+    return false;
+  }
+
+  LOG_INFO("  ✅ Got frame 0 from both decoders (sequence aligned)");
+
+  // ========================================================================
+  // 步骤3：创建 BufferComparator
+  // ========================================================================
+  LOG_INFO("\n[Step 3] Creating BufferComparator...");
+
+  CompareConfig compare_config;
+  compare_config.strategy        = CompareConfig::AUTO_LAYERED; // 自动分层验证
+  compare_config.format_strategy = CompareConfig::AUTO;         // 格式自适应
+  compare_config.quick_psnr_threshold = min_psnr; // 使用传入的阈值
+  compare_config.quick_warn_threshold =
+      min_psnr - 5.0;                             // 警告阈值比通过阈值低5dB
+  compare_config.use_perceptual_weighting = true; // 感知加权
+  compare_config.verbose                  = true; // 详细日志
+  compare_config.save_report              = true; // 保存报告
+  char report_path[256];
+  snprintf(report_path, sizeof(report_path), "./psnr_validation_report_%d.txt",
+           getpid());
+  compare_config.report_path = report_path;
+
+  BufferComparator comparator;
+  if (!comparator.open(compare_config)) {
+    LOG_ERROR("Failed to open BufferComparator");
+    hw_producer.stop();
+    sw_producer.stop();
+    return false;
+  }
+
+  LOG_INFO("  ✅ BufferComparator initialized");
+  LOG_INFO("  Strategy: AUTO_LAYERED (fast → deep)");
+  LOG_INFO("  Format: AUTO (YUV/RGB adaptive)");
+  LOG_INFO_FMT("  PSNR threshold: %.1f dB (pass), %.1f dB (warn)",
+               compare_config.quick_psnr_threshold,
+               compare_config.quick_warn_threshold);
+
+  // ========================================================================
+  // 步骤4：检测格式并创建BufferWriter（可选）
+  // ========================================================================
+  LOG_INFO("\n[Step 4] Detecting format...");
+
+  // 从软件Buffer获取格式（用于保存）
+  AVPixelFormat sw_output_format = AV_PIX_FMT_NV12; // 默认格式
+  int sw_actual_width            = width;
+  int sw_actual_height           = height;
+  std::string sw_format_name     = "NV12";
+  std::string sw_ffplay_format   = "nv12";
+
+  if (first_sw_buf->hasImageMetadata()) {
+    sw_output_format     = first_sw_buf->getImageFormat();
+    sw_actual_width      = first_sw_buf->getImageWidth();
+    sw_actual_height     = first_sw_buf->getImageHeight();
+    const char *fmt_name = av_get_pix_fmt_name(sw_output_format);
+    sw_format_name       = fmt_name ? fmt_name : "NV12";
+
+    // 设置ffplay格式
+    if (sw_output_format == AV_PIX_FMT_NV12) {
+      sw_ffplay_format = "nv12";
+    } else if (sw_output_format == AV_PIX_FMT_YUV420P) {
+      sw_ffplay_format = "yuv420p";
+    } else {
+      sw_ffplay_format = sw_format_name;
+    }
+
+    LOG_INFO_FMT("   Detected software decoder format: %s (%dx%d)",
+                 sw_format_name.c_str(), sw_actual_width, sw_actual_height);
+  } else {
+    LOG_WARN("   Software decoder buffer has no metadata, using default NV12");
+  }
+
+  // ⭐ 对比第一帧（使用 BufferComparator 组件）
+  LOG_INFO("\n[Step 5] Comparing first frame (frame 0)...");
+  LOG_INFO("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+
+  LOG_DEBUG_FMT(
+      "[PSNR] Comparing frame 0 (first frame) - sw_buffer=%p, hw_buffer=%p",
+      first_sw_buf, first_hw_buf);
+
+  if (first_sw_buf->hasImageMetadata()) {
+    LOG_DEBUG_FMT("[PSNR] Software buffer: format=%s, size=%dx%d",
+                  av_get_pix_fmt_name(first_sw_buf->getImageFormat()),
+                  first_sw_buf->getImageWidth(),
+                  first_sw_buf->getImageHeight());
+  }
+  if (first_hw_buf->hasImageMetadata()) {
+    LOG_DEBUG_FMT("[PSNR] Hardware buffer: format=%s, size=%dx%d",
+                  av_get_pix_fmt_name(first_hw_buf->getImageFormat()),
+                  first_hw_buf->getImageWidth(),
+                  first_hw_buf->getImageHeight());
+  }
+
+  FrameCompareResult first_result =
+      comparator.compare(first_sw_buf, first_hw_buf);
+
+  LOG_INFO_FMT("  [Frame 0] PSNR: Y=%.2f U=%.2f V=%.2f dB (avg=%.2f dB)",
+               first_result.psnr_y, first_result.psnr_u, first_result.psnr_v,
+               first_result.psnr_avg);
+  LOG_INFO_FMT(
+      "  [Frame 0] Status: %s | Level: %s",
+      first_result.passed
+          ? "PASS"
+          : (first_result.level == FrameCompareResult::WARN ? "WARN" : "FAIL"),
+      first_result.level == FrameCompareResult::FAIL
+          ? "FAIL"
+          : (first_result.level == FrameCompareResult::WARN ? "WARN" : "PASS"));
+
+  if (first_result.passed) {
+    LOG_INFO_FMT("  ✅ Frame 0: PASS (PSNR-Y: %.2f dB)", first_result.psnr_y);
+  } else {
+    LOG_WARN_FMT("  ⚠️  Frame 0: %s (PSNR-Y: %.2f dB)",
+                 first_result.level == FrameCompareResult::FAIL ? "FAIL"
+                                                                : "WARN",
+                 first_result.psnr_y);
+  }
+
+  // 释放第一帧
+  sw_pool->releaseFilled(first_sw_buf);
+  hw_pool->releaseFilled(first_hw_buf);
+
+  // ========================================================================
+  // 步骤6：帧序列对齐的对比循环（第1帧、第2帧...）
+  // ========================================================================
+  LOG_INFO("\n[Step 6] Comparing decoder outputs frame by frame (sequence "
+           "aligned)...");
+  LOG_INFO("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+
+  int frame_count      = 1; // 第0帧已对比，从第1帧开始
+  const int MAX_FRAMES = max_frames > 0 ? max_frames : 300; // 最多对比指定帧数
+  int timeout_count    = 0;
+  const int MAX_TIMEOUT =
+      200; // ⭐ RTSP流需要更长的超时时间（200次 × 5秒 = 1000秒）
+
+  // ⭐ PSNR统计：记录每帧的PSNR值（参考 run_psnr_compare_test）
+  std::vector<double> psnr_y_values;
+  std::vector<double> psnr_u_values;
+  std::vector<double> psnr_v_values;
+  std::vector<double> psnr_avg_values;
+
+  // ⭐ 将第一帧的PSNR值也记录到统计中
+  if (first_result.psnr_y > 0.0) {
+    psnr_y_values.push_back(first_result.psnr_y);
+    psnr_u_values.push_back(first_result.psnr_u);
+    psnr_v_values.push_back(first_result.psnr_v);
+    psnr_avg_values.push_back(first_result.psnr_avg);
+    LOG_DEBUG_FMT("[PSNR] Recorded frame 0 PSNR: Y=%.2f U=%.2f V=%.2f avg=%.2f",
+                  first_result.psnr_y, first_result.psnr_u, first_result.psnr_v,
+                  first_result.psnr_avg);
+  }
+
+  LOG_INFO_FMT(
+      "  Starting comparison loop: frame_count=%d, MAX_FRAMES=%d, g_running=%d",
+      frame_count, MAX_FRAMES, g_running ? 1 : 0);
+
+  while (g_running && frame_count < MAX_FRAMES) {
+    // ⭐ RTSP流：检查中断标志
+    if (is_rtsp && g_rtsp_interrupted.load()) {
+      LOG_INFO("\n⚠️  检测到RTSP中断请求，停止PSNR验证...");
+      break;
+    }
+
+    // ⭐ RTSP流：使用更长的超时时间（5秒），文件流使用1秒
+    int timeout_ms = is_rtsp ? 5000 : 1000;
+
+    LOG_DEBUG_FMT("[PSNR] Attempting to acquire frame %d (timeout=%dms)",
+                  frame_count, timeout_ms);
+
+    // 同时获取硬件和软件解码的 Buffer
+    Buffer *sw_buffer = sw_pool->acquireFilled(true, timeout_ms);
+    Buffer *hw_buffer = hw_pool->acquireFilled(true, timeout_ms);
+
+    LOG_DEBUG_FMT("[PSNR] Acquired buffers: sw=%p, hw=%p", sw_buffer,
+                  hw_buffer);
+
+    if (!sw_buffer || !hw_buffer) {
+      // ⭐ RTSP流：检查中断标志
+      if (is_rtsp && g_rtsp_interrupted.load()) {
+        LOG_INFO("\n⚠️  检测到RTSP中断请求，停止PSNR验证...");
+        if (sw_buffer)
+          sw_pool->releaseFilled(sw_buffer);
+        if (hw_buffer)
+          hw_pool->releaseFilled(hw_buffer);
+        break;
+      }
+
+      // ⭐ 添加更详细的日志（使用INFO级别，确保能看到）
+      int hw_filled   = hw_pool->getFilledCount();
+      int sw_filled   = sw_pool->getFilledCount();
+      bool hw_running = hw_producer.isRunning();
+      bool sw_running = sw_producer.isRunning();
+
+      if (!sw_buffer) {
+        LOG_INFO_FMT("⚠️  Software decoder timeout (waiting for frame %d, %d "
+                     "frames available, running=%d)",
+                     frame_count, sw_filled, sw_running ? 1 : 0);
+      }
+      if (!hw_buffer) {
+        LOG_INFO_FMT("⚠️  Hardware decoder timeout (waiting for frame %d, %d "
+                     "frames available, running=%d)",
+                     frame_count, hw_filled, hw_running ? 1 : 0);
+      }
+
+      if (sw_buffer)
+        sw_pool->releaseFilled(sw_buffer);
+      if (hw_buffer)
+        hw_pool->releaseFilled(hw_buffer);
+
+      timeout_count++;
+
+      // ⭐ RTSP流：每5次超时打印一次进度（更频繁）
+      if (is_rtsp && timeout_count % 5 == 0) {
+        LOG_INFO_FMT("  ⏳ Waiting for frame %d... (HW: %d frames available, "
+                     "running=%d; SW: %d frames available, running=%d)",
+                     frame_count, hw_filled, hw_running ? 1 : 0, sw_filled,
+                     sw_running ? 1 : 0);
+      }
+
+      if (timeout_count >= MAX_TIMEOUT) {
+        LOG_INFO_FMT("\n  ⚠️  Decoders finished or timeout after %d attempts "
+                     "(compared %d frames)",
+                     timeout_count, frame_count);
+        break;
+      }
+
+      // ⭐ RTSP流：不要因为解码器停止就立即退出，继续等待一段时间
+      // 只有在连续多次超时且两个解码器都停止时才退出
+      if (!hw_running && !sw_running) {
+        // 如果两个解码器都停止了，再等待几次看看是否有新帧
+        if (timeout_count >= 10) {
+          LOG_INFO_FMT("\n  Decoders finished naturally after %d timeouts "
+                       "(compared %d frames)",
+                       timeout_count, frame_count);
+          break;
+        }
+      }
+
+      continue;
+    }
+
+    timeout_count = 0;
+
+    // ⭐ 关键调用：使用 BufferComparator 对比两个 Buffer
+    // 注意：对于RTSP流，两个解码器都从同一个流读取，帧序列应该是对齐的
+    LOG_DEBUG_FMT("[PSNR] Comparing frame %d (sw_buffer=%p, hw_buffer=%p)",
+                  frame_count, sw_buffer, hw_buffer);
+
+    FrameCompareResult result = comparator.compare(sw_buffer, hw_buffer);
+
+    // ⭐ 记录PSNR值（用于统计）
+    if (result.psnr_y > 0.0) {
+      psnr_y_values.push_back(result.psnr_y);
+      psnr_u_values.push_back(result.psnr_u);
+      psnr_v_values.push_back(result.psnr_v);
+      psnr_avg_values.push_back(result.psnr_avg);
+
+      LOG_DEBUG_FMT("[PSNR] Frame %d: Y=%.2f U=%.2f V=%.2f dB (avg=%.2f dB) | "
+                    "passed=%d level=%d",
+                    frame_count, result.psnr_y, result.psnr_u, result.psnr_v,
+                    result.psnr_avg, result.passed ? 1 : 0,
+                    result.level == FrameCompareResult::FAIL
+                        ? 2
+                        : (result.level == FrameCompareResult::WARN ? 1 : 0));
+    } else {
+      LOG_WARN_FMT("[PSNR] Frame %d: Invalid PSNR values (Y=%.2f)", frame_count,
+                   result.psnr_y);
+    }
+
+    // 释放Buffer
+    sw_pool->releaseFilled(sw_buffer);
+    hw_pool->releaseFilled(hw_buffer);
+
+    frame_count++;
+
+    // 每50帧打印一次进度
+    if (frame_count % 50 == 0) {
+      double avg_psnr_y   = psnr_y_values.empty()
+                                ? 0.0
+                                : std::accumulate(psnr_y_values.begin(),
+                                                  psnr_y_values.end(), 0.0) /
+                                    psnr_y_values.size();
+      double avg_psnr_u   = psnr_u_values.empty()
+                                ? 0.0
+                                : std::accumulate(psnr_u_values.begin(),
+                                                  psnr_u_values.end(), 0.0) /
+                                    psnr_u_values.size();
+      double avg_psnr_v   = psnr_v_values.empty()
+                                ? 0.0
+                                : std::accumulate(psnr_v_values.begin(),
+                                                  psnr_v_values.end(), 0.0) /
+                                    psnr_v_values.size();
+      double avg_psnr_avg = psnr_avg_values.empty()
+                                ? 0.0
+                                : std::accumulate(psnr_avg_values.begin(),
+                                                  psnr_avg_values.end(), 0.0) /
+                                      psnr_avg_values.size();
+
+      // 计算当前批次的统计（最近50帧）
+      int recent_start    = std::max(0, (int)psnr_y_values.size() - 50);
+      double recent_avg_y = 0.0;
+      if (recent_start < (int)psnr_y_values.size()) {
+        recent_avg_y = std::accumulate(psnr_y_values.begin() + recent_start,
+                                       psnr_y_values.end(), 0.0) /
+                       (psnr_y_values.size() - recent_start);
+      }
+
+      LOG_INFO_FMT(
+          "  Progress: %d/%d frames | PSNR-Y=%.2f U=%.2f V=%.2f dB (avg=%.2f "
+          "dB) | Recent-50: Y=%.2f dB | Passed: %d, Warned: %d, Failed: %d",
+          frame_count, MAX_FRAMES, avg_psnr_y, avg_psnr_u, avg_psnr_v,
+          avg_psnr_avg, recent_avg_y, comparator.getPassedCount(),
+          comparator.getCompareCount() - comparator.getPassedCount() -
+              comparator.getFailedCount(),
+          comparator.getFailedCount());
+    }
+
+    // 每10帧打印一次当前帧的PSNR（前50帧详细模式）
+    if (frame_count <= 50 && frame_count % 10 == 0) {
+      LOG_INFO_FMT(
+          "  Frame %3d: PSNR Y=%.2f U=%.2f V=%.2f dB (avg=%.2f dB) %s",
+          frame_count, result.psnr_y, result.psnr_u, result.psnr_v,
+          result.psnr_avg,
+          result.passed
+              ? "✅"
+              : (result.level == FrameCompareResult::WARN ? "⚠️" : "❌"));
+    }
+
+    // 每帧打印PSNR（前10帧详细模式）
+    if (frame_count <= 10) {
+      LOG_INFO_FMT(
+          "  [Frame %3d] PSNR: Y=%.2f U=%.2f V=%.2f dB (avg=%.2f dB) | Status: "
+          "%s | Level: %s",
+          frame_count, result.psnr_y, result.psnr_u, result.psnr_v,
+          result.psnr_avg,
+          result.passed
+              ? "PASS"
+              : (result.level == FrameCompareResult::WARN ? "WARN" : "FAIL"),
+          result.level == FrameCompareResult::FAIL
+              ? "FAIL"
+              : (result.level == FrameCompareResult::WARN ? "WARN" : "PASS"));
+    }
+  }
+
+  LOG_INFO("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+
+  // ⭐ 排空剩余 Buffer（不对比，直接释放）
+  LOG_INFO("Draining remaining buffers...");
+  Buffer *remaining = nullptr;
+  int hw_drained    = 0;
+  while ((remaining = hw_pool->acquireFilled(false, 0)) != nullptr) {
+    hw_drained++;
+    hw_pool->releaseFilled(remaining);
+  }
+  if (hw_drained > 0) {
+    LOG_INFO_FMT("Drained %d remaining hardware buffers", hw_drained);
+  }
+
+  int sw_drained = 0;
+  while ((remaining = sw_pool->acquireFilled(false, 0)) != nullptr) {
+    sw_drained++;
+    sw_pool->releaseFilled(remaining);
+  }
+  if (sw_drained > 0) {
+    LOG_INFO_FMT("Drained %d remaining software buffers", sw_drained);
+  }
+
+  // ========================================================================
+  // 步骤7：关闭资源并打印结果
+  // ========================================================================
+  LOG_INFO("\n[Step 7] Cleaning up...");
+
+  comparator.close();
+  hw_producer.stop();
+  sw_producer.stop();
+
+  // ========================================================================
+  // 步骤8：计算详细的PSNR统计信息
+  // ========================================================================
+  LOG_INFO("\n[Step 8] Calculating PSNR statistics...");
+
+  // ⭐ 使用 BufferComparator 打印结果
+  LOG_INFO("\n═══════════════════════════════════════════════════════");
+  LOG_INFO("  Decoder Comparison Results");
+  LOG_INFO("═══════════════════════════════════════════════════════");
+  comparator.printSummary();
+  LOG_INFO("═══════════════════════════════════════════════════════\n");
+
+  // ⭐ 打印详细的PSNR统计
+  if (!psnr_y_values.empty()) {
+    LOG_INFO_FMT("  Calculating PSNR statistics from %zu frames...",
+                 psnr_y_values.size());
+
+    // 计算平均值
+    double avg_psnr_y =
+        std::accumulate(psnr_y_values.begin(), psnr_y_values.end(), 0.0) /
+        psnr_y_values.size();
+    double avg_psnr_u =
+        std::accumulate(psnr_u_values.begin(), psnr_u_values.end(), 0.0) /
+        psnr_u_values.size();
+    double avg_psnr_v =
+        std::accumulate(psnr_v_values.begin(), psnr_v_values.end(), 0.0) /
+        psnr_v_values.size();
+    double avg_psnr_avg =
+        std::accumulate(psnr_avg_values.begin(), psnr_avg_values.end(), 0.0) /
+        psnr_avg_values.size();
+
+    LOG_DEBUG_FMT("[PSNR] Calculated averages: Y=%.2f U=%.2f V=%.2f avg=%.2f",
+                  avg_psnr_y, avg_psnr_u, avg_psnr_v, avg_psnr_avg);
+
+    // 计算最小值和最大值
+    auto minmax_y =
+        std::minmax_element(psnr_y_values.begin(), psnr_y_values.end());
+    auto minmax_u =
+        std::minmax_element(psnr_u_values.begin(), psnr_u_values.end());
+    auto minmax_v =
+        std::minmax_element(psnr_v_values.begin(), psnr_v_values.end());
+    auto minmax_avg =
+        std::minmax_element(psnr_avg_values.begin(), psnr_avg_values.end());
+
+    double min_psnr_y   = *minmax_y.first;
+    double max_psnr_y   = *minmax_y.second;
+    double min_psnr_u   = *minmax_u.first;
+    double max_psnr_u   = *minmax_u.second;
+    double min_psnr_v   = *minmax_v.first;
+    double max_psnr_v   = *minmax_v.second;
+    double min_psnr_avg = *minmax_avg.first;
+    double max_psnr_avg = *minmax_avg.second;
+
+    LOG_DEBUG_FMT("[PSNR] Min/Max Y: [%.2f, %.2f] U: [%.2f, %.2f] V: [%.2f, "
+                  "%.2f] Avg: [%.2f, %.2f]",
+                  min_psnr_y, max_psnr_y, min_psnr_u, max_psnr_u, min_psnr_v,
+                  max_psnr_v, min_psnr_avg, max_psnr_avg);
+
+    // 计算标准差
+    double variance_y   = 0.0;
+    double variance_u   = 0.0;
+    double variance_v   = 0.0;
+    double variance_avg = 0.0;
+    for (size_t i = 0; i < psnr_y_values.size(); i++) {
+      variance_y +=
+          (psnr_y_values[i] - avg_psnr_y) * (psnr_y_values[i] - avg_psnr_y);
+      variance_u +=
+          (psnr_u_values[i] - avg_psnr_u) * (psnr_u_values[i] - avg_psnr_u);
+      variance_v +=
+          (psnr_v_values[i] - avg_psnr_v) * (psnr_v_values[i] - avg_psnr_v);
+      variance_avg += (psnr_avg_values[i] - avg_psnr_avg) *
+                      (psnr_avg_values[i] - avg_psnr_avg);
+    }
+    double stddev_y   = std::sqrt(variance_y / psnr_y_values.size());
+    double stddev_u   = std::sqrt(variance_u / psnr_u_values.size());
+    double stddev_v   = std::sqrt(variance_v / psnr_v_values.size());
+    double stddev_avg = std::sqrt(variance_avg / psnr_avg_values.size());
+
+    LOG_DEBUG_FMT("[PSNR] Standard deviations: Y=%.2f U=%.2f V=%.2f avg=%.2f",
+                  stddev_y, stddev_u, stddev_v, stddev_avg);
+
+    // 统计不同质量区间的帧数
+    int excellent_count = 0, good_count = 0, poor_count = 0;
+    for (double val : psnr_avg_values) {
+      if (val >= 38.0)
+        excellent_count++;
+      else if (val >= 35.0)
+        good_count++;
+      else
+        poor_count++;
+    }
+
+    LOG_INFO("  PSNR Statistics (Hardware vs Software):");
+    LOG_INFO_FMT("    Total frames analyzed: %zu", psnr_y_values.size());
+    LOG_INFO_FMT("    Average: Y=%.2f U=%.2f V=%.2f dB (avg=%.2f dB)",
+                 avg_psnr_y, avg_psnr_u, avg_psnr_v, avg_psnr_avg);
+    LOG_INFO_FMT("    Range Y:  [%.2f, %.2f] dB (stddev=%.2f)", min_psnr_y,
+                 max_psnr_y, stddev_y);
+    LOG_INFO_FMT("    Range U:  [%.2f, %.2f] dB (stddev=%.2f)", min_psnr_u,
+                 max_psnr_u, stddev_u);
+    LOG_INFO_FMT("    Range V:  [%.2f, %.2f] dB (stddev=%.2f)", min_psnr_v,
+                 max_psnr_v, stddev_v);
+    LOG_INFO_FMT("    Range Avg: [%.2f, %.2f] dB (stddev=%.2f)", min_psnr_avg,
+                 max_psnr_avg, stddev_avg);
+    LOG_INFO("");
+    LOG_INFO("  Quality Distribution (by PSNR-avg):");
+    LOG_INFO_FMT("    Excellent (>=38dB): %d frames (%.1f%%)", excellent_count,
+                 100.0 * excellent_count / psnr_avg_values.size());
+    LOG_INFO_FMT("    Good (35-38dB):     %d frames (%.1f%%)", good_count,
+                 100.0 * good_count / psnr_avg_values.size());
+    LOG_INFO_FMT("    Poor (<35dB):       %d frames (%.1f%%)", poor_count,
+                 100.0 * poor_count / psnr_avg_values.size());
+    LOG_INFO("");
+    LOG_INFO("  Quality Assessment (by Comparator):");
+    LOG_INFO_FMT("    Passed: %d ✅ (%.1f%%)", comparator.getPassedCount(),
+                 100.0 * comparator.getPassedCount() / frame_count);
+    LOG_INFO_FMT("    Warned: %d ⚠️  (%.1f%%)",
+                 comparator.getCompareCount() - comparator.getPassedCount() -
+                     comparator.getFailedCount(),
+                 100.0 *
+                     (comparator.getCompareCount() -
+                      comparator.getPassedCount() -
+                      comparator.getFailedCount()) /
+                     frame_count);
+    LOG_INFO_FMT("    Failed: %d ❌ (%.1f%%)", comparator.getFailedCount(),
+                 100.0 * comparator.getFailedCount() / frame_count);
+    LOG_INFO("");
+
+    // 质量评级
+    if (avg_psnr_avg >= 38.0) {
+      LOG_INFO("  ✅ Overall Quality: EXCELLENT (visually lossless)");
+    } else if (avg_psnr_avg >= 35.0) {
+      LOG_INFO("  ⚠️  Overall Quality: GOOD (minor differences)");
+    } else {
+      LOG_INFO("  ❌ Overall Quality: POOR (visible artifacts)");
+    }
+    LOG_INFO("");
+
+    // 显示前10帧和后10帧的PSNR值（用于诊断）
+    LOG_INFO("  PSNR Sample (First 10 frames):");
+    for (size_t i = 0; i < std::min(10UL, psnr_y_values.size()); i++) {
+      LOG_INFO_FMT("    Frame %3zu: Y=%.2f U=%.2f V=%.2f dB (avg=%.2f dB)", i,
+                   psnr_y_values[i], psnr_u_values[i], psnr_v_values[i],
+                   psnr_avg_values[i]);
+    }
+    if (psnr_y_values.size() > 10) {
+      LOG_INFO("  PSNR Sample (Last 10 frames):");
+      size_t start = psnr_y_values.size() - 10;
+      for (size_t i = start; i < psnr_y_values.size(); i++) {
+        LOG_INFO_FMT("    Frame %3zu: Y=%.2f U=%.2f V=%.2f dB (avg=%.2f dB)", i,
+                     psnr_y_values[i], psnr_u_values[i], psnr_v_values[i],
+                     psnr_avg_values[i]);
+      }
+    }
+    LOG_INFO("");
+  } else {
+    LOG_WARN("  No PSNR values recorded for statistics");
+  }
+
+  LOG_INFO("  Decoding Statistics");
+  LOG_INFO("═══════════════════════════════════════════════════════");
+  LOG_INFO_FMT("Hardware decoder:");
+  LOG_INFO_FMT("  Frames produced: %d", hw_producer.getProducedFrames());
+  LOG_INFO_FMT("  Frames skipped: %d", hw_producer.getSkippedFrames());
+  LOG_INFO_FMT("  Average FPS: %.2f", hw_producer.getAverageFPS());
+  LOG_INFO_FMT("Software decoder:");
+  LOG_INFO_FMT("  Frames produced: %d", sw_producer.getProducedFrames());
+  LOG_INFO_FMT("  Frames skipped: %d", sw_producer.getSkippedFrames());
+  LOG_INFO_FMT("  Average FPS: %.2f", sw_producer.getAverageFPS());
+  LOG_INFO("═══════════════════════════════════════════════════════");
+
+  if (compare_config.save_report) {
+    LOG_INFO_FMT("💡 Detailed comparison report saved to: %s",
+                 compare_config.report_path.c_str());
+    LOG_INFO("   View the report for frame-by-frame analysis");
+  }
+
+  LOG_INFO("\n💡 PSNR Interpretation:");
+  LOG_INFO("   >= 38 dB: Excellent quality (visually lossless)");
+  LOG_INFO("   35-38 dB: Good quality (minor differences)");
+  LOG_INFO("   < 35 dB:  Poor quality (visible artifacts)");
+
+  // 判断是否通过
+  bool passed = comparator.isPassed();
+  if (passed) {
+    LOG_INFO_FMT("\n✅ PASS - 解码精度优秀（完全一致）");
+    return true;
+  } else {
+    LOG_INFO_FMT("\n❌ FAIL - 解码精度差（存在明显错误）");
+    LOG_INFO("说明: 部分帧 PSNR < 35dB，硬件解码存在严重问题");
+    return false;
+  }
+}
 
 // 编码格式枚举
 enum class CodecType {
-    H264,
-    H265,
-    MJPEG,
-    CUSTOM  // 自定义解码器
+  H264,
+  H265,
+  MJPEG,
+  CUSTOM // 自定义解码器
 };
 
 // 测试配置结构体
 struct TestConfig {
-    const char* video_path;
-    CodecType codec_type;
-    const char* decoder_name;
-    const char* output_path;
-    const char* profile;         // H264 Profile: baseline, main, high
-    bool enable_display;
-    bool enable_psnr;       // 启用PSNR验证
-    double min_psnr;        // 最小PSNR要求（dB）
-    int save_frames;        // 保存多少帧，0=不保存，-1=全部保存
-    int max_frames;         // 最大处理帧数，-1=全部处理
-    int threads;            // 生产线线程数
-    int width;              // 视频宽度
-    int height;             // 视频高度
-    int fps;                // 目标帧率（用于性能验证）
-    bool auto_test;         // 自动测试模式
-    
-    TestConfig() 
-        : video_path(nullptr)
-        , codec_type(CodecType::H264)
-        , decoder_name(nullptr)
-        , output_path(nullptr)
-        , profile("high")
-        , enable_display(true)
-        , enable_psnr(false)
-        , min_psnr(30.0)
-        , save_frames(300)
-        , max_frames(600)
-        , threads(2)
-        , width(1920)
-        , height(1080)
-        , fps(60)
-        , auto_test(false)
-    {}
-    
-    // 获取实际使用的解码器名称
-    const char* getDecoderName() const {
-        // 如果用户指定了自定义解码器，优先使用
-        if (decoder_name != nullptr) {
-            return decoder_name;
-        }
-        
-        // 否则根据 codec_type 自动选择
-        switch (codec_type) {
-            case CodecType::H264:
-                return "h264_taco";
-            case CodecType::H265:
-                return "hevc_taco";
-            case CodecType::MJPEG:
-                return "mjpeg_taco";
-            default:
-                return "h264_taco";
-        }
-    }
-    
-    // 获取编码格式名称（用于显示）
-    const char* getCodecName() const {
-        if (decoder_name != nullptr) {
-            return "CUSTOM";
-        }
-        
-        switch (codec_type) {
-            case CodecType::H264:
-                return "H264";
-            case CodecType::H265:
-                return "H265";
-            case CodecType::MJPEG:
-                return "MJPEG";
-            default:
-                return "UNKNOWN";
-        }
-    }
+  const char *video_path;
+  CodecType codec_type;
+  const char *decoder_name;
+  const char *output_path;
+  const char *profile; // H264 Profile: baseline, main, high
+  bool enable_display;
+  bool enable_psnr; // 启用PSNR验证
+  double min_psnr;  // 最小PSNR要求（dB）
+  int save_frames;  // 保存多少帧，0=不保存，-1=全部保存
+  int max_frames;   // 最大处理帧数，-1=全部处理
+  int threads;      // 生产线线程数
+  int width;        // 视频宽度
+  int height;       // 视频高度
+  int fps;          // 目标帧率（用于性能验证）
+  bool auto_test;   // 自动测试模式
+
+  TestConfig()
+      : video_path(nullptr), codec_type(CodecType::H264), decoder_name(nullptr),
+        output_path(nullptr), profile("high"), enable_display(true),
+        enable_psnr(false), min_psnr(30.0), save_frames(-1), max_frames(-1),
+        threads(2), width(1920), height(1080), fps(60), auto_test(false) {}
 };
 
-// 解析命令行参数
-TestConfig parse_arguments(int argc, char* argv[]) {
-    TestConfig config;
-    
-    if (argc < 2) {
-        printf("Usage: %s <video_file> [options]\n", argv[0]);
-        printf("\n");
-        printf("Options:\n");
-        printf("  --codec TYPE         Codec type: h264, h265, mjpeg (default: h264)\n");
-        printf("  --profile PROFILE    H264 profile: baseline, main, high (default: high)\n");
-        printf("  --decoder NAME       Custom decoder name (overrides --codec)\n");
-        printf("  --output PATH        Output file path (default: auto-generated)\n");
-        printf("  --no-display         Disable display output\n");
-        printf("  --enable-psnr        Enable PSNR validation (requires FFmpeg)\n");
-        printf("  --min-psnr VALUE     Minimum PSNR requirement in dB (default: 30.0)\n");
-        printf("  --save-frames N      Save N frames (0=none, -1=all, default: 300)\n");
-        printf("  --max-frames N       Max frames to process (-1=all, default: 600)\n");
-        printf("  --threads N          Producer threads (default: 2)\n");
-        printf("  --resolution WxH     Video resolution (default: 1920x1080)\n");
-        printf("  --fps N              Target FPS for validation (default: 60)\n");
-        printf("  --auto-test          Run all test cases automatically\n");
-        printf("  --all-tests          Alias for --auto-test\n");
-        printf("\n");
-        printf("Examples:\n");
-        printf("  %s video.mp4\n", argv[0]);
-        printf("  %s video.mp4 --codec h264 --profile high\n", argv[0]);
-        printf("  %s video.mp4 --codec h265\n", argv[0]);
-        printf("  %s video.mp4 --codec mjpeg --resolution 1280x720\n", argv[0]);
-        printf("  %s video.mp4 --save-frames 100 --max-frames 500\n", argv[0]);
-        printf("  %s video.mp4 --no-display --decoder h264_taco\n", argv[0]);
-        printf("  %s video.mp4 --resolution 1280x720 --fps 30 --threads 4\n", argv[0]);
-        printf("  %s video.mp4 --output /tmp/my_output.yuv --save-frames -1\n", argv[0]);
-        printf("  %s video.mp4 --enable-psnr --save-frames -1\n", argv[0]);
-        printf("  %s video.mp4 --enable-psnr --min-psnr 35.0 --save-frames -1\n", argv[0]);
-        printf("  %s --auto-test\n", argv[0]);
-        printf("  %s --auto-test --no-display --threads 4\n", argv[0]);
-        printf("\n");
-        exit(1);
+/**
+ * @brief 从环境变量或默认值创建测试配置
+ */
+TestConfig create_test_config_from_env(CodecType codec_type = CodecType::H264) {
+  TestConfig config;
+  config.codec_type = codec_type;
+
+  // 从环境变量读取配置（如果存在）
+  const char *env_val;
+
+  if ((env_val = getenv("MP4_DECODE_DISPLAY")) != nullptr) {
+    config.enable_display =
+        (strcmp(env_val, "1") == 0 || strcasecmp(env_val, "true") == 0);
+  }
+
+  if ((env_val = getenv("MP4_DECODE_PSNR")) != nullptr) {
+    config.enable_psnr =
+        (strcmp(env_val, "1") == 0 || strcasecmp(env_val, "true") == 0);
+  }
+
+  if ((env_val = getenv("MP4_DECODE_MIN_PSNR")) != nullptr) {
+    config.min_psnr = atof(env_val);
+  }
+
+  if ((env_val = getenv("MP4_DECODE_SAVE_FRAMES")) != nullptr) {
+    config.save_frames = atoi(env_val);
+  }
+
+  if ((env_val = getenv("MP4_DECODE_MAX_FRAMES")) != nullptr) {
+    config.max_frames = atoi(env_val);
+  }
+
+  if ((env_val = getenv("MP4_DECODE_THREADS")) != nullptr) {
+    config.threads = atoi(env_val);
+    if (config.threads < 1)
+      config.threads = 1;
+  }
+
+  if ((env_val = getenv("MP4_DECODE_RESOLUTION")) != nullptr) {
+    if (sscanf(env_val, "%dx%d", &config.width, &config.height) != 2) {
+      // 解析失败，使用默认值
     }
-    
-    // 检查是否是自动测试模式
-    bool is_auto_test = false;
-    int video_file_index = -1;
-    
-    for (int i = 1; i < argc; i++) {
-        if (strcmp(argv[i], "--auto-test") == 0 || strcmp(argv[i], "--all-tests") == 0) {
-            is_auto_test = true;
-            config.auto_test = true;
-        } else if (argv[i][0] != '-' && video_file_index == -1) {
-            // 第一个非选项参数作为视频文件
-            video_file_index = i;
-        }
-    }
-    
-    if (is_auto_test) {
-        // 自动测试模式：不需要指定视频文件（或可选）
-        config.video_path = nullptr;
-    } else {
-        // 普通模式：需要指定视频文件
-        if (video_file_index == -1) {
-            fprintf(stderr, "Error: Video file not specified\n");
-            fprintf(stderr, "Use --auto-test to run all test cases automatically\n");
-            exit(1);
-        }
-        config.video_path = argv[video_file_index];
-    }
-    
-    // 解析选项（跳过视频文件参数）
-    int start_index = is_auto_test ? 1 : 2;  // 自动测试模式从1开始，普通模式从2开始
-    for (int i = start_index; i < argc; i++) {
-        // 跳过视频文件参数
-        if (i == video_file_index) {
-            continue;
-        }
-        if (strcmp(argv[i], "--codec") == 0 && i + 1 < argc) {
-            const char* codec = argv[++i];
-            if (strcasecmp(codec, "h264") == 0) {
-                config.codec_type = CodecType::H264;
-            } else if (strcasecmp(codec, "h265") == 0 || strcasecmp(codec, "hevc") == 0) {
-                config.codec_type = CodecType::H265;
-            } else if (strcasecmp(codec, "mjpeg") == 0) {
-                config.codec_type = CodecType::MJPEG;
-            } else {
-                fprintf(stderr, "Unknown codec type: %s\n", codec);
-                fprintf(stderr, "Supported codecs: h264, h265, mjpeg\n");
-                exit(1);
-            }
-        } else if (strcmp(argv[i], "--profile") == 0 && i + 1 < argc) {
-            config.profile = argv[++i];
-        } else if (strcmp(argv[i], "--decoder") == 0 && i + 1 < argc) {
-            config.decoder_name = argv[++i];
-            config.codec_type = CodecType::CUSTOM;
-        } else if (strcmp(argv[i], "--output") == 0 && i + 1 < argc) {
-            config.output_path = argv[++i];
-        } else if (strcmp(argv[i], "--no-display") == 0) {
-            config.enable_display = false;
-        } else if (strcmp(argv[i], "--enable-psnr") == 0) {
-            config.enable_psnr = true;
-        } else if (strcmp(argv[i], "--min-psnr") == 0 && i + 1 < argc) {
-            config.min_psnr = atof(argv[++i]);
-        } else if (strcmp(argv[i], "--save-frames") == 0 && i + 1 < argc) {
-            config.save_frames = atoi(argv[++i]);
-        } else if (strcmp(argv[i], "--max-frames") == 0 && i + 1 < argc) {
-            config.max_frames = atoi(argv[++i]);
-        } else if (strcmp(argv[i], "--threads") == 0 && i + 1 < argc) {
-            config.threads = atoi(argv[++i]);
-            if (config.threads < 1) config.threads = 1;
-        } else if (strcmp(argv[i], "--resolution") == 0 && i + 1 < argc) {
-            if (sscanf(argv[++i], "%dx%d", &config.width, &config.height) != 2) {
-                fprintf(stderr, "Invalid resolution format. Use WxH (e.g., 1920x1080)\n");
-                exit(1);
-            }
-        } else if (strcmp(argv[i], "--fps") == 0 && i + 1 < argc) {
-            config.fps = atoi(argv[++i]);
-        } else if (strcmp(argv[i], "--save-all") == 0) {
-            // 兼容旧选项
-            config.save_frames = -1;
-        } else if (strcmp(argv[i], "--auto-test") == 0 || strcmp(argv[i], "--all-tests") == 0) {
-            // 已经在循环前处理过，这里跳过
-            continue;
-        } else if (argv[i][0] == '-') {
-            // 未知选项
-            fprintf(stderr, "Unknown option: %s\n", argv[i]);
-            exit(1);
-        }
-        // 注意：非选项参数（视频文件）已经在循环前处理
-    }
-    
-    return config;
+  }
+
+  if ((env_val = getenv("MP4_DECODE_FPS")) != nullptr) {
+    config.fps = atoi(env_val);
+  }
+
+  if ((env_val = getenv("MP4_DECODE_OUTPUT")) != nullptr) {
+    config.output_path = env_val;
+  }
+
+  return config;
 }
 
 /**
- * @brief 自动测试用例结构体
+ * @brief 获取解码器名称（内联辅助函数）
  */
-struct AutoTestCase {
-    const char* name;           // 测试用例名称
-    const char* description;    // 测试描述
-    int width;                  // 视频宽度
-    int height;                 // 视频高度
-    int fps;                    // 目标帧率
-    CodecType codec_type;       // 编解码器类型
-    const char* profile;        // Profile (h264: high/main, h265: main, mjpeg: none)
-    const char* video_file;     // 视频文件名（相对于当前目录）
-};
+static const char *getDecoderName(const TestConfig &config) {
+  if (config.decoder_name != nullptr) {
+    return config.decoder_name;
+  }
+  switch (config.codec_type) {
+  case CodecType::H264:
+    return "h264_taco";
+  case CodecType::H265:
+    return "hevc_taco";
+  case CodecType::MJPEG:
+    return "mjpeg_taco";
+  default:
+    return "h264_taco";
+  }
+}
 
-// 自动测试用例数组（根据图片中的参数组合）
-// 每种参数组合测试三种格式：mjpeg, h264, h265
-static const AutoTestCase AUTO_TEST_CASES[] = {
-    // 参数组合1: 1920×1080, 60fps, High
-    {"T01", "1920×1080 @ 60fps - MJPEG", 1920, 1080, 60, CodecType::MJPEG, "none", "test_mjpeg_1920x1080_60fps_none.mp4"},
-    {"T02", "1920×1080 @ 60fps - H264 High", 1920, 1080, 60, CodecType::H264, "high", "test_h264_1920x1080_60fps_high.mp4"},
-    {"T03", "1920×1080 @ 60fps - H265 Main", 1920, 1080, 60, CodecType::H265, "main", "test_h265_1920x1080_60fps_main.mp4"},
-    
-    // 参数组合2: 2560×1440, 30fps, High
-    {"T04", "2560×1440 @ 30fps - MJPEG", 2560, 1440, 30, CodecType::MJPEG, "none", "test_mjpeg_2560x1440_30fps_none.mp4"},
-    {"T05", "2560×1440 @ 30fps - H264 High", 2560, 1440, 30, CodecType::H264, "high", "test_h264_2560x1440_30fps_high.mp4"},
-    {"T06", "2560×1440 @ 30fps - H265 Main", 2560, 1440, 30, CodecType::H265, "main", "test_h265_2560x1440_30fps_main.mp4"},
-    
-    // 参数组合3: 3840×2160, 30fps, High
-    {"T07", "3840×2160 @ 30fps - MJPEG", 3840, 2160, 30, CodecType::MJPEG, "none", "test_mjpeg_3840x2160_30fps_none.mp4"},
-    {"T08", "3840×2160 @ 30fps - H264 High", 3840, 2160, 30, CodecType::H264, "high", "test_h264_3840x2160_30fps_high.mp4"},
-    {"T09", "3840×2160 @ 30fps - H265 Main", 3840, 2160, 30, CodecType::H265, "main", "test_h265_3840x2160_30fps_main.mp4"},
-};
+/**
+ * @brief 获取编解码器名称（内联辅助函数）
+ * @note WorkerBase::getExpectedCodecIdFromDecoderName 和 getCodecFriendlyName
+ * 是 protected， 因此使用简单的字符串映射
+ */
+static std::string getCodecName(const TestConfig &config) {
+  if (config.decoder_name != nullptr && strlen(config.decoder_name) > 0) {
+    std::string dname(config.decoder_name);
+    // 转换为小写进行比较
+    std::transform(dname.begin(), dname.end(), dname.begin(), ::tolower);
 
-static const int NUM_AUTO_TEST_CASES = sizeof(AUTO_TEST_CASES) / sizeof(AUTO_TEST_CASES[0]);
+    if (dname.find("h264") != std::string::npos ||
+        dname.find("avc") != std::string::npos) {
+      return "H.264/AVC";
+    } else if (dname.find("h265") != std::string::npos ||
+               dname.find("hevc") != std::string::npos) {
+      return "H.265/HEVC";
+    } else if (dname.find("mjpeg") != std::string::npos ||
+               dname.find("jpeg") != std::string::npos) {
+      return "MJPEG";
+    } else if (dname.find("vp8") != std::string::npos) {
+      return "VP8";
+    } else if (dname.find("vp9") != std::string::npos) {
+      return "VP9";
+    } else if (dname.find("av1") != std::string::npos) {
+      return "AV1";
+    }
+    return "CUSTOM";
+  }
+
+  // 根据 codec_type 返回名称
+  switch (config.codec_type) {
+  case CodecType::H264:
+    return "H.264/AVC";
+  case CodecType::H265:
+    return "H.265/HEVC";
+  case CodecType::MJPEG:
+    return "MJPEG";
+  default:
+    return "UNKNOWN";
+  }
+}
 
 // 前向声明
-int test_mp4_decode(const TestConfig& config);
-
-/**
- * @brief 自动执行所有测试用例
- */
-bool run_auto_tests(const TestConfig& base_config) {
-    LOG_INFO("");
-    LOG_INFO("╔═══════════════════════════════════════════════════════╗");
-    LOG_INFO("║  Auto Test Suite - Running All Test Cases             ║");
-    LOG_INFO("╚═══════════════════════════════════════════════════════╝");
-    LOG_INFO("");
-    LOG_INFO_FMT("Base configuration:");
-    LOG_INFO_FMT("  Threads: %d", base_config.threads);
-    LOG_INFO_FMT("  Display: %s", base_config.enable_display ? "enabled" : "disabled");
-    LOG_INFO_FMT("  PSNR: %s", base_config.enable_psnr ? "enabled" : "disabled");
-    if (base_config.enable_psnr) {
-        LOG_INFO_FMT("  Min PSNR: %.2f dB", base_config.min_psnr);
-    }
-    LOG_INFO_FMT("  Save frames: %d", base_config.save_frames);
-    LOG_INFO_FMT("  Max frames: %d", base_config.max_frames);
-    LOG_INFO("");
-    
-    int total_tests = NUM_AUTO_TEST_CASES;
-    int passed_tests = 0;
-    int failed_tests = 0;
-    int skipped_tests = 0;
-    
-    LOG_INFO("╔═══════════════════════════════════════════════════════╗");
-    LOG_INFO("║  Running Test Cases                                    ║");
-    LOG_INFO("╚═══════════════════════════════════════════════════════╝");
-    LOG_INFO("");
-    
-    for (int i = 0; i < NUM_AUTO_TEST_CASES; i++) {
-        const AutoTestCase& test_case = AUTO_TEST_CASES[i];
-        LOG_INFO("─────────────────────────────────────────────────────────");
-        LOG_INFO_FMT("Test Case %s: %s", test_case.name, test_case.description);
-        LOG_INFO("─────────────────────────────────────────────────────────");
-        
-        // 检查视频文件是否存在
-        if (access(test_case.video_file, F_OK) != 0) {
-            skipped_tests++;
-            LOG_WARN_FMT("⚠️  Test %s SKIPPED: Video file not found: %s", 
-                        test_case.name, test_case.video_file);
-            LOG_INFO("");
-            continue;
-        }
-        
-        // 创建测试配置
-        TestConfig test_config = base_config;
-        test_config.video_path = test_case.video_file;
-        test_config.codec_type = test_case.codec_type;
-        test_config.profile = test_case.profile;
-        test_config.width = test_case.width;
-        test_config.height = test_case.height;
-        test_config.fps = test_case.fps;
-        
-        // 执行测试
-        LOG_INFO_FMT("Video file: %s", test_case.video_file);
-        LOG_INFO_FMT("Codec: %s, Profile: %s", 
-                    test_config.getCodecName(), test_case.profile);
-        LOG_INFO_FMT("Resolution: %dx%d @ %dfps", 
-                    test_case.width, test_case.height, test_case.fps);
-        LOG_INFO("");
-        
-        int result = test_mp4_decode(test_config);
-        bool success = (result == 0);
-        
-        if (success) {
-            passed_tests++;
-            LOG_INFO_FMT("✅ Test %s PASSED", test_case.name);
-        } else {
-            failed_tests++;
-            LOG_ERROR_FMT("❌ Test %s FAILED", test_case.name);
-        }
-        LOG_INFO("");
-        
-        // 短暂延迟，避免资源竞争
-        std::this_thread::sleep_for(std::chrono::milliseconds(200));
-    }
-    
-    // 输出测试总结
-    LOG_INFO("");
-    LOG_INFO("╔═══════════════════════════════════════════════════════╗");
-    LOG_INFO("║  Test Summary                                          ║");
-    LOG_INFO("╚═══════════════════════════════════════════════════════╝");
-    LOG_INFO_FMT("Total tests: %d", total_tests);
-    LOG_INFO_FMT("Passed: %d ✅", passed_tests);
-    LOG_INFO_FMT("Failed: %d ❌", failed_tests);
-    if (skipped_tests > 0) {
-        LOG_INFO_FMT("Skipped: %d ⏭️  (video file not found)", skipped_tests);
-    }
-    int executed_tests = total_tests - skipped_tests;
-    LOG_INFO_FMT("Success rate: %.1f%% (%d/%d executed)", 
-                executed_tests > 0 ? (passed_tests * 100.0 / executed_tests) : 0.0,
-                passed_tests, executed_tests);
-    LOG_INFO("");
-    
-    return failed_tests == 0;
-}
+static int test_mp4_decode_single_impl(const char *video_path,
+                                       const TestConfig &config);
+static int test_rtsp_decode_single_impl(const char *rtsp_url,
+                                        const TestConfig &config);
 
 /**
  * MP4视频解码测试主函数（支持H264/H265/MJPEG等多种编码格式）
+ * 模仿 test_mp4_azh.cpp 的格式
  */
-int test_mp4_decode(const TestConfig& config) {
-    LOG_INFO("╔═══════════════════════════════════════════════════════╗");
-    LOG_INFO("║  Video Decode Test                                    ║");
-    LOG_INFO("╚═══════════════════════════════════════════════════════╝");
-    LOG_INFO_FMT("Video file: %s", config.video_path);
-    LOG_INFO_FMT("Codec: %s", config.getCodecName());
-    if (config.codec_type == CodecType::H264) {
-        LOG_INFO_FMT("Profile: %s", config.profile);
+static int run_decode_test_with_params(const char *video_path, int width,
+                                       int height, const char *decoder_name,
+                                       int decode_threads, double frame_rate,
+                                       const char *profile,
+                                       const char *test_tag) {
+  LOG_INFO("\n═══════════════════════════════════════════════════════");
+  LOG_INFO_FMT("  Decode Test: %s", test_tag ? test_tag : "unknown");
+  LOG_INFO("═══════════════════════════════════════════════════════\n");
+
+  if (!video_path || video_path[0] == '\0') {
+    LOG_ERROR("No video file path specified");
+    return -1;
+  }
+
+  // ⭐ 检查是否为RTSP流，如果是则跳过文件存在性检查
+  bool is_rtsp = is_rtsp_stream(video_path);
+  if (!is_rtsp) {
+    // 检查视频文件是否存在（仅对文件路径检查）
+    if (access(video_path, F_OK) != 0) {
+      LOG_ERROR_FMT("❌ Video file not found: %s", video_path);
+      return -1;
     }
-    LOG_INFO_FMT("Decoder: %s", config.getDecoderName());
-    LOG_INFO_FMT("Resolution: %dx%d @ %dfps", config.width, config.height, config.fps);
-    LOG_INFO_FMT("Threads: %d", config.threads);
-    LOG_INFO_FMT("Display output: %s", config.enable_display ? "enabled" : "disabled");
-    if (config.save_frames == -1) {
-        LOG_INFO("Save frames: all");
-    } else if (config.save_frames == 0) {
-        LOG_INFO("Save frames: none");
+  } else {
+    LOG_INFO_FMT("📡 RTSP stream detected: %s", video_path);
+  }
+
+  // 从环境变量创建配置
+  TestConfig test_config = create_test_config_from_env();
+  test_config.video_path = video_path;
+  test_config.width      = width;
+  test_config.height     = height;
+  test_config.fps        = frame_rate;
+  test_config.threads    = decode_threads;
+  if (profile) {
+    test_config.profile = profile;
+  }
+  if (decoder_name && decoder_name[0] != '\0') {
+    test_config.decoder_name = decoder_name;
+    // 根据解码器名称设置 codec_type
+    if (strcmp(decoder_name, "h264_taco") == 0) {
+      test_config.codec_type = CodecType::H264;
+    } else if (strcmp(decoder_name, "hevc_taco") == 0 ||
+               strcmp(decoder_name, "h265_taco") == 0) {
+      test_config.codec_type = CodecType::H265;
+    } else if (strcmp(decoder_name, "mjpeg_taco") == 0 ||
+               strcmp(decoder_name, "jpeg_taco") == 0) {
+      test_config.codec_type = CodecType::MJPEG;
+    } else if (strcmp(decoder_name, "software") == 0 ||
+               strcmp(decoder_name, "libavcodec") == 0 ||
+               strcmp(decoder_name, "sw") == 0) {
+      // 软件解码器：codec_type 需要根据视频文件自动检测或从参数推断
+      // TestConfig 默认构造函数已经将 codec_type 初始化为
+      // H264，所以不需要额外设置
+    }
+  }
+
+  LOG_INFO_FMT("Codec: %s", getCodecName(test_config).c_str());
+  if (test_config.codec_type == CodecType::H264) {
+    LOG_INFO_FMT("Profile: %s", test_config.profile);
+  }
+  LOG_INFO_FMT("Decoder: %s", getDecoderName(test_config));
+  LOG_INFO_FMT("Resolution: %dx%d @ %dfps", test_config.width,
+               test_config.height, test_config.fps);
+  LOG_INFO_FMT("Threads: %d", test_config.threads);
+  LOG_INFO_FMT("Display output: %s",
+               test_config.enable_display ? "enabled" : "disabled");
+  if (test_config.save_frames == -1) {
+    LOG_INFO("Save frames: all");
+  } else if (test_config.save_frames == 0) {
+    LOG_INFO("Save frames: none");
+  } else {
+    LOG_INFO_FMT("Save frames: first %d", test_config.save_frames);
+  }
+  if (test_config.max_frames == -1) {
+    LOG_INFO("Max frames: unlimited");
+  } else {
+    LOG_INFO_FMT("Max frames: %d", test_config.max_frames);
+  }
+  if (test_config.output_path) {
+    LOG_INFO_FMT("Output file: %s", test_config.output_path);
+  }
+  LOG_INFO("");
+
+  // ⭐ 根据输入类型调用不同的实现函数
+  if (is_rtsp) {
+    return test_rtsp_decode_single_impl(video_path, test_config);
+  } else {
+    return test_mp4_decode_single_impl(video_path, test_config);
+  }
+}
+
+/**
+ * RTSP流解码测试主函数内部实现（专门处理RTSP流）
+ */
+static int test_rtsp_decode_single_impl(const char *rtsp_url,
+                                        const TestConfig &config) {
+  // ========== RTSP流初始化 ==========
+  LOG_INFO("📡 Detected RTSP stream source");
+  g_rtsp_interrupted = false;
+  RtspPacketSource::clearInterrupt();
+
+  // ========== 第1步：配置解码器 ==========
+  LOG_INFO("[Step 1/8] Configuring decoder...");
+
+  // 配置解码器输出格式 - 统一使用 NV12（CPU 可访问）
+  DecoderConfigBuilder decoderBuilder;
+  const char *decoder_name = getDecoderName(config);
+
+  // ⭐ 检查是否使用软件解码器
+  bool use_software = false;
+  if (decoder_name && (strcmp(decoder_name, "software") == 0 ||
+                       strcmp(decoder_name, "libavcodec") == 0 ||
+                       strcmp(decoder_name, "sw") == 0)) {
+    use_software = true;
+    decoderBuilder.useSoftware();
+    LOG_INFO("  Decoder: Software decoder (libavcodec)");
+  } else {
+    decoderBuilder.setDecoderName(decoder_name);
+
+    if (strcmp(decoder_name, "h264_taco") == 0 ||
+        strcmp(decoder_name, "hevc_taco") == 0) {
+      // h264_taco/hevc_taco 输出 NV12（原生YUV格式，CPU 可访问）
+      auto tacoConfig =
+          TacoConfigBuilder()
+              .setRgbConfig(false, "", "bt709") // ch1_rgb=false -> 输出NV12
+              .build();
+
+      const char *codec =
+          (strcmp(decoder_name, "h264_taco") == 0) ? "h264" : "hevc";
+      decoderBuilder.useTaco(codec, tacoConfig);
+      LOG_INFO("  Decoder output: NV12 (YUV format, CPU accessible)");
+    }
+  }
+
+  // ⭐ RTSP流：使用更大的BufferPool（16个Buffer）以提高性能
+  DataSourceConfigBuilder dataSourceBuilder;
+  dataSourceBuilder.setPath(rtsp_url);
+  dataSourceBuilder.setBufferCount(16); // RTSP流需要更大的BufferPool
+  LOG_INFO("  RTSP stream: Using 16 buffers for better performance");
+
+  auto workerConfig =
+      WorkerConfigBuilder()
+          .setDataSourceConfig(dataSourceBuilder.build())
+          .setDisplayConfig(
+              DisplayConfigBuilder()
+                  .setDisplayResolution(config.width, config.height)
+                  .setBitsPerPixel(32)
+                  .build())
+          .setDecoderConfig(decoderBuilder.build())
+          .setWorkerType(WorkerType::FFMPEG_RTSP) // ⭐ RTSP专用WorkerType
+          .build();
+
+  if (use_software) {
+    LOG_INFO_FMT("✅ Decoder configured: Software decoder (libavcodec), %dx%d",
+                 config.width, config.height);
+  } else {
+    LOG_INFO_FMT("✅ Decoder configured: %s, %dx%d, hardware acceleration",
+                 getDecoderName(config), config.width, config.height);
+  }
+
+  // ========== 第2步：初始化显示设备（可选） ==========
+  LOG_INFO("[Step 2/8] Initializing display device...");
+
+  std::unique_ptr<LinuxFramebufferDevice> display;
+  bool has_display = false;
+
+  if (config.enable_display) {
+    display     = std::make_unique<LinuxFramebufferDevice>();
+    has_display = display->initialize(0);
+    if (has_display) {
+      LOG_INFO_FMT("✅ Display initialized: %dx%d @ %d bpp",
+                   display->getWidth(), display->getHeight(),
+                   display->getBitsPerPixel());
     } else {
-        LOG_INFO_FMT("Save frames: first %d", config.save_frames);
+      LOG_WARN("⚠️  Display not available, continuing without display");
     }
-    if (config.max_frames == -1) {
-        LOG_INFO("Max frames: unlimited");
-    } else {
-        LOG_INFO_FMT("Max frames: %d", config.max_frames);
-    }
-    if (config.output_path) {
-        LOG_INFO_FMT("Output file: %s", config.output_path);
-    }
-    LOG_INFO("");
-    
-    // ========== 第1步：配置解码器 ==========
-    LOG_INFO("[Step 1/8] Configuring decoder...");
-    
-    // 配置解码器输出格式 - 统一使用 ARGB（CPU 可访问）
-    DecoderConfigBuilder decoderBuilder;
-    decoderBuilder.setDecoderName(config.getDecoderName());
-    
-    if (strcmp(config.getDecoderName(), "h264_taco") == 0 || 
-        strcmp(config.getDecoderName(), "hevc_taco") == 0) {
-        // h264_taco/hevc_taco 输出 NV12（原生YUV格式，CPU 可访问）
-        auto tacoConfig = TacoConfigBuilder()
-            .setRgbConfig(false, "", "bt709")  // ch1_rgb=false -> 输出NV12
-            .build();
-        
-        const char* codec = (strcmp(config.getDecoderName(), "h264_taco") == 0) ? "h264" : "hevc";
-        decoderBuilder.useTaco(codec, tacoConfig);
-        LOG_INFO("  Decoder output: NV12 (YUV format, CPU accessible)");
-    }
-    
-    auto workerConfig = WorkerConfigBuilder()
-        .setFileConfig(
-            FileConfigBuilder()
-                .setFilePath(config.video_path)
-                .build()
-        )
-        .setDisplayConfig(
-            DisplayConfigBuilder()
-                .setDisplayResolution(config.width, config.height)
-                .setBitsPerPixel(32)
-                .build()
-        )
-        .setDecoderConfig(decoderBuilder.build())
-        .setWorkerType(WorkerType::FFMPEG_VIDEO_FILE)
-        .build();
-    
-    LOG_INFO_FMT("✅ Decoder configured: %s, %dx%d, hardware acceleration", 
-                 config.getDecoderName(), config.width, config.height);
-    
-    // ========== 第2步：初始化显示设备（可选） ==========
-    LOG_INFO("[Step 2/8] Initializing display device...");
-    
-    std::unique_ptr<LinuxFramebufferDevice> display;
-    bool has_display = false;
-    
-    if (config.enable_display) {
-        display = std::make_unique<LinuxFramebufferDevice>();
-        has_display = display->initialize(0);
-        if (has_display) {
-            LOG_INFO_FMT("✅ Display initialized: %dx%d @ %d bpp",
-                        display->getWidth(), display->getHeight(), display->getBitsPerPixel());
-        } else {
-            LOG_WARN("⚠️  Display not available, continuing without display");
-        }
-    } else {
-        LOG_INFO("ℹ️  Display disabled by user");
-    }
-    
-    // ========== 第3步：创建生产线 ==========
-    LOG_INFO("[Step 3/8] Creating VideoProductionLine...");
-    
-    VideoProductionLine producer(
-        false,              // loop = false（不循环，解码一次）
-        config.threads,     // thread_count
-        false               // enable_monitor = false
-    );
-    
-    // 设置错误回调
-    producer.setErrorCallback([](const std::string& error) {
-        LOG_ERROR_FMT("Decode Error: %s", error.c_str());
-        g_running = false;
-    });
-    
-    LOG_INFO_FMT("✅ VideoProductionLine created (%d producer threads)", config.threads);
-    
-    // ========== 第4步：启动生产线 ==========
-    LOG_INFO("[Step 4/8] Starting decode...");
-    
-    if (!producer.start(workerConfig)) {
-        LOG_ERROR("❌ Failed to start VideoProductionLine");
-        return -1;
-    }
-    
-    LOG_INFO("✅ Decoding started");
-    
-    // ========== 第5步：获取 BufferPool ==========
-    LOG_INFO("[Step 5/8] Getting BufferPool...");
-    
-    uint64_t pool_id = producer.getWorkingBufferPoolId();
-    if (pool_id == 0) {
-        LOG_ERROR("❌ No working BufferPool ID available");
-        producer.stop();
-        return -1;
-    }
-    
-    auto pool_weak = BufferPoolRegistry::getInstance().getPool(pool_id);
-    auto pool_sptr = pool_weak.lock();
-    if (!pool_sptr) {
-        LOG_ERROR("❌ BufferPool not found or destroyed");
-        producer.stop();
-        return -1;
-    }
-    
-    LOG_INFO_FMT("✅ BufferPool: '%s' (ID: %lu)", 
-                pool_sptr->getName().c_str(), pool_id);
-    pool_sptr->printStats();
-    
-    // ========== 第6步：创建 BufferWriter ==========
-    LOG_INFO("[Step 6/8] Creating BufferWriter...");
-    
-    using productionline::io::BufferWriter;
-    std::unique_ptr<BufferWriter> writer;
-    char output_yuv[256];
-    AVPixelFormat output_format = AV_PIX_FMT_NONE;
-    int actual_width = config.width;
-    int actual_height = config.height;
-    std::string format_name = "NV12";
-    const char* file_ext = "yuv";
-    std::string ffplay_format = "nv12";
-    
-    if (config.save_frames != 0) {
-        // 等待第一个Buffer以检测实际格式
-        LOG_INFO("   Waiting for first buffer to detect format...");
-        Buffer* first_buffer = pool_sptr->acquireFilled(true, 5000);  // 5秒超时
-        if (!first_buffer) {
-            LOG_ERROR("❌ Failed to get first buffer (timeout)");
-            producer.stop();
-            return -1;
-        }
-        
-        // 从Buffer元数据获取实际格式
-        if (first_buffer->hasImageMetadata()) {
-            output_format = first_buffer->getImageFormat();
-            actual_width = first_buffer->getImageWidth();
-            actual_height = first_buffer->getImageHeight();
-            const char* fmt_name = av_get_pix_fmt_name(output_format);
-            format_name = fmt_name ? fmt_name : "NV12";
-            
-            // 设置ffplay格式（NV12对应nv12）
-            if (output_format == AV_PIX_FMT_NV12) {
-                ffplay_format = "nv12";
-            } else if (output_format == AV_PIX_FMT_YUV420P) {
-                ffplay_format = "yuv420p";
-            } else {
-                ffplay_format = format_name;
-            }
-            
-            LOG_INFO_FMT("   Detected format: %s (%dx%d)", format_name.c_str(), actual_width, actual_height);
-        } else {
-            // 默认使用NV12
-            output_format = AV_PIX_FMT_NV12;
-            format_name = "NV12";
-            ffplay_format = "nv12";
-            LOG_WARN("   Buffer has no metadata, using default NV12");
-        }
-        
-        // 创建BufferWriter
-        writer = std::make_unique<BufferWriter>();
-        if (config.output_path) {
-            snprintf(output_yuv, sizeof(output_yuv), "%s", config.output_path);
-        } else {
-            snprintf(output_yuv, sizeof(output_yuv), 
-                    "/tmp/decoded_%dx%d_%ld.%s", actual_width, actual_height, time(nullptr), file_ext);
-        }
-        
-        if (!writer->open(output_yuv, output_format, actual_width, actual_height)) {
-            LOG_ERROR_FMT("❌ Failed to open BufferWriter: %s", output_yuv);
-            pool_sptr->releaseFilled(first_buffer);
-            producer.stop();
-            return -1;
-        }
-        
-        LOG_INFO_FMT("✅ BufferWriter opened: %s (format: %s, %dx%d)", 
-                    output_yuv, format_name.c_str(), actual_width, actual_height);
-        
-        // 保存第一帧
-        if (writer->write(first_buffer)) {
-            LOG_INFO("   ✅ Saved first frame");
-        }
-        pool_sptr->releaseFilled(first_buffer);
-    } else {
-        LOG_INFO("ℹ️  Output file disabled (save_frames = 0)");
-    }
-    
-    // ========== 第7步：消费者循环（解码+显示+保存） ==========
-    LOG_INFO("[Step 7/8] Consuming decoded frames...");
-    LOG_INFO("Press Ctrl+C to stop early");
-    LOG_INFO("");
-    
-    int frame_count = 0;
-    int display_count = 0;
-    int save_count = 0;
-    int save_limit = (config.save_frames == -1) ? INT32_MAX : config.save_frames;
-    int max_frames_limit = (config.max_frames == -1) ? INT32_MAX : config.max_frames;
-    
-    auto start_time = std::chrono::steady_clock::now();
-    auto last_report_time = start_time;
-    
-    while (g_running && frame_count < max_frames_limit) {
-        // 从 BufferPool 获取已解码的 Buffer
-        Buffer* buffer = pool_sptr->acquireFilled(true, 100);  // 超时100ms
-        
-        if (!buffer) {
-            // 超时：检查生产者是否还在运行
-            if (!producer.isRunning()) {
-                LOG_INFO("Producer stopped, exiting consumer loop");
-                break;
-            }
-            continue;  // 超时但生产者还在，继续等待
-        }
-        
-        // 显示到屏幕（如果启用）
-        if (has_display) {
-            display->waitVerticalSync();
-            if (display->displayBufferByDMA(buffer)) {
-                display_count++;
-            } else {
-                // DMA 失败，回退到普通显示
-                display->displayFilledFramebuffer(buffer);
-                display_count++;
-            }
-        }
-        
-        // 保存到文件（使用BufferWriter）
-        if (writer && save_count < save_limit) {
-            if (writer->write(buffer)) {
-                save_count++;
-            }
-        }
-        
-        // 归还 Buffer
-        pool_sptr->releaseFilled(buffer);
-        frame_count++;
-        
-        // 每 60 帧（约1秒）打印一次进度
-        auto now = std::chrono::steady_clock::now();
-        auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
-            now - last_report_time).count();
-        
-        if (elapsed >= 1000) {  // 每秒报告一次
-            double current_fps = producer.getAverageFPS();
-            LOG_INFO_FMT("Progress: %d frames | FPS: %.1f | Display: %d | Saved: %d",
-                        frame_count, current_fps, display_count, save_count);
-            last_report_time = now;
-        }
-    }
-    
-    // 排空剩余的 Buffer
-    LOG_INFO("Draining remaining buffers...");
-    Buffer* remaining = nullptr;
-    int drained = 0;
-    while ((remaining = pool_sptr->acquireFilled(false, 0)) != nullptr) {
-        if (has_display) {
-            display->waitVerticalSync();
-            display->displayBufferByDMA(remaining);
-            display_count++;
-        }
-        if (writer && save_count < save_limit) {
-            if (writer->write(remaining)) {
-                save_count++;
-            }
-        }
-        pool_sptr->releaseFilled(remaining);
-        frame_count++;
-        drained++;
-    }
-    if (drained > 0) {
-        LOG_INFO_FMT("Drained %d remaining buffers", drained);
-    }
-    
-    if (writer) {
-        writer->close();
-        LOG_INFO_FMT("✅ BufferWriter closed: %d frames written", writer->getWriteCount());
-    }
-    
-    auto end_time = std::chrono::steady_clock::now();
-    auto total_duration = std::chrono::duration_cast<std::chrono::milliseconds>(
-        end_time - start_time).count();
-    
-    LOG_INFO("✅ Consuming completed");
-    
-    // ========== 第8步：停止生产线并输出统计 ==========
-    LOG_INFO("[Step 8/8] Stopping and generating report...");
-    
+  } else {
+    LOG_INFO("ℹ️  Display disabled by user");
+  }
+
+  // ========== 第3步：创建生产线 ==========
+  LOG_INFO("[Step 3/8] Creating VideoProductionLine...");
+
+  VideoProductionLine producer(false, // loop = false（不循环，解码一次）
+                               config.threads, // thread_count
+                               false           // enable_monitor = false
+  );
+
+  // 设置错误回调
+  producer.setErrorCallback([](const std::string &error) {
+    LOG_ERROR_FMT("Decode Error: %s", error.c_str());
+    g_running = false;
+  });
+
+  LOG_INFO_FMT("✅ VideoProductionLine created (%d producer threads)",
+               config.threads);
+
+  // ========== 第4步：启动生产线 ==========
+  LOG_INFO("[Step 4/8] Starting decode...");
+
+  if (!producer.start(workerConfig)) {
+    LOG_ERROR("❌ Failed to start VideoProductionLine");
+    return -1;
+  }
+
+  LOG_INFO("✅ Decoding started");
+
+  // ========== 第5步：获取 BufferPool ==========
+  LOG_INFO("[Step 5/8] Getting BufferPool...");
+
+  uint64_t pool_id = producer.getWorkingBufferPoolId();
+  if (pool_id == 0) {
+    LOG_ERROR("❌ No working BufferPool ID available");
     producer.stop();
-    
-    // 计算性能指标
-    double decode_fps = producer.getAverageFPS();
-    double realtime_fps = (frame_count * 1000.0) / total_duration;
-    double target_fps = config.fps;
-    bool fps_meets_requirement = decode_fps >= target_fps;
-    if (config.enable_psnr) {
-        fps_meets_requirement = true;  // PSNR模式下不检查FPS
+    return -1;
+  }
+
+  auto pool_weak = BufferPoolRegistry::getInstance().getPool(pool_id);
+  auto pool_sptr = pool_weak.lock();
+  if (!pool_sptr) {
+    LOG_ERROR("❌ BufferPool not found or destroyed");
+    producer.stop();
+    return -1;
+  }
+
+  LOG_INFO_FMT("✅ BufferPool: '%s' (ID: %lu)", pool_sptr->getName().c_str(),
+               pool_id);
+  pool_sptr->printStats();
+
+  // ⚠️ RTSP流：禁用MultiWorkerProductionLine对比（Buffer模式在RTSP下有问题）
+  if (!use_software && config.save_frames != 0) {
+    LOG_INFO("[Step 5.5/8] RTSP stream: skipping MultiWorkerProductionLine "
+             "comparison");
+    LOG_INFO("  (RTSP streams use direct decoding, comparison disabled for "
+             "stability)");
+  }
+
+  // ========== 第6步：创建 BufferWriter ==========
+  LOG_INFO("[Step 6/8] Creating BufferWriter...");
+
+  using productionline::io::BufferWriter;
+  std::unique_ptr<BufferWriter> writer;
+  char output_yuv[256];
+  AVPixelFormat output_format = AV_PIX_FMT_NONE;
+  int actual_width            = config.width;
+  int actual_height           = config.height;
+  std::string format_name     = "NV12";
+  const char *file_ext        = "yuv";
+  std::string ffplay_format   = "nv12";
+  int save_count              = 0; // 保存的帧数计数器
+
+  if (config.save_frames != 0) {
+    // 等待第一个Buffer以检测实际格式
+    LOG_INFO("   Waiting for first buffer to detect format...");
+    Buffer *first_buffer = pool_sptr->acquireFilled(true, 5000); // 5秒超时
+    if (!first_buffer) {
+      LOG_ERROR("❌ Failed to get first buffer (timeout)");
+      producer.stop();
+      return -1;
     }
-    
-    // ========== 输出测试报告 ==========
-    LOG_INFO("");
-    LOG_INFO("╔═══════════════════════════════════════════════════════╗");
-    LOG_INFO("║  Test Report: Video Decode                            ║");
-    LOG_INFO("╚═══════════════════════════════════════════════════════╝");
-    LOG_INFO_FMT("Video file: %s", config.video_path);
-    LOG_INFO_FMT("Codec: %s", config.getCodecName());
-    LOG_INFO_FMT("Decoder: %s (hardware)", config.getDecoderName());
-    LOG_INFO_FMT("Resolution: %dx%d", config.width, config.height);
-    LOG_INFO_FMT("Target FPS: %.0f", target_fps);
-    LOG_INFO("");
-    LOG_INFO("--- Performance Metrics ---");
-    LOG_INFO_FMT("Total frames decoded: %d", frame_count);
-    LOG_INFO_FMT("Frames displayed: %d", display_count);
-    LOG_INFO_FMT("Frames saved: %d", save_count);
-    LOG_INFO_FMT("Total time: %.2f seconds", total_duration / 1000.0);
-    LOG_INFO_FMT("Decode FPS (producer): %.2f", decode_fps);
-    LOG_INFO_FMT("Realtime FPS (overall): %.2f", realtime_fps);
-    LOG_INFO_FMT("Frames produced: %d", producer.getProducedFrames());
-    LOG_INFO_FMT("Frames skipped: %d", producer.getSkippedFrames());
-    LOG_INFO("");
-    LOG_INFO("--- Result ---");
-    if (config.enable_psnr) {
-        LOG_INFO("ℹ️  FPS check skipped (PSNR mode prioritizes accuracy over speed)");
-    } else if (fps_meets_requirement) {
-        LOG_INFO_FMT("✅ PASS: Decode FPS (%.2f) >= Target FPS (%.0f)", 
-                    decode_fps, target_fps);
+
+    // 从Buffer元数据获取实际格式
+    if (first_buffer->hasImageMetadata()) {
+      output_format        = first_buffer->getImageFormat();
+      actual_width         = first_buffer->getImageWidth();
+      actual_height        = first_buffer->getImageHeight();
+      const char *fmt_name = av_get_pix_fmt_name(output_format);
+      format_name          = fmt_name ? fmt_name : "NV12";
+
+      // 设置ffplay格式（NV12对应nv12）
+      if (output_format == AV_PIX_FMT_NV12) {
+        ffplay_format = "nv12";
+      } else if (output_format == AV_PIX_FMT_YUV420P) {
+        ffplay_format = "yuv420p";
+      } else {
+        ffplay_format = format_name;
+      }
+
+      LOG_INFO_FMT("   Detected format: %s (%dx%d)", format_name.c_str(),
+                   actual_width, actual_height);
     } else {
-        LOG_WARN_FMT("⚠️  WARN: Decode FPS (%.2f) < Target FPS (%.0f)",
-                    decode_fps, target_fps);
+      // 默认使用NV12
+      output_format = AV_PIX_FMT_NV12;
+      format_name   = "NV12";
+      ffplay_format = "nv12";
+      LOG_WARN("   Buffer has no metadata, using default NV12");
     }
-    
-    if (writer && save_count > 0) {
-        LOG_INFO_FMT("📁 Saved data: %s", output_yuv);
-        LOG_INFO_FMT("   Format: %s, Resolution: %dx%d, Frames: %d", 
-                    format_name.c_str(), actual_width, actual_height, save_count);
-        LOG_INFO("   You can verify with FFmpeg:");
-        LOG_INFO_FMT("   ffplay -f rawvideo -pix_fmt %s -s %dx%d %s", 
-                    ffplay_format.c_str(), actual_width, actual_height, output_yuv);
+
+    // 创建BufferWriter
+    writer = std::make_unique<BufferWriter>();
+    if (config.output_path) {
+      snprintf(output_yuv, sizeof(output_yuv), "%s", config.output_path);
+    } else {
+      snprintf(output_yuv, sizeof(output_yuv), "/tmp/decoded_%dx%d_%ld.%s",
+               actual_width, actual_height, time(nullptr), file_ext);
     }
-    
-    LOG_INFO("");
-    LOG_INFO("--- BufferPool Final Stats ---");
-    pool_sptr->printStats();
-    LOG_INFO("╚═══════════════════════════════════════════════════════╝");
-    
-    // ========== PSNR 验证（如果启用） ==========
-    bool psnr_pass = true;
-    if (config.enable_psnr && save_count > 0) {
-        psnr_pass = validate_psnr_streaming(
-            output_yuv,
-            config.video_path,
-            config.width,
-            config.height,
-            save_count,
-            config.min_psnr
+
+    if (!writer->open(output_yuv, output_format, actual_width, actual_height)) {
+      LOG_ERROR_FMT("❌ Failed to open BufferWriter: %s", output_yuv);
+      pool_sptr->releaseFilled(first_buffer);
+      producer.stop();
+      return -1;
+    }
+
+    LOG_INFO_FMT("✅ BufferWriter opened: %s (format: %s, %dx%d)", output_yuv,
+                 format_name.c_str(), actual_width, actual_height);
+
+    // 保存第一帧
+    if (writer->write(first_buffer)) {
+      LOG_INFO("   ✅ Saved first frame");
+      save_count = 1; // 第一帧已保存，初始化计数器
+    }
+    pool_sptr->releaseFilled(first_buffer);
+  } else {
+    LOG_INFO("ℹ️  Output file disabled (save_frames = 0)");
+  }
+
+  // ========== 第7步：消费者循环（解码+显示+保存） ==========
+  LOG_INFO("[Step 7/8] Consuming decoded frames...");
+  LOG_INFO("Press Ctrl+C to stop early");
+  LOG_INFO("");
+
+  int frame_count   = 0;
+  int display_count = 0;
+  // save_count 已在上面声明，如果 writer 已打开且第一帧已保存，则保持为
+  // 1，否则为 0
+  if (!(writer && writer->isOpen())) {
+    save_count = 0; // writer 未打开，重置为 0
+  }
+  int save_limit = (config.save_frames == -1) ? INT32_MAX : config.save_frames;
+  int max_frames_limit =
+      (config.max_frames == -1) ? INT32_MAX : config.max_frames;
+
+  auto start_time       = std::chrono::steady_clock::now();
+  auto last_report_time = start_time;
+
+  while (g_running && frame_count < max_frames_limit) {
+    // 从 BufferPool 获取已解码的 Buffer
+    Buffer *buffer = pool_sptr->acquireFilled(true, 100); // 超时100ms
+
+    if (!buffer) {
+      // ⭐ RTSP流：检查中断标志
+      if (g_rtsp_interrupted.load()) {
+        LOG_INFO("⚠️  检测到RTSP中断请求，停止解码...");
+        break;
+      }
+
+      // 超时：检查生产者是否还在运行
+      if (!producer.isRunning()) {
+        LOG_INFO("Producer stopped, exiting consumer loop");
+        break;
+      }
+      continue; // 超时但生产者还在，继续等待
+    }
+
+    // 显示到屏幕（如果启用）
+    if (has_display) {
+      display->waitVerticalSync();
+      if (display->displayBufferByDMA(buffer)) {
+        display_count++;
+      } else {
+        // DMA 失败，回退到普通显示
+        display->displayFilledFramebuffer(buffer);
+        display_count++;
+      }
+    }
+
+    // 保存到文件（使用BufferWriter）
+    if (writer && save_count < save_limit) {
+      if (writer->write(buffer)) {
+        save_count++;
+      } else {
+        LOG_WARN_FMT("Failed to write frame %d to file", frame_count);
+      }
+    }
+
+    // 归还 Buffer
+    pool_sptr->releaseFilled(buffer);
+    frame_count++;
+
+    // 每 60 帧（约1秒）打印一次进度
+    auto now     = std::chrono::steady_clock::now();
+    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+                       now - last_report_time)
+                       .count();
+
+    if (elapsed >= 1000) { // 每秒报告一次
+      double current_fps = producer.getAverageFPS();
+      LOG_INFO_FMT("Progress: %d frames | FPS: %.1f | Display: %d | Saved: %d",
+                   frame_count, current_fps, display_count, save_count);
+      last_report_time = now;
+    }
+  }
+
+  // 排空剩余的 Buffer
+  LOG_INFO("Draining remaining buffers...");
+  Buffer *remaining = nullptr;
+  int drained       = 0;
+  while ((remaining = pool_sptr->acquireFilled(false, 0)) != nullptr) {
+    if (has_display) {
+      display->waitVerticalSync();
+      display->displayBufferByDMA(remaining);
+      display_count++;
+    }
+
+    if (writer && save_count < save_limit) {
+      if (writer->write(remaining)) {
+        save_count++;
+      } else {
+        LOG_WARN_FMT("Failed to write remaining frame %d to file", frame_count);
+      }
+    }
+    pool_sptr->releaseFilled(remaining);
+    frame_count++;
+    drained++;
+  }
+  if (drained > 0) {
+    LOG_INFO_FMT("Drained %d remaining buffers", drained);
+  }
+
+  producer.stop();
+
+  if (writer) {
+    writer->close();
+    LOG_INFO_FMT("✅ BufferWriter closed: %d frames written",
+                 writer->getWriteCount());
+  }
+
+  auto end_time       = std::chrono::steady_clock::now();
+  auto total_duration = std::chrono::duration_cast<std::chrono::milliseconds>(
+                            end_time - start_time)
+                            .count();
+
+  LOG_INFO("✅ Consuming completed");
+
+  // ========== 第8步：停止生产线并输出统计 ==========
+  LOG_INFO("[Step 8/8] Stopping and generating report...");
+
+  producer.stop();
+
+  // 计算性能指标
+  double decode_fps          = producer.getAverageFPS();
+  double realtime_fps        = (frame_count * 1000.0) / total_duration;
+  double target_fps          = config.fps;
+  bool fps_meets_requirement = decode_fps >= target_fps;
+
+  // ========== 输出测试报告 ==========
+  LOG_INFO("");
+  LOG_INFO("╔═══════════════════════════════════════════════════════╗");
+  LOG_INFO("║  Test Report: RTSP Stream Decode                    ║");
+  LOG_INFO("╚═══════════════════════════════════════════════════════╝");
+  LOG_INFO_FMT("RTSP URL: %s", rtsp_url);
+  LOG_INFO_FMT("Codec: %s", getCodecName(config).c_str());
+  LOG_INFO_FMT("Decoder: %s (hardware)", getDecoderName(config));
+  LOG_INFO_FMT("Resolution: %dx%d", config.width, config.height);
+  LOG_INFO_FMT("Target FPS: %.0f", target_fps);
+  LOG_INFO("");
+  LOG_INFO("--- Performance Metrics ---");
+  LOG_INFO_FMT("Total frames decoded: %d", frame_count);
+  LOG_INFO_FMT("Frames displayed: %d", display_count);
+  LOG_INFO_FMT("Frames saved: %d", save_count);
+  LOG_INFO_FMT("Total time: %.2f seconds", total_duration / 1000.0);
+  LOG_INFO_FMT("Decode FPS (producer): %.2f", decode_fps);
+  LOG_INFO_FMT("Realtime FPS (overall): %.2f", realtime_fps);
+  LOG_INFO_FMT("Frames produced: %d", producer.getProducedFrames());
+  LOG_INFO_FMT("Frames skipped: %d", producer.getSkippedFrames());
+  LOG_INFO("");
+  LOG_INFO("--- Result ---");
+  if (fps_meets_requirement) {
+    LOG_INFO_FMT("✅ PASS: Decode FPS (%.2f) >= Target FPS (%.0f)", decode_fps,
+                 target_fps);
+  } else {
+    LOG_WARN_FMT("⚠️  WARN: Decode FPS (%.2f) < Target FPS (%.0f)", decode_fps,
+                 target_fps);
+  }
+
+  if (writer && save_count > 0) {
+    int actual_written =
+        writer->getWriteCount(); // 使用 BufferWriter 的实际写入计数
+    LOG_INFO_FMT("📁 Saved data: %s", output_yuv);
+    LOG_INFO_FMT("   Format: %s, Resolution: %dx%d, Frames: %d (BufferWriter "
+                 "reports: %d)",
+                 format_name.c_str(), actual_width, actual_height, save_count,
+                 actual_written);
+
+    // 计算预期文件大小
+    size_t expected_size = actual_written * actual_width * actual_height * 3 /
+                           2; // NV12: 1.5 bytes per pixel
+    LOG_INFO_FMT("   Expected file size: %.2f MB (%zu bytes)",
+                 expected_size / (1024.0 * 1024.0), expected_size);
+
+    LOG_INFO("   You can verify with FFmpeg:");
+    LOG_INFO_FMT("   ffplay -f rawvideo -pix_fmt %s -s %dx%d %s",
+                 ffplay_format.c_str(), actual_width, actual_height,
+                 output_yuv);
+  }
+
+  LOG_INFO("");
+  LOG_INFO("--- BufferPool Final Stats ---");
+  pool_sptr->printStats();
+  LOG_INFO("╚═══════════════════════════════════════════════════════╝");
+
+  // ========== PSNR 验证（如果启用） ==========
+  // ⭐ 使用两个独立的 VideoProductionLine + BufferComparator 进行PSNR验证
+  bool psnr_pass = true;
+  if (config.enable_psnr) {
+    // 使用 validate_psnr_streaming 同时运行硬件和软件解码器进行对比
+    int max_frames = (save_count > 0) ? save_count : config.max_frames;
+    if (max_frames == -1) {
+      max_frames = 300; // 默认对比300帧
+    }
+
+    psnr_pass =
+        validate_psnr_streaming(rtsp_url,      // source_video
+                                actual_width,  // width（使用实际检测到的宽度）
+                                actual_height, // height（使用实际检测到的高度）
+                                getDecoderName(config), // decoder_name
+                                max_frames,             // max_frames
+                                config.min_psnr         // min_psnr
         );
-    } else if (config.enable_psnr && save_count == 0) {
-        LOG_WARN("⚠️  PSNR validation requested but no frames saved (use --save-frames)");
-        psnr_pass = false;
+  }
+
+  // 最终判断：
+  // - 如果启用PSNR：只看PSNR结果
+  // - 如果未启用PSNR：看FPS是否达标
+  bool final_result;
+  if (config.enable_psnr) {
+    final_result = psnr_pass; // PSNR模式下只看质量，不看FPS
+  } else {
+    final_result = fps_meets_requirement; // 性能模式下看FPS
+  }
+
+  return final_result ? 0 : -1;
+}
+
+/**
+ * MP4视频解码测试主函数内部实现（支持H264/H265/MJPEG等多种编码格式）
+ */
+static int test_mp4_decode_single_impl(const char *video_path,
+                                       const TestConfig &config) {
+  // ========== 第1步：配置解码器 ==========
+  LOG_INFO("[Step 1/8] Configuring decoder...");
+
+  // 配置解码器输出格式 - 统一使用 NV12（CPU 可访问）
+  DecoderConfigBuilder decoderBuilder;
+  const char *decoder_name = getDecoderName(config);
+
+  // ⭐ 检查是否使用软件解码器
+  bool use_software = false;
+  if (decoder_name && (strcmp(decoder_name, "software") == 0 ||
+                       strcmp(decoder_name, "libavcodec") == 0 ||
+                       strcmp(decoder_name, "sw") == 0)) {
+    use_software = true;
+    decoderBuilder.useSoftware();
+    LOG_INFO("  Decoder: Software decoder (libavcodec)");
+  } else {
+    decoderBuilder.setDecoderName(decoder_name);
+
+    if (strcmp(decoder_name, "h264_taco") == 0 ||
+        strcmp(decoder_name, "hevc_taco") == 0) {
+      // h264_taco/hevc_taco 输出 NV12（原生YUV格式，CPU 可访问）
+      auto tacoConfig =
+          TacoConfigBuilder()
+              .setRgbConfig(false, "", "bt709") // ch1_rgb=false -> 输出NV12
+              .build();
+
+      const char *codec =
+          (strcmp(decoder_name, "h264_taco") == 0) ? "h264" : "hevc";
+      decoderBuilder.useTaco(codec, tacoConfig);
+      LOG_INFO("  Decoder output: NV12 (YUV format, CPU accessible)");
     }
-    
-    // 最终判断：
-    // - 如果启用PSNR：只看PSNR结果
-    // - 如果未启用PSNR：看FPS是否达标
-    bool final_result;
-    if (config.enable_psnr) {
-        final_result = psnr_pass;  // PSNR模式下只看质量，不看FPS
+  }
+
+  // ⭐ MP4文件：使用FFMPEG_VIDEO_FILE WorkerType
+  DataSourceConfigBuilder dataSourceBuilder;
+  dataSourceBuilder.setPath(video_path);
+
+  auto workerConfig = WorkerConfigBuilder()
+                          .setDataSourceConfig(dataSourceBuilder.build())
+                          .setDisplayConfig(DisplayConfigBuilder()
+                                                .setDisplayResolution(
+                                                    config.width, config.height)
+                                                .setBitsPerPixel(32)
+                                                .build())
+                          .setDecoderConfig(decoderBuilder.build())
+                          .setWorkerType(WorkerType::FFMPEG_VIDEO_FILE)
+                          .build();
+
+  if (use_software) {
+    LOG_INFO_FMT("✅ Decoder configured: Software decoder (libavcodec), %dx%d",
+                 config.width, config.height);
+  } else {
+    LOG_INFO_FMT("✅ Decoder configured: %s, %dx%d, hardware acceleration",
+                 getDecoderName(config), config.width, config.height);
+  }
+
+  // ========== 第2步：初始化显示设备（可选） ==========
+  LOG_INFO("[Step 2/8] Initializing display device...");
+
+  std::unique_ptr<LinuxFramebufferDevice> display;
+  bool has_display = false;
+
+  if (config.enable_display) {
+    display     = std::make_unique<LinuxFramebufferDevice>();
+    has_display = display->initialize(0);
+    if (has_display) {
+      LOG_INFO_FMT("✅ Display initialized: %dx%d @ %d bpp",
+                   display->getWidth(), display->getHeight(),
+                   display->getBitsPerPixel());
     } else {
-        final_result = fps_meets_requirement;  // 性能模式下看FPS
+      LOG_WARN("⚠️  Display not available, continuing without display");
     }
-    
-    return final_result ? 0 : -1;
+  } else {
+    LOG_INFO("ℹ️  Display disabled by user");
+  }
+
+  // ========== 第3步：创建生产线 ==========
+  LOG_INFO("[Step 3/8] Creating VideoProductionLine...");
+
+  VideoProductionLine producer(false, // loop = false（不循环，解码一次）
+                               config.threads, // thread_count
+                               false           // enable_monitor = false
+  );
+
+  // 设置错误回调
+  producer.setErrorCallback([](const std::string &error) {
+    LOG_ERROR_FMT("Decode Error: %s", error.c_str());
+    g_running = false;
+  });
+
+  LOG_INFO_FMT("✅ VideoProductionLine created (%d producer threads)",
+               config.threads);
+
+  // ========== 第4步：启动生产线 ==========
+  LOG_INFO("[Step 4/8] Starting decode...");
+
+  if (!producer.start(workerConfig)) {
+    LOG_ERROR("❌ Failed to start VideoProductionLine");
+    return -1;
+  }
+
+  LOG_INFO("✅ Decoding started");
+
+  // ========== 第5步：获取 BufferPool ==========
+  LOG_INFO("[Step 5/8] Getting BufferPool...");
+
+  uint64_t pool_id = producer.getWorkingBufferPoolId();
+  if (pool_id == 0) {
+    LOG_ERROR("❌ No working BufferPool ID available");
+    producer.stop();
+    return -1;
+  }
+
+  auto pool_weak = BufferPoolRegistry::getInstance().getPool(pool_id);
+  auto pool_sptr = pool_weak.lock();
+  if (!pool_sptr) {
+    LOG_ERROR("❌ BufferPool not found or destroyed");
+    producer.stop();
+    return -1;
+  }
+
+  LOG_INFO_FMT("✅ BufferPool: '%s' (ID: %lu)", pool_sptr->getName().c_str(),
+               pool_id);
+  pool_sptr->printStats();
+
+  // ========== 第5.5步：如果使用硬件解码器，同时启动软件解码器进行对比
+  // ==========
+  using productionline::io::BufferComparator;
+  using productionline::io::CompareConfig;
+  using productionline::io::FrameCompareResult;
+
+  std::unique_ptr<MultiWorkerProductionLine> comparison_worker;
+  std::shared_ptr<BufferPool> sw_pool_sptr;
+  std::shared_ptr<BufferPool> hw_pool_sptr;
+  std::unique_ptr<BufferComparator> comparator;
+  bool enable_comparison = false;
+
+  // ⭐ 如果当前使用硬件解码器且需要保存文件，同时启动软件解码器进行对比
+  if (!use_software && config.save_frames != 0) {
+    LOG_INFO(
+        "[Step 5.5/8] Setting up hardware vs software decoder comparison...");
+
+    // 创建 MultiWorkerProductionLine 配置
+    MultiWorkerProductionLine::MultiWorkerConfig multi_config;
+    MultiWorkerProductionLine::WorkerGroup group("hw_sw_comparison");
+
+    // 生产者：Packet Recorder（录制 packet）
+    group.producer_config =
+        WorkerConfigBuilder()
+            .setDataSourceConfig(
+                DataSourceConfigBuilder().setPath(video_path).build())
+            .setWorkerType(WorkerType::FFMPEG_PACKET_RECORDER)
+            .build();
+
+    // 消费者1：硬件解码器（当前使用的解码器）
+    WorkerConfig hw_consumer_config =
+        WorkerConfigBuilder()
+            .setDecoderConfig(decoderBuilder.build())
+            .setWorkerType(WorkerType::FFMPEG_VIDEO_FILE)
+            .build();
+    group.consumer_configs.push_back(hw_consumer_config);
+
+    // 消费者2：软件解码器
+    DecoderConfigBuilder sw_decoder_builder;
+    sw_decoder_builder.useSoftware();
+    WorkerConfig sw_consumer_config =
+        WorkerConfigBuilder()
+            .setDecoderConfig(sw_decoder_builder.build())
+            .setWorkerType(WorkerType::FFMPEG_VIDEO_FILE)
+            .build();
+    group.consumer_configs.push_back(sw_consumer_config);
+
+    multi_config.groups.push_back(group);
+    multi_config.thread_pool_size = 4;
+
+    // 创建并启动 MultiWorkerProductionLine
+    comparison_worker = std::make_unique<MultiWorkerProductionLine>(
+        multi_config, false, 1, false);
+
+    if (comparison_worker->start()) {
+      // 获取两个解码器的 BufferPool
+      uint64_t hw_pool_id =
+          comparison_worker->getGroupConsumerBufferPoolId(0, 0);
+      uint64_t sw_pool_id =
+          comparison_worker->getGroupConsumerBufferPoolId(0, 1);
+
+      if (hw_pool_id != 0 && sw_pool_id != 0) {
+        auto hw_pool_weak =
+            BufferPoolRegistry::getInstance().getPool(hw_pool_id);
+        auto sw_pool_weak =
+            BufferPoolRegistry::getInstance().getPool(sw_pool_id);
+        hw_pool_sptr = hw_pool_weak.lock();
+        sw_pool_sptr = sw_pool_weak.lock();
+
+        if (hw_pool_sptr && sw_pool_sptr) {
+          // 创建 BufferComparator
+          comparator = std::make_unique<BufferComparator>();
+          CompareConfig compare_config;
+          compare_config.strategy                 = CompareConfig::AUTO_LAYERED;
+          compare_config.format_strategy          = CompareConfig::AUTO;
+          compare_config.quick_psnr_threshold     = 38.0;
+          compare_config.quick_warn_threshold     = 35.0;
+          compare_config.use_perceptual_weighting = true;
+          compare_config.verbose                  = false; // 减少日志输出
+          compare_config.save_report = false; // 不保存报告（主流程中）
+
+          if (comparator->open(compare_config)) {
+            enable_comparison = true;
+            LOG_INFO("  ✅ Hardware vs Software decoder comparison enabled");
+            LOG_INFO_FMT("  Hardware BufferPool: '%s' (ID: %lu)",
+                         hw_pool_sptr->getName().c_str(), hw_pool_id);
+            LOG_INFO_FMT("  Software BufferPool: '%s' (ID: %lu)",
+                         sw_pool_sptr->getName().c_str(), sw_pool_id);
+
+            // ⭐ 如果启用了对比，使用 comparison_worker 的硬件解码器 BufferPool
+            // 替代主 producer 这样可以从同一个数据源获取 buffer 进行显示和保存
+            pool_sptr = hw_pool_sptr; // 使用硬件解码器的 BufferPool
+            LOG_INFO("  ℹ️  Using hardware decoder BufferPool from comparison "
+                     "worker for display/save");
+          } else {
+            LOG_WARN(
+                "  ⚠️  Failed to open BufferComparator, comparison disabled");
+            comparator.reset();
+            comparison_worker->stop();
+            comparison_worker.reset();
+          }
+        } else {
+          LOG_WARN("  ⚠️  Failed to get BufferPools, comparison disabled");
+          comparison_worker->stop();
+          comparison_worker.reset();
+        }
+      } else {
+        LOG_WARN("  ⚠️  Failed to get BufferPool IDs, comparison disabled");
+        comparison_worker->stop();
+        comparison_worker.reset();
+      }
+    } else {
+      LOG_WARN("  ⚠️  Failed to start MultiWorkerProductionLine, comparison "
+               "disabled");
+      comparison_worker.reset();
+    }
+  }
+
+  // ========== 第6步：创建 BufferWriter ==========
+  LOG_INFO("[Step 6/8] Creating BufferWriter...");
+
+  using productionline::io::BufferWriter;
+  std::unique_ptr<BufferWriter> writer;
+  char output_yuv[256];
+  AVPixelFormat output_format = AV_PIX_FMT_NONE;
+  int actual_width            = config.width;
+  int actual_height           = config.height;
+  std::string format_name     = "NV12";
+  const char *file_ext        = "yuv";
+  std::string ffplay_format   = "nv12";
+  int save_count              = 0; // 保存的帧数计数器
+  int comparison_count        = 0; // 对比的帧数计数器
+
+  if (config.save_frames != 0) {
+    // 等待第一个Buffer以检测实际格式
+    LOG_INFO("   Waiting for first buffer to detect format...");
+    Buffer *first_buffer = pool_sptr->acquireFilled(true, 5000); // 5秒超时
+    if (!first_buffer) {
+      LOG_ERROR("❌ Failed to get first buffer (timeout)");
+      producer.stop();
+      return -1;
+    }
+
+    // 从Buffer元数据获取实际格式
+    if (first_buffer->hasImageMetadata()) {
+      output_format        = first_buffer->getImageFormat();
+      actual_width         = first_buffer->getImageWidth();
+      actual_height        = first_buffer->getImageHeight();
+      const char *fmt_name = av_get_pix_fmt_name(output_format);
+      format_name          = fmt_name ? fmt_name : "NV12";
+
+      // 设置ffplay格式（NV12对应nv12）
+      if (output_format == AV_PIX_FMT_NV12) {
+        ffplay_format = "nv12";
+      } else if (output_format == AV_PIX_FMT_YUV420P) {
+        ffplay_format = "yuv420p";
+      } else {
+        ffplay_format = format_name;
+      }
+
+      LOG_INFO_FMT("   Detected format: %s (%dx%d)", format_name.c_str(),
+                   actual_width, actual_height);
+    } else {
+      // 默认使用NV12
+      output_format = AV_PIX_FMT_NV12;
+      format_name   = "NV12";
+      ffplay_format = "nv12";
+      LOG_WARN("   Buffer has no metadata, using default NV12");
+    }
+
+    // 创建BufferWriter
+    writer = std::make_unique<BufferWriter>();
+    if (config.output_path) {
+      snprintf(output_yuv, sizeof(output_yuv), "%s", config.output_path);
+    } else {
+      snprintf(output_yuv, sizeof(output_yuv), "/tmp/decoded_%dx%d_%ld.%s",
+               actual_width, actual_height, time(nullptr), file_ext);
+    }
+
+    if (!writer->open(output_yuv, output_format, actual_width, actual_height)) {
+      LOG_ERROR_FMT("❌ Failed to open BufferWriter: %s", output_yuv);
+      pool_sptr->releaseFilled(first_buffer);
+      producer.stop();
+      return -1;
+    }
+
+    LOG_INFO_FMT("✅ BufferWriter opened: %s (format: %s, %dx%d)", output_yuv,
+                 format_name.c_str(), actual_width, actual_height);
+
+    // 保存第一帧
+    if (writer->write(first_buffer)) {
+      LOG_INFO("   ✅ Saved first frame");
+      save_count = 1; // 第一帧已保存，初始化计数器
+    }
+    pool_sptr->releaseFilled(first_buffer);
+  } else {
+    LOG_INFO("ℹ️  Output file disabled (save_frames = 0)");
+  }
+
+  // ========== 第7步：消费者循环（解码+显示+保存） ==========
+  LOG_INFO("[Step 7/8] Consuming decoded frames...");
+  LOG_INFO("Press Ctrl+C to stop early");
+  LOG_INFO("");
+
+  int frame_count   = 0;
+  int display_count = 0;
+  // save_count 已在上面声明，如果 writer 已打开且第一帧已保存，则保持为
+  // 1，否则为 0
+  if (!(writer && writer->isOpen())) {
+    save_count = 0; // writer 未打开，重置为 0
+  }
+  int save_limit = (config.save_frames == -1) ? INT32_MAX : config.save_frames;
+  int max_frames_limit =
+      (config.max_frames == -1) ? INT32_MAX : config.max_frames;
+
+  // ⭐ PSNR统计：记录每帧的PSNR值（参考附件文件的方法）
+  std::vector<double> psnr_y_values;
+  std::vector<double> psnr_u_values;
+  std::vector<double> psnr_v_values;
+  std::vector<double> psnr_avg_values;
+
+  auto start_time       = std::chrono::steady_clock::now();
+  auto last_report_time = start_time;
+
+  while (g_running && frame_count < max_frames_limit) {
+    // 从 BufferPool 获取已解码的 Buffer
+    Buffer *buffer = pool_sptr->acquireFilled(true, 100); // 超时100ms
+
+    if (!buffer) {
+      // 超时：检查生产者是否还在运行
+      bool is_running = enable_comparison ? (comparison_worker &&
+                                             comparison_worker->isRunning())
+                                          : producer.isRunning();
+      if (!is_running) {
+        LOG_INFO("Producer stopped, exiting consumer loop");
+        break;
+      }
+      continue; // 超时但生产者还在，继续等待
+    }
+
+    // 显示到屏幕（如果启用）
+    if (has_display) {
+      display->waitVerticalSync();
+      if (display->displayBufferByDMA(buffer)) {
+        display_count++;
+      } else {
+        // DMA 失败，回退到普通显示
+        display->displayFilledFramebuffer(buffer);
+        display_count++;
+      }
+    }
+
+    // ⭐ 在保存之前进行软硬解码对比（如果启用）
+    // 注意：buffer 来自硬件解码器（如果启用了对比，pool_sptr == hw_pool_sptr）
+    if (enable_comparison && comparator && sw_pool_sptr) {
+      // 从软件解码器的 BufferPool 获取 Buffer（硬件解码器的 buffer
+      // 已经在主循环中获取）
+      Buffer *sw_buffer = sw_pool_sptr->acquireFilled(true, 100); // 100ms 超时
+
+      if (sw_buffer) {
+        // 使用 BufferComparator
+        // 进行对比（软件解码器作为参考，硬件解码器作为测试）
+        FrameCompareResult result = comparator->compare(sw_buffer, buffer);
+        comparison_count++;
+
+        // ⭐ 记录PSNR值（用于统计）
+        if (result.psnr_y > 0.0) {
+          psnr_y_values.push_back(result.psnr_y);
+          psnr_u_values.push_back(result.psnr_u);
+          psnr_v_values.push_back(result.psnr_v);
+          psnr_avg_values.push_back(result.psnr_avg);
+        }
+
+        // 记录对比结果（可选：只在失败时输出，或前50帧详细输出）
+        if ((!result.passed && result.psnr_y > 0.0) ||
+            (frame_count <= 50 && frame_count % 10 == 0)) {
+          LOG_INFO_FMT(
+              "Frame %3d: PSNR Y=%.2f U=%.2f V=%.2f dB (avg=%.2f dB) %s",
+              frame_count, result.psnr_y, result.psnr_u, result.psnr_v,
+              result.psnr_avg,
+              result.passed
+                  ? "✅"
+                  : (result.level == FrameCompareResult::WARN ? "⚠️" : "❌"));
+        }
+
+        // 释放软件解码器的 Buffer
+        sw_pool_sptr->releaseFilled(sw_buffer);
+      }
+      // 如果无法获取软件解码器的 buffer，跳过对比（硬件解码器的 buffer
+      // 继续用于显示和保存）
+    }
+
+    // 保存到文件（使用BufferWriter）- 在对比之后保存
+    if (writer && save_count < save_limit) {
+      if (writer->write(buffer)) {
+        save_count++;
+      } else {
+        LOG_WARN_FMT("Failed to write frame %d to file", frame_count);
+      }
+    }
+
+    // 归还 Buffer
+    pool_sptr->releaseFilled(buffer);
+    frame_count++;
+
+    // 每 60 帧（约1秒）打印一次进度
+    auto now     = std::chrono::steady_clock::now();
+    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+                       now - last_report_time)
+                       .count();
+
+    if (elapsed >= 1000) { // 每秒报告一次
+      double current_fps =
+          enable_comparison ? 0.0
+                            : producer.getAverageFPS(); // 对比模式下不显示FPS
+      if (enable_comparison) {
+        // ⭐ 计算平均PSNR（如果已有数据）
+        double avg_psnr_y = psnr_y_values.empty()
+                                ? 0.0
+                                : std::accumulate(psnr_y_values.begin(),
+                                                  psnr_y_values.end(), 0.0) /
+                                      psnr_y_values.size();
+        double avg_psnr_avg =
+            psnr_avg_values.empty()
+                ? 0.0
+                : std::accumulate(psnr_avg_values.begin(),
+                                  psnr_avg_values.end(), 0.0) /
+                      psnr_avg_values.size();
+
+        LOG_INFO_FMT("Progress: %d frames | Display: %d | Saved: %d | "
+                     "Compared: %d | PSNR-Y=%.2f dB, PSNR-Avg=%.2f dB | "
+                     "Passed: %d, Warned: %d, Failed: %d",
+                     frame_count, display_count, save_count, comparison_count,
+                     avg_psnr_y, avg_psnr_avg, comparator->getPassedCount(),
+                     comparator->getCompareCount() -
+                         comparator->getPassedCount() -
+                         comparator->getFailedCount(),
+                     comparator->getFailedCount());
+      } else {
+        LOG_INFO_FMT(
+            "Progress: %d frames | FPS: %.1f | Display: %d | Saved: %d",
+            frame_count, current_fps, display_count, save_count);
+      }
+      last_report_time = now;
+    }
+  }
+
+  // 排空剩余的 Buffer
+  LOG_INFO("Draining remaining buffers...");
+  Buffer *remaining = nullptr;
+  int drained       = 0;
+  while ((remaining = pool_sptr->acquireFilled(false, 0)) != nullptr) {
+    if (has_display) {
+      display->waitVerticalSync();
+      display->displayBufferByDMA(remaining);
+      display_count++;
+    }
+
+    // ⭐ 在保存之前进行软硬解码对比（如果启用）
+    if (enable_comparison && comparator && sw_pool_sptr) {
+      Buffer *sw_buffer = sw_pool_sptr->acquireFilled(true, 100);
+      if (sw_buffer) {
+        FrameCompareResult result = comparator->compare(sw_buffer, remaining);
+        comparison_count++;
+
+        // ⭐ 记录PSNR值（用于统计）
+        if (result.psnr_y > 0.0) {
+          psnr_y_values.push_back(result.psnr_y);
+          psnr_u_values.push_back(result.psnr_u);
+          psnr_v_values.push_back(result.psnr_v);
+          psnr_avg_values.push_back(result.psnr_avg);
+        }
+
+        if (!result.passed && result.psnr_y > 0.0) {
+          LOG_WARN_FMT("Remaining frame %d comparison: PSNR-Y=%.2f dB, %s",
+                       frame_count, result.psnr_y,
+                       result.level == FrameCompareResult::FAIL ? "FAIL"
+                                                                : "WARN");
+        }
+        sw_pool_sptr->releaseFilled(sw_buffer);
+      }
+    }
+
+    if (writer && save_count < save_limit) {
+      if (writer->write(remaining)) {
+        save_count++;
+      } else {
+        LOG_WARN_FMT("Failed to write remaining frame %d to file", frame_count);
+      }
+    }
+    pool_sptr->releaseFilled(remaining);
+    frame_count++;
+    drained++;
+  }
+  if (drained > 0) {
+    LOG_INFO_FMT("Drained %d remaining buffers", drained);
+  }
+
+  // 关闭对比器（如果启用）
+  if (comparator) {
+    comparator->close();
+    if (comparison_count > 0) {
+      LOG_INFO_FMT("✅ BufferComparator closed: %d frames compared",
+                   comparison_count);
+
+      // ⭐ 打印详细的PSNR统计（参考附件文件的方法）
+      LOG_INFO("\n═══════════════════════════════════════════════════════");
+      LOG_INFO("  Decoder Comparison Results");
+      LOG_INFO("═══════════════════════════════════════════════════════");
+      comparator->printSummary();
+      LOG_INFO("═══════════════════════════════════════════════════════\n");
+
+      // ⭐ 打印详细的PSNR统计
+      if (!psnr_y_values.empty()) {
+        // 计算平均值
+        double avg_psnr_y =
+            std::accumulate(psnr_y_values.begin(), psnr_y_values.end(), 0.0) /
+            psnr_y_values.size();
+        double avg_psnr_u =
+            std::accumulate(psnr_u_values.begin(), psnr_u_values.end(), 0.0) /
+            psnr_u_values.size();
+        double avg_psnr_v =
+            std::accumulate(psnr_v_values.begin(), psnr_v_values.end(), 0.0) /
+            psnr_v_values.size();
+        double avg_psnr_avg = std::accumulate(psnr_avg_values.begin(),
+                                              psnr_avg_values.end(), 0.0) /
+                              psnr_avg_values.size();
+
+        // 计算最小值和最大值
+        auto minmax_y =
+            std::minmax_element(psnr_y_values.begin(), psnr_y_values.end());
+        auto minmax_avg =
+            std::minmax_element(psnr_avg_values.begin(), psnr_avg_values.end());
+
+        double min_psnr_y   = *minmax_y.first;
+        double max_psnr_y   = *minmax_y.second;
+        double min_psnr_avg = *minmax_avg.first;
+        double max_psnr_avg = *minmax_avg.second;
+
+        // 计算标准差
+        double variance_y = 0.0;
+        for (double val : psnr_y_values) {
+          variance_y += (val - avg_psnr_y) * (val - avg_psnr_y);
+        }
+        double stddev_y = std::sqrt(variance_y / psnr_y_values.size());
+
+        LOG_INFO("  PSNR Statistics (Hardware vs Software):");
+        LOG_INFO_FMT("    Average: Y=%.2f U=%.2f V=%.2f dB (avg=%.2f dB)",
+                     avg_psnr_y, avg_psnr_u, avg_psnr_v, avg_psnr_avg);
+        LOG_INFO_FMT("    Range Y:  [%.2f, %.2f] dB (stddev=%.2f)", min_psnr_y,
+                     max_psnr_y, stddev_y);
+        LOG_INFO_FMT("    Range Avg: [%.2f, %.2f] dB", min_psnr_avg,
+                     max_psnr_avg);
+        LOG_INFO("");
+        LOG_INFO("  Quality Assessment:");
+        LOG_INFO_FMT("    Passed: %d ✅ (%.1f%%)", comparator->getPassedCount(),
+                     100.0 * comparator->getPassedCount() / comparison_count);
+        LOG_INFO_FMT(
+            "    Warned: %d ⚠️  (%.1f%%)",
+            comparator->getCompareCount() - comparator->getPassedCount() -
+                comparator->getFailedCount(),
+            100.0 *
+                (comparator->getCompareCount() - comparator->getPassedCount() -
+                 comparator->getFailedCount()) /
+                comparison_count);
+        LOG_INFO_FMT("    Failed: %d ❌ (%.1f%%)", comparator->getFailedCount(),
+                     100.0 * comparator->getFailedCount() / comparison_count);
+        LOG_INFO("");
+
+        // 质量评级
+        if (avg_psnr_avg >= 38.0) {
+          LOG_INFO("  ✅ Overall Quality: EXCELLENT (visually lossless)");
+        } else if (avg_psnr_avg >= 35.0) {
+          LOG_INFO("  ⚠️  Overall Quality: GOOD (minor differences)");
+        } else {
+          LOG_INFO("  ❌ Overall Quality: POOR (visible artifacts)");
+        }
+        LOG_INFO("");
+
+        LOG_INFO("\n💡 PSNR Interpretation:");
+        LOG_INFO("   >= 38 dB: Excellent quality (visually lossless)");
+        LOG_INFO("   35-38 dB: Good quality (minor differences)");
+        LOG_INFO("   < 35 dB:  Poor quality (visible artifacts)");
+      }
+    }
+  }
+
+  if (comparison_worker) {
+    comparison_worker->stop();
+  }
+
+  // 停止主 producer（如果未使用 comparison_worker）
+  if (!enable_comparison) {
+    producer.stop();
+  }
+
+  if (writer) {
+    writer->close();
+    LOG_INFO_FMT("✅ BufferWriter closed: %d frames written",
+                 writer->getWriteCount());
+  }
+
+  auto end_time       = std::chrono::steady_clock::now();
+  auto total_duration = std::chrono::duration_cast<std::chrono::milliseconds>(
+                            end_time - start_time)
+                            .count();
+
+  LOG_INFO("✅ Consuming completed");
+
+  // ========== 第8步：停止生产线并输出统计 ==========
+  LOG_INFO("[Step 8/8] Stopping and generating report...");
+
+  producer.stop();
+
+  // 计算性能指标
+  double decode_fps          = producer.getAverageFPS();
+  double realtime_fps        = (frame_count * 1000.0) / total_duration;
+  double target_fps          = config.fps;
+  bool fps_meets_requirement = decode_fps >= target_fps;
+  if (config.enable_psnr) {
+    fps_meets_requirement = true; // PSNR模式下不检查FPS
+  }
+
+  // ========== 输出测试报告 ==========
+  LOG_INFO("");
+  LOG_INFO("╔═══════════════════════════════════════════════════════╗");
+  LOG_INFO("║  Test Report: Video Decode                            ║");
+  LOG_INFO("╚═══════════════════════════════════════════════════════╝");
+  LOG_INFO_FMT("Video file: %s", video_path);
+  LOG_INFO_FMT("Codec: %s", getCodecName(config).c_str());
+  LOG_INFO_FMT("Decoder: %s (hardware)", getDecoderName(config));
+  LOG_INFO_FMT("Resolution: %dx%d", config.width, config.height);
+  LOG_INFO_FMT("Target FPS: %.0f", target_fps);
+  LOG_INFO("");
+  LOG_INFO("--- Performance Metrics ---");
+  LOG_INFO_FMT("Total frames decoded: %d", frame_count);
+  LOG_INFO_FMT("Frames displayed: %d", display_count);
+  LOG_INFO_FMT("Frames saved: %d", save_count);
+  LOG_INFO_FMT("Total time: %.2f seconds", total_duration / 1000.0);
+  LOG_INFO_FMT("Decode FPS (producer): %.2f", decode_fps);
+  LOG_INFO_FMT("Realtime FPS (overall): %.2f", realtime_fps);
+  LOG_INFO_FMT("Frames produced: %d", producer.getProducedFrames());
+  LOG_INFO_FMT("Frames skipped: %d", producer.getSkippedFrames());
+  LOG_INFO("");
+  LOG_INFO("--- Result ---");
+  if (config.enable_psnr) {
+    LOG_INFO(
+        "ℹ️  FPS check skipped (PSNR mode prioritizes accuracy over speed)");
+  } else if (fps_meets_requirement) {
+    LOG_INFO_FMT("✅ PASS: Decode FPS (%.2f) >= Target FPS (%.0f)", decode_fps,
+                 target_fps);
+  } else {
+    LOG_WARN_FMT("⚠️  WARN: Decode FPS (%.2f) < Target FPS (%.0f)", decode_fps,
+                 target_fps);
+  }
+
+  if (writer && save_count > 0) {
+    int actual_written =
+        writer->getWriteCount(); // 使用 BufferWriter 的实际写入计数
+    LOG_INFO_FMT("📁 Saved data: %s", output_yuv);
+    LOG_INFO_FMT("   Format: %s, Resolution: %dx%d, Frames: %d (BufferWriter "
+                 "reports: %d)",
+                 format_name.c_str(), actual_width, actual_height, save_count,
+                 actual_written);
+
+    // 计算预期文件大小
+    size_t expected_size = actual_written * actual_width * actual_height * 3 /
+                           2; // NV12: 1.5 bytes per pixel
+    LOG_INFO_FMT("   Expected file size: %.2f MB (%zu bytes)",
+                 expected_size / (1024.0 * 1024.0), expected_size);
+
+    LOG_INFO("   You can verify with FFmpeg:");
+    LOG_INFO_FMT("   ffplay -f rawvideo -pix_fmt %s -s %dx%d %s",
+                 ffplay_format.c_str(), actual_width, actual_height,
+                 output_yuv);
+  }
+
+  LOG_INFO("");
+  LOG_INFO("--- BufferPool Final Stats ---");
+  pool_sptr->printStats();
+  LOG_INFO("╚═══════════════════════════════════════════════════════╝");
+
+  // ========== PSNR 验证（如果启用） ==========
+  // ⭐ 使用 MultiWorkerProductionLine + BufferComparator 进行PSNR验证
+  bool psnr_pass = true;
+  if (config.enable_psnr) {
+    // 使用 MultiWorkerProductionLine 同时运行硬件和软件解码器进行对比
+    // 不再需要先保存硬件解码输出到文件
+    int max_frames = (save_count > 0) ? save_count : config.max_frames;
+    if (max_frames == -1) {
+      max_frames = 300; // 默认对比300帧
+    }
+
+    psnr_pass =
+        validate_psnr_streaming(video_path,    // source_video
+                                actual_width,  // width（使用实际检测到的宽度）
+                                actual_height, // height（使用实际检测到的高度）
+                                getDecoderName(config), // decoder_name
+                                max_frames,             // max_frames
+                                config.min_psnr         // min_psnr
+        );
+  }
+
+  // 最终判断：
+  // - 如果启用PSNR：只看PSNR结果
+  // - 如果未启用PSNR：看FPS是否达标
+  bool final_result;
+  if (config.enable_psnr) {
+    final_result = psnr_pass; // PSNR模式下只看质量，不看FPS
+  } else {
+    final_result = fps_meets_requirement; // 性能模式下看FPS
+  }
+
+  return final_result ? 0 : -1;
+}
+
+// ========== 不同参数的视频文件解码测试用例 ==========
+// 说明：
+//   - 针对不同编码格式（H.264 / H.265 / MJPEG），按分辨率 / 帧率 / profile
+//   拆分为独立用例
+//   - 建议命令行使用方式：
+//       ./test_mp4_decode -m <test_name> /path/to/<对应视频文件>.mp4
+//   - 例如：
+//       ./test_mp4_decode -m mp4_decode_h264_1920x1080_60_high
+//       test_h264_1920x1080_60fps_high.mp4
+//       ./test_mp4_decode -m mp4_decode_h265_3840x2160_30_main
+//       test_h265_3840x2160_30fps_main.mp4
+//       ./test_mp4_decode -m mp4_decode_mjpeg_640x480_60
+//       test_mjpeg_640x480_60fps_none.mp4
+
+// ---------------- H.264 系列 ----------------
+
+static int test_mp4_decode_h264_128x128_30_main(const char *video_path) {
+  return run_decode_test_with_params(video_path, 128, 128, "h264_taco", 0, 30.0,
+                                     "main", "h264_128x128_30_main");
+}
+
+static int test_mp4_decode_h264_320x240_30_high(const char *video_path) {
+  return run_decode_test_with_params(video_path, 320, 240, "h264_taco", 0, 30.0,
+                                     "high", "h264_320x240_30_high");
+}
+
+static int test_mp4_decode_h264_640x480_30_main(const char *video_path) {
+  return run_decode_test_with_params(video_path, 640, 480, "h264_taco", 0, 30.0,
+                                     "main", "h264_640x480_30_main");
+}
+
+static int test_mp4_decode_h264_640x480_60_high(const char *video_path) {
+  return run_decode_test_with_params(video_path, 640, 480, "h264_taco", 4, 60.0,
+                                     "high", "h264_640x480_60_high");
+}
+
+static int test_mp4_decode_h264_1280x720_30_high(const char *video_path) {
+  return run_decode_test_with_params(video_path, 1280, 720, "h264_taco", 0,
+                                     30.0, "high", "h264_1280x720_30_high");
+}
+
+static int test_mp4_decode_h264_1920x1080_30_high(const char *video_path) {
+  return run_decode_test_with_params(video_path, 1920, 1080, "h264_taco", 0,
+                                     30.0, "high", "h264_1920x1080_30_high");
+}
+
+static int test_mp4_decode_h264_1920x1080_60_high(const char *video_path) {
+  return run_decode_test_with_params(video_path, 1920, 1080, "h264_taco", 4,
+                                     60.0, "high", "h264_1920x1080_60_high");
+}
+
+static int test_mp4_decode_h264_2560x1440_30_high(const char *video_path) {
+  return run_decode_test_with_params(video_path, 2560, 1440, "h264_taco", 4,
+                                     30.0, "high", "h264_2560x1440_30_high");
+}
+
+static int test_mp4_decode_h264_3840x2160_30_high(const char *video_path) {
+  return run_decode_test_with_params(video_path, 3840, 2160, "h264_taco", 4,
+                                     30.0, "high", "h264_3840x2160_30_high");
+}
+
+// ---------------- H.265 系列 ----------------
+
+static int test_mp4_decode_h265_128x128_30_main(const char *video_path) {
+  return run_decode_test_with_params(video_path, 128, 128, "hevc_taco", 0, 30.0,
+                                     "main", "h265_128x128_30_main");
+}
+
+static int test_mp4_decode_h265_320x240_30_main(const char *video_path) {
+  return run_decode_test_with_params(video_path, 320, 240, "hevc_taco", 0, 30.0,
+                                     "main", "h265_320x240_30_main");
+}
+
+static int test_mp4_decode_h265_640x480_30_main(const char *video_path) {
+  return run_decode_test_with_params(video_path, 640, 480, "hevc_taco", 0, 30.0,
+                                     "main", "h265_640x480_30_main");
+}
+
+static int test_mp4_decode_h265_640x480_60_main(const char *video_path) {
+  return run_decode_test_with_params(video_path, 640, 480, "hevc_taco", 4, 60.0,
+                                     "main", "h265_640x480_60_main");
+}
+
+static int test_mp4_decode_h265_1280x720_30_main(const char *video_path) {
+  return run_decode_test_with_params(video_path, 1280, 720, "hevc_taco", 0,
+                                     30.0, "main", "h265_1280x720_30_main");
+}
+
+static int test_mp4_decode_h265_1920x1080_30_main(const char *video_path) {
+  return run_decode_test_with_params(video_path, 1920, 1080, "hevc_taco", 0,
+                                     30.0, "main", "h265_1920x1080_30_main");
+}
+
+static int test_mp4_decode_h265_1920x1080_60_main(const char *video_path) {
+  return run_decode_test_with_params(video_path, 1920, 1080, "hevc_taco", 4,
+                                     60.0, "main", "h265_1920x1080_60_main");
+}
+
+static int test_mp4_decode_h265_2560x1440_30_main(const char *video_path) {
+  return run_decode_test_with_params(video_path, 2560, 1440, "hevc_taco", 4,
+                                     30.0, "main", "h265_2560x1440_30_main");
+}
+
+static int test_mp4_decode_h265_3840x2160_30_main(const char *video_path) {
+  return run_decode_test_with_params(video_path, 3840, 2160, "hevc_taco", 4,
+                                     30.0, "main", "h265_3840x2160_30_main");
+}
+
+// ---------------- MJPEG 系列 ----------------
+
+static int test_mp4_decode_mjpeg_128x128_30(const char *video_path) {
+  return run_decode_test_with_params(video_path, 128, 128, "mjpeg_taco", 0,
+                                     30.0, "none", "mjpeg_128x128_30");
+}
+
+static int test_mp4_decode_mjpeg_320x240_30(const char *video_path) {
+  return run_decode_test_with_params(video_path, 320, 240, "mjpeg_taco", 0,
+                                     30.0, "none", "mjpeg_320x240_30");
+}
+
+static int test_mp4_decode_mjpeg_640x480_30(const char *video_path) {
+  return run_decode_test_with_params(video_path, 640, 480, "mjpeg_taco", 0,
+                                     30.0, "none", "mjpeg_640x480_30");
+}
+
+static int test_mp4_decode_mjpeg_640x480_60(const char *video_path) {
+  return run_decode_test_with_params(video_path, 640, 480, "mjpeg_taco", 4,
+                                     60.0, "none", "mjpeg_640x480_60");
+}
+
+static int test_mp4_decode_mjpeg_1280x720_30(const char *video_path) {
+  return run_decode_test_with_params(video_path, 1280, 720, "mjpeg_taco", 0,
+                                     30.0, "none", "mjpeg_1280x720_30");
+}
+
+static int test_mp4_decode_mjpeg_1920x1080_30(const char *video_path) {
+  return run_decode_test_with_params(video_path, 1920, 1080, "mjpeg_taco", 0,
+                                     30.0, "none", "mjpeg_1920x1080_30");
+}
+
+static int test_mp4_decode_mjpeg_1920x1080_60(const char *video_path) {
+  return run_decode_test_with_params(video_path, 1920, 1080, "mjpeg_taco", 4,
+                                     60.0, "none", "mjpeg_1920x1080_60");
+}
+
+static int test_mp4_decode_mjpeg_2560x1440_30(const char *video_path) {
+  return run_decode_test_with_params(video_path, 2560, 1440, "mjpeg_taco", 4,
+                                     30.0, "none", "mjpeg_2560x1440_30");
+}
+
+static int test_mp4_decode_mjpeg_3840x2160_30(const char *video_path) {
+  return run_decode_test_with_params(video_path, 3840, 2160, "mjpeg_taco", 4,
+                                     30.0, "none", "mjpeg_3840x2160_30");
+}
+
+// ---------------- 通用测试用例（保持向后兼容） ----------------
+
+/**
+ * @brief MP4视频解码测试（H264，通用）
+ */
+static int test_mp4_decode_h264(const char *video_path) {
+  TestConfig config = create_test_config_from_env(CodecType::H264);
+  return run_decode_test_with_params(
+      video_path, config.width, config.height, getDecoderName(config),
+      config.threads, config.fps, config.profile, "h264_generic");
+}
+
+/**
+ * @brief MP4视频解码测试（H265，通用）
+ */
+static int test_mp4_decode_h265(const char *video_path) {
+  TestConfig config = create_test_config_from_env(CodecType::H265);
+  return run_decode_test_with_params(
+      video_path, config.width, config.height, getDecoderName(config),
+      config.threads, config.fps, config.profile, "h265_generic");
+}
+
+/**
+ * @brief MP4视频解码测试（MJPEG，通用）
+ */
+static int test_mp4_decode_mjpeg(const char *video_path) {
+  TestConfig config = create_test_config_from_env(CodecType::MJPEG);
+  return run_decode_test_with_params(video_path, config.width, config.height,
+                                     getDecoderName(config), config.threads,
+                                     config.fps, "none", "mjpeg_generic");
+}
+
+/**
+ * @brief MP4视频解码测试（通用，自动检测codec）
+ */
+static int test_mp4_decode(const char *video_path) {
+  TestConfig config = create_test_config_from_env(CodecType::H264);
+  return run_decode_test_with_params(video_path, config.width, config.height,
+                                     getDecoderName(config), config.threads,
+                                     config.fps, config.profile, "auto_detect");
+}
+
+/**
+ * @brief MP4视频解码测试（软件解码器，H.264）
+ */
+static int test_mp4_decode_sw_h264_1920x1080_30(const char *video_path) {
+  return run_decode_test_with_params(video_path, 1920, 1080, "software", 0,
+                                     30.0, "high", "sw_h264_1920x1080_30");
+}
+
+/**
+ * @brief MP4视频解码测试（软件解码器，H.265）
+ */
+static int test_mp4_decode_sw_h265_1920x1080_30(const char *video_path) {
+  return run_decode_test_with_params(video_path, 1920, 1080, "software", 0,
+                                     30.0, "main", "sw_h265_1920x1080_30");
+}
+
+// ========== 测试用例注册（仿照 test_mp4_azh.cpp 结构） ==========
+
+// H.264
+REGISTER_TEST(mp4_decode_h264_128x128_30_main,
+              "H.264 128x128 30fps main profile",
+              test_mp4_decode_h264_128x128_30_main);
+REGISTER_TEST(mp4_decode_h264_320x240_30_high,
+              "H.264 320x240 30fps high profile",
+              test_mp4_decode_h264_320x240_30_high);
+REGISTER_TEST(mp4_decode_h264_640x480_30_main,
+              "H.264 640x480 30fps main profile",
+              test_mp4_decode_h264_640x480_30_main);
+REGISTER_TEST(mp4_decode_h264_640x480_60_high,
+              "H.264 640x480 60fps high profile",
+              test_mp4_decode_h264_640x480_60_high);
+REGISTER_TEST(mp4_decode_h264_1280x720_30_high,
+              "H.264 1280x720 30fps high profile",
+              test_mp4_decode_h264_1280x720_30_high);
+REGISTER_TEST(mp4_decode_h264_1920x1080_30_high,
+              "H.264 1920x1080 30fps high profile",
+              test_mp4_decode_h264_1920x1080_30_high);
+REGISTER_TEST(mp4_decode_h264_1920x1080_60_high,
+              "H.264 1920x1080 60fps high profile",
+              test_mp4_decode_h264_1920x1080_60_high);
+REGISTER_TEST(mp4_decode_h264_2560x1440_30_high,
+              "H.264 2560x1440 30fps high profile",
+              test_mp4_decode_h264_2560x1440_30_high);
+REGISTER_TEST(mp4_decode_h264_3840x2160_30_high,
+              "H.264 3840x2160 30fps high profile",
+              test_mp4_decode_h264_3840x2160_30_high);
+
+// H.265
+REGISTER_TEST(mp4_decode_h265_128x128_30_main,
+              "H.265 128x128 30fps main profile",
+              test_mp4_decode_h265_128x128_30_main);
+REGISTER_TEST(mp4_decode_h265_320x240_30_main,
+              "H.265 320x240 30fps main profile",
+              test_mp4_decode_h265_320x240_30_main);
+REGISTER_TEST(mp4_decode_h265_640x480_30_main,
+              "H.265 640x480 30fps main profile",
+              test_mp4_decode_h265_640x480_30_main);
+REGISTER_TEST(mp4_decode_h265_640x480_60_main,
+              "H.265 640x480 60fps main profile",
+              test_mp4_decode_h265_640x480_60_main);
+REGISTER_TEST(mp4_decode_h265_1280x720_30_main,
+              "H.265 1280x720 30fps main profile",
+              test_mp4_decode_h265_1280x720_30_main);
+REGISTER_TEST(mp4_decode_h265_1920x1080_30_main,
+              "H.265 1920x1080 30fps main profile",
+              test_mp4_decode_h265_1920x1080_30_main);
+REGISTER_TEST(mp4_decode_h265_1920x1080_60_main,
+              "H.265 1920x1080 60fps main profile",
+              test_mp4_decode_h265_1920x1080_60_main);
+REGISTER_TEST(mp4_decode_h265_2560x1440_30_main,
+              "H.265 2560x1440 30fps main profile",
+              test_mp4_decode_h265_2560x1440_30_main);
+REGISTER_TEST(mp4_decode_h265_3840x2160_30_main,
+              "H.265 3840x2160 30fps main profile",
+              test_mp4_decode_h265_3840x2160_30_main);
+
+// MJPEG
+REGISTER_TEST(mp4_decode_mjpeg_128x128_30, "MJPEG 128x128 30fps",
+              test_mp4_decode_mjpeg_128x128_30);
+REGISTER_TEST(mp4_decode_mjpeg_320x240_30, "MJPEG 320x240 30fps",
+              test_mp4_decode_mjpeg_320x240_30);
+REGISTER_TEST(mp4_decode_mjpeg_640x480_30, "MJPEG 640x480 30fps",
+              test_mp4_decode_mjpeg_640x480_30);
+REGISTER_TEST(mp4_decode_mjpeg_640x480_60, "MJPEG 640x480 60fps",
+              test_mp4_decode_mjpeg_640x480_60);
+REGISTER_TEST(mp4_decode_mjpeg_1280x720_30, "MJPEG 1280x720 30fps",
+              test_mp4_decode_mjpeg_1280x720_30);
+REGISTER_TEST(mp4_decode_mjpeg_1920x1080_30, "MJPEG 1920x1080 30fps",
+              test_mp4_decode_mjpeg_1920x1080_30);
+REGISTER_TEST(mp4_decode_mjpeg_1920x1080_60, "MJPEG 1920x1080 60fps",
+              test_mp4_decode_mjpeg_1920x1080_60);
+REGISTER_TEST(mp4_decode_mjpeg_2560x1440_30, "MJPEG 2560x1440 30fps",
+              test_mp4_decode_mjpeg_2560x1440_30);
+REGISTER_TEST(mp4_decode_mjpeg_3840x2160_30, "MJPEG 3840x2160 30fps",
+              test_mp4_decode_mjpeg_3840x2160_30);
+
+// 软件解码器测试用例
+REGISTER_TEST(mp4_decode_sw_h264_1920x1080_30,
+              "Software decoder H.264 1920x1080 30fps",
+              test_mp4_decode_sw_h264_1920x1080_30);
+REGISTER_TEST(mp4_decode_sw_h265_1920x1080_30,
+              "Software decoder H.265 1920x1080 30fps",
+              test_mp4_decode_sw_h265_1920x1080_30);
+
+// 通用测试用例（保持向后兼容）
+REGISTER_TEST(mp4_decode, "MP4 video decode test (auto-detect codec)",
+              test_mp4_decode);
+REGISTER_TEST(mp4_decode_h264, "MP4 video decode test (H264)",
+              test_mp4_decode_h264);
+REGISTER_TEST(mp4_decode_h265, "MP4 video decode test (H265/HEVC)",
+              test_mp4_decode_h265);
+REGISTER_TEST(mp4_decode_mjpeg, "MP4 video decode test (MJPEG)",
+              test_mp4_decode_mjpeg);
+
+/**
+ * @brief 信号处理函数（支持RTSP中断）
+ */
+static void signal_handler(int sig) {
+  g_running = false;
+  if (sig == SIGINT || sig == SIGTERM) {
+    g_rtsp_interrupted = true;
+    RtspPacketSource::requestInterrupt();
+    LOG_INFO("\n⚠️  收到中断信号，正在停止...");
+  }
 }
 
 /**
  * 主函数
  */
-int main(int argc, char* argv[]) {
-    // 初始化日志系统
-    INIT_LOGGER();
-    
-    // 注册信号处理
-    signal(SIGINT, signal_handler);
-    signal(SIGTERM, signal_handler);
-    
-    // 解析命令行参数
-    TestConfig config = parse_arguments(argc, argv);
-    
-    // 运行测试
-    int result = 0;
-    
-    if (config.auto_test) {
-        // 自动测试模式：执行所有测试用例
-        bool success = run_auto_tests(config);
-        result = success ? 0 : -1;
-    } else {
-        // 普通模式：执行单个测试
-        // 检查视频文件是否存在
-        if (!config.video_path) {
-            LOG_ERROR("❌ Video file not specified");
-            return 1;
-        }
-        
-        if (access(config.video_path, F_OK) != 0) {
-            LOG_ERROR_FMT("❌ Video file not found: %s", config.video_path);
-            return 1;
-        }
-        
-        LOG_INFO_FMT("✅ Video file exists: %s", config.video_path);
-        
-        // 运行测试
-        result = test_mp4_decode(config);
-    }
-    
-    // 输出最终结果
-    LOG_INFO("");
-    if (result == 0) {
-        LOG_INFO("╔═══════════════════════════════════════════════════════╗");
-        LOG_INFO("║  ✅ TEST PASSED                                        ║");
-        LOG_INFO("╚═══════════════════════════════════════════════════════╝");
-    } else {
-        LOG_INFO("╔═══════════════════════════════════════════════════════╗");
-        LOG_INFO("║  ❌ TEST FAILED                                        ║");
-        LOG_INFO("╚═══════════════════════════════════════════════════════╝");
-    }
-    
-    return result;
-}
+int main(int argc, char *argv[]) {
+  // 初始化日志系统
+  INIT_LOGGER();
 
+  // 注册信号处理（支持RTSP中断）
+  signal(SIGINT, signal_handler);
+  signal(SIGTERM, signal_handler);
+  g_rtsp_interrupted = false;
+  RtspPacketSource::clearInterrupt();
+
+  // 使用测试框架主函数
+  TEST_MAIN(argc, argv);
+}

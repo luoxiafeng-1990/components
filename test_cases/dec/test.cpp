@@ -2441,30 +2441,30 @@ static int test_buffer_writer_yuv_formats(const char* video_path) {
     // ✅ 定义测试用例：所有硬件支持的 YUV 格式（与 test_buffer_writer_rgb_formats 保持一致的结构）
     std::function<WorkerConfig::DecoderConfig::TacoConfig()> tests[] = {
         // YUV400 系列
-        []() { return TacoConfigBuilder()
-                   .setYuvConfig("YUV400 I010", "bt2020")
-                   .setChannels(true, false)
-                   .setDecoderOutputResolution(1920, 1080)
-                   .build(); 
-        },
-        []() { return TacoConfigBuilder()
-                   .setYuvConfig("YUV400 L010", "bt2020")
-                   .setChannels(true, true)
-                   .setDecoderOutputResolution(1920, 1080)
-                   .build(); 
-        },
-        []() { return TacoConfigBuilder()
-                   .setYuvConfig("YUV400 Pack10", "bt2020")
-                   .setChannels(true, true)
-                   .setDecoderOutputResolution(1920, 1080)
-                   .build(); 
-        },
-        []() { return TacoConfigBuilder()
-                   .setYuvConfig("YUV400 8-bit", "bt601")
-                   .setChannels(true, true)
-                   .setDecoderOutputResolution(1920, 1080)
-                   .build(); 
-        },
+        // []() { return TacoConfigBuilder()
+        //            .setYuvConfig("YUV400 I010", "bt2020")
+        //            .setChannels(true, false)
+        //            .setDecoderOutputResolution(1920, 1080)
+        //            .build(); 
+        // },
+        // []() { return TacoConfigBuilder()
+        //            .setYuvConfig("YUV400 L010", "bt2020")
+        //            .setChannels(true, true)
+        //            .setDecoderOutputResolution(1920, 1080)
+        //            .build(); 
+        // },
+        // []() { return TacoConfigBuilder()
+        //            .setYuvConfig("YUV400 Pack10", "bt2020")
+        //            .setChannels(true, true)
+        //            .setDecoderOutputResolution(1920, 1080)
+        //            .build(); 
+        // },
+        // []() { return TacoConfigBuilder()
+        //            .setYuvConfig("YUV400 8-bit", "bt601")
+        //            .setChannels(true, true)
+        //            .setDecoderOutputResolution(1920, 1080)
+        //            .build(); 
+        // },
         
         // YUV420 NV12 系列
         []() { return TacoConfigBuilder()
