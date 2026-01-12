@@ -125,10 +125,16 @@ static int test_play_rtsp_stream(const char* rtsp_url) {
     
     // 4. 配置 RTSP 流（注意：推荐单线程）
     LOG_INFO_FMT("Configuring RTSP stream: %s", rtsp_url);
+
+    auto tacoConfig = TacoConfigBuilder()
+        .setChannels(true, false)
+        .build();
+
     auto workerConfig = WorkerConfigBuilder()
         .setDataSourceConfig(
             DataSourceConfigBuilder()
                 .setPath(rtsp_url)
+                .setBufferCount(32)
                 .build()
         )
         .setDisplayConfig(
@@ -139,7 +145,7 @@ static int test_play_rtsp_stream(const char* rtsp_url) {
         )
         .setDecoderConfig(
             DecoderConfigBuilder()
-                .useTaco("h264")  // 使用 TACO 硬件解码器进行 H.264 RTSP 流解码
+                .useTaco("h264", tacoConfig)  // 使用 TACO 硬件解码器进行 H.264 RTSP 流解码
                 .build()
         )
         .setWorkerType(WorkerType::FFMPEG_RTSP)
@@ -193,7 +199,7 @@ static int test_play_rtsp_stream(const char* rtsp_url) {
         
         // 从工作BufferPool获取已解码的buffer（带物理地址）
         Buffer* decoded_buffer = producer_pool_sptr->acquireFilled(true, 100);
-        
+
         if (decoded_buffer == nullptr) {
             // 超时时检查生产者状态和中断标志
             if (g_rtsp_interrupted.load()) {
@@ -206,17 +212,35 @@ static int test_play_rtsp_stream(const char* rtsp_url) {
             }
             continue;  // 超时，继续等待
         }
-        
-        // ✨ 关键调用：display.displayBufferByDMA(buffer)
-        display.waitVerticalSync();
-        if (display.displayBufferByDMA(decoded_buffer)) {
-            dma_success++;
+
+        // ⭐⭐⭐ 严格按照 TACO config 消费：只消费配置中启用的通道 ⭐⭐⭐
+        int buffer_channel = decoded_buffer->getOutputChannel();
+        if (buffer_channel == 0 && tacoConfig.ch0_enable) {
+            // 通道 0 已启用：正常显示
+            // ✨ 关键调用：display.displayBufferByDMA(buffer)
+            display.waitVerticalSync();
+            if (display.displayBufferByDMA(decoded_buffer)) {
+                dma_success++;
+            } else {
+                dma_failed++;
+                LOG_WARN_FMT("DMA display failed for buffer (phys_addr=0x%llx)",
+                            (unsigned long long)decoded_buffer->getPhysicalAddress());
+            }
+        } else if (buffer_channel == 1 && tacoConfig.ch1_enable) {
+            // 通道 1 已启用：正常显示
+            display.waitVerticalSync();
+            if (display.displayBufferByDMA(decoded_buffer)) {
+                dma_success++;
+            } else {
+                dma_failed++;
+                LOG_WARN_FMT("DMA display failed for ch1 buffer (phys_addr=0x%llx)",
+                            (unsigned long long)decoded_buffer->getPhysicalAddress());
+            }
         } else {
-            dma_failed++;
-            LOG_WARN_FMT("DMA display failed for buffer (phys_addr=0x%llx)",
-                        (unsigned long long)decoded_buffer->getPhysicalAddress());
+            // 通道未启用：跳过显示
+            LOG_DEBUG_FMT("Skipping display of buffer from ch%d (not enabled in TACO config)", buffer_channel);
         }
-        
+
         // 归还 buffer（会触发 RtspVideoReader 的 deleter 回收 AVFrame）
         producer_pool_sptr->releaseFilled(decoded_buffer);
         
@@ -304,7 +328,7 @@ static int test_rtsp_record_stream(const char* rtsp_url) {
     
     LOG_INFO_FMT("Output file: %s\n", output_file);
     
-    const int duration_seconds = 10;
+    const int duration_seconds = 30;
     
     // ⭐ 创建定时器用于控制录制时长
     Timer recording_timer;
@@ -320,6 +344,7 @@ static int test_rtsp_record_stream(const char* rtsp_url) {
         .setDataSourceConfig(
             DataSourceConfigBuilder()
                 .setPath(rtsp_url)
+                .setBufferCount(32)
                 .build()
         )
         .setWorkerType(WorkerType::FFMPEG_PACKET_RECORDER)
@@ -536,6 +561,7 @@ static int test_file_record(const char* input_file) {
         .setDataSourceConfig(
             DataSourceConfigBuilder()
                 .setPath(input_file)
+                .setBufferCount(32)
                 .build()
         )
         .setWorkerType(WorkerType::FFMPEG_PACKET_RECORDER)
@@ -707,11 +733,16 @@ static int test_h264_taco_video(const char* video_path) {
     
     // 4. 配置 FFmpeg 解码
     LOG_INFO_FMT("[Test] 配置FFmpeg: %s", video_path);
-    
+
+    auto tacoConfig = TacoConfigBuilder()
+        .setChannels(true, false)
+        .build();
+
     auto workerConfig = WorkerConfigBuilder()
         .setDataSourceConfig(
             DataSourceConfigBuilder()
                 .setPath(video_path)
+                .setBufferCount(32)
                 .build()
         )
         .setDisplayConfig(
@@ -722,7 +753,7 @@ static int test_h264_taco_video(const char* video_path) {
         )
         .setDecoderConfig(
             DecoderConfigBuilder()
-                .useTaco("h264")  // 使用 TACO 硬件解码器进行 H.264 视频文件解码
+                .useTaco("h264", tacoConfig)  // 使用 TACO 硬件解码器进行 H.264 视频文件解码
                 .build()
         )
         .setWorkerType(WorkerType::FFMPEG_VIDEO_FILE)
@@ -772,7 +803,7 @@ static int test_h264_taco_video(const char* video_path) {
     while (g_running) {
         // 从工作BufferPool获取已解码的buffer
         Buffer* filled_buffer = producer_pool_sptr->acquireFilled(true, 100);
-        
+
         if (filled_buffer == nullptr) {
             // 超时时检查生产者状态
             if (!producer.isRunning()) {
@@ -781,22 +812,37 @@ static int test_h264_taco_video(const char* video_path) {
             }
             continue;  // 超时，继续等待
         }
-        
-        // 开始计时显示操作
-        if (display_monitor) {
-            display_monitor->beginTiming("display");
+
+        // ⭐⭐⭐ 严格按照 TACO config 消费：只消费配置中启用的通道 ⭐⭐⭐
+        int buffer_channel = filled_buffer->getOutputChannel();
+        if ((buffer_channel == 0 && tacoConfig.ch0_enable) ||
+            (buffer_channel == 1 && tacoConfig.ch1_enable)) {
+
+            // 通道已启用：正常显示
+            // 开始计时显示操作
+            if (display_monitor) {
+                display_monitor->beginTiming("display");
+            }
+
+            // 显示
+            display.waitVerticalSync();
+            // 零拷贝模式：使用 DMA 显示
+            if (!display.displayBufferByDMA(filled_buffer)) {
+                LOG_WARN("DMA display failed, falling back to normal");
+                display.displayFilledFramebuffer(filled_buffer);
+
+            }
+            // 归还 buffer
+            producer_pool_sptr->releaseFilled(filled_buffer);
+            if (display_monitor ) {
+                display_monitor->endTiming("display");
+            }
+            frame_count++;
+        } else {
+            // 通道未启用：跳过显示
+            LOG_DEBUG_FMT("Skipping display of buffer from ch%d (not enabled in TACO config)", buffer_channel);
+            producer_pool_sptr->releaseFilled(filled_buffer);
         }
-        
-        // 显示
-        display.waitVerticalSync();
-        // 零拷贝模式：使用 DMA 显示
-        if (!display.displayBufferByDMA(filled_buffer)) {
-            LOG_WARN("DMA display failed, falling back to normal");
-            display.displayFilledFramebuffer(filled_buffer);
-            
-        }
-        // 归还 buffer
-        producer_pool_sptr->releaseFilled(filled_buffer);
         if (display_monitor ) {
             display_monitor->endTiming("display");
         }
@@ -889,6 +935,7 @@ static int test_ffmpeg_software_decoder(const char* video_path) {
         .setDataSourceConfig(
             DataSourceConfigBuilder()
                 .setPath(video_path)
+                .setBufferCount(32)
                 .build()
         )
         .setDisplayConfig(
@@ -1110,10 +1157,15 @@ static void decode_production_line_worker(
     VideoProductionLine producer(true, 1);  // loop=true, thread_count=1
     
     // 2. 配置 FFmpeg 解码
+    auto tacoConfig = TacoConfigBuilder()
+        .setChannels(true, false)
+        .build();
+
     auto workerConfig = WorkerConfigBuilder()
         .setDataSourceConfig(
             DataSourceConfigBuilder()
                 .setPath(video_path)
+                .setBufferCount(32)
                 .build()
         )
         .setDisplayConfig(
@@ -1124,7 +1176,7 @@ static void decode_production_line_worker(
         )
         .setDecoderConfig(
             DecoderConfigBuilder()
-                .useTaco("h264")  // 使用 TACO 硬件解码器进行 H.264 视频文件解码
+                .useTaco("h264", tacoConfig)  // 使用 TACO 硬件解码器进行 H.264 视频文件解码
                 .build()
         )
         .setWorkerType(WorkerType::FFMPEG_VIDEO_FILE)
@@ -1173,22 +1225,34 @@ static void decode_production_line_worker(
     while (g_running) {
         // 从工作BufferPool获取已解码的buffer
         Buffer* filled_buffer = producer_pool_sptr->acquireFilled(true, 100);
-        
+
         if (filled_buffer == nullptr) {
             // 超时时检查生产者状态
             if (!producer.isRunning()) {
-                LOG_INFO_FMT("%sProducer stopped naturally, exiting decode loop...", 
+                LOG_INFO_FMT("%sProducer stopped naturally, exiting decode loop...",
                            thread_prefix.c_str());
                 break;
             }
             continue;  // 超时，继续等待
         }
-        
-        // 不显示，直接归还 buffer
-        producer_pool_sptr->releaseFilled(filled_buffer);
-        
-        frame_count++;
-        (*total_frames)++;
+
+        // ⭐⭐⭐ 严格按照 TACO config 消费：只消费配置中启用的通道 ⭐⭐⭐
+        int buffer_channel = filled_buffer->getOutputChannel();
+        if ((buffer_channel == 0 && tacoConfig.ch0_enable) ||
+            (buffer_channel == 1 && tacoConfig.ch1_enable)) {
+
+            // 通道已启用：正常消费
+            // 不显示，直接归还 buffer
+            producer_pool_sptr->releaseFilled(filled_buffer);
+
+            frame_count++;
+            (*total_frames)++;
+        } else {
+            // 通道未启用：跳过消费
+            LOG_DEBUG_FMT("%sSkipping buffer from ch%d (not enabled in TACO config)",
+                         thread_prefix.c_str(), buffer_channel);
+            producer_pool_sptr->releaseFilled(filled_buffer);
+        }
         
         // 每100帧打印一次统计
         if (frame_count % 100 == 0) {
@@ -1362,7 +1426,7 @@ static int test_buffer_writer_format(
         .setDataSourceConfig(
             DataSourceConfigBuilder()
                 .setPath(video_path)
-                .setBufferCount(16)
+                .setBufferCount(32)
                 .build()
         )
         .setDisplayConfig(
@@ -1564,17 +1628,18 @@ static int test_buffer_writer_format(
         if (buffer) {
             int buffer_channel = buffer->getOutputChannel();
             
-            // 根据通道号分发
-            if (buffer_channel == 0 && ch0_writer_created) {
-                // ⭐ 直接调用 write，格式验证在 BufferWriter 内部完成（需求4）
+            // ⭐⭐⭐ 严格按照 TACO config 消费：只消费配置中启用的通道 ⭐⭐⭐
+            // TACO config 决定了启用哪些通道，消费者必须严格遵守
+            if (buffer_channel == 0 && taco_config.ch0_enable && ch0_writer_created) {
+                // 通道 0 已启用且 writer 已创建：消费 ch0 数据
                 if (ch0_writer->write(buffer)) {
                     ch0_saved_count++;
                     if (ch0_saved_count % 10 == 0) {
                         LOG_INFO_FMT("  ch0: Saved %d frames", ch0_saved_count);
                     }
                 }
-            } else if (buffer_channel == 1 && ch1_writer_created) {
-                // ⭐ 直接调用 write，格式验证在 BufferWriter 内部完成（需求4）
+            } else if (buffer_channel == 1 && taco_config.ch1_enable && ch1_writer_created) {
+                // 通道 1 已启用且 writer 已创建：消费 ch1 数据
                 if (ch1_writer->write(buffer)) {
                     ch1_saved_count++;
                     if (ch1_saved_count % 10 == 0) {
@@ -1582,16 +1647,17 @@ static int test_buffer_writer_format(
                     }
                 }
             } else if (buffer_channel < 0) {
-                // 无通道信息（软件解码器等），尝试写入第一个可用的 writer
-                if (ch0_writer_created && ch0_writer->write(buffer)) {
+                // 无通道信息（软件解码器等）：尝试写入 TACO config 中启用的通道
+                if (taco_config.ch0_enable && ch0_writer_created && ch0_writer->write(buffer)) {
                     ch0_saved_count++;
-                } else if (ch1_writer_created && ch1_writer->write(buffer)) {
+                } else if (taco_config.ch1_enable && ch1_writer_created && ch1_writer->write(buffer)) {
                     ch1_saved_count++;
                 }
             } else {
+                // 通道不匹配或未启用：跳过
                 skipped_count++;
                 if (skipped_count % 50 == 1) {
-                    LOG_WARN_FMT("  ⚠️  Skipping frame from ch%d (total: %d)", 
+                    LOG_WARN_FMT("  ⚠️  Skipping frame from ch%d (not enabled in TACO config, total: %d)",
                                 buffer_channel, skipped_count);
                 }
             }
@@ -2142,6 +2208,7 @@ static int test_multi_worker(const char* rtsp_url) {
         .setDataSourceConfig(
             DataSourceConfigBuilder()
                 .setPath(rtsp_url)
+                .setBufferCount(32)
                 .build()
         )
         .setWorkerType(WorkerType::FFMPEG_PACKET_RECORDER)
@@ -2149,6 +2216,11 @@ static int test_multi_worker(const char* rtsp_url) {
     
     // 1.2 配置 Consumer Worker 1（硬件解码器）
     LOG_INFO("    Configuring Consumer Worker 1 (Hardware Decoder - h264_taco)...");
+
+    auto tacoConfig = TacoConfigBuilder()
+        .setChannels(true, false)
+        .build();
+
     auto consumer1_config = WorkerConfigBuilder()
         .setDisplayConfig(
             DisplayConfigBuilder()
@@ -2158,7 +2230,7 @@ static int test_multi_worker(const char* rtsp_url) {
         )
         .setDecoderConfig(
             DecoderConfigBuilder()
-                .useTaco("h264")  // 硬件解码器
+                .useTaco("h264", tacoConfig)  // 硬件解码器
                 .build()
         )
         .setWorkerType(WorkerType::FFMPEG_RTSP)  // 需要解码
@@ -2568,6 +2640,7 @@ static int test_rtsp_record_all_formats(const char* rtsp_url) {
             .setDataSourceConfig(
                 DataSourceConfigBuilder()
                     .setPath(rtsp_url)
+                    .setBufferCount(32)
                     .build()
             )
             .setWorkerType(WorkerType::FFMPEG_PACKET_RECORDER)
@@ -2738,12 +2811,215 @@ static int test_rtsp_record_all_formats(const char* rtsp_url) {
     return (failed_count == 0) ? 0 : -1;
 }
 
+/**
+ * MJPEG解码器测试帮助信息
+ */
+static void print_mjpeg_decoder_help() {
+    LOG_INFO("MJPEG Hardware Decoder Test Help:");
+    LOG_INFO("  This test decodes MJPEG video files using TACO hardware acceleration");
+    LOG_INFO("  and saves the decoded frames to a raw YUV file.");
+    LOG_INFO("");
+    LOG_INFO("  Usage: mjpeg_decoder <input_video> <output_file>");
+    LOG_INFO("    input_video: Path to MJPEG video file (.mjpeg, .avi, .mp4, etc.)");
+    LOG_INFO("    output_file: Path for output YUV file (.yuv)");
+    LOG_INFO("");
+    LOG_INFO("  Example:");
+    LOG_INFO("    mjpeg_decoder video.mjpeg output.yuv");
+    LOG_INFO("");
+    LOG_INFO("  Output file can be viewed with:");
+    LOG_INFO("    ffplay -f rawvideo -pix_fmt yuv420p -s 1920x1080 output.yuv");
+}
+
+/**
+ * 测试 MJPEG 解码器
+ * 从包含 MJPEG 帧的视频文件解码并保存到文件
+ */
+static int test_mjpeg_decoder(const std::vector<std::string>& args) {
+    if (args.size() < 2) {
+        LOG_ERROR("Usage: test_mjpeg_decoder <input_video> <output_file>");
+        LOG_ERROR("Example: test_mjpeg_decoder video.mjpeg output.yuv");
+        return -1;
+    }
+
+    const char* input_video = args[0].c_str();
+    const char* output_file = args[1].c_str();
+
+    LOG_INFO("═══════════════════════════════════════════════════════");
+    LOG_INFO("  MJPEG Hardware Decoder Test");
+    LOG_INFO("═══════════════════════════════════════════════════════");
+    LOG_INFO_FMT("  Input:  %s", input_video);
+    LOG_INFO_FMT("  Output: %s", output_file);
+
+    // 1. 创建 VideoProductionLine
+    LOG_INFO("[Test] Creating VideoProductionLine...");
+    VideoProductionLine producer(false, 1, false);
+
+    // 2. 配置 TACO MJPEG 硬件解码器
+    auto tacoConfig = TacoConfigBuilder()
+        .setReorderDisable(true)
+        .setChannels(true, false)
+        .build();
+
+    auto workerConfig = WorkerConfigBuilder()
+        .setDataSourceConfig(
+            DataSourceConfigBuilder()
+                .setPath(input_video)
+                .setBufferCount(32)
+                .build()
+        )
+        .setDecoderConfig(
+            DecoderConfigBuilder()
+                .useTaco("jpeg", tacoConfig)
+                .build()
+        )
+        .setWorkerType(WorkerType::FFMPEG_VIDEO_FILE)
+        .build();
+
+    // 3. 设置错误回调
+    producer.setErrorCallback([](const std::string& error) {
+        LOG_ERROR_FMT("MJPEG Decoder Error: %s", error.c_str());
+        g_running = false;
+    });
+
+    // 4. 启动生产者
+    LOG_INFO("[Test] Starting producer...");
+    if (!producer.start(workerConfig)) {
+        LOG_ERROR("Failed to start producer");
+        return -1;
+    }
+
+    // 5. 获取 Worker Facade 以访问输入源信息
+    auto worker_facade_sptr = producer.getWorkerFacade();
+    if (!worker_facade_sptr) {
+        LOG_ERROR("Failed to get WorkerFacade");
+        producer.stop();
+        return -1;
+    }
+
+    // ⭐⭐⭐ 从输入数据源获取原始信息 ⭐⭐⭐
+    int source_width = worker_facade_sptr->getSourceWidth();
+    int source_height = worker_facade_sptr->getSourceHeight();
+    AVPixelFormat source_format = worker_facade_sptr->getSourcePixelFormat();
+
+    LOG_INFO("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    LOG_INFO_FMT("  Input source resolution: %dx%d", source_width, source_height);
+    LOG_INFO_FMT("  Input source format: %s", av_get_pix_fmt_name(source_format));
+    LOG_INFO("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+
+    // 6. 获取工作 BufferPool
+    uint64_t producer_pool_id = producer.getWorkingBufferPoolId();
+    if (producer_pool_id == 0) {
+        LOG_ERROR("No working BufferPool ID available");
+        producer.stop();
+        return -1;
+    }
+
+    auto producer_pool_weak = BufferPoolRegistry::getInstance().getPool(producer_pool_id);
+    auto producer_pool_sptr = producer_pool_weak.lock();
+    if (!producer_pool_sptr) {
+        LOG_ERROR("BufferPool not found or destroyed");
+        producer.stop();
+        return -1;
+    }
+
+    LOG_INFO_FMT("[Test] Using BufferPool: '%s'", producer_pool_sptr->getName().c_str());
+
+    // 7. 创建输出文件写入器（使用实际的源分辨率）
+    LOG_INFO("[Test] Creating BufferWriter...");
+    productionline::io::BufferWriter writer;
+    if (!writer.openRaw(output_file, AV_PIX_FMT_YUV420P, source_width, source_height)) {
+        LOG_ERROR("Failed to create output writer");
+        producer.stop();
+        return -1;
+    }
+
+    // 8. 消费者循环：消费所有解码后的帧
+    LOG_INFO("[Test] Starting consumer loop...");
+
+    int frame_count = 0;
+    int timeout_count = 0;
+    const int MAX_TIMEOUT = 100;
+
+    while (g_running) {
+        Buffer* buffer = producer_pool_sptr->acquireFilled(true, 100);
+
+        if (buffer) {
+            // ⭐⭐⭐ 严格按照 TACO config 消费：只消费配置中启用的通道 ⭐⭐⭐
+            int buffer_channel = buffer->getOutputChannel();
+            if (buffer_channel == 0 && tacoConfig.ch0_enable) {
+                // 通道 0 已启用：保存帧数据
+                if (writer.write(buffer)) {
+                    frame_count++;
+                    if (frame_count % 10 == 0) {
+                        LOG_INFO_FMT("  Saved %d frames to %s", frame_count, output_file);
+                    }
+                } else {
+                    LOG_WARN("Failed to write frame to output file");
+                }
+            } else {
+                // 通道未启用或不匹配：跳过
+                LOG_DEBUG_FMT("Skipping frame from ch%d (not enabled in TACO config)", buffer_channel);
+            }
+
+            producer_pool_sptr->releaseFilled(buffer);
+            timeout_count = 0;
+        } else {
+            timeout_count++;
+            if (timeout_count >= MAX_TIMEOUT) {
+                LOG_INFO("\n[Test] Consumer timeout - producer may have finished");
+                break;
+            }
+
+            // 检查生产者状态
+            if (!producer.isRunning()) {
+                LOG_INFO("\n[Test] Producer stopped naturally");
+                break;
+            }
+        }
+    }
+
+    // 9. 清理资源
+    writer.close();
+    producer.stop();
+
+    // 10. 结果报告
+    LOG_INFO("\n═══════════════════════════════════════════════════════");
+    LOG_INFO("  Test Results");
+    LOG_INFO("═══════════════════════════════════════════════════════");
+
+    if (frame_count > 0) {
+        // 获取输出文件大小
+        FILE* f = fopen(output_file, "rb");
+        size_t file_size = 0;
+        if (f) {
+            fseek(f, 0, SEEK_END);
+            file_size = ftell(f);
+            fclose(f);
+        }
+
+        LOG_INFO("  ✅ SUCCESS");
+        LOG_INFO_FMT("     Frames saved: %d", frame_count);
+        LOG_INFO_FMT("     Output file:  %s", output_file);
+        LOG_INFO_FMT("     File size:    %.2f MB", file_size / (1024.0 * 1024.0));
+
+        LOG_INFO("\n  💡 Verify output with:");
+        LOG_INFO_FMT("     ffprobe -f rawvideo -pix_fmt yuv420p -s %dx%d %s", source_width, source_height, output_file);
+        LOG_INFO_FMT("     ffplay -f rawvideo -pix_fmt yuv420p -s %dx%d %s", source_width, source_height, output_file);
+
+        return 0;
+    } else {
+        LOG_ERROR("  ❌ FAILED - No frames were decoded/saved");
+        return -1;
+    }
+}
+
 // ========== 测试用例注册 ==========
 // 使用新的测试框架，自动注册所有测试用例
 REGISTER_TEST(rtsp_play, "RTSP stream playback (zero-copy, FFmpeg)", test_play_rtsp_stream);
 REGISTER_TEST(rtsp_record, "RTSP stream recording to MP4 (use env RTSP_OUTPUT_FILE to specify path)", test_rtsp_record_stream);
 REGISTER_TEST(file_record, "Local file recording/remux to MP4 (use env FILE_OUTPUT_FILE to specify path)", test_file_record);
 REGISTER_TEST(ffmpeg_hardware, "FFmpeg encoded video playback (MP4/AVI/MKV/etc)", test_h264_taco_video);
+REGISTER_TEST_MULTI_ARG(mjpeg_decoder, "MJPEG Hardware Decoder Test", "<input_video> <output_file>", test_mjpeg_decoder, print_mjpeg_decoder_help);
 REGISTER_TEST(ffmpeg_software, "FFmpeg software decoder (libavcodec, no hardware acceleration)", test_ffmpeg_software_decoder);
 REGISTER_TEST(ffmpeg_multithread, "Multi-threaded FFmpeg video decoding (no display, decode only)", test_h264_taco_video_multithread);
 REGISTER_TEST_MULTI_ARG(writer, "BufferWriter - Save frames (specify format)", "<format> <video_path>", test_buffer_writer, print_supported_formats);

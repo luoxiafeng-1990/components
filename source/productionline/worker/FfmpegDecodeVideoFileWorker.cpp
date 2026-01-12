@@ -184,13 +184,6 @@ bool FfmpegDecodeVideoFileWorker::open(const char* path) {
         packet_source_->close();
         return false;
     }
-    
-    // ✅ 从配置读取 buffer_count，如果未配置则使用默认值
-    int buffer_count = worker_config_.data_source.buffer_count;
-    if (buffer_count <= 0) {
-        buffer_count = 64;  // 默认值：文件解码建议 128 个 Buffer（应对慢速消费者）
-    }
-    
     // v2.0: allocatePoolWithBuffers 返回 pool_id
     std::string pool_name;
     if (path) {
@@ -201,7 +194,7 @@ bool FfmpegDecodeVideoFileWorker::open(const char* path) {
     }
     
     uint64_t pool_id = allocator_facade_.allocatePoolWithBuffers(
-        buffer_count,
+        worker_config_.data_source.buffer_count,
         frame_size,
         pool_name,
         "Video"
@@ -235,7 +228,7 @@ bool FfmpegDecodeVideoFileWorker::open(const char* path) {
     LOG_DEBUG_FMT("[Worker]    Codec: %s", codec_ctx_ptr_->codec->name);
     LOG_DEBUG_FMT("[Worker]    Total frames (estimated): %d", packet_source_ ? packet_source_->getTotalFrames() : -1);
     LOG_DEBUG_FMT("[Worker]    BufferPool: '%s' (ID: %lu, %d buffers, %zu bytes each)", 
-           actual_pool_name.c_str(), pool_id, buffer_count, frame_size);
+           actual_pool_name.c_str(), pool_id, worker_config_.data_source.buffer_count, frame_size);
     
     return true;
 }

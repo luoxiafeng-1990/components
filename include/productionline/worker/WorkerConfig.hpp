@@ -529,45 +529,6 @@ public:
     }
     
     // ========== 快捷预设 ==========
-    
-    /**
-     * @brief 预设：TACO 硬件解码（通用，支持多种编解码器）
-     * 
-     * 设置解码器为 TACO 平台的指定编解码器。
-     * TACO 是定制硬件解码器平台，支持多种视频编解码器。
-     * 
-     * @param codec 编解码器类型（如 "h264"、"h265"、"vp9" 等）
-     * 
-     * 示例：
-     * @code
-     * // H.264 解码
-     * DecoderConfigBuilder().useTaco("h264").build()
-     * 
-     * // H.265/HEVC 解码
-     * DecoderConfigBuilder().useTaco("h265").build()
-     * 
-     * // VP9 解码
-     * DecoderConfigBuilder().useTaco("vp9").build()
-     * @endcode
-     * 
-     * 生成的解码器名称格式为：{codec}_taco（如 "h264_taco"、"h265_taco"）
-     */
-    DecoderConfigBuilder& useTaco(std::string_view codec) {
-        // 拼接解码器名称：codec + "_taco"
-        decoder_config_.name = std::string(codec) + "_taco";
-        decoder_config_.enable_hardware = true;
-        
-        // 设置默认 taco 配置
-        decoder_config_.taco.reorder_disable = true;
-        decoder_config_.taco.ch0_enable = true;
-        decoder_config_.taco.ch1_enable = true;
-        decoder_config_.taco.ch1_rgb = true;
-        decoder_config_.taco.ch1_rgb_format = TacoConfigBuilder::mapRgbFormatNameToInt("argb888");  // 9
-        decoder_config_.taco.ch1_rgb_std = TacoConfigBuilder::mapRgbStdNameToInt("bt601");          // 1
-        
-        return *this;
-    }
-    
     /**
      * @brief 预设：TACO 硬件解码（通用，支持自定义配置）
      * 

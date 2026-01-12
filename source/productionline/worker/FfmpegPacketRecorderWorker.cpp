@@ -94,15 +94,9 @@ bool FfmpegPacketRecorderWorker::open(const char* path) {
         max_packet_size = 256 * 1024;  // 最小 256KB
     }
     
-    // ✅ 从配置读取 buffer_count，如果未配置则使用默认值
-    int buffer_count = worker_config_.data_source.buffer_count;
-    if (buffer_count <= 0) {
-        buffer_count = 64;  // 默认值：录制建议 64 个 Buffer
-    }
-    
     // 创建 BufferPool
     uint64_t pool_id = allocator_facade_.allocatePoolWithBuffers(
-        buffer_count,
+        worker_config_.data_source.buffer_count,
         max_packet_size,
         std::string("FfmpegPacketRecorderWorker_") + std::string(path),
         "PACKET_RECORD"
@@ -134,7 +128,7 @@ bool FfmpegPacketRecorderWorker::open(const char* path) {
     LOG_DEBUG_FMT("[Worker]    Codec: %s", avcodec_get_name(codecpar->codec_id));
     LOG_DEBUG_FMT("[Worker]    Resolution: %dx%d", codecpar->width, codecpar->height);
     LOG_DEBUG_FMT("[Worker]    BufferPool: '%s' (ID: %lu, %d buffers, %zu bytes each)", 
-           pool_name.c_str(), pool_id, buffer_count, max_packet_size);
+           pool_name.c_str(), pool_id, worker_config_.data_source.buffer_count, max_packet_size);
     
     return true;
 }

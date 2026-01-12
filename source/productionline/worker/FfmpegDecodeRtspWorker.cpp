@@ -44,11 +44,8 @@ FfmpegDecodeRtspWorker::~FfmpegDecodeRtspWorker() {
 // ============ IVideoReader 接口实现 ============
 
 bool FfmpegDecodeRtspWorker::open(const char* path) {
-    LOG_ERROR("[Worker] ❌ RTSP stream does not support single-parameter open()");
-    LOG_ERROR("[Worker]    RTSP requires display resolution and format configuration");
-    LOG_ERROR("[Worker]    Please configure WorkerConfig and use open() without parameters");
-    (void)path;  // 避免未使用参数警告
-    return false;
+    open();
+    return true;
 }
 
 bool FfmpegDecodeRtspWorker::open() {
@@ -123,15 +120,9 @@ bool FfmpegDecodeRtspWorker::open() {
         return false;
     }
     
-    // ✅ 从配置读取 buffer_count，如果未配置则使用默认值
-    int buffer_count = worker_config_.data_source.buffer_count;
-    if (buffer_count <= 0) {
-        buffer_count = 4;  // 默认值：RTSP 流建议 4-8 个 Buffer
-    }
-    
     // v2.0: allocatePoolWithBuffers 返回 pool_id
     uint64_t pool_id = allocator_facade_.allocatePoolWithBuffers(
-        buffer_count,
+        worker_config_.data_source.buffer_count,
         frame_size,
         std::string("FfmpegDecodeRtspWorker_") + std::string(rtsp_url),
         "RTSP"
@@ -162,7 +153,7 @@ bool FfmpegDecodeRtspWorker::open() {
     LOG_DEBUG_FMT("[Worker]    Resolution: %dx%d", output_width_, output_height_);
     LOG_DEBUG_FMT("[Worker]    Codec: %s", codec_ctx_ptr_->codec->name);
     LOG_DEBUG_FMT("[Worker]    BufferPool: '%s' (ID: %lu, %d buffers, %zu bytes each)", 
-           pool_name.c_str(), pool_id, buffer_count, frame_size);
+           pool_name.c_str(), pool_id, worker_config_.data_source.buffer_count, frame_size);
     
     return true;
 }
