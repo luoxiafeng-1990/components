@@ -291,122 +291,191 @@ packet->dts -= first_dts_offset_;
 
 ---
 
-### v2.15 - MultiWorkerProductionLine WorkerGroup 多组并行架构
-**发布日期：** 2025-01
+### v2.15 - MultiWorkerProductionLine WorkerGroup + Connector 多组并行架构（新）
+**发布日期：** 2025-01（本节已按最新实现修正）
 
 **主要变更：**
-- ✅ **WorkerGroup 概念**：引入"工作组"概念，支持多组独立并行
-  - 每组包含：1个生产者（Producer）+ N个消费者（Consumers）
-  - 配置结构：`WorkerGroup { group_id, producer_config, consumer_configs, sync_timeout_ms, ... }`
-- ✅ **组间并行架构**：每个 WorkerGroup 运行在独立线程中
-  - 组线程函数：`groupThreadFunc(WorkerGroupRuntime* group)`
-  - 组间完全独立，互不干扰
-  - 共享线程池：所有组共享 `BS::thread_pool` 执行消费者任务
-- ✅ **组内强同步机制**：使用 `CountDownLatch` 确保同步
-  - 一个 buffer 必须被组内所有消费者处理完成后才释放
-  - 避免 buffer 提前释放或内存泄漏
-  - 生产者 buffer 生命周期严格控制
-- ✅ **零拷贝直连**：消费者直接关联生产者的 BufferPool
-  - 消费者自动配置：`datasource_buffer_mode = true`
-  - 直接调用：`consumer->setSourceBufferPool(producer_buffer_pool_weak)`
-  - 避免中间拷贝，真正的零拷贝数据流
-- ✅ **配置驱动型设计**：灵活的配置系统
-  - 支持多组配置：`MultiWorkerConfig.groups = { group1, group2, ... }`
-  - 每组独立配置：超时时间、错误容忍、错误处理策略
-  - JSON/代码配置均可
+- ✅ **WorkerGroup 概念升级**：引入"工作组"概念，支持多组独立并行  
+  - 每组包含：**多个生产者（Producers）+ 多个消费者（Consumers）+ 多个 Connector**
+  - 配置结构与头文件一致：  
+    `struct WorkerGroup { std::string group_id; std::vector<ProducerConfig> producer_configs; std::vector<ConsumerConfig> consumer_configs; std::vector<ConnectorConfig> connector_configs; };`
+- ✅ **Connector 连接器**：显式描述生产者与消费者之间的绑定关系  
+  - 单一类 `Connector` + `Mode` 枚举：`ONE_TO_ONE / ONE_TO_MANY / MANY_TO_ONE / MANY_TO_MANY`  
+  - 配置结构：`ConnectorConfig { Connector::Mode mode; std::vector<std::string> producer_ids; std::vector<std::string> consumer_ids; }`  
+  - 运行时内部计算 `consumer_index -> producer_index` 映射，**仅负责路由，不负责数据**
+- ✅ **共享全局线程池**：所有组、所有消费者共用一份线程池  
+  - 使用 `GlobalThreadPool` 单例包装 `BS::thread_pool`  
+  - 线程池大小通过 `MultiWorkerConfig::thread_pool_size` 进行初始化配置  
+  - 各组内部通过 `CountDownLatch` 实现一次调度内的同步
+- ✅ **Buffer 模式数据源 + 零拷贝**  
+  - 生产者写入自身 `BufferPool`；消费者统一以 `datasource_buffer_mode` 从指定 `BufferPool` 取数  
+  - 通过 Connector 事先绑定好：**消费者只认 BufferPool，不直接感知具体生产者实现**  
+  - 避免中间拷贝，保持数据链路简洁
+- ✅ **配置驱动 + 严格校验**  
+  - `validateConfig()` 在 `start()` 前对每个 Group 做完整校验：  
+    - 每组必须至少 1 个 Producer + 1 个 Consumer  
+    - 每组必须至少 1 个 Connector  
+    - Connector 中引用的 `producer_ids` / `consumer_ids` 必须存在  
+    - 按 `Mode` 检查 1:1 / 1:N / N:1 的规模约束  
+    - 检查是否存在“未被任何 Connector 绑定”的 Producer / Consumer
 
 **设计原则：**
-- **组间独立**：每组独立线程，互不干扰
-- **组内同步**：强同步保证 buffer 生命周期安全
-- **零拷贝**：消费者直接读取生产者 BufferPool，避免中间拷贝
-- **配置灵活**：支持任意多组，每组独立配置
+- **组间独立**：每组有独立的 `GroupData` 与线程，互不干扰
+- **组内通过 Connector 建模关系**：不再在代码里硬编码“1 个 Producer + N 个 Consumer”的假设
+- **全局统一线程池**：线程资源集中管理，避免多实例、多组重复创建线程池
+- **统计下沉到数据源**：以 `BufferPool` 为统计主体（生产/消费/丢帧），生产线聚合展示
 
 **架构优势：**
-- **可扩展性**：支持任意多组，每组任意多消费者
-- **高性能**：组间并行+共享线程池，充分利用多核
-- **资源安全**：CountDownLatch 保证 buffer 生命周期安全
-- **易于维护**：配置驱动，易于动态调整
+- **可扩展性**：支持任意多组、每组任意多个生产者/消费者、多种连接关系
+- **高性能**：组间并行 + 全局线程池调度组内所有消费者任务
+- **资源安全**：`CountDownLatch` + BufferPool 生命周期控制，避免早释放/泄漏
+- **清晰观测性**：MultiWorker + Group + Producer/Consumer 多层级统计接口
 
-**使用示例：**
+**配置示例：**
 ```cpp
-// 示例1：单组配置（1个生产者 + 2个消费者）
-MultiWorkerProductionLine::WorkerGroup group;
-group.group_id = "group1";
-group.producer_config = record_config;  // RTSP 录制
-group.consumer_configs = {
-    decode_hw_config,  // 硬件解码器
-    decode_sw_config   // 软件解码器
-};
+// 示例1：单组配置（1 个 Producer + 2 个 Consumer，经典对比场景）
+MultiWorkerProductionLine::ProducerConfig producer;
+producer.producer_id = "record";
+producer.worker_config = record_config;  // RTSP 录制
+
+MultiWorkerProductionLine::ConsumerConfig hw;
+hw.consumer_id = "hw_decode";
+hw.worker_config = decode_hw_config;     // 硬件解码器
+
+MultiWorkerProductionLine::ConsumerConfig sw;
+sw.consumer_id = "sw_decode";
+sw.worker_config = decode_sw_config;     // 软件解码器
+
+MultiWorkerProductionLine::ConnectorConfig conn;
+conn.mode = Connector::Mode::ONE_TO_MANY;
+conn.producer_ids = { "record" };
+conn.consumer_ids = { "hw_decode", "sw_decode" };
+
+MultiWorkerProductionLine::WorkerGroup group("group1");
+group.producer_configs = { producer };
+group.consumer_configs = { hw, sw };
+group.connector_configs = { conn };
 
 MultiWorkerProductionLine::MultiWorkerConfig config;
+config.thread_pool_size = 4;  // 初始化全局线程池大小
 config.groups.push_back(group);
 
 MultiWorkerProductionLine pipeline(config);
 pipeline.start();
+```
 
-// 示例2：多组配置（组间并行）
-MultiWorkerProductionLine::WorkerGroup group1, group2;
+```cpp
+// 示例2：多组配置 + 多 Producer 场景（组间并行）
+MultiWorkerProductionLine::WorkerGroup group1("compare_test");
+{
+    // 组1：RTSP 录制 → 硬件解码 + 软件解码（对比测试）
+    MultiWorkerProductionLine::ProducerConfig p;
+    p.producer_id = "rtsp_record";
+    p.worker_config = rtsp_record_config;
 
-// 组1：RTSP录制 → 硬件解码 + 软件解码（对比测试）
-group1.group_id = "compare_test";
-group1.producer_config = rtsp_record_config;
-group1.consumer_configs = { hw_decode_config, sw_decode_config };
+    MultiWorkerProductionLine::ConsumerConfig hw_dec;
+    hw_dec.consumer_id = "hw";
+    hw_dec.worker_config = hw_decode_config;
 
-// 组2：文件解码 → 多路缩放（多分辨率输出）
-group2.group_id = "multi_resolution";
-group2.producer_config = file_decode_config;
-group2.consumer_configs = { 
-    scale_720p_config, 
-    scale_1080p_config, 
-    scale_4k_config 
-};
+    MultiWorkerProductionLine::ConsumerConfig sw_dec;
+    sw_dec.consumer_id = "sw";
+    sw_dec.worker_config = sw_decode_config;
+
+    MultiWorkerProductionLine::ConnectorConfig c;
+    c.mode = Connector::Mode::ONE_TO_MANY;
+    c.producer_ids = { "rtsp_record" };
+    c.consumer_ids = { "hw", "sw" };
+
+    group1.producer_configs = { p };
+    group1.consumer_configs = { hw_dec, sw_dec };
+    group1.connector_configs = { c };
+}
+
+MultiWorkerProductionLine::WorkerGroup group2("multi_resolution");
+{
+    // 组2：文件解码 → 多路缩放（多分辨率输出）
+    MultiWorkerProductionLine::ProducerConfig p;
+    p.producer_id = "file_decode";
+    p.worker_config = file_decode_config;
+
+    MultiWorkerProductionLine::ConsumerConfig c720;
+    c720.consumer_id = "scale_720p";
+    c720.worker_config = scale_720p_config;
+
+    MultiWorkerProductionLine::ConsumerConfig c1080;
+    c1080.consumer_id = "scale_1080p";
+    c1080.worker_config = scale_1080p_config;
+
+    MultiWorkerProductionLine::ConsumerConfig c4k;
+    c4k.consumer_id = "scale_4k";
+    c4k.worker_config = scale_4k_config;
+
+    MultiWorkerProductionLine::ConnectorConfig c;
+    c.mode = Connector::Mode::ONE_TO_MANY;
+    c.producer_ids = { "file_decode" };
+    c.consumer_ids = { "scale_720p", "scale_1080p", "scale_4k" };
+
+    group2.producer_configs = { p };
+    group2.consumer_configs = { c720, c1080, c4k };
+    group2.connector_configs = { c };
+}
 
 MultiWorkerProductionLine::MultiWorkerConfig config;
+config.thread_pool_size = 8;
 config.groups = { group1, group2 };
 
-// 组1和组2并行执行，互不干扰
+// 组1和组2并行执行，互不干扰；共享同一个全局线程池
 MultiWorkerProductionLine pipeline(config);
 pipeline.start();
+```
 
-// 示例3：访问组内 BufferPool
-// 获取组0的生产者 BufferPool ID
-int producer_pool_id = pipeline.getGroupProducerBufferPoolId(0);
+```cpp
+// 示例3：访问组内 BufferPool（兼容多 Producer 的查询语义）
+// 当前接口语义：getGroupProducerBufferPoolId 默认返回该组“第一个 Producer”的 BufferPool
+uint64_t producer_pool_id = pipeline.getGroupProducerBufferPoolId(0);
 
-// 获取组0的第1个消费者 BufferPool ID
-int consumer_pool_id = pipeline.getGroupConsumerBufferPoolId(0, 1);
+// 获取组 0 的第 1 个 Consumer 的 BufferPool ID
+uint64_t consumer_pool_id = pipeline.getGroupConsumerBufferPoolId(0, 1);
 
 BufferPoolRegistry& registry = BufferPoolRegistry::getInstance();
 auto producer_pool = registry.getBufferPool(producer_pool_id);
 auto consumer_pool = registry.getBufferPool(consumer_pool_id);
 ```
 
-**核心流程图**：
+**核心运行时结构：**
 ```
 MultiWorkerProductionLine
   ├─ WorkerGroup 1 (独立线程)
-  │   ├─ Producer: RTSP录制 → BufferPool
-  │   └─ Consumers:
-  │       ├─ Consumer 1: 硬件解码 (从 BufferPool 读取)
-  │       └─ Consumer 2: 软件解码 (从 BufferPool 读取)
-  │   └─ CountDownLatch (等待所有消费者完成后释放 buffer)
+  │   ├─ Producers:
+  │   │    ├─ P0: rtsp_record      → BufferPool(P0)
+  │   │    └─ P1: ...（可选）
+  │   ├─ Consumers:
+  │   │    ├─ C0: hw_decode        (datasource=BufferPool(P0))
+  │   │    └─ C1: sw_decode        (datasource=BufferPool(P0))
+  │   ├─ Connectors:
+  │   │    └─ ONE_TO_MANY: {P0} → {C0, C1}
+  │   └─ CountDownLatch + 全局线程池任务调度
   │
   ├─ WorkerGroup 2 (独立线程)
-  │   ├─ Producer: 文件解码 → BufferPool
-  │   └─ Consumers:
-  │       ├─ Consumer 1: 720p缩放
-  │       ├─ Consumer 2: 1080p缩放
-  │       └─ Consumer 3: 4K缩放
-  │   └─ CountDownLatch (等待所有消费者完成后释放 buffer)
+  │   ├─ Producers:
+  │   │    └─ P0: file_decode      → BufferPool(P0)
+  │   ├─ Consumers:
+  │   │    ├─ C0: scale_720p       (datasource=BufferPool(P0))
+  │   │    ├─ C1: scale_1080p      (datasource=BufferPool(P0))
+  │   │    └─ C2: scale_4k         (datasource=BufferPool(P0))
+  │   ├─ Connectors:
+  │   │    └─ ONE_TO_MANY: {P0} → {C0, C1, C2}
+  │   └─ CountDownLatch + 全局线程池任务调度
   │
-  └─ 共享线程池 (BS::thread_pool)
-      └─ 所有消费者任务在线程池中执行
+  └─ GlobalThreadPool (BS::thread_pool)
+       └─ 所有 Group 的消费者任务在线程池中执行
 ```
 
 **典型应用场景：**
-1. **对比测试**：硬件解码 vs 软件解码性能对比
-2. **多路输出**：同一视频输出多种分辨率/格式
-3. **实时处理**：实时流 → AI推理 + 显示 + 存储
-4. **批量处理**：多个视频文件同时处理，互不干扰
+1. **对比测试**：硬件解码 vs 软件解码性能对比（单 Producer + 多 Consumer，ONE_TO_MANY）
+2. **多路输出**：同一视频输出多种分辨率/格式（单 Producer + 多 Consumer，ONE_TO_MANY）
+3. **多路输入聚合**：多个 Producer 统一喂给一个 Consumer（MANY_TO_ONE / MANY_TO_MANY）
+4. **实时处理流水线**：实时流 → 多路 AI 推理 + 显示 + 存储，多组解耦运行
 
 ---
 
