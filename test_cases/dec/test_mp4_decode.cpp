@@ -161,26 +161,27 @@ bool validate_psnr_streaming(const char *source_video, int width, int height,
   // 1.1 配置硬件解码器
   VideoProductionLine hw_producer(false, 1);
   DecoderConfigBuilder hw_decoderConfigBuilder;
+  // ⭐ 参考 test.cpp 的 test_buffer_writer_format：保存YUV文件时需要传入 TacoConfig
+  // 构建 TacoConfig，确保 YUV 格式正确配置（与 test_buffer_writer_yuv_formats 一致）
+  auto tacoConfig =
+      TacoConfigBuilder()
+          .setYuvConfig("YUV420 8-bit NV12", "bt601")  // ⭐ 明确设置 YUV 格式（与 test.cpp 一致）
+          .setChannels(true, false)                     // ⭐ 只启用 ch0，禁用 ch1（确保 PP0 输出 YUV）
+          .setDecoderOutputResolution(width, height)     // ⭐ 设置输出分辨率（与 test.cpp 一致，可能影响UV平面访问）
+          .build();
+  
   if (decoder_name && decoder_name[0] != '\0') {
     std::string dname(decoder_name);
     if (dname == "h264_taco") {
-      auto tacoConfig = TacoConfigBuilder()
-                            .setRgbConfig(false, "", "bt601")
-                            .setDecoderOutputResolution(width, height)
-                            .build();
-      hw_decoderConfigBuilder.useTaco("h264", tacoConfig);
+      hw_decoderConfigBuilder.useTaco("h264", tacoConfig);  // ⭐ 传入 TacoConfig 以确保 YUV 格式正确
     } else if (dname == "hevc_taco") {
-      auto tacoConfig = TacoConfigBuilder()
-                            .setRgbConfig(false, "", "bt601")
-                            .setDecoderOutputResolution(width, height)
-                            .build();
-      hw_decoderConfigBuilder.useTaco("hevc", tacoConfig);
+      hw_decoderConfigBuilder.useTaco("hevc", tacoConfig);  // ⭐ 传入 TacoConfig 以确保 YUV 格式正确
     } else if (dname == "jpeg_taco") {
-      hw_decoderConfigBuilder.useTaco("jpeg");
+      hw_decoderConfigBuilder.useTaco("jpeg", tacoConfig);  // ⭐ 传入 TacoConfig 以确保 YUV 格式正确
     } else {
       if (dname.length() > 5 && dname.substr(dname.length() - 5) == "_taco") {
         std::string codec = dname.substr(0, dname.length() - 5);
-        hw_decoderConfigBuilder.useTaco(codec);
+        hw_decoderConfigBuilder.useTaco(codec, tacoConfig);  // ⭐ 传入 TacoConfig 以确保 YUV 格式正确
       } else {
         hw_decoderConfigBuilder.setDecoderName(decoder_name);
       }
@@ -406,45 +407,16 @@ bool validate_psnr_streaming(const char *source_video, int width, int height,
   LOG_INFO("\n[Step 5] Comparing first frame (frame 0)...");
   LOG_INFO("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
 
-  LOG_DEBUG_FMT(
-      "[PSNR] Comparing frame 0 (first frame) - sw_buffer=%p, hw_buffer=%p",
-      first_sw_buf, first_hw_buf);
-
-  if (first_sw_buf->hasImageMetadata()) {
-    LOG_DEBUG_FMT("[PSNR] Software buffer: format=%s, size=%dx%d",
-                  av_get_pix_fmt_name(first_sw_buf->getImageFormat()),
-                  first_sw_buf->getImageWidth(),
-                  first_sw_buf->getImageHeight());
-  }
-  if (first_hw_buf->hasImageMetadata()) {
-    LOG_DEBUG_FMT("[PSNR] Hardware buffer: format=%s, size=%dx%d",
-                  av_get_pix_fmt_name(first_hw_buf->getImageFormat()),
-                  first_hw_buf->getImageWidth(),
-                  first_hw_buf->getImageHeight());
-  }
+  // Reduced debug output for PSNR calculation
 
   FrameCompareResult first_result =
       comparator.compare(first_sw_buf, first_hw_buf);
 
-  LOG_INFO_FMT("  [Frame 0] PSNR: Y=%.2f U=%.2f V=%.2f dB (avg=%.2f dB)",
-               first_result.psnr_y, first_result.psnr_u, first_result.psnr_v,
-               first_result.psnr_avg);
-  LOG_INFO_FMT(
-      "  [Frame 0] Status: %s | Level: %s",
-      first_result.passed
-          ? "PASS"
-          : (first_result.level == FrameCompareResult::WARN ? "WARN" : "FAIL"),
-      first_result.level == FrameCompareResult::FAIL
-          ? "FAIL"
-          : (first_result.level == FrameCompareResult::WARN ? "WARN" : "PASS"));
-
-  if (first_result.passed) {
-    LOG_INFO_FMT("  ✅ Frame 0: PASS (PSNR-Y: %.2f dB)", first_result.psnr_y);
-  } else {
-    LOG_WARN_FMT("  ⚠️  Frame 0: %s (PSNR-Y: %.2f dB)",
-                 first_result.level == FrameCompareResult::FAIL ? "FAIL"
-                                                                : "WARN",
-                 first_result.psnr_y);
+  // ⭐ 简化第一帧输出：只在失败时输出
+  if (!first_result.passed) {
+    LOG_WARN_FMT("  Frame 0: PSNR-Y=%.2f dB %s",
+                 first_result.psnr_y,
+                 first_result.level == FrameCompareResult::FAIL ? "❌" : "⚠️");
   }
 
   // 释放第一帧
@@ -476,9 +448,6 @@ bool validate_psnr_streaming(const char *source_video, int width, int height,
     psnr_u_values.push_back(first_result.psnr_u);
     psnr_v_values.push_back(first_result.psnr_v);
     psnr_avg_values.push_back(first_result.psnr_avg);
-    LOG_DEBUG_FMT("[PSNR] Recorded frame 0 PSNR: Y=%.2f U=%.2f V=%.2f avg=%.2f",
-                  first_result.psnr_y, first_result.psnr_u, first_result.psnr_v,
-                  first_result.psnr_avg);
   }
 
   LOG_INFO_FMT(
@@ -495,15 +464,9 @@ bool validate_psnr_streaming(const char *source_video, int width, int height,
     // ⭐ RTSP流：使用更长的超时时间（5秒），文件流使用1秒
     int timeout_ms = is_rtsp ? 5000 : 1000;
 
-    LOG_DEBUG_FMT("[PSNR] Attempting to acquire frame %d (timeout=%dms)",
-                  frame_count, timeout_ms);
-
     // 同时获取硬件和软件解码的 Buffer
     Buffer *sw_buffer = sw_pool->acquireFilled(true, timeout_ms);
     Buffer *hw_buffer = hw_pool->acquireFilled(true, timeout_ms);
-
-    LOG_DEBUG_FMT("[PSNR] Acquired buffers: sw=%p, hw=%p", sw_buffer,
-                  hw_buffer);
 
     if (!sw_buffer || !hw_buffer) {
       // ⭐ RTSP流：检查中断标志
@@ -574,9 +537,6 @@ bool validate_psnr_streaming(const char *source_video, int width, int height,
 
     // ⭐ 关键调用：使用 BufferComparator 对比两个 Buffer
     // 注意：对于RTSP流，两个解码器都从同一个流读取，帧序列应该是对齐的
-    LOG_DEBUG_FMT("[PSNR] Comparing frame %d (sw_buffer=%p, hw_buffer=%p)",
-                  frame_count, sw_buffer, hw_buffer);
-
     FrameCompareResult result = comparator.compare(sw_buffer, hw_buffer);
 
     // ⭐ 记录PSNR值（用于统计）
@@ -585,17 +545,6 @@ bool validate_psnr_streaming(const char *source_video, int width, int height,
       psnr_u_values.push_back(result.psnr_u);
       psnr_v_values.push_back(result.psnr_v);
       psnr_avg_values.push_back(result.psnr_avg);
-
-      LOG_DEBUG_FMT("[PSNR] Frame %d: Y=%.2f U=%.2f V=%.2f dB (avg=%.2f dB) | "
-                    "passed=%d level=%d",
-                    frame_count, result.psnr_y, result.psnr_u, result.psnr_v,
-                    result.psnr_avg, result.passed ? 1 : 0,
-                    result.level == FrameCompareResult::FAIL
-                        ? 2
-                        : (result.level == FrameCompareResult::WARN ? 1 : 0));
-    } else {
-      LOG_WARN_FMT("[PSNR] Frame %d: Invalid PSNR values (Y=%.2f)", frame_count,
-                   result.psnr_y);
     }
 
     // 释放Buffer
@@ -604,72 +553,24 @@ bool validate_psnr_streaming(const char *source_video, int width, int height,
 
     frame_count++;
 
-    // 每50帧打印一次进度
-    if (frame_count % 50 == 0) {
-      double avg_psnr_y   = psnr_y_values.empty()
-                                ? 0.0
-                                : std::accumulate(psnr_y_values.begin(),
-                                                  psnr_y_values.end(), 0.0) /
+    // ⭐ 简化输出：只在失败时输出，或每100帧输出一次进度
+    if (!result.passed && result.psnr_y > 0.0) {
+      // 失败帧：输出详细信息
+      LOG_WARN_FMT("  Frame %3d: PSNR-Y=%.2f dB %s",
+                   frame_count, result.psnr_y,
+                   result.level == FrameCompareResult::FAIL ? "❌ FAIL" : "⚠️ WARN");
+    } else if (frame_count % 100 == 0) {
+      // 每100帧：输出进度统计
+      double avg_psnr_y = psnr_y_values.empty()
+                              ? 0.0
+                              : std::accumulate(psnr_y_values.begin(),
+                                                psnr_y_values.end(), 0.0) /
                                     psnr_y_values.size();
-      double avg_psnr_u   = psnr_u_values.empty()
-                                ? 0.0
-                                : std::accumulate(psnr_u_values.begin(),
-                                                  psnr_u_values.end(), 0.0) /
-                                    psnr_u_values.size();
-      double avg_psnr_v   = psnr_v_values.empty()
-                                ? 0.0
-                                : std::accumulate(psnr_v_values.begin(),
-                                                  psnr_v_values.end(), 0.0) /
-                                    psnr_v_values.size();
-      double avg_psnr_avg = psnr_avg_values.empty()
-                                ? 0.0
-                                : std::accumulate(psnr_avg_values.begin(),
-                                                  psnr_avg_values.end(), 0.0) /
-                                      psnr_avg_values.size();
 
-      // 计算当前批次的统计（最近50帧）
-      int recent_start    = std::max(0, (int)psnr_y_values.size() - 50);
-      double recent_avg_y = 0.0;
-      if (recent_start < (int)psnr_y_values.size()) {
-        recent_avg_y = std::accumulate(psnr_y_values.begin() + recent_start,
-                                       psnr_y_values.end(), 0.0) /
-                       (psnr_y_values.size() - recent_start);
-      }
-
-      LOG_INFO_FMT(
-          "  Progress: %d/%d frames | PSNR-Y=%.2f U=%.2f V=%.2f dB (avg=%.2f "
-          "dB) | Recent-50: Y=%.2f dB | Passed: %d, Warned: %d, Failed: %d",
-          frame_count, MAX_FRAMES, avg_psnr_y, avg_psnr_u, avg_psnr_v,
-          avg_psnr_avg, recent_avg_y, comparator.getPassedCount(),
-          comparator.getCompareCount() - comparator.getPassedCount() -
-              comparator.getFailedCount(),
-          comparator.getFailedCount());
-    }
-
-    // 每10帧打印一次当前帧的PSNR（前50帧详细模式）
-    if (frame_count <= 50 && frame_count % 10 == 0) {
-      LOG_INFO_FMT(
-          "  Frame %3d: PSNR Y=%.2f U=%.2f V=%.2f dB (avg=%.2f dB) %s",
-          frame_count, result.psnr_y, result.psnr_u, result.psnr_v,
-          result.psnr_avg,
-          result.passed
-              ? "✅"
-              : (result.level == FrameCompareResult::WARN ? "⚠️" : "❌"));
-    }
-
-    // 每帧打印PSNR（前10帧详细模式）
-    if (frame_count <= 10) {
-      LOG_INFO_FMT(
-          "  [Frame %3d] PSNR: Y=%.2f U=%.2f V=%.2f dB (avg=%.2f dB) | Status: "
-          "%s | Level: %s",
-          frame_count, result.psnr_y, result.psnr_u, result.psnr_v,
-          result.psnr_avg,
-          result.passed
-              ? "PASS"
-              : (result.level == FrameCompareResult::WARN ? "WARN" : "FAIL"),
-          result.level == FrameCompareResult::FAIL
-              ? "FAIL"
-              : (result.level == FrameCompareResult::WARN ? "WARN" : "PASS"));
+      LOG_INFO_FMT("  Progress: %d/%d frames | Avg PSNR-Y=%.2f dB | "
+                   "Passed: %d, Failed: %d",
+                   frame_count, MAX_FRAMES, avg_psnr_y,
+                   comparator.getPassedCount(), comparator.getFailedCount());
     }
   }
 
@@ -717,118 +618,36 @@ bool validate_psnr_streaming(const char *source_video, int width, int height,
   comparator.printSummary();
   LOG_INFO("═══════════════════════════════════════════════════════\n");
 
-  // ⭐ 打印详细的PSNR统计
+  // ⭐ 打印简化的PSNR统计
   if (!psnr_y_values.empty()) {
-    LOG_INFO_FMT("  Calculating PSNR statistics from %zu frames...",
-                 psnr_y_values.size());
-
     // 计算平均值
     double avg_psnr_y =
         std::accumulate(psnr_y_values.begin(), psnr_y_values.end(), 0.0) /
         psnr_y_values.size();
-    double avg_psnr_u =
-        std::accumulate(psnr_u_values.begin(), psnr_u_values.end(), 0.0) /
-        psnr_u_values.size();
-    double avg_psnr_v =
-        std::accumulate(psnr_v_values.begin(), psnr_v_values.end(), 0.0) /
-        psnr_v_values.size();
     double avg_psnr_avg =
         std::accumulate(psnr_avg_values.begin(), psnr_avg_values.end(), 0.0) /
         psnr_avg_values.size();
 
-    LOG_DEBUG_FMT("[PSNR] Calculated averages: Y=%.2f U=%.2f V=%.2f avg=%.2f",
-                  avg_psnr_y, avg_psnr_u, avg_psnr_v, avg_psnr_avg);
-
     // 计算最小值和最大值
     auto minmax_y =
         std::minmax_element(psnr_y_values.begin(), psnr_y_values.end());
-    auto minmax_u =
-        std::minmax_element(psnr_u_values.begin(), psnr_u_values.end());
-    auto minmax_v =
-        std::minmax_element(psnr_v_values.begin(), psnr_v_values.end());
     auto minmax_avg =
         std::minmax_element(psnr_avg_values.begin(), psnr_avg_values.end());
 
     double min_psnr_y   = *minmax_y.first;
     double max_psnr_y   = *minmax_y.second;
-    double min_psnr_u   = *minmax_u.first;
-    double max_psnr_u   = *minmax_u.second;
-    double min_psnr_v   = *minmax_v.first;
-    double max_psnr_v   = *minmax_v.second;
     double min_psnr_avg = *minmax_avg.first;
     double max_psnr_avg = *minmax_avg.second;
 
-    LOG_DEBUG_FMT("[PSNR] Min/Max Y: [%.2f, %.2f] U: [%.2f, %.2f] V: [%.2f, "
-                  "%.2f] Avg: [%.2f, %.2f]",
-                  min_psnr_y, max_psnr_y, min_psnr_u, max_psnr_u, min_psnr_v,
-                  max_psnr_v, min_psnr_avg, max_psnr_avg);
-
-    // 计算标准差
-    double variance_y   = 0.0;
-    double variance_u   = 0.0;
-    double variance_v   = 0.0;
-    double variance_avg = 0.0;
-    for (size_t i = 0; i < psnr_y_values.size(); i++) {
-      variance_y +=
-          (psnr_y_values[i] - avg_psnr_y) * (psnr_y_values[i] - avg_psnr_y);
-      variance_u +=
-          (psnr_u_values[i] - avg_psnr_u) * (psnr_u_values[i] - avg_psnr_u);
-      variance_v +=
-          (psnr_v_values[i] - avg_psnr_v) * (psnr_v_values[i] - avg_psnr_v);
-      variance_avg += (psnr_avg_values[i] - avg_psnr_avg) *
-                      (psnr_avg_values[i] - avg_psnr_avg);
-    }
-    double stddev_y   = std::sqrt(variance_y / psnr_y_values.size());
-    double stddev_u   = std::sqrt(variance_u / psnr_u_values.size());
-    double stddev_v   = std::sqrt(variance_v / psnr_v_values.size());
-    double stddev_avg = std::sqrt(variance_avg / psnr_avg_values.size());
-
-    LOG_DEBUG_FMT("[PSNR] Standard deviations: Y=%.2f U=%.2f V=%.2f avg=%.2f",
-                  stddev_y, stddev_u, stddev_v, stddev_avg);
-
-    // 统计不同质量区间的帧数
-    int excellent_count = 0, good_count = 0, poor_count = 0;
-    for (double val : psnr_avg_values) {
-      if (val >= 38.0)
-        excellent_count++;
-      else if (val >= 35.0)
-        good_count++;
-      else
-        poor_count++;
-    }
-
     LOG_INFO("  PSNR Statistics (Hardware vs Software):");
     LOG_INFO_FMT("    Total frames analyzed: %zu", psnr_y_values.size());
-    LOG_INFO_FMT("    Average: Y=%.2f U=%.2f V=%.2f dB (avg=%.2f dB)",
-                 avg_psnr_y, avg_psnr_u, avg_psnr_v, avg_psnr_avg);
-    LOG_INFO_FMT("    Range Y:  [%.2f, %.2f] dB (stddev=%.2f)", min_psnr_y,
-                 max_psnr_y, stddev_y);
-    LOG_INFO_FMT("    Range U:  [%.2f, %.2f] dB (stddev=%.2f)", min_psnr_u,
-                 max_psnr_u, stddev_u);
-    LOG_INFO_FMT("    Range V:  [%.2f, %.2f] dB (stddev=%.2f)", min_psnr_v,
-                 max_psnr_v, stddev_v);
-    LOG_INFO_FMT("    Range Avg: [%.2f, %.2f] dB (stddev=%.2f)", min_psnr_avg,
-                 max_psnr_avg, stddev_avg);
-    LOG_INFO("");
-    LOG_INFO("  Quality Distribution (by PSNR-avg):");
-    LOG_INFO_FMT("    Excellent (>=38dB): %d frames (%.1f%%)", excellent_count,
-                 100.0 * excellent_count / psnr_avg_values.size());
-    LOG_INFO_FMT("    Good (35-38dB):     %d frames (%.1f%%)", good_count,
-                 100.0 * good_count / psnr_avg_values.size());
-    LOG_INFO_FMT("    Poor (<35dB):       %d frames (%.1f%%)", poor_count,
-                 100.0 * poor_count / psnr_avg_values.size());
+    LOG_INFO_FMT("    Average: Y=%.2f dB (avg=%.2f dB)", avg_psnr_y, avg_psnr_avg);
+    LOG_INFO_FMT("    Range Y:  [%.2f, %.2f] dB", min_psnr_y, max_psnr_y);
+    LOG_INFO_FMT("    Range Avg: [%.2f, %.2f] dB", min_psnr_avg, max_psnr_avg);
     LOG_INFO("");
     LOG_INFO("  Quality Assessment (by Comparator):");
     LOG_INFO_FMT("    Passed: %d ✅ (%.1f%%)", comparator.getPassedCount(),
                  100.0 * comparator.getPassedCount() / frame_count);
-    LOG_INFO_FMT("    Warned: %d ⚠️  (%.1f%%)",
-                 comparator.getCompareCount() - comparator.getPassedCount() -
-                     comparator.getFailedCount(),
-                 100.0 *
-                     (comparator.getCompareCount() -
-                      comparator.getPassedCount() -
-                      comparator.getFailedCount()) /
-                     frame_count);
     LOG_INFO_FMT("    Failed: %d ❌ (%.1f%%)", comparator.getFailedCount(),
                  100.0 * comparator.getFailedCount() / frame_count);
     LOG_INFO("");
@@ -840,24 +659,6 @@ bool validate_psnr_streaming(const char *source_video, int width, int height,
       LOG_INFO("  ⚠️  Overall Quality: GOOD (minor differences)");
     } else {
       LOG_INFO("  ❌ Overall Quality: POOR (visible artifacts)");
-    }
-    LOG_INFO("");
-
-    // 显示前10帧和后10帧的PSNR值（用于诊断）
-    LOG_INFO("  PSNR Sample (First 10 frames):");
-    for (size_t i = 0; i < std::min(10UL, psnr_y_values.size()); i++) {
-      LOG_INFO_FMT("    Frame %3zu: Y=%.2f U=%.2f V=%.2f dB (avg=%.2f dB)", i,
-                   psnr_y_values[i], psnr_u_values[i], psnr_v_values[i],
-                   psnr_avg_values[i]);
-    }
-    if (psnr_y_values.size() > 10) {
-      LOG_INFO("  PSNR Sample (Last 10 frames):");
-      size_t start = psnr_y_values.size() - 10;
-      for (size_t i = start; i < psnr_y_values.size(); i++) {
-        LOG_INFO_FMT("    Frame %3zu: Y=%.2f U=%.2f V=%.2f dB (avg=%.2f dB)", i,
-                     psnr_y_values[i], psnr_u_values[i], psnr_v_values[i],
-                     psnr_avg_values[i]);
-      }
     }
     LOG_INFO("");
   } else {
@@ -1160,10 +961,37 @@ static int test_rtsp_decode_single_impl(const char *rtsp_url,
   g_rtsp_interrupted = false;
   RtspPacketSource::clearInterrupt();
 
-  // ========== 第1步：配置解码器 ==========
-  LOG_INFO("[Step 1/8] Configuring decoder...");
+  // ========== 第1步：初始化显示设备（必须在配置WorkerConfig之前）==========
+  // ⭐ 参考 test.cpp：先初始化显示设备，然后使用实际分辨率配置WorkerConfig
+  LOG_INFO("[Step 1/8] Initializing display device...");
 
-  // 配置解码器输出格式 - 统一使用 NV12（CPU 可访问）
+  std::unique_ptr<LinuxFramebufferDevice> display;
+  bool has_display = false;
+  int display_width = config.width;
+  int display_height = config.height;
+  int display_bpp = 32;
+
+  if (config.enable_display) {
+    display     = std::make_unique<LinuxFramebufferDevice>();
+    has_display = display->initialize(0);
+    if (has_display) {
+      // ⭐ 使用显示设备的实际分辨率（与 test.cpp 一致）
+      display_width = display->getWidth();
+      display_height = display->getHeight();
+      display_bpp = display->getBitsPerPixel();
+      LOG_INFO_FMT("✅ Display initialized: %dx%d @ %d bpp",
+                   display_width, display_height, display_bpp);
+    } else {
+      LOG_WARN("⚠️  Display not available, continuing without display");
+    }
+  } else {
+    LOG_INFO("ℹ️  Display disabled by user");
+  }
+
+  // ========== 第2步：配置解码器 ==========
+  LOG_INFO("[Step 2/8] Configuring decoder...");
+
+  // ⭐ 参考 test.cpp：使用简化的 TacoConfig（只设置 channels）
   DecoderConfigBuilder decoderBuilder;
   const char *decoder_name = getDecoderName(config);
 
@@ -1176,76 +1004,67 @@ static int test_rtsp_decode_single_impl(const char *rtsp_url,
     decoderBuilder.useSoftware();
     LOG_INFO("  Decoder: Software decoder (libavcodec)");
   } else {
-    decoderBuilder.setDecoderName(decoder_name);
-
-    if (strcmp(decoder_name, "h264_taco") == 0 ||
-        strcmp(decoder_name, "hevc_taco") == 0) {
-      // h264_taco/hevc_taco 输出 NV12（原生YUV格式，CPU 可访问）
-      auto tacoConfig =
-          TacoConfigBuilder()
-              .setRgbConfig(false, "", "bt709") // ch1_rgb=false -> 输出NV12
-              .build();
-
-      const char *codec =
-          (strcmp(decoder_name, "h264_taco") == 0) ? "h264" : "hevc";
-      decoderBuilder.useTaco(codec, tacoConfig);
-      LOG_INFO("  Decoder output: NV12 (YUV format, CPU accessible)");
+    // ⭐ 参考 test.cpp：使用简化的 TacoConfig（只设置 channels）
+    auto tacoConfig = TacoConfigBuilder()
+        .setChannels(true, false)  // ⭐ 与 test.cpp 一致
+        .build();
+    
+    if (strcmp(decoder_name, "h264_taco") == 0) {
+      decoderBuilder.useTaco("h264", tacoConfig);
+      LOG_INFO("  Decoder: TACO H.264 hardware decoder");
+    } else if (strcmp(decoder_name, "hevc_taco") == 0) {
+      decoderBuilder.useTaco("hevc", tacoConfig);
+      LOG_INFO("  Decoder: TACO H.265/HEVC hardware decoder");
+    } else if (strcmp(decoder_name, "mjpeg_taco") == 0 ||
+               strcmp(decoder_name, "jpeg_taco") == 0) {
+      decoderBuilder.useTaco("jpeg", tacoConfig);
+      LOG_INFO("  Decoder: TACO MJPEG hardware decoder");
+    } else {
+      decoderBuilder.setDecoderName(decoder_name);
+      LOG_INFO_FMT("  Decoder: %s", decoder_name);
     }
   }
 
-  // ⭐ RTSP流：使用更大的BufferPool（16个Buffer）以提高性能
-  DataSourceConfigBuilder dataSourceBuilder;
-  dataSourceBuilder.setPath(rtsp_url);
-  dataSourceBuilder.setBufferCount(16); // RTSP流需要更大的BufferPool
-  LOG_INFO("  RTSP stream: Using 16 buffers for better performance");
+  // ⭐ 参考 test.cpp：配置 RTSP 流（完全按照 test.cpp 的方式）
+  LOG_INFO_FMT("Configuring RTSP stream: %s", rtsp_url);
 
-  auto workerConfig =
-      WorkerConfigBuilder()
-          .setDataSourceConfig(dataSourceBuilder.build())
-          .setDisplayConfig(
-              DisplayConfigBuilder()
-                  .setDisplayResolution(config.width, config.height)
-                  .setBitsPerPixel(32)
-                  .build())
-          .setDecoderConfig(decoderBuilder.build())
-          .setWorkerType(WorkerType::FFMPEG_RTSP) // ⭐ RTSP专用WorkerType
-          .build();
+  auto workerConfig = WorkerConfigBuilder()
+      .setDataSourceConfig(
+          DataSourceConfigBuilder()
+              .setPath(rtsp_url)
+              .setBufferCount(32)  // ⭐ 与 test.cpp 一致：使用32个Buffer
+              .build()
+      )
+      .setDisplayConfig(
+          DisplayConfigBuilder()
+              .setDisplayResolution(display_width, display_height)  // ⭐ 使用显示设备的实际分辨率
+              .setBitsPerPixel(display_bpp)  // ⭐ 使用显示设备的实际 bpp
+              .build()
+      )
+      .setDecoderConfig(decoderBuilder.build())
+      .setWorkerType(WorkerType::FFMPEG_RTSP)  // ⭐ RTSP专用WorkerType
+      .build();
+
+  // ⭐ RTSP流特殊处理：设置datasource_buffer_mode=true
+  // 让BufferFillingWorkerFacade调用open(nullptr)，从而触发无参open()
+  // 无参open()会从WorkerConfig读取所有参数（RTSP URL、分辨率等）
+  workerConfig.decoder.datasource_buffer_mode = true;
+  LOG_DEBUG_FMT("  RTSP stream: Setting datasource_buffer_mode=true (workerConfig.decoder.datasource_buffer_mode = %d)", 
+                workerConfig.decoder.datasource_buffer_mode ? 1 : 0);
 
   if (use_software) {
     LOG_INFO_FMT("✅ Decoder configured: Software decoder (libavcodec), %dx%d",
-                 config.width, config.height);
+                 display_width, display_height);
   } else {
     LOG_INFO_FMT("✅ Decoder configured: %s, %dx%d, hardware acceleration",
-                 getDecoderName(config), config.width, config.height);
-  }
-
-  // ========== 第2步：初始化显示设备（可选） ==========
-  LOG_INFO("[Step 2/8] Initializing display device...");
-
-  std::unique_ptr<LinuxFramebufferDevice> display;
-  bool has_display = false;
-
-  if (config.enable_display) {
-    display     = std::make_unique<LinuxFramebufferDevice>();
-    has_display = display->initialize(0);
-    if (has_display) {
-      LOG_INFO_FMT("✅ Display initialized: %dx%d @ %d bpp",
-                   display->getWidth(), display->getHeight(),
-                   display->getBitsPerPixel());
-    } else {
-      LOG_WARN("⚠️  Display not available, continuing without display");
-    }
-  } else {
-    LOG_INFO("ℹ️  Display disabled by user");
+                 getDecoderName(config), display_width, display_height);
   }
 
   // ========== 第3步：创建生产线 ==========
+  // ⭐ 参考 test.cpp：使用单线程（推荐用于RTSP流）
   LOG_INFO("[Step 3/8] Creating VideoProductionLine...");
 
-  VideoProductionLine producer(false, // loop = false（不循环，解码一次）
-                               config.threads, // thread_count
-                               false           // enable_monitor = false
-  );
+  VideoProductionLine producer(false, 1, false);  // ⭐ 与 test.cpp 一致：单线程
 
   // 设置错误回调
   producer.setErrorCallback([](const std::string &error) {
@@ -1253,10 +1072,10 @@ static int test_rtsp_decode_single_impl(const char *rtsp_url,
     g_running = false;
   });
 
-  LOG_INFO_FMT("✅ VideoProductionLine created (%d producer threads)",
-               config.threads);
+  LOG_INFO("✅ VideoProductionLine created (1 producer thread, recommended for RTSP)");
 
   // ========== 第4步：启动生产线 ==========
+  // ⭐ 参考 test.cpp：直接调用 start()，不设置 datasource_buffer_mode
   LOG_INFO("[Step 4/8] Starting decode...");
 
   if (!producer.start(workerConfig)) {
@@ -1356,7 +1175,7 @@ static int test_rtsp_decode_single_impl(const char *rtsp_url,
                actual_width, actual_height, time(nullptr), file_ext);
     }
 
-    if (!writer->open(output_yuv, output_format, actual_width, actual_height)) {
+    if (!writer->openRaw(output_yuv, output_format, actual_width, actual_height)) {
       LOG_ERROR_FMT("❌ Failed to open BufferWriter: %s", output_yuv);
       pool_sptr->releaseFilled(first_buffer);
       producer.stop();
@@ -1392,12 +1211,16 @@ static int test_rtsp_decode_single_impl(const char *rtsp_url,
   int max_frames_limit =
       (config.max_frames == -1) ? INT32_MAX : config.max_frames;
 
+  // ⭐ 参考 test.cpp 的消费者循环逻辑：使用超时计数，让视频自然结束
+  int timeout_count = 0;
+  const int MAX_TIMEOUT = 10; // ⭐ 与 test.cpp 一致：超时10次后退出
+
   auto start_time       = std::chrono::steady_clock::now();
   auto last_report_time = start_time;
 
   while (g_running && frame_count < max_frames_limit) {
     // 从 BufferPool 获取已解码的 Buffer
-    Buffer *buffer = pool_sptr->acquireFilled(true, 100); // 超时100ms
+    Buffer *buffer = pool_sptr->acquireFilled(true, 100); // ⭐ 与 test.cpp 一致：100ms 超时
 
     if (!buffer) {
       // ⭐ RTSP流：检查中断标志
@@ -1406,13 +1229,17 @@ static int test_rtsp_decode_single_impl(const char *rtsp_url,
         break;
       }
 
-      // 超时：检查生产者是否还在运行
-      if (!producer.isRunning()) {
-        LOG_INFO("Producer stopped, exiting consumer loop");
+      // ⭐ 超时处理：使用超时计数，与 test.cpp 一致
+      timeout_count++;
+      if (timeout_count >= MAX_TIMEOUT) {
+        LOG_INFO("Video finished, stopping...");
         break;
       }
-      continue; // 超时但生产者还在，继续等待
+      continue; // 超时但未达到最大次数，继续等待
     }
+    
+    // ⭐ 成功获取 buffer，重置超时计数
+    timeout_count = 0;
 
     // 显示到屏幕（如果启用）
     if (has_display) {
@@ -1615,20 +1442,28 @@ static int test_mp4_decode_single_impl(const char *video_path,
     decoderBuilder.useSoftware();
     LOG_INFO("  Decoder: Software decoder (libavcodec)");
   } else {
-    decoderBuilder.setDecoderName(decoder_name);
-
-    if (strcmp(decoder_name, "h264_taco") == 0 ||
-        strcmp(decoder_name, "hevc_taco") == 0) {
-      // h264_taco/hevc_taco 输出 NV12（原生YUV格式，CPU 可访问）
-      auto tacoConfig =
-          TacoConfigBuilder()
-              .setRgbConfig(false, "", "bt709") // ch1_rgb=false -> 输出NV12
-              .build();
-
-      const char *codec =
-          (strcmp(decoder_name, "h264_taco") == 0) ? "h264" : "hevc";
-      decoderBuilder.useTaco(codec, tacoConfig);
-      LOG_INFO("  Decoder output: NV12 (YUV format, CPU accessible)");
+    // ⭐ 参考 test.cpp 的 test_buffer_writer_format：保存YUV文件时需要传入 TacoConfig
+    // 构建 TacoConfig，确保 YUV 格式正确配置（与 test_buffer_writer_yuv_formats 一致）
+    auto tacoConfig =
+        TacoConfigBuilder()
+            .setYuvConfig("YUV420 8-bit NV12", "bt601")  // ⭐ 明确设置 YUV 格式（与 test.cpp 一致）
+            .setChannels(true, false)                     // ⭐ 只启用 ch0，禁用 ch1（确保 PP0 输出 YUV）
+            .setDecoderOutputResolution(config.width, config.height)  // ⭐ 设置输出分辨率（与 test.cpp 一致，可能影响UV平面访问）
+            .build();
+    
+    if (strcmp(decoder_name, "h264_taco") == 0) {
+      decoderBuilder.useTaco("h264", tacoConfig);  // ⭐ 传入 TacoConfig 以确保 YUV 格式正确
+      LOG_INFO("  Decoder: TACO H.264 hardware decoder");
+    } else if (strcmp(decoder_name, "hevc_taco") == 0) {
+      decoderBuilder.useTaco("hevc", tacoConfig);  // ⭐ 传入 TacoConfig 以确保 YUV 格式正确
+      LOG_INFO("  Decoder: TACO H.265/HEVC hardware decoder");
+    } else if (strcmp(decoder_name, "mjpeg_taco") == 0 ||
+               strcmp(decoder_name, "jpeg_taco") == 0) {
+      decoderBuilder.useTaco("jpeg", tacoConfig);  // ⭐ 传入 TacoConfig 以确保 YUV 格式正确
+      LOG_INFO("  Decoder: TACO MJPEG hardware decoder");
+    } else {
+      decoderBuilder.setDecoderName(decoder_name);
+      LOG_INFO_FMT("  Decoder: %s", decoder_name);
     }
   }
 
@@ -1746,15 +1581,20 @@ static int test_mp4_decode_single_impl(const char *video_path,
     MultiWorkerProductionLine::WorkerGroup group("hw_sw_comparison");
 
     // 生产者：Packet Recorder（录制 packet）
-    group.producer_config =
+    MultiWorkerProductionLine::ProducerConfig producer_config;
+    producer_config.producer_id = "packet_recorder";
+    producer_config.worker_config =
         WorkerConfigBuilder()
             .setDataSourceConfig(
                 DataSourceConfigBuilder().setPath(video_path).build())
             .setWorkerType(WorkerType::FFMPEG_PACKET_RECORDER)
             .build();
+    group.producer_configs.push_back(producer_config);
 
     // 消费者1：硬件解码器（当前使用的解码器）
-    WorkerConfig hw_consumer_config =
+    MultiWorkerProductionLine::ConsumerConfig hw_consumer_config;
+    hw_consumer_config.consumer_id = "hw_decoder";
+    hw_consumer_config.worker_config =
         WorkerConfigBuilder()
             .setDecoderConfig(decoderBuilder.build())
             .setWorkerType(WorkerType::FFMPEG_VIDEO_FILE)
@@ -1764,7 +1604,9 @@ static int test_mp4_decode_single_impl(const char *video_path,
     // 消费者2：软件解码器
     DecoderConfigBuilder sw_decoder_builder;
     sw_decoder_builder.useSoftware();
-    WorkerConfig sw_consumer_config =
+    MultiWorkerProductionLine::ConsumerConfig sw_consumer_config;
+    sw_consumer_config.consumer_id = "sw_decoder";
+    sw_consumer_config.worker_config =
         WorkerConfigBuilder()
             .setDecoderConfig(sw_decoder_builder.build())
             .setWorkerType(WorkerType::FFMPEG_VIDEO_FILE)
@@ -1903,7 +1745,7 @@ static int test_mp4_decode_single_impl(const char *video_path,
                actual_width, actual_height, time(nullptr), file_ext);
     }
 
-    if (!writer->open(output_yuv, output_format, actual_width, actual_height)) {
+    if (!writer->openRaw(output_yuv, output_format, actual_width, actual_height)) {
       LOG_ERROR_FMT("❌ Failed to open BufferWriter: %s", output_yuv);
       pool_sptr->releaseFilled(first_buffer);
       producer.stop();
@@ -1948,21 +1790,26 @@ static int test_mp4_decode_single_impl(const char *video_path,
   auto start_time       = std::chrono::steady_clock::now();
   auto last_report_time = start_time;
 
+  // ⭐ 参考 test.cpp 的消费者循环逻辑：使用超时计数，让视频自然结束
+  int timeout_count = 0;
+  const int MAX_TIMEOUT = 10; // ⭐ 与 test.cpp 一致：超时10次后退出
+  
   while (g_running && frame_count < max_frames_limit) {
     // 从 BufferPool 获取已解码的 Buffer
-    Buffer *buffer = pool_sptr->acquireFilled(true, 100); // 超时100ms
+    Buffer *buffer = pool_sptr->acquireFilled(true, 100); // ⭐ 与 test.cpp 一致：100ms 超时
 
     if (!buffer) {
-      // 超时：检查生产者是否还在运行
-      bool is_running = enable_comparison ? (comparison_worker &&
-                                             comparison_worker->isRunning())
-                                          : producer.isRunning();
-      if (!is_running) {
-        LOG_INFO("Producer stopped, exiting consumer loop");
+      // ⭐ 超时处理：使用超时计数，与 test.cpp 一致
+      timeout_count++;
+      if (timeout_count >= MAX_TIMEOUT) {
+        LOG_INFO("Video finished, stopping...");
         break;
       }
-      continue; // 超时但生产者还在，继续等待
+      continue; // 超时但未达到最大次数，继续等待
     }
+    
+    // ⭐ 成功获取 buffer，重置超时计数
+    timeout_count = 0;
 
     // 显示到屏幕（如果启用）
     if (has_display) {
@@ -1981,7 +1828,8 @@ static int test_mp4_decode_single_impl(const char *video_path,
     if (enable_comparison && comparator && sw_pool_sptr) {
       // 从软件解码器的 BufferPool 获取 Buffer（硬件解码器的 buffer
       // 已经在主循环中获取）
-      Buffer *sw_buffer = sw_pool_sptr->acquireFilled(true, 100); // 100ms 超时
+      // ⭐ 增加超时时间，确保能获取到软件解码器的buffer进行对比
+      Buffer *sw_buffer = sw_pool_sptr->acquireFilled(true, 1000); // 1秒超时
 
       if (sw_buffer) {
         // 使用 BufferComparator
@@ -1997,16 +1845,11 @@ static int test_mp4_decode_single_impl(const char *video_path,
           psnr_avg_values.push_back(result.psnr_avg);
         }
 
-        // 记录对比结果（可选：只在失败时输出，或前50帧详细输出）
-        if ((!result.passed && result.psnr_y > 0.0) ||
-            (frame_count <= 50 && frame_count % 10 == 0)) {
-          LOG_INFO_FMT(
-              "Frame %3d: PSNR Y=%.2f U=%.2f V=%.2f dB (avg=%.2f dB) %s",
-              frame_count, result.psnr_y, result.psnr_u, result.psnr_v,
-              result.psnr_avg,
-              result.passed
-                  ? "✅"
-                  : (result.level == FrameCompareResult::WARN ? "⚠️" : "❌"));
+        // ⭐ 简化输出：只在失败时输出（减少输出频率）
+        if (!result.passed && result.psnr_y > 0.0 && frame_count % 10 == 0) {
+          LOG_WARN_FMT("Frame %3d: PSNR-Y=%.2f dB %s",
+                       frame_count, result.psnr_y,
+                       result.level == FrameCompareResult::FAIL ? "❌ FAIL" : "⚠️ WARN");
         }
 
         // 释放软件解码器的 Buffer
@@ -2017,6 +1860,7 @@ static int test_mp4_decode_single_impl(const char *video_path,
     }
 
     // 保存到文件（使用BufferWriter）- 在对比之后保存
+    // ⭐ 参考 test.cpp 的 test_buffer_writer_format 函数：直接调用 writer->write(buffer)
     if (writer && save_count < save_limit) {
       if (writer->write(buffer)) {
         save_count++;
@@ -2040,28 +1884,20 @@ static int test_mp4_decode_single_impl(const char *video_path,
           enable_comparison ? 0.0
                             : producer.getAverageFPS(); // 对比模式下不显示FPS
       if (enable_comparison) {
-        // ⭐ 计算平均PSNR（如果已有数据）
-        double avg_psnr_y = psnr_y_values.empty()
-                                ? 0.0
-                                : std::accumulate(psnr_y_values.begin(),
-                                                  psnr_y_values.end(), 0.0) /
-                                      psnr_y_values.size();
-        double avg_psnr_avg =
-            psnr_avg_values.empty()
-                ? 0.0
-                : std::accumulate(psnr_avg_values.begin(),
-                                  psnr_avg_values.end(), 0.0) /
-                      psnr_avg_values.size();
+        // ⭐ 简化PSNR输出：只显示关键统计信息（减少输出频率）
+        if (frame_count % 60 == 0) {
+          double avg_psnr_y = psnr_y_values.empty()
+                                  ? 0.0
+                                  : std::accumulate(psnr_y_values.begin(),
+                                                    psnr_y_values.end(), 0.0) /
+                                        psnr_y_values.size();
 
-        LOG_INFO_FMT("Progress: %d frames | Display: %d | Saved: %d | "
-                     "Compared: %d | PSNR-Y=%.2f dB, PSNR-Avg=%.2f dB | "
-                     "Passed: %d, Warned: %d, Failed: %d",
-                     frame_count, display_count, save_count, comparison_count,
-                     avg_psnr_y, avg_psnr_avg, comparator->getPassedCount(),
-                     comparator->getCompareCount() -
-                         comparator->getPassedCount() -
-                         comparator->getFailedCount(),
-                     comparator->getFailedCount());
+          LOG_INFO_FMT("Progress: %d frames | Saved: %d | Compared: %d | "
+                       "Avg PSNR-Y=%.2f dB | Passed: %d, Failed: %d",
+                       frame_count, save_count, comparison_count,
+                       avg_psnr_y, comparator->getPassedCount(),
+                       comparator->getFailedCount());
+        }
       } else {
         LOG_INFO_FMT(
             "Progress: %d frames | FPS: %.1f | Display: %d | Saved: %d",
@@ -2084,7 +1920,8 @@ static int test_mp4_decode_single_impl(const char *video_path,
 
     // ⭐ 在保存之前进行软硬解码对比（如果启用）
     if (enable_comparison && comparator && sw_pool_sptr) {
-      Buffer *sw_buffer = sw_pool_sptr->acquireFilled(true, 100);
+      // ⭐ 增加超时时间，确保能获取到软件解码器的buffer进行对比
+      Buffer *sw_buffer = sw_pool_sptr->acquireFilled(true, 1000); // 1秒超时
       if (sw_buffer) {
         FrameCompareResult result = comparator->compare(sw_buffer, remaining);
         comparison_count++;
@@ -2097,7 +1934,8 @@ static int test_mp4_decode_single_impl(const char *video_path,
           psnr_avg_values.push_back(result.psnr_avg);
         }
 
-        if (!result.passed && result.psnr_y > 0.0) {
+        // Reduced output for remaining frames
+        if (!result.passed && result.psnr_y > 0.0 && frame_count % 10 == 0) {
           LOG_WARN_FMT("Remaining frame %d comparison: PSNR-Y=%.2f dB, %s",
                        frame_count, result.psnr_y,
                        result.level == FrameCompareResult::FAIL ? "FAIL"
@@ -2107,6 +1945,7 @@ static int test_mp4_decode_single_impl(const char *video_path,
       }
     }
 
+    // ⭐ 参考 test.cpp 的 test_buffer_writer_format 函数：直接调用 writer->write(buffer)
     if (writer && save_count < save_limit) {
       if (writer->write(remaining)) {
         save_count++;
@@ -2136,18 +1975,12 @@ static int test_mp4_decode_single_impl(const char *video_path,
       comparator->printSummary();
       LOG_INFO("═══════════════════════════════════════════════════════\n");
 
-      // ⭐ 打印详细的PSNR统计
+      // ⭐ 打印简化的PSNR统计
       if (!psnr_y_values.empty()) {
         // 计算平均值
         double avg_psnr_y =
             std::accumulate(psnr_y_values.begin(), psnr_y_values.end(), 0.0) /
             psnr_y_values.size();
-        double avg_psnr_u =
-            std::accumulate(psnr_u_values.begin(), psnr_u_values.end(), 0.0) /
-            psnr_u_values.size();
-        double avg_psnr_v =
-            std::accumulate(psnr_v_values.begin(), psnr_v_values.end(), 0.0) /
-            psnr_v_values.size();
         double avg_psnr_avg = std::accumulate(psnr_avg_values.begin(),
                                               psnr_avg_values.end(), 0.0) /
                               psnr_avg_values.size();
@@ -2163,32 +1996,14 @@ static int test_mp4_decode_single_impl(const char *video_path,
         double min_psnr_avg = *minmax_avg.first;
         double max_psnr_avg = *minmax_avg.second;
 
-        // 计算标准差
-        double variance_y = 0.0;
-        for (double val : psnr_y_values) {
-          variance_y += (val - avg_psnr_y) * (val - avg_psnr_y);
-        }
-        double stddev_y = std::sqrt(variance_y / psnr_y_values.size());
-
         LOG_INFO("  PSNR Statistics (Hardware vs Software):");
-        LOG_INFO_FMT("    Average: Y=%.2f U=%.2f V=%.2f dB (avg=%.2f dB)",
-                     avg_psnr_y, avg_psnr_u, avg_psnr_v, avg_psnr_avg);
-        LOG_INFO_FMT("    Range Y:  [%.2f, %.2f] dB (stddev=%.2f)", min_psnr_y,
-                     max_psnr_y, stddev_y);
-        LOG_INFO_FMT("    Range Avg: [%.2f, %.2f] dB", min_psnr_avg,
-                     max_psnr_avg);
+        LOG_INFO_FMT("    Average: Y=%.2f dB (avg=%.2f dB)", avg_psnr_y, avg_psnr_avg);
+        LOG_INFO_FMT("    Range Y:  [%.2f, %.2f] dB", min_psnr_y, max_psnr_y);
+        LOG_INFO_FMT("    Range Avg: [%.2f, %.2f] dB", min_psnr_avg, max_psnr_avg);
         LOG_INFO("");
         LOG_INFO("  Quality Assessment:");
         LOG_INFO_FMT("    Passed: %d ✅ (%.1f%%)", comparator->getPassedCount(),
                      100.0 * comparator->getPassedCount() / comparison_count);
-        LOG_INFO_FMT(
-            "    Warned: %d ⚠️  (%.1f%%)",
-            comparator->getCompareCount() - comparator->getPassedCount() -
-                comparator->getFailedCount(),
-            100.0 *
-                (comparator->getCompareCount() - comparator->getPassedCount() -
-                 comparator->getFailedCount()) /
-                comparison_count);
         LOG_INFO_FMT("    Failed: %d ❌ (%.1f%%)", comparator->getFailedCount(),
                      100.0 * comparator->getFailedCount() / comparison_count);
         LOG_INFO("");
@@ -2201,12 +2016,6 @@ static int test_mp4_decode_single_impl(const char *video_path,
         } else {
           LOG_INFO("  ❌ Overall Quality: POOR (visible artifacts)");
         }
-        LOG_INFO("");
-
-        LOG_INFO("\n💡 PSNR Interpretation:");
-        LOG_INFO("   >= 38 dB: Excellent quality (visually lossless)");
-        LOG_INFO("   35-38 dB: Good quality (minor differences)");
-        LOG_INFO("   < 35 dB:  Poor quality (visible artifacts)");
       }
     }
   }
