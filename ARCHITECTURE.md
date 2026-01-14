@@ -19,7 +19,97 @@
 
 ## 版本历史
 
-### v2.18（当前版本）- 输入源信息查询与动态适配
+### v2.19（当前版本）- 共享数据源模式与硬件解码增强
+**发布日期：** 2025-01-14
+
+**主要变更：**
+- ✅ **BufferPacketSource 共享模式**：支持 ONE_TO_MANY 发布-订阅模式
+  - 新增共享模式构造函数，接受 `subscriber_count` 参数
+  - 实现订阅者同步机制：所有消费者处理同一个 packet
+  - 使用互斥锁和条件变量确保线程安全
+  - 新增成员：`is_shared_mode_`、`total_subscribers_`、`current_request_count_`、`current_buffer_`
+- ✅ **Connector 共享实例管理**：支持共享 PacketSource 生命周期管理
+  - 新增 `setSharedSource()` 方法：存储共享的 PacketSource
+  - 新增 `getSharedSource()` 方法：获取共享实例
+  - 新增成员：`shared_source_`（仅 ONE_TO_MANY 模式使用）
+- ✅ **Ffmpeg 解码器硬件检测工具**：统一的硬件解码器判断机制
+  - `isHardwareDecoder()`：使用 FFmpeg 官方 API 判断（`AV_CODEC_CAP_HARDWARE` + `avcodec_get_hw_config`）
+  - `findPureSoftwareDecoder()`：查找指定 codec_id 的纯软件解码器
+  - 替代不可靠的字符串匹配方式（`strstr`）
+  - 使用 `virtual final` 禁止子类覆盖，保证判断逻辑统一
+- ✅ **packet_source_ 智能指针升级**：从 `unique_ptr` 改为 `shared_ptr`
+  - 支持多个消费者 Worker 共享同一个 PacketSource 实例
+  - 适配 ONE_TO_MANY 模式的共享需求
+  - 修改类：FfmpegDecodeRtspWorker、FfmpegDecodeVideoFileWorker
+- ✅ **解码器辅助方法重构**：提取公共逻辑，提高代码复用
+  - `readAndSendPacket()`：从数据源读取 packet 并发送到解码器
+  - `fillBufferMetadataFromFrame()`：从 AVFrame 填充 Buffer 元数据
+  - 新增帧缓存：`cached_frames_`（用于多通道解码场景）
+
+**设计原则：**
+- **共享语义明确**：shared_ptr 表达共享所有权，unique_ptr 表达独占所有权
+- **线程安全保证**：使用互斥锁和条件变量保护共享状态
+- **官方 API 优先**：使用 FFmpeg 官方接口而非字符串匹配
+- **代码复用**：提取公共逻辑为独立方法，减少重复代码
+
+**架构优势：**
+- **真正的共享模式**：所有消费者处理同一个 packet，而非各自复制
+- **类型安全检测**：硬件解码器判断基于 API 而非字符串，更可靠
+- **扩展性强**：shared_ptr 支持任意数量的消费者共享
+- **维护性好**：公共逻辑集中管理，易于调试和优化
+
+**使用示例：**
+```cpp
+// 示例1：创建共享模式 BufferPacketSource
+size_t consumer_count = 3;  // 3个消费者
+auto shared_source = std::make_shared<BufferPacketSource>(
+    codec_params, 
+    consumer_count  // 共享模式
+);
+
+// 所有消费者共享同一个实例
+worker1->setPacketSource(shared_source);
+worker2->setPacketSource(shared_source);
+worker3->setPacketSource(shared_source);
+
+// 示例2：Connector 管理共享实例
+Connector connector(Connector::Mode::ONE_TO_MANY, {0}, {0, 1, 2});
+connector.setSharedSource(shared_source);  // 防止被销毁
+
+// 示例3：强制使用软件解码器
+const AVCodec* codec = nullptr;
+if (!use_hardware_decoder_) {
+    codec = findPureSoftwareDecoder(AV_CODEC_ID_H264);
+    if (!codec) {
+        LOG_ERROR("No pure software decoder found for H264");
+        return false;
+    }
+}
+
+// 示例4：使用辅助方法简化解码流程
+AVPacket* packet = av_packet_alloc();
+if (readAndSendPacket(packet)) {
+    AVFrame* frame = av_frame_alloc();
+    if (avcodec_receive_frame(codec_ctx_, frame) == 0) {
+        Buffer* buffer = getBufferForFilling();
+        fillBufferMetadataFromFrame(frame, buffer);
+    }
+}
+```
+
+**典型应用场景：**
+- **ONE_TO_MANY 场景**：一路输入，多路不同格式输出（如 YUV + RGB）
+- **硬件解码限制**：需要明确强制软件解码的场景
+- **多消费者共享**：多个 Worker 需要处理同一帧数据
+
+**向后兼容：**
+- BufferPacketSource 保留原有单参数构造函数（普通模式）
+- Connector 原有接口不变，共享模式为可选功能
+- 硬件检测工具为新增功能，不影响现有逻辑
+
+---
+
+### v2.18 - 输入源信息查询与动态适配
 **发布日期：** 2025-01
 
 **主要变更：**
