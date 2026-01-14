@@ -23,11 +23,14 @@ BufferWriter::BufferWriter()
     , width_(0)
     , height_(0)
     , write_count_(0)
+    , mismatch_count_(0)
     , output_format_ctx_(nullptr)
     , video_stream_index_(-1)
     , packet_count_(0)
     , time_base_({1, 25})
     , last_dts_(AV_NOPTS_VALUE)
+    , first_pts_(AV_NOPTS_VALUE)
+    , first_dts_(AV_NOPTS_VALUE)
     , writer_id_(++next_id_)
     , log_prefix_("[BufferWriter::" + std::to_string(writer_id_) + "]")
 {
@@ -56,10 +59,14 @@ BufferWriter::~BufferWriter() {
 
 // ========== 核心接口实现 ==========
 
-bool BufferWriter::open(const char* path, 
-                        AVPixelFormat format,
-                        int width, 
-                        int height) {
+/**
+ * @brief 打开原始图像数据文件（裸数据模式）
+ * 详细说明参见头文件注释
+ */
+bool BufferWriter::openRaw(const char* path, 
+                           AVPixelFormat save_format,
+                           int width, 
+                           int height) {
     // 1. 参数校验
     if (!path) {
         LOG_ERROR("[BufferWriter] Error: Invalid path (nullptr)");
@@ -73,9 +80,9 @@ bool BufferWriter::open(const char* path,
     }
     
     // 2. 检查格式支持
-    if (!isSupportedFormat(format)) {
-        LOG_ERROR_FMT("[BufferWriter] Error: Unsupported format: %s (%d)",
-                av_get_pix_fmt_name(format), format);
+    if (!isSupportedFormat(save_format)) {
+        LOG_ERROR_FMT("[BufferWriter] Error: Unsupported save_format: %s (%d)",
+                av_get_pix_fmt_name(save_format), save_format);
         LOG_ERROR("[BufferWriter] Supported formats (21): "
                 "GRAY8, GRAY10LE, NV12, P010LE, NV21, YUV420P10LE, YUV422P, YUV444P, "
                 "RGB24, BGR24, ARGB, ABGR, RGBA, BGRA, GBRP, "
@@ -97,10 +104,11 @@ bool BufferWriter::open(const char* path,
     }
     
     // 5. 保存配置
-    format_ = format;
+    format_ = save_format;
     width_ = width;
     height_ = height;
     write_count_.store(0);  // 重置计数器
+    mismatch_count_.store(0);  // ⭐ v2.17：重置格式不匹配计数器
     
     // 6. 打印成功信息
     LOG_INFO_FMT("[BufferWriter] Opened: %s", path);
@@ -129,7 +137,39 @@ bool BufferWriter::write(const Buffer* buffer) {
         return false;
     }
     
-    // 4. ⭐ 检查Buffer是否有图像元数据
+    // 4. ⭐⭐⭐ v2.17 需求4：格式和尺寸验证（在 BufferWriter 内部完成）
+    if (buffer->hasImageMetadata()) {
+        AVPixelFormat actual_format = buffer->getImageFormat();
+        int actual_width = buffer->getImageWidth();
+        int actual_height = buffer->getImageHeight();
+        
+        bool format_match = (actual_format == format_);
+        bool size_match = (actual_width == width_ && actual_height == height_);
+        
+        if (!format_match || !size_match) {
+            mismatch_count_.fetch_add(1);
+            int64_t current_count = mismatch_count_.load();
+            
+            // 只打印前5次错误，避免刷屏
+            if (current_count <= 5) {
+                LOG_ERROR_FMT("[BufferWriter] ❌ Format/size mismatch (count: %lld):", 
+                             (long long)current_count);
+                if (!format_match) {
+                    LOG_ERROR_FMT("  Expected format: %s, got: %s",
+                                 av_get_pix_fmt_name(format_),
+                                 av_get_pix_fmt_name(actual_format));
+                }
+                if (!size_match) {
+                    LOG_ERROR_FMT("  Expected size: %dx%d, got: %dx%d",
+                                 width_, height_, actual_width, actual_height);
+                }
+            }
+            
+            return false;  // ⭐ 不匹配则拒绝写入
+        }
+    }
+    
+    // 5. ⭐ 检查Buffer是否有图像元数据
     if (buffer->hasImageMetadata()) {
         // 使用元数据模式（v2.6新功能）
         return writeWithMetadata(buffer);
@@ -210,6 +250,8 @@ bool BufferWriter::writeWithMetadata(const Buffer* buffer) {
     if (format_ != AV_PIX_FMT_NONE && buf_format != format_) {
         // 格式不匹配，静默跳过（这是正常行为，不是错误）
         // 场景：TACO解码器同时输出多种格式，每个BufferWriter只保存自己关心的格式
+        LOG_INFO_FMT("[BufferWriter] Format not matched: %s (expected: %s)",
+                av_get_pix_fmt_name(buf_format), av_get_pix_fmt_name(format_));
         return true;  // 返回true表示"已处理"（虽然未写入，但这是预期行为）
     }
     
@@ -218,6 +260,7 @@ bool BufferWriter::writeWithMetadata(const Buffer* buffer) {
     const uint8_t* first_plane = buffer->getImagePlaneData(0);
     if (!first_plane) {
         // 数据未就绪，静默跳过
+        LOG_ERROR("[BufferWriter] Warning: First image plane data is null, skipping frame");
         return true;
     }
     
@@ -231,11 +274,13 @@ bool BufferWriter::writeWithMetadata(const Buffer* buffer) {
             
             // 写入Y平面（去除stride）
             if (!writePlane(y_data, linesize[0], buf_width, buf_height)) {
+                LOG_ERROR("[BufferWriter] Error: Write Y plane failed");
                 return false;
             }
             
             // 写入UV平面（去除stride，高度为height/2）
             if (!writePlane(uv_data, linesize[1], buf_width, buf_height / 2)) {
+                LOG_ERROR("[BufferWriter] Error: Write UV plane failed");
                 return false;
             }
             break;
@@ -423,9 +468,7 @@ bool BufferWriter::writeWithMetadata(const Buffer* buffer) {
 bool BufferWriter::writePlane(const uint8_t* data, int stride, 
                                int width, int height) {
     if (!data) {
-        // ⭐ plane data 为空：静默跳过（这是正常情况，不是错误）
-        // 场景：Buffer 报告了格式但实际数据未就绪，或者帧不完整
-        return true;  // 返回true表示"已处理"（虽然未写入）
+        return false;  // 返回true表示"已处理"（虽然未写入）
     }
     
     if (stride == width) {
@@ -437,12 +480,12 @@ bool BufferWriter::writePlane(const uint8_t* data, int stride,
         for (int y = 0; y < height; y++) {
             size_t written = fwrite(data + y * stride, 1, width, file_);
             if (written != (size_t)width) {
-                LOG_ERROR_FMT("[BufferWriter] Error: Write plane failed at row %d", y);
                 return false;
             }
         }
         return true;
     }
+    return false;
 }
 
 void BufferWriter::close() {
@@ -639,7 +682,11 @@ const char* BufferWriter::getFormatName(AVPixelFormat format) {
 
 // ========== 编码流模式实现 ==========
 
-bool BufferWriter::open(const char* path, const AVCodecParameters* codec_params, const AVRational& time_base) {
+/**
+ * @brief 打开编码流文件（容器格式模式）
+ * 详细说明参见头文件注释
+ */
+bool BufferWriter::openEncoded(const char* path, const AVCodecParameters* codec_params, const AVRational& time_base) {
     // 1. 参数校验
     if (!path || !codec_params) {
         LOG_ERROR("[BufferWriter] Error: Invalid parameters for encoded mode");
@@ -729,6 +776,10 @@ bool BufferWriter::open(const char* path, const AVCodecParameters* codec_params,
     write_count_.store(0);
     last_dts_ = AV_NOPTS_VALUE;  // 重置上一个DTS
     
+    // ⭐ v2.15: 重置时间戳偏移量（用于处理 RTSP 流从非零时间戳开始的情况）
+    first_pts_ = AV_NOPTS_VALUE;
+    first_dts_ = AV_NOPTS_VALUE;
+    
     // 11. 打印成功信息
     LOG_INFO("");
     LOG_INFO_FMT("[BufferWriter] Opened (encoded mode): %s", path);
@@ -779,29 +830,29 @@ bool BufferWriter::writeEncoded(const Buffer* buffer) {
     // 5.1 转换时间基
     av_packet_rescale_ts(&pkt, time_base_, out_stream->time_base);
     
-    // 5.2 检查并修正无效或重复的时间戳
-    if (pkt.dts == AV_NOPTS_VALUE || (last_dts_ != AV_NOPTS_VALUE && pkt.dts <= last_dts_)) {
-        // DTS 无效或不单调递增，使用生成的时间戳（基于帧率）
-        // 假设平均每帧的duration（根据输出流的时间基）
-        int64_t frame_duration = av_rescale_q(1, av_inv_q(out_stream->avg_frame_rate), out_stream->time_base);
-        if (frame_duration <= 0) {
-            frame_duration = av_rescale_q(1, (AVRational){1, 25}, out_stream->time_base); // 默认25fps
-        }
-        
-        if (last_dts_ == AV_NOPTS_VALUE) {
-            pkt.dts = 0;  // 第一个包从0开始
-        } else {
-            pkt.dts = last_dts_ + frame_duration;  // 在上一个DTS基础上增加一帧
-        }
-        
-        LOG_DEBUG_FMT("[BufferWriter] Corrected DTS: %lld (packet #%lld, last_dts=%lld)", 
-                     (long long)pkt.dts, (long long)packet_count_, (long long)last_dts_);
+    // 5.2 ⭐⭐ v2.16: 生成单调递增的时间戳（替代源时间戳）
+    //     解决 RTSP 流时间戳不连续/混乱的问题
+    //     策略：完全忽略源时间戳，基于帧率生成新的时间戳序列
+    //     - 假设恒定帧率（从输出流的 avg_frame_rate 获取）
+    //     - 时间戳从 0 开始，每帧递增固定 duration
+    
+    // 计算每帧的 duration（基于输出流的时间基）
+    int64_t frame_duration = av_rescale_q(1, av_inv_q(out_stream->avg_frame_rate), out_stream->time_base);
+    if (frame_duration <= 0) {
+        frame_duration = av_rescale_q(1, (AVRational){1, 25}, out_stream->time_base); // 默认25fps
     }
     
-    if (pkt.pts == AV_NOPTS_VALUE || pkt.pts < pkt.dts) {
-        // PTS 无效或小于 DTS，设置为等于 DTS
-        pkt.pts = pkt.dts;
+    // 生成新的时间戳
+    pkt.dts = packet_count_ * frame_duration;
+    pkt.pts = pkt.dts;  // 假设无 B 帧，PTS = DTS
+    
+    // ⭐ 调试：打印前几个包的时间戳
+    if (packet_count_ < 3) {
+        LOG_DEBUG_FMT("[BufferWriter] Packet #%lld: Generated DTS=%lld, PTS=%lld (frame_duration=%lld)",
+                     (long long)packet_count_, (long long)pkt.dts, (long long)pkt.pts, (long long)frame_duration);
     }
+    
+    // ⭐ v2.16: 时间戳已由上面的代码生成，无需额外检查
     
     // 更新 last_dts_
     last_dts_ = pkt.dts;

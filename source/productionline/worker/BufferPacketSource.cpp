@@ -147,6 +147,21 @@ bool BufferPacketSource::isEof() const {
     return false;
 }
 
+int BufferPacketSource::getSourceWidth() const {
+    const AVCodecParameters* params = getCodecParameters();
+    return params ? params->width : 0;
+}
+
+int BufferPacketSource::getSourceHeight() const {
+    const AVCodecParameters* params = getCodecParameters();
+    return params ? params->height : 0;
+}
+
+AVPixelFormat BufferPacketSource::getSourcePixelFormat() const {
+    const AVCodecParameters* params = getCodecParameters();
+    return params ? static_cast<AVPixelFormat>(params->format) : AV_PIX_FMT_NONE;
+}
+
 void BufferPacketSource::setSourceBufferPool(std::weak_ptr<BufferPool> pool_weak) {
     source_pool_ = pool_weak;
     LOG_DEBUG("[BufferPacketSource] ⭐ v2.13：已设置源 BufferPool");

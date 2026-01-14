@@ -3,9 +3,11 @@
 #include "productionline/VideoProductionLine.hpp"
 #include "productionline/worker/BufferFillingWorkerFacade.hpp"
 #include "productionline/worker/WorkerConfig.hpp"
+#include "productionline/Connector.hpp"
 #include "buffer/bufferpool/BufferPool.hpp"
 #include "buffer/bufferpool/BufferPoolRegistry.hpp"
 #include "common/Logger.hpp"
+#include "common/GlobalThreadPool.hpp"
 #include <string>
 #include <vector>
 #include <thread>
@@ -17,6 +19,8 @@
 #include <map>
 #include <queue>
 #include <chrono>
+#include <set>
+#include <unordered_map>
 
 // 第三方线程池库（需要下载 BS::thread_pool.hpp）
 // GitHub: https://github.com/bshoshany/thread-pool
@@ -148,47 +152,62 @@ private:
 class MultiWorkerProductionLine : public VideoProductionLine {
 public:
     /**
+     * @brief ProducerConfig - 生产者配置
+     */
+    struct ProducerConfig {
+        std::string producer_id;      // 组内唯一标识
+        WorkerConfig worker_config;
+    };
+    
+    /**
+     * @brief ConsumerConfig - 消费者配置
+     */
+    struct ConsumerConfig {
+        std::string consumer_id;      // 组内唯一标识（可选）
+        WorkerConfig worker_config;
+    };
+    
+    /**
+     * @brief ConnectorConfig - 连接器配置
+     */
+    struct ConnectorConfig {
+        Connector::Mode mode;
+        std::vector<std::string> producer_ids;  // 关联的生产者 ID
+        std::vector<std::string> consumer_ids;   // 关联的消费者 ID
+    };
+    
+    /**
      * @brief WorkerGroup - Worker 工作组
      * 
-     * ⭐ 核心概念：一个 Group = 1个生产者 + N个消费者
-     * - Group 内强同步：生产者的每个 buffer 必须同时分发给所有消费者
+     * ⭐ 核心概念：一个 Group = 多个生产者 + 多个消费者 + 多个连接器
+     * - Group 内强同步：通过连接器建立生产者-消费者关系
      * - Group 间独立：多个 Group 并行运行，互不干扰
      * - 数据源模式：消费者自动配置为 Buffer 模式，关联到生产者的 BufferPool
      */
     struct WorkerGroup {
         // 组标识
-        std::string group_id;                        // 组ID（用于日志和监控）
+        std::string group_id;
         
-        // 生产者配置（1个）
-        WorkerConfig producer_config;
+        // 多个生产者和消费者
+        std::vector<ProducerConfig> producer_configs;
+        std::vector<ConsumerConfig> consumer_configs;
         
-        // 消费者配置列表（N个）
-        std::vector<WorkerConfig> consumer_configs;
-        
-        // 组级别配置（可选，覆盖全局配置）
-        int sync_timeout_ms = -1;                    // 同步超时（-1 表示使用全局配置）
-        int max_consecutive_errors = -1;             // 最大连续错误数（-1 表示使用全局配置）
-        bool continue_on_error = false;              // 部分消费者失败是否继续
+        // 多个连接器
+        std::vector<ConnectorConfig> connector_configs;
         
         WorkerGroup() = default;
         explicit WorkerGroup(const std::string& id) : group_id(id) {}
     };
     
     /**
-     * @brief 多Worker配置结构（重构版 - 基于 WorkerGroup）
+     * @brief 多Worker配置结构
      */
     struct MultiWorkerConfig {
         // ⭐ 核心：Worker Group 列表
         std::vector<WorkerGroup> groups;
         
-        // 全局线程池配置
-        int thread_pool_size = 4;                    // 共享线程池大小
-        int max_pending_tasks = 100;                 // 全局背压阈值（保留，未来可用）
-        
-        // 全局容错配置（Group 可覆盖）
-        int default_sync_timeout_ms = 5000;          // 默认同步超时时间（毫秒）
-        int default_max_consecutive_errors = 10;     // 默认最大连续错误数
-        bool default_continue_on_error = false;      // 默认部分失败是否继续
+        // 全局线程池配置（用于初始化全局线程池）
+        int thread_pool_size = 4;
         
         MultiWorkerConfig() = default;
     };
@@ -283,28 +302,33 @@ private:
     // ========== 内部类型定义 ==========
     
     /**
-     * @brief WorkerGroup 运行时信息
-     * 
-     * 必须在使用它的方法声明之前定义
+     * @brief GroupData - Group 运行时数据（简化版）
      */
-    struct WorkerGroupRuntime {
+    struct GroupData {
         std::string group_id;
         
         // 生产者信息
-        std::unique_ptr<VideoProductionLine> producer_line;
-        uint64_t producer_buffer_pool_id;
-        std::weak_ptr<BufferPool> producer_buffer_pool_weak;
-        
-        // 消费者信息列表
-        struct ConsumerInfo {
-            std::shared_ptr<BufferFillingWorkerFacade> worker;
-            uint64_t buffer_pool_id;
+        struct ProducerInfo {
+            std::string producer_id;
+            std::unique_ptr<VideoProductionLine> producer_line;
+            uint64_t buffer_pool_id{0};
             std::weak_ptr<BufferPool> buffer_pool_weak;
-            std::atomic<int64_t> success_count{0};
-            std::atomic<int64_t> error_count{0};
-            std::atomic<bool> is_active{true};
+        };
+        std::vector<std::unique_ptr<ProducerInfo>> producers;
+        std::unordered_map<std::string, ProducerInfo*> producer_by_id;
+        
+        // 消费者信息
+        struct ConsumerInfo {
+            std::string consumer_id;
+            std::shared_ptr<BufferFillingWorkerFacade> worker;
+            uint64_t buffer_pool_id{0};
+            std::weak_ptr<BufferPool> buffer_pool_weak;
         };
         std::vector<std::unique_ptr<ConsumerInfo>> consumers;
+        std::unordered_map<std::string, ConsumerInfo*> consumer_by_id;
+        
+        // 连接器列表
+        std::vector<std::unique_ptr<Connector>> connectors;
         
         // Group 独立线程
         std::thread group_thread;
@@ -314,17 +338,23 @@ private:
         std::atomic<int64_t> processed_count{0};
         std::atomic<int64_t> success_count{0};
         std::atomic<int64_t> error_count{0};
-        std::atomic<int> consecutive_errors{0};
-        
-        // Group 配置
-        int sync_timeout_ms;
-        int max_consecutive_errors;
-        bool continue_on_error;
-        
-        WorkerGroupRuntime() = default;
     };
     
     // ========== 内部方法 ==========
+    
+    /**
+     * @brief 校验配置（私有函数）
+     * 
+     * 校验内容：
+     * - 每个 Group 必须至少有一个生产者和一个消费者
+     * - 每个 Group 必须至少有一个连接器
+     * - 连接器的 producer_ids 和 consumer_ids 必须存在
+     * - 连接器模式校验（ONE_TO_ONE、ONE_TO_MANY、MANY_TO_ONE 的规则）
+     * - 检查是否有未连接的 Producer/Consumer
+     * 
+     * @return true 如果配置有效，false 如果配置无效
+     */
+    bool validateConfig() const;
     
     /**
      * @brief WorkerGroup 独立线程函数
@@ -336,24 +366,12 @@ private:
      * 2. 等待所有消费者完成
      * 3. 循环执行
      */
-    void groupThreadFunc(WorkerGroupRuntime* group);
-    
-    /**
-     * @brief 创建生产者 Worker
-     */
-    bool createProducer(WorkerGroupRuntime* group, const WorkerConfig& producer_config);
-    
-    /**
-     * @brief 创建消费者 Workers
-     */
-    bool createConsumers(WorkerGroupRuntime* group, 
-                        const std::vector<WorkerConfig>& consumer_configs,
-                        const AVCodecParameters* producer_codec_params);
+    void groupThreadFunc(GroupData* group);
     
     /**
      * @brief 设置错误信息并触发回调
      */
-    void setError(const std::string& error_msg);
+    void setError(const std::string& error_msg) const;
     
     // ========== 成员变量 ==========
     
@@ -361,14 +379,11 @@ private:
     MultiWorkerConfig config_;
     
     // ⭐ 核心：WorkerGroup 列表
-    std::vector<std::unique_ptr<WorkerGroupRuntime>> groups_;
+    std::vector<std::unique_ptr<GroupData>> groups_;
     
-    // 共享线程池（所有 Group 共享）
-    std::unique_ptr<BS::thread_pool<>> thread_pool_;
-    
-    // 错误处理
-    std::mutex error_mutex_;
-    std::queue<std::string> error_queue_;  // 错误队列（用于诊断）
+    // 错误处理（mutable 允许在 const 函数中修改）
+    mutable std::mutex error_mutex_;
+    mutable std::queue<std::string> error_queue_;  // 错误队列（用于诊断）
     
     // 统计信息
     Statistics stats_;

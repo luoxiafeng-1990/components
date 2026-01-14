@@ -9,6 +9,28 @@
 #include <algorithm>
 
 // ============================================================
+// 硬件资源限制常量（基于大厂设计经验）
+// ============================================================
+
+/**
+ * 硬件解码缓冲区最大数量限制
+ *
+ * 大厂设计经验总结：
+ * - GPU显存限制：高分辨率视频(4K/8K)单个buffer可能需要数百MB
+ * - 并发处理：现代GPU可并发处理8-32路解码流
+ * - 内存压力：避免过度占用系统内存影响整体性能
+ * - 缓冲区轮转：需要足够的buffer进行解码流水线操作
+ *
+ * 取值32的依据：
+ * - 满足4K@60fps的解码流水线需求(至少3-4个buffer用于重排序)
+ * - 支持多路并发解码(8-32路同时处理)
+ * - 控制显存占用在合理范围内(32*100MB=3.2GB，对于16GB显存是安全的)
+ * - 参考FFmpeg/libavcodec、NVIDIA Video Codec SDK等主流实现
+ * - 提供更大的buffer池容量以应对复杂的视频处理场景
+ */
+static constexpr int MAX_HARDWARE_BUFFERS = 32;
+
+// ============================================================
 // 所有权跟踪（静态全局变量，所有 AVFrameAllocator 实例共享）
 // ============================================================
 static std::unordered_map<Buffer*, BufferAllocatorBase*> avframe_buffer_ownership_;
@@ -201,7 +223,11 @@ uint64_t AVFrameAllocator::allocatePoolWithBuffers(
         name,
         category
     );
-    
+    if (count > MAX_HARDWARE_BUFFERS || count <= 0) {
+        LOG_ERROR_FMT("[AVFrameAllocator] Warning: count %d exceeds MAX_HARDWARE_BUFFERS %d", count, MAX_HARDWARE_BUFFERS);
+        count = MAX_HARDWARE_BUFFERS;
+        LOG_WARN_FMT("[AVFrameAllocator] Using MAX_HARDWARE_BUFFERS %d instead of %d", MAX_HARDWARE_BUFFERS, count);
+    }
     // 4. 🎯 核心逻辑：提前分配 count 个 AVFrame* "壳子"，包装成 Buffer
     
     for (int i = 0; i < count; i++) {

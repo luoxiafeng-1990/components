@@ -48,6 +48,9 @@ public:
     std::string getFilePath() const override;
     bool seek(int frame_index) override;
     bool isEof() const override;
+    int getSourceWidth() const override;
+    int getSourceHeight() const override;
+    AVPixelFormat getSourcePixelFormat() const override;
     
 private:
     std::string file_path_;              // 文件路径

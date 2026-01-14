@@ -44,9 +44,10 @@ namespace {
         log4cplus::SharedAppenderPtr appender(new log4cplus::ConsoleAppender());
         
         // 设置自定义 PatternLayout
+        // [%D{...}] - 时间戳（年-月-日 时:分:秒.毫秒）
         // [%-5p] - 日志级别，左对齐，固定5字符宽度，用[]包围
         // %m%n - 消息内容 + 换行
-        std::string pattern = "[%-5p] %m%n";
+        std::string pattern = "[%D{%Y-%m-%d %H:%M:%S.%q}] [%-5p] %m%n";
         std::unique_ptr<log4cplus::Layout> layout(new log4cplus::PatternLayout(pattern));
         appender->setLayout(std::move(layout));
         

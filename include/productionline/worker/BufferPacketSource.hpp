@@ -67,6 +67,9 @@ public:
      */
     bool seek(int frame_index) override;
     bool isEof() const override;
+    int getSourceWidth() const override;
+    int getSourceHeight() const override;
+    AVPixelFormat getSourcePixelFormat() const override;
     
     /**
      * @brief 设置数据源 BufferPool（v2.13 新增）

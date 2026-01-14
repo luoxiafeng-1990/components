@@ -103,13 +103,16 @@ public:
      * @brief 获取编解码器参数（供BufferWriter使用）
      * @return 编解码器参数指针，如果未打开则返回nullptr
      */
-    const struct AVCodecParameters* getCodecParameters() const;
+    const struct AVCodecParameters* getCodecParameters() const override;
     
     /**
      * @brief 获取时间基（供BufferWriter使用）
      * @return 时间基
      */
-    struct AVRational getTimeBase() const;
+    struct AVRational getTimeBase() const override;
+    int getSourceWidth() const override;
+    int getSourceHeight() const override;
+    AVPixelFormat getSourcePixelFormat() const override;
 
 private:
     std::string getLastError() const;

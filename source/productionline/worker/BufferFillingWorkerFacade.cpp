@@ -191,3 +191,39 @@ BufferPoolType BufferFillingWorkerFacade::getPrimaryBufferPoolType() {
     }
     return BufferPoolType::DECODE_VIDEO_PRIMARY;  // 默认值
 }
+
+// ============ v2.16：编解码器参数和时间基获取 ============
+const struct AVCodecParameters* BufferFillingWorkerFacade::getCodecParameters() const {
+    if (worker_base_uptr_) {
+        return worker_base_uptr_->getCodecParameters();
+    }
+    return nullptr;
+}
+
+struct AVRational BufferFillingWorkerFacade::getTimeBase() const {
+    if (worker_base_uptr_) {
+        return worker_base_uptr_->getTimeBase();
+    }
+    return {1, 25};  // 默认 25fps
+}
+
+int BufferFillingWorkerFacade::getSourceWidth() const {
+    if (worker_base_uptr_) {
+        return worker_base_uptr_->getSourceWidth();
+    }
+    return 0;
+}
+
+int BufferFillingWorkerFacade::getSourceHeight() const {
+    if (worker_base_uptr_) {
+        return worker_base_uptr_->getSourceHeight();
+    }
+    return 0;
+}
+
+AVPixelFormat BufferFillingWorkerFacade::getSourcePixelFormat() const {
+    if (worker_base_uptr_) {
+        return worker_base_uptr_->getSourcePixelFormat();
+    }
+    return AV_PIX_FMT_NONE;
+}

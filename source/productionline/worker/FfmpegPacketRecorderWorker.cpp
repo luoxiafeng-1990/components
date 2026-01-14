@@ -94,15 +94,9 @@ bool FfmpegPacketRecorderWorker::open(const char* path) {
         max_packet_size = 256 * 1024;  // 最小 256KB
     }
     
-    // ✅ 从配置读取 buffer_count，如果未配置则使用默认值
-    int buffer_count = worker_config_.data_source.buffer_count;
-    if (buffer_count <= 0) {
-        buffer_count = 64;  // 默认值：录制建议 64 个 Buffer
-    }
-    
     // 创建 BufferPool
     uint64_t pool_id = allocator_facade_.allocatePoolWithBuffers(
-        buffer_count,
+        worker_config_.data_source.buffer_count,
         max_packet_size,
         std::string("FfmpegPacketRecorderWorker_") + std::string(path),
         "PACKET_RECORD"
@@ -134,7 +128,7 @@ bool FfmpegPacketRecorderWorker::open(const char* path) {
     LOG_DEBUG_FMT("[Worker]    Codec: %s", avcodec_get_name(codecpar->codec_id));
     LOG_DEBUG_FMT("[Worker]    Resolution: %dx%d", codecpar->width, codecpar->height);
     LOG_DEBUG_FMT("[Worker]    BufferPool: '%s' (ID: %lu, %d buffers, %zu bytes each)", 
-           pool_name.c_str(), pool_id, buffer_count, max_packet_size);
+           pool_name.c_str(), pool_id, worker_config_.data_source.buffer_count, max_packet_size);
     
     return true;
 }
@@ -378,4 +372,16 @@ AVRational FfmpegPacketRecorderWorker::getTimeBase() const {
     // 从数据源获取编解码器参数，进而获取时间基
     // 注意：需要从 AVStream 获取，这里简化处理返回默认值
     return {1, 25};  // 默认25fps（TODO: 如需精确时间基，需要扩展 IPacketSource 接口）
+}
+
+int FfmpegPacketRecorderWorker::getSourceWidth() const {
+    return packet_source_ ? packet_source_->getSourceWidth() : 0;
+}
+
+int FfmpegPacketRecorderWorker::getSourceHeight() const {
+    return packet_source_ ? packet_source_->getSourceHeight() : 0;
+}
+
+AVPixelFormat FfmpegPacketRecorderWorker::getSourcePixelFormat() const {
+    return packet_source_ ? packet_source_->getSourcePixelFormat() : AV_PIX_FMT_NONE;
 }

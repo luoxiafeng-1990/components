@@ -184,13 +184,6 @@ bool FfmpegDecodeVideoFileWorker::open(const char* path) {
         packet_source_->close();
         return false;
     }
-    
-    // ✅ 从配置读取 buffer_count，如果未配置则使用默认值
-    int buffer_count = worker_config_.data_source.buffer_count;
-    if (buffer_count <= 0) {
-        buffer_count = 128;  // 默认值：文件解码建议 128 个 Buffer（应对慢速消费者）
-    }
-    
     // v2.0: allocatePoolWithBuffers 返回 pool_id
     std::string pool_name;
     if (path) {
@@ -201,7 +194,7 @@ bool FfmpegDecodeVideoFileWorker::open(const char* path) {
     }
     
     uint64_t pool_id = allocator_facade_.allocatePoolWithBuffers(
-        buffer_count,
+        worker_config_.data_source.buffer_count,
         frame_size,
         pool_name,
         "Video"
@@ -235,7 +228,7 @@ bool FfmpegDecodeVideoFileWorker::open(const char* path) {
     LOG_DEBUG_FMT("[Worker]    Codec: %s", codec_ctx_ptr_->codec->name);
     LOG_DEBUG_FMT("[Worker]    Total frames (estimated): %d", packet_source_ ? packet_source_->getTotalFrames() : -1);
     LOG_DEBUG_FMT("[Worker]    BufferPool: '%s' (ID: %lu, %d buffers, %zu bytes each)", 
-           actual_pool_name.c_str(), pool_id, buffer_count, frame_size);
+           actual_pool_name.c_str(), pool_id, worker_config_.data_source.buffer_count, frame_size);
     
     return true;
 }
@@ -452,6 +445,28 @@ bool FfmpegDecodeVideoFileWorker::configureSpecialDecoder() {
     LOG_DEBUG_FMT("[Worker]    ch1_enable=%d: %s", taco.ch1_enable ? 1 : 0, 
            ret < 0 ? "FAILED" : "OK");
     
+    // ========== 通道0配置 ==========
+    
+    // 配置通道0裁剪参数（从 config 读取）
+    if (taco.ch0_crop_width > 0 && taco.ch0_crop_height > 0) {
+        av_opt_set_int(codec_ctx_ptr_->priv_data, "ch0_crop_x", taco.ch0_crop_x, 0);
+        av_opt_set_int(codec_ctx_ptr_->priv_data, "ch0_crop_y", taco.ch0_crop_y, 0);
+        av_opt_set_int(codec_ctx_ptr_->priv_data, "ch0_crop_width", taco.ch0_crop_width, 0);
+        av_opt_set_int(codec_ctx_ptr_->priv_data, "ch0_crop_height", taco.ch0_crop_height, 0);
+        LOG_DEBUG_FMT("[Worker]    ch0_crop: (%d, %d, %d, %d)", 
+               taco.ch0_crop_x, taco.ch0_crop_y, 
+               taco.ch0_crop_width, taco.ch0_crop_height);
+    }
+    
+    // 配置通道0缩放参数（从 config 读取）
+    if (taco.ch0_scale_width > 0 && taco.ch0_scale_height > 0) {
+        av_opt_set_int(codec_ctx_ptr_->priv_data, "ch0_scale_width", taco.ch0_scale_width, 0);
+        av_opt_set_int(codec_ctx_ptr_->priv_data, "ch0_scale_height", taco.ch0_scale_height, 0);
+        LOG_DEBUG_FMT("[Worker]    ch0_scale: (%d, %d)", taco.ch0_scale_width, taco.ch0_scale_height);
+    }
+    
+    // ========== 通道1配置 ==========
+    
     // 配置通道1裁剪参数（从 config 读取）
     if (taco.ch1_crop_width > 0 && taco.ch1_crop_height > 0) {
         av_opt_set_int(codec_ctx_ptr_->priv_data, "ch1_crop_x", taco.ch1_crop_x, 0);
@@ -496,19 +511,19 @@ bool FfmpegDecodeVideoFileWorker::configureSpecialDecoder() {
     LOG_DEBUG_FMT("[Worker]    ch1_rgb=%d: %s", taco.ch1_rgb ? 1 : 0, 
            ret < 0 ? "FAILED" : "OK");
     
-    // 设置RGB格式（从 config 读取）
-    if (taco.ch1_rgb && !taco.ch1_rgb_format.empty()) {
-        ret = av_opt_set(codec_ctx_ptr_->priv_data, "ch1_rgb_format", 
-                         taco.ch1_rgb_format.c_str(), 0);
-        LOG_DEBUG_FMT("[Worker]    ch1_rgb_format=%s: %s", taco.ch1_rgb_format.c_str(), 
+    // ⭐ v2.17: 设置 RGB 格式（使用整型枚举）
+    if (taco.ch1_rgb && taco.ch1_rgb_format > 0) {
+        ret = av_opt_set_int(codec_ctx_ptr_->priv_data, "ch1_rgb_format", 
+                             taco.ch1_rgb_format, 0);
+        LOG_DEBUG_FMT("[Worker]    ch1_rgb_format=%d: %s", taco.ch1_rgb_format, 
                ret < 0 ? "FAILED" : "OK");
     }
     
-    // 设置颜色标准（从 config 读取）
-    if (taco.ch1_rgb && !taco.ch1_rgb_std.empty()) {
-        ret = av_opt_set(codec_ctx_ptr_->priv_data, "ch1_rgb_std", 
-                         taco.ch1_rgb_std.c_str(), 0);
-        LOG_DEBUG_FMT("[Worker]    ch1_rgb_std=%s: %s", taco.ch1_rgb_std.c_str(), 
+    // ⭐ v2.17: 设置颜色标准（使用整型枚举）
+    if (taco.ch1_rgb && taco.ch1_rgb_std > 0) {
+        ret = av_opt_set_int(codec_ctx_ptr_->priv_data, "ch1_rgb_std", 
+                             taco.ch1_rgb_std, 0);
+        LOG_DEBUG_FMT("[Worker]    ch1_rgb_std=%d: %s", taco.ch1_rgb_std, 
                ret < 0 ? "FAILED" : "OK");
     }
     
@@ -622,36 +637,30 @@ double FfmpegDecodeVideoFileWorker::getBytesPerPixel() const {
         }
     }
     
-    // 2️⃣ Fallback：从 worker_config_.decoder.taco 的格式字符串推断
+    // 2️⃣ Fallback：从 worker_config_.decoder.taco 的格式枚举推断（⭐ v2.17）
     if (worker_config_.decoder.taco.ch1_rgb) {
-        // RGB 模式：根据 ch1_rgb_format 推断
-        const std::string& fmt = worker_config_.decoder.taco.ch1_rgb_format;
-        if (fmt == "argb888" || fmt == "bgra888" || fmt == "rgba888" || 
-            fmt == "abgr888" || fmt == "xrgb888" || fmt == "xbgr888") {
-            return 4.0;  // 32-bit RGBA/XRGB
-        } else if (fmt == "rgb888" || fmt == "bgr888") {
-            return 3.0;  // 24-bit RGB
-        } else if (fmt == "r16g16b16" || fmt == "b16g16r16") {
-            return 6.0;  // 48-bit RGB
+        // RGB 模式：根据 ch1_rgb_format 整型枚举推断
+        int rgb_fmt = worker_config_.decoder.taco.ch1_rgb_format;
+        
+        // RGB 8-bit 有 Alpha 通道（4 字节/像素）
+        if (rgb_fmt == 9 || rgb_fmt == 10 || rgb_fmt == 11 || rgb_fmt == 12 ||  // argb888/abgr888/bgra888/rgba888
+            rgb_fmt == 21 || rgb_fmt == 22) {  // xrgb888/xbgr888
+            return 4.0;
         }
-        // 默认 RGB
+        // RGB 8-bit 无 Alpha 通道（3 字节/像素）
+        else if (rgb_fmt == 1 || rgb_fmt == 3) {  // rgb888/bgr888
+            return 3.0;
+        }
+        // RGB 16-bit（6 字节/像素）
+        else if (rgb_fmt == 2 || rgb_fmt == 4) {  // r16g16b16/b16g16r16
+            return 6.0;
+        }
+        // 默认 ARGB888（4 字节/像素）
         return 4.0;
     } else {
-        // YUV 模式：根据 ch0_yuv_format 推断
-        const std::string& fmt = worker_config_.decoder.taco.ch0_yuv_format;
-        if (fmt.find("NV12") != std::string::npos || fmt.find("NV21") != std::string::npos) {
-            return 1.5;  // YUV420: 1.5 bytes/pixel
-        } else if (fmt.find("P010") != std::string::npos || fmt.find("I010") != std::string::npos ||
-                   fmt.find("L010") != std::string::npos || fmt.find("Pack10") != std::string::npos) {
-            return 3.0;  // YUV420 10-bit: 3 bytes/pixel
-        } else if (fmt.find("YUV400") != std::string::npos) {
-            if (fmt.find("8-bit") != std::string::npos) {
-                return 1.0;  // YUV400 8-bit: 1 byte/pixel
-            } else {
-                return 2.0;  // YUV400 10-bit: 2 bytes/pixel
-            }
-        }
-        // 默认 YUV420
+        // YUV 模式：格式由解码器自动决定，无配置字段
+        // 默认假设 YUV420（最常见，1.5 字节/像素）
+        LOG_WARN("[Worker] getBytesPerPixel() fallback: assuming YUV420 (1.5 bytes/pixel)");
         return 1.5;
     }
 }
@@ -789,40 +798,49 @@ bool FfmpegDecodeVideoFileWorker::fillBuffer(int frame_index, Buffer* buffer) {
     
     // 步骤4: 发送 packet 到解码器（参考 ids_test_video3:2270）
     int ret = avcodec_send_packet(codec_ctx_ptr_, packet_ptr);
-    
-    // 🔧 修复：无论成功与否，都要释放packet引用
-    // avcodec_send_packet 会复制数据，不再需要原始packet
-    av_packet_unref(packet_ptr);
-    
     if (ret < 0) {
         LOG_ERROR_FMT("[Worker] ERROR: avcodec_send_packet failed: %d", ret);
         return false;
     }
     bool recv_frm = false;
-    // 步骤5: 🎯 循环调用 receive_frame，直到成功或需要更多数据（参考 ids_test_video3:2276-2354）
+
+    // 🎯 在循环前创建临时 AVFrame（只创建一次）
+    AVFrame* temp_frame = av_frame_alloc();
+    if (!temp_frame) {
+        LOG_ERROR("[Worker] ERROR: Failed to allocate temporary AVFrame");
+        return false;
+    }
+
+    // 步骤5: 🎯 循环调用 receive_frame，直到成功或需要更多数据
     while (true) {
-        ret = avcodec_receive_frame(codec_ctx_ptr_, frame_ptr);
+        // 🎯 使用临时 AVFrame 进行解码
+        ret = avcodec_receive_frame(codec_ctx_ptr_, temp_frame);
         if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF || ret < 0) {
             break;
-        } 
-        // ✅ 成功解码！
-        
+        }
+
+        // ✅ 成功解码到临时 AVFrame！
+
+        // 🎯 使用 move 操作将数据转移到 buffer 的 AVFrame
+        av_frame_move_ref(frame_ptr, temp_frame);
+
         // ⭐ 硬件解码器：提取物理内存地址
         // 判断条件：decoder_name_ 非空 且 use_hardware_decoder_ == true
         if (!decoder_name_.empty() && use_hardware_decoder_) {
             // 明确使用了硬件解码器，尝试提取物理地址
             if (!extractHardwareAddressFromMetadata(frame_ptr, buffer)) {
                 // ❌ 硬件解码时提取失败是错误
-                LOG_ERROR_FMT("[Worker] Hardware decoder '%s': Failed to extract physical address", 
+                LOG_ERROR_FMT("[Worker] Hardware decoder '%s': Failed to extract physical address",
                              decoder_name_.c_str());
+                av_frame_free(&temp_frame);  // 🔧 清理临时 AVFrame
                 return false;
             }
         }
         // 软件解码或自动选择：不提取物理地址（正常，物理地址保持为 0）
-        
+
         // ⭐ v2.7改进：先更新虚拟地址为实际数据地址（frame->data[0]）
         buffer->setVirtualAddress(frame_ptr->data[0]);
-        
+
         // ⭐ v2.10新增：从AVFrame获取实际帧大小并更新Buffer的size
         int actual_frame_size = av_image_get_buffer_size(
             (AVPixelFormat)frame_ptr->format,
@@ -830,20 +848,26 @@ bool FfmpegDecodeVideoFileWorker::fillBuffer(int frame_index, Buffer* buffer) {
             frame_ptr->height,
             1  // alignment
         );
-        
+
         if (actual_frame_size > 0) {
             buffer->setSize(actual_frame_size);
             LOG_TRACE_FMT("[Worker] Updated buffer size to actual frame size: %d bytes", actual_frame_size);
         } else {
             LOG_ERROR_FMT("[Worker] Failed to get frame buffer size: %d", actual_frame_size);
         }
-        
+
         // ⭐ v2.6新增：从AVFrame设置图像元数据到Buffer
         buffer->setImageMetadataFromAVFrame(frame_ptr);
         decoded_frames_++;
         current_frame_index_++;
         recv_frm = true;
+
+        // 🎯 处理完一帧后立即退出循环，避免覆盖
+        break;
     }
+
+    // 🔧 在循环结束后清理临时 AVFrame
+    av_frame_free(&temp_frame);
     return recv_frm;
 }
 
@@ -874,6 +898,30 @@ const char* FfmpegDecodeVideoFileWorker::getCodecName() const {
         return codec_ctx_ptr_->codec->name;
     }
     return "unknown";
+}
+
+const AVCodecParameters* FfmpegDecodeVideoFileWorker::getCodecParameters() const {
+    if (!packet_source_) {
+        return nullptr;
+    }
+    return packet_source_->getCodecParameters();
+}
+
+AVRational FfmpegDecodeVideoFileWorker::getTimeBase() const {
+    if (!packet_source_) {
+        return {1, 25};  // 默认值
+    }
+    
+    // 从数据源获取编解码器参数
+    const AVCodecParameters* codecpar = packet_source_->getCodecParameters();
+    if (!codecpar) {
+        return {1, 25};  // 默认值
+    }
+    
+    // 对于视频流，通常使用帧率的倒数作为时间基
+    // 这里返回一个通用的时间基（可以根据实际需求调整）
+    // 注意：如果需要更精确的时间基，应该从 AVStream 获取
+    return {1, 25};  // 默认25fps
 }
 
 int FfmpegDecodeVideoFileWorker::getOriginalWidth() const {
@@ -979,3 +1027,15 @@ bool FfmpegDecodeVideoFileWorker::extractHardwareAddressFromMetadata(AVFrame* fr
     return false;
 }
 
+
+int FfmpegDecodeVideoFileWorker::getSourceWidth() const {
+    return packet_source_ ? packet_source_->getSourceWidth() : 0;
+}
+
+int FfmpegDecodeVideoFileWorker::getSourceHeight() const {
+    return packet_source_ ? packet_source_->getSourceHeight() : 0;
+}
+
+AVPixelFormat FfmpegDecodeVideoFileWorker::getSourcePixelFormat() const {
+    return packet_source_ ? packet_source_->getSourcePixelFormat() : AV_PIX_FMT_NONE;
+}

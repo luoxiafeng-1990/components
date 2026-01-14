@@ -155,6 +155,21 @@ public:
     std::string getLastError() const;
     
     /**
+     * @brief 获取编解码器参数（用于 BufferWriter 等场景）
+     * @return 编解码器参数指针，如果不可用则返回 nullptr
+     */
+    const struct AVCodecParameters* getCodecParameters() const override;
+    
+    /**
+     * @brief 获取时间基（用于 BufferWriter 等场景）
+     * @return 时间基
+     */
+    struct AVRational getTimeBase() const override;
+    int getSourceWidth() const override;
+    int getSourceHeight() const override;
+    AVPixelFormat getSourcePixelFormat() const override;
+    
+    /**
      * 打印统计信息
      */
     void printStats() const;

@@ -293,6 +293,7 @@ void VideoProductionLine::producerThreadFunc(int thread_id) {
     int thread_produced = 0;
     int thread_skipped = 0;
     int consecutive_failures = 0;
+    int buffer_wait_count = 0;  // 缓冲区等待计数器，避免频繁日志
     if (monitor_) {
         monitor_->start();  // 启动后Timer会自动触发周期性报告
     }
@@ -311,8 +312,12 @@ void VideoProductionLine::producerThreadFunc(int thread_id) {
             buffer = pool_sptr->acquireFree(true, 100);  // 100ms 超时
             if (buffer == nullptr && running_.load()) {
                 // 超时但仍在运行，继续等待
-                LOG_DEBUG_FMT("[VideoProductionLine][Thread #%d] Waiting for free buffer from pool '%s' (frame_index=%d)...", 
-                              thread_id, pool_sptr->getName().c_str(), frame_index);
+                buffer_wait_count++;
+                // 每100次等待才打印一次日志，避免过于频繁
+                if (buffer_wait_count % 100 == 1) {
+                    LOG_DEBUG_FMT("[VideoProductionLine][Thread #%d] Waiting for free buffer from pool '%s' (frame_index=%d, wait_count=%d)...",
+                                  thread_id, pool_sptr->getName().c_str(), frame_index, buffer_wait_count);
+                }
             }
         }
         

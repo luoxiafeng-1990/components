@@ -55,6 +55,9 @@ public:
     std::string getFilePath() const override; // 返回 RTSP URL
     bool seek(int frame_index) override;      // 返回 false（实时流不支持 seek）
     bool isEof() const override;
+    int getSourceWidth() const override;
+    int getSourceHeight() const override;
+    AVPixelFormat getSourcePixelFormat() const override;
     
     // ============ 中断控制接口 ============
     
