@@ -141,7 +141,7 @@ public:
      * consumer_worker.open();
      * ```
      */
-    bool setSourceBufferPool(std::weak_ptr<BufferPool> pool_weak);
+    bool setSourceBufferPool(std::weak_ptr<BufferPool> pool_weak) override;
     
     // ============ 信息查询 ============
     

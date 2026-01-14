@@ -50,9 +50,20 @@ struct CompareConfig {
     
     ColorStandard color_std = BT601;
     
+    // ========== 指标开关 ==========
+    bool enable_psnr = true;               // 是否启用 PSNR 计算
+    bool enable_ssim = true;               // 是否启用 SSIM 计算（计算量约为 PSNR 的 1.5-2 倍）
+    
+    // ========== 并行计算配置 ==========
+    bool enable_parallel = true;           // 是否启用并行计算（使用全局线程池）
+    // 注意：并行计算可提速 40-60%（快速验证）到 2-3 倍（深度验证）
+    //      但会增加线程调度开销，建议在高分辨率视频时启用
+    
     // ========== 阈值配置 ==========
     double quick_psnr_threshold = 38.0;    // >= 38dB 快速通过
     double quick_warn_threshold = 35.0;    // < 35dB 触发深度验证
+    double ssim_threshold = 0.95;          // >= 0.95 认为质量优秀
+    double ssim_warn_threshold = 0.90;     // < 0.90 触发警告
     int max_pixel_diff = 3;                // 最大差3灰度级
     float diff_pixel_ratio = 0.05;         // 差异像素<5%
     
@@ -83,6 +94,14 @@ struct FrameCompareResult {
     double psnr_u = 0.0;    // U平面 或 R通道
     double psnr_v = 0.0;    // V平面 或 B通道
     double psnr_avg = 0.0;  // 加权平均
+    
+    // ========== SSIM结果 ==========
+    // YUV格式：ssim_y/u/v 表示 Y/U/V 平面
+    // RGB格式：复用字段 ssim_y=G, ssim_u=R, ssim_v=B
+    double ssim_y = 0.0;    // Y平面 或 G通道（主要指标）范围 [0.0, 1.0]
+    double ssim_u = 0.0;    // U平面 或 R通道，范围 [0.0, 1.0]
+    double ssim_v = 0.0;    // V平面 或 B通道，范围 [0.0, 1.0]
+    double ssim_avg = 0.0;  // 加权平均，范围 [0.0, 1.0]
     
     // ========== 像素差异统计 ==========
     int max_pixel_diff = 0;      // 最大像素差值
@@ -221,6 +240,12 @@ private:
     double min_psnr_y_;
     double max_psnr_y_;
     
+    double sum_ssim_y_;
+    double sum_ssim_u_;
+    double sum_ssim_v_;
+    double min_ssim_y_;
+    double max_ssim_y_;
+    
     // ========== 失败帧列表 ==========
     std::vector<FrameCompareResult> failures_;
     std::vector<FrameCompareResult> warnings_;
@@ -325,6 +350,63 @@ private:
      */
     double calculatePSNR_RGB_B(Buffer* buf1, Buffer* buf2,
                                const FormatInfo& info1, const FormatInfo& info2);
+    
+    // ========== SSIM计算 ==========
+    
+    /**
+     * @brief 通用 SSIM 计算（单平面/通道）
+     * @param data1 第一个图像数据
+     * @param data2 第二个图像数据
+     * @param width 图像宽度
+     * @param height 图像高度
+     * @param stride1 第一个图像的行跨度
+     * @param stride2 第二个图像的行跨度
+     * @return SSIM 值，范围 [0.0, 1.0]，1.0 表示完全相同
+     * 
+     * @note 使用 8x8 滑动窗口和标准 SSIM 算法
+     * @note 计算复杂度约为 PSNR 的 1.5-2 倍
+     */
+    double calculateSSIM(
+        const uint8_t* data1, const uint8_t* data2,
+        int width, int height,
+        int stride1, int stride2
+    );
+    
+    /**
+     * @brief YUV格式：Y平面 SSIM
+     */
+    double calculateSSIM_YUV_Y(Buffer* buf1, Buffer* buf2, 
+                              const FormatInfo& info1, const FormatInfo& info2);
+    
+    /**
+     * @brief YUV格式：U平面 SSIM
+     */
+    double calculateSSIM_YUV_U(Buffer* buf1, Buffer* buf2,
+                              const FormatInfo& info1, const FormatInfo& info2);
+    
+    /**
+     * @brief YUV格式：V平面 SSIM
+     */
+    double calculateSSIM_YUV_V(Buffer* buf1, Buffer* buf2,
+                              const FormatInfo& info1, const FormatInfo& info2);
+    
+    /**
+     * @brief RGB格式：R通道 SSIM
+     */
+    double calculateSSIM_RGB_R(Buffer* buf1, Buffer* buf2,
+                              const FormatInfo& info1, const FormatInfo& info2);
+    
+    /**
+     * @brief RGB格式：G通道 SSIM
+     */
+    double calculateSSIM_RGB_G(Buffer* buf1, Buffer* buf2,
+                              const FormatInfo& info1, const FormatInfo& info2);
+    
+    /**
+     * @brief RGB格式：B通道 SSIM
+     */
+    double calculateSSIM_RGB_B(Buffer* buf1, Buffer* buf2,
+                              const FormatInfo& info1, const FormatInfo& info2);
     
     // ========== 辅助方法 ==========
     

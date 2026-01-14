@@ -135,6 +135,40 @@ public:
     // ============ RTSP 特有接口 ============
     
     /**
+     * @brief 设置源 BufferPool（用于 Buffer 模式）
+     * 
+     * 功能：在 Buffer 模式下，关联 Record Worker 的 BufferPool
+     * 
+     * 使用场景：
+     * - MultiWorkerProductionLine 场景
+     * - 消费者 Worker 从生产者 Worker 的 BufferPool 获取数据
+     * 
+     * 前置条件：
+     * - WorkerConfig 中必须设置 `decoder.datasource_buffer_mode = true`
+     * - 构造函数中会创建 `BufferPacketSource`（而不是 `RtspPacketSource`）
+     * 
+     * 示例：
+     * ```cpp
+     * // 1. 创建消费者 Worker（Buffer 模式）
+     * WorkerConfig config;
+     * config.decoder.datasource_buffer_mode = true;
+     * config.decoder.codec_params = record_worker->getCodecParameters();
+     * FfmpegDecodeRtspWorker consumer_worker(config);
+     * 
+     * // 2. 关联 Record BufferPool
+     * auto record_pool_weak = BufferPoolRegistry::getInstance().getPool(record_pool_id);
+     * consumer_worker.setSourceBufferPool(record_pool_weak);
+     * 
+     * // 3. 打开并使用
+     * consumer_worker.open();
+     * ```
+     * 
+     * @param pool_weak Record Worker 的 BufferPool（weak_ptr）
+     * @return true 如果成功设置，false 如果失败（不是 Buffer 模式）
+     */
+    bool setSourceBufferPool(std::weak_ptr<BufferPool> pool_weak) override;
+    
+    /**
      * 获取已解码帧数
      */
     int getDecodedFrames() const { return decoded_frames_.load(); }

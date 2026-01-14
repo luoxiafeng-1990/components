@@ -17,6 +17,7 @@ libcomponents_la_SOURCES = \
     source/productionline/worker/RtspPacketSource.cpp \
     source/monitor/PerformanceMonitor.cpp \
     source/common/Timer.cpp \
+    source/common/GlobalThreadPool.cpp \
     source/buffer/bufferpool/Buffer.cpp \
     source/buffer/BufferAllocatorFactory.cpp \
     source/buffer/BufferAllocatorFacade.cpp \
@@ -27,6 +28,7 @@ libcomponents_la_SOURCES = \
     source/buffer/bufferpool/BufferPool.cpp \
     source/buffer/bufferpool/BufferPoolRegistry.cpp \
     source/productionline/VideoProductionLine.cpp \
+    source/productionline/Connector.cpp \
     source/productionline/MultiWorkerProductionLine.cpp \
     source/productionline/io/BufferWriter.cpp \
     source/productionline/io/BufferComparator.cpp

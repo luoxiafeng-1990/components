@@ -305,12 +305,33 @@ bool MultiWorkerProductionLine::start() {
         LOG4CPLUS_INFO(logger, log_prefix_ << "    创建 " << group_config.consumer_configs.size() 
                        << " 个消费者 Worker...");
         
+        // ⭐ v2.13 新增：从第一个生产者获取 codec_params 和 time_base（用于 Buffer 模式）
+        const AVCodecParameters* producer_codec_params = nullptr;
+        AVRational producer_time_base = {0, 1};
+        if (!group->producers.empty() && group->producers[0]) {
+            auto worker_facade = group->producers[0]->producer_line->getWorkerFacade();
+            if (worker_facade) {
+                producer_codec_params = worker_facade->getCodecParameters();
+                producer_time_base = worker_facade->getTimeBase();
+                if (producer_codec_params) {
+                    LOG4CPLUS_INFO(logger, log_prefix_ << "    从生产者获取 codec_params (codec_id=" 
+                                   << producer_codec_params->codec_id << ")");
+                }
+            }
+        }
+        
         for (const auto& ccfg : group_config.consumer_configs) {
             LOG4CPLUS_INFO(logger, log_prefix_ << "      创建消费者 '" << ccfg.consumer_id << "'...");
             
             // 配置 buffer mode
             WorkerConfig consumer_config = ccfg.worker_config;
             consumer_config.decoder.datasource_buffer_mode = true;
+            
+            // ⭐ v2.13 新增：传递 codec_params 和 time_base 给消费者（用于 BufferPacketSource）
+            if (producer_codec_params) {
+                consumer_config.decoder.codec_params = producer_codec_params;
+                consumer_config.decoder.time_base = producer_time_base;
+            }
             
             // 创建消费者 Worker（但不 open，等待连接器绑定）
             auto consumer_worker = std::make_shared<BufferFillingWorkerFacade>(consumer_config);

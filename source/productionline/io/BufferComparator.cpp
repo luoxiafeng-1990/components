@@ -1,8 +1,11 @@
 #include "productionline/io/BufferComparator.hpp"
 #include "common/Logger.hpp"
+#include "common/GlobalThreadPool.hpp"
 #include <cmath>
 #include <cstring>
 #include <algorithm>
+#include <future>
+#include <vector>
 
 extern "C" {
 #include <libavutil/frame.h>
@@ -29,6 +32,11 @@ BufferComparator::BufferComparator()
     , sum_psnr_v_(0.0)
     , min_psnr_y_(100.0)
     , max_psnr_y_(0.0)
+    , sum_ssim_y_(0.0)
+    , sum_ssim_u_(0.0)
+    , sum_ssim_v_(0.0)
+    , min_ssim_y_(1.0)
+    , max_ssim_y_(0.0)
     , report_file_(nullptr)
 {
 }
@@ -51,6 +59,12 @@ bool BufferComparator::open(const CompareConfig& config) {
     
     config_ = config;
     
+    // 检查：至少启用一个指标
+    if (!config_.enable_psnr && !config_.enable_ssim) {
+        LOG_ERROR("[BufferComparator] At least one metric (PSNR or SSIM) must be enabled");
+        return false;
+    }
+    
     // 打开报告文件
     if (config_.save_report) {
         report_file_ = fopen(config_.report_path.c_str(), "w");
@@ -71,8 +85,20 @@ bool BufferComparator::open(const CompareConfig& config) {
                 config_.format_strategy == CompareConfig::AUTO ? "AUTO" :
                 config_.format_strategy == CompareConfig::FORCE_YUV ? "FORCE_YUV" :
                 config_.format_strategy == CompareConfig::FORCE_RGB ? "FORCE_RGB" : "NATIVE");
-        fprintf(report_file_, "PSNR Threshold: Pass >= %.1f dB, Warn >= %.1f dB\n",
-                config_.quick_psnr_threshold, config_.quick_warn_threshold);
+        fprintf(report_file_, "Enabled Metrics: %s%s%s\n",
+                config_.enable_psnr ? "PSNR" : "",
+                (config_.enable_psnr && config_.enable_ssim) ? " + " : "",
+                config_.enable_ssim ? "SSIM" : "");
+        fprintf(report_file_, "Parallel Computing: %s\n",
+                config_.enable_parallel ? "Enabled (using GlobalThreadPool)" : "Disabled");
+        if (config_.enable_psnr) {
+            fprintf(report_file_, "PSNR Threshold: Pass >= %.1f dB, Warn >= %.1f dB\n",
+                    config_.quick_psnr_threshold, config_.quick_warn_threshold);
+        }
+        if (config_.enable_ssim) {
+            fprintf(report_file_, "SSIM Threshold: Pass >= %.4f, Warn >= %.4f\n",
+                    config_.ssim_threshold, config_.ssim_warn_threshold);
+        }
         fprintf(report_file_, "═══════════════════════════════════════════════════════\n\n");
         fflush(report_file_);
     }
@@ -87,6 +113,11 @@ bool BufferComparator::open(const CompareConfig& config) {
     sum_psnr_v_ = 0.0;
     min_psnr_y_ = 100.0;
     max_psnr_y_ = 0.0;
+    sum_ssim_y_ = 0.0;
+    sum_ssim_u_ = 0.0;
+    sum_ssim_v_ = 0.0;
+    min_ssim_y_ = 1.0;
+    max_ssim_y_ = 0.0;
     failures_.clear();
     warnings_.clear();
     
@@ -117,13 +148,25 @@ void BufferComparator::close() {
                 compare_count_ > 0 ? 100.0 * failed_count_.load() / compare_count_.load() : 0.0);
         
         if (compare_count_ > 0) {
-            fprintf(report_file_, "\nPSNR Statistics:\n");
-            fprintf(report_file_, "  Average: Y=%.2f U=%.2f V=%.2f dB\n",
-                    sum_psnr_y_ / compare_count_.load(),
-                    sum_psnr_u_ / compare_count_.load(),
-                    sum_psnr_v_ / compare_count_.load());
-            fprintf(report_file_, "  Min Y: %.2f dB\n", min_psnr_y_);
-            fprintf(report_file_, "  Max Y: %.2f dB\n", max_psnr_y_);
+            if (config_.enable_psnr) {
+                fprintf(report_file_, "\nPSNR Statistics:\n");
+                fprintf(report_file_, "  Average: Y=%.2f U=%.2f V=%.2f dB\n",
+                        sum_psnr_y_ / compare_count_.load(),
+                        sum_psnr_u_ / compare_count_.load(),
+                        sum_psnr_v_ / compare_count_.load());
+                fprintf(report_file_, "  Min Y: %.2f dB\n", min_psnr_y_);
+                fprintf(report_file_, "  Max Y: %.2f dB\n", max_psnr_y_);
+            }
+            
+            if (config_.enable_ssim) {
+                fprintf(report_file_, "\nSSIM Statistics:\n");
+                fprintf(report_file_, "  Average: Y=%.4f U=%.4f V=%.4f\n",
+                        sum_ssim_y_ / compare_count_.load(),
+                        sum_ssim_u_ / compare_count_.load(),
+                        sum_ssim_v_ / compare_count_.load());
+                fprintf(report_file_, "  Min Y: %.4f\n", min_ssim_y_);
+                fprintf(report_file_, "  Max Y: %.4f\n", max_ssim_y_);
+            }
         }
         
         fprintf(report_file_, "\n%s\n", 
@@ -249,13 +292,25 @@ void BufferComparator::printSummary() const {
                  compare_count_ > 0 ? 100.0 * failed_count_.load() / compare_count_.load() : 0.0);
     
     if (compare_count_ > 0) {
-        LOG_INFO("");
-        LOG_INFO("  PSNR Statistics:");
-        LOG_INFO_FMT("    Average: Y=%.2f U=%.2f V=%.2f dB",
-                     sum_psnr_y_ / compare_count_.load(),
-                     sum_psnr_u_ / compare_count_.load(),
-                     sum_psnr_v_ / compare_count_.load());
-        LOG_INFO_FMT("    Range:   Y=[%.2f, %.2f] dB", min_psnr_y_, max_psnr_y_);
+        if (config_.enable_psnr) {
+            LOG_INFO("");
+            LOG_INFO("  PSNR Statistics:");
+            LOG_INFO_FMT("    Average: Y=%.2f U=%.2f V=%.2f dB",
+                         sum_psnr_y_ / compare_count_.load(),
+                         sum_psnr_u_ / compare_count_.load(),
+                         sum_psnr_v_ / compare_count_.load());
+            LOG_INFO_FMT("    Range:   Y=[%.2f, %.2f] dB", min_psnr_y_, max_psnr_y_);
+        }
+        
+        if (config_.enable_ssim) {
+            LOG_INFO("");
+            LOG_INFO("  SSIM Statistics:");
+            LOG_INFO_FMT("    Average: Y=%.4f U=%.4f V=%.4f",
+                         sum_ssim_y_ / compare_count_.load(),
+                         sum_ssim_u_ / compare_count_.load(),
+                         sum_ssim_v_ / compare_count_.load());
+            LOG_INFO_FMT("    Range:   Y=[%.4f, %.4f]", min_ssim_y_, max_ssim_y_);
+        }
     }
     
     LOG_INFO("");
@@ -403,59 +458,254 @@ FrameCompareResult BufferComparator::compareYUV(
 ) {
     FrameCompareResult result;
     
+    // ============================================================================
     // 层1：快速验证（仅Y平面）
-    result.psnr_y = calculatePSNR_YUV_Y(ref_buffer, test_buffer, ref_info, test_info);
+    // ============================================================================
     
-    if (result.psnr_y >= config_.quick_psnr_threshold) {
+    bool quick_pass = false;
+    
+    // 🚀 并行计算 PSNR-Y 和 SSIM-Y（如果都启用）
+    if (config_.enable_parallel && config_.enable_psnr && config_.enable_ssim) {
+        // 方案B：完全并行 - 使用全局线程池
+        auto& pool = GlobalThreadPool::getInstance().getThreadPool();
+        
+        // 提交两个异步任务
+        auto future_psnr = pool.submit_task([this, ref_buffer, test_buffer, &ref_info, &test_info]() {
+            return this->calculatePSNR_YUV_Y(ref_buffer, test_buffer, ref_info, test_info);
+        });
+        
+        auto future_ssim = pool.submit_task([this, ref_buffer, test_buffer, &ref_info, &test_info]() {
+            return this->calculateSSIM_YUV_Y(ref_buffer, test_buffer, ref_info, test_info);
+        });
+        
+        // 等待结果
+        result.psnr_y = future_psnr.get();
+        result.ssim_y = future_ssim.get();
+        
+        // 两者都要达标
+        quick_pass = (result.psnr_y >= config_.quick_psnr_threshold) && 
+                     (result.ssim_y >= config_.ssim_threshold);
+    } 
+    else {
+        // 串行计算（兼容模式或只启用一个指标）
+        if (config_.enable_psnr) {
+            result.psnr_y = calculatePSNR_YUV_Y(ref_buffer, test_buffer, ref_info, test_info);
+        }
+        
+        if (config_.enable_ssim) {
+            result.ssim_y = calculateSSIM_YUV_Y(ref_buffer, test_buffer, ref_info, test_info);
+        }
+        
+        // 判定快速通过条件（严格模式：都要满足）
+        if (config_.enable_psnr && config_.enable_ssim) {
+            quick_pass = (result.psnr_y >= config_.quick_psnr_threshold) && 
+                         (result.ssim_y >= config_.ssim_threshold);
+        } else if (config_.enable_psnr) {
+            quick_pass = (result.psnr_y >= config_.quick_psnr_threshold);
+        } else if (config_.enable_ssim) {
+            quick_pass = (result.ssim_y >= config_.ssim_threshold);
+        }
+    }
+    
+    if (quick_pass) {
         // ✅ 快速通过
         result.passed = true;
         result.level = FrameCompareResult::PASS;
         passed_count_++;
         
         if (config_.verbose && result.frame_index % 50 == 0) {
-            LOG_DEBUG_FMT("  Frame %d: PASS (PSNR-Y: %.2f dB) ⚡ quick", 
-                         result.frame_index, result.psnr_y);
+            if (config_.enable_psnr && config_.enable_ssim) {
+                LOG_DEBUG_FMT("  Frame %d: PASS (PSNR-Y: %.2f dB, SSIM-Y: %.4f) ⚡ quick%s", 
+                             result.frame_index, result.psnr_y, result.ssim_y,
+                             config_.enable_parallel ? " [parallel]" : "");
+            } else if (config_.enable_psnr) {
+                LOG_DEBUG_FMT("  Frame %d: PASS (PSNR-Y: %.2f dB) ⚡ quick", 
+                             result.frame_index, result.psnr_y);
+            } else {
+                LOG_DEBUG_FMT("  Frame %d: PASS (SSIM-Y: %.4f) ⚡ quick", 
+                             result.frame_index, result.ssim_y);
+            }
         }
         
         return result;
     }
     
+    // ============================================================================
     // 层2：深度验证（U/V平面）
+    // ============================================================================
+    
     if (config_.strategy == CompareConfig::AUTO_LAYERED ||
         config_.strategy == CompareConfig::DEEP_ALWAYS) {
         
         if (config_.verbose) {
-            LOG_WARN_FMT("  Frame %d: PSNR-Y=%.2f dB < %.2f dB, deep validation...",
-                         result.frame_index, result.psnr_y, config_.quick_psnr_threshold);
+            if (config_.enable_psnr && config_.enable_ssim) {
+                LOG_WARN_FMT("  Frame %d: PSNR-Y=%.2f dB, SSIM-Y=%.4f, deep validation...",
+                             result.frame_index, result.psnr_y, result.ssim_y);
+            } else if (config_.enable_psnr) {
+                LOG_WARN_FMT("  Frame %d: PSNR-Y=%.2f dB < %.2f dB, deep validation...",
+                             result.frame_index, result.psnr_y, config_.quick_psnr_threshold);
+            } else {
+                LOG_WARN_FMT("  Frame %d: SSIM-Y=%.4f < %.4f, deep validation...",
+                             result.frame_index, result.ssim_y, config_.ssim_threshold);
+            }
         }
         
-        result.psnr_u = calculatePSNR_YUV_U(ref_buffer, test_buffer, ref_info, test_info);
-        result.psnr_v = calculatePSNR_YUV_V(ref_buffer, test_buffer, ref_info, test_info);
-        
-        // 加权平均
-        if (config_.use_perceptual_weighting) {
-            result.psnr_avg = (result.psnr_y * 4.0 + result.psnr_u + result.psnr_v) / 6.0;
-        } else {
-            result.psnr_avg = (result.psnr_y + result.psnr_u + result.psnr_v) / 3.0;
+        // 🚀 方案B：完全并行 - 并行计算所有 U/V 平面（最多4个任务）
+        if (config_.enable_parallel && config_.enable_psnr && config_.enable_ssim) {
+            // 完全并行：4 个任务（PSNR-U, PSNR-V, SSIM-U, SSIM-V）
+            auto& pool = GlobalThreadPool::getInstance().getThreadPool();
+            
+            auto future_psnr_u = pool.submit_task([this, ref_buffer, test_buffer, &ref_info, &test_info]() {
+                return this->calculatePSNR_YUV_U(ref_buffer, test_buffer, ref_info, test_info);
+            });
+            
+            auto future_psnr_v = pool.submit_task([this, ref_buffer, test_buffer, &ref_info, &test_info]() {
+                return this->calculatePSNR_YUV_V(ref_buffer, test_buffer, ref_info, test_info);
+            });
+            
+            auto future_ssim_u = pool.submit_task([this, ref_buffer, test_buffer, &ref_info, &test_info]() {
+                return this->calculateSSIM_YUV_U(ref_buffer, test_buffer, ref_info, test_info);
+            });
+            
+            auto future_ssim_v = pool.submit_task([this, ref_buffer, test_buffer, &ref_info, &test_info]() {
+                return this->calculateSSIM_YUV_V(ref_buffer, test_buffer, ref_info, test_info);
+            });
+            
+            // 等待所有结果
+            result.psnr_u = future_psnr_u.get();
+            result.psnr_v = future_psnr_v.get();
+            result.ssim_u = future_ssim_u.get();
+            result.ssim_v = future_ssim_v.get();
+            
+            // 加权平均
+            if (config_.use_perceptual_weighting) {
+                result.psnr_avg = (result.psnr_y * 4.0 + result.psnr_u + result.psnr_v) / 6.0;
+                result.ssim_avg = (result.ssim_y * 4.0 + result.ssim_u + result.ssim_v) / 6.0;
+            } else {
+                result.psnr_avg = (result.psnr_y + result.psnr_u + result.psnr_v) / 3.0;
+                result.ssim_avg = (result.ssim_y + result.ssim_u + result.ssim_v) / 3.0;
+            }
+        }
+        else if (config_.enable_parallel && (config_.enable_psnr || config_.enable_ssim)) {
+            // 部分并行：2 个任务（PSNR-UV 或 SSIM-UV）
+            auto& pool = GlobalThreadPool::getInstance().getThreadPool();
+            
+            if (config_.enable_psnr) {
+                auto future_psnr_u = pool.submit_task([this, ref_buffer, test_buffer, &ref_info, &test_info]() {
+                    return this->calculatePSNR_YUV_U(ref_buffer, test_buffer, ref_info, test_info);
+                });
+                
+                auto future_psnr_v = pool.submit_task([this, ref_buffer, test_buffer, &ref_info, &test_info]() {
+                    return this->calculatePSNR_YUV_V(ref_buffer, test_buffer, ref_info, test_info);
+                });
+                
+                result.psnr_u = future_psnr_u.get();
+                result.psnr_v = future_psnr_v.get();
+                
+                // 加权平均
+                if (config_.use_perceptual_weighting) {
+                    result.psnr_avg = (result.psnr_y * 4.0 + result.psnr_u + result.psnr_v) / 6.0;
+                } else {
+                    result.psnr_avg = (result.psnr_y + result.psnr_u + result.psnr_v) / 3.0;
+                }
+            }
+            
+            if (config_.enable_ssim) {
+                auto future_ssim_u = pool.submit_task([this, ref_buffer, test_buffer, &ref_info, &test_info]() {
+                    return this->calculateSSIM_YUV_U(ref_buffer, test_buffer, ref_info, test_info);
+                });
+                
+                auto future_ssim_v = pool.submit_task([this, ref_buffer, test_buffer, &ref_info, &test_info]() {
+                    return this->calculateSSIM_YUV_V(ref_buffer, test_buffer, ref_info, test_info);
+                });
+                
+                result.ssim_u = future_ssim_u.get();
+                result.ssim_v = future_ssim_v.get();
+                
+                // 加权平均
+                if (config_.use_perceptual_weighting) {
+                    result.ssim_avg = (result.ssim_y * 4.0 + result.ssim_u + result.ssim_v) / 6.0;
+                } else {
+                    result.ssim_avg = (result.ssim_y + result.ssim_u + result.ssim_v) / 3.0;
+                }
+            }
+        }
+        else {
+            // 串行计算（兼容模式）
+            if (config_.enable_psnr) {
+                result.psnr_u = calculatePSNR_YUV_U(ref_buffer, test_buffer, ref_info, test_info);
+                result.psnr_v = calculatePSNR_YUV_V(ref_buffer, test_buffer, ref_info, test_info);
+                
+                // 加权平均
+                if (config_.use_perceptual_weighting) {
+                    result.psnr_avg = (result.psnr_y * 4.0 + result.psnr_u + result.psnr_v) / 6.0;
+                } else {
+                    result.psnr_avg = (result.psnr_y + result.psnr_u + result.psnr_v) / 3.0;
+                }
+            }
+            
+            if (config_.enable_ssim) {
+                result.ssim_u = calculateSSIM_YUV_U(ref_buffer, test_buffer, ref_info, test_info);
+                result.ssim_v = calculateSSIM_YUV_V(ref_buffer, test_buffer, ref_info, test_info);
+                
+                // 加权平均
+                if (config_.use_perceptual_weighting) {
+                    result.ssim_avg = (result.ssim_y * 4.0 + result.ssim_u + result.ssim_v) / 6.0;
+                } else {
+                    result.ssim_avg = (result.ssim_y + result.ssim_u + result.ssim_v) / 3.0;
+                }
+            }
         }
         
-        // 判定
-        if (result.psnr_y >= config_.quick_warn_threshold) {
+        // 判定（严格模式：都要满足）
+        bool is_warn = false;
+        
+        if (config_.enable_psnr && config_.enable_ssim) {
+            // 两者都启用：都要满足警告阈值
+            is_warn = (result.psnr_y >= config_.quick_warn_threshold) && 
+                      (result.ssim_y >= config_.ssim_warn_threshold);
+        } else if (config_.enable_psnr) {
+            is_warn = (result.psnr_y >= config_.quick_warn_threshold);
+        } else if (config_.enable_ssim) {
+            is_warn = (result.ssim_y >= config_.ssim_warn_threshold);
+        }
+        
+        if (is_warn) {
             result.level = FrameCompareResult::WARN;
             result.passed = true;
             warned_count_++;
             
             if (config_.verbose) {
-                LOG_WARN_FMT("  Frame %d: WARN (PSNR: Y=%.2f U=%.2f V=%.2f dB)",
-                             result.frame_index, result.psnr_y, result.psnr_u, result.psnr_v);
+                if (config_.enable_psnr && config_.enable_ssim) {
+                    LOG_WARN_FMT("  Frame %d: WARN (PSNR: Y=%.2f U=%.2f V=%.2f dB, SSIM: Y=%.4f U=%.4f V=%.4f)%s",
+                                 result.frame_index, result.psnr_y, result.psnr_u, result.psnr_v,
+                                 result.ssim_y, result.ssim_u, result.ssim_v,
+                                 config_.enable_parallel ? " [parallel]" : "");
+                } else if (config_.enable_psnr) {
+                    LOG_WARN_FMT("  Frame %d: WARN (PSNR: Y=%.2f U=%.2f V=%.2f dB)",
+                                 result.frame_index, result.psnr_y, result.psnr_u, result.psnr_v);
+                } else {
+                    LOG_WARN_FMT("  Frame %d: WARN (SSIM: Y=%.4f U=%.4f V=%.4f)",
+                                 result.frame_index, result.ssim_y, result.ssim_u, result.ssim_v);
+                }
             }
         } else {
             result.level = FrameCompareResult::FAIL;
             result.passed = false;
             failed_count_++;
             
-            LOG_ERROR_FMT("  Frame %d: FAIL (PSNR: Y=%.2f U=%.2f V=%.2f dB)",
-                          result.frame_index, result.psnr_y, result.psnr_u, result.psnr_v);
+            if (config_.enable_psnr && config_.enable_ssim) {
+                LOG_ERROR_FMT("  Frame %d: FAIL (PSNR: Y=%.2f U=%.2f V=%.2f dB, SSIM: Y=%.4f U=%.4f V=%.4f)%s",
+                              result.frame_index, result.psnr_y, result.psnr_u, result.psnr_v,
+                              result.ssim_y, result.ssim_u, result.ssim_v,
+                              config_.enable_parallel ? " [parallel]" : "");
+            } else if (config_.enable_psnr) {
+                LOG_ERROR_FMT("  Frame %d: FAIL (PSNR: Y=%.2f U=%.2f V=%.2f dB)",
+                              result.frame_index, result.psnr_y, result.psnr_u, result.psnr_v);
+            } else {
+                LOG_ERROR_FMT("  Frame %d: FAIL (SSIM: Y=%.4f U=%.4f V=%.4f)",
+                              result.frame_index, result.ssim_y, result.ssim_u, result.ssim_v);
+            }
         }
     } else {
         // FAST_ONLY 模式
@@ -477,65 +727,285 @@ FrameCompareResult BufferComparator::compareRGB(
 ) {
     FrameCompareResult result;
     
+    // ============================================================================
     // 层1：快速验证（G通道，人眼最敏感）
-    double psnr_g = calculatePSNR_RGB_G(ref_buffer, test_buffer, ref_info, test_info);
-    result.psnr_y = psnr_g;  // 复用psnr_y字段
+    // ============================================================================
     
-    if (psnr_g >= config_.quick_psnr_threshold) {
+    bool quick_pass = false;
+    
+    // 🚀 并行计算 PSNR-G 和 SSIM-G（如果都启用）
+    if (config_.enable_parallel && config_.enable_psnr && config_.enable_ssim) {
+        // 方案B：完全并行 - 使用全局线程池
+        auto& pool = GlobalThreadPool::getInstance().getThreadPool();
+        
+        auto future_psnr = pool.submit_task([this, ref_buffer, test_buffer, &ref_info, &test_info]() {
+            return this->calculatePSNR_RGB_G(ref_buffer, test_buffer, ref_info, test_info);
+        });
+        
+        auto future_ssim = pool.submit_task([this, ref_buffer, test_buffer, &ref_info, &test_info]() {
+            return this->calculateSSIM_RGB_G(ref_buffer, test_buffer, ref_info, test_info);
+        });
+        
+        // 等待结果
+        result.psnr_y = future_psnr.get();  // G → Y
+        result.ssim_y = future_ssim.get();  // G → Y
+        
+        // 两者都要达标
+        quick_pass = (result.psnr_y >= config_.quick_psnr_threshold) && 
+                     (result.ssim_y >= config_.ssim_threshold);
+    }
+    else {
+        // 串行计算
+        if (config_.enable_psnr) {
+            double psnr_g = calculatePSNR_RGB_G(ref_buffer, test_buffer, ref_info, test_info);
+            result.psnr_y = psnr_g;  // 复用psnr_y字段
+        }
+        
+        if (config_.enable_ssim) {
+            double ssim_g = calculateSSIM_RGB_G(ref_buffer, test_buffer, ref_info, test_info);
+            result.ssim_y = ssim_g;  // 复用ssim_y字段
+        }
+        
+        // 判定快速通过条件（严格模式：都要满足）
+        if (config_.enable_psnr && config_.enable_ssim) {
+            quick_pass = (result.psnr_y >= config_.quick_psnr_threshold) && 
+                         (result.ssim_y >= config_.ssim_threshold);
+        } else if (config_.enable_psnr) {
+            quick_pass = (result.psnr_y >= config_.quick_psnr_threshold);
+        } else if (config_.enable_ssim) {
+            quick_pass = (result.ssim_y >= config_.ssim_threshold);
+        }
+    }
+    
+    if (quick_pass) {
         // ✅ 快速通过
         result.passed = true;
         result.level = FrameCompareResult::PASS;
         passed_count_++;
         
         if (config_.verbose && result.frame_index % 50 == 0) {
-            LOG_DEBUG_FMT("  Frame %d: PASS (PSNR-G: %.2f dB) ⚡ quick",
-                         result.frame_index, psnr_g);
+            if (config_.enable_psnr && config_.enable_ssim) {
+                LOG_DEBUG_FMT("  Frame %d: PASS (PSNR-G: %.2f dB, SSIM-G: %.4f) ⚡ quick%s",
+                             result.frame_index, result.psnr_y, result.ssim_y,
+                             config_.enable_parallel ? " [parallel]" : "");
+            } else if (config_.enable_psnr) {
+                LOG_DEBUG_FMT("  Frame %d: PASS (PSNR-G: %.2f dB) ⚡ quick",
+                             result.frame_index, result.psnr_y);
+            } else {
+                LOG_DEBUG_FMT("  Frame %d: PASS (SSIM-G: %.4f) ⚡ quick",
+                             result.frame_index, result.ssim_y);
+            }
         }
         
         return result;
     }
     
-    // 层2：深度验证（R/G/B全通道）
+    // ============================================================================
+    // 层2：深度验证（R/B通道）
+    // ============================================================================
+    
     if (config_.strategy == CompareConfig::AUTO_LAYERED ||
         config_.strategy == CompareConfig::DEEP_ALWAYS) {
         
         if (config_.verbose) {
-            LOG_WARN_FMT("  Frame %d: PSNR-G=%.2f dB < %.2f dB, deep validation...",
-                         result.frame_index, psnr_g, config_.quick_psnr_threshold);
+            if (config_.enable_psnr && config_.enable_ssim) {
+                LOG_WARN_FMT("  Frame %d: PSNR-G=%.2f dB, SSIM-G=%.4f, deep validation...",
+                             result.frame_index, result.psnr_y, result.ssim_y);
+            } else if (config_.enable_psnr) {
+                LOG_WARN_FMT("  Frame %d: PSNR-G=%.2f dB < %.2f dB, deep validation...",
+                             result.frame_index, result.psnr_y, config_.quick_psnr_threshold);
+            } else {
+                LOG_WARN_FMT("  Frame %d: SSIM-G=%.4f < %.4f, deep validation...",
+                             result.frame_index, result.ssim_y, config_.ssim_threshold);
+            }
         }
         
-        double psnr_r = calculatePSNR_RGB_R(ref_buffer, test_buffer, ref_info, test_info);
-        double psnr_b = calculatePSNR_RGB_B(ref_buffer, test_buffer, ref_info, test_info);
+        double psnr_g = result.psnr_y;  // 保存已计算的 G 通道值
+        double ssim_g = result.ssim_y;
         
-        // 加权平均（G通道权重更高）
-        if (config_.use_perceptual_weighting) {
-            result.psnr_avg = (psnr_r + psnr_g * 2.0 + psnr_b) / 4.0;
-        } else {
-            result.psnr_avg = (psnr_r + psnr_g + psnr_b) / 3.0;
+        // 🚀 方案B：完全并行 - 并行计算 R/B 通道（最多4个任务）
+        if (config_.enable_parallel && config_.enable_psnr && config_.enable_ssim) {
+            // 完全并行：4 个任务（PSNR-R, PSNR-B, SSIM-R, SSIM-B）
+            auto& pool = GlobalThreadPool::getInstance().getThreadPool();
+            
+            auto future_psnr_r = pool.submit_task([this, ref_buffer, test_buffer, &ref_info, &test_info]() {
+                return this->calculatePSNR_RGB_R(ref_buffer, test_buffer, ref_info, test_info);
+            });
+            
+            auto future_psnr_b = pool.submit_task([this, ref_buffer, test_buffer, &ref_info, &test_info]() {
+                return this->calculatePSNR_RGB_B(ref_buffer, test_buffer, ref_info, test_info);
+            });
+            
+            auto future_ssim_r = pool.submit_task([this, ref_buffer, test_buffer, &ref_info, &test_info]() {
+                return this->calculateSSIM_RGB_R(ref_buffer, test_buffer, ref_info, test_info);
+            });
+            
+            auto future_ssim_b = pool.submit_task([this, ref_buffer, test_buffer, &ref_info, &test_info]() {
+                return this->calculateSSIM_RGB_B(ref_buffer, test_buffer, ref_info, test_info);
+            });
+            
+            // 等待所有结果
+            double psnr_r = future_psnr_r.get();
+            double psnr_b = future_psnr_b.get();
+            double ssim_r = future_ssim_r.get();
+            double ssim_b = future_ssim_b.get();
+            
+            // 加权平均（G通道权重更高）
+            if (config_.use_perceptual_weighting) {
+                result.psnr_avg = (psnr_r + psnr_g * 2.0 + psnr_b) / 4.0;
+                result.ssim_avg = (ssim_r + ssim_g * 2.0 + ssim_b) / 4.0;
+            } else {
+                result.psnr_avg = (psnr_r + psnr_g + psnr_b) / 3.0;
+                result.ssim_avg = (ssim_r + ssim_g + ssim_b) / 3.0;
+            }
+            
+            // 存储到结果（复用YUV字段）
+            result.psnr_y = psnr_g;  // G → Y
+            result.psnr_u = psnr_r;  // R → U
+            result.psnr_v = psnr_b;  // B → V
+            result.ssim_y = ssim_g;  // G → Y
+            result.ssim_u = ssim_r;  // R → U
+            result.ssim_v = ssim_b;  // B → V
+        }
+        else if (config_.enable_parallel && (config_.enable_psnr || config_.enable_ssim)) {
+            // 部分并行：2 个任务
+            auto& pool = GlobalThreadPool::getInstance().getThreadPool();
+            
+            if (config_.enable_psnr) {
+                auto future_psnr_r = pool.submit_task([this, ref_buffer, test_buffer, &ref_info, &test_info]() {
+                    return this->calculatePSNR_RGB_R(ref_buffer, test_buffer, ref_info, test_info);
+                });
+                
+                auto future_psnr_b = pool.submit_task([this, ref_buffer, test_buffer, &ref_info, &test_info]() {
+                    return this->calculatePSNR_RGB_B(ref_buffer, test_buffer, ref_info, test_info);
+                });
+                
+                double psnr_r = future_psnr_r.get();
+                double psnr_b = future_psnr_b.get();
+                
+                // 加权平均
+                if (config_.use_perceptual_weighting) {
+                    result.psnr_avg = (psnr_r + psnr_g * 2.0 + psnr_b) / 4.0;
+                } else {
+                    result.psnr_avg = (psnr_r + psnr_g + psnr_b) / 3.0;
+                }
+                
+                // 存储到结果
+                result.psnr_y = psnr_g;  // G → Y
+                result.psnr_u = psnr_r;  // R → U
+                result.psnr_v = psnr_b;  // B → V
+            }
+            
+            if (config_.enable_ssim) {
+                auto future_ssim_r = pool.submit_task([this, ref_buffer, test_buffer, &ref_info, &test_info]() {
+                    return this->calculateSSIM_RGB_R(ref_buffer, test_buffer, ref_info, test_info);
+                });
+                
+                auto future_ssim_b = pool.submit_task([this, ref_buffer, test_buffer, &ref_info, &test_info]() {
+                    return this->calculateSSIM_RGB_B(ref_buffer, test_buffer, ref_info, test_info);
+                });
+                
+                double ssim_r = future_ssim_r.get();
+                double ssim_b = future_ssim_b.get();
+                
+                // 加权平均
+                if (config_.use_perceptual_weighting) {
+                    result.ssim_avg = (ssim_r + ssim_g * 2.0 + ssim_b) / 4.0;
+                } else {
+                    result.ssim_avg = (ssim_r + ssim_g + ssim_b) / 3.0;
+                }
+                
+                // 存储到结果
+                result.ssim_y = ssim_g;  // G → Y
+                result.ssim_u = ssim_r;  // R → U
+                result.ssim_v = ssim_b;  // B → V
+            }
+        }
+        else {
+            // 串行计算（兼容模式）
+            if (config_.enable_psnr) {
+                double psnr_r = calculatePSNR_RGB_R(ref_buffer, test_buffer, ref_info, test_info);
+                double psnr_b = calculatePSNR_RGB_B(ref_buffer, test_buffer, ref_info, test_info);
+                
+                // 加权平均（G通道权重更高）
+                if (config_.use_perceptual_weighting) {
+                    result.psnr_avg = (psnr_r + psnr_g * 2.0 + psnr_b) / 4.0;
+                } else {
+                    result.psnr_avg = (psnr_r + psnr_g + psnr_b) / 3.0;
+                }
+                
+                // 存储到结果（复用YUV字段）
+                result.psnr_y = psnr_g;  // G → Y
+                result.psnr_u = psnr_r;  // R → U
+                result.psnr_v = psnr_b;  // B → V
+            }
+            
+            if (config_.enable_ssim) {
+                double ssim_r = calculateSSIM_RGB_R(ref_buffer, test_buffer, ref_info, test_info);
+                double ssim_b = calculateSSIM_RGB_B(ref_buffer, test_buffer, ref_info, test_info);
+                
+                // 加权平均（G通道权重更高）
+                if (config_.use_perceptual_weighting) {
+                    result.ssim_avg = (ssim_r + ssim_g * 2.0 + ssim_b) / 4.0;
+                } else {
+                    result.ssim_avg = (ssim_r + ssim_g + ssim_b) / 3.0;
+                }
+                
+                // 存储到结果（复用YUV字段）
+                result.ssim_y = ssim_g;  // G → Y
+                result.ssim_u = ssim_r;  // R → U
+                result.ssim_v = ssim_b;  // B → V
+            }
         }
         
-        // 存储到结果（复用YUV字段）
-        result.psnr_y = psnr_g;  // G → Y
-        result.psnr_u = psnr_r;  // R → U
-        result.psnr_v = psnr_b;  // B → V
+        // 判定（严格模式：都要满足）
+        bool is_warn = false;
         
-        // 判定
-        if (psnr_g >= config_.quick_warn_threshold) {
+        if (config_.enable_psnr && config_.enable_ssim) {
+            is_warn = (result.psnr_y >= config_.quick_warn_threshold) && 
+                      (result.ssim_y >= config_.ssim_warn_threshold);
+        } else if (config_.enable_psnr) {
+            is_warn = (result.psnr_y >= config_.quick_warn_threshold);
+        } else if (config_.enable_ssim) {
+            is_warn = (result.ssim_y >= config_.ssim_warn_threshold);
+        }
+        
+        if (is_warn) {
             result.level = FrameCompareResult::WARN;
             result.passed = true;
             warned_count_++;
             
             if (config_.verbose) {
-                LOG_WARN_FMT("  Frame %d: WARN (PSNR: R=%.2f G=%.2f B=%.2f dB)",
-                             result.frame_index, psnr_r, psnr_g, psnr_b);
+                if (config_.enable_psnr && config_.enable_ssim) {
+                    LOG_WARN_FMT("  Frame %d: WARN (PSNR: R=%.2f G=%.2f B=%.2f dB, SSIM: R=%.4f G=%.4f B=%.4f)%s",
+                                 result.frame_index, result.psnr_u, result.psnr_y, result.psnr_v,
+                                 result.ssim_u, result.ssim_y, result.ssim_v,
+                                 config_.enable_parallel ? " [parallel]" : "");
+                } else if (config_.enable_psnr) {
+                    LOG_WARN_FMT("  Frame %d: WARN (PSNR: R=%.2f G=%.2f B=%.2f dB)",
+                                 result.frame_index, result.psnr_u, result.psnr_y, result.psnr_v);
+                } else {
+                    LOG_WARN_FMT("  Frame %d: WARN (SSIM: R=%.4f G=%.4f B=%.4f)",
+                                 result.frame_index, result.ssim_u, result.ssim_y, result.ssim_v);
+                }
             }
         } else {
             result.level = FrameCompareResult::FAIL;
             result.passed = false;
             failed_count_++;
             
-            LOG_ERROR_FMT("  Frame %d: FAIL (PSNR: R=%.2f G=%.2f B=%.2f dB)",
-                          result.frame_index, psnr_r, psnr_g, psnr_b);
+            if (config_.enable_psnr && config_.enable_ssim) {
+                LOG_ERROR_FMT("  Frame %d: FAIL (PSNR: R=%.2f G=%.2f B=%.2f dB, SSIM: R=%.4f G=%.4f B=%.4f)%s",
+                              result.frame_index, result.psnr_u, result.psnr_y, result.psnr_v,
+                              result.ssim_u, result.ssim_y, result.ssim_v,
+                              config_.enable_parallel ? " [parallel]" : "");
+            } else if (config_.enable_psnr) {
+                LOG_ERROR_FMT("  Frame %d: FAIL (PSNR: R=%.2f G=%.2f B=%.2f dB)",
+                              result.frame_index, result.psnr_u, result.psnr_y, result.psnr_v);
+            } else {
+                LOG_ERROR_FMT("  Frame %d: FAIL (SSIM: R=%.4f G=%.4f B=%.4f)",
+                              result.frame_index, result.ssim_u, result.ssim_y, result.ssim_v);
+            }
         }
     } else {
         result.level = FrameCompareResult::FAIL;
@@ -797,7 +1267,7 @@ void BufferComparator::freeConvertedFrame(AVFrame* frame) {
 // ============================================================================
 
 void BufferComparator::updateStatistics(const FrameCompareResult& result) {
-    if (result.psnr_y > 0.0) {
+    if (config_.enable_psnr && result.psnr_y > 0.0) {
         sum_psnr_y_ += result.psnr_y;
         sum_psnr_u_ += result.psnr_u;
         sum_psnr_v_ += result.psnr_v;
@@ -807,6 +1277,19 @@ void BufferComparator::updateStatistics(const FrameCompareResult& result) {
         }
         if (result.psnr_y > max_psnr_y_) {
             max_psnr_y_ = result.psnr_y;
+        }
+    }
+    
+    if (config_.enable_ssim && result.ssim_y > 0.0) {
+        sum_ssim_y_ += result.ssim_y;
+        sum_ssim_u_ += result.ssim_u;
+        sum_ssim_v_ += result.ssim_v;
+        
+        if (result.ssim_y < min_ssim_y_) {
+            min_ssim_y_ = result.ssim_y;
+        }
+        if (result.ssim_y > max_ssim_y_) {
+            max_ssim_y_ = result.ssim_y;
         }
     }
     
@@ -833,8 +1316,16 @@ void BufferComparator::writeReport(const FrameCompareResult& result) {
         fprintf(report_file_, "  Formats: %s vs %s\n",
                 result.ref_format_name.c_str(),
                 result.test_format_name.c_str());
-        fprintf(report_file_, "  PSNR: Y=%.2f U=%.2f V=%.2f dB (avg=%.2f dB)\n",
-                result.psnr_y, result.psnr_u, result.psnr_v, result.psnr_avg);
+        
+        if (config_.enable_psnr) {
+            fprintf(report_file_, "  PSNR: Y=%.2f U=%.2f V=%.2f dB (avg=%.2f dB)\n",
+                    result.psnr_y, result.psnr_u, result.psnr_v, result.psnr_avg);
+        }
+        
+        if (config_.enable_ssim) {
+            fprintf(report_file_, "  SSIM: Y=%.4f U=%.4f V=%.4f (avg=%.4f)\n",
+                    result.ssim_y, result.ssim_u, result.ssim_v, result.ssim_avg);
+        }
         
         if (!result.error_message.empty()) {
             fprintf(report_file_, "  Error: %s\n", result.error_message.c_str());
@@ -843,6 +1334,201 @@ void BufferComparator::writeReport(const FrameCompareResult& result) {
         fprintf(report_file_, "\n");
         fflush(report_file_);
     }
+}
+
+// ============================================================================
+// SSIM计算 - 核心算法
+// ============================================================================
+
+/**
+ * @brief SSIM 核心算法实现
+ * 
+ * SSIM = [亮度对比] × [对比度对比] × [结构对比]
+ *      = l(x,y) × c(x,y) × s(x,y)
+ * 
+ * 其中：
+ * - l(x,y) = (2*μx*μy + C1) / (μx² + μy² + C1)      亮度
+ * - c(x,y) = (2*σx*σy + C2) / (σx² + σy² + C2)      对比度
+ * - s(x,y) = (σxy + C3) / (σx*σy + C3)              结构
+ * 
+ * 简化公式（C3 = C2/2）：
+ * SSIM = [(2*μx*μy + C1)(2*σxy + C2)] / [(μx² + μy² + C1)(σx² + σy² + C2)]
+ */
+double BufferComparator::calculateSSIM(
+    const uint8_t* data1, const uint8_t* data2,
+    int width, int height,
+    int stride1, int stride2
+) {
+    if (!data1 || !data2 || width <= 0 || height <= 0) {
+        return 0.0;
+    }
+    
+    // SSIM 常量（ITU-T 标准）
+    const double C1 = (0.01 * 255) * (0.01 * 255);  // (K1*L)^2, K1=0.01, L=255
+    const double C2 = (0.03 * 255) * (0.03 * 255);  // (K2*L)^2, K2=0.03
+    
+    // 使用滑动窗口（8x8，简化版，标准是11x11高斯窗口）
+    const int window_size = 8;
+    const int step = 8;  // 步长=窗口大小，避免重叠（加速计算）
+    
+    double ssim_sum = 0.0;
+    int window_count = 0;
+    
+    // 滑动窗口遍历
+    for (int y = 0; y <= height - window_size; y += step) {
+        for (int x = 0; x <= width - window_size; x += step) {
+            // 计算窗口内的统计量
+            double sum1 = 0.0, sum2 = 0.0;
+            double sum1_sq = 0.0, sum2_sq = 0.0;
+            double sum12 = 0.0;
+            int n = window_size * window_size;
+            
+            for (int wy = 0; wy < window_size; wy++) {
+                const uint8_t* row1 = data1 + (y + wy) * stride1 + x;
+                const uint8_t* row2 = data2 + (y + wy) * stride2 + x;
+                
+                for (int wx = 0; wx < window_size; wx++) {
+                    double p1 = row1[wx];
+                    double p2 = row2[wx];
+                    
+                    sum1 += p1;
+                    sum2 += p2;
+                    sum1_sq += p1 * p1;
+                    sum2_sq += p2 * p2;
+                    sum12 += p1 * p2;
+                }
+            }
+            
+            // 计算均值和方差
+            double mean1 = sum1 / n;
+            double mean2 = sum2 / n;
+            double variance1 = (sum1_sq / n) - (mean1 * mean1);
+            double variance2 = (sum2_sq / n) - (mean2 * mean2);
+            double covariance = (sum12 / n) - (mean1 * mean2);
+            
+            // 计算 SSIM
+            double numerator = (2.0 * mean1 * mean2 + C1) * (2.0 * covariance + C2);
+            double denominator = (mean1 * mean1 + mean2 * mean2 + C1) * 
+                                (variance1 + variance2 + C2);
+            
+            double ssim = numerator / denominator;
+            ssim_sum += ssim;
+            window_count++;
+        }
+    }
+    
+    if (window_count == 0) {
+        return 1.0;  // 窗口太小，认为相同
+    }
+    
+    double mean_ssim = ssim_sum / window_count;
+    
+    // SSIM 范围应该在 [0, 1]，但实际计算可能略小于0（数值误差）
+    if (mean_ssim < 0.0) mean_ssim = 0.0;
+    if (mean_ssim > 1.0) mean_ssim = 1.0;
+    
+    return mean_ssim;
+}
+
+// ============================================================================
+// SSIM计算 - YUV格式
+// ============================================================================
+
+double BufferComparator::calculateSSIM_YUV_Y(
+    Buffer* buf1, Buffer* buf2,
+    const FormatInfo& info1, const FormatInfo& info2
+) {
+    uint8_t* data1 = buf1->getImagePlaneData(0);
+    uint8_t* data2 = buf2->getImagePlaneData(0);
+    
+    if (!data1 || !data2) {
+        return 0.0;
+    }
+    
+    const int* linesize1 = buf1->getImageLinesize();
+    const int* linesize2 = buf2->getImageLinesize();
+    
+    return calculateSSIM(data1, data2, info1.width, info1.height,
+                        linesize1[0], linesize2[0]);
+}
+
+double BufferComparator::calculateSSIM_YUV_U(
+    Buffer* buf1, Buffer* buf2,
+    const FormatInfo& info1, const FormatInfo& info2
+) {
+    uint8_t* data1 = buf1->getImagePlaneData(1);
+    uint8_t* data2 = buf2->getImagePlaneData(1);
+    
+    if (!data1 || !data2) {
+        return 1.0;  // 无U平面，认为一致
+    }
+    
+    const int* linesize1 = buf1->getImageLinesize();
+    const int* linesize2 = buf2->getImageLinesize();
+    
+    int uv_width = info1.width / 2;
+    int uv_height = info1.height / 2;
+    
+    return calculateSSIM(data1, data2, uv_width, uv_height,
+                        linesize1[1], linesize2[1]);
+}
+
+double BufferComparator::calculateSSIM_YUV_V(
+    Buffer* buf1, Buffer* buf2,
+    const FormatInfo& info1, const FormatInfo& info2
+) {
+    uint8_t* data1 = buf1->getImagePlaneData(2);
+    uint8_t* data2 = buf2->getImagePlaneData(2);
+    
+    if (!data1 || !data2) {
+        return 1.0;
+    }
+    
+    const int* linesize1 = buf1->getImageLinesize();
+    const int* linesize2 = buf2->getImageLinesize();
+    
+    int uv_width = info1.width / 2;
+    int uv_height = info1.height / 2;
+    
+    return calculateSSIM(data1, data2, uv_width, uv_height,
+                        linesize1[2], linesize2[2]);
+}
+
+// ============================================================================
+// SSIM计算 - RGB格式
+// ============================================================================
+
+double BufferComparator::calculateSSIM_RGB_R(
+    Buffer* buf1, Buffer* buf2,
+    const FormatInfo& info1, const FormatInfo& info2
+) {
+    // 简化实现：使用整体 SSIM（标准实现需要通道分离）
+    uint8_t* data1 = buf1->getImagePlaneData(0);
+    uint8_t* data2 = buf2->getImagePlaneData(0);
+    
+    if (!data1 || !data2) {
+        return 0.0;
+    }
+    
+    const int* linesize1 = buf1->getImageLinesize();
+    const int* linesize2 = buf2->getImageLinesize();
+    
+    return calculateSSIM(data1, data2, info1.width * 3, info1.height,
+                        linesize1[0], linesize2[0]);
+}
+
+double BufferComparator::calculateSSIM_RGB_G(
+    Buffer* buf1, Buffer* buf2,
+    const FormatInfo& info1, const FormatInfo& info2
+) {
+    return calculateSSIM_RGB_R(buf1, buf2, info1, info2);
+}
+
+double BufferComparator::calculateSSIM_RGB_B(
+    Buffer* buf1, Buffer* buf2,
+    const FormatInfo& info1, const FormatInfo& info2
+) {
+    return calculateSSIM_RGB_R(buf1, buf2, info1, info2);
 }
 
 } // namespace io

@@ -1761,14 +1761,15 @@ static bool create_taco_config_by_format(
     // YUV 格式
     if (fmt == "nv12") {
         taco_config = TacoConfigBuilder()
-            .setRgbConfig(false, "", "bt601")
+            .setChannels(false, true)
+            .setOutputFormat(Channel::CH1, OutputFormat::YUV_NV12, ColorStandard::BT601)
             .build();
         return true;
     }
     if (fmt == "nv21") {
         taco_config = TacoConfigBuilder()
-            .setRgbConfig(false, "", "bt601")
-            // NV21 需要特殊配置，暂时使用 NV12
+            .setChannels(false, true)
+            .setOutputFormat(Channel::CH1, OutputFormat::YUV_NV21, ColorStandard::BT601)
             .build();
         return true;
     }
@@ -1777,25 +1778,29 @@ static bool create_taco_config_by_format(
     // ⭐ v2.18：移除硬编码分辨率，让优先级逻辑自动适配输入视频分辨率
     if (fmt == "argb888") {
         taco_config = TacoConfigBuilder()
-            .setRgbConfig(true, "argb888", "bt601")
+            .setChannels(false, true)
+            .setOutputFormat(Channel::CH1, OutputFormat::RGB_ARGB888, ColorStandard::BT601)
             .build();
         return true;
     }
     if (fmt == "abgr888") {
         taco_config = TacoConfigBuilder()
-            .setRgbConfig(true, "abgr888", "bt601")
+            .setChannels(false, true)
+            .setOutputFormat(Channel::CH1, OutputFormat::RGB_ABGR888, ColorStandard::BT601)
             .build();
         return true;
     }
     if (fmt == "bgra888") {
         taco_config = TacoConfigBuilder()
-            .setRgbConfig(true, "bgra888", "bt601")
+            .setChannels(false, true)
+            .setOutputFormat(Channel::CH1, OutputFormat::RGB_BGRA888, ColorStandard::BT601)
             .build();
         return true;
     }
     if (fmt == "rgba888") {
         taco_config = TacoConfigBuilder()
-            .setRgbConfig(true, "rgba888", "bt601")
+            .setChannels(false, true)
+            .setOutputFormat(Channel::CH1, OutputFormat::RGB_RGBA888, ColorStandard::BT601)
             .build();
         return true;
     }
@@ -1803,13 +1808,15 @@ static bool create_taco_config_by_format(
     // RGB 8-bit 无 Alpha 格式
     if (fmt == "rgb888") {
         taco_config = TacoConfigBuilder()
-            .setRgbConfig(true, "rgb888", "bt601")
+            .setChannels(false, true)
+            .setOutputFormat(Channel::CH1, OutputFormat::RGB_RGB888, ColorStandard::BT601)
             .build();
         return true;
     }
     if (fmt == "bgr888") {
         taco_config = TacoConfigBuilder()
-            .setRgbConfig(true, "bgr888", "bt601")
+            .setChannels(false, true)
+            .setOutputFormat(Channel::CH1, OutputFormat::RGB_BGR888, ColorStandard::BT601)
             .build();
         return true;
     }
@@ -1817,13 +1824,15 @@ static bool create_taco_config_by_format(
     // RGB 16-bit 格式
     if (fmt == "r16g16b16") {
         taco_config = TacoConfigBuilder()
-            .setRgbConfig(true, "r16g16b16", "bt601")
+            .setChannels(false, true)
+            .setOutputFormat(Channel::CH1, OutputFormat::RGB_R16G16B16, ColorStandard::BT601)
             .build();
         return true;
     }
     if (fmt == "b16g16r16") {
         taco_config = TacoConfigBuilder()
-            .setRgbConfig(true, "b16g16r16", "bt601")
+            .setChannels(false, true)
+            .setOutputFormat(Channel::CH1, OutputFormat::RGB_B16G16R16, ColorStandard::BT601)
             .build();
         return true;
     }
@@ -1905,48 +1914,50 @@ static int test_buffer_writer_rgb_formats(const char* video_path) {
     std::function<WorkerConfig::DecoderConfig::TacoConfig()> tests[] = {
         // 8-bit ARGB/ABGR/BGRA/RGBA 格式（Alpha 通道，4 字节/像素）
         []() { return TacoConfigBuilder()
-                   .setRgbConfig(true, "argb888", "bt601")
                    .setChannels(false, true)
+                   .setOutputFormat(Channel::CH1, OutputFormat::RGB_ARGB888, ColorStandard::BT601)
                    .build(); 
         },
         []() { return TacoConfigBuilder()
-                   .setRgbConfig(true, "abgr888", "bt601")
                    .setChannels(false, true)
+                   .setOutputFormat(Channel::CH1, OutputFormat::RGB_ABGR888, ColorStandard::BT601)
                    .build(); 
         },
         []() { return TacoConfigBuilder()
-                   .setRgbConfig(true, "bgra888", "bt601")
                    .setChannels(false, true)
+                   .setOutputFormat(Channel::CH1, OutputFormat::RGB_BGRA888, ColorStandard::BT601)
                    .build(); 
         },
         []() { return TacoConfigBuilder()
-                   .setRgbConfig(true, "rgba888", "bt601")
                    .setChannels(false, true)
+                   .setOutputFormat(Channel::CH1, OutputFormat::RGB_RGBA888, ColorStandard::BT601)
                    .build(); 
         },
         
         // 8-bit RGB/BGR 格式（3 字节/像素）
         []() { return TacoConfigBuilder()
-                   .setRgbConfig(true, "rgb888", "bt601")
                    .setChannels(false, true)
+                   .setOutputFormat(Channel::CH1, OutputFormat::RGB_RGB888, ColorStandard::BT601)
                    .build(); 
         },
         []() { return TacoConfigBuilder()
-                   .setRgbConfig(true, "bgr888", "bt601")
                    .setChannels(false, true)
+                   .setOutputFormat(Channel::CH1, OutputFormat::RGB_BGR888, ColorStandard::BT601)
                    .build(); 
         },
         
        /*  // ⭐ 8-bit 0RGB/0BGR 格式（padding 在前，4 字节/像素）
         // 注意：TACO xrgb888 → FFmpeg 0RGB，xbgr888 → FFmpeg 0BGR
         []() { return TacoConfigBuilder()
-                   .setRgbConfig(true, "xrgb888", "bt601")
-                   .setDecoderOutputResolution(1920, 1080)
+                   .setChannels(false, true)
+                   .setOutputFormat(Channel::CH1, OutputFormat::RGB_XRGB888, ColorStandard::BT601)
+                   .setScale(Channel::CH1, 1920, 1080)
                    .build(); 
         },
         []() { return TacoConfigBuilder()
-                   .setRgbConfig(true, "xbgr888", "bt601")
-                   .setDecoderOutputResolution(1920, 1080)
+                   .setChannels(false, true)
+                   .setOutputFormat(Channel::CH1, OutputFormat::RGB_XBGR888, ColorStandard::BT601)
+                   .setScale(Channel::CH1, 1920, 1080)
                    .build(); 
         },
         
@@ -1956,25 +1967,27 @@ static int test_buffer_writer_rgb_formats(const char* video_path) {
         // 所以同样的配置字符串可能映射到不同的 FFmpeg 格式（取决于驱动实现）
         // 这里我们暂时复用 xrgb888/xbgr888，期望驱动能正确处理为 RGB0/BGR0
         []() { return TacoConfigBuilder()
-                   .setRgbConfig(true, "xbgr888", "bt601")  // → 实际内存 RGBX → RGB0
-                   .setDecoderOutputResolution(1920, 1080)
+                   .setChannels(false, true)
+                   .setOutputFormat(Channel::CH1, OutputFormat::RGB_XBGR888, ColorStandard::BT601)  // → 实际内存 RGBX → RGB0
+                   .setScale(Channel::CH1, 1920, 1080)
                    .build(); 
         },
         []() { return TacoConfigBuilder()
-                   .setRgbConfig(true, "xrgb888", "bt601")  // → 实际内存 BGRX → BGR0
-                   .setDecoderOutputResolution(1920, 1080)
+                   .setChannels(false, true)
+                   .setOutputFormat(Channel::CH1, OutputFormat::RGB_XRGB888, ColorStandard::BT601)  // → 实际内存 BGRX → BGR0
+                   .setScale(Channel::CH1, 1920, 1080)
                    .build(); 
         },
          */
         // ⭐ 16-bit RGB/BGR 格式（6 字节/像素，文件更大）
         []() { return TacoConfigBuilder()
-                   .setRgbConfig(true, "r16g16b16", "bt601")
                    .setChannels(false, true)
+                   .setOutputFormat(Channel::CH1, OutputFormat::RGB_R16G16B16, ColorStandard::BT601)
                    .build(); 
         },
         []() { return TacoConfigBuilder()
-                   .setRgbConfig(true, "b16g16r16", "bt601")
                    .setChannels(false, true)
+                   .setOutputFormat(Channel::CH1, OutputFormat::RGB_B16G16R16, ColorStandard::BT601)
                    .build(); 
         },
     };
@@ -2035,82 +2048,83 @@ static int test_buffer_writer_yuv_formats(const char* video_path) {
     
     // ✅ 定义测试用例：所有硬件支持的 YUV 格式（与 test_buffer_writer_rgb_formats 保持一致的结构）
     // ⭐ v2.18：移除硬编码分辨率，让优先级逻辑自动适配输入视频分辨率
+    // ⭐ v3.0：通道0使用 YUV_AUTO，由解码器根据输入流自动决定YUV格式
     std::function<WorkerConfig::DecoderConfig::TacoConfig()> tests[] = {
         // YUV400 系列
-        []() { return TacoConfigBuilder()
-                   .setChannels(true, false)  // ⭐ 第一步：启用 ch0（YUV），关闭 ch1
-                   .setYuvConfig("YUV400 I010", "bt2020")
+        []() { return TacoConfigBuilder()  // YUV400 I010, bt2020
+                   .setChannels(true, false)
+                   .setOutputFormat(Channel::CH0, OutputFormat::YUV_AUTO, ColorStandard::BT2020)
                    .build(); 
         },
-        []() { return TacoConfigBuilder()
-                   .setChannels(true, false)  // ⭐ 第一步：启用 ch0（YUV），关闭 ch1
-                   .setYuvConfig("YUV400 L010", "bt2020")
+        []() { return TacoConfigBuilder()  // YUV400 L010, bt2020
+                   .setChannels(true, false)
+                   .setOutputFormat(Channel::CH0, OutputFormat::YUV_AUTO, ColorStandard::BT2020)
                    .build(); 
         },
-        []() { return TacoConfigBuilder()
-                   .setChannels(true, false)  // ⭐ 第一步：启用 ch0（YUV），关闭 ch1
-                   .setYuvConfig("YUV400 Pack10", "bt2020")
+        []() { return TacoConfigBuilder()  // YUV400 Pack10, bt2020
+                   .setChannels(true, false)
+                   .setOutputFormat(Channel::CH0, OutputFormat::YUV_AUTO, ColorStandard::BT2020)
                    .build(); 
         },
-        []() { return TacoConfigBuilder()
-                   .setChannels(true, false)  // ⭐ 第一步：启用 ch0（YUV），关闭 ch1
-                   .setYuvConfig("YUV400 8-bit", "bt601")
+        []() { return TacoConfigBuilder()  // YUV400 8-bit, bt601
+                   .setChannels(true, false)
+                   .setOutputFormat(Channel::CH0, OutputFormat::YUV_AUTO, ColorStandard::BT601)
                    .build(); 
         },
         
         // YUV420 NV12 系列
-        []() { return TacoConfigBuilder()
-                   .setChannels(true, false)  // ⭐ 第一步：启用 ch0（YUV），关闭 ch1
-                   .setYuvConfig("YUV420 NV12 P010", "bt2020")
+        []() { return TacoConfigBuilder()  // YUV420 NV12 P010, bt2020
+                   .setChannels(true, false)
+                   .setOutputFormat(Channel::CH0, OutputFormat::YUV_AUTO, ColorStandard::BT2020)
                    .build(); 
         },
-        []() { return TacoConfigBuilder()
-                   .setChannels(true, false)  // ⭐ 第一步：启用 ch0（YUV），关闭 ch1
-                   .setYuvConfig("YUV420 NV12 I010", "bt2020")
+        []() { return TacoConfigBuilder()  // YUV420 NV12 I010, bt2020
+                   .setChannels(true, false)
+                   .setOutputFormat(Channel::CH0, OutputFormat::YUV_AUTO, ColorStandard::BT2020)
                    .build(); 
         },
-        []() { return TacoConfigBuilder()
-                   .setChannels(true, false)  // ⭐ 第一步：启用 ch0（YUV），关闭 ch1
-                   .setYuvConfig("YUV420 NV12 L010", "bt2020")
+        []() { return TacoConfigBuilder()  // YUV420 NV12 L010, bt2020
+                   .setChannels(true, false)
+                   .setOutputFormat(Channel::CH0, OutputFormat::YUV_AUTO, ColorStandard::BT2020)
                    .build(); 
         },
-        []() { return TacoConfigBuilder()
-                   .setChannels(true, false)  // ⭐ 第一步：启用 ch0（YUV），关闭 ch1
-                   .setYuvConfig("YUV420 NV12 Pack10", "bt2020")
+        []() { return TacoConfigBuilder()  // YUV420 NV12 Pack10, bt2020
+                   .setChannels(true, false)
+                   .setOutputFormat(Channel::CH0, OutputFormat::YUV_AUTO, ColorStandard::BT2020)
                    .build(); 
         },
-        []() { return TacoConfigBuilder()
-                   .setChannels(true, false)  // ⭐ 第一步：启用 ch0（YUV），关闭 ch1
-                   .setYuvConfig("YUV420 8-bit NV12", "bt601")  // 最常用
+        []() { return TacoConfigBuilder()  // YUV420 8-bit NV12, bt601（最常用）
+                   .setChannels(true, false)
+                   .setOutputFormat(Channel::CH0, OutputFormat::YUV_AUTO, ColorStandard::BT601)
                    .build(); 
         },
         
         // YUV420 NV21 系列
-        []() { return TacoConfigBuilder()
-                   .setChannels(true, false)  // ⭐ 第一步：启用 ch0（YUV），关闭 ch1
-                   .setYuvConfig("YUV420 NV21 P010 Tiled-4×4", "bt2020")
+        []() { return TacoConfigBuilder()  // YUV420 NV21 P010 Tiled-4×4, bt2020
+                   .setChannels(true, false)
+                   .setOutputFormat(Channel::CH0, OutputFormat::YUV_AUTO, ColorStandard::BT2020)
                    .build(); 
         },
-        []() { return TacoConfigBuilder()
-                   .setChannels(true, false)  // ⭐ 第一步：启用 ch0（YUV），关闭 ch1
-                   .setYuvConfig("YUV420 NV21 I011", "bt2020")
+        []() { return TacoConfigBuilder()  // YUV420 NV21 I011, bt2020
+                   .setChannels(true, false)
+                   .setOutputFormat(Channel::CH0, OutputFormat::YUV_AUTO, ColorStandard::BT2020)
                    .build(); 
         },
-        []() { return TacoConfigBuilder()
-                   .setChannels(true, false)  // ⭐ 第一步：启用 ch0（YUV），关闭 ch1
-                   .setYuvConfig("YUV420 NV21 L010", "bt2020")
+        []() { return TacoConfigBuilder()  // YUV420 NV21 L010, bt2020
+                   .setChannels(true, false)
+                   .setOutputFormat(Channel::CH0, OutputFormat::YUV_AUTO, ColorStandard::BT2020)
                    .build(); 
         },
-        []() { return TacoConfigBuilder()
-                   .setChannels(true, false)  // ⭐ 第一步：启用 ch0（YUV），关闭 ch1
-                   .setYuvConfig("YUV420 8-bit NV21", "bt601")
+        []() { return TacoConfigBuilder()  // YUV420 8-bit NV21, bt601
+                   .setChannels(true, false)
+                   .setOutputFormat(Channel::CH0, OutputFormat::YUV_AUTO, ColorStandard::BT601)
                    .build(); 
         },
         
         // YUV420 P010
-        []() { return TacoConfigBuilder()
-                   .setChannels(true, false)  // ⭐ 第一步：启用 ch0（YUV），关闭 ch1
-                   .setYuvConfig("YUV420 P010", "bt2020")
+        []() { return TacoConfigBuilder()  // YUV420 P010, bt2020
+                   .setChannels(true, false)
+                   .setOutputFormat(Channel::CH0, OutputFormat::YUV_AUTO, ColorStandard::BT2020)
                    .build(); 
         },
     };
@@ -2154,384 +2168,6 @@ static int test_buffer_writer_yuv_formats(const char* video_path) {
     return (failed == 0) ? 0 : -1;
 }
 
-/**
- * 测试9：MultiWorkerProductionLine 多Worker测试
- * 
- * 功能：
- * - 使用 MultiWorkerProductionLine 同时处理同一个 RTSP 流
- * - Record Worker 作为生产者，读取 RTSP 流并产生 AVPacket
- * - Consumer Worker 1：硬件解码器（h264_taco）
- * - Consumer Worker 2：软件解码器（useSoftware）
- * - 将两个解码器的输出分别保存到不同的文件
- * 
- * 架构：
- * - Record Worker → BufferPool A (AVPacket)
- * - Consumer Worker 1 → BufferPool B1 (硬件解码后的 AVFrame)
- * - Consumer Worker 2 → BufferPool B2 (软件解码后的 AVFrame)
- * - 测试程序从 B1 和 B2 获取 buffer 并保存到文件
- * 
- * 使用示例：
- *   ./display_test -m multi_worker rtsp://...
- */
-static int test_multi_worker(const char* rtsp_url) {
-    using namespace productionline::io;
-    
-    LOG_INFO("╔═══════════════════════════════════════════════════════╗");
-    LOG_INFO("║   Test: MultiWorkerProductionLine - Multi Worker     ║");
-    LOG_INFO("╚═══════════════════════════════════════════════════════╝\n");
-    
-    // 注册信号处理器（用于 Ctrl+C）
-    signal(SIGINT, signal_handler);
-    g_running = true;
-    g_rtsp_interrupted = false;
-    RtspPacketSource::clearInterrupt();
-    LOG_DEBUG("[Test] ✅ 已注册 Ctrl+C 信号处理器");
-    
-    LOG_INFO_FMT("RTSP URL: %s\n", rtsp_url);
-    
-    const int duration_seconds = 10;  // 录制时长（秒）
-    
-    // 1. 配置 MultiWorkerConfig
-    LOG_INFO("[Step 1] Configuring MultiWorkerProductionLine...");
-    
-    MultiWorkerProductionLine::MultiWorkerConfig config;
-    
-    // ⭐ v2.14：使用 WorkerGroup 配置
-    LOG_INFO("  Creating WorkerGroup (1 Producer + 2 Consumers)...");
-    
-    // 创建 WorkerGroup
-    MultiWorkerProductionLine::WorkerGroup group("rtsp_decode_group");
-    
-    // 1.1 配置生产者 Worker
-    LOG_INFO("    Configuring Producer Worker (RTSP Record)...");
-    group.producer_config = WorkerConfigBuilder()
-        .setDataSourceConfig(
-            DataSourceConfigBuilder()
-                .setPath(rtsp_url)
-                .setBufferCount(32)
-                .build()
-        )
-        .setWorkerType(WorkerType::FFMPEG_PACKET_RECORDER)
-        .build();
-    
-    // 1.2 配置 Consumer Worker 1（硬件解码器）
-    LOG_INFO("    Configuring Consumer Worker 1 (Hardware Decoder - h264_taco)...");
-
-    auto tacoConfig = TacoConfigBuilder()
-        .setChannels(true, false)
-        .build();
-
-    auto consumer1_config = WorkerConfigBuilder()
-        .setDisplayConfig(
-            DisplayConfigBuilder()
-                .setDisplayResolution(1920, 1080)
-                .setBitsPerPixel(32)
-                .build()
-        )
-        .setDecoderConfig(
-            DecoderConfigBuilder()
-                .useTaco("h264", tacoConfig)  // 硬件解码器
-                .build()
-        )
-        .setWorkerType(WorkerType::FFMPEG_RTSP)  // 需要解码
-        .build();
-    group.consumer_configs.push_back(consumer1_config);
-    
-    // 1.3 配置 Consumer Worker 2（软件解码器）
-    LOG_INFO("    Configuring Consumer Worker 2 (Software Decoder - libavcodec)...");
-    auto consumer2_config = WorkerConfigBuilder()
-        .setDisplayConfig(
-            DisplayConfigBuilder()
-                .setDisplayResolution(1920, 1080)
-                .setBitsPerPixel(32)
-                .build()
-        )
-        .setDecoderConfig(
-            DecoderConfigBuilder()
-                .useSoftware()  // 软件解码器
-                .build()
-        )
-        .setWorkerType(WorkerType::FFMPEG_RTSP)  // 需要解码
-        .build();
-    group.consumer_configs.push_back(consumer2_config);
-    
-    // 添加 Group 到配置
-    config.groups.push_back(group);
-    
-    // 1.4 配置线程池和其他参数
-    config.thread_pool_size = 4;
-    config.default_sync_timeout_ms = 5000;
-    config.default_max_consecutive_errors = 10;
-    
-    LOG_INFO_FMT("  Thread pool size: %d", config.thread_pool_size);
-    LOG_INFO_FMT("  WorkerGroups: %zu", config.groups.size());
-    LOG_INFO_FMT("  Group '%s': 1 producer + %zu consumers", group.group_id.c_str(), group.consumer_configs.size());
-    
-    // 2. 创建 MultiWorkerProductionLine
-    LOG_INFO("\n[Step 2] Creating MultiWorkerProductionLine...");
-    MultiWorkerProductionLine multi_worker(config, false, 1, false);  // loop=false, thread_count=1, enable_monitor=false
-    
-    // 3. 设置错误回调
-    multi_worker.setErrorCallback([](const std::string& error) {
-        LOG_ERROR_FMT("MultiWorker Error: %s", error.c_str());
-        g_running = false;
-    });
-    
-    // 4. 启动 MultiWorkerProductionLine
-    LOG_INFO("[Step 3] Starting MultiWorkerProductionLine...");
-    if (!multi_worker.start()) {
-        LOG_ERROR("Failed to start MultiWorkerProductionLine");
-        return -1;
-    }
-    
-    LOG_INFO("  ✅ MultiWorkerProductionLine started successfully");
-    
-    // 5. 获取两个生产者的 BufferPool（对 test.cpp 而言，Group 内的消费者是数据的生产者）
-    LOG_INFO("\n[Step 4] Getting Producer BufferPools...");
-    
-    uint64_t producer1_pool_id = multi_worker.getGroupConsumerBufferPoolId(0, 0);  // Group 0, Consumer 0 (Hardware decoder)
-    uint64_t producer2_pool_id = multi_worker.getGroupConsumerBufferPoolId(0, 1);  // Group 0, Consumer 1 (Software decoder)
-    
-    if (producer1_pool_id == 0 || producer2_pool_id == 0) {
-        LOG_ERROR("Failed to get producer BufferPool IDs");
-        multi_worker.stop();
-        return -1;
-    }
-    
-    auto producer1_pool_weak = BufferPoolRegistry::getInstance().getPool(producer1_pool_id);
-    auto producer1_pool_sptr = producer1_pool_weak.lock();
-    auto producer2_pool_weak = BufferPoolRegistry::getInstance().getPool(producer2_pool_id);
-    auto producer2_pool_sptr = producer2_pool_weak.lock();
-    
-    if (!producer1_pool_sptr || !producer2_pool_sptr) {
-        LOG_ERROR("Failed to get producer BufferPools from Registry");
-        multi_worker.stop();
-        return -1;
-    }
-    
-    LOG_INFO_FMT("  Producer 1 (Hardware Decoder) BufferPool: '%s' (ID: %lu)", 
-                 producer1_pool_sptr->getName().c_str(), producer1_pool_id);
-    LOG_INFO_FMT("  Producer 2 (Software Decoder) BufferPool: '%s' (ID: %lu)", 
-                 producer2_pool_sptr->getName().c_str(), producer2_pool_id);
-    
-    // 6. 等待第一个Buffer，获取实际格式
-    LOG_INFO("\n[Step 5] Waiting for first buffers to detect format...");
-    
-    Buffer* first_buffer1 = producer1_pool_sptr->acquireFilled(true, 5000);
-    Buffer* first_buffer2 = producer2_pool_sptr->acquireFilled(true, 5000);
-    
-    if (!first_buffer1 || !first_buffer2) {
-        LOG_ERROR("Failed to get first buffers (timeout)");
-        if (first_buffer1) producer1_pool_sptr->releaseFilled(first_buffer1);
-        if (first_buffer2) producer2_pool_sptr->releaseFilled(first_buffer2);
-        multi_worker.stop();
-        return -1;
-    }
-    
-    // 6.1 从Buffer元数据获取实际格式
-    AVPixelFormat format1 = AV_PIX_FMT_NONE;
-    AVPixelFormat format2 = AV_PIX_FMT_NONE;
-    int width1 = 1920, height1 = 1080;
-    int width2 = 1920, height2 = 1080;
-    
-    if (first_buffer1->hasImageMetadata()) {
-        format1 = first_buffer1->getImageFormat();
-        width1 = first_buffer1->getImageWidth();
-        height1 = first_buffer1->getImageHeight();
-        LOG_INFO_FMT("  Producer 1 (Hardware) format: %s (%dx%d)", 
-                    av_get_pix_fmt_name(format1), width1, height1);
-    } else {
-        LOG_WARN("  Producer 1 buffer has no metadata, using default NV12");
-        format1 = AV_PIX_FMT_NV12;
-    }
-    
-    if (first_buffer2->hasImageMetadata()) {
-        format2 = first_buffer2->getImageFormat();
-        width2 = first_buffer2->getImageWidth();
-        height2 = first_buffer2->getImageHeight();
-        LOG_INFO_FMT("  Producer 2 (Software) format: %s (%dx%d)", 
-                    av_get_pix_fmt_name(format2), width2, height2);
-    } else {
-        LOG_WARN("  Producer 2 buffer has no metadata, using default NV12");
-        format2 = AV_PIX_FMT_NV12;
-    }
-    
-    // 7. 创建两个 BufferWriter
-    LOG_INFO("\n[Step 6] Creating BufferWriters...");
-    
-    const char* output_file1 = "/tmp/multi_worker_hardware.yuv";
-    const char* output_file2 = "/tmp/multi_worker_software.yuv";
-    
-    BufferWriter writer1, writer2;
-    
-    if (!writer1.openRaw(output_file1, format1, width1, height1)) {
-        LOG_ERROR_FMT("Failed to open BufferWriter for Producer 1: %s", output_file1);
-        producer1_pool_sptr->releaseFilled(first_buffer1);
-        producer2_pool_sptr->releaseFilled(first_buffer2);
-        multi_worker.stop();
-        return -1;
-    }
-    
-    if (!writer2.openRaw(output_file2, format2, width2, height2)) {
-        LOG_ERROR_FMT("Failed to open BufferWriter for Producer 2: %s", output_file2);
-        writer1.close();
-        producer1_pool_sptr->releaseFilled(first_buffer1);
-        producer2_pool_sptr->releaseFilled(first_buffer2);
-        multi_worker.stop();
-        return -1;
-    }
-    
-    LOG_INFO_FMT("  Producer 1 (Hardware) output: %s (format: %s)", 
-                 output_file1, av_get_pix_fmt_name(format1));
-    LOG_INFO_FMT("  Producer 2 (Software) output: %s (format: %s)", 
-                 output_file2, av_get_pix_fmt_name(format2));
-    
-    // 8. 保存第一帧
-    LOG_INFO("\n[Step 7] Saving frames...");
-    LOG_INFO("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-    
-    if (writer1.write(first_buffer1)) {
-        LOG_INFO("  ✅ Saved Producer 1 frame 1 (Hardware Decoder)");
-    }
-    if (writer2.write(first_buffer2)) {
-        LOG_INFO("  ✅ Saved Producer 2 frame 1 (Software Decoder)");
-    }
-    
-    producer1_pool_sptr->releaseFilled(first_buffer1);
-    producer2_pool_sptr->releaseFilled(first_buffer2);
-    
-    // 9. 消费者循环：从两个生产者的 BufferPool 获取 buffer 并保存
-    auto start_time = std::chrono::steady_clock::now();
-    int frame_count1 = 1;  // 已经保存了第一帧
-    int frame_count2 = 1;
-    int timeout_count1 = 0;
-    int timeout_count2 = 0;
-    const int MAX_TIMEOUT = 50;
-    
-    LOG_INFO("  Starting consumer loop (Ctrl+C to stop)...\n");
-    
-    while (g_running) {
-        // 检查中断标志
-        if (g_rtsp_interrupted.load()) {
-            LOG_INFO("\n  ⚠️  检测到中断请求，停止测试...");
-            break;
-        }
-        
-        // 检查时长
-        auto now = std::chrono::steady_clock::now();
-        int elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - start_time).count();
-        if (elapsed >= duration_seconds) {
-            LOG_INFO_FMT("\n  ⏱️  Reached duration limit: %d seconds", duration_seconds);
-            break;
-        }
-        
-        // 从 Producer 1 (Hardware) 获取 buffer
-        Buffer* buffer1 = producer1_pool_sptr->acquireFilled(true, 100);
-        if (buffer1) {
-            if (writer1.write(buffer1)) {
-                frame_count1++;
-                if (frame_count1 % 50 == 0) {
-                    LOG_INFO_FMT("  Producer 1 (Hardware Decoder): %d frames saved", frame_count1);
-                }
-            } else {
-                LOG_WARN("Failed to write Producer 1 buffer");
-            }
-            producer1_pool_sptr->releaseFilled(buffer1);
-            timeout_count1 = 0;
-        } else {
-            timeout_count1++;
-        }
-        
-        // 从 Producer 2 (Software) 获取 buffer
-        Buffer* buffer2 = producer2_pool_sptr->acquireFilled(true, 100);
-        if (buffer2) {
-            if (writer2.write(buffer2)) {
-                frame_count2++;
-                if (frame_count2 % 50 == 0) {
-                    LOG_INFO_FMT("  Producer 2 (Software Decoder): %d frames saved", frame_count2);
-                }
-            } else {
-                LOG_WARN("Failed to write Producer 2 buffer");
-            }
-            producer2_pool_sptr->releaseFilled(buffer2);
-            timeout_count2 = 0;
-        } else {
-            timeout_count2++;
-        }
-        
-        // 检查超时
-        if (timeout_count1 >= MAX_TIMEOUT && timeout_count2 >= MAX_TIMEOUT) {
-            LOG_WARN("\n  ⚠️  Both producers timeout, stopping...");
-            break;
-        }
-    }
-    
-    LOG_INFO("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-    
-    // 10. 排空剩余的 buffer
-    LOG_INFO("\n[Step 8] Draining remaining buffers...");
-    int drained1 = 0, drained2 = 0;
-    
-    Buffer* remaining1 = nullptr;
-    while ((remaining1 = producer1_pool_sptr->acquireFilled(false, 0)) != nullptr) {
-        writer1.write(remaining1);
-        producer1_pool_sptr->releaseFilled(remaining1);
-        frame_count1++;
-        drained1++;
-    }
-    
-    Buffer* remaining2 = nullptr;
-    while ((remaining2 = producer2_pool_sptr->acquireFilled(false, 0)) != nullptr) {
-        writer2.write(remaining2);
-        producer2_pool_sptr->releaseFilled(remaining2);
-        frame_count2++;
-        drained2++;
-    }
-    
-    if (drained1 > 0 || drained2 > 0) {
-        LOG_INFO_FMT("  Drained: Producer 1=%d, Producer 2=%d", drained1, drained2);
-    }
-    
-    // 11. 清理
-    LOG_INFO("\n[Step 9] Cleaning up...");
-    writer1.close();
-    writer2.close();
-    multi_worker.stop();
-    
-    // 12. 打印结果
-    auto end_time = std::chrono::steady_clock::now();
-    double total_duration = std::chrono::duration<double>(end_time - start_time).count();
-    
-    LOG_INFO("\n═══════════════════════════════════════════════════════");
-    LOG_INFO("  Test Results");
-    LOG_INFO("═══════════════════════════════════════════════════════");
-    LOG_INFO_FMT("  Producer 1 (Hardware Decoder):");
-    LOG_INFO_FMT("    Output file: %s", output_file1);
-    LOG_INFO_FMT("    Format: %s (%dx%d)", av_get_pix_fmt_name(format1), width1, height1);
-    LOG_INFO_FMT("    Frames saved: %d", frame_count1);
-    LOG_INFO_FMT("  Producer 2 (Software Decoder):");
-    LOG_INFO_FMT("    Output file: %s", output_file2);
-    LOG_INFO_FMT("    Format: %s (%dx%d)", av_get_pix_fmt_name(format2), width2, height2);
-    LOG_INFO_FMT("    Frames saved: %d", frame_count2);
-    LOG_INFO_FMT("  Duration: %.2f seconds", total_duration);
-    
-    // 打印统计信息
-    multi_worker.printDetailedStats();
-    
-    LOG_INFO("\n💡 Verify the output files with:");
-    LOG_INFO_FMT("   ffplay -f rawvideo -pixel_format %s -video_size %dx%d %s",
-                 av_get_pix_fmt_name(format1), width1, height1, output_file1);
-    LOG_INFO_FMT("   ffplay -f rawvideo -pixel_format %s -video_size %dx%d %s",
-                 av_get_pix_fmt_name(format2), width2, height2, output_file2);
-    LOG_INFO("═══════════════════════════════════════════════════════\n");
-    
-    if (frame_count1 > 0 && frame_count2 > 0) {
-        return 0;
-    } else {
-        LOG_ERROR("Test failed: No frames saved from one or both producers");
-        return -1;
-    }
-}
 
 /**
  * 测试：RTSP 流录制到所有支持的容器格式（批量验证）
@@ -2812,6 +2448,392 @@ static int test_rtsp_record_all_formats(const char* rtsp_url) {
 }
 
 /**
+ * 测试：MultiWorkerProductionLine 多Worker解码（同一RTSP流，硬解+软解对比）
+ *
+ * 架构：
+ * - Producer: FFMPEG_PACKET_RECORDER（读取RTSP编码包 → BufferPool P）
+ * - Consumer 1: 硬件解码（h264_taco）→ BufferPool C1
+ * - Consumer 2: 软件解码（useSoftware）→ BufferPool C2
+ * - 本测试从 C1/C2 中取出解码后的帧，分别写入两个 YUV 文件，便于对比质量/性能
+ *
+ * 用法示例：
+ *   ./display_test -m multi_worker rtsp://...
+ */
+static int test_multi_worker(const char* rtsp_url) {
+    using namespace productionline::io;
+    
+    LOG_INFO("╔═══════════════════════════════════════════════════════╗");
+    LOG_INFO("║   Test: MultiWorkerProductionLine - Multi Worker     ║");
+    LOG_INFO("╚═══════════════════════════════════════════════════════╝\n");
+    
+    // 注册信号处理器（用于 Ctrl+C）
+    signal(SIGINT, signal_handler);
+    g_running = true;
+    g_rtsp_interrupted = false;
+    RtspPacketSource::clearInterrupt();
+    LOG_DEBUG("[Test] ✅ 已注册 Ctrl+C 信号处理器");
+    
+    LOG_INFO_FMT("RTSP URL: %s\n", rtsp_url);
+    
+    const int duration_seconds = 10;  // 录制时长（秒）
+    
+    // 1. 配置 MultiWorkerConfig
+    LOG_INFO("[Step 1] Configuring MultiWorkerProductionLine...");
+    
+    MultiWorkerProductionLine::MultiWorkerConfig config;
+    
+    // 创建 WorkerGroup
+    MultiWorkerProductionLine::WorkerGroup group("rtsp_decode_group");
+    
+    // 1.1 配置生产者 Worker（录制 RTSP 包）
+    LOG_INFO("    Configuring Producer Worker (RTSP Record)...");
+    MultiWorkerProductionLine::ProducerConfig producer_cfg;
+    producer_cfg.producer_id = "recorder";
+    producer_cfg.worker_config = WorkerConfigBuilder()
+        .setDataSourceConfig(
+            DataSourceConfigBuilder()
+                .setPath(rtsp_url)
+                .setBufferCount(32)
+                .build()
+        )
+        .setWorkerType(WorkerType::FFMPEG_PACKET_RECORDER)
+        .build();
+    group.producer_configs.push_back(producer_cfg);
+    
+    // 1.2 配置 Consumer Worker 1（硬件解码器）
+    LOG_INFO("    Configuring Consumer Worker 1 (Hardware Decoder - h264_taco)...");
+    
+    auto tacoConfig = TacoConfigBuilder()
+        .setChannels(true, false)
+        .build();
+    
+    MultiWorkerProductionLine::ConsumerConfig consumer_hw_cfg;
+    consumer_hw_cfg.consumer_id = "hw_dec";
+    consumer_hw_cfg.worker_config = WorkerConfigBuilder()
+        .setDisplayConfig(
+            DisplayConfigBuilder()
+                .setDisplayResolution(1920, 1080)
+                .setBitsPerPixel(32)
+                .build()
+        )
+        .setDecoderConfig(
+            DecoderConfigBuilder()
+                .useTaco("h264", tacoConfig)  // 硬件解码器
+                .build()
+        )
+        .setWorkerType(WorkerType::FFMPEG_RTSP)
+        .build();
+    group.consumer_configs.push_back(consumer_hw_cfg);
+    
+    // 1.3 配置 Consumer Worker 2（软件解码器）
+    LOG_INFO("    Configuring Consumer Worker 2 (Software Decoder - libavcodec)...");
+    
+    MultiWorkerProductionLine::ConsumerConfig consumer_sw_cfg;
+    consumer_sw_cfg.consumer_id = "sw_dec";
+    consumer_sw_cfg.worker_config = WorkerConfigBuilder()
+        .setDisplayConfig(
+            DisplayConfigBuilder()
+                .setDisplayResolution(1920, 1080)
+                .setBitsPerPixel(32)
+                .build()
+        )
+        .setDecoderConfig(
+            DecoderConfigBuilder()
+                .useSoftware()  // 软件解码器
+                .build()
+        )
+        .setWorkerType(WorkerType::FFMPEG_RTSP)
+        .build();
+    group.consumer_configs.push_back(consumer_sw_cfg);
+    
+    // 1.4 配置连接器：一个生产者 → 两个消费者（ONE_TO_MANY 模式）
+    LOG_INFO("    Configuring Connector (ONE_TO_MANY)...");
+    MultiWorkerProductionLine::ConnectorConfig connector_cfg;
+    connector_cfg.mode = Connector::Mode::ONE_TO_MANY;
+    connector_cfg.producer_ids.push_back("recorder");
+    connector_cfg.consumer_ids.push_back("hw_dec");
+    connector_cfg.consumer_ids.push_back("sw_dec");
+    group.connector_configs.push_back(connector_cfg);
+    
+    // 添加 Group 到配置
+    config.groups.push_back(group);
+    config.thread_pool_size = 4;
+    
+    LOG_INFO_FMT("  Thread pool size: %d", config.thread_pool_size);
+    LOG_INFO_FMT("  WorkerGroups: %zu", config.groups.size());
+    LOG_INFO_FMT("  Group '%s': %zu producers, %zu consumers, %zu connectors",
+                 group.group_id.c_str(),
+                 group.producer_configs.size(),
+                 group.consumer_configs.size(),
+                 group.connector_configs.size());
+    
+    // 2. 创建 MultiWorkerProductionLine
+    LOG_INFO("\n[Step 2] Creating MultiWorkerProductionLine...");
+    MultiWorkerProductionLine multi_worker(config, false, 1, false);  // loop=false, thread_count=1, enable_monitor=false
+    
+    // 3. 设置错误回调
+    multi_worker.setErrorCallback([](const std::string& error) {
+        LOG_ERROR_FMT("MultiWorker Error: %s", error.c_str());
+        g_running = false;
+    });
+    
+    // 4. 启动 MultiWorkerProductionLine
+    LOG_INFO("[Step 3] Starting MultiWorkerProductionLine...");
+    if (!multi_worker.start()) {
+        LOG_ERROR("Failed to start MultiWorkerProductionLine");
+        return -1;
+    }
+    
+    LOG_INFO("  ✅ MultiWorkerProductionLine started successfully");
+    
+    // 5. 获取两个消费者的 BufferPool（对本测试而言，Group 内的消费者是数据的生产者）
+    LOG_INFO("\n[Step 4] Getting Consumer BufferPools...");
+    
+    uint64_t hw_pool_id = multi_worker.getGroupConsumerBufferPoolId(0, 0);  // Group 0, Consumer 0 (Hardware decoder)
+    uint64_t sw_pool_id = multi_worker.getGroupConsumerBufferPoolId(0, 1);  // Group 0, Consumer 1 (Software decoder)
+    
+    if (hw_pool_id == 0 || sw_pool_id == 0) {
+        LOG_ERROR("Failed to get consumer BufferPool IDs");
+        multi_worker.stop();
+        return -1;
+    }
+    
+    auto hw_pool_weak = BufferPoolRegistry::getInstance().getPool(hw_pool_id);
+    auto sw_pool_weak = BufferPoolRegistry::getInstance().getPool(sw_pool_id);
+    auto hw_pool_sptr = hw_pool_weak.lock();
+    auto sw_pool_sptr = sw_pool_weak.lock();
+    
+    if (!hw_pool_sptr || !sw_pool_sptr) {
+        LOG_ERROR("Failed to get consumer BufferPools from Registry");
+        multi_worker.stop();
+        return -1;
+    }
+    
+    LOG_INFO_FMT("  Consumer 1 (Hardware Decoder) BufferPool: '%s' (ID: %lu)", 
+                 hw_pool_sptr->getName().c_str(), hw_pool_id);
+    LOG_INFO_FMT("  Consumer 2 (Software Decoder) BufferPool: '%s' (ID: %lu)", 
+                 sw_pool_sptr->getName().c_str(), sw_pool_id);
+    
+    // 6. 等待第一个Buffer，获取实际格式
+    LOG_INFO("\n[Step 5] Waiting for first buffers to detect format...");
+    
+    Buffer* first_hw = hw_pool_sptr->acquireFilled(true, 5000);
+    Buffer* first_sw = sw_pool_sptr->acquireFilled(true, 5000);
+    
+    if (!first_hw || !first_sw) {
+        LOG_ERROR("Failed to get first buffers (timeout)");
+        if (first_hw) hw_pool_sptr->releaseFilled(first_hw);
+        if (first_sw) sw_pool_sptr->releaseFilled(first_sw);
+        multi_worker.stop();
+        return -1;
+    }
+    
+    // 从Buffer元数据获取实际格式
+    AVPixelFormat hw_format = AV_PIX_FMT_NONE;
+    AVPixelFormat sw_format = AV_PIX_FMT_NONE;
+    int hw_width = 1920, hw_height = 1080;
+    int sw_width = 1920, sw_height = 1080;
+    
+    if (first_hw->hasImageMetadata()) {
+        hw_format = first_hw->getImageFormat();
+        hw_width = first_hw->getImageWidth();
+        hw_height = first_hw->getImageHeight();
+        LOG_INFO_FMT("  Consumer 1 (Hardware) format: %s (%dx%d)", 
+                     av_get_pix_fmt_name(hw_format), hw_width, hw_height);
+    } else {
+        LOG_WARN("  Consumer 1 buffer has no metadata, using default NV12 1920x1080");
+        hw_format = AV_PIX_FMT_NV12;
+    }
+    
+    if (first_sw->hasImageMetadata()) {
+        sw_format = first_sw->getImageFormat();
+        sw_width = first_sw->getImageWidth();
+        sw_height = first_sw->getImageHeight();
+        LOG_INFO_FMT("  Consumer 2 (Software) format: %s (%dx%d)", 
+                     av_get_pix_fmt_name(sw_format), sw_width, sw_height);
+    } else {
+        LOG_WARN("  Consumer 2 buffer has no metadata, using default NV12 1920x1080");
+        sw_format = AV_PIX_FMT_NV12;
+    }
+    
+    // 7. 创建两个 BufferWriter
+    LOG_INFO("\n[Step 6] Creating BufferWriters...");
+    
+    const char* output_file_hw = "/tmp/multi_worker_hardware.yuv";
+    const char* output_file_sw = "/tmp/multi_worker_software.yuv";
+    
+    BufferWriter writer_hw, writer_sw;
+    
+    if (!writer_hw.openRaw(output_file_hw, hw_format, hw_width, hw_height)) {
+        LOG_ERROR_FMT("Failed to open BufferWriter for Consumer 1: %s", output_file_hw);
+        hw_pool_sptr->releaseFilled(first_hw);
+        sw_pool_sptr->releaseFilled(first_sw);
+        multi_worker.stop();
+        return -1;
+    }
+    
+    if (!writer_sw.openRaw(output_file_sw, sw_format, sw_width, sw_height)) {
+        LOG_ERROR_FMT("Failed to open BufferWriter for Consumer 2: %s", output_file_sw);
+        writer_hw.close();
+        hw_pool_sptr->releaseFilled(first_hw);
+        sw_pool_sptr->releaseFilled(first_sw);
+        multi_worker.stop();
+        return -1;
+    }
+    
+    LOG_INFO_FMT("  Consumer 1 (Hardware Decoder) output: %s (format: %s)", 
+                 output_file_hw, av_get_pix_fmt_name(hw_format));
+    LOG_INFO_FMT("  Consumer 2 (Software Decoder) output: %s (format: %s)", 
+                 output_file_sw, av_get_pix_fmt_name(sw_format));
+    
+    // 8. 保存第一帧
+    LOG_INFO("\n[Step 7] Saving frames...");
+    LOG_INFO("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    
+    if (writer_hw.write(first_hw)) {
+        LOG_INFO("  ✅ Saved Consumer 1 frame 1 (Hardware Decoder)");
+    }
+    if (writer_sw.write(first_sw)) {
+        LOG_INFO("  ✅ Saved Consumer 2 frame 1 (Software Decoder)");
+    }
+    
+    hw_pool_sptr->releaseFilled(first_hw);
+    sw_pool_sptr->releaseFilled(first_sw);
+    
+    // 9. 消费者循环：从两个消费者的 BufferPool 获取 buffer 并保存
+    auto start_time = std::chrono::steady_clock::now();
+    int frame_count_hw = 1;  // 已经保存了第一帧
+    int frame_count_sw = 1;
+    int timeout_hw = 0;
+    int timeout_sw = 0;
+    const int MAX_TIMEOUT = 50;
+    
+    LOG_INFO("  Starting consumer loop (Ctrl+C to stop)...\n");
+    
+    while (g_running) {
+        // 检查中断标志
+        if (g_rtsp_interrupted.load()) {
+            LOG_INFO("\n  ⚠️  检测到中断请求，停止测试...");
+            break;
+        }
+        
+        // 检查时长
+        auto now = std::chrono::steady_clock::now();
+        int elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - start_time).count();
+        if (elapsed >= duration_seconds) {
+            LOG_INFO_FMT("\n  ⏱️  Reached duration limit: %d seconds", duration_seconds);
+            break;
+        }
+        
+        // 从 Consumer 1 (Hardware) 获取 buffer
+        Buffer* buf_hw = hw_pool_sptr->acquireFilled(true, 100);
+        if (buf_hw) {
+            if (writer_hw.write(buf_hw)) {
+                frame_count_hw++;
+                if (frame_count_hw % 50 == 0) {
+                    LOG_INFO_FMT("  Consumer 1 (Hardware Decoder): %d frames saved", frame_count_hw);
+                }
+            } else {
+                LOG_WARN("Failed to write Consumer 1 buffer");
+            }
+            hw_pool_sptr->releaseFilled(buf_hw);
+            timeout_hw = 0;
+        } else {
+            timeout_hw++;
+        }
+        
+        // 从 Consumer 2 (Software) 获取 buffer
+        Buffer* buf_sw = sw_pool_sptr->acquireFilled(true, 100);
+        if (buf_sw) {
+            if (writer_sw.write(buf_sw)) {
+                frame_count_sw++;
+                if (frame_count_sw % 50 == 0) {
+                    LOG_INFO_FMT("  Consumer 2 (Software Decoder): %d frames saved", frame_count_sw);
+                }
+            } else {
+                LOG_WARN("Failed to write Consumer 2 buffer");
+            }
+            sw_pool_sptr->releaseFilled(buf_sw);
+            timeout_sw = 0;
+        } else {
+            timeout_sw++;
+        }
+        
+        // 检查超时
+        if (timeout_hw >= MAX_TIMEOUT && timeout_sw >= MAX_TIMEOUT) {
+            LOG_WARN("\n  ⚠️  Both consumers timeout, stopping...");
+            break;
+        }
+    }
+    
+    LOG_INFO("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    
+    // 10. 排空剩余的 buffer
+    LOG_INFO("\n[Step 8] Draining remaining buffers...");
+    int drained_hw = 0, drained_sw = 0;
+    
+    Buffer* remaining_hw = nullptr;
+    while ((remaining_hw = hw_pool_sptr->acquireFilled(false, 0)) != nullptr) {
+        writer_hw.write(remaining_hw);
+        hw_pool_sptr->releaseFilled(remaining_hw);
+        frame_count_hw++;
+        drained_hw++;
+    }
+    
+    Buffer* remaining_sw = nullptr;
+    while ((remaining_sw = sw_pool_sptr->acquireFilled(false, 0)) != nullptr) {
+        writer_sw.write(remaining_sw);
+        sw_pool_sptr->releaseFilled(remaining_sw);
+        frame_count_sw++;
+        drained_sw++;
+    }
+    
+    if (drained_hw > 0 || drained_sw > 0) {
+        LOG_INFO_FMT("  Drained: Consumer 1=%d, Consumer 2=%d", drained_hw, drained_sw);
+    }
+    
+    // 11. 清理
+    LOG_INFO("\n[Step 9] Cleaning up...");
+    writer_hw.close();
+    writer_sw.close();
+    multi_worker.stop();
+    
+    // 12. 打印结果
+    auto end_time = std::chrono::steady_clock::now();
+    double total_duration = std::chrono::duration<double>(end_time - start_time).count();
+    
+    LOG_INFO("\n═══════════════════════════════════════════════════════");
+    LOG_INFO("  Test Results");
+    LOG_INFO("═══════════════════════════════════════════════════════");
+    LOG_INFO_FMT("  Consumer 1 (Hardware Decoder):");
+    LOG_INFO_FMT("    Output file: %s", output_file_hw);
+    LOG_INFO_FMT("    Format: %s (%dx%d)", av_get_pix_fmt_name(hw_format), hw_width, hw_height);
+    LOG_INFO_FMT("    Frames saved: %d", frame_count_hw);
+    LOG_INFO_FMT("  Consumer 2 (Software Decoder):");
+    LOG_INFO_FMT("    Output file: %s", output_file_sw);
+    LOG_INFO_FMT("    Format: %s (%dx%d)", av_get_pix_fmt_name(sw_format), sw_width, sw_height);
+    LOG_INFO_FMT("    Frames saved: %d", frame_count_sw);
+    LOG_INFO_FMT("  Duration: %.2f seconds", total_duration);
+    
+    // 打印统计信息
+    multi_worker.printDetailedStats();
+    
+    LOG_INFO("\n💡 Verify the output files with:");
+    LOG_INFO_FMT("   ffplay -f rawvideo -pixel_format %s -video_size %dx%d %s",
+                 av_get_pix_fmt_name(hw_format), hw_width, hw_height, output_file_hw);
+    LOG_INFO_FMT("   ffplay -f rawvideo -pixel_format %s -video_size %dx%d %s",
+                 av_get_pix_fmt_name(sw_format), sw_width, sw_height, output_file_sw);
+    LOG_INFO("═══════════════════════════════════════════════════════\n");
+    
+    if (frame_count_hw > 0 && frame_count_sw > 0) {
+        return 0;
+    } else {
+        LOG_ERROR("Test failed: No frames saved from one or both consumers");
+        return -1;
+    }
+}
+
+/**
  * MJPEG解码器测试帮助信息
  */
 static void print_mjpeg_decoder_help() {
@@ -3025,8 +3047,8 @@ REGISTER_TEST(ffmpeg_multithread, "Multi-threaded FFmpeg video decoding (no disp
 REGISTER_TEST_MULTI_ARG(writer, "BufferWriter - Save frames (specify format)", "<format> <video_path>", test_buffer_writer, print_supported_formats);
 REGISTER_TEST(writer_all_rgb_formats, "BufferWriter - 12 RGB formats (ARGB/ABGR/BGRA/RGBA/RGB/BGR/0RGB/0BGR/RGB0/BGR0/RGB48/BGR48)", test_buffer_writer_rgb_formats);
 REGISTER_TEST(writer_all_yuv_formats, "BufferWriter - 15 YUV formats (PP0 ch0: YUV400/YUV420 NV12/YUV420 NV21/YUV420 P010 series)", test_buffer_writer_yuv_formats);
-REGISTER_TEST(multi_worker, "MultiWorkerProductionLine - Multi worker test (hardware + software decoder from same RTSP stream)", test_multi_worker);
 REGISTER_TEST(rtsp_record_all_formats, "RTSP Record - All format validation (7 formats: MP4/MKV/MOV/TS/FLV/AVI/3GP)", test_rtsp_record_all_formats);
+REGISTER_TEST(multi_worker, "MultiWorkerProductionLine - Multi worker test (hardware + software decoder from same RTSP stream)", test_multi_worker);
 
 /**
  * 主函数

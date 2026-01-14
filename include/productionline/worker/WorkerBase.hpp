@@ -293,6 +293,39 @@ public:
     }
     
     /**
+     * @brief 设置源 BufferPool（用于 Buffer 模式）
+     * 
+     * 功能：在 Buffer 模式下，关联 Record Worker 的 BufferPool
+     * 
+     * 使用场景：
+     * - MultiWorkerProductionLine 场景
+     * - 消费者 Worker 从生产者 Worker 的 BufferPool 获取数据
+     * 
+     * 默认实现：返回 false（不支持 Buffer 模式）
+     * 子类（如 FfmpegDecodeVideoFileWorker、FfmpegDecodeRtspWorker）可以重写此方法
+     * 
+     * @param pool_weak Record Worker 的 BufferPool（weak_ptr）
+     * @return true 如果成功设置，false 如果失败（不支持 Buffer 模式）
+     * 
+     * @note 子类实现示例：
+     * @code
+     * bool setSourceBufferPool(std::weak_ptr<BufferPool> pool_weak) override {
+     *     auto* buffer_source = dynamic_cast<BufferPacketSource*>(packet_source_.get());
+     *     if (!buffer_source) {
+     *         return false;
+     *     }
+     *     buffer_source->setSourceBufferPool(pool_weak);
+     *     return true;
+     * }
+     * @endcode
+     */
+    virtual bool setSourceBufferPool(std::weak_ptr<BufferPool> pool_weak) {
+        // 默认实现：不支持 Buffer 模式
+        (void)pool_weak;  // 避免未使用参数警告
+        return false;
+    }
+    
+    /**
      * @brief 获取输入数据源的原始视频宽度
      * @return 视频宽度（像素），如果不可用则返回 0
      * 

@@ -1,6 +1,5 @@
 #include "productionline/worker/BufferFillingWorkerFacade.hpp"
 #include "common/Logger.hpp"
-#include "productionline/worker/FfmpegDecodeVideoFileWorker.hpp"
 #include <stdio.h>
 
 // ============ 构造/析构 ============
@@ -75,15 +74,10 @@ bool BufferFillingWorkerFacade::setSourceBufferPool(std::weak_ptr<BufferPool> po
         return false;
     }
     
-    // 转发调用到底层 Worker（如果支持）
-    // 注意：只有支持 Buffer 模式的 Worker 才有这个方法
-    auto* decode_worker = dynamic_cast<FfmpegDecodeVideoFileWorker*>(worker_base_uptr_.get());
-    if (decode_worker) {
-        return decode_worker->setSourceBufferPool(pool_weak);
-    }
-    
-    LOG_WARN("[Worker] setSourceBufferPool: Worker 不支持此操作");
-    return false;
+    // ✅ 直接调用基类虚函数，自动多态分发
+    // 支持 Buffer 模式的 Worker（如 FfmpegDecodeVideoFileWorker、FfmpegDecodeRtspWorker）
+    // 会重写此方法并返回 true，不支持的 Worker 会使用基类默认实现返回 false
+    return worker_base_uptr_->setSourceBufferPool(pool_weak);
 }
 
 bool BufferFillingWorkerFacade::isOpen() const {

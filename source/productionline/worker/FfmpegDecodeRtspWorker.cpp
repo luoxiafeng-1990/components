@@ -1,5 +1,6 @@
 #include "productionline/worker/FfmpegDecodeRtspWorker.hpp"
 #include "productionline/worker/RtspPacketSource.hpp"
+#include "productionline/worker/BufferPacketSource.hpp"
 #include "common/Logger.hpp"
 #include "buffer/bufferpool/BufferPool.hpp"
 #include "buffer/NormalAllocator.hpp"
@@ -23,7 +24,7 @@ extern "C" {
 // 构造函数（v2.12修改：必须通过配置创建，与 FfmpegDecodeVideoFileWorker 保持一致）
 FfmpegDecodeRtspWorker::FfmpegDecodeRtspWorker(const WorkerConfig& config)
     : WorkerBase(BufferAllocatorFactory::AllocatorType::AVFRAME, config)  // 传递 config 给父类
-    , packet_source_(nullptr)  // ⚠️ 数据源将在 open() 时根据 RTSP URL 创建
+    , packet_source_(nullptr)  // ⚠️ 数据源将在下面根据配置创建
     , codec_ctx_ptr_(nullptr)
     , output_width_(0)
     , output_height_(0)
@@ -34,6 +35,18 @@ FfmpegDecodeRtspWorker::FfmpegDecodeRtspWorker(const WorkerConfig& config)
     , dropped_frames_(0)
 {
     LOG_DEBUG("[Worker] FfmpegDecodeRtspWorker created with config");
+    
+    // ⭐ v2.13 新增：根据配置创建数据源（类似 FfmpegDecodeVideoFileWorker）
+    if (config.decoder.datasource_buffer_mode) {
+        // Buffer 数据源模式：从 BufferPacketSource 获取 packet
+        if (config.decoder.codec_params) {
+            packet_source_ = std::make_unique<BufferPacketSource>(config.decoder.codec_params);
+            LOG_DEBUG("[FfmpegDecodeRtspWorker] Created BufferPacketSource (v2.13: 需要调用 setSourceBufferPool 关联源 Pool)");
+        } else {
+            LOG_WARN("[FfmpegDecodeRtspWorker] datasource_buffer_mode=true but codec_params is nullptr");
+        }
+    }
+    // 注意：RtspPacketSource 将在 open() 时创建（如果不是 Buffer 模式）
 }
 
 FfmpegDecodeRtspWorker::~FfmpegDecodeRtspWorker() {
@@ -57,6 +70,82 @@ bool FfmpegDecodeRtspWorker::open() {
         close();
     }
     
+    // ⭐ v2.13 新增：检查是否是 Buffer 模式
+    bool is_buffer_mode = worker_config_.decoder.datasource_buffer_mode;
+    
+    if (is_buffer_mode) {
+        // Buffer 模式：使用已创建的 BufferPacketSource
+        auto* buffer_source = dynamic_cast<BufferPacketSource*>(packet_source_.get());
+        if (!buffer_source) {
+            setError("Buffer mode enabled but BufferPacketSource not created");
+            return false;
+        }
+        
+        // 验证 codec_params 是否已设置
+        if (!buffer_source->getCodecParameters()) {
+            setError("Buffer mode enabled but codec_params not set");
+            return false;
+        }
+        
+        LOG_INFO("[Worker] 📦 Opening BufferPacketSource (Buffer mode)");
+        
+        // 打开 BufferPacketSource（不需要 RTSP URL）
+        if (!buffer_source->open()) {
+            setError("Failed to open BufferPacketSource");
+            return false;
+        }
+        
+        // 从 BufferPacketSource 获取编解码器参数
+        const AVCodecParameters* codecpar = buffer_source->getCodecParameters();
+        if (!codecpar) {
+            setError("Failed to get codec parameters from BufferPacketSource");
+            buffer_source->close();
+            return false;
+        }
+        
+        // 检查编解码器类型是否匹配
+        checkCodecMismatch(codecpar->codec_id, decoder_name_);
+        
+        // 初始化解码器
+        if (!initializeDecoder(codecpar)) {
+            buffer_source->close();
+            return false;
+        }
+        
+        // ⭐ Buffer 模式下，输出分辨率从配置读取（或使用默认值）
+        output_width_ = worker_config_.display.width > 0 ? worker_config_.display.width : 1920;
+        output_height_ = worker_config_.display.height > 0 ? worker_config_.display.height : 1080;
+        int bits_per_pixel = worker_config_.display.bits_per_pixel > 0 ? worker_config_.display.bits_per_pixel : 32;
+        
+        // 创建 BufferPool
+        size_t frame_size = output_width_ * output_height_ * (bits_per_pixel / 8);
+        if (frame_size == 0) {
+            setError("Invalid frame size, cannot create BufferPool");
+            buffer_source->close();
+            return false;
+        }
+        
+        uint64_t pool_id = allocator_facade_.allocatePoolWithBuffers(
+            worker_config_.data_source.buffer_count,
+            frame_size,
+            std::string("FfmpegDecodeRtspWorker_BufferMode"),
+            "RTSP_BUFFER"
+        );
+        
+        if (pool_id == 0) {
+            setError("Failed to create BufferPool");
+            buffer_source->close();
+            return false;
+        }
+        
+        // 保存 BufferPool 信息
+        // registerBufferPool(BufferPoolType::FRAME_VIDEO, pool_id);  // 已废弃
+        
+        LOG_INFO_FMT("[Worker] ✅ BufferPacketSource opened successfully (Pool ID: %lu)", pool_id);
+        return true;
+    }
+    
+    // ========== 原有 RTSP 模式代码（保持不变）==========
     // ✅ 从 worker_config_ 读取所有参数
     const char* rtsp_url = worker_config_.data_source.path.c_str();
     int width = worker_config_.display.width;
@@ -84,9 +173,11 @@ bool FfmpegDecodeRtspWorker::open() {
     LOG_INFO_FMT("📡 Opening RTSP stream: %s", rtsp_url);
     LOG_INFO_FMT("   Output resolution: %dx%d@%dbpp", width, height, bits_per_pixel);
     
-    // ⭐ 创建 RTSP 数据源
-    packet_source_ = std::make_unique<RtspPacketSource>(std::string(rtsp_url));
-    LOG_DEBUG_FMT("[Worker] Created RtspPacketSource for '%s'", rtsp_url);
+    // ⭐ 创建 RTSP 数据源（仅当不是 Buffer 模式时）
+    if (!packet_source_) {
+        packet_source_ = std::make_unique<RtspPacketSource>(std::string(rtsp_url));
+        LOG_DEBUG_FMT("[Worker] Created RtspPacketSource for '%s'", rtsp_url);
+    }
     
     // 1. 打开数据源
     if (!packet_source_->open()) {
@@ -154,6 +245,23 @@ bool FfmpegDecodeRtspWorker::open() {
     LOG_DEBUG_FMT("[Worker]    Codec: %s", codec_ctx_ptr_->codec->name);
     LOG_DEBUG_FMT("[Worker]    BufferPool: '%s' (ID: %lu, %d buffers, %zu bytes each)", 
            pool_name.c_str(), pool_id, worker_config_.data_source.buffer_count, frame_size);
+    
+    return true;
+}
+
+// ============ v2.13 BufferPacketSource 配置 ============
+
+bool FfmpegDecodeRtspWorker::setSourceBufferPool(std::weak_ptr<BufferPool> pool_weak) {
+    // 检查是否是 BufferPacketSource
+    auto* buffer_source = dynamic_cast<BufferPacketSource*>(packet_source_.get());
+    if (!buffer_source) {
+        LOG_WARN("[FfmpegDecodeRtspWorker] setSourceBufferPool 失败：不是 Buffer 模式");
+        return false;
+    }
+    
+    // 设置源 BufferPool
+    buffer_source->setSourceBufferPool(pool_weak);
+    LOG_DEBUG("[FfmpegDecodeRtspWorker] ✅ 已设置源 BufferPool（v2.13 Pool 模式）");
     
     return true;
 }

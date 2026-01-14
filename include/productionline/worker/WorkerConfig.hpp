@@ -6,6 +6,11 @@
 #include <optional>
 #include "common/Logger.hpp"
 
+// FFmpeg 头文件（用于 AVRational 和 AVCodecParameters）
+extern "C" {
+#include <libavutil/rational.h>
+}
+
 /**
  * @brief Worker 类型枚举
  * 
@@ -16,6 +21,75 @@ enum class WorkerType {
     FFMPEG_RTSP,            // FFmpeg RTSP 流
     FFMPEG_PACKET_RECORDER, // FFmpeg Packet 录制器（支持 RTSP/文件/HTTP 等多种数据源）
     FFMPEG_VIDEO_FILE       // FFmpeg 视频文件
+};
+
+/**
+ * @brief 通道枚举
+ * 
+ * TACO 解码器支持两个输出通道：
+ * - CH0: YUV 格式输出通道
+ * - CH1: RGB/YUV 格式输出通道（支持格式转换）
+ */
+enum class Channel { 
+    CH0 = 0,  // 通道0（仅支持 YUV 格式输出）
+    CH1 = 1   // 通道1（支持 RGB 和 YUV 格式输出）
+};
+
+/**
+ * @brief 输出格式枚举
+ * 
+ * 包含 TACO 解码器支持的所有输出格式（YUV 和 RGB）
+ */
+enum class OutputFormat {
+    // ========================================
+    // YUV 格式（通道0和通道1都支持）
+    // ========================================
+    YUV_AUTO = -1,        // 自动选择 YUV 格式（由解码器根据输入流决定）
+    YUV_NV12 = 0,         // NV12: YUV420 semi-planar, UV interleaved
+    YUV_NV21 = 1,         // NV21: YUV420 semi-planar, VU interleaved
+    YUV_I420 = 2,         // I420/YUV420P: YUV420 planar
+    YUV_YV12 = 3,         // YV12: YUV420 planar, V before U
+    YUV_P010 = 4,         // P010: 10-bit YUV420 semi-planar
+    YUV_NV16 = 5,         // NV16: YUV422 semi-planar
+    YUV_NV61 = 6,         // NV61: YUV422 semi-planar, VU interleaved
+    YUV_I422 = 7,         // I422: YUV422 planar
+    YUV_NV24 = 8,         // NV24: YUV444 semi-planar
+    YUV_I444 = 9,         // I444: YUV444 planar
+    
+    // ========================================
+    // RGB 格式（仅通道1支持）
+    // ========================================
+    // 注意：枚举值 >= 1000 用于与 YUV 格式区分
+    RGB_ARGB888 = 1000,      // ARGB8888 packed (驱动值: 9)
+    RGB_ABGR888 = 1001,      // ABGR8888 packed (驱动值: 11)
+    RGB_RGBA888 = 1002,      // RGBA8888 packed (驱动值: 13)
+    RGB_BGRA888 = 1003,      // BGRA8888 packed (驱动值: 15)
+    RGB_RGB888 = 1004,       // RGB888 packed (驱动值: 1)
+    RGB_BGR888 = 1005,       // BGR888 packed (驱动值: 3)
+    RGB_XRGB888 = 1006,      // XRGB8888 packed (驱动值: 25)
+    RGB_XBGR888 = 1007,      // XBGR8888 packed (驱动值: 27)
+    RGB_RGBX888 = 1008,      // RGBX8888 packed (驱动值: 21)
+    RGB_BGRX888 = 1009,      // BGRX8888 packed (驱动值: 23)
+    RGB_RGB888_PLANAR = 1010,   // RGB888 planar (驱动值: 2)
+    RGB_BGR888_PLANAR = 1011,   // BGR888 planar (驱动值: 4)
+    RGB_R16G16B16 = 1012,    // RGB 16-bit per channel (驱动值: 17)
+    RGB_B16G16R16 = 1013,    // BGR 16-bit per channel (驱动值: 19)
+    RGB_GBRP = 1014          // GBR planar (驱动值: 28)
+};
+
+/**
+ * @brief 颜色标准枚举
+ * 
+ * 定义视频颜色空间标准和范围
+ */
+enum class ColorStandard {
+    NONE = 0,               // 无颜色标准
+    BT601 = 1,              // BT.601 full range (SD)
+    BT601_LIMITED = 2,      // BT.601 limited range
+    BT709 = 3,              // BT.709 full range (HD)
+    BT709_LIMITED = 4,      // BT.709 limited range
+    BT2020 = 5,             // BT.2020 full range (UHD/HDR)
+    BT2020_LIMITED = 6      // BT.2020 limited range
 };
 
 /**
@@ -87,6 +161,7 @@ struct WorkerConfig {
         // ========================================
         bool datasource_buffer_mode = false;           // true=从Buffer数据源获取packet, false=从文件数据源读取
         const struct AVCodecParameters* codec_params = nullptr;  // Buffer模式下的编解码器参数（从Record Worker获取）
+        AVRational time_base = {0, 1};                 // 时间基准（从Record Worker获取，用于同步）
         
         // ========================================
         // h264_taco 特定配置（子子结构体）
@@ -102,8 +177,9 @@ struct WorkerConfig {
             // ========================================
             bool ch0_enable = true;                    // 启用通道0（YUV 格式输出）
             
-            // YUV 格式由解码器自动决定（NV12/NV21/P010等），无需手动配置
-            // 输出格式取决于输入流的编码格式和位深度
+            // YUV 格式配置
+            int ch0_yuv_format = -1;                   // YUV格式类型（-1=自动，0=NV12, 1=NV21, 等）
+            int ch0_yuv_std = 1;                       // YUV颜色标准（默认 1=BT.601）
             
             // 裁剪参数（Crop）
             int ch0_crop_x = 0;                        // 裁剪起始X坐标（0=不裁剪）
@@ -123,23 +199,11 @@ struct WorkerConfig {
             
             // RGB 格式配置（仅当 ch1_rgb=true 时有效）
             int ch1_rgb_format = 9;                    // RGB格式类型（默认 9=argb888 packed）
-                                                       // 常用值：
-                                                       // 9  = argb888 (ARGB8888 packed)
-                                                       // 11 = abgr888 (ABGR8888 packed)
-                                                       // 13 = rgba888 (RGBA8888 packed)
-                                                       // 15 = bgra888 (BGRA8888 packed)
-                                                       // 1  = rgb888  (RGB888 packed)
-                                                       // 3  = bgr888  (BGR888 packed)
-                                                       // 完整列表见 TACO 解码器文档
-            
             int ch1_rgb_std = 1;                       // RGB颜色标准（默认 1=BT.601 full range）
-                                                       // 0 = none (无标准)
-                                                       // 1 = bt601    (BT.601 full range)
-                                                       // 2 = bt601_l  (BT.601 limited range)
-                                                       // 3 = bt709    (BT.709 full range)
-                                                       // 4 = bt709_l  (BT.709 limited range)
-                                                       // 5 = bt2020   (BT.2020 full range)
-                                                       // 6 = bt2020_l (BT.2020 limited range)
+            
+            // YUV 格式配置（仅当 ch1_rgb=false 时有效）
+            int ch1_yuv_format = -1;                   // YUV格式类型（-1=自动）
+            int ch1_yuv_std = 1;                       // YUV颜色标准（默认 1=BT.601）
             
             // 裁剪参数（Crop）
             int ch1_crop_x = 0;                        // 裁剪起始X坐标（0=不裁剪）
@@ -304,176 +368,348 @@ private:
 };
 
 /**
- * @brief h264_taco 特定配置构建器
+ * @brief TACO 解码器特定配置构建器
+ * 
+ * 提供统一的通用接口来配置 TACO 解码器的两个输出通道。
+ * 
+ * 设计理念：
+ * - 通用接口：所有通道使用相同的配置接口（setCrop/setScale/setOutputFormat）
+ * - 类型安全：使用枚举类型代替魔法数字
+ * - 无前置检查：可以先配置参数，后启用通道（Builder 模式的正常用法）
+ * 
+ * 使用示例：
+ * @code
+ * // 通道0: YUV NV12 输出
+ * auto taco = TacoConfigBuilder()
+ *     .setChannels(true, false)
+ *     .setOutputFormat(Channel::CH0, OutputFormat::YUV_NV12, ColorStandard::BT709)
+ *     .setScale(Channel::CH0, 1920, 1080)
+ *     .build();
+ * 
+ * // 通道1: RGB BGRA888 输出
+ * auto taco = TacoConfigBuilder()
+ *     .setChannels(false, true)
+ *     .setOutputFormat(Channel::CH1, OutputFormat::RGB_BGRA888, ColorStandard::BT709)
+ *     .setCrop(Channel::CH1, 0, 0, 1920, 1080)
+ *     .setScale(Channel::CH1, 1280, 720)
+ *     .build();
+ * @endcode
  */
 class TacoConfigBuilder {
 public:
     TacoConfigBuilder() = default;
     
+    // ========================================
+    // 解码器行为配置
+    // ========================================
+    
+    /**
+     * @brief 设置是否禁用重排序
+     * @param disable true=禁用重排序（推荐），false=启用重排序
+     */
     TacoConfigBuilder& setReorderDisable(bool disable = true) {
         taco_config_.reorder_disable = disable;
         return *this;
     }
     
+    /**
+     * @brief 同时设置两个通道的启用状态（快捷方法）
+     * @param ch0 是否启用通道0
+     * @param ch1 是否启用通道1
+     */
     TacoConfigBuilder& setChannels(bool ch0, bool ch1) {
         taco_config_.ch0_enable = ch0;
         taco_config_.ch1_enable = ch1;
         return *this;
     }
     
-    // ========== 通道0配置 ==========
+    // ========================================
+    // 通用配置接口（支持任意通道）
+    // ========================================
     
     /**
-     * @brief 设置通道0裁剪区域
+     * @brief 设置通道输出格式（通用接口）
+     * 
+     * @param ch 通道选择（CH0 或 CH1）
+     * @param format 输出格式
+     *               - YUV_*: YUV 格式（两个通道都支持）
+     *               - RGB_*: RGB 格式（仅 CH1 支持）
+     * @param std 颜色标准（默认 BT601）
+     * 
+     * @note 通道0仅支持 YUV 格式，传入 RGB 格式会记录错误并忽略
+     * @note 通道1支持 RGB 和 YUV 格式
+     * @note 自动根据 format 判断是 RGB 还是 YUV 并设置对应参数
+     * 
+     * @example
+     * // 通道0设置 YUV NV12
+     * .setOutputFormat(Channel::CH0, OutputFormat::YUV_NV12, ColorStandard::BT601)
+     * 
+     * // 通道1设置 RGB ARGB888
+     * .setOutputFormat(Channel::CH1, OutputFormat::RGB_ARGB888, ColorStandard::BT709)
+     * 
+     * // 通道1设置 YUV P010 (10-bit)
+     * .setOutputFormat(Channel::CH1, OutputFormat::YUV_P010, ColorStandard::BT2020)
      */
-    TacoConfigBuilder& setCh0CropRegion(int x, int y, int width, int height) {
-        taco_config_.ch0_crop_x = x;
-        taco_config_.ch0_crop_y = y;
-        taco_config_.ch0_crop_width = width;
-        taco_config_.ch0_crop_height = height;
+    TacoConfigBuilder& setOutputFormat(
+        Channel ch,
+        OutputFormat format = OutputFormat::YUV_AUTO,
+        ColorStandard std = ColorStandard::BT601
+    ) {
+        int format_value = static_cast<int>(format);
+        int std_value = static_cast<int>(std);
+        
+        // 判断是 RGB 还是 YUV（RGB 格式枚举值 >= 1000）
+        bool is_rgb = (format_value >= 1000);
+        
+        if (ch == Channel::CH0) {
+            // 通道0仅支持 YUV
+            if (is_rgb) {
+                LOG_ERROR_FMT("TacoConfigBuilder: Channel 0 only supports YUV format, RGB format ignored");
+                return *this;
+            }
+            // 设置 YUV 格式
+            taco_config_.ch0_yuv_format = format_value;
+            taco_config_.ch0_yuv_std = std_value;
+            
+        } else if (ch == Channel::CH1) {
+            // 通道1支持 RGB 和 YUV
+            taco_config_.ch1_rgb = is_rgb;
+            
+            if (is_rgb) {
+                // RGB 格式：需要映射回驱动的原始值
+                taco_config_.ch1_rgb_format = mapEnumToRgbDriverValue(format);
+                taco_config_.ch1_rgb_std = std_value;
+            } else {
+                // YUV 格式
+                taco_config_.ch1_yuv_format = format_value;
+                taco_config_.ch1_yuv_std = std_value;
+            }
+        }
+        
         return *this;
     }
     
     /**
-     * @brief 设置通道0缩放分辨率
+     * @brief 设置通道裁剪区域（通用接口）
+     * 
+     * @param ch 通道选择（CH0 或 CH1）
+     * @param x 裁剪起始 X 坐标（0=不裁剪）
+     * @param y 裁剪起始 Y 坐标（0=不裁剪）
+     * @param width 裁剪宽度（0=不裁剪）
+     * @param height 裁剪高度（0=不裁剪）
+     * 
+     * @note 无需预先启用通道，可以先配置后启用
+     * 
+     * @example
+     * // 通道0裁剪
+     * .setCrop(Channel::CH0, 100, 100, 1920, 1080)
+     * 
+     * // 通道1裁剪
+     * .setCrop(Channel::CH1, 0, 0, 1280, 720)
      */
-    TacoConfigBuilder& setCh0ScaleResolution(int width, int height) {
-        taco_config_.ch0_scale_width = width;
-        taco_config_.ch0_scale_height = height;
-        return *this;
-    }
-    
-    // ========== 通道1配置 ==========
-    
-    /**
-     * @brief 设置通道1 RGB配置
-     * @param enable 是否输出RGB
-     * @param format RGB格式类型（0-28），默认 9=argb888
-     * @param std 颜色标准（0-6），默认 1=bt601
-     */
-    TacoConfigBuilder& setCh1RgbConfig(bool enable, int format = 9, int std = 1) {
-        taco_config_.ch1_rgb = enable;
-        taco_config_.ch1_rgb_format = format;
-        taco_config_.ch1_rgb_std = std;
-        return *this;
-    }
-    
-    /**
-     * @brief 设置通道1裁剪区域
-     */
-    TacoConfigBuilder& setCh1CropRegion(int x, int y, int width, int height) {
-        if (taco_config_.ch1_enable) {
+    TacoConfigBuilder& setCrop(Channel ch, int x, int y, int width, int height) {
+        if (ch == Channel::CH0) {
+            taco_config_.ch0_crop_x = x;
+            taco_config_.ch0_crop_y = y;
+            taco_config_.ch0_crop_width = width;
+            taco_config_.ch0_crop_height = height;
+        } else if (ch == Channel::CH1) {
             taco_config_.ch1_crop_x = x;
             taco_config_.ch1_crop_y = y;
             taco_config_.ch1_crop_width = width;
             taco_config_.ch1_crop_height = height;
-            return *this;
         }
-        LOG_ERROR_FMT("TacoConfigBuilder::setCh1CropRegion() failed, ch1 is not enabled");
         return *this;
     }
     
     /**
-     * @brief 设置通道1缩放分辨率（解码器输出分辨率）
+     * @brief 设置通道缩放分辨率（通用接口）
+     * 
+     * @param ch 通道选择（CH0 或 CH1）
+     * @param width 缩放目标宽度（0=不缩放）
+     * @param height 缩放目标高度（0=不缩放）
+     * 
+     * @note 无需预先启用通道，可以先配置后启用
+     * 
+     * @example
+     * // 通道0缩放到 1920x1080
+     * .setScale(Channel::CH0, 1920, 1080)
+     * 
+     * // 通道1缩放到 1280x720
+     * .setScale(Channel::CH1, 1280, 720)
      */
-    TacoConfigBuilder& setCh1ScaleResolution(int width, int height) {
-        if (taco_config_.ch1_enable) {
+    TacoConfigBuilder& setScale(Channel ch, int width, int height) {
+        if (ch == Channel::CH0) {
+            taco_config_.ch0_scale_width = width;
+            taco_config_.ch0_scale_height = height;
+        } else if (ch == Channel::CH1) {
             taco_config_.ch1_scale_width = width;
             taco_config_.ch1_scale_height = height;
-            return *this;
         }
-        LOG_ERROR_FMT("TacoConfigBuilder::setCh1ScaleResolution() failed, ch1 is not enabled");
-        return *this;
-    }
-    
-    // ========== 向后兼容的快捷方法（保留旧接口） ==========
-    
-    /**
-     * @brief 设置RGB配置（简化版，向后兼容）
-     * @deprecated 请使用 setCh1RgbConfig()
-     */
-    TacoConfigBuilder& setRgbConfig(bool enable, std::string_view format = "argb888", std::string_view std_name = "bt601") {
-        taco_config_.ch1_rgb = enable;
-        taco_config_.ch1_rgb_format = mapRgbFormatNameToInt(format);
-        taco_config_.ch1_rgb_std = mapRgbStdNameToInt(std_name);
         return *this;
     }
     
     /**
-     * @brief 设置YUV配置（简化版，向后兼容）
-     * @note YUV格式由解码器自动决定，此方法仅为兼容性保留
-     * @deprecated YUV格式无需手动配置
+     * @brief 构建最终的 TacoConfig 对象
      */
-    TacoConfigBuilder& setYuvConfig(
-        std::string_view format = "YUV420 8-bit NV12", 
-        std::string_view std = "bt601"
-    ) {
-        // YUV 格式由解码器自动决定，不需要设置
-        // 保留此方法仅为向后兼容
-        return *this;
-    }
-    
-    /**
-     * @brief 设置裁剪区域（简化版，向后兼容，作用于ch1）
-     * @deprecated 请使用 setCh1CropRegion()
-     */
-    TacoConfigBuilder& setCropRegion(int x, int y, int width, int height) {
-        return setCh1CropRegion(x, y, width, height);
-    }
-    
-    /**
-     * @brief 设置解码器输出分辨率（简化版，向后兼容，作用于ch1）
-     * @deprecated 请使用 setCh1ScaleResolution()
-     */
-    TacoConfigBuilder& setDecoderOutputResolution(int width, int height) {
-        return setCh1ScaleResolution(width, height);
-    }
-    
     WorkerConfig::DecoderConfig::TacoConfig build() const {
         return taco_config_;
     }
     
-    // ========== 辅助映射函数（public，供外部使用） ==========
+    // ========================================
+    // 辅助映射函数（向后兼容，供外部使用）
+    // ========================================
     
     /**
-     * @brief 将RGB格式名称映射为整数（向后兼容）
+     * @brief 将格式名称字符串映射为 OutputFormat 枚举
+     * @param format_name 格式名称（如 "nv12", "argb888" 等）
+     * @return OutputFormat 枚举值
+     * 
+     * 向后兼容旧代码使用字符串配置的情况。
      */
-    static int mapRgbFormatNameToInt(std::string_view format) {
-        if (format == "argb888") return 9;
-        if (format == "abgr888") return 11;
-        if (format == "rgba888") return 13;
-        if (format == "bgra888") return 15;
-        if (format == "rgb888") return 1;
-        if (format == "bgr888") return 3;
-        if (format == "xrgb888") return 25;
-        if (format == "xbgr888") return 27;
-        if (format == "rgb888_planar") return 2;
-        if (format == "bgr888_planar") return 4;
-        if (format == "r16g16b16") return 17;
-        if (format == "b16g16r16") return 19;
-        if (format == "rgbx888") return 21;
-        if (format == "bgrx888") return 23;
-        if (format == "gbrp") return 28;
-        // 默认返回 argb888
-        return 9;
+    static OutputFormat mapFormatNameToEnum(std::string_view format_name) {
+        // YUV 格式
+        if (format_name == "auto" || format_name == "yuv_auto") return OutputFormat::YUV_AUTO;
+        if (format_name == "nv12") return OutputFormat::YUV_NV12;
+        if (format_name == "nv21") return OutputFormat::YUV_NV21;
+        if (format_name == "i420" || format_name == "yuv420p") return OutputFormat::YUV_I420;
+        if (format_name == "yv12") return OutputFormat::YUV_YV12;
+        if (format_name == "p010") return OutputFormat::YUV_P010;
+        if (format_name == "nv16") return OutputFormat::YUV_NV16;
+        if (format_name == "nv61") return OutputFormat::YUV_NV61;
+        if (format_name == "i422" || format_name == "yuv422p") return OutputFormat::YUV_I422;
+        if (format_name == "nv24") return OutputFormat::YUV_NV24;
+        if (format_name == "i444" || format_name == "yuv444p") return OutputFormat::YUV_I444;
+        
+        // RGB 格式
+        if (format_name == "argb888") return OutputFormat::RGB_ARGB888;
+        if (format_name == "abgr888") return OutputFormat::RGB_ABGR888;
+        if (format_name == "rgba888") return OutputFormat::RGB_RGBA888;
+        if (format_name == "bgra888") return OutputFormat::RGB_BGRA888;
+        if (format_name == "rgb888") return OutputFormat::RGB_RGB888;
+        if (format_name == "bgr888") return OutputFormat::RGB_BGR888;
+        if (format_name == "xrgb888") return OutputFormat::RGB_XRGB888;
+        if (format_name == "xbgr888") return OutputFormat::RGB_XBGR888;
+        if (format_name == "rgbx888") return OutputFormat::RGB_RGBX888;
+        if (format_name == "bgrx888") return OutputFormat::RGB_BGRX888;
+        if (format_name == "rgb888_planar") return OutputFormat::RGB_RGB888_PLANAR;
+        if (format_name == "bgr888_planar") return OutputFormat::RGB_BGR888_PLANAR;
+        if (format_name == "r16g16b16") return OutputFormat::RGB_R16G16B16;
+        if (format_name == "b16g16r16") return OutputFormat::RGB_B16G16R16;
+        if (format_name == "gbrp") return OutputFormat::RGB_GBRP;
+        
+        // 默认返回 YUV_AUTO
+        return OutputFormat::YUV_AUTO;
     }
     
     /**
-     * @brief 将颜色标准名称映射为整数（向后兼容）
+     * @brief 将颜色标准名称字符串映射为 ColorStandard 枚举
+     * @param std_name 颜色标准名称（如 "bt601", "bt709" 等）
+     * @return ColorStandard 枚举值
+     * 
+     * 向后兼容旧代码使用字符串配置的情况。
      */
-    static int mapRgbStdNameToInt(std::string_view std_name) {
-        if (std_name == "bt601") return 1;
-        if (std_name == "bt601_l") return 2;
-        if (std_name == "bt709") return 3;
-        if (std_name == "bt709_l") return 4;
-        if (std_name == "bt2020") return 5;
-        if (std_name == "bt2020_l") return 6;
-        // 默认返回 bt601
-        return 1;
+    static ColorStandard mapColorStdNameToEnum(std::string_view std_name) {
+        if (std_name == "none") return ColorStandard::NONE;
+        if (std_name == "bt601") return ColorStandard::BT601;
+        if (std_name == "bt601_l" || std_name == "bt601_limited") return ColorStandard::BT601_LIMITED;
+        if (std_name == "bt709") return ColorStandard::BT709;
+        if (std_name == "bt709_l" || std_name == "bt709_limited") return ColorStandard::BT709_LIMITED;
+        if (std_name == "bt2020") return ColorStandard::BT2020;
+        if (std_name == "bt2020_l" || std_name == "bt2020_limited") return ColorStandard::BT2020_LIMITED;
+        
+        // 默认返回 BT601
+        return ColorStandard::BT601;
+    }
+    
+    /**
+     * @brief 将 OutputFormat 枚举映射为格式名称字符串
+     * @param format OutputFormat 枚举值
+     * @return 格式名称字符串
+     */
+    static std::string_view mapFormatEnumToName(OutputFormat format) {
+        switch (format) {
+            // YUV 格式
+            case OutputFormat::YUV_AUTO: return "yuv_auto";
+            case OutputFormat::YUV_NV12: return "nv12";
+            case OutputFormat::YUV_NV21: return "nv21";
+            case OutputFormat::YUV_I420: return "i420";
+            case OutputFormat::YUV_YV12: return "yv12";
+            case OutputFormat::YUV_P010: return "p010";
+            case OutputFormat::YUV_NV16: return "nv16";
+            case OutputFormat::YUV_NV61: return "nv61";
+            case OutputFormat::YUV_I422: return "i422";
+            case OutputFormat::YUV_NV24: return "nv24";
+            case OutputFormat::YUV_I444: return "i444";
+            
+            // RGB 格式
+            case OutputFormat::RGB_ARGB888: return "argb888";
+            case OutputFormat::RGB_ABGR888: return "abgr888";
+            case OutputFormat::RGB_RGBA888: return "rgba888";
+            case OutputFormat::RGB_BGRA888: return "bgra888";
+            case OutputFormat::RGB_RGB888: return "rgb888";
+            case OutputFormat::RGB_BGR888: return "bgr888";
+            case OutputFormat::RGB_XRGB888: return "xrgb888";
+            case OutputFormat::RGB_XBGR888: return "xbgr888";
+            case OutputFormat::RGB_RGBX888: return "rgbx888";
+            case OutputFormat::RGB_BGRX888: return "bgrx888";
+            case OutputFormat::RGB_RGB888_PLANAR: return "rgb888_planar";
+            case OutputFormat::RGB_BGR888_PLANAR: return "bgr888_planar";
+            case OutputFormat::RGB_R16G16B16: return "r16g16b16";
+            case OutputFormat::RGB_B16G16R16: return "b16g16r16";
+            case OutputFormat::RGB_GBRP: return "gbrp";
+            
+            default: return "unknown";
+        }
+    }
+    
+    /**
+     * @brief 将 ColorStandard 枚举映射为颜色标准名称字符串
+     * @param std ColorStandard 枚举值
+     * @return 颜色标准名称字符串
+     */
+    static std::string_view mapColorStdEnumToName(ColorStandard std) {
+        switch (std) {
+            case ColorStandard::NONE: return "none";
+            case ColorStandard::BT601: return "bt601";
+            case ColorStandard::BT601_LIMITED: return "bt601_limited";
+            case ColorStandard::BT709: return "bt709";
+            case ColorStandard::BT709_LIMITED: return "bt709_limited";
+            case ColorStandard::BT2020: return "bt2020";
+            case ColorStandard::BT2020_LIMITED: return "bt2020_limited";
+            default: return "unknown";
+        }
     }
 
 private:
     WorkerConfig::DecoderConfig::TacoConfig taco_config_;
+    
+    /**
+     * @brief 将 OutputFormat 枚举值映射回 TACO 驱动的原始 RGB 格式值
+     * 
+     * OutputFormat 枚举使用 1000+ 的值来区分 RGB 和 YUV，
+     * 但 TACO 驱动需要原始的格式值（如 9 表示 ARGB888）。
+     */
+    static int mapEnumToRgbDriverValue(OutputFormat format) {
+        switch (format) {
+            case OutputFormat::RGB_ARGB888: return 9;
+            case OutputFormat::RGB_ABGR888: return 11;
+            case OutputFormat::RGB_RGBA888: return 13;
+            case OutputFormat::RGB_BGRA888: return 15;
+            case OutputFormat::RGB_RGB888: return 1;
+            case OutputFormat::RGB_BGR888: return 3;
+            case OutputFormat::RGB_XRGB888: return 25;
+            case OutputFormat::RGB_XBGR888: return 27;
+            case OutputFormat::RGB_RGBX888: return 21;
+            case OutputFormat::RGB_BGRX888: return 23;
+            case OutputFormat::RGB_RGB888_PLANAR: return 2;
+            case OutputFormat::RGB_BGR888_PLANAR: return 4;
+            case OutputFormat::RGB_R16G16B16: return 17;
+            case OutputFormat::RGB_B16G16R16: return 19;
+            case OutputFormat::RGB_GBRP: return 28;
+            default: return 9; // 默认 ARGB888
+        }
+    }
 };
 
 /**
