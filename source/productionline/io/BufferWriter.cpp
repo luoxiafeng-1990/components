@@ -83,8 +83,8 @@ bool BufferWriter::openRaw(const char* path,
     if (!isSupportedFormat(save_format)) {
         LOG_ERROR_FMT("[BufferWriter] Error: Unsupported save_format: %s (%d)",
                 av_get_pix_fmt_name(save_format), save_format);
-        LOG_ERROR("[BufferWriter] Supported formats (21): "
-                "GRAY8, GRAY10LE, NV12, P010LE, NV21, YUV420P10LE, YUV422P, YUV444P, "
+        LOG_ERROR("[BufferWriter] Supported formats (22): "
+                "GRAY8, GRAY10LE, NV12, P010LE, NV21, YUV420P, YUV420P10LE, YUV422P, YUV444P, "
                 "RGB24, BGR24, ARGB, ABGR, RGBA, BGRA, GBRP, "
                 "RGB0, BGR0, 0RGB, 0BGR, RGB48LE, BGR48LE");
         return false;
@@ -541,6 +541,7 @@ bool BufferWriter::isSupportedFormat(AVPixelFormat format) {
         case AV_PIX_FMT_NV21:         // YUV420 8-bit NV21
         
         // YUV420 Planar
+        case AV_PIX_FMT_YUV420P:      // YUV420 8-bit Planar ⭐
         case AV_PIX_FMT_YUV420P10LE:  // YUV420 P010 (planar)
         
         // YUV422 Planar（新增）
@@ -610,6 +611,13 @@ size_t BufferWriter::calculateFrameSize(AVPixelFormat format, int width, int hei
             // YYYY... (16bit×W×H) + UVUV... (16bit×W×H/2)
             // = W×H×3 (每个分量16bit)
             size = width * height * 3;
+            break;
+        
+        // YUV420 Planar 8bit
+        case AV_PIX_FMT_YUV420P:
+            // YYYY... (W×H) + UUUU... (W×H/4) + VVVV... (W×H/4)
+            // = W×H×1.5
+            size = width * height * 3 / 2;
             break;
         
         // YUV420 Planar 10bit

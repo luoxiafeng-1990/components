@@ -7,6 +7,7 @@ Connector::Connector(Mode mode,
     : mode_(mode)
     , producer_indices_(producer_indices)
     , consumer_indices_(consumer_indices)
+    , shared_source_(nullptr)  // ⭐ v2.18：初始化共享实例
 {
     if (producer_indices_.empty()) {
         throw std::invalid_argument("Connector: producer_indices cannot be empty");

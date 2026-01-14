@@ -210,7 +210,8 @@ public:
 
 private:
     // ============ 数据源抽象（v2.12新增）============
-    std::unique_ptr<IPacketSource> packet_source_;  // 数据源抽象（RTSP流）
+    // ⭐ v2.18 修改：从 unique_ptr 改为 shared_ptr（支持共享模式）
+    std::shared_ptr<IPacketSource> packet_source_;  // 数据源抽象（RTSP流 或 共享Buffer）
     
     // ============ FFmpeg 资源 ============
     AVCodecContext* codec_ctx_ptr_;
@@ -234,6 +235,9 @@ private:
     // ============ 错误处理 ============
     std::string last_error_;
     
+    // ============ 帧缓存（用于多通道解码）============
+    std::vector<AVFrame*> cached_frames_;  // 缓存解码后的帧（用于处理双通道等场景）
+    
     // ============ 内部辅助方法 ============
     
     /**
@@ -247,6 +251,33 @@ private:
      * @return true 如果成功
      */
     bool configureSpecialDecoder();
+    
+    /**
+     * @brief 从数据源读取 packet 并发送到解码器
+     * @param packet_ptr AVPacket 指针（必须已分配）
+     * @return true 成功发送 packet 到解码器，false 失败或 EOF
+     * 
+     * 功能：
+     * - 从 packet_source_ 读取 packet
+     * - 处理错误情况
+     * - 调用 avcodec_send_packet 发送到解码器
+     * - 释放 packet 引用
+     */
+    bool readAndSendPacket(AVPacket* packet_ptr);
+    
+    /**
+     * @brief 从 AVFrame 填充 Buffer 的元数据
+     * @param frame_ptr AVFrame 指针（必须已填充数据）
+     * @param buffer Buffer 指针（用于存储元数据）
+     * @return true 成功设置元数据，false 失败
+     * 
+     * 功能：
+     * - 提取硬件解码器的物理地址（如果使用硬件解码）
+     * - 设置虚拟地址（frame->data[0]）
+     * - 设置图像元数据（格式、宽高、linesize 等）
+     * - 更新统计计数器
+     */
+    bool fillBufferMetadataFromFrame(AVFrame* frame_ptr, Buffer* buffer);
     
     /**
      * 设置错误信息

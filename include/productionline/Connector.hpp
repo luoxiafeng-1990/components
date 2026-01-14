@@ -2,6 +2,10 @@
 
 #include <vector>
 #include <string>
+#include <memory>
+
+// 前向声明
+class IPacketSource;
 
 /**
  * @brief Connector - 连接器类
@@ -15,6 +19,10 @@
  * - 简单：单一类，通过 Mode 枚举选择模式
  * - 必要字段：mode, producer_indices, consumer_indices
  * - 核心方法：getProducerIndexForConsumer()
+ * 
+ * ⭐ v2.18 新增：
+ * - 支持共享 PacketSource（ONE_TO_MANY 模式）
+ * - 存储共享实例，防止被销毁
  */
 class Connector {
 public:
@@ -47,11 +55,35 @@ public:
     const std::vector<size_t>& getProducerIndices() const { return producer_indices_; }
     const std::vector<size_t>& getConsumerIndices() const { return consumer_indices_; }
     
+    // ⭐ v2.18 新增：设置共享的 PacketSource
+    /**
+     * @brief 设置共享的 PacketSource（用于 ONE_TO_MANY 模式）
+     * @param source 共享的 PacketSource 实例
+     * 
+     * 功能：
+     * - Connector 持有共享实例，防止被销毁
+     * - 仅在 ONE_TO_MANY 模式下使用
+     */
+    void setSharedSource(std::shared_ptr<IPacketSource> source) {
+        shared_source_ = source;
+    }
+    
+    /**
+     * @brief 获取共享的 PacketSource
+     * @return 共享实例（如果没有则返回 nullptr）
+     */
+    std::shared_ptr<IPacketSource> getSharedSource() const {
+        return shared_source_;
+    }
+    
 private:
     Mode mode_;
     std::vector<size_t> producer_indices_;
     std::vector<size_t> consumer_indices_;
     std::vector<int> mapping_;  // consumer_index -> producer_index
+    
+    // ⭐ v2.18 新增：共享的 PacketSource（仅 ONE_TO_MANY 模式使用）
+    std::shared_ptr<IPacketSource> shared_source_;
     
     void computeMapping();  // 根据 mode 计算映射关系
 };

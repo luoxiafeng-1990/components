@@ -1,5 +1,6 @@
 #include "productionline/MultiWorkerProductionLine.hpp"
 #include "productionline/worker/FfmpegPacketRecorderWorker.hpp"
+#include "productionline/worker/BufferPacketSource.hpp"
 #include "productionline/Connector.hpp"
 #include "buffer/bufferpool/BufferPoolRegistry.hpp"
 #include "common/Logger.hpp"
@@ -403,7 +404,42 @@ bool MultiWorkerProductionLine::start() {
                 consumer_indices
             );
             
-            // 4.3.4 为每个消费者设置源 BufferPool
+            // ⭐ v2.18 新增：ONE_TO_MANY 模式创建共享 BufferPacketSource
+            std::shared_ptr<BufferPacketSource> shared_source = nullptr;
+            if (conn_cfg.mode == Connector::Mode::ONE_TO_MANY) {
+                // 获取生产者的 codec_params
+                size_t producer_idx_in_group = producer_indices[0];  // ONE_TO_MANY 只有一个生产者
+                auto* producer_info = group->producers[producer_idx_in_group].get();
+                
+                const AVCodecParameters* codec_params = nullptr;
+                if (producer_info->producer_line) {
+                    auto worker_facade = producer_info->producer_line->getWorkerFacade();
+                    if (worker_facade) {
+                        codec_params = worker_facade->getCodecParameters();
+                    }
+                }
+                
+                if (!codec_params) {
+                    setError("Cannot create shared BufferPacketSource: codec_params is nullptr");
+                    groups_.clear();
+                    return false;
+                }
+                
+                // 创建唯一的共享 BufferPacketSource
+                size_t subscriber_count = consumer_indices.size();
+                shared_source = std::make_shared<BufferPacketSource>(codec_params, subscriber_count);
+                
+                // 设置源 BufferPool
+                shared_source->setSourceBufferPool(producer_info->buffer_pool_weak);
+                
+                // 保存到 Connector（防止被销毁）
+                connector->setSharedSource(shared_source);
+                
+                LOG4CPLUS_INFO(logger, log_prefix_ << "      ⭐ v2.18：创建共享 BufferPacketSource (" 
+                               << subscriber_count << " 个订阅者)");
+            }
+            
+            // 4.3.4 为每个消费者设置源 BufferPool 或共享 PacketSource
             for (size_t i = 0; i < consumer_indices.size(); i++) {
                 size_t consumer_idx = consumer_indices[i];
                 int producer_idx = connector->getProducerIndexForConsumer(i);
@@ -413,11 +449,45 @@ bool MultiWorkerProductionLine::start() {
                     auto* consumer_info = group->consumers[consumer_idx].get();
                     auto* producer_info = group->producers[actual_producer_idx].get();
                     
-                    // 使用保存的 producer_info->buffer_pool_weak
-                    if (!consumer_info->worker->setSourceBufferPool(producer_info->buffer_pool_weak)) {
-                        setError("Consumer failed to set source BufferPool: " + consumer_info->consumer_id);
-                        groups_.clear();
-                        return false;
+                    // ⭐ v2.18：如果是 ONE_TO_MANY 模式，重新创建 Worker（使用共享 datasource）
+                    if (conn_cfg.mode == Connector::Mode::ONE_TO_MANY && shared_source) {
+                        // 找到当前消费者的原始配置
+                        const WorkerConfig* original_config = nullptr;
+                        for (const auto& ccfg : group_config.consumer_configs) {
+                            if (ccfg.consumer_id == consumer_info->consumer_id) {
+                                original_config = &ccfg.worker_config;
+                                break;
+                            }
+                        }
+                        
+                        if (!original_config) {
+                            setError("Cannot find original config for consumer: " + consumer_info->consumer_id);
+                            groups_.clear();
+                            return false;
+                        }
+                        
+                        // 获取原始 config
+                        WorkerConfig new_config = *original_config;
+                        new_config.decoder.datasource_buffer_mode = true;
+                        new_config.decoder.codec_params = producer_codec_params;
+                        new_config.decoder.time_base = producer_time_base;
+                        
+                        // ⭐ 设置共享 datasource
+                        new_config.decoder.shared_packet_source = shared_source;
+                        
+                        // 重新创建 Worker（会使用共享实例）
+                        consumer_info->worker.reset();
+                        consumer_info->worker = std::make_shared<BufferFillingWorkerFacade>(new_config);
+                        
+                        LOG4CPLUS_INFO(logger, log_prefix_ << "        ✅ 消费者 '" 
+                                       << consumer_info->consumer_id << "' 使用共享 BufferPacketSource");
+                    } else {
+                        // ⭐ 普通模式：设置源 BufferPool
+                        if (!consumer_info->worker->setSourceBufferPool(producer_info->buffer_pool_weak)) {
+                            setError("Consumer failed to set source BufferPool: " + consumer_info->consumer_id);
+                            groups_.clear();
+                            return false;
+                        }
                     }
                     
                     // 打开消费者（会自动创建 BufferPool）

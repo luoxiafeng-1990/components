@@ -455,6 +455,54 @@ public:
     virtual bool isAtEnd() const override = 0;
     
 protected:
+    // ========== 编解码器类型检测工具（v2.18 新增）==========
+    
+    /**
+     * @brief 判断解码器是否是硬件解码器（使用 FFmpeg 官方 API）
+     * 
+     * v2.18 设计：
+     * - 使用 FFmpeg 官方 API 判断（`AV_CODEC_CAP_HARDWARE` 和 `avcodec_get_hw_config`）
+     * - 替代不可靠的字符串匹配方式（strstr）
+     * - 所有子类通过继承使用，无需重复实现
+     * 
+     * @param codec AVCodec 指针
+     * @return true=硬件解码器，false=软件解码器
+     * 
+     * @note 判断依据：
+     *       1. AVCodec->capabilities 中的 AV_CODEC_CAP_HARDWARE 标志
+     *       2. AVCodec 是否有硬件配置（avcodec_get_hw_config）
+     * 
+     * @note 使用 virtual final 禁止子类覆盖，保证判断逻辑统一
+     */
+    virtual bool isHardwareDecoder(const AVCodec* codec) const final;
+    
+    /**
+     * @brief 查找指定 codec_id 的纯软件解码器
+     * 
+     * v2.18 设计：
+     * - 遍历所有注册的解码器，使用 isHardwareDecoder() 过滤硬件解码器
+     * - 解决 FFmpeg 默认优先返回硬件解码器的问题
+     * - 适用于用户明确要求软件解码（use_hardware_decoder_=false）的场景
+     * 
+     * @param codec_id 编解码器 ID（如 AV_CODEC_ID_H264）
+     * @return 软件解码器指针，未找到返回 nullptr
+     * 
+     * @note 使用 virtual final 禁止子类覆盖，保证查找逻辑统一
+     * @note 查找顺序：按 FFmpeg 注册顺序（av_codec_iterate）
+     * 
+     * @note 使用示例：
+     * @code
+     * // 在 initializeDecoder() 中，如果用户要求软件解码
+     * if (!use_hardware_decoder_) {
+     *     codec = findPureSoftwareDecoder(AV_CODEC_ID_H264);
+     *     if (!codec) {
+     *         return false;  // 无可用软件解码器
+     *     }
+     * }
+     * @endcode
+     */
+    virtual const AVCodec* findPureSoftwareDecoder(AVCodecID codec_id) const final;
+    
     /**
      * @brief Allocator门面（所有Worker子类自动继承）
      */

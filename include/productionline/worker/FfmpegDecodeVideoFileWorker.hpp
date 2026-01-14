@@ -203,6 +203,9 @@ private:
     // ============ 错误处理 ============
     std::string last_error_;
     
+    // ============ 帧缓存（用于多通道解码）============
+    std::vector<AVFrame*> cached_frames_;  // 缓存解码后的帧（用于处理双通道等场景）
+    
     // ============ 内部辅助方法 ============
     
     /**
@@ -215,6 +218,34 @@ private:
      * @brief 配置特殊解码器（如 h264_taco）
      */
     bool configureSpecialDecoder();
+    
+    /**
+     * @brief 从数据源读取 packet 并发送到解码器
+     * @param packet_ptr AVPacket 指针（必须已分配）
+     * @return true 成功发送 packet 到解码器，false 失败或 EOF
+     * 
+     * 功能：
+     * - 从 packet_source_ 读取 packet
+     * - 处理损坏的 packet（自动重试）
+     * - 过滤非视频流的 packet（仅文件模式）
+     * - 调用 avcodec_send_packet 发送到解码器
+     */
+    bool readAndSendPacket(AVPacket* packet_ptr);
+    
+    /**
+     * @brief 从 AVFrame 填充 Buffer 的元数据
+     * @param frame_ptr AVFrame 指针（必须已填充数据）
+     * @param buffer Buffer 指针（用于存储元数据）
+     * @return true 成功设置元数据，false 失败
+     * 
+     * 功能：
+     * - 提取硬件解码器的物理地址（如果使用硬件解码）
+     * - 设置虚拟地址（frame->data[0]）
+     * - 计算并设置帧大小
+     * - 设置图像元数据（格式、宽高、linesize 等）
+     * - 更新统计计数器
+     */
+    bool fillBufferMetadataFromFrame(AVFrame* frame_ptr, Buffer* buffer);
     
     /**
      * @brief 从AVFrame元数据中提取硬件解码器的物理内存地址（重写基类）

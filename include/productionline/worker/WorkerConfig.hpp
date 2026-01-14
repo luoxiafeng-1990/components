@@ -4,12 +4,16 @@
 #include <string>
 #include <string_view>
 #include <optional>
+#include <memory>
 #include "common/Logger.hpp"
 
 // FFmpeg 头文件（用于 AVRational 和 AVCodecParameters）
 extern "C" {
 #include <libavutil/rational.h>
 }
+
+// 前向声明（避免循环依赖）
+class IPacketSource;
 
 /**
  * @brief Worker 类型枚举
@@ -162,6 +166,18 @@ struct WorkerConfig {
         bool datasource_buffer_mode = false;           // true=从Buffer数据源获取packet, false=从文件数据源读取
         const struct AVCodecParameters* codec_params = nullptr;  // Buffer模式下的编解码器参数（从Record Worker获取）
         AVRational time_base = {0, 1};                 // 时间基准（从Record Worker获取，用于同步）
+        
+        // ⭐ v2.18 新增：共享的 Packet 数据源（用于 MultiWorker 共享模式）
+        // 
+        // 使用场景：
+        // - 普通模式：nullptr（Worker 自己创建独立的 BufferPacketSource）
+        // - 共享模式：MultiWorkerProductionLine 创建唯一实例并传入
+        // 
+        // 优点：
+        // - Worker 仍然根据 config 创建 datasource（符合原始设计）
+        // - 不需要修改 Worker 接口（不需要 setPacketSource）
+        // - 使用基类指针 IPacketSource，支持多态
+        std::shared_ptr<class IPacketSource> shared_packet_source = nullptr;
         
         // ========================================
         // h264_taco 特定配置（子子结构体）

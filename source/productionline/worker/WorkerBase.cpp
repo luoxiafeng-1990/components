@@ -105,3 +105,59 @@ void WorkerBase::checkCodecMismatch(AVCodecID actual_codec_id,
     LOG_WARN("╚═══════════════════════════════════════════════════════════════╝");
 }
 
+// ============================================================================
+// 编解码器类型检测工具实现（v2.18 新增）
+// ============================================================================
+
+bool WorkerBase::isHardwareDecoder(const AVCodec* codec) const {
+    if (!codec) {
+        return false;
+    }
+    
+    // ⭐ 方法1：检查 AVCodec->capabilities 中的 AV_CODEC_CAP_HARDWARE 标志
+    // 这是 FFmpeg 官方推荐的方式，用于标识硬件加速解码器
+    if (codec->capabilities & AV_CODEC_CAP_HARDWARE) {
+        LOG_DEBUG_FMT("[WorkerBase] Codec '%s' is hardware decoder (AV_CODEC_CAP_HARDWARE)", 
+                      codec->name);
+        return true;
+    }
+    
+    // ⭐ 方法2：检查解码器是否有硬件配置
+    // 如果 avcodec_get_hw_config(codec, 0) 返回非空，说明支持硬件加速
+    const AVCodecHWConfig* hw_config = avcodec_get_hw_config(codec, 0);
+    if (hw_config != nullptr) {
+        LOG_DEBUG_FMT("[WorkerBase] Codec '%s' is hardware decoder (has hw_config)", 
+                      codec->name);
+        return true;
+    }
+    
+    // ✅ 两种方法都未检测到硬件特征，判定为软件解码器
+    LOG_DEBUG_FMT("[WorkerBase] Codec '%s' is software decoder", codec->name);
+    return false;
+}
+
+const AVCodec* WorkerBase::findPureSoftwareDecoder(AVCodecID codec_id) const {
+    LOG_DEBUG_FMT("[WorkerBase] Searching for pure software decoder (codec_id=%d)...", codec_id);
+    
+    const AVCodec* sw_codec = nullptr;
+    void* opaque = nullptr;
+    
+    // ⭐ 遍历所有已注册的解码器
+    while ((sw_codec = av_codec_iterate(&opaque)) != nullptr) {
+        // 检查条件：
+        // 1. 是解码器（不是编码器）
+        // 2. 匹配 codec_id
+        // 3. 不是硬件解码器（使用 isHardwareDecoder() 判断）
+        if (av_codec_is_decoder(sw_codec) && 
+            sw_codec->id == codec_id &&
+            !isHardwareDecoder(sw_codec)) {
+            LOG_INFO_FMT("[WorkerBase] ✅ Found pure software decoder: %s", sw_codec->name);
+            return sw_codec;
+        }
+    }
+    
+    // ❌ 未找到软件解码器
+    LOG_ERROR_FMT("[WorkerBase] ❌ No pure software decoder found for codec_id=%d", codec_id);
+    return nullptr;
+}
+

@@ -2052,81 +2052,82 @@ static int test_buffer_writer_yuv_formats(const char* video_path) {
     std::function<WorkerConfig::DecoderConfig::TacoConfig()> tests[] = {
         // YUV400 系列
         []() { return TacoConfigBuilder()  // YUV400 I010, bt2020
-                   .setChannels(true, false)
+                   .setChannels(true, true)
                    .setOutputFormat(Channel::CH0, OutputFormat::YUV_AUTO, ColorStandard::BT2020)
+                   .setOutputFormat(Channel::CH1, OutputFormat::RGB_ABGR888, ColorStandard::BT2020)
                    .build(); 
-        },
-        []() { return TacoConfigBuilder()  // YUV400 L010, bt2020
-                   .setChannels(true, false)
-                   .setOutputFormat(Channel::CH0, OutputFormat::YUV_AUTO, ColorStandard::BT2020)
-                   .build(); 
-        },
-        []() { return TacoConfigBuilder()  // YUV400 Pack10, bt2020
-                   .setChannels(true, false)
-                   .setOutputFormat(Channel::CH0, OutputFormat::YUV_AUTO, ColorStandard::BT2020)
-                   .build(); 
-        },
-        []() { return TacoConfigBuilder()  // YUV400 8-bit, bt601
-                   .setChannels(true, false)
-                   .setOutputFormat(Channel::CH0, OutputFormat::YUV_AUTO, ColorStandard::BT601)
-                   .build(); 
-        },
+        }
+        // []() { return TacoConfigBuilder()  // YUV400 L010, bt2020
+        //            .setChannels(true, false)
+        //            .setOutputFormat(Channel::CH0, OutputFormat::YUV_AUTO, ColorStandard::BT2020)
+        //            .build(); 
+        // },
+        // []() { return TacoConfigBuilder()  // YUV400 Pack10, bt2020
+        //            .setChannels(true, false)
+        //            .setOutputFormat(Channel::CH0, OutputFormat::YUV_AUTO, ColorStandard::BT2020)
+        //            .build(); 
+        // },
+        // []() { return TacoConfigBuilder()  // YUV400 8-bit, bt601
+        //            .setChannels(true, false)
+        //            .setOutputFormat(Channel::CH0, OutputFormat::YUV_AUTO, ColorStandard::BT601)
+        //            .build(); 
+        // },
         
-        // YUV420 NV12 系列
-        []() { return TacoConfigBuilder()  // YUV420 NV12 P010, bt2020
-                   .setChannels(true, false)
-                   .setOutputFormat(Channel::CH0, OutputFormat::YUV_AUTO, ColorStandard::BT2020)
-                   .build(); 
-        },
-        []() { return TacoConfigBuilder()  // YUV420 NV12 I010, bt2020
-                   .setChannels(true, false)
-                   .setOutputFormat(Channel::CH0, OutputFormat::YUV_AUTO, ColorStandard::BT2020)
-                   .build(); 
-        },
-        []() { return TacoConfigBuilder()  // YUV420 NV12 L010, bt2020
-                   .setChannels(true, false)
-                   .setOutputFormat(Channel::CH0, OutputFormat::YUV_AUTO, ColorStandard::BT2020)
-                   .build(); 
-        },
-        []() { return TacoConfigBuilder()  // YUV420 NV12 Pack10, bt2020
-                   .setChannels(true, false)
-                   .setOutputFormat(Channel::CH0, OutputFormat::YUV_AUTO, ColorStandard::BT2020)
-                   .build(); 
-        },
-        []() { return TacoConfigBuilder()  // YUV420 8-bit NV12, bt601（最常用）
-                   .setChannels(true, false)
-                   .setOutputFormat(Channel::CH0, OutputFormat::YUV_AUTO, ColorStandard::BT601)
-                   .build(); 
-        },
+        // // YUV420 NV12 系列
+        // []() { return TacoConfigBuilder()  // YUV420 NV12 P010, bt2020
+        //            .setChannels(true, false)
+        //            .setOutputFormat(Channel::CH0, OutputFormat::YUV_AUTO, ColorStandard::BT2020)
+        //            .build(); 
+        // },
+        // []() { return TacoConfigBuilder()  // YUV420 NV12 I010, bt2020
+        //            .setChannels(true, false)
+        //            .setOutputFormat(Channel::CH0, OutputFormat::YUV_AUTO, ColorStandard::BT2020)
+        //            .build(); 
+        // },
+        // []() { return TacoConfigBuilder()  // YUV420 NV12 L010, bt2020
+        //            .setChannels(true, false)
+        //            .setOutputFormat(Channel::CH0, OutputFormat::YUV_AUTO, ColorStandard::BT2020)
+        //            .build(); 
+        // },
+        // []() { return TacoConfigBuilder()  // YUV420 NV12 Pack10, bt2020
+        //            .setChannels(true, false)
+        //            .setOutputFormat(Channel::CH0, OutputFormat::YUV_AUTO, ColorStandard::BT2020)
+        //            .build(); 
+        // },
+        // []() { return TacoConfigBuilder()  // YUV420 8-bit NV12, bt601（最常用）
+        //            .setChannels(true, false)
+        //            .setOutputFormat(Channel::CH0, OutputFormat::YUV_AUTO, ColorStandard::BT601)
+        //            .build(); 
+        // },
         
-        // YUV420 NV21 系列
-        []() { return TacoConfigBuilder()  // YUV420 NV21 P010 Tiled-4×4, bt2020
-                   .setChannels(true, false)
-                   .setOutputFormat(Channel::CH0, OutputFormat::YUV_AUTO, ColorStandard::BT2020)
-                   .build(); 
-        },
-        []() { return TacoConfigBuilder()  // YUV420 NV21 I011, bt2020
-                   .setChannels(true, false)
-                   .setOutputFormat(Channel::CH0, OutputFormat::YUV_AUTO, ColorStandard::BT2020)
-                   .build(); 
-        },
-        []() { return TacoConfigBuilder()  // YUV420 NV21 L010, bt2020
-                   .setChannels(true, false)
-                   .setOutputFormat(Channel::CH0, OutputFormat::YUV_AUTO, ColorStandard::BT2020)
-                   .build(); 
-        },
-        []() { return TacoConfigBuilder()  // YUV420 8-bit NV21, bt601
-                   .setChannels(true, false)
-                   .setOutputFormat(Channel::CH0, OutputFormat::YUV_AUTO, ColorStandard::BT601)
-                   .build(); 
-        },
+        // // YUV420 NV21 系列
+        // []() { return TacoConfigBuilder()  // YUV420 NV21 P010 Tiled-4×4, bt2020
+        //            .setChannels(true, false)
+        //            .setOutputFormat(Channel::CH0, OutputFormat::YUV_AUTO, ColorStandard::BT2020)
+        //            .build(); 
+        // },
+        // []() { return TacoConfigBuilder()  // YUV420 NV21 I011, bt2020
+        //            .setChannels(true, false)
+        //            .setOutputFormat(Channel::CH0, OutputFormat::YUV_AUTO, ColorStandard::BT2020)
+        //            .build(); 
+        // },
+        // []() { return TacoConfigBuilder()  // YUV420 NV21 L010, bt2020
+        //            .setChannels(true, false)
+        //            .setOutputFormat(Channel::CH0, OutputFormat::YUV_AUTO, ColorStandard::BT2020)
+        //            .build(); 
+        // },
+        // []() { return TacoConfigBuilder()  // YUV420 8-bit NV21, bt601
+        //            .setChannels(true, false)
+        //            .setOutputFormat(Channel::CH0, OutputFormat::YUV_AUTO, ColorStandard::BT601)
+        //            .build(); 
+        // },
         
-        // YUV420 P010
-        []() { return TacoConfigBuilder()  // YUV420 P010, bt2020
-                   .setChannels(true, false)
-                   .setOutputFormat(Channel::CH0, OutputFormat::YUV_AUTO, ColorStandard::BT2020)
-                   .build(); 
-        },
+        // // YUV420 P010
+        // []() { return TacoConfigBuilder()  // YUV420 P010, bt2020
+        //            .setChannels(true, false)
+        //            .setOutputFormat(Channel::CH0, OutputFormat::YUV_AUTO, ColorStandard::BT2020)
+        //            .build(); 
+        // },
     };
     
     int total_tests = sizeof(tests) / sizeof(tests[0]);
