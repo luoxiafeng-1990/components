@@ -1003,8 +1003,7 @@ bool FfmpegDecodeVideoFileWorker::extractHardwareAddressFromMetadata(AVFrame* fr
         return false;
     }
     
-    // ========== h264_taco 硬件解码器 ==========
-    if (decoder_name_ == "h264_taco") {
+    if (decoder_name_.find("taco") != std::string::npos) {
         // TACO 特定逻辑：从 metadata 中提取 pool_blk_id，转换为物理地址
         uint64_t phys_addr = 0;
         uint32_t blk_id = 0;
