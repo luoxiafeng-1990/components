@@ -29,30 +29,28 @@ VideoProductionLine::VideoProductionLine(bool loop, int thread_count, bool enabl
     , last_error_()
     , start_time_()
     , monitor_(nullptr)
-    , log_prefix_("[VideoProductionLine]")
+    , log_prefix_("")
+    , logger_(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.VideoLine")))
 {
-    // 获取logger
-    auto logger = log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components"));
-    
     // 打印生命周期开始
-    LOG4CPLUS_INFO(logger, log_prefix_ << " 创建: loop=" << (loop_ ? "true" : "false") 
+    LOG4CPLUS_INFO(logger_, "创建: loop=" << (loop_ ? "true" : "false") 
                    << ", threads=" << thread_count_);
     
     if (thread_count < 1) {
-        LOG4CPLUS_WARN(logger, log_prefix_ << " Invalid thread_count, using 1");
+        LOG4CPLUS_WARN(logger_, "Invalid thread_count, using 1");
         thread_count_ = 1;
     }
 }
 
 VideoProductionLine::~VideoProductionLine() {
     // 获取logger
-    auto logger = log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components"));
+    // logger_ 已在构造函数初始化
     
     // 打印生命周期结束
-    LOG4CPLUS_INFO(logger, "");
-    LOG4CPLUS_INFO(logger, log_prefix_ << " " << std::string(69, '='));
-    LOG4CPLUS_INFO(logger, log_prefix_ << " 析构: 已生产 " << produced_frames_.load() << " 帧, 跳过 " << skipped_frames_.load() << " 帧");
-    LOG4CPLUS_INFO(logger, log_prefix_ << " " << std::string(69, '='));
+    LOG4CPLUS_INFO(logger_, "");
+    LOG4CPLUS_INFO(logger_, "" << std::string(69, '='));
+    LOG4CPLUS_INFO(logger_, "析构: 已生产 " << produced_frames_.load() << " 帧, 跳过 " << skipped_frames_.load() << " 帧");
+    LOG4CPLUS_INFO(logger_, "" << std::string(69, '='));
     
     // 🔧 修复：无论 running_ 的状态如何，都必须确保所有线程被正确 join
     // 避免 std::thread 在 joinable 状态下被析构导致 std::terminate()
@@ -75,19 +73,19 @@ VideoProductionLine::~VideoProductionLine() {
 // ============================================================
 
 bool VideoProductionLine::start(const WorkerConfig& worker_config) {
-    auto logger = log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components"));
+    // logger_ 已在构造函数初始化
     
     // 检查是否已经在运行
     if (running_.load()) {
-        LOG4CPLUS_WARN(logger, log_prefix_ << " Already running");
+        LOG4CPLUS_WARN(logger_, "Already running");
         return false;
     }
     
-    LOG4CPLUS_INFO(logger, log_prefix_ << " BufferFillingWorkerFacade: " << worker_config.data_source.path);
+    LOG4CPLUS_INFO(logger_, "BufferFillingWorkerFacade: " << worker_config.data_source.path);
     
     // 创建共享的 BufferFillingWorkerFacade 对象（v2.2：只传入完整配置）
     worker_facade_sptr_ = std::make_shared<BufferFillingWorkerFacade>(worker_config);
-    LOG4CPLUS_INFO(logger, log_prefix_ << " 启动Worker...");
+    LOG4CPLUS_INFO(logger_, "启动Worker...");
     
     // v2.2：简化的 open 接口（所有参数从 config 获取）
     if (!worker_facade_sptr_->open()) {
@@ -120,16 +118,16 @@ bool VideoProductionLine::start(const WorkerConfig& worker_config) {
         return false;
     }
     
-    LOG_INFO_FMT("Using %s pool (ID: %lu)", 
+    LOG4CPLUS_INFO_FMT(logger_, "Using %s pool (ID: %lu)", 
                  bufferPoolTypeToString(primary_type), working_buffer_pool_id_);
     
     total_frames_ = worker_facade_sptr_->getTotalFrames();
     size_t frame_size = worker_facade_sptr_->getFrameSize();
     
-    LOG4CPLUS_INFO(logger, log_prefix_ << " Worker已就绪: " << worker_facade_sptr_->getWorkerType());
-    LOG4CPLUS_INFO(logger, log_prefix_ << "   - 分辨率: " << worker_facade_sptr_->getWidth() << "x" << worker_facade_sptr_->getHeight());
-    LOG4CPLUS_INFO(logger, log_prefix_ << "   - 总帧数: " << total_frames_);
-    LOG4CPLUS_INFO(logger, log_prefix_ << "   - 帧大小: " << (frame_size / (1024.0 * 1024.0)) << " MB");
+    LOG4CPLUS_INFO(logger_, "Worker已就绪: " << worker_facade_sptr_->getWorkerType());
+    LOG4CPLUS_INFO(logger_, "  - 分辨率: " << worker_facade_sptr_->getWidth() << "x" << worker_facade_sptr_->getHeight());
+    LOG4CPLUS_INFO(logger_, "  - 总帧数: " << total_frames_);
+    LOG4CPLUS_INFO(logger_, "  - 帧大小: " << (frame_size / (1024.0 * 1024.0)) << " MB");
     
     // 重置状态
     running_.store(true);
@@ -142,21 +140,21 @@ bool VideoProductionLine::start(const WorkerConfig& worker_config) {
     if (enable_monitor_) {
         monitor_ = std::make_unique<PerformanceMonitor>();
         monitor_->setReportInterval(1000);
-        LOG4CPLUS_INFO(logger, log_prefix_ << "   - 性能监控: 已启用");
+        LOG4CPLUS_INFO(logger_, "  - 性能监控: 已启用");
     }
     
     // 启动生产者线程
     threads_.reserve(thread_count_);
     active_threads_.store(thread_count_);
     
-    LOG4CPLUS_INFO(logger, log_prefix_ << " 启动生产线: " << thread_count_ << " threads");
+    LOG4CPLUS_INFO(logger_, "启动生产线: " << thread_count_ << " threads");
     
     for (int i = 0; i < thread_count_; i++) {
         try {
             threads_.emplace_back(&VideoProductionLine::producerThreadFunc, this, i);
-            LOG4CPLUS_INFO(logger, log_prefix_ << "   - Thread #" << i << " started");
+            LOG4CPLUS_INFO(logger_, "  - Thread #" << i << " started");
         } catch (const std::exception& e) {
-            LOG4CPLUS_ERROR(logger, log_prefix_ << " Failed to start thread #" << i << ": " << e.what());
+            LOG4CPLUS_ERROR(logger_, "Failed to start thread #" << i << ": " << e.what());
             // 停止已启动的线程
             running_.store(false);
             active_threads_.store(0);  // 重置活跃线程计数
@@ -183,7 +181,7 @@ void VideoProductionLine::stop() {
         return;
     }
     
-    LOG_INFO("Stopping VideoProductionLine...");
+    LOG4CPLUS_INFO(logger_, "Stopping VideoProductionLine...");
     
     // 设置停止标志
     running_.store(false);
@@ -204,10 +202,10 @@ void VideoProductionLine::stop() {
         monitor_.reset();
     }
     
-    LOG_INFO("VideoProductionLine stopped");
-    LOG_INFO_FMT("Total produced: %d frames", produced_frames_.load());
-    LOG_INFO_FMT("Total skipped: %d frames", skipped_frames_.load());
-    LOG_INFO_FMT("Average FPS: %.2f", getAverageFPS());
+    LOG4CPLUS_INFO(logger_, "VideoProductionLine stopped");
+    LOG4CPLUS_INFO_FMT(logger_, "Total produced: %d frames", produced_frames_.load());
+    LOG4CPLUS_INFO_FMT(logger_, "Total skipped: %d frames", skipped_frames_.load());
+    LOG4CPLUS_INFO_FMT(logger_, "Average FPS: %.2f", getAverageFPS());
 }
 
 // ============================================================
@@ -239,7 +237,7 @@ std::string VideoProductionLine::getLastError() const {
 }
 
 void VideoProductionLine::printStats() const {
-    LOG_DEBUG_FMT("VideoProductionLine Statistics: Running: %s, Produced: %d, Skipped: %d, Total: %d, FPS: %.2f, Threads: %zu",
+    LOG4CPLUS_DEBUG_FMT(logger_, "VideoProductionLine Statistics: Running: %s, Produced: %d, Skipped: %d, Total: %d, FPS: %.2f, Threads: %zu",
                   running_.load() ? "Yes" : "No", produced_frames_.load(), skipped_frames_.load(), 
                   total_frames_, getAverageFPS(), threads_.size());
 }
@@ -283,12 +281,12 @@ void VideoProductionLine::producerThreadFunc(int thread_id) {
     // 从缓存的 weak_ptr 获取临时 shared_ptr（符合架构设计）
     auto pool_sptr = working_buffer_pool_weak_.lock();
     if (!pool_sptr) {
-        LOG_ERROR_FMT("Thread #%d: BufferPool not found or destroyed", thread_id);
+        LOG4CPLUS_ERROR_FMT(logger_, "Thread #%d: BufferPool not found or destroyed", thread_id);
         return;
     }
     
-    LOG_INFO_FMT("[VideoProductionLine] Thread #%d: Starting unified producer loop", thread_id);
-    LOG_INFO_FMT("[VideoProductionLine] Working BufferPool: '%s'", pool_sptr->getName().c_str());
+    LOG4CPLUS_INFO_FMT(logger_, "[VideoProductionLine] Thread #%d: Starting unified producer loop", thread_id);
+    LOG4CPLUS_INFO_FMT(logger_, "[VideoProductionLine] Working BufferPool: '%s'", pool_sptr->getName().c_str());
     
     int thread_produced = 0;
     int thread_skipped = 0;
@@ -315,7 +313,7 @@ void VideoProductionLine::producerThreadFunc(int thread_id) {
                 buffer_wait_count++;
                 // 每100次等待才打印一次日志，避免过于频繁
                 if (buffer_wait_count % 100 == 1) {
-                    LOG_DEBUG_FMT("[VideoProductionLine][Thread #%d] Waiting for free buffer from pool '%s' (frame_index=%d, wait_count=%d)...",
+                    LOG4CPLUS_DEBUG_FMT(logger_, "[VideoProductionLine][Thread #%d] Waiting for free buffer from pool '%s' (frame_index=%d, wait_count=%d)...",
                                   thread_id, pool_sptr->getName().c_str(), frame_index, buffer_wait_count);
                 }
             }
@@ -351,7 +349,7 @@ void VideoProductionLine::producerThreadFunc(int thread_id) {
                 if (loop_) {
                     // 🔧 修复：循环模式下，当 Worker 到达 EOF 时，重置 Worker
                     // 这确保循环播放时 Worker 能够从文件开头重新开始读取
-                    LOG_DEBUG_FMT("[Thread #%d] Worker reached EOF in loop mode, resetting to begin (frame_index=%d)", 
+                    LOG4CPLUS_DEBUG_FMT(logger_, "[Thread #%d] Worker reached EOF in loop mode, resetting to begin (frame_index=%d)", 
                                   thread_id, frame_index);
                     if (worker_facade_sptr_->seekToBegin()) {
                         // 重置成功：归还 buffer，重置失败计数，继续下一次循环
@@ -359,7 +357,7 @@ void VideoProductionLine::producerThreadFunc(int thread_id) {
                         pool_sptr->releaseFree(buffer);
                         consecutive_failures = 0;
                     } else {
-                        LOG_ERROR_FMT("[Thread #%d] Failed to reset Worker to begin", thread_id);
+                        LOG4CPLUS_ERROR_FMT(logger_, "[Thread #%d] Failed to reset Worker to begin", thread_id);
                         // 重置失败，按正常失败处理
                         pool_sptr->releaseFree(buffer);
                         skipped_frames_.fetch_add(1);
@@ -368,7 +366,7 @@ void VideoProductionLine::producerThreadFunc(int thread_id) {
                     }
                 } else {
                     // 🔧 修复：非循环模式下，Worker 到达 EOF 时应该停止循环
-                    LOG_DEBUG_FMT("[Thread #%d] Worker reached EOF in non-loop mode, stopping producer thread", 
+                    LOG4CPLUS_DEBUG_FMT(logger_, "[Thread #%d] Worker reached EOF in non-loop mode, stopping producer thread", 
                                   thread_id);
                     pool_sptr->releaseFree(buffer);
                     // 停止循环，退出生产者线程
@@ -382,7 +380,7 @@ void VideoProductionLine::producerThreadFunc(int thread_id) {
                 // 🎯 累加连续失败次数（PerformanceMonitor的Timer会每2秒自动打印统计）
                 consecutive_failures++;
                 if (consecutive_failures > kMaxConsecutiveFailures) {
-                    LOG_ERROR_FMT("[Thread #%d] Failed to fill buffer %d times in a row, stopping producer thread", 
+                    LOG4CPLUS_ERROR_FMT(logger_, "[Thread #%d] Failed to fill buffer %d times in a row, stopping producer thread", 
                                   thread_id, kMaxConsecutiveFailures);
                     break;
                 }
@@ -403,7 +401,7 @@ void VideoProductionLine::producerThreadFunc(int thread_id) {
     }
     
     // 线程结束
-    LOG_INFO_FMT("Thread #%d finished: produced=%d, skipped=%d, final_consecutive_failures=%d",
+    LOG4CPLUS_INFO_FMT(logger_, "Thread #%d finished: produced=%d, skipped=%d, final_consecutive_failures=%d",
                  thread_id, thread_produced, thread_skipped, consecutive_failures);
     
     // 减少活跃线程计数
@@ -411,7 +409,7 @@ void VideoProductionLine::producerThreadFunc(int thread_id) {
     if (remaining == 0) {
         // 最后一个线程退出，设置 running_ 为 false
         running_.store(false);
-        LOG_INFO("All producer threads finished naturally, production line stopped");
+        LOG4CPLUS_INFO(logger_, "All producer threads finished naturally, production line stopped");
     }
 }
 
@@ -427,11 +425,11 @@ void VideoProductionLine::setError(const std::string& error_msg) {
         try {
             error_callback_(error_msg);
         } catch (...) {
-            LOG_WARN("Exception in error callback");
+            LOG4CPLUS_WARN(logger_, "Exception in error callback");
         }
     }
     
     // 打印到控制台
-    LOG_ERROR_FMT("VideoProductionLine Error: %s", error_msg.c_str());
+    LOG4CPLUS_ERROR_FMT(logger_, "VideoProductionLine Error: %s", error_msg.c_str());
 }
 

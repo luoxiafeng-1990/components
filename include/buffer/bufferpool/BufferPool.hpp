@@ -9,6 +9,8 @@
 #include <condition_variable>
 #include <memory>
 #include <atomic>
+#include <log4cplus/logger.h>
+#include <log4cplus/loggingmacros.h>
 
 // 前向声明
 class BufferAllocatorBase;
@@ -369,4 +371,7 @@ private:
     
     // 日志前缀（用于清晰标识对象）
     std::string log_prefix_;
+    
+    // 日志器
+    log4cplus::Logger logger_;
 };

@@ -9,7 +9,8 @@ PerformanceMonitor::PerformanceMonitor()
     : is_started_(false)
     , is_paused_(false)
     , report_timer_id_(0)
-    , report_interval_ms_(1000)  // 默认1秒报告一次
+    , report_interval_ms_(1000),
+    logger_(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Monitor.Performance")))// 默认1秒报告一次
 {
 }
 
@@ -35,7 +36,7 @@ void PerformanceMonitor::start() {
     // 启动报告定时器
     startReportTimer();
     
-    LOG_INFO("📊 PerformanceMonitor started (auto-report enabled)");
+    LOG4CPLUS_INFO(logger_, "📊 PerformanceMonitor started (auto-report enabled)");
 }
 
 void PerformanceMonitor::reset() {
@@ -88,7 +89,7 @@ void PerformanceMonitor::stop() {
     // 注意：在锁外调用，因为 Timer 内部可能有自己的锁，避免死锁
     report_timer_.stop();
     
-    LOG_INFO("📊 PerformanceMonitor stopped");
+    LOG4CPLUS_INFO(logger_, "📊 PerformanceMonitor stopped");
 }
 
 // ============ 通用接口（动态监控）===========
@@ -189,16 +190,16 @@ double PerformanceMonitor::getElapsedTime() const {
 
 void PerformanceMonitor::printStatistics() const {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
-    LOG_INFO("");
-    LOG_INFO("═══════════════════════════════════════════════════════");
-    LOG_INFO("          Performance Statistics");
-    LOG_INFO("═══════════════════════════════════════════════════════");
+    LOG4CPLUS_INFO(logger_, "");
+    LOG4CPLUS_INFO(logger_, "═══════════════════════════════════════════════════════");
+    LOG4CPLUS_INFO(logger_, "          Performance Statistics");
+    LOG4CPLUS_INFO(logger_, "═══════════════════════════════════════════════════════");
     
     double total_time = getTotalDuration();
     
     // 打印所有指标
     if (metrics_.empty()) {
-        LOG_INFO("No metrics recorded yet.");
+        LOG4CPLUS_INFO(logger_, "No metrics recorded yet.");
     } else {
         for (const auto& pair : metrics_) {
             const std::string& name = pair.first;
@@ -206,48 +207,48 @@ void PerformanceMonitor::printStatistics() const {
             int count = metric.count.load();
             
             if (count > 0) {
-                LOG_INFO("");
-                LOG_INFO_FMT("📊 Metric: %s", name.c_str());
-                LOG_INFO_FMT("   Count: %d", count);
-                LOG_INFO_FMT("   Average FPS: %.2f fps", calculateAverageFPS(count));
+                LOG4CPLUS_INFO(logger_, "");
+                LOG4CPLUS_INFO_FMT(logger_, "📊 Metric: %s", name.c_str());
+                LOG4CPLUS_INFO_FMT(logger_, "   Count: %d", count);
+                LOG4CPLUS_INFO_FMT(logger_, "   Average FPS: %.2f fps", calculateAverageFPS(count));
                 
                 long long total_us = metric.total_time_us.load();
                 if (total_us > 0) {
                     double avg_time = (double)total_us / count / 1000.0;
-                    LOG_INFO_FMT("   Average Time: %.2f ms/event", avg_time);
+                    LOG4CPLUS_INFO_FMT(logger_, "   Average Time: %.2f ms/event", avg_time);
                 }
             }
         }
     }
     
-    LOG_INFO("");
-    LOG_INFO_FMT("⏱️  Total Time:       %.2f seconds", total_time);
-    LOG_INFO("═══════════════════════════════════════════════════════");
-    LOG_INFO("");
+    LOG4CPLUS_INFO(logger_, "");
+    LOG4CPLUS_INFO_FMT(logger_, "⏱️  Total Time:       %.2f seconds", total_time);
+    LOG4CPLUS_INFO(logger_, "═══════════════════════════════════════════════════════");
+    LOG4CPLUS_INFO(logger_, "");
 }
 
 void PerformanceMonitor::printMetric(const std::string& metric_name) const {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
     const MetricData* metric = getMetric(metric_name);
     if (!metric) {
-        LOG_WARN_FMT("Metric '%s' not found.", metric_name.c_str());
+        LOG4CPLUS_WARN_FMT(logger_, "Metric '%s' not found.", metric_name.c_str());
         return;
     }
     
     int count = metric->count.load();
     if (count == 0) {
-        LOG_INFO_FMT("Metric '%s': No data recorded yet.", metric_name.c_str());
+        LOG4CPLUS_INFO_FMT(logger_, "Metric '%s': No data recorded yet.", metric_name.c_str());
         return;
     }
     
-    LOG_INFO_FMT("📊 Metric: %s", metric_name.c_str());
-    LOG_INFO_FMT("   Count: %d", count);
-    LOG_INFO_FMT("   Average FPS: %.2f fps", calculateAverageFPS(count));
+    LOG4CPLUS_INFO_FMT(logger_, "📊 Metric: %s", metric_name.c_str());
+    LOG4CPLUS_INFO_FMT(logger_, "   Count: %d", count);
+    LOG4CPLUS_INFO_FMT(logger_, "   Average FPS: %.2f fps", calculateAverageFPS(count));
     
     long long total_us = metric->total_time_us.load();
     if (total_us > 0) {
         double avg_time = (double)total_us / count / 1000.0;
-        LOG_INFO_FMT("   Average Time: %.2f ms/event", avg_time);
+        LOG4CPLUS_INFO_FMT(logger_, "   Average Time: %.2f ms/event", avg_time);
     }
 }
 
@@ -300,7 +301,7 @@ void PerformanceMonitor::printRealTimeStats() {
     snprintf(time_buf, sizeof(time_buf), " Time=%.1fs", getElapsedTime());
     stats_line += time_buf;
     
-    LOG_INFO(stats_line.c_str());
+    LOG4CPLUS_INFO(logger_, stats_line.c_str());
     
     // 打印后重置所有计数器（从0开始统计下一个周期）
     for (auto& pair : metrics_) {
@@ -347,7 +348,7 @@ void PerformanceMonitor::setReportInterval(int interval_ms) {
     std::unique_lock<std::recursive_mutex> lock(mutex_);
     
     if (interval_ms <= 0) {
-        LOG_WARN_FMT("⚠️  Invalid report interval: %d ms, must be > 0", interval_ms);
+        LOG4CPLUS_WARN_FMT(logger_, "⚠️  Invalid report interval: %d ms, must be > 0", interval_ms);
         return;
     }
     

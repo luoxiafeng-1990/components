@@ -87,22 +87,22 @@ void WorkerBase::checkCodecMismatch(AVCodecID actual_codec_id,
     }
     
     // ⚠️ 不匹配，打印详细警告
-    LOG_WARN("╔═══════════════════════════════════════════════════════════════╗");
-    LOG_WARN("║  ⚠️  Codec Mismatch Detected                                ║");
-    LOG_WARN("╚═══════════════════════════════════════════════════════════════╝");
-    LOG_WARN_FMT("  Configured decoder: '%s' (expects %s)",
+    LOG4CPLUS_WARN(logger_, "╔═══════════════════════════════════════════════════════════════╗");
+    LOG4CPLUS_WARN(logger_, "║  ⚠️  Codec Mismatch Detected                                ║");
+    LOG4CPLUS_WARN(logger_, "╚═══════════════════════════════════════════════════════════════╝");
+    LOG4CPLUS_WARN_FMT(logger_, "  Configured decoder: '%s' (expects %s)",
                  decoder_name.c_str(),
                  getCodecFriendlyName(expected_codec_id).c_str());
-    LOG_WARN_FMT("  Actual stream codec: %s",
+    LOG4CPLUS_WARN_FMT(logger_, "  Actual stream codec: %s",
                  getCodecFriendlyName(actual_codec_id).c_str());
-    LOG_WARN("");
-    LOG_WARN("  💡 Suggestions:");
-    LOG_WARN_FMT("  - Update config to use '%s' decoder",
+    LOG4CPLUS_WARN(logger_, "");
+    LOG4CPLUS_WARN(logger_, "  💡 Suggestions:");
+    LOG4CPLUS_WARN_FMT(logger_, "  - Update config to use '%s' decoder",
                  avcodec_get_name(actual_codec_id));
-    LOG_WARN("  - Or remove decoder name from config for auto-detection");
-    LOG_WARN("");
-    LOG_WARN("  ⚙️  Continuing with auto-selected decoder...");
-    LOG_WARN("╚═══════════════════════════════════════════════════════════════╝");
+    LOG4CPLUS_WARN(logger_, "  - Or remove decoder name from config for auto-detection");
+    LOG4CPLUS_WARN(logger_, "");
+    LOG4CPLUS_WARN(logger_, "  ⚙️  Continuing with auto-selected decoder...");
+    LOG4CPLUS_WARN(logger_, "╚═══════════════════════════════════════════════════════════════╝");
 }
 
 // ============================================================================
@@ -117,7 +117,7 @@ bool WorkerBase::isHardwareDecoder(const AVCodec* codec) const {
     // ⭐ 方法1：检查 AVCodec->capabilities 中的 AV_CODEC_CAP_HARDWARE 标志
     // 这是 FFmpeg 官方推荐的方式，用于标识硬件加速解码器
     if (codec->capabilities & AV_CODEC_CAP_HARDWARE) {
-        LOG_DEBUG_FMT("[WorkerBase] Codec '%s' is hardware decoder (AV_CODEC_CAP_HARDWARE)", 
+        LOG4CPLUS_DEBUG_FMT(logger_, "[WorkerBase] Codec '%s' is hardware decoder (AV_CODEC_CAP_HARDWARE)", 
                       codec->name);
         return true;
     }
@@ -126,18 +126,18 @@ bool WorkerBase::isHardwareDecoder(const AVCodec* codec) const {
     // 如果 avcodec_get_hw_config(codec, 0) 返回非空，说明支持硬件加速
     const AVCodecHWConfig* hw_config = avcodec_get_hw_config(codec, 0);
     if (hw_config != nullptr) {
-        LOG_DEBUG_FMT("[WorkerBase] Codec '%s' is hardware decoder (has hw_config)", 
+        LOG4CPLUS_DEBUG_FMT(logger_, "[WorkerBase] Codec '%s' is hardware decoder (has hw_config)", 
                       codec->name);
         return true;
     }
     
     // ✅ 两种方法都未检测到硬件特征，判定为软件解码器
-    LOG_DEBUG_FMT("[WorkerBase] Codec '%s' is software decoder", codec->name);
+    LOG4CPLUS_DEBUG_FMT(logger_, "[WorkerBase] Codec '%s' is software decoder", codec->name);
     return false;
 }
 
 const AVCodec* WorkerBase::findPureSoftwareDecoder(AVCodecID codec_id) const {
-    LOG_DEBUG_FMT("[WorkerBase] Searching for pure software decoder (codec_id=%d)...", codec_id);
+    LOG4CPLUS_DEBUG_FMT(logger_, "[WorkerBase] Searching for pure software decoder (codec_id=%d)...", codec_id);
     
     const AVCodec* sw_codec = nullptr;
     void* opaque = nullptr;
@@ -151,13 +151,13 @@ const AVCodec* WorkerBase::findPureSoftwareDecoder(AVCodecID codec_id) const {
         if (av_codec_is_decoder(sw_codec) && 
             sw_codec->id == codec_id &&
             !isHardwareDecoder(sw_codec)) {
-            LOG_INFO_FMT("[WorkerBase] ✅ Found pure software decoder: %s", sw_codec->name);
+            LOG4CPLUS_INFO_FMT(logger_, "[WorkerBase] ✅ Found pure software decoder: %s", sw_codec->name);
             return sw_codec;
         }
     }
     
     // ❌ 未找到软件解码器
-    LOG_ERROR_FMT("[WorkerBase] ❌ No pure software decoder found for codec_id=%d", codec_id);
+    LOG4CPLUS_ERROR_FMT(logger_, "[WorkerBase] ❌ No pure software decoder found for codec_id=%d", codec_id);
     return nullptr;
 }
 

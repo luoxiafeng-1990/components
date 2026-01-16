@@ -11,6 +11,8 @@
 #include <memory>
 #include <functional>
 #include <optional>
+#include <log4cplus/logger.h>
+#include <log4cplus/loggingmacros.h>
 
 /**
  * @brief VideoProductionLine - 视频生产流水线
@@ -219,6 +221,9 @@ protected:
     
     // 日志前缀（用于清晰标识对象）
     std::string log_prefix_;
+    
+    // 日志器
+    log4cplus::Logger logger_;
     
 private:
     /**

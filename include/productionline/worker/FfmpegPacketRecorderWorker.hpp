@@ -6,6 +6,8 @@
 #include <atomic>
 #include <mutex>
 #include <memory>
+#include <log4cplus/logger.h>
+#include <log4cplus/loggingmacros.h>
 
 // Forward declarations
 struct AVPacket;
@@ -139,4 +141,7 @@ private:
     
     // 互斥锁
     mutable std::recursive_mutex mutex_;
+    
+    // 日志器
+    log4cplus::Logger logger_;
 };

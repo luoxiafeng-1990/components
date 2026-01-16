@@ -1,15 +1,29 @@
 #pragma once
 
 #include "buffer/bufferpool/Buffer.hpp"
+#include <log4cplus/logger.h>
+#include <log4cplus/loggingmacros.h>
 #include <atomic>
+#include <log4cplus/logger.h>
+#include <log4cplus/loggingmacros.h>
 #include <cstdio>
+#include <log4cplus/logger.h>
+#include <log4cplus/loggingmacros.h>
 #include <string>
+#include <log4cplus/logger.h>
+#include <log4cplus/loggingmacros.h>
 
 // FFmpeg标准格式定义
 extern "C" {
 #include <libavutil/pixfmt.h>
+#include <log4cplus/logger.h>
+#include <log4cplus/loggingmacros.h>
 #include <libavcodec/avcodec.h>
+#include <log4cplus/logger.h>
+#include <log4cplus/loggingmacros.h>
 #include <libavformat/avformat.h>
+#include <log4cplus/logger.h>
+#include <log4cplus/loggingmacros.h>
 }
 
 namespace productionline {
@@ -306,6 +320,9 @@ private:
      * @note 自动处理remux（无需转码）
      */
     bool writeEncoded(const Buffer* buffer);
+    
+    // 日志器
+    log4cplus::Logger logger_;
 };
 
 } // namespace io

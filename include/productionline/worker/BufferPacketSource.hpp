@@ -8,6 +8,8 @@
 #include <atomic>
 #include <mutex>
 #include <condition_variable>
+#include <log4cplus/logger.h>
+#include <log4cplus/loggingmacros.h>
 
 // 前向声明
 struct AVCodecParameters;
@@ -118,11 +120,15 @@ private:
     // ========== 共享模式成员（v2.18 新增）==========
     bool is_shared_mode_;                       // 是否为共享模式
     size_t total_subscribers_;                  // 订阅者总数（消费者数量）
-    std::atomic<size_t> current_request_count_; // 当前请求计数器
+    std::atomic<size_t> remaining_subscribers_; // 剩余未完成的订阅者数量
     Buffer* current_buffer_;                    // 当前共享的 Buffer
+    Buffer* previous_buffer_;                   // 待释放的旧 Buffer
     mutable std::mutex mutex_;                  // 互斥锁（保护共享状态）
-    std::condition_variable cv_;                // 条件变量（等待所有订阅者）
+    std::condition_variable cv_subscribers_;    // 条件变量（订阅者等待新 Buffer）
+    std::condition_variable cv_fetch_;          // 条件变量（Fetch 任务等待订阅者完成）
+    std::condition_variable cv_task_exit_;      // 条件变量（等待 Fetch 任务退出）
     std::atomic<bool> is_running_;              // 是否运行中
+    std::atomic<bool> fetch_task_running_;      // Fetch 任务是否正在运行
     
     /**
      * @brief 从当前 Buffer 复制 packet 数据
@@ -131,6 +137,14 @@ private:
      * @return 0=成功, <0=错误
      */
     int copyPacket(AVPacket* dst_packet, const AVPacket* src_packet);
+    
+    /**
+     * @brief Fetch 任务函数（在全局线程池中运行）
+     */
+    void fetchTaskFunc();
+    
+    // 日志器
+    log4cplus::Logger logger_;
 };
 
 #endif // BUFFER_PACKET_SOURCE_HPP

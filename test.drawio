@@ -1,6 +1,6 @@
 <mxfile host="65bd71144e">
     <diagram id="LhBejCh7xFbcIp1JhNI3" name="第 1 页">
-        <mxGraphModel dx="452" dy="570" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="827" pageHeight="1169" math="0" shadow="0">
+        <mxGraphModel dx="557" dy="682" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="827" pageHeight="1169" math="0" shadow="0">
             <root>
                 <mxCell id="0"/>
                 <mxCell id="1" parent="0"/>
@@ -8,7 +8,7 @@
         </mxGraphModel>
     </diagram>
     <diagram name="ProductionLine Architecture - Dynamic View" id="architecture-dynamic">
-        <mxGraphModel dx="452" dy="3370" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="4000" pageHeight="2800" math="0" shadow="0">
+        <mxGraphModel dx="1071" dy="3482" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="4000" pageHeight="2800" math="0" shadow="0">
             <root>
                 <mxCell id="0"/>
                 <mxCell id="1" parent="0"/>
@@ -392,6 +392,1066 @@
                 </mxCell>
                 <mxCell id="note2" value="关键特性：&#10;• 零拷贝：BufferPacketSource 直接从 BufferPool 读取&#10;• 组内同步：CountDownLatch 确保所有消费者完成&#10;• 组间并行：每个 WorkerGroup 独立线程运行" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=top;whiteSpace=wrap;rounded=0;fontSize=10;" parent="1" vertex="1">
                     <mxGeometry x="2860" y="800" width="400" height="80" as="geometry"/>
+                </mxCell>
+            </root>
+        </mxGraphModel>
+    </diagram>
+    <diagram id="rz5pq_QofZ_hLUITbR6z" name="第 3 页">
+        <mxGraphModel dx="1071" dy="682" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="827" pageHeight="1169" math="0" shadow="0">
+            <root>
+                <mxCell id="0"/>
+                <mxCell id="1" parent="0"/>
+            </root>
+        </mxGraphModel>
+    </diagram>
+    <diagram id="test-multi-worker-groups" name="test_multi_worker Group关系图">
+        <mxGraphModel dx="1339" dy="853" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="3000" pageHeight="2000" math="0" shadow="0">
+            <root>
+                <mxCell id="0"/>
+                <mxCell id="1" parent="0"/>
+                <mxCell id="title-main-group" value="test_multi_worker 中的 Group 关系图" style="text;html=1;strokeColor=#1ba1e2;fillColor=#dae8fc;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=1;fontSize=22;fontStyle=1;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="100" y="40" width="2800" height="60" as="geometry"/>
+                </mxCell>
+                <mxCell id="group1-container" value="Group 1: 现有 test_multi_worker 结构" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1f5fe;strokeColor=#01579b;fontSize=16;fontStyle=1;align=left;verticalAlign=top;spacingLeft=20;spacingTop=10;strokeWidth=3;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="70" y="160" width="1300" height="700" as="geometry"/>
+                </mxCell>
+                <mxCell id="g1-producer" value="Producer: recorder&#10;(FFMPEG_PACKET_RECORDER)&#10;从文件/RTSP录制数据包" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#c8e6c9;strokeColor=#2e7d32;fontSize=13;fontStyle=1;fontColor=#000000;strokeWidth=2;" parent="1" vertex="1">
+                    <mxGeometry x="200" y="250" width="280" height="100" as="geometry"/>
+                </mxCell>
+                <mxCell id="g1-bufferpool" value="BufferPool&#10;(缓冲区池)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff9c4;strokeColor=#f57f17;fontSize=13;fontStyle=1;fontColor=#000000;strokeWidth=2;" parent="1" vertex="1">
+                    <mxGeometry x="600" y="250" width="200" height="100" as="geometry"/>
+                </mxCell>
+                <mxCell id="g1-connector" value="Connector&#10;Mode: ONE_TO_MANY&#10;1个生产者 → 2个消费者" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f3e5f5;strokeColor=#4a148c;fontSize=12;fontStyle=1;fontColor=#000000;strokeWidth=2;" parent="1" vertex="1">
+                    <mxGeometry x="950" y="250" width="280" height="100" as="geometry"/>
+                </mxCell>
+                <mxCell id="g1-consumer1" value="Consumer 1: hw_dec&#10;(FfmpegDecodeRtspWorker)&#10;硬件解码器 (h264_taco)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffccbc;strokeColor=#bf360c;fontSize=12;fontStyle=1;fontColor=#000000;strokeWidth=2;" parent="1" vertex="1">
+                    <mxGeometry x="900" y="450" width="280" height="100" as="geometry"/>
+                </mxCell>
+                <mxCell id="g1-consumer2" value="Consumer 2: sw_dec&#10;(FfmpegDecodeRtspWorker)&#10;软件解码器 (libavcodec)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffccbc;strokeColor=#bf360c;fontSize=12;fontStyle=1;fontColor=#000000;strokeWidth=2;" parent="1" vertex="1">
+                    <mxGeometry x="900" y="600" width="280" height="100" as="geometry"/>
+                </mxCell>
+                <mxCell id="g1-c1-pool" value="BufferPool (hw_dec)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff9c4;strokeColor=#f57f17;fontSize=11;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="1230" y="475" width="140" height="50" as="geometry"/>
+                </mxCell>
+                <mxCell id="g1-c2-pool" value="BufferPool (sw_dec)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff9c4;strokeColor=#f57f17;fontSize=11;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="1230" y="625" width="140" height="50" as="geometry"/>
+                </mxCell>
+                <mxCell id="g1-latch" value="CountDownLatch&#10;(组内同步机制)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1bee7;strokeColor=#4a148c;fontSize=12;fontStyle=2;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="200" y="770" width="1170" height="50" as="geometry"/>
+                </mxCell>
+                <mxCell id="g1-arrow1" value="生产数据" style="endArrow=block;endSize=16;endFill=1;html=1;rounded=0;strokeWidth=3;strokeColor=#2e7d32;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;fontColor=#000000;" parent="1" source="g1-producer" target="g1-bufferpool" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="g1-arrow2" value="管理连接" style="endArrow=block;endSize=16;endFill=1;html=1;rounded=0;strokeWidth=3;strokeColor=#4a148c;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;fontColor=#000000;" parent="1" source="g1-bufferpool" target="g1-connector" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="g1-arrow3" value="零拷贝读取" style="endArrow=block;endSize=16;endFill=1;html=1;rounded=0;strokeWidth=3;strokeColor=#bf360c;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;fontColor=#000000;" parent="1" source="g1-connector" target="g1-consumer1" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="g1-arrow4" value="零拷贝读取" style="endArrow=block;endSize=16;endFill=1;html=1;rounded=0;strokeWidth=3;strokeColor=#bf360c;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;fontColor=#000000;" parent="1" source="g1-connector" target="g1-consumer2" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="g1-arrow5" value="输出帧" style="endArrow=block;endSize=12;endFill=1;html=1;rounded=0;strokeWidth=2;strokeColor=#f57f17;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;fontColor=#000000;" parent="1" source="g1-consumer1" target="g1-c1-pool" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="g1-arrow6" value="输出帧" style="endArrow=block;endSize=12;endFill=1;html=1;rounded=0;strokeWidth=2;strokeColor=#f57f17;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;fontColor=#000000;" parent="1" source="g1-consumer2" target="g1-c2-pool" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="group2-container" value="Group 2: 扩展结构 (2个Connector)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff3e0;strokeColor=#e65100;fontSize=16;fontStyle=1;align=left;verticalAlign=top;spacingLeft=20;spacingTop=10;strokeWidth=3;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="1500" y="150" width="1400" height="700" as="geometry"/>
+                </mxCell>
+                <mxCell id="g2-section1" value="Connector 1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e8f5e9;strokeColor=#1b5e20;fontSize=14;fontStyle=1;align=center;verticalAlign=top;spacingTop=5;strokeWidth=2;dashed=1;dashPattern=5 5;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="1550" y="200" width="600" height="310" as="geometry"/>
+                </mxCell>
+                <mxCell id="g2-producer1" value="Producer 1&#10;(视频源1)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#c8e6c9;strokeColor=#2e7d32;fontSize=12;fontStyle=1;fontColor=#000000;strokeWidth=2;" parent="1" vertex="1">
+                    <mxGeometry x="1600" y="240" width="160" height="70" as="geometry"/>
+                </mxCell>
+                <mxCell id="g2-bp1" value="BufferPool 1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff9c4;strokeColor=#f57f17;fontSize=11;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="1800" y="252.5" width="120" height="45" as="geometry"/>
+                </mxCell>
+                <mxCell id="g2-conn1" value="Connector 1&#10;ONE_TO_MANY" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f3e5f5;strokeColor=#4a148c;fontSize=11;fontStyle=1;fontColor=#000000;strokeWidth=2;" parent="1" vertex="1">
+                    <mxGeometry x="1960" y="245" width="140" height="60" as="geometry"/>
+                </mxCell>
+                <mxCell id="g2-c1-consumer1" value="Consumer 1-1&#10;(消费者A)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffccbc;strokeColor=#bf360c;fontSize=11;fontStyle=1;fontColor=#000000;strokeWidth=2;" parent="1" vertex="1">
+                    <mxGeometry x="1580" y="350" width="200" height="70" as="geometry"/>
+                </mxCell>
+                <mxCell id="g2-c1-consumer2" value="Consumer 1-2&#10;(消费者B)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffccbc;strokeColor=#bf360c;fontSize=11;fontStyle=1;fontColor=#000000;strokeWidth=2;" parent="1" vertex="1">
+                    <mxGeometry x="1580" y="430" width="200" height="70" as="geometry"/>
+                </mxCell>
+                <mxCell id="g2-c1-c1-pool" value="BufferPool" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff9c4;strokeColor=#f57f17;fontSize=10;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="1820" y="362.5" width="100" height="45" as="geometry"/>
+                </mxCell>
+                <mxCell id="g2-c1-c2-pool" value="BufferPool" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff9c4;strokeColor=#f57f17;fontSize=10;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="1820" y="442.5" width="100" height="45" as="geometry"/>
+                </mxCell>
+                <mxCell id="g2-arr1-1" value="" style="endArrow=block;endSize=14;endFill=1;html=1;rounded=0;strokeWidth=2.5;strokeColor=#2e7d32;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" parent="1" source="g2-producer1" target="g2-bp1" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="g2-arr1-2" value="" style="endArrow=block;endSize=14;endFill=1;html=1;rounded=0;strokeWidth=2.5;strokeColor=#4a148c;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" parent="1" source="g2-bp1" target="g2-conn1" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="g2-arr1-3" value="" style="endArrow=block;endSize=14;endFill=1;html=1;rounded=0;strokeWidth=2.5;strokeColor=#bf360c;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=1;entryY=0.5;entryDx=0;entryDy=0;" parent="1" source="g2-conn1" target="g2-c1-consumer1" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="g2-arr1-4" value="" style="endArrow=block;endSize=14;endFill=1;html=1;rounded=0;strokeWidth=2.5;strokeColor=#bf360c;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=1;entryY=0.5;entryDx=0;entryDy=0;" parent="1" source="g2-conn1" target="g2-c1-consumer2" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="g2-arr1-5" value="" style="endArrow=block;endSize=10;endFill=1;html=1;rounded=0;strokeWidth=2;strokeColor=#f57f17;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" parent="1" source="g2-c1-consumer1" target="g2-c1-c1-pool" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="g2-arr1-6" value="" style="endArrow=block;endSize=10;endFill=1;html=1;rounded=0;strokeWidth=2;strokeColor=#f57f17;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" parent="1" source="g2-c1-consumer2" target="g2-c1-c2-pool" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="g2-section2" value="Connector 2" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fce4ec;strokeColor=#880e4f;fontSize=14;fontStyle=1;align=center;verticalAlign=top;spacingTop=5;strokeWidth=2;dashed=1;dashPattern=5 5;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="2200" y="200" width="600" height="310" as="geometry"/>
+                </mxCell>
+                <mxCell id="g2-producer2" value="Producer 2&#10;(视频源2)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#c8e6c9;strokeColor=#2e7d32;fontSize=12;fontStyle=1;fontColor=#000000;strokeWidth=2;" parent="1" vertex="1">
+                    <mxGeometry x="2250" y="240" width="160" height="70" as="geometry"/>
+                </mxCell>
+                <mxCell id="g2-bp2" value="BufferPool 2" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff9c4;strokeColor=#f57f17;fontSize=11;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="2450" y="252.5" width="120" height="45" as="geometry"/>
+                </mxCell>
+                <mxCell id="g2-conn2" value="Connector 2&#10;ONE_TO_MANY" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f3e5f5;strokeColor=#4a148c;fontSize=11;fontStyle=1;fontColor=#000000;strokeWidth=2;" parent="1" vertex="1">
+                    <mxGeometry x="2610" y="245" width="140" height="60" as="geometry"/>
+                </mxCell>
+                <mxCell id="g2-c2-consumer1" value="Consumer 2-1&#10;(消费者C)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffccbc;strokeColor=#bf360c;fontSize=11;fontStyle=1;fontColor=#000000;strokeWidth=2;" parent="1" vertex="1">
+                    <mxGeometry x="2230" y="350" width="200" height="70" as="geometry"/>
+                </mxCell>
+                <mxCell id="g2-c2-consumer2" value="Consumer 2-2&#10;(消费者D)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffccbc;strokeColor=#bf360c;fontSize=11;fontStyle=1;fontColor=#000000;strokeWidth=2;" parent="1" vertex="1">
+                    <mxGeometry x="2230" y="430" width="200" height="70" as="geometry"/>
+                </mxCell>
+                <mxCell id="g2-c2-c1-pool" value="BufferPool" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff9c4;strokeColor=#f57f17;fontSize=10;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="2470" y="362.5" width="100" height="45" as="geometry"/>
+                </mxCell>
+                <mxCell id="g2-c2-c2-pool" value="BufferPool" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff9c4;strokeColor=#f57f17;fontSize=10;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="2470" y="442.5" width="100" height="45" as="geometry"/>
+                </mxCell>
+                <mxCell id="g2-arr2-1" value="" style="endArrow=block;endSize=14;endFill=1;html=1;rounded=0;strokeWidth=2.5;strokeColor=#2e7d32;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" parent="1" source="g2-producer2" target="g2-bp2" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="g2-arr2-2" value="" style="endArrow=block;endSize=14;endFill=1;html=1;rounded=0;strokeWidth=2.5;strokeColor=#4a148c;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" parent="1" source="g2-bp2" target="g2-conn2" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="g2-arr2-3" value="" style="endArrow=block;endSize=14;endFill=1;html=1;rounded=0;strokeWidth=2.5;strokeColor=#bf360c;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=1;entryY=0.5;entryDx=0;entryDy=0;" parent="1" source="g2-conn2" target="g2-c2-consumer1" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="g2-arr2-4" value="" style="endArrow=block;endSize=14;endFill=1;html=1;rounded=0;strokeWidth=2.5;strokeColor=#bf360c;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=1;entryY=0.5;entryDx=0;entryDy=0;" parent="1" source="g2-conn2" target="g2-c2-consumer2" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="g2-arr2-5" value="" style="endArrow=block;endSize=10;endFill=1;html=1;rounded=0;strokeWidth=2;strokeColor=#f57f17;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" parent="1" source="g2-c2-consumer1" target="g2-c2-c1-pool" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="g2-arr2-6" value="" style="endArrow=block;endSize=10;endFill=1;html=1;rounded=0;strokeWidth=2;strokeColor=#f57f17;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" parent="1" source="g2-c2-consumer2" target="g2-c2-c2-pool" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="g2-latch" value="CountDownLatch (组内同步机制 - 确保所有消费者完成)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1bee7;strokeColor=#4a148c;fontSize=12;fontStyle=2;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="1550" y="540" width="1300" height="50" as="geometry"/>
+                </mxCell>
+                <mxCell id="legend-container" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;align=left;verticalAlign=top;strokeWidth=2;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="100" y="900" width="2800" height="180" as="geometry"/>
+                </mxCell>
+                <mxCell id="legend-title" value="图例说明" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=18;fontStyle=1;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="1400" y="910" width="200" height="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="legend-producer-sample" value="生产者" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#c8e6c9;strokeColor=#2e7d32;fontSize=11;fontStyle=1;fontColor=#000000;strokeWidth=2;" parent="1" vertex="1">
+                    <mxGeometry x="200" y="960" width="120" height="40" as="geometry"/>
+                </mxCell>
+                <mxCell id="legend-bufferpool-sample" value="BufferPool" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff9c4;strokeColor=#f57f17;fontSize=11;fontStyle=1;fontColor=#000000;strokeWidth=2;" parent="1" vertex="1">
+                    <mxGeometry x="400" y="960" width="120" height="40" as="geometry"/>
+                </mxCell>
+                <mxCell id="legend-connector-sample" value="Connector" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f3e5f5;strokeColor=#4a148c;fontSize=11;fontStyle=1;fontColor=#000000;strokeWidth=2;" parent="1" vertex="1">
+                    <mxGeometry x="600" y="960" width="120" height="40" as="geometry"/>
+                </mxCell>
+                <mxCell id="legend-consumer-sample" value="消费者" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffccbc;strokeColor=#bf360c;fontSize=11;fontStyle=1;fontColor=#000000;strokeWidth=2;" parent="1" vertex="1">
+                    <mxGeometry x="800" y="960" width="120" height="40" as="geometry"/>
+                </mxCell>
+                <mxCell id="legend-latch-sample" value="CountDownLatch" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1bee7;strokeColor=#4a148c;fontSize=11;fontStyle=2;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="1000" y="960" width="140" height="40" as="geometry"/>
+                </mxCell>
+                <mxCell id="legend-arrow1" value="数据流" style="endArrow=block;endSize=14;endFill=1;html=1;rounded=0;strokeWidth=2.5;strokeColor=#2e7d32;" parent="1" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry">
+                        <mxPoint x="1250" y="980" as="sourcePoint"/>
+                        <mxPoint x="1350" y="980" as="targetPoint"/>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="legend-arrow2" value="连接管理" style="endArrow=block;endSize=14;endFill=1;html=1;rounded=0;strokeWidth=2.5;strokeColor=#4a148c;" parent="1" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry">
+                        <mxPoint x="1450" y="980" as="sourcePoint"/>
+                        <mxPoint x="1550" y="980" as="targetPoint"/>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="legend-arrow3" value="零拷贝读取" style="endArrow=block;endSize=14;endFill=1;html=1;rounded=0;strokeWidth=2.5;strokeColor=#bf360c;" parent="1" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry">
+                        <mxPoint x="1650" y="980" as="sourcePoint"/>
+                        <mxPoint x="1750" y="980" as="targetPoint"/>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="legend-notes" value="关键特性：&#10;• ONE_TO_MANY 模式：一个生产者的数据可以被多个消费者零拷贝读取&#10;• BufferPacketSource：实现零拷贝机制，多个消费者共享同一份数据&#10;• CountDownLatch：确保组内所有消费者完成处理后才继续下一轮&#10;• 每个 WorkerGroup 独立运行在一个线程中，组间并行执行" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=top;whiteSpace=wrap;rounded=0;fontSize=12;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="200" y="1020" width="2600" height="50" as="geometry"/>
+                </mxCell>
+                <mxCell id="comparison-note" value="对比说明：&#10;• Group 1：展示 test_multi_worker 中的实际配置（1个Connector，1个生产者，2个消费者）&#10;• Group 2：扩展示例（2个Connector，每个Connector连接1个生产者和2个消费者，共2个生产者4个消费者）" style="text;html=1;strokeColor=#d79b00;fillColor=#ffe6cc;align=left;verticalAlign=top;whiteSpace=wrap;rounded=1;fontSize=13;fontStyle=1;spacingLeft=10;spacingTop=5;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="100" y="1130" width="2800" height="60" as="geometry"/>
+                </mxCell>
+            </root>
+        </mxGraphModel>
+    </diagram>
+    <diagram id="multiworker-start-flow" name="MultiWorkerProductionLine::start()流程">
+        <mxGraphModel grid="1" page="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" pageScale="1" pageWidth="2400" pageHeight="3000" math="0" shadow="0">
+            <root>
+                <mxCell id="0"/>
+                <mxCell id="1" parent="0"/>
+                <mxCell id="title-main" value="MultiWorkerProductionLine::start() 执行流程" style="text;html=1;strokeColor=#1ba1e2;fillColor=#dae8fc;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=1;fontSize=20;fontStyle=1;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="50" y="20" width="2300" height="50" as="geometry"/>
+                </mxCell>
+                <mxCell id="step-start" value="开始: start()" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=14;fontStyle=1;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="1050" y="100" width="200" height="50" as="geometry"/>
+                </mxCell>
+                <mxCell id="step-check-running" value="检查是否已运行?" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=12;fontStyle=1;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="1075" y="180" width="150" height="80" as="geometry"/>
+                </mxCell>
+                <mxCell id="arrow1" value="" style="endArrow=classic;html=1;rounded=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeWidth=2" parent="1" source="step-start" target="step-check-running" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="step-return-false" value="返回 false" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=12;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="900" y="195" width="100" height="50" as="geometry"/>
+                </mxCell>
+                <mxCell id="arrow-running-yes" value="是" style="endArrow=classic;html=1;rounded=0;exitX=0;exitY=0.5;exitDx=0;exitDy=0;entryX=1;entryY=0.5;entryDx=0;entryDy=0;strokeWidth=2;fontColor=#000000;" parent="1" source="step-check-running" target="step-return-false" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="step-init-threadpool" value="步骤2：初始化全局线程池&#10;GlobalThreadPool::getInstance()&#10;.setSize(config_.thread_pool_size)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="1025" y="290" width="250" height="60" as="geometry"/>
+                </mxCell>
+                <mxCell id="arrow2" value="否" style="endArrow=classic;html=1;rounded=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeWidth=2;fontColor=#000000;" parent="1" source="step-check-running" target="step-init-threadpool" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="step-validate" value="步骤3：校验配置&#10;validateConfig()" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="1050" y="380" width="200" height="50" as="geometry"/>
+                </mxCell>
+                <mxCell id="arrow3" value="" style="endArrow=classic;html=1;rounded=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeWidth=2" parent="1" source="step-init-threadpool" target="step-validate" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="step-validate-fail" value="返回 false" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=12;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="900" y="380" width="100" height="50" as="geometry"/>
+                </mxCell>
+                <mxCell id="arrow-validate-fail" value="失败" style="endArrow=classic;html=1;rounded=0;exitX=0;exitY=0.5;exitDx=0;exitDy=0;entryX=1;entryY=0.5;entryDx=0;entryDy=0;strokeWidth=2;dashed=1;fontColor=#000000;" parent="1" source="step-validate" target="step-validate-fail" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="step-loop-start" value="步骤4：遍历所有 WorkerGroup&#10;for (group_idx = 0; group_idx &lt; config_.groups.size())" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=11;fontStyle=1;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="975" y="470" width="350" height="50" as="geometry"/>
+                </mxCell>
+                <mxCell id="arrow4" value="通过" style="endArrow=classic;html=1;rounded=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeWidth=2;fontColor=#000000;" parent="1" source="step-validate" target="step-loop-start" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="group-box-producer" value="步骤4.1：创建所有生产者 Worker" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;fontStyle=1;align=left;verticalAlign=top;spacingLeft=10;spacingTop=5;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="200" y="570" width="500" height="280" as="geometry"/>
+                </mxCell>
+                <mxCell id="step-producer-loop" value="遍历生产者配置&#10;for (pcfg : producer_configs)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="220" y="610" width="200" height="50" as="geometry"/>
+                </mxCell>
+                <mxCell id="step-create-producer" value="创建 VideoProductionLine&#10;作为生产者" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=10;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="220" y="680" width="200" height="40" as="geometry"/>
+                </mxCell>
+                <mxCell id="step-start-producer" value="启动生产者&#10;producer_line-&gt;start()" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=10;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="220" y="740" width="200" height="40" as="geometry"/>
+                </mxCell>
+                <mxCell id="step-get-pool-id" value="获取 BufferPool ID" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=10;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="220" y="800" width="200" height="40" as="geometry"/>
+                </mxCell>
+                <mxCell id="step-save-producer" value="保存生产者信息&#10;(producer_id, buffer_pool)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="460" y="740" width="200" height="60" as="geometry"/>
+                </mxCell>
+                <mxCell id="arrow-producer1" value="" style="endArrow=classic;html=1;rounded=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeWidth=1" parent="1" source="step-producer-loop" target="step-create-producer" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="arrow-producer2" value="" style="endArrow=classic;html=1;rounded=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeWidth=1" parent="1" source="step-create-producer" target="step-start-producer" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="arrow-producer3" value="" style="endArrow=classic;html=1;rounded=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeWidth=1" parent="1" source="step-start-producer" target="step-get-pool-id" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="arrow-producer4" value="" style="endArrow=classic;html=1;rounded=0;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;strokeWidth=1" parent="1" source="step-get-pool-id" target="step-save-producer" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="group-box-preanalysis" value="步骤4.2：创建 Connector 并保存 shared_source（v2.20优化）" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=12;fontStyle=1;align=left;verticalAlign=top;spacingLeft=10;spacingTop=5;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="750" y="570" width="500" height="280" as="geometry"/>
+                </mxCell>
+                <mxCell id="step-get-codec" value="找到 producer/consumer&#10;索引" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="770" y="610" width="180" height="40" as="geometry"/>
+                </mxCell>
+                <mxCell id="step-connector-loop" value="遍历连接器配置&#10;for (conn_cfg : connector_configs)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=10;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="770" y="670" width="220" height="40" as="geometry"/>
+                </mxCell>
+                <mxCell id="step-check-onetomany" value="创建 Connector 对象" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=10;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="790" y="730" width="180" height="40" as="geometry"/>
+                </mxCell>
+                <mxCell id="step-create-shared" value="是 ONE_TO_MANY？" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="800" y="790" width="160" height="50" as="geometry"/>
+                </mxCell>
+                <mxCell id="step-get-producer-codec" value="获取 producer 的&#10;codec_params" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=10;fontColor=#000000;" vertex="1" parent="1">
+                    <mxGeometry x="1010" y="745" width="150" height="40" as="geometry"/>
+                </mxCell>
+                <mxCell id="step-build-map" value="✅ 创建 shared_source&#10;保存到 Connector" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=10;fontStyle=1;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="1010" y="805" width="150" height="50" as="geometry"/>
+                </mxCell>
+                <mxCell id="arrow-pre1" value="" style="endArrow=classic;html=1;rounded=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeWidth=1" parent="1" source="step-get-codec" target="step-connector-loop" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="arrow-pre2" value="" style="endArrow=classic;html=1;rounded=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeWidth=2;strokeColor=#9673a6" parent="1" source="step-connector-loop" target="step-check-onetomany" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="arrow-pre3" value="" style="endArrow=classic;html=1;rounded=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeWidth=2;strokeColor=#9673a6;fontColor=#000000;" parent="1" source="step-check-onetomany" target="step-create-shared" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="arrow-pre4" value="是" style="endArrow=classic;html=1;rounded=0;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;strokeWidth=2;strokeColor=#9673a6;fontColor=#000000;" parent="1" source="step-create-shared" target="step-get-producer-codec" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="990" y="815"/>
+                            <mxPoint x="990" y="765"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="arrow-codec-to-shared" value="" style="endArrow=classic;html=1;rounded=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeWidth=2;strokeColor=#d79b00" edge="1" parent="1" source="step-get-producer-codec" target="step-build-map">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="group-box-consumer" value="步骤4.3：创建并打开所有消费者（根据 Connector 模式配置）" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=12;fontStyle=1;align=left;verticalAlign=top;spacingLeft=10;spacingTop=5;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="1300" y="570" width="460" height="600" as="geometry"/>
+                </mxCell>
+                <mxCell id="step-consumer-loop" value="遍历消费者配置&#10;for (ccfg : consumer_configs)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=10;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="1320" y="610" width="200" height="40" as="geometry"/>
+                </mxCell>
+                <mxCell id="step-config-consumer" value="配置 buffer mode" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=10;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="1320" y="670" width="200" height="40" as="geometry"/>
+                </mxCell>
+                <mxCell id="step-query-map" value="查找所属的 Connector" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=10;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="1340" y="725" width="160" height="40" as="geometry"/>
+                </mxCell>
+                <mxCell id="step-set-shared" value="Connector 有&#10;shared_source?" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="1350" y="785" width="140" height="60" as="geometry"/>
+                </mxCell>
+                <mxCell id="step-shared-mode" value="✅ 设置 config.&#10;shared_packet_source" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=10;fontStyle=1;fontColor=#000000;" vertex="1" parent="1">
+                    <mxGeometry x="1560" y="785" width="160" height="60" as="geometry"/>
+                </mxCell>
+                <mxCell id="step-normal-mode" value="✅ 获取 producer&#10;codec_params&#10;设置 config.codec_params&#10;（用于创建独立 BufferPacketSource）" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=9;fontColor=#000000;" vertex="1" parent="1">
+                    <mxGeometry x="1560" y="870" width="160" height="70" as="geometry"/>
+                </mxCell>
+                <mxCell id="step-create-worker" value="创建 Worker&#10;构造函数根据 config：&#10;• 有 shared_source → 直接使用&#10;• 有 codec_params → 创建独立 BufferPacketSource" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=9;fontStyle=1;fontColor=#000000;" vertex="1" parent="1">
+                    <mxGeometry x="1340" y="960" width="180" height="70" as="geometry"/>
+                </mxCell>
+                <mxCell id="step-set-pool" value="普通模式？&#10;setSourceBufferPool" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=9;fontColor=#000000;" vertex="1" parent="1">
+                    <mxGeometry x="1355" y="1030" width="150" height="50" as="geometry"/>
+                </mxCell>
+                <mxCell id="step-open-worker" value="worker-&gt;open() ✅" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;fontStyle=1;fontColor=#000000;" vertex="1" parent="1">
+                    <mxGeometry x="1350" y="1100" width="160" height="40" as="geometry"/>
+                </mxCell>
+                <mxCell id="arrow-cons1" value="" style="endArrow=classic;html=1;rounded=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeWidth=1" parent="1" source="step-consumer-loop" target="step-config-consumer" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="arrow-cons2" value="" style="endArrow=classic;html=1;rounded=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeWidth=2;strokeColor=#b85450" parent="1" source="step-config-consumer" target="step-query-map" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="arrow-cons3" value="" style="endArrow=classic;html=1;rounded=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeWidth=2;strokeColor=#9673a6;fontColor=#000000;" parent="1" source="step-query-map" target="step-set-shared" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="arrow-shared-yes" value="是（ONE_TO_MANY）" style="endArrow=classic;html=1;rounded=0;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;strokeWidth=2;strokeColor=#d79b00;fontColor=#000000;" edge="1" parent="1" source="step-set-shared" target="step-shared-mode">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="arrow-shared-no" value="否（普通模式）" style="endArrow=classic;html=1;rounded=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;strokeWidth=2;strokeColor=#82b366;fontColor=#000000;" edge="1" parent="1" source="step-set-shared" target="step-normal-mode">
+                    <mxGeometry x="-0.4" y="10" width="50" height="50" relative="1" as="geometry">
+                        <mxPoint as="offset"/>
+                        <Array as="points">
+                            <mxPoint x="1420" y="900"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="arrow-to-create" value="" style="endArrow=classic;html=1;rounded=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=1;entryY=0.5;entryDx=0;entryDy=0;strokeWidth=2;strokeColor=#6c8ebf;fontColor=#000000;" edge="1" parent="1" source="step-shared-mode" target="step-create-worker">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="1640" y="985"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="arrow-normal-to-create" value="" style="endArrow=classic;html=1;rounded=0;exitX=0;exitY=0.5;exitDx=0;exitDy=0;entryX=1;entryY=1;entryDx=0;entryDy=0;strokeWidth=2;strokeColor=#82b366;fontColor=#000000;" edge="1" parent="1" source="step-normal-mode" target="step-create-worker">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="arrow-to-pool-check" value="" style="endArrow=classic;html=1;rounded=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeWidth=2;strokeColor=#6c8ebf" edge="1" parent="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry">
+                        <mxPoint x="1420" y="1340" as="sourcePoint"/>
+                        <mxPoint x="1420" y="1360" as="targetPoint"/>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="arrow-pool-yes" value="是" style="endArrow=classic;html=1;rounded=0;exitX=0;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0;entryDx=0;entryDy=0;strokeWidth=2;strokeColor=#82b366;fontColor=#000000;" edge="1" parent="1" source="step-set-pool" target="step-open-worker">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="1320" y="1055"/>
+                            <mxPoint x="1320" y="1100"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="arrow-pool-no" value="否（共享模式）" style="endArrow=classic;html=1;rounded=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeWidth=2;strokeColor=#d79b00;fontColor=#000000;" edge="1" parent="1" source="step-set-pool" target="step-open-worker">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="arrow-to-producer" value="" style="endArrow=classic;html=1;rounded=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeWidth=2;strokeColor=#82b366" parent="1" source="step-loop-start" target="step-producer-loop" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="1150" y="550"/>
+                            <mxPoint x="320" y="550"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="arrow-producer-to-pre" value="" style="endArrow=classic;html=1;rounded=0;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;strokeWidth=2;strokeColor=#82b366" parent="1" source="step-save-producer" target="step-connector-loop" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="720" y="770"/>
+                            <mxPoint x="720" y="690"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="arrow-pre-to-consumer" value="Connector已创建" style="endArrow=classic;html=1;rounded=0;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;strokeWidth=2;strokeColor=#9673a6;fontColor=#000000;" parent="1" source="step-connector-loop" target="step-consumer-loop" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="1260" y="690"/>
+                            <mxPoint x="1260" y="630"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="step-init-state" value="步骤5：初始化状态&#10;running_ = true&#10;start_time_ = now()" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="1050" y="920" width="200" height="60" as="geometry"/>
+                </mxCell>
+                <mxCell id="arrow-to-init" value="所有消费者已打开" style="endArrow=classic;html=1;rounded=0;exitX=0;exitY=0.5;exitDx=0;exitDy=0;entryX=1;entryY=0.5;entryDx=0;entryDy=0;strokeWidth=2;strokeColor=#b85450;fontColor=#000000;" parent="1" source="step-open-worker" target="step-init-state" edge="1">
+                    <mxGeometry x="-0.2" y="10" width="50" height="50" relative="1" as="geometry">
+                        <mxPoint as="offset"/>
+                        <Array as="points">
+                            <mxPoint x="1280" y="1120"/>
+                            <mxPoint x="1280" y="950"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="step-start-threads" value="步骤6：启动所有 Group 线程&#10;group-&gt;group_thread = std::thread(&#10;    groupThreadFunc, group)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="1025" y="1010" width="250" height="60" as="geometry"/>
+                </mxCell>
+                <mxCell id="arrow5" value="" style="endArrow=classic;html=1;rounded=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeWidth=2" parent="1" source="step-init-state" target="step-start-threads" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="step-end" value="返回 true&#10;启动成功 ✅" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=14;fontStyle=1;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="1050" y="1100" width="200" height="50" as="geometry"/>
+                </mxCell>
+                <mxCell id="arrow6" value="" style="endArrow=classic;html=1;rounded=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeWidth=2" parent="1" source="step-start-threads" target="step-end" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="note-optimization" value="⭐ v2.20 关键优化（完整流程）：&#10;&#10;• 步骤4.2：创建 Connector 时保存 shared_source&#10;  ✅ shared_source 在 Connector 内部&#10;  ✅ 需要从 producer 获取 codec_params（创建 shared_source 必需）&#10;&#10;• 步骤4.3：创建消费者时根据模式配置&#10;  ✅ ONE_TO_MANY：config.shared_packet_source（不需要 codec_params）&#10;  ✅ 普通模式：config.codec_params + setSourceBufferPool&#10;  ✅ Worker 构造函数根据 config 创建 packet_source&#10;  ✅ Worker-&gt;open() 一步完成 ✅&#10;&#10;• 避免了重新创建 Worker 的开销 ✅" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=11;align=left;verticalAlign=top;spacingLeft=10;spacingTop=10;fontStyle=1;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="50" y="1200" width="480" height="250" as="geometry"/>
+                </mxCell>
+                <mxCell id="note-dataflow" value="核心关系与 codec_params 的作用：&#10;&#10;• codec_params 用于创建 BufferPacketSource：&#10;  ├─ 步骤4.2：创建 shared_source（ONE_TO_MANY）&#10;  └─ 步骤4.3：创建独立 BufferPacketSource（普通模式）&#10;&#10;• 两种模式的 config 配置：&#10;  ├─ ONE_TO_MANY：只设置 config.shared_packet_source&#10;  │                 Worker 直接使用，不需要 codec_params&#10;  └─ 普通模式：设置 config.codec_params&#10;                Worker 构造函数用它创建独立 BufferPacketSource&#10;&#10;• Connector 提供：&#10;  ├─ shared_source（如果是 ONE_TO_MANY）&#10;  └─ producer 引用（用于获取 codec_params 和 BufferPool）" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;align=left;verticalAlign=top;spacingLeft=10;spacingTop=10;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="560" y="1200" width="480" height="250" as="geometry"/>
+                </mxCell>
+                <mxCell id="legend-title2" value="图例说明" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=14;fontStyle=1;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="1350" y="920" width="950" height="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="legend-box2" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;align=left;verticalAlign=top" parent="1" vertex="1">
+                    <mxGeometry x="1290" y="1300" width="950" height="140" as="geometry"/>
+                </mxCell>
+                <mxCell id="legend-producer-box" value="生产者相关" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=10;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="1370" y="1310" width="100" height="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="legend-preanalysis-box" value="预分析阶段" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="1480" y="1310" width="100" height="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="legend-consumer-box" value="消费者相关" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=10;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="1600" y="1310" width="100" height="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="legend-connector-box" value="连接器相关" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=10;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="1720" y="1310" width="100" height="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="legend-control-box" value="流程控制" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=10;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="1840" y="1310" width="100" height="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="legend-optimization" value="⭐ 优化点" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=10;fontStyle=1;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="1980" y="1310" width="100" height="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="legend-note" value="• 绿色：生产者创建和管理&#10;• 黄色：连接器预分析（避免重复创建）&#10;• 红色：消费者创建和配置&#10;• 紫色：连接器创建和绑定&#10;• 蓝色：主流程控制&#10;• 橙色：关键优化点（v2.19）" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=top;whiteSpace=wrap;rounded=0;fontSize=10;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="1310" y="1360" width="900" height="70" as="geometry"/>
+                </mxCell>
+            </root>
+        </mxGraphModel>
+    </diagram>
+    <diagram id="group-thread-func-flow" name="groupThreadFunc()流程">
+        <mxGraphModel dx="903" dy="681" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="2400" pageHeight="2500" math="0" shadow="0">
+            <root>
+                <mxCell id="0"/>
+                <mxCell id="1" parent="0"/>
+                <mxCell id="title-group-thread" value="groupThreadFunc() 执行流程（Group 工作线程）" style="text;html=1;strokeColor=#6c8ebf;fillColor=#dae8fc;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=1;fontSize=16;fontStyle=1;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="50" y="20" width="600" height="40" as="geometry"/>
+                </mxCell>
+                <mxCell id="step-start" value="线程启动&#10;group-&gt;is_running = true" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;fontStyle=1;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="250" y="80" width="200" height="50" as="geometry"/>
+                </mxCell>
+                <mxCell id="loop-start" value="主循环开始&#10;while (is_running)" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;fontStyle=1;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="240" y="160" width="220" height="80" as="geometry"/>
+                </mxCell>
+                <mxCell id="step-count-active" value="步骤1：统计活跃消费者&#10;遍历所有 Connector 和 Consumer&#10;检查 worker-&gt;isOpen()" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=10;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="230" y="270" width="240" height="60" as="geometry"/>
+                </mxCell>
+                <mxCell id="check-active" value="active_consumers &gt; 0?" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="250" y="360" width="200" height="60" as="geometry"/>
+                </mxCell>
+                <mxCell id="step-sleep" value="休眠 100ms&#10;continue" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=10;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="520" y="360" width="120" height="60" as="geometry"/>
+                </mxCell>
+                <mxCell id="step-create-latch" value="步骤2：创建同步门闩&#10;latch = CountDownLatch(active_consumers)&#10;success_count = 0, error_count = 0" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=10;fontStyle=1;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="210" y="460" width="280" height="60" as="geometry"/>
+                </mxCell>
+                <mxCell id="step-submit-tasks" value="步骤3：提交任务到线程池&#10;遍历所有活跃消费者&#10;thread_pool.detach_task(...)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=10;fontStyle=1;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="210" y="550" width="280" height="60" as="geometry"/>
+                </mxCell>
+                <mxCell id="group-consumer-task" value="消费者任务（并行执行）" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=12;fontStyle=1;align=left;verticalAlign=top;spacingLeft=10;spacingTop=5;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="600" y="270" width="420" height="470" as="geometry"/>
+                </mxCell>
+                <mxCell id="task-check-pool" value="检查 BufferPool 是否可用&#10;pool = buffer_pool_weak.lock()" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=10;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="620" y="310" width="200" height="50" as="geometry"/>
+                </mxCell>
+                <mxCell id="task-check-pool-ok" value="Pool 可用?" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="650" y="380" width="140" height="50" as="geometry"/>
+                </mxCell>
+                <mxCell id="task-error-no-pool" value="error_count++&#10;countDown()&#10;return" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=10;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="860" y="380" width="120" height="50" as="geometry"/>
+                </mxCell>
+                <mxCell id="task-loop-fill" value="循环填充 Buffer&#10;while (true)" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;fontStyle=1;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="640" y="460" width="160" height="60" as="geometry"/>
+                </mxCell>
+                <mxCell id="task-acquire-buffer" value="获取空闲 Buffer&#10;acquireFree(100ms)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=10;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="640" y="550" width="160" height="40" as="geometry"/>
+                </mxCell>
+                <mxCell id="task-check-buffer" value="Buffer 获取成功?" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=9;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="650" y="610" width="140" height="50" as="geometry"/>
+                </mxCell>
+                <mxCell id="task-fill-buffer" value="fillBuffer(buffer)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=10;fontStyle=1;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="650" y="680" width="140" height="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="task-check-fill-success" value="填充成功?" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=9;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="650" y="730" width="140" height="50" as="geometry"/>
+                </mxCell>
+                <mxCell id="task-submit-filled" value="submitFilled(buffer)&#10;frames_processed++&#10;success_count++" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=9;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="645" y="800" width="150" height="50" as="geometry"/>
+                </mxCell>
+                <mxCell id="task-release-buffer" value="releaseFree(buffer)&#10;break" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=9;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="840" y="730" width="140" height="50" as="geometry"/>
+                </mxCell>
+                <mxCell id="task-break-no-buffer" value="break&#10;(无法获取 Buffer)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=9;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="840" y="610" width="140" height="50" as="geometry"/>
+                </mxCell>
+                <mxCell id="task-update-stats" value="更新统计&#10;if (frames_processed &gt; 0)&#10;  group-&gt;success_count++&#10;else error_count++" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=9;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="640" y="870" width="160" height="60" as="geometry"/>
+                </mxCell>
+                <mxCell id="task-countdown" value="latch-&gt;countDown()" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=10;fontStyle=1;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="650" y="950" width="140" height="40" as="geometry"/>
+                </mxCell>
+                <mxCell id="step-wait-latch" value="步骤4：等待所有任务完成&#10;latch-&gt;wait(5000ms)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=10;fontStyle=1;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="210" y="780" width="280" height="50" as="geometry"/>
+                </mxCell>
+                <mxCell id="check-timeout" value="超时?" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="270" y="860" width="160" height="50" as="geometry"/>
+                </mxCell>
+                <mxCell id="step-log-timeout" value="记录超时错误" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=10;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="520" y="860" width="120" height="50" as="geometry"/>
+                </mxCell>
+                <mxCell id="step-update-stats" value="步骤5：更新全局统计&#10;processed_count++&#10;total_packets_succeeded += success_count&#10;total_packets_failed += error_count" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=10;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="195" y="950" width="310" height="70" as="geometry"/>
+                </mxCell>
+                <mxCell id="step-delay" value="延迟 1ms&#10;sleep_for(1ms)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=10;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="250" y="1050" width="200" height="50" as="geometry"/>
+                </mxCell>
+                <mxCell id="step-end" value="线程结束&#10;记录统计信息" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=11;fontStyle=1;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="250" y="1150" width="200" height="50" as="geometry"/>
+                </mxCell>
+                <mxCell id="arrow-start-to-loop" value="" style="endArrow=classic;html=1;rounded=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeWidth=2;strokeColor=#82b366" parent="1" source="step-start" target="loop-start" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="arrow-loop-to-count" value="继续运行" style="endArrow=classic;html=1;rounded=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeWidth=2;strokeColor=#6c8ebf;fontColor=#000000;" parent="1" source="loop-start" target="step-count-active" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="arrow-count-to-check" value="" style="endArrow=classic;html=1;rounded=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeWidth=2;strokeColor=#6c8ebf" parent="1" source="step-count-active" target="check-active" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="arrow-check-to-sleep" value="否" style="endArrow=classic;html=1;rounded=0;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;strokeWidth=2;strokeColor=#b85450;fontColor=#000000;" parent="1" source="check-active" target="step-sleep" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="arrow-sleep-to-loop" value="" style="endArrow=classic;html=1;rounded=0;exitX=0.5;exitY=0;exitDx=0;exitDy=0;entryX=1;entryY=0.5;entryDx=0;entryDy=0;strokeWidth=2;strokeColor=#b85450" parent="1" source="step-sleep" target="loop-start" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="580" y="200"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="arrow-check-to-latch" value="是" style="endArrow=classic;html=1;rounded=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeWidth=2;strokeColor=#82b366;fontColor=#000000;" parent="1" source="check-active" target="step-create-latch" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="arrow-latch-to-submit" value="" style="endArrow=classic;html=1;rounded=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeWidth=2;strokeColor=#9673a6" parent="1" source="step-create-latch" target="step-submit-tasks" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="arrow-submit-to-task" value="每个消费者一个任务" style="endArrow=classic;html=1;rounded=0;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;strokeWidth=2;strokeColor=#d79b00;dashed=1;fontColor=#000000;" parent="1" source="step-submit-tasks" target="task-check-pool" edge="1">
+                    <mxGeometry x="-0.1" y="10" width="50" height="50" relative="1" as="geometry">
+                        <mxPoint as="offset"/>
+                        <Array as="points">
+                            <mxPoint x="560" y="580"/>
+                            <mxPoint x="560" y="335"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="arrow-task-check-pool" value="" style="endArrow=classic;html=1;rounded=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeWidth=2;strokeColor=#6c8ebf" parent="1" source="task-check-pool" target="task-check-pool-ok" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="arrow-pool-no" value="否" style="endArrow=classic;html=1;rounded=0;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;strokeWidth=2;strokeColor=#b85450;fontColor=#000000;" parent="1" source="task-check-pool-ok" target="task-error-no-pool" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="arrow-pool-yes" value="是" style="endArrow=classic;html=1;rounded=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeWidth=2;strokeColor=#82b366;fontColor=#000000;" parent="1" source="task-check-pool-ok" target="task-loop-fill" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="arrow-loop-to-acquire" value="" style="endArrow=classic;html=1;rounded=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeWidth=2;strokeColor=#82b366" parent="1" source="task-loop-fill" target="task-acquire-buffer" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="arrow-acquire-to-check" value="" style="endArrow=classic;html=1;rounded=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeWidth=2;strokeColor=#82b366" parent="1" source="task-acquire-buffer" target="task-check-buffer" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="arrow-buffer-no" value="否/超时" style="endArrow=classic;html=1;rounded=0;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;strokeWidth=2;strokeColor=#b85450;fontColor=#000000;" parent="1" source="task-check-buffer" target="task-break-no-buffer" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="arrow-buffer-yes" value="是" style="endArrow=classic;html=1;rounded=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeWidth=2;strokeColor=#82b366;fontColor=#000000;" parent="1" source="task-check-buffer" target="task-fill-buffer" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="arrow-fill-to-check" value="" style="endArrow=classic;html=1;rounded=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeWidth=2;strokeColor=#d79b00" parent="1" source="task-fill-buffer" target="task-check-fill-success" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="arrow-fill-yes" value="是" style="endArrow=classic;html=1;rounded=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeWidth=2;strokeColor=#82b366;fontColor=#000000;" parent="1" source="task-check-fill-success" target="task-submit-filled" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="arrow-fill-no" value="否" style="endArrow=classic;html=1;rounded=0;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;strokeWidth=2;strokeColor=#b85450;fontColor=#000000;" parent="1" source="task-check-fill-success" target="task-release-buffer" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="arrow-submit-to-loop" value="继续循环" style="endArrow=classic;html=1;rounded=0;exitX=0;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;strokeWidth=2;strokeColor=#82b366;fontColor=#000000;" parent="1" source="task-submit-filled" target="task-loop-fill" edge="1">
+                    <mxGeometry x="-0.2" y="10" width="50" height="50" relative="1" as="geometry">
+                        <mxPoint as="offset"/>
+                        <Array as="points">
+                            <mxPoint x="620" y="825"/>
+                            <mxPoint x="620" y="490"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="arrow-break-to-stats" value="" style="endArrow=classic;html=1;rounded=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=1;entryY=0.5;entryDx=0;entryDy=0;strokeWidth=2;strokeColor=#9673a6" parent="1" source="task-break-no-buffer" target="task-update-stats" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="910" y="900"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="arrow-release-to-stats" value="" style="endArrow=classic;html=1;rounded=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=1;entryY=0;entryDx=0;entryDy=0;strokeWidth=2;strokeColor=#9673a6" parent="1" source="task-release-buffer" target="task-update-stats" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="910" y="860"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="arrow-stats-to-countdown" value="" style="endArrow=classic;html=1;rounded=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeWidth=2;strokeColor=#9673a6" parent="1" source="task-update-stats" target="task-countdown" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="arrow-submit-to-wait" value="" style="endArrow=classic;html=1;rounded=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeWidth=2;strokeColor=#9673a6" parent="1" source="step-submit-tasks" target="step-wait-latch" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="350" y="640"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="arrow-wait-to-check" value="" style="endArrow=classic;html=1;rounded=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeWidth=2;strokeColor=#9673a6" parent="1" source="step-wait-latch" target="check-timeout" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="arrow-timeout-yes" value="是" style="endArrow=classic;html=1;rounded=0;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;strokeWidth=2;strokeColor=#b85450;fontColor=#000000;" parent="1" source="check-timeout" target="step-log-timeout" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="arrow-timeout-no" value="否" style="endArrow=classic;html=1;rounded=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeWidth=2;strokeColor=#82b366;fontColor=#000000;" parent="1" source="check-timeout" target="step-update-stats" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="arrow-log-to-stats" value="" style="endArrow=classic;html=1;rounded=0;exitX=0;exitY=0.5;exitDx=0;exitDy=0;entryX=1;entryY=0.5;entryDx=0;entryDy=0;strokeWidth=2;strokeColor=#b85450" parent="1" source="step-log-timeout" target="step-update-stats" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="arrow-stats-to-delay" value="" style="endArrow=classic;html=1;rounded=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeWidth=2;strokeColor=#82b366" parent="1" source="step-update-stats" target="step-delay" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="arrow-delay-to-loop" value="继续循环" style="endArrow=classic;html=1;rounded=0;exitX=0;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;strokeWidth=2;strokeColor=#6c8ebf;fontColor=#000000;" parent="1" source="step-delay" target="loop-start" edge="1">
+                    <mxGeometry x="-0.2" y="10" width="50" height="50" relative="1" as="geometry">
+                        <mxPoint as="offset"/>
+                        <Array as="points">
+                            <mxPoint x="180" y="1075"/>
+                            <mxPoint x="180" y="200"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="arrow-loop-to-end" value="停止运行" style="endArrow=classic;html=1;rounded=0;exitX=0;exitY=0.5;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeWidth=2;strokeColor=#b85450;fontColor=#000000;" parent="1" source="loop-start" target="step-end" edge="1">
+                    <mxGeometry x="-0.4" y="10" width="50" height="50" relative="1" as="geometry">
+                        <mxPoint as="offset"/>
+                        <Array as="points">
+                            <mxPoint x="150" y="200"/>
+                            <mxPoint x="150" y="1120"/>
+                            <mxPoint x="350" y="1120"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="note-parallel" value="⭐ 关键设计：&#10;&#10;• 所有消费者任务并行执行在全局线程池中&#10;• 使用 CountDownLatch 同步等待所有任务完成&#10;• 每个消费者任务循环填充 Buffer 直到失败&#10;• 主线程等待所有任务完成后更新统计信息" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=11;align=left;verticalAlign=top;spacingLeft=10;spacingTop=10;fontStyle=1;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="50" y="1250" width="400" height="150" as="geometry"/>
+                </mxCell>
+                <mxCell id="note-fill-buffer" value="⭐ fillBuffer() 逻辑：&#10;&#10;• 循环调用直到失败（缓存为空或无数据）&#10;• 成功：submitFilled() 并继续循环&#10;• 失败：releaseFree() 并退出循环&#10;• 避免阻塞：acquireFree() 使用 100ms 超时" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;align=left;verticalAlign=top;spacingLeft=10;spacingTop=10;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="500" y="1250" width="380" height="150" as="geometry"/>
+                </mxCell>
+                <mxCell id="legend-box" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;align=left;verticalAlign=top" parent="1" vertex="1">
+                    <mxGeometry x="1080" y="270" width="280" height="300" as="geometry"/>
+                </mxCell>
+                <mxCell id="legend-title" value="图例说明" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=14;fontStyle=1;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="1150" y="280" width="140" height="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="legend-start" value="启动/结束" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=10;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="1100" y="320" width="100" height="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="legend-process" value="处理步骤" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=10;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="1220" y="320" width="100" height="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="legend-decision" value="判断条件" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="1110" y="370" width="80" height="40" as="geometry"/>
+                </mxCell>
+                <mxCell id="legend-sync" value="同步操作" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=10;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="1220" y="375" width="100" height="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="legend-submit" value="任务提交" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=10;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="1100" y="430" width="100" height="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="legend-consumer" value="消费者任务" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=10;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="1220" y="430" width="100" height="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="legend-note-text" value="• 绿色：启动/结束/成功路径&#10;• 蓝色：主流程处理步骤&#10;• 黄色：条件判断&#10;• 紫色：同步/协调操作&#10;• 橙色：任务提交/关键操作&#10;• 红色：消费者任务/错误处理" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=top;whiteSpace=wrap;rounded=0;fontSize=10;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="1100" y="480" width="240" height="80" as="geometry"/>
+                </mxCell>
+            </root>
+        </mxGraphModel>
+    </diagram>
+    <diagram id="fetch-task-func-flow" name="BufferPacketSource::fetchTaskFunc()流程">
+        <mxGraphModel dx="903" dy="681" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="2400" pageHeight="2800" math="0" shadow="0">
+            <root>
+                <mxCell id="0"/>
+                <mxCell id="1" parent="0"/>
+                <mxCell id="title-fetch" value="BufferPacketSource::fetchTaskFunc() 执行流程（共享模式 ONE_TO_MANY）" style="text;html=1;strokeColor=#6c8ebf;fillColor=#dae8fc;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=1;fontSize=16;fontStyle=1;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="50" y="20" width="800" height="40" as="geometry"/>
+                </mxCell>
+                <mxCell id="group-fetch-task" value="Fetch 任务（生产者线程）" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;fontStyle=1;align=left;verticalAlign=top;spacingLeft=10;spacingTop=5;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="50" y="80" width="480" height="1800" as="geometry"/>
+                </mxCell>
+                <mxCell id="fetch-start" value="任务启动&#10;fetch_task_running_ = true&#10;创建 RAII Guard" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=10;fontStyle=1;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="150" y="120" width="180" height="60" as="geometry"/>
+                </mxCell>
+                <mxCell id="fetch-check-pool" value="检查 source_pool_&#10;pool = source_pool_.lock()" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=10;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="150" y="210" width="180" height="50" as="geometry"/>
+                </mxCell>
+                <mxCell id="fetch-pool-valid" value="Pool 可用?" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="170" y="290" width="140" height="50" as="geometry"/>
+                </mxCell>
+                <mxCell id="fetch-error-no-pool" value="记录错误&#10;return&#10;（Guard 析构通知）" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=10;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="380" y="285" width="120" height="60" as="geometry"/>
+                </mxCell>
+                <mxCell id="fetch-loop-start" value="主循环开始&#10;while (is_running_)" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;fontStyle=1;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="155" y="380" width="170" height="70" as="geometry"/>
+                </mxCell>
+                <mxCell id="fetch-step1-wait" value="步骤1：等待所有订阅者完成&#10;cv_fetch_.wait(lock, ...)&#10;等待条件: remaining_subscribers_ == 0" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=10;fontStyle=1;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="120" y="490" width="240" height="70" as="geometry"/>
+                </mxCell>
+                <mxCell id="fetch-check-stop1" value="收到停止信号?" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="160" y="590" width="160" height="50" as="geometry"/>
+                </mxCell>
+                <mxCell id="fetch-break1" value="break&#10;退出循环" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=10;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="380" y="595" width="100" height="40" as="geometry"/>
+                </mxCell>
+                <mxCell id="fetch-step2-release" value="步骤2：释放旧 Buffer&#10;if (previous_buffer_)&#10;  pool-&gt;releaseFilled(previous_buffer_)&#10;  previous_buffer_ = nullptr" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=9;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="120" y="680" width="240" height="70" as="geometry"/>
+                </mxCell>
+                <mxCell id="fetch-step3-acquire" value="步骤3：获取新 Buffer&#10;new_buffer = pool-&gt;acquireFilled(100ms)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=10;fontStyle=1;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="120" y="790" width="240" height="50" as="geometry"/>
+                </mxCell>
+                <mxCell id="fetch-check-buffer" value="获取成功?" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="165" y="870" width="150" height="50" as="geometry"/>
+                </mxCell>
+                <mxCell id="fetch-check-stop2" value="收到停止信号?" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=9;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="380" y="870" width="120" height="50" as="geometry"/>
+                </mxCell>
+                <mxCell id="fetch-break2" value="break" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=10;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="395" y="950" width="90" height="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="fetch-sleep" value="sleep(10ms)&#10;continue" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=9;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="395" y="1010" width="90" height="40" as="geometry"/>
+                </mxCell>
+                <mxCell id="fetch-validate" value="验证 Buffer&#10;AVPacket 有效?" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=9;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="160" y="960" width="160" height="60" as="geometry"/>
+                </mxCell>
+                <mxCell id="fetch-release-invalid" value="releaseFilled()&#10;continue" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=9;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="80" y="975" width="100" height="40" as="geometry"/>
+                </mxCell>
+                <mxCell id="fetch-step4-set" value="步骤4：设置当前 Buffer（加锁）" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=10;fontStyle=1;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="140" y="1070" width="200" height="40" as="geometry"/>
+                </mxCell>
+                <mxCell id="fetch-save-previous" value="previous_buffer_ = current_buffer_&#10;（暂存旧 Buffer，下轮释放）" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=9;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="120" y="1140" width="240" height="40" as="geometry"/>
+                </mxCell>
+                <mxCell id="fetch-set-current" value="current_buffer_ = new_buffer&#10;（设置新 Buffer）" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=9;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="120" y="1200" width="240" height="40" as="geometry"/>
+                </mxCell>
+                <mxCell id="fetch-reset-counter" value="remaining_subscribers_ =&#10;total_subscribers_&#10;（重置计数器）" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=9;fontStyle=1;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="120" y="1260" width="240" height="50" as="geometry"/>
+                </mxCell>
+                <mxCell id="fetch-notify" value="cv_subscribers_.notify_all()&#10;（唤醒所有订阅者）" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=10;fontStyle=1;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="120" y="1340" width="240" height="50" as="geometry"/>
+                </mxCell>
+                <mxCell id="fetch-loop-continue" value="继续下一轮循环" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=10;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="165" y="1420" width="150" height="40" as="geometry"/>
+                </mxCell>
+                <mxCell id="fetch-end" value="循环结束&#10;退出任务&#10;（Guard 析构：&#10;fetch_task_running_ = false&#10;cv_task_exit_.notify_all()）" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=10;fontStyle=1;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="130" y="1790" width="220" height="80" as="geometry"/>
+                </mxCell>
+                <mxCell id="group-subscribers" value="订阅者线程（多个并发）" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=12;fontStyle=1;align=left;verticalAlign=top;spacingLeft=10;spacingTop=5;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="600" y="80" width="420" height="1000" as="geometry"/>
+                </mxCell>
+                <mxCell id="sub-wait" value="等待新 Buffer&#10;cv_subscribers_.wait(lock, ...)&#10;等待条件: current_buffer_ != nullptr" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=10;fontStyle=1;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="640" y="120" width="240" height="70" as="geometry"/>
+                </mxCell>
+                <mxCell id="sub-check-stop" value="收到停止信号?" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="680" y="220" width="160" height="50" as="geometry"/>
+                </mxCell>
+                <mxCell id="sub-return-eof" value="return AVERROR_EOF" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=10;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="890" y="225" width="110" height="40" as="geometry"/>
+                </mxCell>
+                <mxCell id="sub-check-buffer" value="current_buffer_&#10;有效?" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="685" y="310" width="150" height="50" as="geometry"/>
+                </mxCell>
+                <mxCell id="sub-return-eagain" value="return AVERROR(EAGAIN)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=10;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="880" y="310" width="130" height="50" as="geometry"/>
+                </mxCell>
+                <mxCell id="sub-copy-packet" value="复制 packet 数据&#10;src_packet = current_buffer_-&gt;getAVPacket()&#10;copyPacket(packet, src_packet)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=10;fontStyle=1;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="640" y="400" width="240" height="70" as="geometry"/>
+                </mxCell>
+                <mxCell id="sub-decrement" value="标记完成（原子操作）&#10;remaining = remaining_subscribers_&#10;              .fetch_sub(1) - 1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=9;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="640" y="510" width="240" height="60" as="geometry"/>
+                </mxCell>
+                <mxCell id="sub-check-last" value="是最后一个?&#10;remaining == 0" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="680" y="610" width="160" height="60" as="geometry"/>
+                </mxCell>
+                <mxCell id="sub-notify-fetch" value="cv_fetch_.notify_one()&#10;（唤醒 Fetch 任务）" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=10;fontStyle=1;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="665" y="710" width="190" height="50" as="geometry"/>
+                </mxCell>
+                <mxCell id="sub-return" value="return ret&#10;（返回复制结果）" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=10;fontStyle=1;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="680" y="800" width="160" height="50" as="geometry"/>
+                </mxCell>
+                <mxCell id="sub-not-last" value="直接返回&#10;（不通知 Fetch）" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=9;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="900" y="625" width="100" height="50" as="geometry"/>
+                </mxCell>
+                <mxCell id="note-sync" value="⭐ 同步机制（生产者-消费者模式）：&#10;&#10;1. Fetch 任务等待：cv_fetch_.wait (条件: remaining_subscribers_ == 0)&#10;   → 表示所有订阅者已完成当前 Buffer 的读取&#10;&#10;2. 订阅者等待：cv_subscribers_.wait (条件: current_buffer_ != nullptr)&#10;   → 表示 Fetch 任务已准备好新的 Buffer&#10;&#10;3. 计数器：remaining_subscribers_ 从 total_subscribers_ 递减到 0&#10;   → 最后一个订阅者唤醒 Fetch 任务&#10;&#10;4. 双 Buffer 机制：current_buffer_ + previous_buffer_&#10;   → 避免过早释放正在使用的 Buffer" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=10;align=left;verticalAlign=top;spacingLeft=10;spacingTop=10;fontStyle=1;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="50" y="1930" width="550" height="280" as="geometry"/>
+                </mxCell>
+                <mxCell id="note-lifecycle" value="⭐ Buffer 生命周期：&#10;&#10;阶段 1：Fetch 任务获取新 Buffer (acquireFilled)&#10;  ↓&#10;阶段 2：设置为 current_buffer_，通知所有订阅者&#10;  ↓&#10;阶段 3：所有订阅者并发读取 current_buffer_&#10;  ↓&#10;阶段 4：最后一个订阅者通知 Fetch 任务&#10;  ↓&#10;阶段 5：Fetch 任务将 current_buffer_ → previous_buffer_&#10;  ↓&#10;阶段 6：下一轮循环开始时释放 previous_buffer_&#10;&#10;✅ 确保 Buffer 只在所有订阅者读取完成后才释放" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=10;align=left;verticalAlign=top;spacingLeft=10;spacingTop=10;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="640" y="1930" width="380" height="280" as="geometry"/>
+                </mxCell>
+                <mxCell id="note-zero-copy" value="⭐ 零拷贝设计：&#10;&#10;• 订阅者不会真正拷贝 Buffer 的数据&#10;• copyPacket() 只是让 dst_packet 指向 src_packet&#10;  dst_packet-&gt;data = src_packet-&gt;data&#10;  dst_packet-&gt;buf = nullptr (无引用计数)&#10;&#10;• avcodec_send_packet() 会在内部拷贝数据&#10;• Buffer 的生命周期由 Fetch 任务统一管理&#10;&#10;✅ 多个订阅者共享同一个 Buffer，零拷贝" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=10;align=left;verticalAlign=top;spacingLeft=10;spacingTop=10;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="1070" y="1930" width="380" height="230" as="geometry"/>
+                </mxCell>
+                <mxCell id="note-example" value="⭐ 执行示例（3 个订阅者）：&#10;&#10;时刻 T1：Fetch 获取 Buffer A，设置 current_buffer_ = A&#10;           remaining_subscribers_ = 3，唤醒所有订阅者&#10;&#10;时刻 T2：订阅者 1 读取 A，remaining_subscribers_ = 2&#10;           订阅者 2 读取 A，remaining_subscribers_ = 1&#10;           订阅者 3 读取 A，remaining_subscribers_ = 0 → 唤醒 Fetch&#10;&#10;时刻 T3：Fetch 收到通知，释放 previous_buffer_（如果有）&#10;           获取新 Buffer B&#10;&#10;时刻 T4：Fetch 设置：&#10;           previous_buffer_ = current_buffer_ (= A)&#10;           current_buffer_ = B&#10;           remaining_subscribers_ = 3&#10;&#10;时刻 T5：下一轮循环开始，释放 previous_buffer_ (A)&#10;           此时所有订阅者已完成 A 的读取 ✅" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=9;align=left;verticalAlign=top;spacingLeft=10;spacingTop=10;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="50" y="2260" width="550" height="280" as="geometry"/>
+                </mxCell>
+                <mxCell id="arrow-fetch-start" value="" style="endArrow=classic;html=1;rounded=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeWidth=2;strokeColor=#82b366" parent="1" source="fetch-start" target="fetch-check-pool" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="arrow-pool-check" value="" style="endArrow=classic;html=1;rounded=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeWidth=2;strokeColor=#6c8ebf" parent="1" source="fetch-check-pool" target="fetch-pool-valid" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="arrow-pool-no" value="否" style="endArrow=classic;html=1;rounded=0;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;strokeWidth=2;strokeColor=#b85450;fontColor=#000000;" parent="1" source="fetch-pool-valid" target="fetch-error-no-pool" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="arrow-pool-yes" value="是" style="endArrow=classic;html=1;rounded=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeWidth=2;strokeColor=#82b366;fontColor=#000000;" parent="1" source="fetch-pool-valid" target="fetch-loop-start" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="arrow-loop-continue" value="继续运行" style="endArrow=classic;html=1;rounded=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeWidth=2;strokeColor=#9673a6;fontColor=#000000;" parent="1" source="fetch-loop-start" target="fetch-step1-wait" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="arrow-wait-check" value="" style="endArrow=classic;html=1;rounded=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeWidth=2;strokeColor=#9673a6" parent="1" source="fetch-step1-wait" target="fetch-check-stop1" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="arrow-stop1-yes" value="是" style="endArrow=classic;html=1;rounded=0;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;strokeWidth=2;strokeColor=#b85450;fontColor=#000000;" parent="1" source="fetch-check-stop1" target="fetch-break1" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="arrow-stop1-no" value="否" style="endArrow=classic;html=1;rounded=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeWidth=2;strokeColor=#82b366;fontColor=#000000;" parent="1" source="fetch-check-stop1" target="fetch-step2-release" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="arrow-release-acquire" value="" style="endArrow=classic;html=1;rounded=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeWidth=2;strokeColor=#82b366" parent="1" source="fetch-step2-release" target="fetch-step3-acquire" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="arrow-acquire-check" value="" style="endArrow=classic;html=1;rounded=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeWidth=2;strokeColor=#d79b00" parent="1" source="fetch-step3-acquire" target="fetch-check-buffer" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="arrow-buffer-no" value="否/超时" style="endArrow=classic;html=1;rounded=0;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;strokeWidth=2;strokeColor=#6c8ebf;fontColor=#000000;" parent="1" source="fetch-check-buffer" target="fetch-check-stop2" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="arrow-stop2-yes" value="是" style="endArrow=classic;html=1;rounded=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeWidth=2;strokeColor=#b85450;fontColor=#000000;" parent="1" source="fetch-check-stop2" target="fetch-break2" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="arrow-stop2-no" value="否" style="endArrow=classic;html=1;rounded=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeWidth=2;strokeColor=#6c8ebf;fontColor=#000000;" parent="1" source="fetch-check-stop2" target="fetch-sleep" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="arrow-sleep-loop" value="" style="endArrow=classic;html=1;rounded=0;exitX=0;exitY=0.5;exitDx=0;exitDy=0;entryX=1;entryY=0.5;entryDx=0;entryDy=0;strokeWidth=2;strokeColor=#6c8ebf" parent="1" source="fetch-sleep" target="fetch-loop-start" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="520" y="1030"/>
+                            <mxPoint x="520" y="415"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="arrow-buffer-yes" value="是" style="endArrow=classic;html=1;rounded=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeWidth=2;strokeColor=#82b366;fontColor=#000000;" parent="1" source="fetch-check-buffer" target="fetch-validate" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="arrow-validate-no" value="无效" style="endArrow=classic;html=1;rounded=0;exitX=0;exitY=0.5;exitDx=0;exitDy=0;entryX=1;entryY=0.5;entryDx=0;entryDy=0;strokeWidth=2;strokeColor=#b85450;fontColor=#000000;" parent="1" source="fetch-validate" target="fetch-release-invalid" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="arrow-invalid-loop" value="" style="endArrow=classic;html=1;rounded=0;exitX=0.5;exitY=0;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;strokeWidth=2;strokeColor=#b85450" parent="1" source="fetch-release-invalid" target="fetch-loop-start" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="130" y="900"/>
+                            <mxPoint x="60" y="900"/>
+                            <mxPoint x="60" y="415"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="arrow-validate-yes" value="有效" style="endArrow=classic;html=1;rounded=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeWidth=2;strokeColor=#82b366;fontColor=#000000;" parent="1" source="fetch-validate" target="fetch-step4-set" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="arrow-set-previous" value="" style="endArrow=classic;html=1;rounded=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeWidth=2;strokeColor=#82b366" parent="1" source="fetch-step4-set" target="fetch-save-previous" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="arrow-previous-current" value="" style="endArrow=classic;html=1;rounded=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeWidth=2;strokeColor=#82b366" parent="1" source="fetch-save-previous" target="fetch-set-current" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="arrow-current-counter" value="" style="endArrow=classic;html=1;rounded=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeWidth=2;strokeColor=#82b366" parent="1" source="fetch-set-current" target="fetch-reset-counter" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="arrow-counter-notify" value="" style="endArrow=classic;html=1;rounded=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeWidth=2;strokeColor=#d79b00" parent="1" source="fetch-reset-counter" target="fetch-notify" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="arrow-notify-continue" value="" style="endArrow=classic;html=1;rounded=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeWidth=2;strokeColor=#9673a6" parent="1" source="fetch-notify" target="fetch-loop-continue" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="arrow-continue-loop" value="" style="endArrow=classic;html=1;rounded=0;exitX=0;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;strokeWidth=2;strokeColor=#6c8ebf" parent="1" source="fetch-loop-continue" target="fetch-loop-start" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="100" y="1440"/>
+                            <mxPoint x="100" y="415"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="arrow-loop-end" value="停止运行" style="endArrow=classic;html=1;rounded=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeWidth=2;strokeColor=#b85450;fontColor=#000000;" parent="1" source="fetch-loop-start" target="fetch-end" edge="1">
+                    <mxGeometry x="-0.3" y="10" width="50" height="50" relative="1" as="geometry">
+                        <mxPoint as="offset"/>
+                        <Array as="points">
+                            <mxPoint x="240" y="1700"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="arrow-break1-end" value="" style="endArrow=classic;html=1;rounded=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=1;entryY=0;entryDx=0;entryDy=0;strokeWidth=2;strokeColor=#b85450;dashed=1" parent="1" source="fetch-break1" target="fetch-end" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="430" y="1750"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="arrow-break2-end" value="" style="endArrow=classic;html=1;rounded=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=1;entryY=0.5;entryDx=0;entryDy=0;strokeWidth=2;strokeColor=#b85450;dashed=1" parent="1" source="fetch-break2" target="fetch-end" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="440" y="1830"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="arrow-sub-check-stop" value="" style="endArrow=classic;html=1;rounded=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeWidth=2;strokeColor=#9673a6" parent="1" source="sub-wait" target="sub-check-stop" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="arrow-sub-stop-yes" value="是" style="endArrow=classic;html=1;rounded=0;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;strokeWidth=2;strokeColor=#b85450;fontColor=#000000;" parent="1" source="sub-check-stop" target="sub-return-eof" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="arrow-sub-stop-no" value="否" style="endArrow=classic;html=1;rounded=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeWidth=2;strokeColor=#82b366;fontColor=#000000;" parent="1" source="sub-check-stop" target="sub-check-buffer" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="arrow-sub-buffer-no" value="否" style="endArrow=classic;html=1;rounded=0;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;strokeWidth=2;strokeColor=#b85450;fontColor=#000000;" parent="1" source="sub-check-buffer" target="sub-return-eagain" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="arrow-sub-buffer-yes" value="是" style="endArrow=classic;html=1;rounded=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeWidth=2;strokeColor=#82b366;fontColor=#000000;" parent="1" source="sub-check-buffer" target="sub-copy-packet" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="arrow-sub-copy-decrement" value="" style="endArrow=classic;html=1;rounded=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeWidth=2;strokeColor=#d79b00" parent="1" source="sub-copy-packet" target="sub-decrement" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="arrow-sub-decrement-check" value="" style="endArrow=classic;html=1;rounded=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeWidth=2;strokeColor=#82b366" parent="1" source="sub-decrement" target="sub-check-last" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="arrow-sub-last-yes" value="是" style="endArrow=classic;html=1;rounded=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeWidth=2;strokeColor=#9673a6;fontColor=#000000;" parent="1" source="sub-check-last" target="sub-notify-fetch" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="arrow-sub-last-no" value="否" style="endArrow=classic;html=1;rounded=0;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;strokeWidth=2;strokeColor=#6c8ebf;fontColor=#000000;" parent="1" source="sub-check-last" target="sub-not-last" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="arrow-sub-notify-return" value="" style="endArrow=classic;html=1;rounded=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeWidth=2;strokeColor=#82b366" parent="1" source="sub-notify-fetch" target="sub-return" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="arrow-sub-notlast-return" value="" style="endArrow=classic;html=1;rounded=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=1;entryY=0.5;entryDx=0;entryDy=0;strokeWidth=2;strokeColor=#6c8ebf" parent="1" source="sub-not-last" target="sub-return" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="950" y="825"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="arrow-notify-to-wait" value="唤醒订阅者" style="endArrow=classic;html=1;rounded=0;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;strokeWidth=3;strokeColor=#d79b00;dashed=1;fontColor=#000000;" parent="1" source="fetch-notify" target="sub-wait" edge="1">
+                    <mxGeometry x="-0.2" y="10" width="50" height="50" relative="1" as="geometry">
+                        <mxPoint as="offset"/>
+                        <Array as="points">
+                            <mxPoint x="570" y="1365"/>
+                            <mxPoint x="570" y="155"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="arrow-sub-notify-to-wait" value="唤醒 Fetch" style="endArrow=classic;html=1;rounded=0;exitX=0;exitY=0.5;exitDx=0;exitDy=0;entryX=1;entryY=0.5;entryDx=0;entryDy=0;strokeWidth=3;strokeColor=#9673a6;dashed=1;fontColor=#000000;" parent="1" source="sub-notify-fetch" target="fetch-step1-wait" edge="1">
+                    <mxGeometry x="-0.2" y="10" width="50" height="50" relative="1" as="geometry">
+                        <mxPoint as="offset"/>
+                        <Array as="points">
+                            <mxPoint x="570" y="735"/>
+                            <mxPoint x="570" y="525"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="legend-box-fetch" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;align=left;verticalAlign=top" parent="1" vertex="1">
+                    <mxGeometry x="600" y="1180" width="420" height="400" as="geometry"/>
+                </mxCell>
+                <mxCell id="legend-title-fetch" value="图例说明" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=14;fontStyle=1;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="720" y="1190" width="180" height="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="legend-fetch-process" value="处理步骤" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=10;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="620" y="1240" width="100" height="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="legend-fetch-sync" value="同步操作" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=10;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="740" y="1240" width="100" height="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="legend-fetch-key" value="关键操作" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=10;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="860" y="1240" width="100" height="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="legend-fetch-success" value="成功路径" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=10;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="620" y="1290" width="100" height="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="legend-fetch-error" value="错误/退出" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=10;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="740" y="1290" width="100" height="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="legend-fetch-decision" value="条件判断" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="870" y="1290" width="80" height="40" as="geometry"/>
+                </mxCell>
+                <mxCell id="legend-fetch-note" value="• 蓝色：主流程处理步骤&#10;• 紫色：同步/协调操作（条件变量）&#10;• 橙色：关键操作（设置 Buffer、唤醒）&#10;• 绿色：成功路径&#10;• 红色：错误处理/退出路径&#10;• 黄色：条件判断&#10;&#10;⭐ 粗虚线：线程间通信（条件变量唤醒）" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=top;whiteSpace=wrap;rounded=0;fontSize=10;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="620" y="1350" width="380" height="150" as="geometry"/>
+                </mxCell>
+                <mxCell id="state-diagram" value="⭐ 状态转换图：&#10;&#10;[等待订阅者完成] (remaining_subscribers_ == 0)&#10;  ↓ cv_fetch_.wait 被唤醒&#10;[释放旧 Buffer]&#10;  ↓&#10;[获取新 Buffer] (acquireFilled)&#10;  ↓&#10;[设置 current_buffer_ + 重置计数器]&#10;  ↓ cv_subscribers_.notify_all()&#10;[订阅者并发读取] (N 个线程)&#10;  ↓ 每个订阅者 remaining_subscribers_--&#10;  ↓ 最后一个订阅者 cv_fetch_.notify_one()&#10;[回到开始]" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;align=left;verticalAlign=top;spacingLeft=10;spacingTop=10;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="640" y="2260" width="380" height="280" as="geometry"/>
                 </mxCell>
             </root>
         </mxGraphModel>

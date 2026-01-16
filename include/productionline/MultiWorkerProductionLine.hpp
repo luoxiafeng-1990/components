@@ -388,6 +388,9 @@ private:
     // 统计信息
     Statistics stats_;
     
+    // ⭐ Logger（每个类持有自己的 Logger 实例）
+    log4cplus::Logger logger_;
+    
     // 日志前缀
     std::string log_prefix_;
 };

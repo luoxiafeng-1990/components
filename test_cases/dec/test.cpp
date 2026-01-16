@@ -56,6 +56,9 @@ static volatile bool g_running = true;
 // RTSP 中断标志（用于快速响应 Ctrl+C）
 static std::atomic<bool> g_rtsp_interrupted(false);
 
+// 测试框架专用 Logger
+static log4cplus::Logger test_logger = log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Test"));
+
 /**
  * @brief 信号处理器（用于 Ctrl+C）
  * 
@@ -68,11 +71,11 @@ static void signal_handler(int signum) {
     if (signum == SIGINT) {
         if (!g_rtsp_interrupted.load()) {
             // 第一次 Ctrl+C：优雅退出
-            LOG_INFO("\n");
-            LOG_INFO("🛑 ═══════════════════════════════════════════════════════");
-            LOG_INFO("🛑   收到中断信号 (Ctrl+C)，正在停止程序...");
-            LOG_INFO("🛑   再次按 Ctrl+C 可强制退出");
-            LOG_INFO("🛑 ═══════════════════════════════════════════════════════");
+            LOG4CPLUS_INFO(test_logger, "\n");
+            LOG4CPLUS_INFO(test_logger, "🛑 ═══════════════════════════════════════════════════════");
+            LOG4CPLUS_INFO(test_logger, "🛑   收到中断信号 (Ctrl+C)，正在停止程序...");
+            LOG4CPLUS_INFO(test_logger, "🛑   再次按 Ctrl+C 可强制退出");
+            LOG4CPLUS_INFO(test_logger, "🛑 ═══════════════════════════════════════════════════════");
             
             g_running = false;
             g_rtsp_interrupted = true;
@@ -81,7 +84,7 @@ static void signal_handler(int signum) {
             RtspPacketSource::requestInterrupt();
         } else {
             // 第二次 Ctrl+C：强制退出
-            LOG_INFO("\n🛑 强制退出...");
+            LOG4CPLUS_INFO(test_logger, "\n🛑 强制退出...");
             signal(SIGINT, SIG_DFL);
             raise(SIGINT);
         }
@@ -93,38 +96,38 @@ static void signal_handler(int signum) {
  * 测试5：RTSP 视频流播放（Worker自动创建BufferPool + DMA 零拷贝显示）
  */
 static int test_play_rtsp_stream(const char* rtsp_url) {
-    LOG_INFO("═══════════════════════════════════════════════════════");
-    LOG_INFO("  Test: RTSP Stream Playback (Independent BufferPool + DMA)");
-    LOG_INFO("═══════════════════════════════════════════════════════");
+    LOG4CPLUS_INFO(test_logger, "═══════════════════════════════════════════════════════");
+    LOG4CPLUS_INFO(test_logger, "  Test: RTSP Stream Playback (Independent BufferPool + DMA)");
+    LOG4CPLUS_INFO(test_logger, "═══════════════════════════════════════════════════════");
     
     // 注册信号处理器（用于 Ctrl+C）
     signal(SIGINT, signal_handler);
     g_running = true;
     g_rtsp_interrupted = false;
     RtspPacketSource::clearInterrupt();
-    LOG_DEBUG("[Test] ✅ 已注册 Ctrl+C 信号处理器");
+    LOG4CPLUS_DEBUG(test_logger, "[Test] ✅ 已注册 Ctrl+C 信号处理器");
     
-    LOG_INFO("Zero-Copy Workflow:");
-    LOG_INFO("  1. Worker opens RTSP stream and automatically creates BufferPool (if needed)");
-    LOG_INFO("  2. Worker decodes RTSP → AVFrame with phys_addr");
-    LOG_INFO("  3. Worker injects Buffer to its BufferPool");
-    LOG_INFO("  4. Consumer acquires Buffer from Worker's BufferPool");
-    LOG_INFO("  5. display.displayBufferByDMA(buffer) → DMA zero-copy");
-    LOG_INFO("  6. Consumer releases Buffer → triggers deleter");
+    LOG4CPLUS_INFO(test_logger, "Zero-Copy Workflow:");
+    LOG4CPLUS_INFO(test_logger, "  1. Worker opens RTSP stream and automatically creates BufferPool (if needed)");
+    LOG4CPLUS_INFO(test_logger, "  2. Worker decodes RTSP → AVFrame with phys_addr");
+    LOG4CPLUS_INFO(test_logger, "  3. Worker injects Buffer to its BufferPool");
+    LOG4CPLUS_INFO(test_logger, "  4. Consumer acquires Buffer from Worker's BufferPool");
+    LOG4CPLUS_INFO(test_logger, "  5. display.displayBufferByDMA(buffer) → DMA zero-copy");
+    LOG4CPLUS_INFO(test_logger, "  6. Consumer releases Buffer → triggers deleter");
     
     // 1. 初始化显示设备
-    LOG_INFO("[Test] 初始化显示设备...");
+    LOG4CPLUS_INFO(test_logger, "[Test] 初始化显示设备...");
     LinuxFramebufferDevice display;
     if (!display.initialize(0)) {
         return -1;
     }
     
     // 2. 创建 VideoProductionLine（Worker会在open()时自动调用Allocator创建BufferPool）
-    LOG_INFO("[Test] 创建VideoProductionLine...");
+    LOG4CPLUS_INFO(test_logger, "[Test] 创建VideoProductionLine...");
     VideoProductionLine producer(false, 1);  // loop=false, thread_count=1
     
     // 4. 配置 RTSP 流（注意：推荐单线程）
-    LOG_INFO_FMT("Configuring RTSP stream: %s", rtsp_url);
+    LOG4CPLUS_INFO_FMT(test_logger, "Configuring RTSP stream: %s", rtsp_url);
 
     auto tacoConfig = TacoConfigBuilder()
         .setChannels(true, false)
@@ -153,35 +156,35 @@ static int test_play_rtsp_stream(const char* rtsp_url) {
     
     // 5. 设置错误回调
     producer.setErrorCallback([](const std::string& error) {
-        LOG_ERROR_FMT("RTSP Error: %s", error.c_str());
+        LOG4CPLUS_ERROR_FMT(test_logger, "RTSP Error: %s", error.c_str());
         g_running = false;
     });
     
     // 6. 启动生产者（内部会创建RTSP Reader并启用零拷贝）
-    LOG_INFO("Starting RTSP producer...");
+    LOG4CPLUS_INFO(test_logger, "Starting RTSP producer...");
     if (!producer.start(workerConfig)) {
-        LOG_ERROR("Failed to start RTSP producer");
+        LOG4CPLUS_ERROR(test_logger, "Failed to start RTSP producer");
         return -1;
     }
     
-    LOG_INFO("RTSP stream connected, starting playback...");
-    LOG_INFO("[Test] 按Ctrl+C停止");
-    LOG_INFO("Watch for '[DMA Display]' messages below");
+    LOG4CPLUS_INFO(test_logger, "RTSP stream connected, starting playback...");
+    LOG4CPLUS_INFO(test_logger, "[Test] 按Ctrl+C停止");
+    LOG4CPLUS_INFO(test_logger, "Watch for '[DMA Display]' messages below");
     
     // 7. 获取工作BufferPool（Worker创建的或fallback的）
     uint64_t producer_pool_id = producer.getWorkingBufferPoolId();
     if (producer_pool_id == 0) {
-        LOG_ERROR("No working BufferPool ID available");
+        LOG4CPLUS_ERROR(test_logger, "No working BufferPool ID available");
         return -1;
     }
     auto producer_pool_weak = BufferPoolRegistry::getInstance().getPool(producer_pool_id);
     auto producer_pool_sptr = producer_pool_weak.lock();
     if (!producer_pool_sptr) {
-        LOG_ERROR("BufferPool not found or destroyed");
+        LOG4CPLUS_ERROR(test_logger, "BufferPool not found or destroyed");
         return -1;
     }
     
-    LOG_INFO_FMT("[Test] Using BufferPool: '%s' (created by Worker via Allocator)", 
+    LOG4CPLUS_INFO_FMT(test_logger, "[Test] Using BufferPool: '%s' (created by Worker via Allocator)", 
                  producer_pool_sptr->getName().c_str());
     producer_pool_sptr->printStats();
     
@@ -193,7 +196,7 @@ static int test_play_rtsp_stream(const char* rtsp_url) {
     while (g_running) {
         // 检查中断标志
         if (g_rtsp_interrupted.load()) {
-            LOG_INFO("⚠️  检测到中断请求，停止播放...");
+            LOG4CPLUS_INFO(test_logger, "⚠️  检测到中断请求，停止播放...");
             break;
         }
         
@@ -203,11 +206,11 @@ static int test_play_rtsp_stream(const char* rtsp_url) {
         if (decoded_buffer == nullptr) {
             // 超时时检查生产者状态和中断标志
             if (g_rtsp_interrupted.load()) {
-                LOG_INFO("⚠️  检测到中断请求，停止播放...");
+                LOG4CPLUS_INFO(test_logger, "⚠️  检测到中断请求，停止播放...");
                 break;
             }
             if (!producer.isRunning()) {
-                LOG_INFO("Producer stopped naturally, exiting consumer loop...");
+                LOG4CPLUS_INFO(test_logger, "Producer stopped naturally, exiting consumer loop...");
                 break;
             }
             continue;  // 超时，继续等待
@@ -223,7 +226,7 @@ static int test_play_rtsp_stream(const char* rtsp_url) {
                 dma_success++;
             } else {
                 dma_failed++;
-                LOG_WARN_FMT("DMA display failed for buffer (phys_addr=0x%llx)",
+                LOG4CPLUS_WARN_FMT(test_logger, "DMA display failed for buffer (phys_addr=0x%llx)",
                             (unsigned long long)decoded_buffer->getPhysicalAddress());
             }
         } else if (buffer_channel == 1 && tacoConfig.ch1_enable) {
@@ -233,12 +236,12 @@ static int test_play_rtsp_stream(const char* rtsp_url) {
                 dma_success++;
             } else {
                 dma_failed++;
-                LOG_WARN_FMT("DMA display failed for ch1 buffer (phys_addr=0x%llx)",
+                LOG4CPLUS_WARN_FMT(test_logger, "DMA display failed for ch1 buffer (phys_addr=0x%llx)",
                             (unsigned long long)decoded_buffer->getPhysicalAddress());
             }
         } else {
             // 通道未启用：跳过显示
-            LOG_DEBUG_FMT("Skipping display of buffer from ch%d (not enabled in TACO config)", buffer_channel);
+            LOG4CPLUS_DEBUG_FMT(test_logger, "Skipping display of buffer from ch%d (not enabled in TACO config)", buffer_channel);
         }
 
         // 归还 buffer（会触发 RtspVideoReader 的 deleter 回收 AVFrame）
@@ -248,13 +251,13 @@ static int test_play_rtsp_stream(const char* rtsp_url) {
         
         // 每100帧打印一次统计
         if (frame_count % 100 == 0) {
-            LOG_DEBUG_FMT("Progress: %d frames displayed (%.1f fps, DMA success: %d, failed: %d)", 
+            LOG4CPLUS_DEBUG_FMT(test_logger, "Progress: %d frames displayed (%.1f fps, DMA success: %d, failed: %d)", 
                           frame_count, producer.getAverageFPS(), dma_success, dma_failed);
         }
     }
     
     // 排空剩余的已填充 buffer
-    LOG_INFO("Draining remaining buffers from BufferPool...");
+    LOG4CPLUS_INFO(test_logger, "Draining remaining buffers from BufferPool...");
     Buffer* remaining_buffer = nullptr;
     int drained_count = 0;
     while ((remaining_buffer = producer_pool_sptr->acquireFilled(false, 0)) != nullptr) {
@@ -269,21 +272,21 @@ static int test_play_rtsp_stream(const char* rtsp_url) {
         drained_count++;
     }
     if (drained_count > 0) {
-        LOG_INFO_FMT("Drained %d remaining buffers", drained_count);
+        LOG4CPLUS_INFO_FMT(test_logger, "Drained %d remaining buffers", drained_count);
     }
     
     // 8. 停止生产者
-    LOG_INFO("Stopping RTSP producer...");
+    LOG4CPLUS_INFO(test_logger, "Stopping RTSP producer...");
     producer.stop();
     
-    LOG_INFO("RTSP test completed");
-    LOG_INFO_FMT("Total frames displayed: %d", frame_count);
-    LOG_INFO_FMT("DMA display success: %d", dma_success);
-    LOG_INFO_FMT("DMA display failed: %d", dma_failed);
-    LOG_INFO_FMT("Success rate: %.1f%%", 
+    LOG4CPLUS_INFO(test_logger, "RTSP test completed");
+    LOG4CPLUS_INFO_FMT(test_logger, "Total frames displayed: %d", frame_count);
+    LOG4CPLUS_INFO_FMT(test_logger, "DMA display success: %d", dma_success);
+    LOG4CPLUS_INFO_FMT(test_logger, "DMA display failed: %d", dma_failed);
+    LOG4CPLUS_INFO_FMT(test_logger, "Success rate: %.1f%%", 
                  frame_count > 0 ? (100.0 * dma_success / frame_count) : 0.0);
     
-    LOG_INFO("Final BufferPool statistics:");
+    LOG4CPLUS_INFO(test_logger, "Final BufferPool statistics:");
     producer_pool_sptr->printStats();
     
     return 0;
@@ -309,16 +312,16 @@ static int test_play_rtsp_stream(const char* rtsp_url) {
 static int test_rtsp_record_stream(const char* rtsp_url) {
     using namespace productionline::io;
     
-    LOG_INFO("╔═══════════════════════════════════════════════════════╗");
-    LOG_INFO("║   Test: RTSP Stream Recording to MP4                 ║");
-    LOG_INFO("╚═══════════════════════════════════════════════════════╝\n");
+    LOG4CPLUS_INFO(test_logger, "╔═══════════════════════════════════════════════════════╗");
+    LOG4CPLUS_INFO(test_logger, "║   Test: RTSP Stream Recording to MP4                 ║");
+    LOG4CPLUS_INFO(test_logger, "╚═══════════════════════════════════════════════════════╝\n");
     
     // 注册信号处理器（用于 Ctrl+C）
     signal(SIGINT, signal_handler);
     g_running = true;
     g_rtsp_interrupted = false;
     RtspPacketSource::clearInterrupt();
-    LOG_DEBUG("[Test] ✅ 已注册 Ctrl+C 信号处理器");
+    LOG4CPLUS_DEBUG(test_logger, "[Test] ✅ 已注册 Ctrl+C 信号处理器");
     
     // 从环境变量获取输出路径，如果没有则使用默认值
     const char* output_file = std::getenv("RTSP_OUTPUT_FILE");
@@ -326,7 +329,7 @@ static int test_rtsp_record_stream(const char* rtsp_url) {
         output_file = "/tmp/rtsp_recorded.mp4";  // 默认输出为MP4
     }
     
-    LOG_INFO_FMT("Output file: %s\n", output_file);
+    LOG4CPLUS_INFO_FMT(test_logger, "Output file: %s\n", output_file);
     
     const int duration_seconds = 30;
     
@@ -335,11 +338,11 @@ static int test_rtsp_record_stream(const char* rtsp_url) {
     recording_timer.start();
     
     // 1. 创建 VideoProductionLine（生产者）
-    LOG_INFO("[Step 1] Creating VideoProductionLine...");
+    LOG4CPLUS_INFO(test_logger, "[Step 1] Creating VideoProductionLine...");
     VideoProductionLine producer(false, 1, false);
     
     // 2. 配置 Worker
-    LOG_INFO("[Step 2] Configuring FfmpegPacketRecorderWorker...");
+    LOG4CPLUS_INFO(test_logger, "[Step 2] Configuring FfmpegPacketRecorderWorker...");
     auto workerConfig = WorkerConfigBuilder()
         .setDataSourceConfig(
             DataSourceConfigBuilder()
@@ -352,36 +355,36 @@ static int test_rtsp_record_stream(const char* rtsp_url) {
     
     // 3. 设置错误回调
     producer.setErrorCallback([](const std::string& error) {
-        LOG_ERROR_FMT("Recording Error: %s", error.c_str());
+        LOG4CPLUS_ERROR_FMT(test_logger, "Recording Error: %s", error.c_str());
         g_running = false;
     });
     
     // 4. 启动生产者
-    LOG_INFO("[Step 3] Starting producer...");
+    LOG4CPLUS_INFO(test_logger, "[Step 3] Starting producer...");
     if (!producer.start(workerConfig)) {
-        LOG_ERROR("Failed to start producer");
+        LOG4CPLUS_ERROR(test_logger, "Failed to start producer");
         return -1;
     }
     
     // 5. 获取 BufferPool
-    LOG_INFO("[Step 4] Getting BufferPool...");
+    LOG4CPLUS_INFO(test_logger, "[Step 4] Getting BufferPool...");
     uint64_t pool_id = producer.getWorkingBufferPoolId();
     auto pool_sptr = BufferPoolRegistry::getInstance().getPool(pool_id).lock();
     if (!pool_sptr) {
-        LOG_ERROR("Failed to get BufferPool");
+        LOG4CPLUS_ERROR(test_logger, "Failed to get BufferPool");
         producer.stop();
         return -1;
     }
     
-    LOG_INFO_FMT("  BufferPool: '%s' (ID: %lu)", pool_sptr->getName().c_str(), pool_id);
+    LOG4CPLUS_INFO_FMT(test_logger, "  BufferPool: '%s' (ID: %lu)", pool_sptr->getName().c_str(), pool_id);
     
     // 6. 获取Worker并打开BufferWriter（MP4模式）
-    LOG_INFO("[Step 5] Opening BufferWriter (MP4 mode)...");
+    LOG4CPLUS_INFO(test_logger, "[Step 5] Opening BufferWriter (MP4 mode)...");
     
     // 获取Worker的编解码器参数（v2.14: 通过门面类直接获取，无需类型转换）
     auto worker_facade_sptr = producer.getWorkerFacade();
     if (!worker_facade_sptr) {
-        LOG_ERROR("Failed to get worker facade");
+        LOG4CPLUS_ERROR(test_logger, "Failed to get worker facade");
         producer.stop();
         return -1;
     }
@@ -389,7 +392,7 @@ static int test_rtsp_record_stream(const char* rtsp_url) {
     // 直接从门面类获取编解码器参数和时间基
     const AVCodecParameters* codec_params = worker_facade_sptr->getCodecParameters();
     if (!codec_params) {
-        LOG_ERROR("Failed to get codec parameters from worker");
+        LOG4CPLUS_ERROR(test_logger, "Failed to get codec parameters from worker");
         producer.stop();
         return -1;
     }
@@ -399,25 +402,25 @@ static int test_rtsp_record_stream(const char* rtsp_url) {
     // 保存编码流到 MP4 文件
     BufferWriter writer;
     if (!writer.openEncoded(output_file, codec_params, time_base)) {
-        LOG_ERROR("Failed to save encoded stream");
+        LOG4CPLUS_ERROR(test_logger, "Failed to save encoded stream");
         producer.stop();
         return -1;
     }
     
     // 7. 消费者线程：保存编码流到MP4文件
-    LOG_INFO("\n[Step 6] Recording to MP4...");
-    LOG_INFO("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    LOG4CPLUS_INFO(test_logger, "\n[Step 6] Recording to MP4...");
+    LOG4CPLUS_INFO(test_logger, "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
     
     // ⭐ 设置录制时长定时器
     auto timer_id = recording_timer.scheduleOnce(
         duration_seconds * 1000,  // 毫秒
         []() {
             g_running = false;  // 时间到，停止录制
-            LOG_INFO("\n  ⏱️  Recording duration reached, stopping...");
+            LOG4CPLUS_INFO(test_logger, "\n  ⏱️  Recording duration reached, stopping...");
         }
     );
     
-    LOG_INFO_FMT("  Recording for %d seconds (timer-controlled)...\n", duration_seconds);
+    LOG4CPLUS_INFO_FMT(test_logger, "  Recording for %d seconds (timer-controlled)...\n", duration_seconds);
     
     auto start_time = std::chrono::steady_clock::now();
     int packet_count = 0;
@@ -428,7 +431,7 @@ static int test_rtsp_record_stream(const char* rtsp_url) {
     while (g_running) {
         // 检查中断标志
         if (g_rtsp_interrupted.load()) {
-            LOG_INFO("\n  ⚠️  检测到中断请求，停止录制...");
+            LOG4CPLUS_INFO(test_logger, "\n  ⚠️  检测到中断请求，停止录制...");
             break;
         }
         
@@ -448,11 +451,11 @@ static int test_rtsp_record_stream(const char* rtsp_url) {
                         auto now = std::chrono::steady_clock::now();
                         int elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - start_time).count();
                         double rate_mbps = elapsed > 0 ? (total_bytes * 8.0) / (elapsed * 1000000.0) : 0.0;
-                        LOG_INFO_FMT("  Recorded %d packets | %d seconds | %.2f Mbps",
+                        LOG4CPLUS_INFO_FMT(test_logger, "  Recorded %d packets | %d seconds | %.2f Mbps",
                                      packet_count, elapsed, rate_mbps);
                     }
                 } else {
-                    LOG_WARN("Failed to write packet to MP4");
+                    LOG4CPLUS_WARN(test_logger, "Failed to write packet to MP4");
                 }
             }
             
@@ -461,13 +464,13 @@ static int test_rtsp_record_stream(const char* rtsp_url) {
         } else {
             timeout_count++;
             if (timeout_count >= MAX_TIMEOUT) {
-                LOG_WARN("\n  ⚠️  Stream timeout, stopping...");
+                LOG4CPLUS_WARN(test_logger, "\n  ⚠️  Stream timeout, stopping...");
                 break;
             }
         }
     }
     
-    LOG_INFO("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    LOG4CPLUS_INFO(test_logger, "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
     
     // 8. 清理
     // ⭐ 停止定时器
@@ -482,31 +485,31 @@ static int test_rtsp_record_stream(const char* rtsp_url) {
     auto end_time = std::chrono::steady_clock::now();
     double total_duration = std::chrono::duration<double>(end_time - start_time).count();
     
-    LOG_INFO("\n═══════════════════════════════════════════════════════");
-    LOG_INFO("  Recording Results");
-    LOG_INFO("═══════════════════════════════════════════════════════");
-    LOG_INFO_FMT("  ✅ MP4 file:      %s", output_file);
-    LOG_INFO_FMT("  Packets recorded: %d", packet_count);
-    LOG_INFO_FMT("  Duration:         %.2f seconds", total_duration);
-    LOG_INFO_FMT("  Total bytes:      %.2f MB", total_bytes / (1024.0 * 1024.0));
+    LOG4CPLUS_INFO(test_logger, "\n═══════════════════════════════════════════════════════");
+    LOG4CPLUS_INFO(test_logger, "  Recording Results");
+    LOG4CPLUS_INFO(test_logger, "═══════════════════════════════════════════════════════");
+    LOG4CPLUS_INFO_FMT(test_logger, "  ✅ MP4 file:      %s", output_file);
+    LOG4CPLUS_INFO_FMT(test_logger, "  Packets recorded: %d", packet_count);
+    LOG4CPLUS_INFO_FMT(test_logger, "  Duration:         %.2f seconds", total_duration);
+    LOG4CPLUS_INFO_FMT(test_logger, "  Total bytes:      %.2f MB", total_bytes / (1024.0 * 1024.0));
     
     if (total_duration > 0) {
-        LOG_INFO_FMT("  Average bitrate:  %.2f Mbps", 
+        LOG4CPLUS_INFO_FMT(test_logger, "  Average bitrate:  %.2f Mbps", 
                      (total_bytes * 8.0) / (total_duration * 1000000.0));
     }
     
-    LOG_INFO("\n💡 Play the recorded MP4 file with:");
-    LOG_INFO_FMT("   ffplay %s", output_file);
-    LOG_INFO_FMT("   vlc %s", output_file);
-    LOG_INFO("\n💡 Or test with this program:");
-    LOG_INFO_FMT("   ./display_test -m ffmpeg %s              # Hardware decode", output_file);
-    LOG_INFO_FMT("   ./display_test -m ffmpeg_software %s     # Software decode", output_file);
-    LOG_INFO("═══════════════════════════════════════════════════════\n");
+    LOG4CPLUS_INFO(test_logger, "\n💡 Play the recorded MP4 file with:");
+    LOG4CPLUS_INFO_FMT(test_logger, "   ffplay %s", output_file);
+    LOG4CPLUS_INFO_FMT(test_logger, "   vlc %s", output_file);
+    LOG4CPLUS_INFO(test_logger, "\n💡 Or test with this program:");
+    LOG4CPLUS_INFO_FMT(test_logger, "   ./display_test -m ffmpeg %s              # Hardware decode", output_file);
+    LOG4CPLUS_INFO_FMT(test_logger, "   ./display_test -m ffmpeg_software %s     # Software decode", output_file);
+    LOG4CPLUS_INFO(test_logger, "═══════════════════════════════════════════════════════\n");
     
     if (packet_count > 0) {
         return 0;
     } else {
-        LOG_ERROR("No packets recorded");
+        LOG4CPLUS_ERROR(test_logger, "No packets recorded");
         return -1;
     }
 }
@@ -537,11 +540,11 @@ static int test_rtsp_record_stream(const char* rtsp_url) {
 static int test_file_record(const char* input_file) {
     using namespace productionline::io;
     
-    LOG_INFO("╔═══════════════════════════════════════════════════════╗");
-    LOG_INFO("║   Test: File Recording/Remux to MP4                  ║");
-    LOG_INFO("╚═══════════════════════════════════════════════════════╝\n");
+    LOG4CPLUS_INFO(test_logger, "╔═══════════════════════════════════════════════════════╗");
+    LOG4CPLUS_INFO(test_logger, "║   Test: File Recording/Remux to MP4                  ║");
+    LOG4CPLUS_INFO(test_logger, "╚═══════════════════════════════════════════════════════╝\n");
     
-    LOG_INFO_FMT("Input file: %s\n", input_file);
+    LOG4CPLUS_INFO_FMT(test_logger, "Input file: %s\n", input_file);
     
     // 从环境变量获取输出路径，如果没有则使用默认值
     const char* output_file = std::getenv("FILE_OUTPUT_FILE");
@@ -549,14 +552,14 @@ static int test_file_record(const char* input_file) {
         output_file = "/tmp/file_recorded.mp4";  // 默认输出为MP4
     }
     
-    LOG_INFO_FMT("Output file: %s\n", output_file);
+    LOG4CPLUS_INFO_FMT(test_logger, "Output file: %s\n", output_file);
     
     // 1. 创建 VideoProductionLine（生产者）
-    LOG_INFO("[Step 1] Creating VideoProductionLine...");
+    LOG4CPLUS_INFO(test_logger, "[Step 1] Creating VideoProductionLine...");
     VideoProductionLine producer(false, 1, false);
     
     // 2. 配置 Worker
-    LOG_INFO("[Step 2] Configuring FfmpegPacketRecorderWorker...");
+    LOG4CPLUS_INFO(test_logger, "[Step 2] Configuring FfmpegPacketRecorderWorker...");
     auto workerConfig = WorkerConfigBuilder()
         .setDataSourceConfig(
             DataSourceConfigBuilder()
@@ -569,36 +572,36 @@ static int test_file_record(const char* input_file) {
     
     // 3. 设置错误回调
     producer.setErrorCallback([](const std::string& error) {
-        LOG_ERROR_FMT("Recording Error: %s", error.c_str());
+        LOG4CPLUS_ERROR_FMT(test_logger, "Recording Error: %s", error.c_str());
         g_running = false;
     });
     
     // 4. 启动生产者
-    LOG_INFO("[Step 3] Starting producer...");
+    LOG4CPLUS_INFO(test_logger, "[Step 3] Starting producer...");
     if (!producer.start(workerConfig)) {
-        LOG_ERROR("Failed to start producer");
+        LOG4CPLUS_ERROR(test_logger, "Failed to start producer");
         return -1;
     }
     
     // 5. 获取 BufferPool
-    LOG_INFO("[Step 4] Getting BufferPool...");
+    LOG4CPLUS_INFO(test_logger, "[Step 4] Getting BufferPool...");
     uint64_t pool_id = producer.getWorkingBufferPoolId();
     auto pool_sptr = BufferPoolRegistry::getInstance().getPool(pool_id).lock();
     if (!pool_sptr) {
-        LOG_ERROR("Failed to get BufferPool");
+        LOG4CPLUS_ERROR(test_logger, "Failed to get BufferPool");
         producer.stop();
         return -1;
     }
     
-    LOG_INFO_FMT("  BufferPool: '%s' (ID: %lu)", pool_sptr->getName().c_str(), pool_id);
+    LOG4CPLUS_INFO_FMT(test_logger, "  BufferPool: '%s' (ID: %lu)", pool_sptr->getName().c_str(), pool_id);
     
     // 6. 获取Worker并打开BufferWriter（MP4模式）
-    LOG_INFO("[Step 5] Opening BufferWriter (MP4 mode)...");
+    LOG4CPLUS_INFO(test_logger, "[Step 5] Opening BufferWriter (MP4 mode)...");
     
     // 获取Worker的编解码器参数（v2.14: 通过门面类直接获取，无需类型转换）
     auto worker_facade_sptr = producer.getWorkerFacade();
     if (!worker_facade_sptr) {
-        LOG_ERROR("Failed to get worker facade");
+        LOG4CPLUS_ERROR(test_logger, "Failed to get worker facade");
         producer.stop();
         return -1;
     }
@@ -606,7 +609,7 @@ static int test_file_record(const char* input_file) {
     // 直接从门面类获取编解码器参数和时间基
     const AVCodecParameters* codec_params = worker_facade_sptr->getCodecParameters();
     if (!codec_params) {
-        LOG_ERROR("Failed to get codec parameters from worker");
+        LOG4CPLUS_ERROR(test_logger, "Failed to get codec parameters from worker");
         producer.stop();
         return -1;
     }
@@ -616,14 +619,14 @@ static int test_file_record(const char* input_file) {
     // 保存编码流到 MP4 文件
     BufferWriter writer;
     if (!writer.openEncoded(output_file, codec_params, time_base)) {
-        LOG_ERROR("Failed to save encoded stream");
+        LOG4CPLUS_ERROR(test_logger, "Failed to save encoded stream");
         producer.stop();
         return -1;
     }
     
     // 7. 消费者线程：保存编码流到MP4文件
-    LOG_INFO("\n[Step 6] Remuxing to MP4...");
-    LOG_INFO("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    LOG4CPLUS_INFO(test_logger, "\n[Step 6] Remuxing to MP4...");
+    LOG4CPLUS_INFO(test_logger, "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
     
     auto start_time = std::chrono::steady_clock::now();
     int packet_count = 0;
@@ -644,11 +647,11 @@ static int test_file_record(const char* input_file) {
                     total_bytes += used_size;
                     
                     if (packet_count % 100 == 0) {
-                        LOG_INFO_FMT("  Processed %d packets (%.2f MB)",
+                        LOG4CPLUS_INFO_FMT(test_logger, "  Processed %d packets (%.2f MB)",
                                      packet_count, total_bytes / (1024.0 * 1024.0));
                     }
                 } else {
-                    LOG_WARN("Failed to write packet to MP4");
+                    LOG4CPLUS_WARN(test_logger, "Failed to write packet to MP4");
                 }
             }
             
@@ -657,19 +660,19 @@ static int test_file_record(const char* input_file) {
         } else {
             timeout_count++;
             if (timeout_count >= MAX_TIMEOUT) {
-                LOG_INFO("\n  ⏱️  File processing completed (EOF reached)");
+                LOG4CPLUS_INFO(test_logger, "\n  ⏱️  File processing completed (EOF reached)");
                 break;
             }
         }
         
         // 检查生产者状态
         if (!producer.isRunning()) {
-            LOG_INFO("\n  ⏱️  Producer finished naturally");
+            LOG4CPLUS_INFO(test_logger, "\n  ⏱️  Producer finished naturally");
             break;
         }
     }
     
-    LOG_INFO("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    LOG4CPLUS_INFO(test_logger, "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
     
     // 8. 清理（BufferWriter会自动写入MP4 trailer）
     writer.close();
@@ -679,35 +682,35 @@ static int test_file_record(const char* input_file) {
     auto end_time = std::chrono::steady_clock::now();
     double total_duration = std::chrono::duration<double>(end_time - start_time).count();
     
-    LOG_INFO("\n═══════════════════════════════════════════════════════");
-    LOG_INFO("  Recording Results");
-    LOG_INFO("═══════════════════════════════════════════════════════");
-    LOG_INFO_FMT("  ✅ Input file:    %s", input_file);
-    LOG_INFO_FMT("  ✅ Output file:   %s", output_file);
-    LOG_INFO_FMT("  Packets written:  %d", packet_count);
-    LOG_INFO_FMT("  Processing time:  %.2f seconds", total_duration);
-    LOG_INFO_FMT("  Total bytes:      %.2f MB", total_bytes / (1024.0 * 1024.0));
+    LOG4CPLUS_INFO(test_logger, "\n═══════════════════════════════════════════════════════");
+    LOG4CPLUS_INFO(test_logger, "  Recording Results");
+    LOG4CPLUS_INFO(test_logger, "═══════════════════════════════════════════════════════");
+    LOG4CPLUS_INFO_FMT(test_logger, "  ✅ Input file:    %s", input_file);
+    LOG4CPLUS_INFO_FMT(test_logger, "  ✅ Output file:   %s", output_file);
+    LOG4CPLUS_INFO_FMT(test_logger, "  Packets written:  %d", packet_count);
+    LOG4CPLUS_INFO_FMT(test_logger, "  Processing time:  %.2f seconds", total_duration);
+    LOG4CPLUS_INFO_FMT(test_logger, "  Total bytes:      %.2f MB", total_bytes / (1024.0 * 1024.0));
     
     if (total_duration > 0) {
-        LOG_INFO_FMT("  Processing speed: %.2f Mbps", 
+        LOG4CPLUS_INFO_FMT(test_logger, "  Processing speed: %.2f Mbps", 
                      (total_bytes * 8.0) / (total_duration * 1000000.0));
     }
     
-    LOG_INFO("\n💡 Play the remuxed MP4 file with:");
-    LOG_INFO_FMT("   ffplay %s", output_file);
-    LOG_INFO_FMT("   vlc %s", output_file);
-    LOG_INFO("\n💡 Or test with this program:");
-    LOG_INFO_FMT("   ./display_test -m ffmpeg %s              # Hardware decode", output_file);
-    LOG_INFO_FMT("   ./display_test -m ffmpeg_software %s     # Software decode", output_file);
-    LOG_INFO("\n💡 Compare with original:");
-    LOG_INFO_FMT("   ffprobe %s", input_file);
-    LOG_INFO_FMT("   ffprobe %s", output_file);
-    LOG_INFO("═══════════════════════════════════════════════════════\n");
+    LOG4CPLUS_INFO(test_logger, "\n💡 Play the remuxed MP4 file with:");
+    LOG4CPLUS_INFO_FMT(test_logger, "   ffplay %s", output_file);
+    LOG4CPLUS_INFO_FMT(test_logger, "   vlc %s", output_file);
+    LOG4CPLUS_INFO(test_logger, "\n💡 Or test with this program:");
+    LOG4CPLUS_INFO_FMT(test_logger, "   ./display_test -m ffmpeg %s              # Hardware decode", output_file);
+    LOG4CPLUS_INFO_FMT(test_logger, "   ./display_test -m ffmpeg_software %s     # Software decode", output_file);
+    LOG4CPLUS_INFO(test_logger, "\n💡 Compare with original:");
+    LOG4CPLUS_INFO_FMT(test_logger, "   ffprobe %s", input_file);
+    LOG4CPLUS_INFO_FMT(test_logger, "   ffprobe %s", output_file);
+    LOG4CPLUS_INFO(test_logger, "═══════════════════════════════════════════════════════\n");
     
     if (packet_count > 0) {
         return 0;
     } else {
-        LOG_ERROR("No packets recorded");
+        LOG4CPLUS_ERROR(test_logger, "No packets recorded");
         return -1;
     }
 }
@@ -716,23 +719,23 @@ static int test_file_record(const char* input_file) {
  * 测试6：FFmpeg 编码视频文件播放（使用Worker自动创建BufferPool）
  */
 static int test_h264_taco_video(const char* video_path) {
-    LOG_INFO("═══════════════════════════════════════════════════════");
-    LOG_INFO_FMT("  Test: FFmpeg Encoded Video Playback - File: %s", video_path);
-    LOG_INFO("═══════════════════════════════════════════════════════");
+    LOG4CPLUS_INFO(test_logger, "═══════════════════════════════════════════════════════");
+    LOG4CPLUS_INFO_FMT(test_logger, "  Test: FFmpeg Encoded Video Playback - File: %s", video_path);
+    LOG4CPLUS_INFO(test_logger, "═══════════════════════════════════════════════════════");
     
     // 1. 初始化显示设备
-    LOG_INFO("[Test] 初始化显示设备...");
+    LOG4CPLUS_INFO(test_logger, "[Test] 初始化显示设备...");
     LinuxFramebufferDevice display;
     if (!display.initialize(0)) {
         return -1;
     }
     
     // 2. 创建 VideoProductionLine（Worker会在open()时自动调用Allocator创建BufferPool）
-    LOG_INFO("[Test] 创建VideoProductionLine...");
+    LOG4CPLUS_INFO(test_logger, "[Test] 创建VideoProductionLine...");
     VideoProductionLine producer(false, 1,false);  // loop=true, thread_count=1
     
     // 4. 配置 FFmpeg 解码
-    LOG_INFO_FMT("[Test] 配置FFmpeg: %s", video_path);
+    LOG4CPLUS_INFO_FMT(test_logger, "[Test] 配置FFmpeg: %s", video_path);
 
     auto tacoConfig = TacoConfigBuilder()
         .setChannels(true, false)
@@ -761,34 +764,34 @@ static int test_h264_taco_video(const char* video_path) {
     
     // 5. 设置错误回调
     producer.setErrorCallback([](const std::string& error) {
-        LOG_ERROR_FMT("FFmpeg Error: %s", error.c_str());
+        LOG4CPLUS_ERROR_FMT(test_logger, "FFmpeg Error: %s", error.c_str());
         g_running = false;
     });
     
     // 6. 启动生产者
-    LOG_INFO("[Test] 启动FFmpeg...");
+    LOG4CPLUS_INFO(test_logger, "[Test] 启动FFmpeg...");
     if (!producer.start(workerConfig)) {
-        LOG_ERROR("Failed to start FFmpeg producer");
+        LOG4CPLUS_ERROR(test_logger, "Failed to start FFmpeg producer");
         return -1;
     }
     
-    LOG_INFO("[Test] 视频解码已启动, starting playback...");
-    LOG_INFO("[Test] 按Ctrl+C停止");
+    LOG4CPLUS_INFO(test_logger, "[Test] 视频解码已启动, starting playback...");
+    LOG4CPLUS_INFO(test_logger, "[Test] 按Ctrl+C停止");
     
     // 7. 获取工作BufferPool（Worker创建的或fallback的）
     uint64_t producer_pool_id = producer.getWorkingBufferPoolId();
     if (producer_pool_id == 0) {
-        LOG_ERROR("No working BufferPool ID available");
+        LOG4CPLUS_ERROR(test_logger, "No working BufferPool ID available");
         return -1;
     }
     auto producer_pool_weak = BufferPoolRegistry::getInstance().getPool(producer_pool_id);
     auto producer_pool_sptr = producer_pool_weak.lock();
     if (!producer_pool_sptr) {
-        LOG_ERROR("BufferPool not found or destroyed");
+        LOG4CPLUS_ERROR(test_logger, "BufferPool not found or destroyed");
         return -1;
     }
     
-    LOG_INFO_FMT("[Test] Using BufferPool: '%s' (created by Worker via Allocator)", 
+    LOG4CPLUS_INFO_FMT(test_logger, "[Test] Using BufferPool: '%s' (created by Worker via Allocator)", 
                  producer_pool_sptr->getName().c_str());
     producer_pool_sptr->printStats();
     
@@ -807,7 +810,7 @@ static int test_h264_taco_video(const char* video_path) {
         if (filled_buffer == nullptr) {
             // 超时时检查生产者状态
             if (!producer.isRunning()) {
-                LOG_INFO("Producer stopped naturally, exiting consumer loop...");
+                LOG4CPLUS_INFO(test_logger, "Producer stopped naturally, exiting consumer loop...");
                 break;
             }
             continue;  // 超时，继续等待
@@ -828,7 +831,7 @@ static int test_h264_taco_video(const char* video_path) {
             display.waitVerticalSync();
             // 零拷贝模式：使用 DMA 显示
             if (!display.displayBufferByDMA(filled_buffer)) {
-                LOG_WARN("DMA display failed, falling back to normal");
+                LOG4CPLUS_WARN(test_logger, "DMA display failed, falling back to normal");
                 display.displayFilledFramebuffer(filled_buffer);
 
             }
@@ -840,7 +843,7 @@ static int test_h264_taco_video(const char* video_path) {
             frame_count++;
         } else {
             // 通道未启用：跳过显示
-            LOG_DEBUG_FMT("Skipping display of buffer from ch%d (not enabled in TACO config)", buffer_channel);
+            LOG4CPLUS_DEBUG_FMT(test_logger, "Skipping display of buffer from ch%d (not enabled in TACO config)", buffer_channel);
             producer_pool_sptr->releaseFilled(filled_buffer);
         }
         if (display_monitor ) {
@@ -850,13 +853,13 @@ static int test_h264_taco_video(const char* video_path) {
         
         // 每100帧打印一次统计
         if (frame_count % 100 == 0) {
-            LOG_DEBUG_FMT("Frames displayed: %d (%.1f fps)", 
+            LOG4CPLUS_DEBUG_FMT(test_logger, "Frames displayed: %d (%.1f fps)", 
                           frame_count, producer.getAverageFPS());
         }
     }
     
     // 排空剩余的已填充 buffer
-    LOG_INFO("Draining remaining buffers from BufferPool...");
+    LOG4CPLUS_INFO(test_logger, "Draining remaining buffers from BufferPool...");
     Buffer* remaining_buffer = nullptr;
     int drained_count = 0;
     while ((remaining_buffer = producer_pool_sptr->acquireFilled(false, 0)) != nullptr) {
@@ -869,30 +872,30 @@ static int test_h264_taco_video(const char* video_path) {
         drained_count++;
     }
     if (drained_count > 0) {
-        LOG_INFO_FMT("Drained %d remaining buffers", drained_count);
+        LOG4CPLUS_INFO_FMT(test_logger, "Drained %d remaining buffers", drained_count);
     }
     
     // 10. 停止性能监控
     if (display_monitor) {
         display_monitor->stop();
-        LOG_INFO("═══════════════════════════════════════════════════════");
-        LOG_INFO("  Display Performance Statistics");
-        LOG_INFO("═══════════════════════════════════════════════════════");
+        LOG4CPLUS_INFO(test_logger, "═══════════════════════════════════════════════════════");
+        LOG4CPLUS_INFO(test_logger, "  Display Performance Statistics");
+        LOG4CPLUS_INFO(test_logger, "═══════════════════════════════════════════════════════");
         display_monitor->printStatistics();
         display_monitor.reset();
     }
     
     // 11. 停止生产者
-    LOG_INFO("Stopping FFmpeg producer...");
+    LOG4CPLUS_INFO(test_logger, "Stopping FFmpeg producer...");
     producer.stop();
     
-    LOG_INFO("FFmpeg video test completed");
-    LOG_INFO_FMT("Total frames displayed: %d", frame_count);
-    LOG_INFO_FMT("Frames produced: %d", producer.getProducedFrames());
-    LOG_INFO_FMT("Frames skipped: %d", producer.getSkippedFrames());
-    LOG_INFO_FMT("Average FPS: %.2f", producer.getAverageFPS());
+    LOG4CPLUS_INFO(test_logger, "FFmpeg video test completed");
+    LOG4CPLUS_INFO_FMT(test_logger, "Total frames displayed: %d", frame_count);
+    LOG4CPLUS_INFO_FMT(test_logger, "Frames produced: %d", producer.getProducedFrames());
+    LOG4CPLUS_INFO_FMT(test_logger, "Frames skipped: %d", producer.getSkippedFrames());
+    LOG4CPLUS_INFO_FMT(test_logger, "Average FPS: %.2f", producer.getAverageFPS());
     
-    LOG_INFO("Final BufferPool statistics:");
+    LOG4CPLUS_INFO(test_logger, "Final BufferPool statistics:");
     producer_pool_sptr->printStats();
     
     return 0;
@@ -912,24 +915,24 @@ static int test_h264_taco_video(const char* video_path) {
  * - 提供硬件解码失败时的 fallback 方案验证
  */
 static int test_ffmpeg_software_decoder(const char* video_path) {
-    LOG_INFO("═══════════════════════════════════════════════════════");
-    LOG_INFO_FMT("  Test: FFmpeg Software Decoder - File: %s", video_path);
-    LOG_INFO("  (Using libavcodec, no hardware acceleration)");
-    LOG_INFO("═══════════════════════════════════════════════════════");
+    LOG4CPLUS_INFO(test_logger, "═══════════════════════════════════════════════════════");
+    LOG4CPLUS_INFO_FMT(test_logger, "  Test: FFmpeg Software Decoder - File: %s", video_path);
+    LOG4CPLUS_INFO(test_logger, "  (Using libavcodec, no hardware acceleration)");
+    LOG4CPLUS_INFO(test_logger, "═══════════════════════════════════════════════════════");
     
     // 1. 初始化显示设备
-    LOG_INFO("[Test] 初始化显示设备...");
+    LOG4CPLUS_INFO(test_logger, "[Test] 初始化显示设备...");
     LinuxFramebufferDevice display;
     if (!display.initialize(0)) {
         return -1;
     }
     
     // 2. 创建 VideoProductionLine
-    LOG_INFO("[Test] 创建VideoProductionLine...");
+    LOG4CPLUS_INFO(test_logger, "[Test] 创建VideoProductionLine...");
     VideoProductionLine producer(false, 1, false);  // loop=false, thread_count=1
     
     // 3. 配置 FFmpeg 软件解码
-    LOG_INFO_FMT("[Test] 配置FFmpeg软件解码: %s", video_path);
+    LOG4CPLUS_INFO_FMT(test_logger, "[Test] 配置FFmpeg软件解码: %s", video_path);
     
     auto workerConfig = WorkerConfigBuilder()
         .setDataSourceConfig(
@@ -954,56 +957,56 @@ static int test_ffmpeg_software_decoder(const char* video_path) {
     
     // 4. 设置错误回调
     producer.setErrorCallback([](const std::string& error) {
-        LOG_ERROR_FMT("FFmpeg Software Decoder Error: %s", error.c_str());
+        LOG4CPLUS_ERROR_FMT(test_logger, "FFmpeg Software Decoder Error: %s", error.c_str());
         g_running = false;
     });
     
     // 5. 启动生产者
-    LOG_INFO("[Test] 启动FFmpeg软件解码...");
+    LOG4CPLUS_INFO(test_logger, "[Test] 启动FFmpeg软件解码...");
     if (!producer.start(workerConfig)) {
-        LOG_ERROR("Failed to start FFmpeg software decoder");
+        LOG4CPLUS_ERROR(test_logger, "Failed to start FFmpeg software decoder");
         return -1;
     }
     
-    LOG_INFO("[Test] 视频解码已启动 (Software Decoder), starting playback...");
-    LOG_INFO("[Test] 按Ctrl+C停止");
-    LOG_INFO("[Test] ⚠️ 注意：软件解码输出系统内存，需要拷贝到 framebuffer 显示");
+    LOG4CPLUS_INFO(test_logger, "[Test] 视频解码已启动 (Software Decoder), starting playback...");
+    LOG4CPLUS_INFO(test_logger, "[Test] 按Ctrl+C停止");
+    LOG4CPLUS_INFO(test_logger, "[Test] ⚠️ 注意：软件解码输出系统内存，需要拷贝到 framebuffer 显示");
     
     // 6. 获取 Display 的 BufferPool（用于显示）
-    LOG_INFO("[Test] 获取 Display BufferPool...");
+    LOG4CPLUS_INFO(test_logger, "[Test] 获取 Display BufferPool...");
     uint64_t display_pool_id = display.getBufferPoolId();
     if (display_pool_id == 0) {
-        LOG_ERROR("Display BufferPool not initialized");
+        LOG4CPLUS_ERROR(test_logger, "Display BufferPool not initialized");
         producer.stop();
         return -1;
     }
     auto display_pool_weak = BufferPoolRegistry::getInstance().getPool(display_pool_id);
     auto display_pool_sptr = display_pool_weak.lock();
     if (!display_pool_sptr) {
-        LOG_ERROR_FMT("Display BufferPool (ID: %lu) not found or already destroyed", display_pool_id);
+        LOG4CPLUS_ERROR_FMT(test_logger, "Display BufferPool (ID: %lu) not found or already destroyed", display_pool_id);
         producer.stop();
         return -1;
     }
     
     // 7. 获取 Worker 的 BufferPool（软件解码输出）
-    LOG_INFO("[Test] 获取 Worker BufferPool...");
+    LOG4CPLUS_INFO(test_logger, "[Test] 获取 Worker BufferPool...");
     uint64_t producer_pool_id = producer.getWorkingBufferPoolId();
     if (producer_pool_id == 0) {
-        LOG_ERROR("No working BufferPool ID available");
+        LOG4CPLUS_ERROR(test_logger, "No working BufferPool ID available");
         producer.stop();
         return -1;
     }
     auto producer_pool_weak = BufferPoolRegistry::getInstance().getPool(producer_pool_id);
     auto producer_pool_sptr = producer_pool_weak.lock();
     if (!producer_pool_sptr) {
-        LOG_ERROR("Worker BufferPool not found or destroyed");
+        LOG4CPLUS_ERROR(test_logger, "Worker BufferPool not found or destroyed");
         producer.stop();
         return -1;
     }
     
-    LOG_INFO_FMT("[Test] Worker BufferPool: '%s' (ID: %lu)", 
+    LOG4CPLUS_INFO_FMT(test_logger, "[Test] Worker BufferPool: '%s' (ID: %lu)", 
                  producer_pool_sptr->getName().c_str(), producer_pool_id);
-    LOG_INFO_FMT("[Test] Display BufferPool: '%s' (ID: %lu)", 
+    LOG4CPLUS_INFO_FMT(test_logger, "[Test] Display BufferPool: '%s' (ID: %lu)", 
                  display_pool_sptr->getName().c_str(), display_pool_id);
     producer_pool_sptr->printStats();
     display_pool_sptr->printStats();
@@ -1018,7 +1021,7 @@ static int test_ffmpeg_software_decoder(const char* video_path) {
         if (decoded_buffer == nullptr) {
             // 超时时检查生产者状态
             if (!producer.isRunning()) {
-                LOG_INFO("Producer stopped naturally, exiting consumer loop...");
+                LOG4CPLUS_INFO(test_logger, "Producer stopped naturally, exiting consumer loop...");
                 break;
             }
             continue;  // 超时，继续等待
@@ -1027,7 +1030,7 @@ static int test_ffmpeg_software_decoder(const char* video_path) {
         // 步骤2：从 Display BufferPool 获取空闲的 framebuffer
         Buffer* display_buffer = display_pool_sptr->acquireFree(true, 100);
         if (display_buffer == nullptr) {
-            LOG_WARN("Failed to acquire free display buffer, skipping frame");
+            LOG4CPLUS_WARN(test_logger, "Failed to acquire free display buffer, skipping frame");
             producer_pool_sptr->releaseFilled(decoded_buffer);
             continue;
         }
@@ -1039,7 +1042,7 @@ static int test_ffmpeg_software_decoder(const char* video_path) {
         size_t copy_size = std::min(decoded_buffer->size(), display_buffer->size());
         
         if (!src_addr) {
-            LOG_ERROR_FMT("❌ ERROR: decoded_buffer->getVirtualAddress() is nullptr (buffer #%u)", 
+            LOG4CPLUS_ERROR_FMT(test_logger, "❌ ERROR: decoded_buffer->getVirtualAddress() is nullptr (buffer #%u)", 
                           decoded_buffer->id());
             display_pool_sptr->releaseFree(display_buffer);
             producer_pool_sptr->releaseFilled(decoded_buffer);
@@ -1047,7 +1050,7 @@ static int test_ffmpeg_software_decoder(const char* video_path) {
         }
         
         if (!dst_addr) {
-            LOG_ERROR_FMT("❌ ERROR: display_buffer->getVirtualAddress() is nullptr (buffer #%u)", 
+            LOG4CPLUS_ERROR_FMT(test_logger, "❌ ERROR: display_buffer->getVirtualAddress() is nullptr (buffer #%u)", 
                           display_buffer->id());
             display_pool_sptr->releaseFree(display_buffer);
             producer_pool_sptr->releaseFilled(decoded_buffer);
@@ -1055,7 +1058,7 @@ static int test_ffmpeg_software_decoder(const char* video_path) {
         }
         
         if (copy_size == 0) {
-            LOG_WARN("⚠️  WARNING: copy_size is 0, skipping frame");
+            LOG4CPLUS_WARN(test_logger, "⚠️  WARNING: copy_size is 0, skipping frame");
             display_pool_sptr->releaseFree(display_buffer);
             producer_pool_sptr->releaseFilled(decoded_buffer);
             continue;
@@ -1066,7 +1069,7 @@ static int test_ffmpeg_software_decoder(const char* video_path) {
         // 步骤4：显示（现在是 Display BufferPool 的 buffer，可以正常显示）
         display.waitVerticalSync();
         if (!display.displayFilledFramebuffer(display_buffer)) {
-            LOG_WARN("Display failed");
+            LOG4CPLUS_WARN(test_logger, "Display failed");
         }
         
         // 步骤5：归还两个 buffer
@@ -1077,13 +1080,13 @@ static int test_ffmpeg_software_decoder(const char* video_path) {
         
         // 每100帧打印一次统计
         if (frame_count % 100 == 0) {
-            LOG_DEBUG_FMT("Frames displayed: %d (%.1f fps)", 
+            LOG4CPLUS_DEBUG_FMT(test_logger, "Frames displayed: %d (%.1f fps)", 
                           frame_count, producer.getAverageFPS());
         }
     }
     
     // 9. 排空剩余的已填充 buffer
-    LOG_INFO("Draining remaining buffers from BufferPool...");
+    LOG4CPLUS_INFO(test_logger, "Draining remaining buffers from BufferPool...");
     Buffer* remaining_decoded = nullptr;
     int drained_count = 0;
     while ((remaining_decoded = producer_pool_sptr->acquireFilled(false, 0)) != nullptr) {
@@ -1100,7 +1103,7 @@ static int test_ffmpeg_software_decoder(const char* video_path) {
                 display.waitVerticalSync();
                 display.displayFilledFramebuffer(display_buffer);
             } else {
-                LOG_WARN("⚠️  Skipping invalid buffer during drain");
+                LOG4CPLUS_WARN(test_logger, "⚠️  Skipping invalid buffer during drain");
             }
             
             display_pool_sptr->releaseFree(display_buffer);
@@ -1111,21 +1114,21 @@ static int test_ffmpeg_software_decoder(const char* video_path) {
         drained_count++;
     }
     if (drained_count > 0) {
-        LOG_INFO_FMT("Drained %d remaining buffers", drained_count);
+        LOG4CPLUS_INFO_FMT(test_logger, "Drained %d remaining buffers", drained_count);
     }
     
     // 10. 停止生产者
-    LOG_INFO("Stopping FFmpeg software decoder...");
+    LOG4CPLUS_INFO(test_logger, "Stopping FFmpeg software decoder...");
     producer.stop();
     
-    LOG_INFO("FFmpeg software decoder test completed");
-    LOG_INFO_FMT("Total frames displayed: %d", frame_count);
-    LOG_INFO_FMT("Frames produced: %d", producer.getProducedFrames());
-    LOG_INFO_FMT("Frames skipped: %d", producer.getSkippedFrames());
-    LOG_INFO_FMT("Average FPS: %.2f", producer.getAverageFPS());
-    LOG_INFO("💡 Tip: Compare with test_h264_taco_video (hardware decoder) for performance difference");
+    LOG4CPLUS_INFO(test_logger, "FFmpeg software decoder test completed");
+    LOG4CPLUS_INFO_FMT(test_logger, "Total frames displayed: %d", frame_count);
+    LOG4CPLUS_INFO_FMT(test_logger, "Frames produced: %d", producer.getProducedFrames());
+    LOG4CPLUS_INFO_FMT(test_logger, "Frames skipped: %d", producer.getSkippedFrames());
+    LOG4CPLUS_INFO_FMT(test_logger, "Average FPS: %.2f", producer.getAverageFPS());
+    LOG4CPLUS_INFO(test_logger, "💡 Tip: Compare with test_h264_taco_video (hardware decoder) for performance difference");
     
-    LOG_INFO("Final BufferPool statistics:");
+    LOG4CPLUS_INFO(test_logger, "Final BufferPool statistics:");
     producer_pool_sptr->printStats();
     
     return 0;
@@ -1151,7 +1154,7 @@ static void decode_production_line_worker(
 ) {
     std::string thread_prefix = "[Line " + std::to_string(line_id) + "] ";
     
-    LOG_INFO_FMT("%sStarting decode worker for: %s", thread_prefix.c_str(), video_path);
+    LOG4CPLUS_INFO_FMT(test_logger, "%sStarting decode worker for: %s", thread_prefix.c_str(), video_path);
     
     // 1. 创建 VideoProductionLine（Worker会在open()时自动调用Allocator创建BufferPool）
     VideoProductionLine producer(true, 1);  // loop=true, thread_count=1
@@ -1184,24 +1187,24 @@ static void decode_production_line_worker(
     
     // 3. 设置错误回调
     producer.setErrorCallback([thread_prefix, total_errors](const std::string& error) {
-        LOG_ERROR_FMT("%sFFmpeg Error: %s", thread_prefix.c_str(), error.c_str());
+        LOG4CPLUS_ERROR_FMT(test_logger, "%sFFmpeg Error: %s", thread_prefix.c_str(), error.c_str());
         (*total_errors)++;
     });
     
     // 4. 启动生产者
-    LOG_INFO_FMT("%sStarting FFmpeg video producer...", thread_prefix.c_str());
+    LOG4CPLUS_INFO_FMT(test_logger, "%sStarting FFmpeg video producer...", thread_prefix.c_str());
     if (!producer.start(workerConfig)) {
-        LOG_ERROR_FMT("%sFailed to start FFmpeg producer", thread_prefix.c_str());
+        LOG4CPLUS_ERROR_FMT(test_logger, "%sFailed to start FFmpeg producer", thread_prefix.c_str());
         (*total_errors)++;
         return;
     }
     
-    LOG_INFO_FMT("%sVideo decoding started", thread_prefix.c_str());
+    LOG4CPLUS_INFO_FMT(test_logger, "%sVideo decoding started", thread_prefix.c_str());
     
     // 5. 获取工作BufferPool（Worker创建的或fallback的）
     uint64_t producer_pool_id = producer.getWorkingBufferPoolId();
     if (producer_pool_id == 0) {
-        LOG_ERROR_FMT("%sNo working BufferPool ID available", thread_prefix.c_str());
+        LOG4CPLUS_ERROR_FMT(test_logger, "%sNo working BufferPool ID available", thread_prefix.c_str());
         (*total_errors)++;
         producer.stop();
         return;
@@ -1210,13 +1213,13 @@ static void decode_production_line_worker(
     auto producer_pool_weak = BufferPoolRegistry::getInstance().getPool(producer_pool_id);
     auto producer_pool_sptr = producer_pool_weak.lock();
     if (!producer_pool_sptr) {
-        LOG_ERROR_FMT("%sBufferPool not found or destroyed", thread_prefix.c_str());
+        LOG4CPLUS_ERROR_FMT(test_logger, "%sBufferPool not found or destroyed", thread_prefix.c_str());
         (*total_errors)++;
         producer.stop();
         return;
     }
     
-    LOG_INFO_FMT("%sUsing BufferPool: '%s'", thread_prefix.c_str(), 
+    LOG4CPLUS_INFO_FMT(test_logger, "%sUsing BufferPool: '%s'", thread_prefix.c_str(), 
                  producer_pool_sptr->getName().c_str());
     
     // 6. 解码循环（不显示，直接释放buffer）
@@ -1229,7 +1232,7 @@ static void decode_production_line_worker(
         if (filled_buffer == nullptr) {
             // 超时时检查生产者状态
             if (!producer.isRunning()) {
-                LOG_INFO_FMT("%sProducer stopped naturally, exiting decode loop...",
+                LOG4CPLUS_INFO_FMT(test_logger, "%sProducer stopped naturally, exiting decode loop...",
                            thread_prefix.c_str());
                 break;
             }
@@ -1249,20 +1252,20 @@ static void decode_production_line_worker(
             (*total_frames)++;
         } else {
             // 通道未启用：跳过消费
-            LOG_DEBUG_FMT("%sSkipping buffer from ch%d (not enabled in TACO config)",
+            LOG4CPLUS_DEBUG_FMT(test_logger, "%sSkipping buffer from ch%d (not enabled in TACO config)",
                          thread_prefix.c_str(), buffer_channel);
             producer_pool_sptr->releaseFilled(filled_buffer);
         }
         
         // 每100帧打印一次统计
         if (frame_count % 100 == 0) {
-            LOG_DEBUG_FMT("%sDecoded %d frames (%.1f fps)", 
+            LOG4CPLUS_DEBUG_FMT(test_logger, "%sDecoded %d frames (%.1f fps)", 
                          thread_prefix.c_str(), frame_count, producer.getAverageFPS());
         }
     }
     
     // 排空剩余的已填充 buffer
-    LOG_INFO_FMT("%sDraining remaining buffers from BufferPool...", thread_prefix.c_str());
+    LOG4CPLUS_INFO_FMT(test_logger, "%sDraining remaining buffers from BufferPool...", thread_prefix.c_str());
     Buffer* remaining_buffer = nullptr;
     int drained_count = 0;
     while ((remaining_buffer = producer_pool_sptr->acquireFilled(false, 0)) != nullptr) {
@@ -1272,18 +1275,18 @@ static void decode_production_line_worker(
         drained_count++;
     }
     if (drained_count > 0) {
-        LOG_INFO_FMT("%sDrained %d remaining buffers", thread_prefix.c_str(), drained_count);
+        LOG4CPLUS_INFO_FMT(test_logger, "%sDrained %d remaining buffers", thread_prefix.c_str(), drained_count);
     }
     
     // 7. 停止生产者
-    LOG_INFO_FMT("%sStopping FFmpeg producer...", thread_prefix.c_str());
+    LOG4CPLUS_INFO_FMT(test_logger, "%sStopping FFmpeg producer...", thread_prefix.c_str());
     producer.stop();
     
-    LOG_INFO_FMT("%sDecode worker completed", thread_prefix.c_str());
-    LOG_INFO_FMT("%sTotal frames decoded: %d", thread_prefix.c_str(), frame_count);
-    LOG_INFO_FMT("%sFrames produced: %d", thread_prefix.c_str(), producer.getProducedFrames());
-    LOG_INFO_FMT("%sFrames skipped: %d", thread_prefix.c_str(), producer.getSkippedFrames());
-    LOG_INFO_FMT("%sAverage FPS: %.2f", thread_prefix.c_str(), producer.getAverageFPS());
+    LOG4CPLUS_INFO_FMT(test_logger, "%sDecode worker completed", thread_prefix.c_str());
+    LOG4CPLUS_INFO_FMT(test_logger, "%sTotal frames decoded: %d", thread_prefix.c_str(), frame_count);
+    LOG4CPLUS_INFO_FMT(test_logger, "%sFrames produced: %d", thread_prefix.c_str(), producer.getProducedFrames());
+    LOG4CPLUS_INFO_FMT(test_logger, "%sFrames skipped: %d", thread_prefix.c_str(), producer.getSkippedFrames());
+    LOG4CPLUS_INFO_FMT(test_logger, "%sAverage FPS: %.2f", thread_prefix.c_str(), producer.getAverageFPS());
 }
 
 /**
@@ -1296,20 +1299,20 @@ static void decode_production_line_worker(
  * - 统计所有线程的解码性能
  */
 static int test_h264_taco_video_multithread(const char* video_path) {
-    LOG_INFO("═══════════════════════════════════════════════════════");
-    LOG_INFO_FMT("  Test: Multi-threaded FFmpeg Video Decoding - File: %s", video_path);
-    LOG_INFO("═══════════════════════════════════════════════════════");
+    LOG4CPLUS_INFO(test_logger, "═══════════════════════════════════════════════════════");
+    LOG4CPLUS_INFO_FMT(test_logger, "  Test: Multi-threaded FFmpeg Video Decoding - File: %s", video_path);
+    LOG4CPLUS_INFO(test_logger, "═══════════════════════════════════════════════════════");
     
     // 配置参数
     const int num_threads = 4;  // 固定4个线程
     const int output_width = 1920;
     const int output_height = 1080;
     
-    LOG_INFO_FMT("Configuration:");
-    LOG_INFO_FMT("  Threads: %d", num_threads);
-    LOG_INFO_FMT("  Video file: %s", video_path);
-    LOG_INFO_FMT("  Output resolution: %dx%d", output_width, output_height);
-    LOG_INFO_FMT("  Display: Disabled (decode only)");
+    LOG4CPLUS_INFO_FMT(test_logger, "Configuration:");
+    LOG4CPLUS_INFO_FMT(test_logger, "  Threads: %d", num_threads);
+    LOG4CPLUS_INFO_FMT(test_logger, "  Video file: %s", video_path);
+    LOG4CPLUS_INFO_FMT(test_logger, "  Output resolution: %dx%d", output_width, output_height);
+    LOG4CPLUS_INFO_FMT(test_logger, "  Display: Disabled (decode only)");
     
     
     // 全局统计
@@ -1317,7 +1320,7 @@ static int test_h264_taco_video_multithread(const char* video_path) {
     std::atomic<int> total_errors(0);
     
     // 创建多个线程，每个线程运行一个 VideoProductionLine
-    LOG_INFO("Creating decode threads...");
+    LOG4CPLUS_INFO(test_logger, "Creating decode threads...");
     std::vector<std::thread> threads;
     
     for (int i = 0; i < num_threads; i++) {
@@ -1330,8 +1333,8 @@ static int test_h264_taco_video_multithread(const char* video_path) {
                             &total_errors);
     }
     
-    LOG_INFO_FMT("All %d decode threads started", num_threads);
-    LOG_INFO("[Test] 按Ctrl+C停止");
+    LOG4CPLUS_INFO_FMT(test_logger, "All %d decode threads started", num_threads);
+    LOG4CPLUS_INFO(test_logger, "[Test] 按Ctrl+C停止");
     
     
     // 等待所有线程完成（或通过 g_running 控制）
@@ -1340,19 +1343,19 @@ static int test_h264_taco_video_multithread(const char* video_path) {
     }
     
     // 打印最终统计
-    LOG_INFO("═══════════════════════════════════════════════════════");
-    LOG_INFO("  Test Results");
-    LOG_INFO("═══════════════════════════════════════════════════════");
-    LOG_INFO_FMT("Total threads: %d", num_threads);
-    LOG_INFO_FMT("Total frames decoded: %d", total_frames.load());
-    LOG_INFO_FMT("Total errors: %d", total_errors.load());
+    LOG4CPLUS_INFO(test_logger, "═══════════════════════════════════════════════════════");
+    LOG4CPLUS_INFO(test_logger, "  Test Results");
+    LOG4CPLUS_INFO(test_logger, "═══════════════════════════════════════════════════════");
+    LOG4CPLUS_INFO_FMT(test_logger, "Total threads: %d", num_threads);
+    LOG4CPLUS_INFO_FMT(test_logger, "Total frames decoded: %d", total_frames.load());
+    LOG4CPLUS_INFO_FMT(test_logger, "Total errors: %d", total_errors.load());
     
     if (total_errors.load() > 0) {
-        LOG_WARN_FMT("Test completed with %d errors", total_errors.load());
+        LOG4CPLUS_WARN_FMT(test_logger, "Test completed with %d errors", total_errors.load());
         return -1;
     }
     
-    LOG_INFO("Test completed successfully");
+    LOG4CPLUS_INFO(test_logger, "Test completed successfully");
     return 0;
 }
 
@@ -1414,13 +1417,13 @@ static int test_buffer_writer_format(
 ) {
     using namespace productionline::io;
     
-    LOG_INFO("═══════════════════════════════════════════════════════");
-    LOG_INFO("  BufferWriter Format Test (v2.18 - 优先级逻辑)");
-    LOG_INFO_FMT("  Video: %s", video_path);
-    LOG_INFO("═══════════════════════════════════════════════════════");
+    LOG4CPLUS_INFO(test_logger, "═══════════════════════════════════════════════════════");
+    LOG4CPLUS_INFO(test_logger, "  BufferWriter Format Test (v2.18 - 优先级逻辑)");
+    LOG4CPLUS_INFO_FMT(test_logger, "  Video: %s", video_path);
+    LOG4CPLUS_INFO(test_logger, "═══════════════════════════════════════════════════════");
     
     // ========== Step 1: 启动 VideoProductionLine 并获取输入源信息 ==========
-    LOG_INFO("\nStep 1: Starting VideoProductionLine and getting source info...");
+    LOG4CPLUS_INFO(test_logger, "\nStep 1: Starting VideoProductionLine and getting source info...");
     
     auto workerConfig = WorkerConfigBuilder()
         .setDataSourceConfig(
@@ -1445,14 +1448,14 @@ static int test_buffer_writer_format(
     
     VideoProductionLine producer(false, 1, false);
     if (!producer.start(workerConfig)) {
-        LOG_ERROR("Failed to start VideoProductionLine");
+        LOG4CPLUS_ERROR(test_logger, "Failed to start VideoProductionLine");
         return -1;
     }
     
     // 获取 Worker Facade 以访问输入源信息
     auto worker_facade_sptr = producer.getWorkerFacade();
     if (!worker_facade_sptr) {
-        LOG_ERROR("Failed to get WorkerFacade");
+        LOG4CPLUS_ERROR(test_logger, "Failed to get WorkerFacade");
         producer.stop();
         return -1;
     }
@@ -1462,13 +1465,13 @@ static int test_buffer_writer_format(
     int source_height = worker_facade_sptr->getSourceHeight();
     AVPixelFormat source_format = worker_facade_sptr->getSourcePixelFormat();
     
-    LOG_INFO("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-    LOG_INFO_FMT("  Input source resolution: %dx%d", source_width, source_height);
-    LOG_INFO_FMT("  Input source format: %s", av_get_pix_fmt_name(source_format));
-    LOG_INFO("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    LOG4CPLUS_INFO(test_logger, "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    LOG4CPLUS_INFO_FMT(test_logger, "  Input source resolution: %dx%d", source_width, source_height);
+    LOG4CPLUS_INFO_FMT(test_logger, "  Input source format: %s", av_get_pix_fmt_name(source_format));
+    LOG4CPLUS_INFO(test_logger, "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
     
     // ========== Step 2: 使用优先级逻辑确定输出参数 ==========
-    LOG_INFO("\nStep 2: Determining output parameters with priority logic...");
+    LOG4CPLUS_INFO(test_logger, "\nStep 2: Determining output parameters with priority logic...");
     system("mkdir -p ./test_output_raw/yuv ./test_output_raw/rgb ./test_output_raw/gray");
     
     // ========== 通道0变量 ==========
@@ -1503,17 +1506,17 @@ static int test_buffer_writer_format(
         if (taco_config.ch0_scale_width > 0 && taco_config.ch0_scale_height > 0) {
             ch0_expected_width = taco_config.ch0_scale_width;
             ch0_expected_height = taco_config.ch0_scale_height;
-            LOG_INFO_FMT("  ch0: Using taco_config scale: %dx%d (Priority 1)", 
+            LOG4CPLUS_INFO_FMT(test_logger, "  ch0: Using taco_config scale: %dx%d (Priority 1)", 
                          ch0_expected_width, ch0_expected_height);
         } else if (source_width > 0 && source_height > 0) {
             ch0_expected_width = source_width;
             ch0_expected_height = source_height;
-            LOG_INFO_FMT("  ch0: Using input source resolution: %dx%d (Priority 2)", 
+            LOG4CPLUS_INFO_FMT(test_logger, "  ch0: Using input source resolution: %dx%d (Priority 2)", 
                          ch0_expected_width, ch0_expected_height);
         } else {
             ch0_expected_width = 1920;
             ch0_expected_height = 1080;
-            LOG_INFO_FMT("  ch0: Using default resolution: %dx%d (Priority 3)", 
+            LOG4CPLUS_INFO_FMT(test_logger, "  ch0: Using default resolution: %dx%d (Priority 3)", 
                          ch0_expected_width, ch0_expected_height);
         }
         ch0_output_path = generateOutputPath(0, ch0_expected_format, ch0_expected_width, ch0_expected_height);
@@ -1522,12 +1525,12 @@ static int test_buffer_writer_format(
         if (ch0_writer->openRaw(ch0_output_path.c_str(), ch0_expected_format, 
                                 ch0_expected_width, ch0_expected_height)) {
             ch0_writer_created = true;
-            LOG_INFO_FMT("✅ Created ch0 writer: %s (%dx%d)", 
+            LOG4CPLUS_INFO_FMT(test_logger, "✅ Created ch0 writer: %s (%dx%d)", 
                          av_get_pix_fmt_name(ch0_expected_format),
                          ch0_expected_width, ch0_expected_height);
-            LOG_INFO_FMT("   Output: %s", ch0_output_path.c_str());
+            LOG4CPLUS_INFO_FMT(test_logger, "   Output: %s", ch0_output_path.c_str());
         } else {
-            LOG_ERROR("Failed to create ch0 writer");
+            LOG4CPLUS_ERROR(test_logger, "Failed to create ch0 writer");
             producer.stop();
             return -1;
         }
@@ -1566,17 +1569,17 @@ static int test_buffer_writer_format(
         if (taco_config.ch1_scale_width > 0 && taco_config.ch1_scale_height > 0) {
             ch1_expected_width = taco_config.ch1_scale_width;
             ch1_expected_height = taco_config.ch1_scale_height;
-            LOG_INFO_FMT("  ch1: Using taco_config scale: %dx%d (Priority 1)", 
+            LOG4CPLUS_INFO_FMT(test_logger, "  ch1: Using taco_config scale: %dx%d (Priority 1)", 
                          ch1_expected_width, ch1_expected_height);
         } else if (source_width > 0 && source_height > 0) {
             ch1_expected_width = source_width;
             ch1_expected_height = source_height;
-            LOG_INFO_FMT("  ch1: Using input source resolution: %dx%d (Priority 2)", 
+            LOG4CPLUS_INFO_FMT(test_logger, "  ch1: Using input source resolution: %dx%d (Priority 2)", 
                          ch1_expected_width, ch1_expected_height);
         } else {
             ch1_expected_width = 1920;
             ch1_expected_height = 1080;
-            LOG_INFO_FMT("  ch1: Using default resolution: %dx%d (Priority 3)", 
+            LOG4CPLUS_INFO_FMT(test_logger, "  ch1: Using default resolution: %dx%d (Priority 3)", 
                          ch1_expected_width, ch1_expected_height);
         }
         ch1_output_path = generateOutputPath(1, ch1_expected_format, ch1_expected_width, ch1_expected_height);
@@ -1585,39 +1588,39 @@ static int test_buffer_writer_format(
         if (ch1_writer->openRaw(ch1_output_path.c_str(), ch1_expected_format, 
                                 ch1_expected_width, ch1_expected_height)) {
             ch1_writer_created = true;
-            LOG_INFO_FMT("✅ Created ch1 writer: %s (%dx%d)", 
+            LOG4CPLUS_INFO_FMT(test_logger, "✅ Created ch1 writer: %s (%dx%d)", 
                          av_get_pix_fmt_name(ch1_expected_format),
                          ch1_expected_width, ch1_expected_height);
-            LOG_INFO_FMT("   Output: %s", ch1_output_path.c_str());
+            LOG4CPLUS_INFO_FMT(test_logger, "   Output: %s", ch1_output_path.c_str());
         } else {
-            LOG_ERROR("Failed to create ch1 writer");
+            LOG4CPLUS_ERROR(test_logger, "Failed to create ch1 writer");
             producer.stop();
             return -1;
         }
     }
     
     if (!ch0_writer_created && !ch1_writer_created) {
-        LOG_ERROR("No channels enabled in taco_config!");
+        LOG4CPLUS_ERROR(test_logger, "No channels enabled in taco_config!");
         producer.stop();
         return -1;
     }
     
     // ========== Step 3: 获取 BufferPool ==========
-    LOG_INFO("\nStep 3: Getting BufferPool...");
+    LOG4CPLUS_INFO(test_logger, "\nStep 3: Getting BufferPool...");
     uint64_t pool_id = producer.getWorkingBufferPoolId();
     auto pool_sptr = BufferPoolRegistry::getInstance().getPool(pool_id).lock();
     if (!pool_sptr) {
-        LOG_ERROR("Failed to get BufferPool");
+        LOG4CPLUS_ERROR(test_logger, "Failed to get BufferPool");
         producer.stop();
         return -1;
     }
     
-    LOG_INFO_FMT("BufferPool: %s (ID: %lu)", 
+    LOG4CPLUS_INFO_FMT(test_logger, "BufferPool: %s (ID: %lu)", 
                  pool_sptr->getName().c_str(), pool_id);
     
     // ========== Step 4: 消费循环（通道过滤 + 格式验证在 BufferWriter 内部） ==========
-    LOG_INFO("\nStep 4: Saving frames...");
-    LOG_INFO("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    LOG4CPLUS_INFO(test_logger, "\nStep 4: Saving frames...");
+    LOG4CPLUS_INFO(test_logger, "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
     
     int timeout_count = 0;
     const int MAX_TIMEOUT = 10;
@@ -1635,7 +1638,7 @@ static int test_buffer_writer_format(
                 if (ch0_writer->write(buffer)) {
                     ch0_saved_count++;
                     if (ch0_saved_count % 10 == 0) {
-                        LOG_INFO_FMT("  ch0: Saved %d frames", ch0_saved_count);
+                        LOG4CPLUS_INFO_FMT(test_logger, "  ch0: Saved %d frames", ch0_saved_count);
                     }
                 }
             } else if (buffer_channel == 1 && taco_config.ch1_enable && ch1_writer_created) {
@@ -1643,7 +1646,7 @@ static int test_buffer_writer_format(
                 if (ch1_writer->write(buffer)) {
                     ch1_saved_count++;
                     if (ch1_saved_count % 10 == 0) {
-                        LOG_INFO_FMT("  ch1: Saved %d frames", ch1_saved_count);
+                        LOG4CPLUS_INFO_FMT(test_logger, "  ch1: Saved %d frames", ch1_saved_count);
                     }
                 }
             } else if (buffer_channel < 0) {
@@ -1657,7 +1660,7 @@ static int test_buffer_writer_format(
                 // 通道不匹配或未启用：跳过
                 skipped_count++;
                 if (skipped_count % 50 == 1) {
-                    LOG_WARN_FMT("  ⚠️  Skipping frame from ch%d (not enabled in TACO config, total: %d)",
+                    LOG4CPLUS_WARN_FMT(test_logger, "  ⚠️  Skipping frame from ch%d (not enabled in TACO config, total: %d)",
                                 buffer_channel, skipped_count);
                 }
             }
@@ -1667,44 +1670,44 @@ static int test_buffer_writer_format(
         } else {
             timeout_count++;
             if (timeout_count >= MAX_TIMEOUT) {
-                LOG_INFO("Video finished, stopping...");
+                LOG4CPLUS_INFO(test_logger, "Video finished, stopping...");
                 break;
             }
             usleep(10000);
         }
     }
     
-    LOG_INFO("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    LOG4CPLUS_INFO(test_logger, "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
     
     // 4. 关闭
-    LOG_INFO("\nStep 4: Cleaning up...");
+    LOG4CPLUS_INFO(test_logger, "\nStep 4: Cleaning up...");
     if (ch0_writer) ch0_writer->close();
     if (ch1_writer) ch1_writer->close();
     producer.stop();
     
     // 5. ========== 最终统计 ==========
-    LOG_INFO("\n═══════════════════════════════════════════════════════");
-    LOG_INFO("  Test Results");
-    LOG_INFO("═══════════════════════════════════════════════════════");
+    LOG4CPLUS_INFO(test_logger, "\n═══════════════════════════════════════════════════════");
+    LOG4CPLUS_INFO(test_logger, "  Test Results");
+    LOG4CPLUS_INFO(test_logger, "═══════════════════════════════════════════════════════");
     if (ch0_writer_created) {
-        LOG_INFO_FMT("  ch0: Saved %d frames", ch0_saved_count);
-        LOG_INFO_FMT("       Format mismatches: %lld", (long long)ch0_writer->getMismatchCount());
-        LOG_INFO_FMT("       Output: %s", ch0_output_path.c_str());
+        LOG4CPLUS_INFO_FMT(test_logger, "  ch0: Saved %d frames", ch0_saved_count);
+        LOG4CPLUS_INFO_FMT(test_logger, "       Format mismatches: %lld", (long long)ch0_writer->getMismatchCount());
+        LOG4CPLUS_INFO_FMT(test_logger, "       Output: %s", ch0_output_path.c_str());
     }
     if (ch1_writer_created) {
-        LOG_INFO_FMT("  ch1: Saved %d frames", ch1_saved_count);
-        LOG_INFO_FMT("       Format mismatches: %lld", (long long)ch1_writer->getMismatchCount());
-        LOG_INFO_FMT("       Output: %s", ch1_output_path.c_str());
+        LOG4CPLUS_INFO_FMT(test_logger, "  ch1: Saved %d frames", ch1_saved_count);
+        LOG4CPLUS_INFO_FMT(test_logger, "       Format mismatches: %lld", (long long)ch1_writer->getMismatchCount());
+        LOG4CPLUS_INFO_FMT(test_logger, "       Output: %s", ch1_output_path.c_str());
     }
-    LOG_INFO_FMT("  Skipped frames: %d (channel mismatch)", skipped_count);
-    LOG_INFO("═══════════════════════════════════════════════════════");
+    LOG4CPLUS_INFO_FMT(test_logger, "  Skipped frames: %d (channel mismatch)", skipped_count);
+    LOG4CPLUS_INFO(test_logger, "═══════════════════════════════════════════════════════");
     
     bool success = (ch0_saved_count > 0 || ch1_saved_count > 0);
     if (success) {
-        LOG_INFO("\n✅ Test PASSED");
+        LOG4CPLUS_INFO(test_logger, "\n✅ Test PASSED");
     } else {
-        LOG_ERROR("\n❌ Test FAILED: No frames saved");
-        LOG_ERROR("   💡 Tip: Check TACO configuration and decoder output");
+        LOG4CPLUS_ERROR(test_logger, "\n❌ Test FAILED: No frames saved");
+        LOG4CPLUS_ERROR(test_logger, "   💡 Tip: Check TACO configuration and decoder output");
     }
     
     return success ? 0 : -1;
@@ -1714,33 +1717,33 @@ static int test_buffer_writer_format(
  * 打印支持的像素格式列表
  */
 static void print_supported_formats() {
-    LOG_INFO("╔═══════════════════════════════════════════════════════╗");
-    LOG_INFO("║  支持的像素格式 (Supported Pixel Formats)            ║");
-    LOG_INFO("╚═══════════════════════════════════════════════════════╝");
-    LOG_INFO("");
-    LOG_INFO("YUV 格式:");
-    LOG_INFO("  nv12         - YUV420 NV12 (默认格式)");
-    LOG_INFO("  nv21         - YUV420 NV21");
-    LOG_INFO("");
-    LOG_INFO("RGB 格式 (8-bit, Alpha 通道):");
-    LOG_INFO("  argb888      - ARGB (4字节/像素)");
-    LOG_INFO("  abgr888      - ABGR (4字节/像素)");
-    LOG_INFO("  bgra888      - BGRA (4字节/像素)");
-    LOG_INFO("  rgba888      - RGBA (4字节/像素)");
-    LOG_INFO("");
-    LOG_INFO("RGB 格式 (8-bit, 无 Alpha):");
-    LOG_INFO("  rgb888       - RGB24 (3字节/像素)");
-    LOG_INFO("  bgr888       - BGR24 (3字节/像素)");
-    LOG_INFO("");
-    LOG_INFO("RGB 格式 (16-bit):");
-    LOG_INFO("  r16g16b16    - RGB48LE (6字节/像素)");
-    LOG_INFO("  b16g16r16    - BGR48LE (6字节/像素)");
-    LOG_INFO("");
-    LOG_INFO("使用示例:");
-    LOG_INFO("  ./test writer nv12 /path/to/video.mp4");
-    LOG_INFO("  ./test writer rgb888 /path/to/video.mp4");
-    LOG_INFO("  ./test writer argb888 /path/to/video.mp4");
-    LOG_INFO("╚═══════════════════════════════════════════════════════╝");
+    LOG4CPLUS_INFO(test_logger, "╔═══════════════════════════════════════════════════════╗");
+    LOG4CPLUS_INFO(test_logger, "║  支持的像素格式 (Supported Pixel Formats)            ║");
+    LOG4CPLUS_INFO(test_logger, "╚═══════════════════════════════════════════════════════╝");
+    LOG4CPLUS_INFO(test_logger, "");
+    LOG4CPLUS_INFO(test_logger, "YUV 格式:");
+    LOG4CPLUS_INFO(test_logger, "  nv12         - YUV420 NV12 (默认格式)");
+    LOG4CPLUS_INFO(test_logger, "  nv21         - YUV420 NV21");
+    LOG4CPLUS_INFO(test_logger, "");
+    LOG4CPLUS_INFO(test_logger, "RGB 格式 (8-bit, Alpha 通道):");
+    LOG4CPLUS_INFO(test_logger, "  argb888      - ARGB (4字节/像素)");
+    LOG4CPLUS_INFO(test_logger, "  abgr888      - ABGR (4字节/像素)");
+    LOG4CPLUS_INFO(test_logger, "  bgra888      - BGRA (4字节/像素)");
+    LOG4CPLUS_INFO(test_logger, "  rgba888      - RGBA (4字节/像素)");
+    LOG4CPLUS_INFO(test_logger, "");
+    LOG4CPLUS_INFO(test_logger, "RGB 格式 (8-bit, 无 Alpha):");
+    LOG4CPLUS_INFO(test_logger, "  rgb888       - RGB24 (3字节/像素)");
+    LOG4CPLUS_INFO(test_logger, "  bgr888       - BGR24 (3字节/像素)");
+    LOG4CPLUS_INFO(test_logger, "");
+    LOG4CPLUS_INFO(test_logger, "RGB 格式 (16-bit):");
+    LOG4CPLUS_INFO(test_logger, "  r16g16b16    - RGB48LE (6字节/像素)");
+    LOG4CPLUS_INFO(test_logger, "  b16g16r16    - BGR48LE (6字节/像素)");
+    LOG4CPLUS_INFO(test_logger, "");
+    LOG4CPLUS_INFO(test_logger, "使用示例:");
+    LOG4CPLUS_INFO(test_logger, "  ./test writer nv12 /path/to/video.mp4");
+    LOG4CPLUS_INFO(test_logger, "  ./test writer rgb888 /path/to/video.mp4");
+    LOG4CPLUS_INFO(test_logger, "  ./test writer argb888 /path/to/video.mp4");
+    LOG4CPLUS_INFO(test_logger, "╚═══════════════════════════════════════════════════════╝");
 }
 
 /**
@@ -1861,7 +1864,7 @@ static int test_buffer_writer(const std::vector<std::string>& args) {
     // 检查参数数量（框架已经检查过，这里只需处理业务逻辑）
     if (args.size() < 2) {
         // 这个分支不应该被触发，因为框架会先检查
-        LOG_ERROR("错误：缺少参数");
+        LOG4CPLUS_ERROR(test_logger, "错误：缺少参数");
         return -1;
     }
     
@@ -1871,10 +1874,10 @@ static int test_buffer_writer(const std::vector<std::string>& args) {
     // 根据格式名称创建配置
     WorkerConfig::DecoderConfig::TacoConfig taco_config;
     if (!create_taco_config_by_format(format_name, taco_config)) {
-        LOG_ERROR("╔═══════════════════════════════════════════════════════╗");
-        LOG_ERROR_FMT("║  错误：不支持的格式 '%s'", format_name.c_str());
-        LOG_ERROR("╚═══════════════════════════════════════════════════════╝");
-        LOG_ERROR("");
+        LOG4CPLUS_ERROR(test_logger, "╔═══════════════════════════════════════════════════════╗");
+        LOG4CPLUS_ERROR_FMT(test_logger, "║  错误：不支持的格式 '%s'", format_name.c_str());
+        LOG4CPLUS_ERROR(test_logger, "╚═══════════════════════════════════════════════════════╝");
+        LOG4CPLUS_ERROR(test_logger, "");
         print_supported_formats();
         return -1;
     }
@@ -1904,10 +1907,10 @@ static int test_buffer_writer(const std::vector<std::string>& args) {
  * 注意：NV12 格式由 test_buffer_writer() 单独测试
  */
 static int test_buffer_writer_rgb_formats(const char* video_path) {
-    LOG_INFO("╔═══════════════════════════════════════════════════════╗");
-    LOG_INFO("║  BufferWriter RGB Formats Test Suite                  ║");
-    LOG_INFO("║  Testing 12 RGB formats (full coverage)               ║");
-    LOG_INFO("╚═══════════════════════════════════════════════════════╝");
+    LOG4CPLUS_INFO(test_logger, "╔═══════════════════════════════════════════════════════╗");
+    LOG4CPLUS_INFO(test_logger, "║  BufferWriter RGB Formats Test Suite                  ║");
+    LOG4CPLUS_INFO(test_logger, "║  Testing 12 RGB formats (full coverage)               ║");
+    LOG4CPLUS_INFO(test_logger, "╚═══════════════════════════════════════════════════════╝");
     
     // ✅ 定义测试用例：所有 RGB 格式（NV12 由 test_buffer_writer 单独测试）
     // ⭐ v2.18：移除硬编码分辨率，让优先级逻辑自动适配输入视频分辨率
@@ -1996,22 +1999,22 @@ static int test_buffer_writer_rgb_formats(const char* video_path) {
     int passed = 0;
     int failed = 0;
     
-    LOG_INFO_FMT("\nTotal RGB formats to test: %d\n", total_tests);
+    LOG4CPLUS_INFO_FMT(test_logger, "\nTotal RGB formats to test: %d\n", total_tests);
     
     for (int i = 0; i < total_tests; i++) {
-        LOG_INFO_FMT("\n╔═══════════════════════════════════════════════════════╗");
-        LOG_INFO_FMT("║  [%d/%d] Testing format                                ║", i + 1, total_tests);
-        LOG_INFO_FMT("╚═══════════════════════════════════════════════════════╝");
+        LOG4CPLUS_INFO_FMT(test_logger, "\n╔═══════════════════════════════════════════════════════╗");
+        LOG4CPLUS_INFO_FMT(test_logger, "║  [%d/%d] Testing format                                ║", i + 1, total_tests);
+        LOG4CPLUS_INFO_FMT(test_logger, "╚═══════════════════════════════════════════════════════╝");
         
         // ✅ 调用build_config()构建TacoConfig，直接传给测试函数
         int result = test_buffer_writer_format(video_path, tests[i]());
         
         if (result == 0) {
             passed++;
-            LOG_INFO_FMT("\n✅ [%d/%d] PASSED\n", i + 1, total_tests);
+            LOG4CPLUS_INFO_FMT(test_logger, "\n✅ [%d/%d] PASSED\n", i + 1, total_tests);
         } else {
             failed++;
-            LOG_ERROR_FMT("\n❌ [%d/%d] FAILED\n", i + 1, total_tests);
+            LOG4CPLUS_ERROR_FMT(test_logger, "\n❌ [%d/%d] FAILED\n", i + 1, total_tests);
         }
         
         // 短暂延迟，避免资源冲突
@@ -2019,14 +2022,14 @@ static int test_buffer_writer_rgb_formats(const char* video_path) {
     }
     
     // 最终统计
-    LOG_INFO("\n╔═══════════════════════════════════════════════════════╗");
-    LOG_INFO("║  Test Summary                                          ║");
-    LOG_INFO("╚═══════════════════════════════════════════════════════╝");
-    LOG_INFO_FMT("Total tests: %d", total_tests);
-    LOG_INFO_FMT("Passed: %d ✅", passed);
-    LOG_INFO_FMT("Failed: %d ❌", failed);
-    LOG_INFO_FMT("Success rate: %.1f%%", (100.0 * passed / total_tests));
-    LOG_INFO("\n╔═══════════════════════════════════════════════════════╗");
+    LOG4CPLUS_INFO(test_logger, "\n╔═══════════════════════════════════════════════════════╗");
+    LOG4CPLUS_INFO(test_logger, "║  Test Summary                                          ║");
+    LOG4CPLUS_INFO(test_logger, "╚═══════════════════════════════════════════════════════╝");
+    LOG4CPLUS_INFO_FMT(test_logger, "Total tests: %d", total_tests);
+    LOG4CPLUS_INFO_FMT(test_logger, "Passed: %d ✅", passed);
+    LOG4CPLUS_INFO_FMT(test_logger, "Failed: %d ❌", failed);
+    LOG4CPLUS_INFO_FMT(test_logger, "Success rate: %.1f%%", (100.0 * passed / total_tests));
+    LOG4CPLUS_INFO(test_logger, "\n╔═══════════════════════════════════════════════════════╗");
     
     return (failed == 0) ? 0 : -1;
 }
@@ -2041,10 +2044,10 @@ static int test_buffer_writer_rgb_formats(const char* video_path) {
  *   - YUV420 P010
  */
 static int test_buffer_writer_yuv_formats(const char* video_path) {
-    LOG_INFO("╔═══════════════════════════════════════════════════════╗");
-    LOG_INFO("║  BufferWriter YUV Formats Test Suite                   ║");
-    LOG_INFO("║  Testing YUV formats supported by PP0 (ch0)            ║");
-    LOG_INFO("╚═══════════════════════════════════════════════════════╝");
+    LOG4CPLUS_INFO(test_logger, "╔═══════════════════════════════════════════════════════╗");
+    LOG4CPLUS_INFO(test_logger, "║  BufferWriter YUV Formats Test Suite                   ║");
+    LOG4CPLUS_INFO(test_logger, "║  Testing YUV formats supported by PP0 (ch0)            ║");
+    LOG4CPLUS_INFO(test_logger, "╚═══════════════════════════════════════════════════════╝");
     
     // ✅ 定义测试用例：所有硬件支持的 YUV 格式（与 test_buffer_writer_rgb_formats 保持一致的结构）
     // ⭐ v2.18：移除硬编码分辨率，让优先级逻辑自动适配输入视频分辨率
@@ -2134,22 +2137,22 @@ static int test_buffer_writer_yuv_formats(const char* video_path) {
     int passed = 0;
     int failed = 0;
     
-    LOG_INFO_FMT("\nTotal YUV formats to test: %d\n", total_tests);
+    LOG4CPLUS_INFO_FMT(test_logger, "\nTotal YUV formats to test: %d\n", total_tests);
     
     for (int i = 0; i < total_tests; i++) {
-        LOG_INFO_FMT("\n╔═══════════════════════════════════════════════════════╗");
-        LOG_INFO_FMT("║  [%d/%d] Testing format                                ║", i + 1, total_tests);
-        LOG_INFO_FMT("╚═══════════════════════════════════════════════════════╝");
+        LOG4CPLUS_INFO_FMT(test_logger, "\n╔═══════════════════════════════════════════════════════╗");
+        LOG4CPLUS_INFO_FMT(test_logger, "║  [%d/%d] Testing format                                ║", i + 1, total_tests);
+        LOG4CPLUS_INFO_FMT(test_logger, "╚═══════════════════════════════════════════════════════╝");
         
         // ✅ 调用build_config()构建TacoConfig，直接传给测试函数（与RGB测试保持一致）
         int result = test_buffer_writer_format(video_path, tests[i]());
         
         if (result == 0) {
             passed++;
-            LOG_INFO_FMT("\n✅ [%d/%d] PASSED\n", i + 1, total_tests);
+            LOG4CPLUS_INFO_FMT(test_logger, "\n✅ [%d/%d] PASSED\n", i + 1, total_tests);
         } else {
             failed++;
-            LOG_ERROR_FMT("\n❌ [%d/%d] FAILED\n", i + 1, total_tests);
+            LOG4CPLUS_ERROR_FMT(test_logger, "\n❌ [%d/%d] FAILED\n", i + 1, total_tests);
         }
         
         // 短暂延迟，避免资源冲突
@@ -2157,14 +2160,14 @@ static int test_buffer_writer_yuv_formats(const char* video_path) {
     }
     
     // 最终统计
-    LOG_INFO("\n╔═══════════════════════════════════════════════════════╗");
-    LOG_INFO("║  Test Summary                                          ║");
-    LOG_INFO("╚═══════════════════════════════════════════════════════╝");
-    LOG_INFO_FMT("Total tests: %d", total_tests);
-    LOG_INFO_FMT("Passed: %d ✅", passed);
-    LOG_INFO_FMT("Failed: %d ❌", failed);
-    LOG_INFO_FMT("Success rate: %.1f%%", (100.0 * passed / total_tests));
-    LOG_INFO("\n╔═══════════════════════════════════════════════════════╝");
+    LOG4CPLUS_INFO(test_logger, "\n╔═══════════════════════════════════════════════════════╗");
+    LOG4CPLUS_INFO(test_logger, "║  Test Summary                                          ║");
+    LOG4CPLUS_INFO(test_logger, "╚═══════════════════════════════════════════════════════╝");
+    LOG4CPLUS_INFO_FMT(test_logger, "Total tests: %d", total_tests);
+    LOG4CPLUS_INFO_FMT(test_logger, "Passed: %d ✅", passed);
+    LOG4CPLUS_INFO_FMT(test_logger, "Failed: %d ❌", failed);
+    LOG4CPLUS_INFO_FMT(test_logger, "Success rate: %.1f%%", (100.0 * passed / total_tests));
+    LOG4CPLUS_INFO(test_logger, "\n╔═══════════════════════════════════════════════════════╝");
     
     return (failed == 0) ? 0 : -1;
 }
@@ -2187,9 +2190,9 @@ static int test_buffer_writer_yuv_formats(const char* video_path) {
 static int test_rtsp_record_all_formats(const char* rtsp_url) {
     using namespace productionline::io;
     
-    LOG_INFO("╔═══════════════════════════════════════════════════════╗");
-    LOG_INFO("║   Test: RTSP Record - All Format Validation          ║");
-    LOG_INFO("╚═══════════════════════════════════════════════════════╝\n");
+    LOG4CPLUS_INFO(test_logger, "╔═══════════════════════════════════════════════════════╗");
+    LOG4CPLUS_INFO(test_logger, "║   Test: RTSP Record - All Format Validation          ║");
+    LOG4CPLUS_INFO(test_logger, "╚═══════════════════════════════════════════════════════╝\n");
     
     // 注册信号处理器
     signal(SIGINT, signal_handler);
@@ -2197,7 +2200,7 @@ static int test_rtsp_record_all_formats(const char* rtsp_url) {
     g_rtsp_interrupted = false;
     RtspPacketSource::clearInterrupt();
     
-    LOG_INFO_FMT("RTSP URL: %s\n", rtsp_url);
+    LOG4CPLUS_INFO_FMT(test_logger, "RTSP URL: %s\n", rtsp_url);
     
     // ⭐ 创建定时器（每次格式测试时会重新设置）
     Timer recording_timer;
@@ -2205,7 +2208,7 @@ static int test_rtsp_record_all_formats(const char* rtsp_url) {
     
     // 1. 创建输出目录
     const char* output_dir = "./test_output_videos";
-    LOG_INFO_FMT("[Step 1] Creating output directory: %s", output_dir);
+    LOG4CPLUS_INFO_FMT(test_logger, "[Step 1] Creating output directory: %s", output_dir);
     
     // 使用 mkdir (POSIX) 创建目录
     #ifdef _WIN32
@@ -2214,7 +2217,7 @@ static int test_rtsp_record_all_formats(const char* rtsp_url) {
         mkdir(output_dir, 0755);
     #endif
     
-    LOG_INFO_FMT("  ✅ Output directory: %s/\n", output_dir);
+    LOG4CPLUS_INFO_FMT(test_logger, "  ✅ Output directory: %s/\n", output_dir);
     
     // 2. 定义所有要测试的格式
     struct FormatTest {
@@ -2244,7 +2247,7 @@ static int test_rtsp_record_all_formats(const char* rtsp_url) {
     const int num_formats = sizeof(formats) / sizeof(formats[0]);
     const int duration_seconds = 30;  // 每种格式录制 10 秒
     
-    LOG_INFO_FMT("[Step 2] Testing %d container formats (%d seconds each)...\n", 
+    LOG4CPLUS_INFO_FMT(test_logger, "[Step 2] Testing %d container formats (%d seconds each)...\n", 
                  num_formats, duration_seconds);
     
     // 3. 循环测试每种格式
@@ -2254,15 +2257,15 @@ static int test_rtsp_record_all_formats(const char* rtsp_url) {
     for (int i = 0; i < num_formats; i++) {
         auto& fmt = formats[i];
         
-        LOG_INFO("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-        LOG_INFO_FMT("[%d/%d] Testing %s (%s)", i + 1, num_formats, fmt.name, fmt.tier);
+        LOG4CPLUS_INFO(test_logger, "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+        LOG4CPLUS_INFO_FMT(test_logger, "[%d/%d] Testing %s (%s)", i + 1, num_formats, fmt.name, fmt.tier);
         
         // 生成输出文件路径
         char output_file[512];
         snprintf(output_file, sizeof(output_file), 
                  "%s/test_output.%s", output_dir, fmt.extension);
         
-        LOG_INFO_FMT("  Output: %s", output_file);
+        LOG4CPLUS_INFO_FMT(test_logger, "  Output: %s", output_file);
         
         // 重置中断标志
         g_running = true;
@@ -2290,7 +2293,7 @@ static int test_rtsp_record_all_formats(const char* rtsp_url) {
         
         // 启动生产者
         if (!producer.start(workerConfig)) {
-            LOG_ERROR_FMT("  ❌ Failed to start producer");
+            LOG4CPLUS_ERROR_FMT(test_logger, "  ❌ Failed to start producer");
             failed_count++;
             continue;
         }
@@ -2299,7 +2302,7 @@ static int test_rtsp_record_all_formats(const char* rtsp_url) {
         uint64_t pool_id = producer.getWorkingBufferPoolId();
         auto pool_sptr = BufferPoolRegistry::getInstance().getPool(pool_id).lock();
         if (!pool_sptr) {
-            LOG_ERROR_FMT("  ❌ Failed to get BufferPool");
+            LOG4CPLUS_ERROR_FMT(test_logger, "  ❌ Failed to get BufferPool");
             producer.stop();
             failed_count++;
             continue;
@@ -2308,7 +2311,7 @@ static int test_rtsp_record_all_formats(const char* rtsp_url) {
         // 获取 Worker 的编解码器参数（v2.14: 通过门面类直接获取）
         auto worker_facade_sptr = producer.getWorkerFacade();
         if (!worker_facade_sptr) {
-            LOG_ERROR_FMT("  ❌ Failed to get worker facade");
+            LOG4CPLUS_ERROR_FMT(test_logger, "  ❌ Failed to get worker facade");
             producer.stop();
             failed_count++;
             continue;
@@ -2317,7 +2320,7 @@ static int test_rtsp_record_all_formats(const char* rtsp_url) {
         // ⭐ 直接从门面类获取编解码器参数和时间基
         const AVCodecParameters* codec_params = worker_facade_sptr->getCodecParameters();
         if (!codec_params) {
-            LOG_ERROR_FMT("  ❌ Failed to get codec parameters from worker");
+            LOG4CPLUS_ERROR_FMT(test_logger, "  ❌ Failed to get codec parameters from worker");
             producer.stop();
             failed_count++;
             continue;
@@ -2328,7 +2331,7 @@ static int test_rtsp_record_all_formats(const char* rtsp_url) {
         // 打开 BufferWriter
         BufferWriter writer;
         if (!writer.openEncoded(output_file, codec_params, time_base)) {
-            LOG_ERROR_FMT("  ❌ Failed to open BufferWriter for format %s", fmt.extension);
+            LOG4CPLUS_ERROR_FMT(test_logger, "  ❌ Failed to open BufferWriter for format %s", fmt.extension);
             producer.stop();
             failed_count++;
             continue;
@@ -2341,7 +2344,7 @@ static int test_rtsp_record_all_formats(const char* rtsp_url) {
             [&producer]() {  // 捕获 producer 引用
                 g_running = false;  // 时间到，停止录制
                 producer.stop();
-                LOG_INFO("\n  ⏱️  Recording duration reached, stopping...");
+                LOG4CPLUS_INFO(test_logger, "\n  ⏱️  Recording duration reached, stopping...");
             }
         );
         
@@ -2393,11 +2396,11 @@ static int test_rtsp_record_all_formats(const char* rtsp_url) {
             fmt.packet_count = packet_count;
             fmt.file_size = file_size;
             
-            LOG_INFO_FMT("  ✅ Success: %d packets, %.2f MB", 
+            LOG4CPLUS_INFO_FMT(test_logger, "  ✅ Success: %d packets, %.2f MB", 
                          packet_count, file_size / (1024.0 * 1024.0));
             success_count++;
         } else {
-            LOG_ERROR_FMT("  ❌ Failed: No packets recorded");
+            LOG4CPLUS_ERROR_FMT(test_logger, "  ❌ Failed: No packets recorded");
             failed_count++;
         }
         
@@ -2406,30 +2409,30 @@ static int test_rtsp_record_all_formats(const char* rtsp_url) {
     }
     
     // 4. 打印总结报告
-    LOG_INFO("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-    LOG_INFO("\n╔═══════════════════════════════════════════════════════╗");
-    LOG_INFO("║   Test Summary                                        ║");
-    LOG_INFO("╚═══════════════════════════════════════════════════════╝");
-    LOG_INFO_FMT("  Total:    %d formats", num_formats);
-    LOG_INFO_FMT("  Success:  %d formats ✅", success_count);
-    LOG_INFO_FMT("  Failed:   %d formats ❌", failed_count);
+    LOG4CPLUS_INFO(test_logger, "\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    LOG4CPLUS_INFO(test_logger, "\n╔═══════════════════════════════════════════════════════╗");
+    LOG4CPLUS_INFO(test_logger, "║   Test Summary                                        ║");
+    LOG4CPLUS_INFO(test_logger, "╚═══════════════════════════════════════════════════════╝");
+    LOG4CPLUS_INFO_FMT(test_logger, "  Total:    %d formats", num_formats);
+    LOG4CPLUS_INFO_FMT(test_logger, "  Success:  %d formats ✅", success_count);
+    LOG4CPLUS_INFO_FMT(test_logger, "  Failed:   %d formats ❌", failed_count);
     
     // 打印失败的格式
     if (failed_count > 0) {
-        LOG_INFO("\nFailed formats:");
+        LOG4CPLUS_INFO(test_logger, "\nFailed formats:");
         for (int i = 0; i < num_formats; i++) {
             if (!formats[i].success) {
-                LOG_INFO_FMT("  - %s (%s)", formats[i].name, formats[i].tier);
+                LOG4CPLUS_INFO_FMT(test_logger, "  - %s (%s)", formats[i].name, formats[i].tier);
             }
         }
     }
     
     // 打印成功的文件
     if (success_count > 0) {
-        LOG_INFO("\nSuccessfully recorded files:");
+        LOG4CPLUS_INFO(test_logger, "\nSuccessfully recorded files:");
         for (int i = 0; i < num_formats; i++) {
             if (formats[i].success) {
-                LOG_INFO_FMT("  %s/test_output.%-4s  (%.2f MB, %d packets)", 
+                LOG4CPLUS_INFO_FMT(test_logger, "  %s/test_output.%-4s  (%.2f MB, %d packets)", 
                              output_dir, formats[i].extension,
                              formats[i].file_size / (1024.0 * 1024.0),
                              formats[i].packet_count);
@@ -2437,10 +2440,10 @@ static int test_rtsp_record_all_formats(const char* rtsp_url) {
         }
     }
     
-    LOG_INFO("\n💡 Verify files with:");
-    LOG_INFO_FMT("   ls -lh %s/", output_dir);
-    LOG_INFO_FMT("   ffprobe %s/test_output.mp4", output_dir);
-    LOG_INFO("╚═══════════════════════════════════════════════════════╝\n");
+    LOG4CPLUS_INFO(test_logger, "\n💡 Verify files with:");
+    LOG4CPLUS_INFO_FMT(test_logger, "   ls -lh %s/", output_dir);
+    LOG4CPLUS_INFO_FMT(test_logger, "   ffprobe %s/test_output.mp4", output_dir);
+    LOG4CPLUS_INFO(test_logger, "╚═══════════════════════════════════════════════════════╝\n");
     
     // ⭐ 停止定时器服务
     recording_timer.stop();
@@ -2449,51 +2452,57 @@ static int test_rtsp_record_all_formats(const char* rtsp_url) {
 }
 
 /**
- * 测试：MultiWorkerProductionLine 多Worker解码（同一RTSP流，硬解+软解对比）
+ * 测试：MultiWorkerProductionLine 多Worker解码（从文件读取，硬解+软解对比）
  *
  * 架构：
- * - Producer: FFMPEG_PACKET_RECORDER（读取RTSP编码包 → BufferPool P）
+ * - Producer: FFMPEG_PACKET_RECORDER（读取视频文件编码包 → BufferPool P）
  * - Consumer 1: 硬件解码（h264_taco）→ BufferPool C1
  * - Consumer 2: 软件解码（useSoftware）→ BufferPool C2
  * - 本测试从 C1/C2 中取出解码后的帧，分别写入两个 YUV 文件，便于对比质量/性能
  *
  * 用法示例：
- *   ./display_test -m multi_worker rtsp://...
+ *   ./display_test -m multi_worker /path/to/video.h264
+ *   或
+ *   ./display_test -m multi_worker rtsp://...  (仍支持RTSP)
  */
-static int test_multi_worker(const char* rtsp_url) {
+static int test_multi_worker(const char* video_source) {
     using namespace productionline::io;
     
-    LOG_INFO("╔═══════════════════════════════════════════════════════╗");
-    LOG_INFO("║   Test: MultiWorkerProductionLine - Multi Worker     ║");
-    LOG_INFO("╚═══════════════════════════════════════════════════════╝\n");
+    LOG4CPLUS_INFO(test_logger, "╔═══════════════════════════════════════════════════════╗");
+    LOG4CPLUS_INFO(test_logger, "║   Test: MultiWorkerProductionLine - Multi Worker     ║");
+    LOG4CPLUS_INFO(test_logger, "╚═══════════════════════════════════════════════════════╝\n");
     
     // 注册信号处理器（用于 Ctrl+C）
     signal(SIGINT, signal_handler);
     g_running = true;
     g_rtsp_interrupted = false;
     RtspPacketSource::clearInterrupt();
-    LOG_DEBUG("[Test] ✅ 已注册 Ctrl+C 信号处理器");
+    LOG4CPLUS_DEBUG(test_logger, "[Test] ✅ 已注册 Ctrl+C 信号处理器");
     
-    LOG_INFO_FMT("RTSP URL: %s\n", rtsp_url);
+    // ⭐ 支持文件和RTSP（FfmpegPacketRecorderWorker会自动判断）
+    LOG4CPLUS_INFO_FMT(test_logger, "Video source: %s\n", video_source);
+    
+    // 判断是否是RTSP，用于后续处理
+    bool is_rtsp = (strstr(video_source, "rtsp://") == video_source);
     
     const int duration_seconds = 10;  // 录制时长（秒）
     
     // 1. 配置 MultiWorkerConfig
-    LOG_INFO("[Step 1] Configuring MultiWorkerProductionLine...");
+    LOG4CPLUS_INFO(test_logger, "[Step 1] Configuring MultiWorkerProductionLine...");
     
     MultiWorkerProductionLine::MultiWorkerConfig config;
     
     // 创建 WorkerGroup
-    MultiWorkerProductionLine::WorkerGroup group("rtsp_decode_group");
+    MultiWorkerProductionLine::WorkerGroup group(is_rtsp ? "rtsp_decode_group" : "file_decode_group");
     
-    // 1.1 配置生产者 Worker（录制 RTSP 包）
-    LOG_INFO("    Configuring Producer Worker (RTSP Record)...");
+    // 1.1 配置生产者 Worker（从文件或RTSP录制包）
+    LOG4CPLUS_INFO_FMT(test_logger, "    Configuring Producer Worker (%s Record)...", is_rtsp ? "RTSP" : "File");
     MultiWorkerProductionLine::ProducerConfig producer_cfg;
     producer_cfg.producer_id = "recorder";
     producer_cfg.worker_config = WorkerConfigBuilder()
         .setDataSourceConfig(
             DataSourceConfigBuilder()
-                .setPath(rtsp_url)
+                .setPath(video_source)  // ⭐ 支持文件路径或RTSP URL
                 .setBufferCount(32)
                 .build()
         )
@@ -2502,7 +2511,7 @@ static int test_multi_worker(const char* rtsp_url) {
     group.producer_configs.push_back(producer_cfg);
     
     // 1.2 配置 Consumer Worker 1（硬件解码器）
-    LOG_INFO("    Configuring Consumer Worker 1 (Hardware Decoder - h264_taco)...");
+    LOG4CPLUS_INFO(test_logger, "    Configuring Consumer Worker 1 (Hardware Decoder - h264_taco)...");
     
     auto tacoConfig = TacoConfigBuilder()
         .setChannels(true, false)
@@ -2527,7 +2536,7 @@ static int test_multi_worker(const char* rtsp_url) {
     group.consumer_configs.push_back(consumer_hw_cfg);
     
     // 1.3 配置 Consumer Worker 2（软件解码器）
-    LOG_INFO("    Configuring Consumer Worker 2 (Software Decoder - libavcodec)...");
+    LOG4CPLUS_INFO(test_logger, "    Configuring Consumer Worker 2 (Software Decoder - libavcodec)...");
     
     MultiWorkerProductionLine::ConsumerConfig consumer_sw_cfg;
     consumer_sw_cfg.consumer_id = "sw_dec";
@@ -2548,7 +2557,7 @@ static int test_multi_worker(const char* rtsp_url) {
     group.consumer_configs.push_back(consumer_sw_cfg);
     
     // 1.4 配置连接器：一个生产者 → 两个消费者（ONE_TO_MANY 模式）
-    LOG_INFO("    Configuring Connector (ONE_TO_MANY)...");
+    LOG4CPLUS_INFO(test_logger, "    Configuring Connector (ONE_TO_MANY)...");
     MultiWorkerProductionLine::ConnectorConfig connector_cfg;
     connector_cfg.mode = Connector::Mode::ONE_TO_MANY;
     connector_cfg.producer_ids.push_back("recorder");
@@ -2558,43 +2567,43 @@ static int test_multi_worker(const char* rtsp_url) {
     
     // 添加 Group 到配置
     config.groups.push_back(group);
-    config.thread_pool_size = 4;
+    config.thread_pool_size = 32;
     
-    LOG_INFO_FMT("  Thread pool size: %d", config.thread_pool_size);
-    LOG_INFO_FMT("  WorkerGroups: %zu", config.groups.size());
-    LOG_INFO_FMT("  Group '%s': %zu producers, %zu consumers, %zu connectors",
+    LOG4CPLUS_INFO_FMT(test_logger, "  Thread pool size: %d", config.thread_pool_size);
+    LOG4CPLUS_INFO_FMT(test_logger, "  WorkerGroups: %zu", config.groups.size());
+    LOG4CPLUS_INFO_FMT(test_logger, "  Group '%s': %zu producers, %zu consumers, %zu connectors",
                  group.group_id.c_str(),
                  group.producer_configs.size(),
                  group.consumer_configs.size(),
                  group.connector_configs.size());
     
     // 2. 创建 MultiWorkerProductionLine
-    LOG_INFO("\n[Step 2] Creating MultiWorkerProductionLine...");
+    LOG4CPLUS_INFO(test_logger, "\n[Step 2] Creating MultiWorkerProductionLine...");
     MultiWorkerProductionLine multi_worker(config, false, 1, false);  // loop=false, thread_count=1, enable_monitor=false
     
     // 3. 设置错误回调
     multi_worker.setErrorCallback([](const std::string& error) {
-        LOG_ERROR_FMT("MultiWorker Error: %s", error.c_str());
+        LOG4CPLUS_ERROR_FMT(test_logger, "MultiWorker Error: %s", error.c_str());
         g_running = false;
     });
     
     // 4. 启动 MultiWorkerProductionLine
-    LOG_INFO("[Step 3] Starting MultiWorkerProductionLine...");
+    LOG4CPLUS_INFO(test_logger, "[Step 3] Starting MultiWorkerProductionLine...");
     if (!multi_worker.start()) {
-        LOG_ERROR("Failed to start MultiWorkerProductionLine");
+        LOG4CPLUS_ERROR(test_logger, "Failed to start MultiWorkerProductionLine");
         return -1;
     }
     
-    LOG_INFO("  ✅ MultiWorkerProductionLine started successfully");
+    LOG4CPLUS_INFO(test_logger, "  ✅ MultiWorkerProductionLine started successfully");
     
     // 5. 获取两个消费者的 BufferPool（对本测试而言，Group 内的消费者是数据的生产者）
-    LOG_INFO("\n[Step 4] Getting Consumer BufferPools...");
+    LOG4CPLUS_INFO(test_logger, "\n[Step 4] Getting Consumer BufferPools...");
     
     uint64_t hw_pool_id = multi_worker.getGroupConsumerBufferPoolId(0, 0);  // Group 0, Consumer 0 (Hardware decoder)
     uint64_t sw_pool_id = multi_worker.getGroupConsumerBufferPoolId(0, 1);  // Group 0, Consumer 1 (Software decoder)
     
     if (hw_pool_id == 0 || sw_pool_id == 0) {
-        LOG_ERROR("Failed to get consumer BufferPool IDs");
+        LOG4CPLUS_ERROR(test_logger, "Failed to get consumer BufferPool IDs");
         multi_worker.stop();
         return -1;
     }
@@ -2605,24 +2614,24 @@ static int test_multi_worker(const char* rtsp_url) {
     auto sw_pool_sptr = sw_pool_weak.lock();
     
     if (!hw_pool_sptr || !sw_pool_sptr) {
-        LOG_ERROR("Failed to get consumer BufferPools from Registry");
+        LOG4CPLUS_ERROR(test_logger, "Failed to get consumer BufferPools from Registry");
         multi_worker.stop();
         return -1;
     }
     
-    LOG_INFO_FMT("  Consumer 1 (Hardware Decoder) BufferPool: '%s' (ID: %lu)", 
+    LOG4CPLUS_INFO_FMT(test_logger, "  Consumer 1 (Hardware Decoder) BufferPool: '%s' (ID: %lu)", 
                  hw_pool_sptr->getName().c_str(), hw_pool_id);
-    LOG_INFO_FMT("  Consumer 2 (Software Decoder) BufferPool: '%s' (ID: %lu)", 
+    LOG4CPLUS_INFO_FMT(test_logger, "  Consumer 2 (Software Decoder) BufferPool: '%s' (ID: %lu)", 
                  sw_pool_sptr->getName().c_str(), sw_pool_id);
     
     // 6. 等待第一个Buffer，获取实际格式
-    LOG_INFO("\n[Step 5] Waiting for first buffers to detect format...");
+    LOG4CPLUS_INFO(test_logger, "\n[Step 5] Waiting for first buffers to detect format...");
     
     Buffer* first_hw = hw_pool_sptr->acquireFilled(true, 5000);
     Buffer* first_sw = sw_pool_sptr->acquireFilled(true, 5000);
     
     if (!first_hw || !first_sw) {
-        LOG_ERROR("Failed to get first buffers (timeout)");
+        LOG4CPLUS_ERROR(test_logger, "Failed to get first buffers (timeout)");
         if (first_hw) hw_pool_sptr->releaseFilled(first_hw);
         if (first_sw) sw_pool_sptr->releaseFilled(first_sw);
         multi_worker.stop();
@@ -2639,10 +2648,10 @@ static int test_multi_worker(const char* rtsp_url) {
         hw_format = first_hw->getImageFormat();
         hw_width = first_hw->getImageWidth();
         hw_height = first_hw->getImageHeight();
-        LOG_INFO_FMT("  Consumer 1 (Hardware) format: %s (%dx%d)", 
+        LOG4CPLUS_INFO_FMT(test_logger, "  Consumer 1 (Hardware) format: %s (%dx%d)", 
                      av_get_pix_fmt_name(hw_format), hw_width, hw_height);
     } else {
-        LOG_WARN("  Consumer 1 buffer has no metadata, using default NV12 1920x1080");
+        LOG4CPLUS_WARN(test_logger, "  Consumer 1 buffer has no metadata, using default NV12 1920x1080");
         hw_format = AV_PIX_FMT_NV12;
     }
     
@@ -2650,15 +2659,15 @@ static int test_multi_worker(const char* rtsp_url) {
         sw_format = first_sw->getImageFormat();
         sw_width = first_sw->getImageWidth();
         sw_height = first_sw->getImageHeight();
-        LOG_INFO_FMT("  Consumer 2 (Software) format: %s (%dx%d)", 
+        LOG4CPLUS_INFO_FMT(test_logger, "  Consumer 2 (Software) format: %s (%dx%d)", 
                      av_get_pix_fmt_name(sw_format), sw_width, sw_height);
     } else {
-        LOG_WARN("  Consumer 2 buffer has no metadata, using default NV12 1920x1080");
+        LOG4CPLUS_WARN(test_logger, "  Consumer 2 buffer has no metadata, using default NV12 1920x1080");
         sw_format = AV_PIX_FMT_NV12;
     }
     
     // 7. 创建两个 BufferWriter
-    LOG_INFO("\n[Step 6] Creating BufferWriters...");
+    LOG4CPLUS_INFO(test_logger, "\n[Step 6] Creating BufferWriters...");
     
     const char* output_file_hw = "/tmp/multi_worker_hardware.yuv";
     const char* output_file_sw = "/tmp/multi_worker_software.yuv";
@@ -2666,7 +2675,7 @@ static int test_multi_worker(const char* rtsp_url) {
     BufferWriter writer_hw, writer_sw;
     
     if (!writer_hw.openRaw(output_file_hw, hw_format, hw_width, hw_height)) {
-        LOG_ERROR_FMT("Failed to open BufferWriter for Consumer 1: %s", output_file_hw);
+        LOG4CPLUS_ERROR_FMT(test_logger, "Failed to open BufferWriter for Consumer 1: %s", output_file_hw);
         hw_pool_sptr->releaseFilled(first_hw);
         sw_pool_sptr->releaseFilled(first_sw);
         multi_worker.stop();
@@ -2674,7 +2683,7 @@ static int test_multi_worker(const char* rtsp_url) {
     }
     
     if (!writer_sw.openRaw(output_file_sw, sw_format, sw_width, sw_height)) {
-        LOG_ERROR_FMT("Failed to open BufferWriter for Consumer 2: %s", output_file_sw);
+        LOG4CPLUS_ERROR_FMT(test_logger, "Failed to open BufferWriter for Consumer 2: %s", output_file_sw);
         writer_hw.close();
         hw_pool_sptr->releaseFilled(first_hw);
         sw_pool_sptr->releaseFilled(first_sw);
@@ -2682,20 +2691,20 @@ static int test_multi_worker(const char* rtsp_url) {
         return -1;
     }
     
-    LOG_INFO_FMT("  Consumer 1 (Hardware Decoder) output: %s (format: %s)", 
+    LOG4CPLUS_INFO_FMT(test_logger, "  Consumer 1 (Hardware Decoder) output: %s (format: %s)", 
                  output_file_hw, av_get_pix_fmt_name(hw_format));
-    LOG_INFO_FMT("  Consumer 2 (Software Decoder) output: %s (format: %s)", 
+    LOG4CPLUS_INFO_FMT(test_logger, "  Consumer 2 (Software Decoder) output: %s (format: %s)", 
                  output_file_sw, av_get_pix_fmt_name(sw_format));
     
     // 8. 保存第一帧
-    LOG_INFO("\n[Step 7] Saving frames...");
-    LOG_INFO("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    LOG4CPLUS_INFO(test_logger, "\n[Step 7] Saving frames...");
+    LOG4CPLUS_INFO(test_logger, "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
     
     if (writer_hw.write(first_hw)) {
-        LOG_INFO("  ✅ Saved Consumer 1 frame 1 (Hardware Decoder)");
+        LOG4CPLUS_INFO(test_logger, "  ✅ Saved Consumer 1 frame 1 (Hardware Decoder)");
     }
     if (writer_sw.write(first_sw)) {
-        LOG_INFO("  ✅ Saved Consumer 2 frame 1 (Software Decoder)");
+        LOG4CPLUS_INFO(test_logger, "  ✅ Saved Consumer 2 frame 1 (Software Decoder)");
     }
     
     hw_pool_sptr->releaseFilled(first_hw);
@@ -2709,12 +2718,12 @@ static int test_multi_worker(const char* rtsp_url) {
     int timeout_sw = 0;
     const int MAX_TIMEOUT = 50;
     
-    LOG_INFO("  Starting consumer loop (Ctrl+C to stop)...\n");
+    LOG4CPLUS_INFO(test_logger, "  Starting consumer loop (Ctrl+C to stop)...\n");
     
     while (g_running) {
         // 检查中断标志
         if (g_rtsp_interrupted.load()) {
-            LOG_INFO("\n  ⚠️  检测到中断请求，停止测试...");
+            LOG4CPLUS_INFO(test_logger, "\n  ⚠️  检测到中断请求，停止测试...");
             break;
         }
         
@@ -2722,7 +2731,7 @@ static int test_multi_worker(const char* rtsp_url) {
         auto now = std::chrono::steady_clock::now();
         int elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - start_time).count();
         if (elapsed >= duration_seconds) {
-            LOG_INFO_FMT("\n  ⏱️  Reached duration limit: %d seconds", duration_seconds);
+            LOG4CPLUS_INFO_FMT(test_logger, "\n  ⏱️  Reached duration limit: %d seconds", duration_seconds);
             break;
         }
         
@@ -2732,10 +2741,10 @@ static int test_multi_worker(const char* rtsp_url) {
             if (writer_hw.write(buf_hw)) {
                 frame_count_hw++;
                 if (frame_count_hw % 50 == 0) {
-                    LOG_INFO_FMT("  Consumer 1 (Hardware Decoder): %d frames saved", frame_count_hw);
+                    LOG4CPLUS_INFO_FMT(test_logger, "  Consumer 1 (Hardware Decoder): %d frames saved", frame_count_hw);
                 }
             } else {
-                LOG_WARN("Failed to write Consumer 1 buffer");
+                LOG4CPLUS_WARN(test_logger, "Failed to write Consumer 1 buffer");
             }
             hw_pool_sptr->releaseFilled(buf_hw);
             timeout_hw = 0;
@@ -2749,10 +2758,10 @@ static int test_multi_worker(const char* rtsp_url) {
             if (writer_sw.write(buf_sw)) {
                 frame_count_sw++;
                 if (frame_count_sw % 50 == 0) {
-                    LOG_INFO_FMT("  Consumer 2 (Software Decoder): %d frames saved", frame_count_sw);
+                    LOG4CPLUS_INFO_FMT(test_logger, "  Consumer 2 (Software Decoder): %d frames saved", frame_count_sw);
                 }
             } else {
-                LOG_WARN("Failed to write Consumer 2 buffer");
+                LOG4CPLUS_WARN(test_logger, "Failed to write Consumer 2 buffer");
             }
             sw_pool_sptr->releaseFilled(buf_sw);
             timeout_sw = 0;
@@ -2762,15 +2771,15 @@ static int test_multi_worker(const char* rtsp_url) {
         
         // 检查超时
         if (timeout_hw >= MAX_TIMEOUT && timeout_sw >= MAX_TIMEOUT) {
-            LOG_WARN("\n  ⚠️  Both consumers timeout, stopping...");
+            LOG4CPLUS_WARN(test_logger, "\n  ⚠️  Both consumers timeout, stopping...");
             break;
         }
     }
     
-    LOG_INFO("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    LOG4CPLUS_INFO(test_logger, "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
     
     // 10. 排空剩余的 buffer
-    LOG_INFO("\n[Step 8] Draining remaining buffers...");
+    LOG4CPLUS_INFO(test_logger, "\n[Step 8] Draining remaining buffers...");
     int drained_hw = 0, drained_sw = 0;
     
     Buffer* remaining_hw = nullptr;
@@ -2790,11 +2799,11 @@ static int test_multi_worker(const char* rtsp_url) {
     }
     
     if (drained_hw > 0 || drained_sw > 0) {
-        LOG_INFO_FMT("  Drained: Consumer 1=%d, Consumer 2=%d", drained_hw, drained_sw);
+        LOG4CPLUS_INFO_FMT(test_logger, "  Drained: Consumer 1=%d, Consumer 2=%d", drained_hw, drained_sw);
     }
     
     // 11. 清理
-    LOG_INFO("\n[Step 9] Cleaning up...");
+    LOG4CPLUS_INFO(test_logger, "\n[Step 9] Cleaning up...");
     writer_hw.close();
     writer_sw.close();
     multi_worker.stop();
@@ -2803,33 +2812,33 @@ static int test_multi_worker(const char* rtsp_url) {
     auto end_time = std::chrono::steady_clock::now();
     double total_duration = std::chrono::duration<double>(end_time - start_time).count();
     
-    LOG_INFO("\n═══════════════════════════════════════════════════════");
-    LOG_INFO("  Test Results");
-    LOG_INFO("═══════════════════════════════════════════════════════");
-    LOG_INFO_FMT("  Consumer 1 (Hardware Decoder):");
-    LOG_INFO_FMT("    Output file: %s", output_file_hw);
-    LOG_INFO_FMT("    Format: %s (%dx%d)", av_get_pix_fmt_name(hw_format), hw_width, hw_height);
-    LOG_INFO_FMT("    Frames saved: %d", frame_count_hw);
-    LOG_INFO_FMT("  Consumer 2 (Software Decoder):");
-    LOG_INFO_FMT("    Output file: %s", output_file_sw);
-    LOG_INFO_FMT("    Format: %s (%dx%d)", av_get_pix_fmt_name(sw_format), sw_width, sw_height);
-    LOG_INFO_FMT("    Frames saved: %d", frame_count_sw);
-    LOG_INFO_FMT("  Duration: %.2f seconds", total_duration);
+    LOG4CPLUS_INFO(test_logger, "\n═══════════════════════════════════════════════════════");
+    LOG4CPLUS_INFO(test_logger, "  Test Results");
+    LOG4CPLUS_INFO(test_logger, "═══════════════════════════════════════════════════════");
+    LOG4CPLUS_INFO_FMT(test_logger, "  Consumer 1 (Hardware Decoder):");
+    LOG4CPLUS_INFO_FMT(test_logger, "    Output file: %s", output_file_hw);
+    LOG4CPLUS_INFO_FMT(test_logger, "    Format: %s (%dx%d)", av_get_pix_fmt_name(hw_format), hw_width, hw_height);
+    LOG4CPLUS_INFO_FMT(test_logger, "    Frames saved: %d", frame_count_hw);
+    LOG4CPLUS_INFO_FMT(test_logger, "  Consumer 2 (Software Decoder):");
+    LOG4CPLUS_INFO_FMT(test_logger, "    Output file: %s", output_file_sw);
+    LOG4CPLUS_INFO_FMT(test_logger, "    Format: %s (%dx%d)", av_get_pix_fmt_name(sw_format), sw_width, sw_height);
+    LOG4CPLUS_INFO_FMT(test_logger, "    Frames saved: %d", frame_count_sw);
+    LOG4CPLUS_INFO_FMT(test_logger, "  Duration: %.2f seconds", total_duration);
     
     // 打印统计信息
     multi_worker.printDetailedStats();
     
-    LOG_INFO("\n💡 Verify the output files with:");
-    LOG_INFO_FMT("   ffplay -f rawvideo -pixel_format %s -video_size %dx%d %s",
+    LOG4CPLUS_INFO(test_logger, "\n💡 Verify the output files with:");
+    LOG4CPLUS_INFO_FMT(test_logger, "   ffplay -f rawvideo -pixel_format %s -video_size %dx%d %s",
                  av_get_pix_fmt_name(hw_format), hw_width, hw_height, output_file_hw);
-    LOG_INFO_FMT("   ffplay -f rawvideo -pixel_format %s -video_size %dx%d %s",
+    LOG4CPLUS_INFO_FMT(test_logger, "   ffplay -f rawvideo -pixel_format %s -video_size %dx%d %s",
                  av_get_pix_fmt_name(sw_format), sw_width, sw_height, output_file_sw);
-    LOG_INFO("═══════════════════════════════════════════════════════\n");
+    LOG4CPLUS_INFO(test_logger, "═══════════════════════════════════════════════════════\n");
     
     if (frame_count_hw > 0 && frame_count_sw > 0) {
         return 0;
     } else {
-        LOG_ERROR("Test failed: No frames saved from one or both consumers");
+        LOG4CPLUS_ERROR(test_logger, "Test failed: No frames saved from one or both consumers");
         return -1;
     }
 }
@@ -2838,19 +2847,19 @@ static int test_multi_worker(const char* rtsp_url) {
  * MJPEG解码器测试帮助信息
  */
 static void print_mjpeg_decoder_help() {
-    LOG_INFO("MJPEG Hardware Decoder Test Help:");
-    LOG_INFO("  This test decodes MJPEG video files using TACO hardware acceleration");
-    LOG_INFO("  and saves the decoded frames to a raw YUV file.");
-    LOG_INFO("");
-    LOG_INFO("  Usage: mjpeg_decoder <input_video> <output_file>");
-    LOG_INFO("    input_video: Path to MJPEG video file (.mjpeg, .avi, .mp4, etc.)");
-    LOG_INFO("    output_file: Path for output YUV file (.yuv)");
-    LOG_INFO("");
-    LOG_INFO("  Example:");
-    LOG_INFO("    mjpeg_decoder video.mjpeg output.yuv");
-    LOG_INFO("");
-    LOG_INFO("  Output file can be viewed with:");
-    LOG_INFO("    ffplay -f rawvideo -pix_fmt yuv420p -s 1920x1080 output.yuv");
+    LOG4CPLUS_INFO(test_logger, "MJPEG Hardware Decoder Test Help:");
+    LOG4CPLUS_INFO(test_logger, "  This test decodes MJPEG video files using TACO hardware acceleration");
+    LOG4CPLUS_INFO(test_logger, "  and saves the decoded frames to a raw YUV file.");
+    LOG4CPLUS_INFO(test_logger, "");
+    LOG4CPLUS_INFO(test_logger, "  Usage: mjpeg_decoder <input_video> <output_file>");
+    LOG4CPLUS_INFO(test_logger, "    input_video: Path to MJPEG video file (.mjpeg, .avi, .mp4, etc.)");
+    LOG4CPLUS_INFO(test_logger, "    output_file: Path for output YUV file (.yuv)");
+    LOG4CPLUS_INFO(test_logger, "");
+    LOG4CPLUS_INFO(test_logger, "  Example:");
+    LOG4CPLUS_INFO(test_logger, "    mjpeg_decoder video.mjpeg output.yuv");
+    LOG4CPLUS_INFO(test_logger, "");
+    LOG4CPLUS_INFO(test_logger, "  Output file can be viewed with:");
+    LOG4CPLUS_INFO(test_logger, "    ffplay -f rawvideo -pix_fmt yuv420p -s 1920x1080 output.yuv");
 }
 
 /**
@@ -2859,22 +2868,22 @@ static void print_mjpeg_decoder_help() {
  */
 static int test_mjpeg_decoder(const std::vector<std::string>& args) {
     if (args.size() < 2) {
-        LOG_ERROR("Usage: test_mjpeg_decoder <input_video> <output_file>");
-        LOG_ERROR("Example: test_mjpeg_decoder video.mjpeg output.yuv");
+        LOG4CPLUS_ERROR(test_logger, "Usage: test_mjpeg_decoder <input_video> <output_file>");
+        LOG4CPLUS_ERROR(test_logger, "Example: test_mjpeg_decoder video.mjpeg output.yuv");
         return -1;
     }
 
     const char* input_video = args[0].c_str();
     const char* output_file = args[1].c_str();
 
-    LOG_INFO("═══════════════════════════════════════════════════════");
-    LOG_INFO("  MJPEG Hardware Decoder Test");
-    LOG_INFO("═══════════════════════════════════════════════════════");
-    LOG_INFO_FMT("  Input:  %s", input_video);
-    LOG_INFO_FMT("  Output: %s", output_file);
+    LOG4CPLUS_INFO(test_logger, "═══════════════════════════════════════════════════════");
+    LOG4CPLUS_INFO(test_logger, "  MJPEG Hardware Decoder Test");
+    LOG4CPLUS_INFO(test_logger, "═══════════════════════════════════════════════════════");
+    LOG4CPLUS_INFO_FMT(test_logger, "  Input:  %s", input_video);
+    LOG4CPLUS_INFO_FMT(test_logger, "  Output: %s", output_file);
 
     // 1. 创建 VideoProductionLine
-    LOG_INFO("[Test] Creating VideoProductionLine...");
+    LOG4CPLUS_INFO(test_logger, "[Test] Creating VideoProductionLine...");
     VideoProductionLine producer(false, 1, false);
 
     // 2. 配置 TACO MJPEG 硬件解码器
@@ -2900,21 +2909,21 @@ static int test_mjpeg_decoder(const std::vector<std::string>& args) {
 
     // 3. 设置错误回调
     producer.setErrorCallback([](const std::string& error) {
-        LOG_ERROR_FMT("MJPEG Decoder Error: %s", error.c_str());
+        LOG4CPLUS_ERROR_FMT(test_logger, "MJPEG Decoder Error: %s", error.c_str());
         g_running = false;
     });
 
     // 4. 启动生产者
-    LOG_INFO("[Test] Starting producer...");
+    LOG4CPLUS_INFO(test_logger, "[Test] Starting producer...");
     if (!producer.start(workerConfig)) {
-        LOG_ERROR("Failed to start producer");
+        LOG4CPLUS_ERROR(test_logger, "Failed to start producer");
         return -1;
     }
 
     // 5. 获取 Worker Facade 以访问输入源信息
     auto worker_facade_sptr = producer.getWorkerFacade();
     if (!worker_facade_sptr) {
-        LOG_ERROR("Failed to get WorkerFacade");
+        LOG4CPLUS_ERROR(test_logger, "Failed to get WorkerFacade");
         producer.stop();
         return -1;
     }
@@ -2924,15 +2933,15 @@ static int test_mjpeg_decoder(const std::vector<std::string>& args) {
     int source_height = worker_facade_sptr->getSourceHeight();
     AVPixelFormat source_format = worker_facade_sptr->getSourcePixelFormat();
 
-    LOG_INFO("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-    LOG_INFO_FMT("  Input source resolution: %dx%d", source_width, source_height);
-    LOG_INFO_FMT("  Input source format: %s", av_get_pix_fmt_name(source_format));
-    LOG_INFO("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    LOG4CPLUS_INFO(test_logger, "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    LOG4CPLUS_INFO_FMT(test_logger, "  Input source resolution: %dx%d", source_width, source_height);
+    LOG4CPLUS_INFO_FMT(test_logger, "  Input source format: %s", av_get_pix_fmt_name(source_format));
+    LOG4CPLUS_INFO(test_logger, "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
 
     // 6. 获取工作 BufferPool
     uint64_t producer_pool_id = producer.getWorkingBufferPoolId();
     if (producer_pool_id == 0) {
-        LOG_ERROR("No working BufferPool ID available");
+        LOG4CPLUS_ERROR(test_logger, "No working BufferPool ID available");
         producer.stop();
         return -1;
     }
@@ -2940,24 +2949,24 @@ static int test_mjpeg_decoder(const std::vector<std::string>& args) {
     auto producer_pool_weak = BufferPoolRegistry::getInstance().getPool(producer_pool_id);
     auto producer_pool_sptr = producer_pool_weak.lock();
     if (!producer_pool_sptr) {
-        LOG_ERROR("BufferPool not found or destroyed");
+        LOG4CPLUS_ERROR(test_logger, "BufferPool not found or destroyed");
         producer.stop();
         return -1;
     }
 
-    LOG_INFO_FMT("[Test] Using BufferPool: '%s'", producer_pool_sptr->getName().c_str());
+    LOG4CPLUS_INFO_FMT(test_logger, "[Test] Using BufferPool: '%s'", producer_pool_sptr->getName().c_str());
 
     // 7. 创建输出文件写入器（使用实际的源分辨率）
-    LOG_INFO("[Test] Creating BufferWriter...");
+    LOG4CPLUS_INFO(test_logger, "[Test] Creating BufferWriter...");
     productionline::io::BufferWriter writer;
     if (!writer.openRaw(output_file, AV_PIX_FMT_YUV420P, source_width, source_height)) {
-        LOG_ERROR("Failed to create output writer");
+        LOG4CPLUS_ERROR(test_logger, "Failed to create output writer");
         producer.stop();
         return -1;
     }
 
     // 8. 消费者循环：消费所有解码后的帧
-    LOG_INFO("[Test] Starting consumer loop...");
+    LOG4CPLUS_INFO(test_logger, "[Test] Starting consumer loop...");
 
     int frame_count = 0;
     int timeout_count = 0;
@@ -2974,14 +2983,14 @@ static int test_mjpeg_decoder(const std::vector<std::string>& args) {
                 if (writer.write(buffer)) {
                     frame_count++;
                     if (frame_count % 10 == 0) {
-                        LOG_INFO_FMT("  Saved %d frames to %s", frame_count, output_file);
+                        LOG4CPLUS_INFO_FMT(test_logger, "  Saved %d frames to %s", frame_count, output_file);
                     }
                 } else {
-                    LOG_WARN("Failed to write frame to output file");
+                    LOG4CPLUS_WARN(test_logger, "Failed to write frame to output file");
                 }
             } else {
                 // 通道未启用或不匹配：跳过
-                LOG_DEBUG_FMT("Skipping frame from ch%d (not enabled in TACO config)", buffer_channel);
+                LOG4CPLUS_DEBUG_FMT(test_logger, "Skipping frame from ch%d (not enabled in TACO config)", buffer_channel);
             }
 
             producer_pool_sptr->releaseFilled(buffer);
@@ -2989,13 +2998,13 @@ static int test_mjpeg_decoder(const std::vector<std::string>& args) {
         } else {
             timeout_count++;
             if (timeout_count >= MAX_TIMEOUT) {
-                LOG_INFO("\n[Test] Consumer timeout - producer may have finished");
+                LOG4CPLUS_INFO(test_logger, "\n[Test] Consumer timeout - producer may have finished");
                 break;
             }
 
             // 检查生产者状态
             if (!producer.isRunning()) {
-                LOG_INFO("\n[Test] Producer stopped naturally");
+                LOG4CPLUS_INFO(test_logger, "\n[Test] Producer stopped naturally");
                 break;
             }
         }
@@ -3006,9 +3015,9 @@ static int test_mjpeg_decoder(const std::vector<std::string>& args) {
     producer.stop();
 
     // 10. 结果报告
-    LOG_INFO("\n═══════════════════════════════════════════════════════");
-    LOG_INFO("  Test Results");
-    LOG_INFO("═══════════════════════════════════════════════════════");
+    LOG4CPLUS_INFO(test_logger, "\n═══════════════════════════════════════════════════════");
+    LOG4CPLUS_INFO(test_logger, "  Test Results");
+    LOG4CPLUS_INFO(test_logger, "═══════════════════════════════════════════════════════");
 
     if (frame_count > 0) {
         // 获取输出文件大小
@@ -3020,18 +3029,18 @@ static int test_mjpeg_decoder(const std::vector<std::string>& args) {
             fclose(f);
         }
 
-        LOG_INFO("  ✅ SUCCESS");
-        LOG_INFO_FMT("     Frames saved: %d", frame_count);
-        LOG_INFO_FMT("     Output file:  %s", output_file);
-        LOG_INFO_FMT("     File size:    %.2f MB", file_size / (1024.0 * 1024.0));
+        LOG4CPLUS_INFO(test_logger, "  ✅ SUCCESS");
+        LOG4CPLUS_INFO_FMT(test_logger, "     Frames saved: %d", frame_count);
+        LOG4CPLUS_INFO_FMT(test_logger, "     Output file:  %s", output_file);
+        LOG4CPLUS_INFO_FMT(test_logger, "     File size:    %.2f MB", file_size / (1024.0 * 1024.0));
 
-        LOG_INFO("\n  💡 Verify output with:");
-        LOG_INFO_FMT("     ffprobe -f rawvideo -pix_fmt yuv420p -s %dx%d %s", source_width, source_height, output_file);
-        LOG_INFO_FMT("     ffplay -f rawvideo -pix_fmt yuv420p -s %dx%d %s", source_width, source_height, output_file);
+        LOG4CPLUS_INFO(test_logger, "\n  💡 Verify output with:");
+        LOG4CPLUS_INFO_FMT(test_logger, "     ffprobe -f rawvideo -pix_fmt yuv420p -s %dx%d %s", source_width, source_height, output_file);
+        LOG4CPLUS_INFO_FMT(test_logger, "     ffplay -f rawvideo -pix_fmt yuv420p -s %dx%d %s", source_width, source_height, output_file);
 
         return 0;
     } else {
-        LOG_ERROR("  ❌ FAILED - No frames were decoded/saved");
+        LOG4CPLUS_ERROR(test_logger, "  ❌ FAILED - No frames were decoded/saved");
         return -1;
     }
 }
@@ -3052,16 +3061,163 @@ REGISTER_TEST(rtsp_record_all_formats, "RTSP Record - All format validation (7 f
 REGISTER_TEST(multi_worker, "MultiWorkerProductionLine - Multi worker test (hardware + software decoder from same RTSP stream)", test_multi_worker);
 
 /**
+ * @brief 配置所有模块的日志级别（编程式配置，作为 fallback）
+ * 
+ * 说明：
+ * - 如果存在 logger.properties 配置文件，此函数将被跳过
+ * - 配置文件方式更灵活（无需重新编译，直接修改即可）
+ * - 此函数仅在没有配置文件时作为默认配置使用
+ * 
+ * 使用方式：
+ * - 在 main 函数开头调用（INIT_LOGGER 之后）
+ * - 为每个模块设置日志级别
+ */
+void configureModuleLoggers() {
+    // 静默配置所有模块的日志级别（不输出配置信息）
+    
+    // ========== 测试框架 Logger ==========
+    test_logger.setLogLevel(log4cplus::DEBUG_LOG_LEVEL);
+    
+    // ========== ProductionLine 模块 ==========
+    auto multi_worker = log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.MultiWorker"));
+    multi_worker.setLogLevel(log4cplus::DEBUG_LOG_LEVEL);
+    
+    auto video_line = log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.VideoLine"));
+    video_line.setLogLevel(log4cplus::DEBUG_LOG_LEVEL);
+    
+    // ========== Buffer 相关模块 ==========
+    auto buffer_pool = log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.BufferPool"));
+    buffer_pool.setLogLevel(log4cplus::DEBUG_LOG_LEVEL);
+    
+    auto bps = log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.BufferPacketSource"));
+    bps.setLogLevel(log4cplus::DEBUG_LOG_LEVEL);
+    
+    auto writer = log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.BufferWriter"));
+    writer.setLogLevel(log4cplus::DEBUG_LOG_LEVEL);
+    
+    auto buffer_comparator = log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.BufferComparator"));
+    buffer_comparator.setLogLevel(log4cplus::DEBUG_LOG_LEVEL);
+    
+    // ========== Connector 模块 ==========
+    auto connector = log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Connector"));
+    connector.setLogLevel(log4cplus::DEBUG_LOG_LEVEL);
+    
+    // ========== Worker 模块（层次化）==========
+    auto worker = log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Worker"));
+    worker.setLogLevel(log4cplus::DEBUG_LOG_LEVEL);
+    
+    auto worker_video = log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Worker.VideoFile"));
+    worker_video.setLogLevel(log4cplus::DEBUG_LOG_LEVEL);
+    
+    auto worker_rtsp = log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Worker.Rtsp"));
+    worker_rtsp.setLogLevel(log4cplus::DEBUG_LOG_LEVEL);
+    
+    auto worker_recorder = log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Worker.Recorder"));
+    worker_recorder.setLogLevel(log4cplus::DEBUG_LOG_LEVEL);
+    
+    // ========== Allocator 模块（层次化）==========
+    auto allocator = log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Allocator"));
+    allocator.setLogLevel(log4cplus::DEBUG_LOG_LEVEL);
+    
+    auto allocator_avframe = log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Allocator.AVFrame"));
+    allocator_avframe.setLogLevel(log4cplus::DEBUG_LOG_LEVEL);
+    
+    auto allocator_fb = log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Allocator.Framebuffer"));
+    allocator_fb.setLogLevel(log4cplus::DEBUG_LOG_LEVEL);
+    
+    auto allocator_normal = log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Allocator.Normal"));
+    allocator_normal.setLogLevel(log4cplus::DEBUG_LOG_LEVEL);
+    
+    auto allocator_factory = log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Allocator.Factory"));
+    allocator_factory.setLogLevel(log4cplus::DEBUG_LOG_LEVEL);
+    
+    auto allocator_facade = log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Allocator.Facade"));
+    allocator_facade.setLogLevel(log4cplus::DEBUG_LOG_LEVEL);
+    
+    // ========== 数据源模块 ==========
+    auto datasource_rtsp = log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.DataSource.Rtsp"));
+    datasource_rtsp.setLogLevel(log4cplus::DEBUG_LOG_LEVEL);
+    
+    auto datasource_file = log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.DataSource.File"));
+    datasource_file.setLogLevel(log4cplus::DEBUG_LOG_LEVEL);
+    
+    // ========== 工具类模块 ==========
+    auto util_timer = log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Util.Timer"));
+    util_timer.setLogLevel(log4cplus::DEBUG_LOG_LEVEL);
+    
+    auto worker_factory = log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Worker.Factory"));
+    worker_factory.setLogLevel(log4cplus::DEBUG_LOG_LEVEL);
+    
+    auto worker_facade = log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Worker.Facade"));
+    worker_facade.setLogLevel(log4cplus::DEBUG_LOG_LEVEL);
+    
+    // ========== 显示和监控 ==========
+    auto display_fb = log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Display.Framebuffer"));
+    display_fb.setLogLevel(log4cplus::DEBUG_LOG_LEVEL);
+    
+    auto monitor_perf = log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Monitor.Performance"));
+    monitor_perf.setLogLevel(log4cplus::DEBUG_LOG_LEVEL);
+    
+    auto pool_registry = log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.BufferPool.Registry"));
+    pool_registry.setLogLevel(log4cplus::DEBUG_LOG_LEVEL);
+}
+
+/**
+ * @brief 快速检查命令行参数，判断是否需要显示帮助或列表
+ * 
+ * 在初始化日志系统之前调用，避免在显示帮助信息时打印日志
+ */
+static bool needsHelpOrList(int argc, char* argv[]) {
+    for (int i = 1; i < argc; i++) {
+        std::string arg = argv[i];
+        if (arg == "-h" || arg == "--help" || arg == "-l" || arg == "--list") {
+            return true;
+        }
+        // 如果 -m 后面没有参数，也会触发帮助信息
+        if (arg == "-m" || arg == "--mode") {
+            if (i + 1 >= argc) {
+                return true;  // -m 缺少参数，会显示帮助
+            }
+        }
+    }
+    return false;
+}
+
+/**
  * 主函数
  */
 int main(int argc, char* argv[]) {
-    // 初始化日志系统（无需配置文件）
+    // ⭐ 先快速检查命令行参数，如果是帮助或列表命令，直接输出并退出（不初始化日志系统）
+    if (needsHelpOrList(argc, argv)) {
+        // 直接使用 TEST_MAIN 来处理帮助信息（它会解析参数并输出帮助）
+        // optind 在 TestMacros.hpp 包含的 getopt.h 中已定义，可以直接使用
+        extern int optind;
+        optind = 1;  // 重置 getopt 的内部状态，确保能正确解析参数
+        TEST_MAIN(argc, argv);
+        return 0;
+    }
+    
+    // 初始化日志系统（支持配置文件或编程式配置）
     INIT_LOGGER();
     
+    // ⭐ 配置所有模块的日志级别
+    // 注意：如果 INIT_LOGGER() 已成功加载配置文件，下面的硬编码配置会被覆盖
+    // 推荐使用配置文件方式（无需重新编译）
+    struct stat buffer;
+    bool has_config_file = (stat("./logger.properties", &buffer) == 0) ||
+                           (stat("/etc/logger.properties", &buffer) == 0) ||
+                           (stat("../logger.properties", &buffer) == 0);
+    
+    if (!has_config_file) {
+        // 如果没有配置文件，使用编程式配置（静默配置，不输出信息）
+        configureModuleLoggers();
+    }
+    // 如果有配置文件，直接使用配置文件中的设置（静默，不输出提示信息）
+
     // 注册信号处理
     signal(SIGINT, [](int) { g_running = false; });
     signal(SIGTERM, [](int) { g_running = false; });
-    
+
     // 使用测试框架主函数
     TEST_MAIN(argc, argv);
 }

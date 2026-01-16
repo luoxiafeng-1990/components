@@ -24,30 +24,33 @@ static std::mutex framebuffer_ownership_mutex_;
 FramebufferAllocator::FramebufferAllocator()
     : external_buffers_()
     , next_buffer_index_(0)
+    , logger_(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Allocator.Framebuffer")))
 {
-   LOG_DEBUG("[FramebufferAllocator] 创建完成");
+   LOG4CPLUS_DEBUG(logger_, "创建完成");
 }
 
 FramebufferAllocator::FramebufferAllocator(const std::vector<BufferInfo>& external_buffers)
     : external_buffers_(external_buffers)
     , next_buffer_index_(0)
+    , logger_(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Allocator.Framebuffer")))
 {
-    LOG_DEBUG_FMT("[FramebufferAllocator] 创建: 包装%zu个external buffers", 
+    LOG4CPLUS_DEBUG_FMT(logger_, "创建: 包装%zu个external buffers", 
            external_buffers_.size());
 }
 
 FramebufferAllocator::FramebufferAllocator(LinuxFramebufferDevice* device)
     : next_buffer_index_(0)
+    , logger_(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Allocator.Framebuffer")))
 {
     if (!device) {
-        LOG_ERROR("[FramebufferAllocator] ERROR: Device pointer is null");
+        LOG4CPLUS_ERROR(logger_, "ERROR: Device pointer is null");
         return;
     }
     
     // 调用私有方法构建 BufferInfo 列表
     external_buffers_ = buildBufferInfosFromDevice(device);
     
-    LOG_DEBUG_FMT("[FramebufferAllocator] 创建: 从device获取%zu buffers", 
+    LOG4CPLUS_DEBUG_FMT(logger_, "创建: 从device获取%zu buffers", 
            external_buffers_.size());
 }
 
@@ -57,7 +60,7 @@ FramebufferAllocator::~FramebufferAllocator() {
     // destroyPool() 会自动查询 Registry 获取所有 Pool 并清理
     destroyPool();
     
-    LOG_DEBUG("[FramebufferAllocator] FramebufferAllocator destroyed (external memory not freed)");
+    LOG4CPLUS_DEBUG(logger_, "FramebufferAllocator destroyed (external memory not freed)");
 }
 
 // ============================================================
@@ -70,7 +73,7 @@ uint64_t FramebufferAllocator::allocatePoolWithBuffers(
     const std::string& name,
     const std::string& category)
 {
-    LOG_INFO_FMT("🏭 [FramebufferAllocator] Creating BufferPool with %d buffers...", count);
+    LOG4CPLUS_INFO_FMT(logger_, "🏭 [FramebufferAllocator] Creating BufferPool with %d buffers...", count);
     // v2.0 步骤 1: 使用 Passkey Token 创建 BufferPool（shared_ptr）
     auto pool = std::make_shared<BufferPool>(
         token(),    // 从基类获取通行证
@@ -84,7 +87,7 @@ uint64_t FramebufferAllocator::allocatePoolWithBuffers(
     for (int i = 0; i < actual_count; i++) {
         Buffer* buffer = createBuffer(i, 0);  // size 参数被忽略
         if (!buffer) {
-            LOG_ERROR_FMT("[FramebufferAllocator] Failed to wrap external buffer #%d", i);
+            LOG4CPLUS_ERROR_FMT(logger_, "Failed to wrap external buffer #%d", i);
             // 清理已创建的 buffers（pool还未注册，需要手动清理）
             // 遍历pool的managed_buffers_清理已添加的buffer
             {
@@ -100,7 +103,7 @@ uint64_t FramebufferAllocator::allocatePoolWithBuffers(
         }
         
         if (!BufferAllocatorBase::addBufferToPoolQueue(pool.get(), buffer, QueueType::FREE)) {
-            LOG_ERROR_FMT("[FramebufferAllocator] Failed to add buffer #%d to pool", i);
+            LOG4CPLUS_ERROR_FMT(logger_, "Failed to add buffer #%d to pool", i);
             deallocateBuffer(buffer);
             // 清理已创建的 buffers（pool还未注册，需要手动清理）
             {
@@ -120,11 +123,11 @@ uint64_t FramebufferAllocator::allocatePoolWithBuffers(
             framebuffer_buffer_ownership_[buffer] = this;
         }
         
-        LOG_DEBUG_FMT("[FramebufferAllocator]   Buffer #%d wrapped: virt=%p, phys=0x%lx, size=%zu (EXTERNAL)",
+        LOG4CPLUS_DEBUG_FMT(logger_, "  Buffer #%d wrapped: virt=%p, phys=0x%lx, size=%zu (EXTERNAL)",
                i, buffer->getVirtualAddress(), buffer->getPhysicalAddress(), buffer->size());
     }
     
-    LOG_DEBUG_FMT("[FramebufferAllocator] BufferPool '%s' created with %d buffers", 
+    LOG4CPLUS_DEBUG_FMT(logger_, "BufferPool '%s' created with %d buffers", 
            pool->getName().c_str(), actual_count);
     
     // v2.0 步骤 3: 注册到 Registry（转移所有权，传入 Allocator ID）
@@ -142,7 +145,7 @@ uint64_t FramebufferAllocator::allocatePoolWithBuffers(
 Buffer* FramebufferAllocator::createBuffer(uint32_t id, size_t size) {
     // 检查 id 是否越界
     if (id >= external_buffers_.size()) {
-        LOG_ERROR_FMT("[FramebufferAllocator] Buffer ID %u out of range (max: %zu)", 
+        LOG4CPLUS_ERROR_FMT(logger_, "Buffer ID %u out of range (max: %zu)", 
                id, external_buffers_.size());
         return nullptr;
     }
@@ -160,7 +163,7 @@ Buffer* FramebufferAllocator::createBuffer(uint32_t id, size_t size) {
     );
     
     if (!buffer) {
-        LOG_ERROR_FMT("[FramebufferAllocator] Failed to create Buffer object #%u", id);
+        LOG4CPLUS_ERROR_FMT(logger_, "Failed to create Buffer object #%u", id);
         return nullptr;
     }
     
@@ -173,7 +176,7 @@ void FramebufferAllocator::deallocateBuffer(Buffer* buffer) {
     }
     
     // 1. 不释放内存（外部管理）
-    LOG_DEBUG_FMT("[FramebufferAllocator] Deleting Buffer #%u (external memory retained)", buffer->id());
+    LOG4CPLUS_DEBUG_FMT(logger_, "Deleting Buffer #%u (external memory retained)", buffer->id());
     
     // 2. 仅删除 Buffer 对象
     delete buffer;
@@ -186,18 +189,21 @@ void FramebufferAllocator::deallocateBuffer(Buffer* buffer) {
 std::vector<FramebufferAllocator::BufferInfo> 
 FramebufferAllocator::buildBufferInfosFromDevice(LinuxFramebufferDevice* device)
 {
+    // 静态函数需要临时创建 logger 实例
+    auto logger = log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Allocator.Framebuffer"));
+    
     std::vector<BufferInfo> infos;
     
     if (!device) {
-        LOG_ERROR("[FramebufferAllocator] ERROR: Device pointer is null in buildBufferInfosFromDevice");
+        LOG4CPLUS_ERROR(logger, "ERROR: Device pointer is null in buildBufferInfosFromDevice");
         return infos;
     }
     
     // 1. 从设备获取 mmap 信息
     auto mapped_info = device->getMappedInfo();
     
-    LOG_INFO("📋 [FramebufferAllocator] Building BufferInfo list from device:");
-    LOG_INFO_FMT("   base_addr=%p, buffer_size=%zu, buffer_count=%d",
+    LOG4CPLUS_INFO(logger, "📋 Building BufferInfo list from device:");
+    LOG4CPLUS_INFO_FMT(logger, "   base_addr=%p, buffer_size=%zu, buffer_count=%d",
            mapped_info.base_addr, mapped_info.buffer_size, mapped_info.buffer_count);
     
     // 2. 计算每个 buffer 的地址并构建 BufferInfo
@@ -211,7 +217,7 @@ FramebufferAllocator::buildBufferInfosFromDevice(LinuxFramebufferDevice* device)
             .size = mapped_info.buffer_size
         });
         
-        LOG_DEBUG_FMT("   Buffer[%d]: virt=%p, size=%zu", 
+        LOG4CPLUS_DEBUG_FMT(logger, "   Buffer[%d]: virt=%p, size=%zu", 
                i, infos.back().virt_addr, infos.back().size);
     }
     
@@ -227,9 +233,9 @@ Buffer* FramebufferAllocator::injectBufferToPool(
     size_t size,
     QueueType queue
 ) {
-    LOG_WARN("[FramebufferAllocator]  [FramebufferAllocator] injectBufferToPool: This method is not supported");
-    LOG_WARN("[FramebufferAllocator]  FramebufferAllocator only supports wrapping pre-allocated external memory");
-    LOG_WARN("[FramebufferAllocator]  Use allocatePoolWithBuffers() or injectExternalBufferToPool() instead");
+    LOG4CPLUS_WARN(logger_, " [FramebufferAllocator] injectBufferToPool: This method is not supported");
+    LOG4CPLUS_WARN(logger_, " FramebufferAllocator only supports wrapping pre-allocated external memory");
+    LOG4CPLUS_WARN(logger_, " Use allocatePoolWithBuffers() or injectExternalBufferToPool() instead");
     return nullptr;
 }
 
@@ -241,7 +247,7 @@ Buffer* FramebufferAllocator::injectExternalBufferToPool(
     QueueType queue
 ) {
     if (!virt_addr || size == 0) {
-        LOG_ERROR("[FramebufferAllocator] injectExternalBufferToPool: invalid parameters");
+        LOG4CPLUS_ERROR(logger_, "injectExternalBufferToPool: invalid parameters");
         return nullptr;
     }
     
@@ -249,7 +255,7 @@ Buffer* FramebufferAllocator::injectExternalBufferToPool(
     auto pool_weak = BufferPoolRegistry::getInstance().getPool(pool_id);
     auto pool = pool_weak.lock();
     if (!pool) {
-        LOG_ERROR_FMT("[FramebufferAllocator] pool_id %lu not found or already destroyed", pool_id);
+        LOG4CPLUS_ERROR_FMT(logger_, "pool_id %lu not found or already destroyed", pool_id);
         return nullptr;
     }
     
@@ -266,13 +272,13 @@ Buffer* FramebufferAllocator::injectExternalBufferToPool(
     );
     
     if (!buffer) {
-        LOG_ERROR_FMT("[FramebufferAllocator] Failed to create Buffer object #%u for external memory", id);
+        LOG4CPLUS_ERROR_FMT(logger_, "Failed to create Buffer object #%u for external memory", id);
         return nullptr;
     }
     
     // 3. 通过基类静态方法添加到 pool 的指定队列（会自动添加到 managed_buffers_）
     if (!BufferAllocatorBase::addBufferToPoolQueue(pool.get(), buffer, queue)) {
-        LOG_ERROR_FMT("[FramebufferAllocator] Failed to add external buffer #%u to pool '%s'", 
+        LOG4CPLUS_ERROR_FMT(logger_, "Failed to add external buffer #%u to pool '%s'", 
                id, pool->getName().c_str());
         delete buffer;  // 只删除 Buffer 对象，不释放外部内存
         return nullptr;
@@ -285,7 +291,7 @@ Buffer* FramebufferAllocator::injectExternalBufferToPool(
     }
     
     // 仅在TRACE级别输出详细信息
-    LOG_TRACE_FMT("[FramebufferAllocator] External buffer #%u injected (virt=%p, phys=0x%lx, size=%zu)",
+    LOG_TRACE_FMT("External buffer #%u injected (virt=%p, phys=0x%lx, size=%zu)",
            id, virt_addr, phys_addr, size);
     
     return buffer;
@@ -293,7 +299,7 @@ Buffer* FramebufferAllocator::injectExternalBufferToPool(
 
 bool FramebufferAllocator::removeBufferFromPool(uint64_t pool_id, Buffer* buffer) {
     if (!buffer) {
-        LOG_ERROR("[FramebufferAllocator] removeBufferFromPool: buffer is nullptr");
+        LOG4CPLUS_ERROR(logger_, "removeBufferFromPool: buffer is nullptr");
         return false;
     }
     
@@ -301,13 +307,13 @@ bool FramebufferAllocator::removeBufferFromPool(uint64_t pool_id, Buffer* buffer
     auto pool_weak = BufferPoolRegistry::getInstance().getPool(pool_id);
     auto pool = pool_weak.lock();
     if (!pool) {
-        LOG_ERROR_FMT("[FramebufferAllocator] pool_id %lu not found or already destroyed", pool_id);
+        LOG4CPLUS_ERROR_FMT(logger_, "pool_id %lu not found or already destroyed", pool_id);
         return false;
     }
     
     // 1. 通过基类静态方法从 pool 移除
     if (!BufferAllocatorBase::removeBufferFromPoolInternal(pool.get(), buffer)) {
-        LOG_WARN_FMT("[FramebufferAllocator]  Failed to remove buffer #%u from pool '%s' (in use or not in pool)",
+        LOG4CPLUS_WARN_FMT(logger_, " Failed to remove buffer #%u from pool '%s' (in use or not in pool)",
                buffer->id(), pool->getName().c_str());
         return false;
     }
@@ -321,7 +327,7 @@ bool FramebufferAllocator::removeBufferFromPool(uint64_t pool_id, Buffer* buffer
         framebuffer_buffer_ownership_.erase(buffer);
     }
     
-    LOG_DEBUG_FMT("[FramebufferAllocator] Buffer #%u removed from pool '%s'",
+    LOG4CPLUS_DEBUG_FMT(logger_, "Buffer #%u removed from pool '%s'",
            buffer->id(), pool->getName().c_str());
     
     return true;
@@ -332,11 +338,11 @@ bool FramebufferAllocator::destroyPool() {
     auto pool_ids = getPoolsByAllocator();
     
     if (pool_ids.empty()) {
-        LOG_DEBUG("[FramebufferAllocator] No pools to destroy");
+        LOG4CPLUS_DEBUG(logger_, "No pools to destroy");
         return true;
     }
     
-    LOG_DEBUG_FMT("[FramebufferAllocator] Destroying %zu pool(s)...", pool_ids.size());
+    LOG4CPLUS_DEBUG_FMT(logger_, "Destroying %zu pool(s)...", pool_ids.size());
     
     std::lock_guard<std::mutex> lock(framebuffer_ownership_mutex_);
     
@@ -345,11 +351,11 @@ bool FramebufferAllocator::destroyPool() {
         // 2.1 获取 pool
         auto pool = getPoolSpecialForAllocator(pool_id);
         if (!pool) {
-            LOG_WARN_FMT("[FramebufferAllocator]  [FramebufferAllocator] pool_id %lu not found (already destroyed?)", pool_id);
+            LOG4CPLUS_WARN_FMT(logger_, " [FramebufferAllocator] pool_id %lu not found (already destroyed?)", pool_id);
             continue;
         }
         
-        LOG_DEBUG_FMT("[FramebufferAllocator] Destroying pool '%s' (ID: %lu)...", pool->getName().c_str(), pool_id);
+        LOG4CPLUS_DEBUG_FMT(logger_, "Destroying pool '%s' (ID: %lu)...", pool->getName().c_str(), pool_id);
         
         // 2.2 通过 BufferPool 的公共方法获取所有属于此 pool 的 buffer
         std::vector<Buffer*> to_remove;
@@ -368,14 +374,14 @@ bool FramebufferAllocator::destroyPool() {
             framebuffer_buffer_ownership_.erase(buf);
         }
         
-        LOG_DEBUG_FMT("[FramebufferAllocator] Pool '%s' destroyed: removed %zu buffers (external memory retained)", 
+        LOG4CPLUS_DEBUG_FMT(logger_, "Pool '%s' destroyed: removed %zu buffers (external memory retained)", 
                pool->getName().c_str(), to_remove.size());
         
         // 2.4 从 Registry 注销（触发 Pool 析构）
         unregisterPool(pool_id);
     }
     
-    LOG_DEBUG_FMT("[FramebufferAllocator] All %zu pool(s) destroyed", pool_ids.size());
+    LOG4CPLUS_DEBUG_FMT(logger_, "All %zu pool(s) destroyed", pool_ids.size());
     return true;
 }
 

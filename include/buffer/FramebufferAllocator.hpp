@@ -2,6 +2,8 @@
 
 #include "buffer/BufferAllocatorBase.hpp"
 #include <vector>
+#include <log4cplus/logger.h>
+#include <log4cplus/loggingmacros.h>
 
 // 前向声明（避免循环依赖）
 class LinuxFramebufferDevice;
@@ -227,5 +229,8 @@ private:
     
     std::vector<BufferInfo> external_buffers_;  // 外部内存信息
     size_t next_buffer_index_;                   // 下一个可用索引
+    
+    // 日志器
+    log4cplus::Logger logger_;
 };
 

@@ -32,27 +32,22 @@ BufferWriter::BufferWriter()
     , first_pts_(AV_NOPTS_VALUE)
     , first_dts_(AV_NOPTS_VALUE)
     , writer_id_(++next_id_)
-    , log_prefix_("[BufferWriter::" + std::to_string(writer_id_) + "]")
+    , log_prefix_("[" + std::to_string(writer_id_) + "]")
+    , logger_(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.BufferWriter")))
 {
-    // 获取logger
-    auto logger = log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components"));
-    
     // 打印生命周期开始
-    LOG4CPLUS_INFO(logger, "");
-    LOG4CPLUS_INFO(logger, log_prefix_ << " " << std::string(67, '='));
-    LOG4CPLUS_INFO(logger, log_prefix_ << " 构造");
-    LOG4CPLUS_INFO(logger, log_prefix_ << " " << std::string(67, '='));
+    LOG4CPLUS_INFO(logger_, "");
+    LOG4CPLUS_INFO(logger_, log_prefix_ << " " << std::string(67, '='));
+    LOG4CPLUS_INFO(logger_, log_prefix_ << " 构造");
+    LOG4CPLUS_INFO(logger_, log_prefix_ << " " << std::string(67, '='));
 }
 
 BufferWriter::~BufferWriter() {
-    // 获取logger
-    auto logger = log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components"));
-    
     // 打印生命周期结束
-    LOG4CPLUS_INFO(logger, "");
-    LOG4CPLUS_INFO(logger, log_prefix_ << " " << std::string(67, '='));
-    LOG4CPLUS_INFO(logger, log_prefix_ << " 析构: 共写入 " << write_count_.load() << " 帧");
-    LOG4CPLUS_INFO(logger, log_prefix_ << " " << std::string(67, '='));
+    LOG4CPLUS_INFO(logger_, "");
+    LOG4CPLUS_INFO(logger_, log_prefix_ << " " << std::string(67, '='));
+    LOG4CPLUS_INFO(logger_, log_prefix_ << " 析构: 共写入 " << write_count_.load() << " 帧");
+    LOG4CPLUS_INFO(logger_, log_prefix_ << " " << std::string(67, '='));
     
     close();
 }
@@ -69,21 +64,21 @@ bool BufferWriter::openRaw(const char* path,
                            int height) {
     // 1. 参数校验
     if (!path) {
-        LOG_ERROR("[BufferWriter] Error: Invalid path (nullptr)");
+        LOG4CPLUS_ERROR(logger_, "Error: Invalid path (nullptr)");
         return false;
     }
     
     if (width <= 0 || height <= 0) {
-        LOG_ERROR_FMT("[BufferWriter] Error: Invalid dimensions (%dx%d)", 
+        LOG4CPLUS_ERROR_FMT(logger_, "Error: Invalid dimensions (%dx%d)", 
                 width, height);
         return false;
     }
     
     // 2. 检查格式支持
     if (!isSupportedFormat(save_format)) {
-        LOG_ERROR_FMT("[BufferWriter] Error: Unsupported save_format: %s (%d)",
+        LOG4CPLUS_ERROR_FMT(logger_, "Error: Unsupported save_format: %s (%d)",
                 av_get_pix_fmt_name(save_format), save_format);
-        LOG_ERROR("[BufferWriter] Supported formats (22): "
+        LOG4CPLUS_ERROR(logger_, "Supported formats (22): "
                 "GRAY8, GRAY10LE, NV12, P010LE, NV21, YUV420P, YUV420P10LE, YUV422P, YUV444P, "
                 "RGB24, BGR24, ARGB, ABGR, RGBA, BGRA, GBRP, "
                 "RGB0, BGR0, 0RGB, 0BGR, RGB48LE, BGR48LE");
@@ -98,7 +93,7 @@ bool BufferWriter::openRaw(const char* path,
     // 4. 打开文件（二进制写入模式）
     file_ = fopen(path, "wb");
     if (!file_) {
-        LOG_ERROR_FMT("[BufferWriter] Error: Failed to open file: %s "
+        LOG4CPLUS_ERROR_FMT(logger_, "Error: Failed to open file: %s "
                 "(errno=%d: %s)", path, errno, strerror(errno));
         return false;
     }
@@ -111,10 +106,10 @@ bool BufferWriter::openRaw(const char* path,
     mismatch_count_.store(0);  // ⭐ v2.17：重置格式不匹配计数器
     
     // 6. 打印成功信息
-    LOG_INFO_FMT("[BufferWriter] Opened: %s", path);
-    LOG_INFO_FMT("  Format: %s", getFormatName(format_));
-    LOG_INFO_FMT("  Resolution: %dx%d", width_, height_);
-    LOG_INFO_FMT("  Frame size: %zu bytes", calculateFrameSize(format_, width_, height_));
+    LOG4CPLUS_INFO_FMT(logger_, "Opened: %s", path);
+    LOG4CPLUS_INFO_FMT(logger_, "  Format: %s", getFormatName(format_));
+    LOG4CPLUS_INFO_FMT(logger_, "  Resolution: %dx%d", width_, height_);
+    LOG4CPLUS_INFO_FMT(logger_, "  Frame size: %zu bytes", calculateFrameSize(format_, width_, height_));
     
     return true;
 }
@@ -122,7 +117,7 @@ bool BufferWriter::openRaw(const char* path,
 bool BufferWriter::write(const Buffer* buffer) {
     // 1. 参数校验
     if (!buffer) {
-        LOG_ERROR("[BufferWriter] Error: Invalid buffer");
+        LOG4CPLUS_ERROR(logger_, "Error: Invalid buffer");
         return false;
     }
     
@@ -133,7 +128,7 @@ bool BufferWriter::write(const Buffer* buffer) {
     
     // 3. 图像模式（原有逻辑）
     if (!file_) {
-        LOG_ERROR("[BufferWriter] Error: file not opened");
+        LOG4CPLUS_ERROR(logger_, "Error: file not opened");
         return false;
     }
     
@@ -152,15 +147,15 @@ bool BufferWriter::write(const Buffer* buffer) {
             
             // 只打印前5次错误，避免刷屏
             if (current_count <= 5) {
-                LOG_ERROR_FMT("[BufferWriter] ❌ Format/size mismatch (count: %lld):", 
+                LOG4CPLUS_ERROR_FMT(logger_, "❌ Format/size mismatch (count: %lld):", 
                              (long long)current_count);
                 if (!format_match) {
-                    LOG_ERROR_FMT("  Expected format: %s, got: %s",
+                    LOG4CPLUS_ERROR_FMT(logger_, "  Expected format: %s, got: %s",
                                  av_get_pix_fmt_name(format_),
                                  av_get_pix_fmt_name(actual_format));
                 }
                 if (!size_match) {
-                    LOG_ERROR_FMT("  Expected size: %dx%d, got: %dx%d",
+                    LOG4CPLUS_ERROR_FMT(logger_, "  Expected size: %dx%d, got: %dx%d",
                                  width_, height_, actual_width, actual_height);
                 }
             }
@@ -182,7 +177,7 @@ bool BufferWriter::write(const Buffer* buffer) {
 bool BufferWriter::writeSimple(const Buffer* buffer) {
     // 1. 参数校验：空指针检查（防御性编程）
     if (!buffer) {
-        LOG_ERROR("[BufferWriter::writeSimple] Error: buffer is nullptr");
+        LOG4CPLUS_ERROR(logger_, "[BufferWriter::writeSimple] Error: buffer is nullptr");
         return false;
     }
     
@@ -198,7 +193,7 @@ bool BufferWriter::writeSimple(const Buffer* buffer) {
     
     // 3. 旧版简单写入（向后兼容）
     if (!buffer->isValid()) {
-        LOG_ERROR("[BufferWriter] Error: Buffer validation failed");
+        LOG4CPLUS_ERROR(logger_, "Error: Buffer validation failed");
         return false;
     }
     
@@ -206,26 +201,26 @@ bool BufferWriter::writeSimple(const Buffer* buffer) {
     size_t buffer_size = buffer->size();
     
     if (!data || buffer_size == 0) {
-        LOG_ERROR("[BufferWriter] Error: Buffer has no data or zero size");
+        LOG4CPLUS_ERROR(logger_, "Error: Buffer has no data or zero size");
         return false;
     }
     
     size_t expected_size = calculateFrameSize(format_, width_, height_);
     
     if (buffer_size < expected_size) {
-        LOG_ERROR("[BufferWriter] Error: Buffer size mismatch");
-        LOG_ERROR_FMT("  Expected: %zu bytes (format=%s, %dx%d)",
+        LOG4CPLUS_ERROR(logger_, "Error: Buffer size mismatch");
+        LOG4CPLUS_ERROR_FMT(logger_, "  Expected: %zu bytes (format=%s, %dx%d)",
                 expected_size, getFormatName(format_), width_, height_);
-        LOG_ERROR_FMT("  Got: %zu bytes", buffer_size);
+        LOG4CPLUS_ERROR_FMT(logger_, "  Got: %zu bytes", buffer_size);
         return false;
     }
     
     size_t written = fwrite(data, 1, expected_size, file_);
     if (written != expected_size) {
-        LOG_ERROR("[BufferWriter] Error: Write failed");
-        LOG_ERROR_FMT("  Expected to write: %zu bytes", expected_size);
-        LOG_ERROR_FMT("  Actually wrote: %zu bytes", written);
-        LOG_ERROR_FMT("  errno=%d: %s", errno, strerror(errno));
+        LOG4CPLUS_ERROR(logger_, "Error: Write failed");
+        LOG4CPLUS_ERROR_FMT(logger_, "  Expected to write: %zu bytes", expected_size);
+        LOG4CPLUS_ERROR_FMT(logger_, "  Actually wrote: %zu bytes", written);
+        LOG4CPLUS_ERROR_FMT(logger_, "  errno=%d: %s", errno, strerror(errno));
         return false;
     }
     
@@ -236,7 +231,7 @@ bool BufferWriter::writeSimple(const Buffer* buffer) {
 bool BufferWriter::writeWithMetadata(const Buffer* buffer) {
     // 1. 参数校验：空指针检查（防御性编程）
     if (!buffer) {
-        LOG_ERROR("[BufferWriter::writeWithMetadata] Error: buffer is nullptr");
+        LOG4CPLUS_ERROR(logger_, "[BufferWriter::writeWithMetadata] Error: buffer is nullptr");
         return false;
     }
     
@@ -250,7 +245,7 @@ bool BufferWriter::writeWithMetadata(const Buffer* buffer) {
     if (format_ != AV_PIX_FMT_NONE && buf_format != format_) {
         // 格式不匹配，静默跳过（这是正常行为，不是错误）
         // 场景：TACO解码器同时输出多种格式，每个BufferWriter只保存自己关心的格式
-        LOG_INFO_FMT("[BufferWriter] Format not matched: %s (expected: %s)",
+        LOG4CPLUS_INFO_FMT(logger_, "Format not matched: %s (expected: %s)",
                 av_get_pix_fmt_name(buf_format), av_get_pix_fmt_name(format_));
         return true;  // 返回true表示"已处理"（虽然未写入，但这是预期行为）
     }
@@ -260,7 +255,7 @@ bool BufferWriter::writeWithMetadata(const Buffer* buffer) {
     const uint8_t* first_plane = buffer->getImagePlaneData(0);
     if (!first_plane) {
         // 数据未就绪，静默跳过
-        LOG_ERROR("[BufferWriter] Warning: First image plane data is null, skipping frame");
+        LOG4CPLUS_ERROR(logger_, "Warning: First image plane data is null, skipping frame");
         return true;
     }
     
@@ -274,13 +269,13 @@ bool BufferWriter::writeWithMetadata(const Buffer* buffer) {
             
             // 写入Y平面（去除stride）
             if (!writePlane(y_data, linesize[0], buf_width, buf_height)) {
-                LOG_ERROR("[BufferWriter] Error: Write Y plane failed");
+                LOG4CPLUS_ERROR(logger_, "Error: Write Y plane failed");
                 return false;
             }
             
             // 写入UV平面（去除stride，高度为height/2）
             if (!writePlane(uv_data, linesize[1], buf_width, buf_height / 2)) {
-                LOG_ERROR("[BufferWriter] Error: Write UV plane failed");
+                LOG4CPLUS_ERROR(logger_, "Error: Write UV plane failed");
                 return false;
             }
             break;
@@ -455,7 +450,7 @@ bool BufferWriter::writeWithMetadata(const Buffer* buffer) {
         }
         
         default:
-            LOG_ERROR_FMT("[BufferWriter] Unsupported format: %s",
+            LOG4CPLUS_ERROR_FMT(logger_, "Unsupported format: %s",
                     av_get_pix_fmt_name(buf_format));
             return false;
     }
@@ -507,7 +502,7 @@ void BufferWriter::close() {
         video_stream_index_ = -1;
         packet_count_ = 0;
         
-        LOG_INFO_FMT("[BufferWriter] Closed (written %d packets)", 
+        LOG4CPLUS_INFO_FMT(logger_, "Closed (written %d packets)", 
                write_count_.load());
         return;
     }
@@ -518,7 +513,7 @@ void BufferWriter::close() {
         fclose(file_);
         file_ = nullptr;
         
-        LOG_INFO_FMT("[BufferWriter] Closed (written %d frames)", 
+        LOG4CPLUS_INFO_FMT(logger_, "Closed (written %d frames)", 
                write_count_.load());
     }
 }
@@ -697,7 +692,7 @@ const char* BufferWriter::getFormatName(AVPixelFormat format) {
 bool BufferWriter::openEncoded(const char* path, const AVCodecParameters* codec_params, const AVRational& time_base) {
     // 1. 参数校验
     if (!path || !codec_params) {
-        LOG_ERROR("[BufferWriter] Error: Invalid parameters for encoded mode");
+        LOG4CPLUS_ERROR(logger_, "Error: Invalid parameters for encoded mode");
         return false;
     }
     
@@ -714,14 +709,14 @@ bool BufferWriter::openEncoded(const char* path, const AVCodecParameters* codec_
     if (ret < 0) {
         char errbuf[128];
         av_strerror(ret, errbuf, sizeof(errbuf));
-        LOG_ERROR_FMT("[BufferWriter] Error: Failed to allocate output context: %s", errbuf);
+        LOG4CPLUS_ERROR_FMT(logger_, "Error: Failed to allocate output context: %s", errbuf);
         return false;
     }
     
     // 4. 创建输出视频流
     AVStream* out_stream = avformat_new_stream(output_format_ctx_, nullptr);
     if (!out_stream) {
-        LOG_ERROR("[BufferWriter] Error: Failed to create output stream");
+        LOG4CPLUS_ERROR(logger_, "Error: Failed to create output stream");
         avformat_free_context(output_format_ctx_);
         output_format_ctx_ = nullptr;
         return false;
@@ -734,7 +729,7 @@ bool BufferWriter::openEncoded(const char* path, const AVCodecParameters* codec_
     if (ret < 0) {
         char errbuf[128];
         av_strerror(ret, errbuf, sizeof(errbuf));
-        LOG_ERROR_FMT("[BufferWriter] Error: Failed to copy codec parameters: %s", errbuf);
+        LOG4CPLUS_ERROR_FMT(logger_, "Error: Failed to copy codec parameters: %s", errbuf);
         avformat_free_context(output_format_ctx_);
         output_format_ctx_ = nullptr;
         return false;
@@ -758,7 +753,7 @@ bool BufferWriter::openEncoded(const char* path, const AVCodecParameters* codec_
         if (ret < 0) {
             char errbuf[128];
             av_strerror(ret, errbuf, sizeof(errbuf));
-            LOG_ERROR_FMT("[BufferWriter] Error: Failed to open output file: %s", errbuf);
+            LOG4CPLUS_ERROR_FMT(logger_, "Error: Failed to open output file: %s", errbuf);
             avformat_free_context(output_format_ctx_);
             output_format_ctx_ = nullptr;
             return false;
@@ -770,7 +765,7 @@ bool BufferWriter::openEncoded(const char* path, const AVCodecParameters* codec_
     if (ret < 0) {
         char errbuf[128];
         av_strerror(ret, errbuf, sizeof(errbuf));
-        LOG_ERROR_FMT("[BufferWriter] Error: Failed to write header: %s", errbuf);
+        LOG4CPLUS_ERROR_FMT(logger_, "Error: Failed to write header: %s", errbuf);
         if (!(output_format_ctx_->oformat->flags & AVFMT_NOFILE)) {
             avio_closep(&output_format_ctx_->pb);
         }
@@ -789,30 +784,30 @@ bool BufferWriter::openEncoded(const char* path, const AVCodecParameters* codec_
     first_dts_ = AV_NOPTS_VALUE;
     
     // 11. 打印成功信息
-    LOG_INFO("");
-    LOG_INFO_FMT("[BufferWriter] Opened (encoded mode): %s", path);
-    LOG_INFO_FMT("  Format: %s", output_format_ctx_->oformat->name);
-    LOG_INFO_FMT("  Codec: %s", avcodec_get_name(out_stream->codecpar->codec_id));
-    LOG_INFO_FMT("  Resolution: %dx%d", out_stream->codecpar->width, out_stream->codecpar->height);
+    LOG4CPLUS_INFO(logger_, "");
+    LOG4CPLUS_INFO_FMT(logger_, "Opened (encoded mode): %s", path);
+    LOG4CPLUS_INFO_FMT(logger_, "  Format: %s", output_format_ctx_->oformat->name);
+    LOG4CPLUS_INFO_FMT(logger_, "  Codec: %s", avcodec_get_name(out_stream->codecpar->codec_id));
+    LOG4CPLUS_INFO_FMT(logger_, "  Resolution: %dx%d", out_stream->codecpar->width, out_stream->codecpar->height);
     
     return true;
 }
 
 bool BufferWriter::writeEncoded(const Buffer* buffer) {
     if (!output_format_ctx_) {
-        LOG_ERROR("[BufferWriter] Error: Not in encoded mode");
+        LOG4CPLUS_ERROR(logger_, "Error: Not in encoded mode");
         return false;
     }
     
     if (!buffer || !buffer->isValid()) {
-        LOG_ERROR("[BufferWriter] Error: Invalid buffer");
+        LOG4CPLUS_ERROR(logger_, "Error: Invalid buffer");
         return false;
     }
     
     // 1. ⭐ 直接从 Buffer 获取 AVPacket（包含所有数据和元数据）
     AVPacket* src_packet = buffer->getAVPacket();
     if (!src_packet || !src_packet->data) {
-        LOG_ERROR("[BufferWriter] Error: Buffer has no AVPacket data");
+        LOG4CPLUS_ERROR(logger_, "Error: Buffer has no AVPacket data");
         return false;
     }
     
@@ -825,7 +820,7 @@ bool BufferWriter::writeEncoded(const Buffer* buffer) {
     if (ret < 0) {
         char errbuf[128];
         av_strerror(ret, errbuf, sizeof(errbuf));
-        LOG_ERROR_FMT("[BufferWriter] Error: Failed to reference packet: %s", errbuf);
+        LOG4CPLUS_ERROR_FMT(logger_, "Error: Failed to reference packet: %s", errbuf);
         return false;
     }
     
@@ -856,7 +851,7 @@ bool BufferWriter::writeEncoded(const Buffer* buffer) {
     
     // ⭐ 调试：打印前几个包的时间戳
     if (packet_count_ < 3) {
-        LOG_DEBUG_FMT("[BufferWriter] Packet #%lld: Generated DTS=%lld, PTS=%lld (frame_duration=%lld)",
+        LOG4CPLUS_DEBUG_FMT(logger_, "Packet #%lld: Generated DTS=%lld, PTS=%lld (frame_duration=%lld)",
                      (long long)packet_count_, (long long)pkt.dts, (long long)pkt.pts, (long long)frame_duration);
     }
     
@@ -871,7 +866,7 @@ bool BufferWriter::writeEncoded(const Buffer* buffer) {
     if (ret < 0) {
         char errbuf[128];
         av_strerror(ret, errbuf, sizeof(errbuf));
-        LOG_ERROR_FMT("[BufferWriter] Error: Failed to write packet: %s", errbuf);
+        LOG4CPLUS_ERROR_FMT(logger_, "Error: Failed to write packet: %s", errbuf);
         return false;
     }
     

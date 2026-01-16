@@ -2,9 +2,17 @@
 #define FILE_PACKET_SOURCE_HPP
 
 #include "productionline/worker/IPacketSource.hpp"
+#include <log4cplus/logger.h>
+#include <log4cplus/loggingmacros.h>
 #include <string>
+#include <log4cplus/logger.h>
+#include <log4cplus/loggingmacros.h>
 #include <memory>
+#include <log4cplus/logger.h>
+#include <log4cplus/loggingmacros.h>
 #include <atomic>
+#include <log4cplus/logger.h>
+#include <log4cplus/loggingmacros.h>
 
 // FFmpeg 前向声明
 struct AVFormatContext;
@@ -71,6 +79,9 @@ private:
      * @return 总帧数
      */
     int estimateTotalFrames();
+    
+    // 日志器
+    log4cplus::Logger logger_;
 };
 
 #endif // FILE_PACKET_SOURCE_HPP

@@ -12,26 +12,26 @@ std::unique_ptr<WorkerBase> BufferFillingWorkerFactory::create(const WorkerConfi
     auto type = config.worker_type;
     // 1️⃣ 用户显式指定（最高优先级）
     if (type != WorkerType::AUTO) {
-        LOG_DEBUG_FMT("[WorkerFactory] BufferFillingWorkerFactory: User specified type: %s", typeToString(type));
+        LOG4CPLUS_DEBUG_FMT(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Worker.Factory")), "[WorkerFactory] BufferFillingWorkerFactory: User specified type: %s", typeToString(type));
         return createByType(type, config);
     }
     
     // 2️⃣ 环境变量配置
     WorkerType env_type = getTypeFromEnvironment();
     if (env_type != WorkerType::AUTO) {
-        LOG_DEBUG_FMT("[WorkerFactory] BufferFillingWorkerFactory: Type from environment: %s", typeToString(env_type));
+        LOG4CPLUS_DEBUG_FMT(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Worker.Factory")), "[WorkerFactory] BufferFillingWorkerFactory: Type from environment: %s", typeToString(env_type));
         return createByType(env_type, config);
     }
     
     // 3️⃣ 配置文件
     WorkerType config_type = getTypeFromConfig();
     if (config_type != WorkerType::AUTO) {
-        LOG_DEBUG_FMT("[WorkerFactory] BufferFillingWorkerFactory: Type from config: %s", typeToString(config_type));
+        LOG4CPLUS_DEBUG_FMT(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Worker.Factory")), "[WorkerFactory] BufferFillingWorkerFactory: Type from config: %s", typeToString(config_type));
         return createByType(config_type, config);
     }
     
     // 4️⃣ 自动检测
-    LOG_DEBUG("[WorkerFactory] BufferFillingWorkerFactory: Auto-detecting best worker type...");
+    LOG4CPLUS_DEBUG(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Worker.Factory")), "[WorkerFactory] BufferFillingWorkerFactory: Auto-detecting best worker type...");
     return autoDetect(config);
 }
 
@@ -53,8 +53,8 @@ const char* BufferFillingWorkerFactory::typeToString(WorkerType type) {
 // ============ 私有辅助方法 ============
 
 std::unique_ptr<WorkerBase> BufferFillingWorkerFactory::autoDetect(const WorkerConfig& config) {
-    LOG_INFO("🔍 Auto-detecting Worker type...");
-    LOG_INFO("   Using FfmpegDecodeVideoFileWorker as default");
+    LOG4CPLUS_INFO(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Worker.Factory")), "🔍 Auto-detecting Worker type...");
+    LOG4CPLUS_INFO(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Worker.Factory")), "   Using FfmpegDecodeVideoFileWorker as default");
     
     // 默认使用 FFmpeg Video File Worker
     return std::make_unique<FfmpegDecodeVideoFileWorker>(config);

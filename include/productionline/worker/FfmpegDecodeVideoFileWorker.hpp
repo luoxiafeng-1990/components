@@ -176,8 +176,12 @@ public:
     void printStats() const;
 
 private:
+    // ============ Logger ============
+    log4cplus::Logger logger_;
+    
     // ============ 数据源抽象（v2.9新增）============
-    std::unique_ptr<IPacketSource> packet_source_;  // 数据源抽象（文件或Buffer）
+    // ⭐ v2.20 修改：从 unique_ptr 改为 shared_ptr（支持 ONE_TO_MANY 共享模式）
+    std::shared_ptr<IPacketSource> packet_source_;  // 数据源抽象（文件或Buffer）
     
     
     AVCodecContext* codec_ctx_ptr_;

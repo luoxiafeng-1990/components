@@ -30,7 +30,7 @@ void Timer::start() {
     // 启动定时器线程
     timer_thread_ = std::thread(&Timer::timerThreadLoop, this);
     
-    LOG_DEBUG("⏰ Timer started");
+    LOG4CPLUS_DEBUG(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Util.Timer")), "⏰ Timer started");
 }
 
 void Timer::stop() {
@@ -58,7 +58,7 @@ void Timer::stop() {
         timer_thread_.join();
     }
     
-    LOG_DEBUG("⏰ Timer stopped");
+    LOG4CPLUS_DEBUG(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Util.Timer")), "⏰ Timer stopped");
 }
 
 // ============ 定时器调度 ============
@@ -71,7 +71,7 @@ Timer::TimerId Timer::scheduleOnce(int delay_ms, Callback callback) {
     std::lock_guard<std::mutex> lock(mutex_);
     
     if (!is_running_.load()) {
-        LOG_WARN("⚠️  Timer not started, call start() first");
+        LOG4CPLUS_WARN(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Util.Timer")), "⚠️  Timer not started, call start() first");
         return 0;
     }
     
@@ -97,14 +97,14 @@ Timer::TimerId Timer::scheduleOnce(int delay_ms, Callback callback) {
 Timer::TimerId Timer::scheduleRepeated(int interval_ms, Callback callback) {
     
     if (interval_ms <= 0) {
-        LOG_WARN_FMT("⚠️  Invalid interval: %d ms, must be > 0", interval_ms);
+        LOG4CPLUS_WARN_FMT(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Util.Timer")), "⚠️  Invalid interval: %d ms, must be > 0", interval_ms);
         return 0;
     }
     
     std::lock_guard<std::mutex> lock(mutex_);
     
     if (!is_running_.load()) {
-        LOG_WARN("⚠️  Timer not started, call start() first");
+        LOG4CPLUS_WARN(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Util.Timer")), "⚠️  Timer not started, call start() first");
         return 0;
     }
     
@@ -322,9 +322,9 @@ void Timer::executeExpiredTimers() {
                 task.callback();
             }
         } catch (const std::exception& e) {
-            LOG_ERROR_FMT("⚠️  Timer callback exception: %s", e.what());
+            LOG4CPLUS_ERROR_FMT(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Util.Timer")), "⚠️  Timer callback exception: %s", e.what());
         } catch (...) {
-            LOG_ERROR("⚠️  Timer callback unknown exception");
+            LOG4CPLUS_ERROR(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Util.Timer")), "⚠️  Timer callback unknown exception");
         }
     }
     
@@ -339,9 +339,9 @@ void Timer::executeExpiredTimers() {
                 task.callback();
             }
         } catch (const std::exception& e) {
-            LOG_ERROR_FMT("⚠️  Timer callback exception: %s", e.what());
+            LOG4CPLUS_ERROR_FMT(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Util.Timer")), "⚠️  Timer callback exception: %s", e.what());
         } catch (...) {
-            LOG_ERROR("⚠️  Timer callback unknown exception");
+            LOG4CPLUS_ERROR(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Util.Timer")), "⚠️  Timer callback unknown exception");
         }
     }
 }

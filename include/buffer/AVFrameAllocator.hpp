@@ -1,6 +1,8 @@
 #pragma once
 
 #include "buffer/BufferAllocatorBase.hpp"
+#include <log4cplus/logger.h>
+#include <log4cplus/loggingmacros.h>
 
 extern "C" {
 #include <libavcodec/avcodec.h>
@@ -184,5 +186,8 @@ private:
     // std::unordered_map<Buffer*, AVFrame*> buffer_to_frame_;  // 已废弃
     
     std::mutex mapping_mutex_;  // 保留互斥锁用于其他同步需求
+    
+    // 日志器
+    log4cplus::Logger logger_;
 };
 

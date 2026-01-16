@@ -209,6 +209,9 @@ public:
     void printStats() const;
 
 private:
+    // ============ Logger ============
+    log4cplus::Logger logger_;
+    
     // ============ 数据源抽象（v2.12新增）============
     // ⭐ v2.18 修改：从 unique_ptr 改为 shared_ptr（支持共享模式）
     std::shared_ptr<IPacketSource> packet_source_;  // 数据源抽象（RTSP流 或 共享Buffer）

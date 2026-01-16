@@ -2,9 +2,17 @@
 #define RTSP_PACKET_SOURCE_HPP
 
 #include "productionline/worker/IPacketSource.hpp"
+#include <log4cplus/logger.h>
+#include <log4cplus/loggingmacros.h>
 #include <string>
+#include <log4cplus/logger.h>
+#include <log4cplus/loggingmacros.h>
 #include <memory>
+#include <log4cplus/logger.h>
+#include <log4cplus/loggingmacros.h>
 #include <atomic>
+#include <log4cplus/logger.h>
+#include <log4cplus/loggingmacros.h>
 
 // FFmpeg 前向声明
 struct AVFormatContext;
@@ -115,6 +123,9 @@ private:
      * @return true 如果成功
      */
     bool initializeConnection();
+    
+    // 日志器
+    log4cplus::Logger logger_;
 };
 
 #endif // RTSP_PACKET_SOURCE_HPP

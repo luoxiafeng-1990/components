@@ -1,14 +1,26 @@
 #pragma once
 
 #include "buffer/bufferpool/Buffer.hpp"
+#include <log4cplus/logger.h>
+#include <log4cplus/loggingmacros.h>
 #include <string>
+#include <log4cplus/logger.h>
+#include <log4cplus/loggingmacros.h>
 #include <vector>
+#include <log4cplus/logger.h>
+#include <log4cplus/loggingmacros.h>
 #include <atomic>
+#include <log4cplus/logger.h>
+#include <log4cplus/loggingmacros.h>
 #include <cstdio>
+#include <log4cplus/logger.h>
+#include <log4cplus/loggingmacros.h>
 
 // FFmpeg前向声明
 extern "C" {
 #include <libavutil/pixfmt.h>
+#include <log4cplus/logger.h>
+#include <log4cplus/loggingmacros.h>
 }
 
 struct AVFrame;
@@ -78,6 +90,9 @@ struct CompareConfig {
     std::string report_path = "./decoder_compare_report.txt";
     bool save_failed_frames = false;       // 保存失败帧的差异图（未实现）
     std::string output_dir = "./validation_output";
+    
+    // 日志器
+    log4cplus::Logger logger_;
 };
 
 /**
@@ -120,6 +135,9 @@ struct FrameCompareResult {
     // ========== 格式信息 ==========
     std::string ref_format_name;
     std::string test_format_name;
+    
+    // 日志器
+    log4cplus::Logger logger_;
 };
 
 /**
@@ -438,6 +456,9 @@ private:
      * @brief 释放转换后的AVFrame
      */
     void freeConvertedFrame(AVFrame* frame);
+    
+    // 日志器
+    log4cplus::Logger logger_;
 };
 
 } // namespace io

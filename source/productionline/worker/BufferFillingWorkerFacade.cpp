@@ -36,7 +36,7 @@ bool BufferFillingWorkerFacade::open() {
     }
     
     if (!worker_base_uptr_) {
-        LOG_ERROR("[Worker] ERROR: Failed to create worker");
+        LOG4CPLUS_ERROR(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Worker.Facade")), "[Worker] ERROR: Failed to create worker");
         return false;
     }
     
@@ -45,7 +45,7 @@ bool BufferFillingWorkerFacade::open() {
     
     if (is_buffer_mode) {
         // Buffer 模式：不需要文件路径，直接调用 open(nullptr)
-        LOG_DEBUG("[Worker] BufferFillingWorkerFacade: Opening in Buffer mode (no file path needed)");
+        LOG4CPLUS_DEBUG(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Worker.Facade")), "[Worker] BufferFillingWorkerFacade: Opening in Buffer mode (no file path needed)");
         return worker_base_uptr_->open(nullptr);
     }
     
@@ -53,13 +53,13 @@ bool BufferFillingWorkerFacade::open() {
     const std::string& file_path = config_.data_source.path;
     
     if (file_path.empty()) {
-        LOG_ERROR("[Worker] ERROR: File path not set in config");
+        LOG4CPLUS_ERROR(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Worker.Facade")), "[Worker] ERROR: File path not set in config");
         return false;
     }
     
     const char* path = file_path.c_str();
     
-    LOG_DEBUG_FMT("[Worker] BufferFillingWorkerFacade: Opening file: %s", path);
+    LOG4CPLUS_DEBUG_FMT(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Worker.Facade")), "[Worker] BufferFillingWorkerFacade: Opening file: %s", path);
     return worker_base_uptr_->open(path);
 }
 
@@ -70,7 +70,7 @@ void BufferFillingWorkerFacade::close() {
 }
 bool BufferFillingWorkerFacade::setSourceBufferPool(std::weak_ptr<BufferPool> pool_weak) {
     if (!worker_base_uptr_) {
-        LOG_ERROR("[Worker] ERROR: Worker not initialized");
+        LOG4CPLUS_ERROR(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Worker.Facade")), "[Worker] ERROR: Worker not initialized");
         return false;
     }
     
@@ -88,7 +88,7 @@ bool BufferFillingWorkerFacade::isOpen() const {
 
 bool BufferFillingWorkerFacade::fillBuffer(int frame_index, Buffer* buffer) {
     if (!worker_base_uptr_) {
-        LOG_ERROR("[Worker] ERROR: Worker not initialized");
+        LOG4CPLUS_ERROR(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Worker.Facade")), "[Worker] ERROR: Worker not initialized");
         return false;
     }
     return worker_base_uptr_->fillBuffer(frame_index, buffer);
@@ -98,7 +98,7 @@ bool BufferFillingWorkerFacade::fillBuffer(int frame_index, Buffer* buffer) {
 
 bool BufferFillingWorkerFacade::seek(int frame_index) {
     if (!worker_base_uptr_) {
-        LOG_ERROR("[Worker] ERROR: Worker not initialized");
+        LOG4CPLUS_ERROR(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Worker.Facade")), "[Worker] ERROR: Worker not initialized");
         return false;
     }
     return worker_base_uptr_->seek(frame_index);
@@ -106,7 +106,7 @@ bool BufferFillingWorkerFacade::seek(int frame_index) {
 
 bool BufferFillingWorkerFacade::seekToBegin() {
     if (!worker_base_uptr_) {
-        LOG_ERROR("[Worker] ERROR: Worker not initialized");
+        LOG4CPLUS_ERROR(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Worker.Facade")), "[Worker] ERROR: Worker not initialized");
         return false;
     }
     return worker_base_uptr_->seekToBegin();
@@ -114,7 +114,7 @@ bool BufferFillingWorkerFacade::seekToBegin() {
 
 bool BufferFillingWorkerFacade::seekToEnd() {
     if (!worker_base_uptr_) {
-        LOG_ERROR("[Worker] ERROR: Worker not initialized");
+        LOG4CPLUS_ERROR(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Worker.Facade")), "[Worker] ERROR: Worker not initialized");
         return false;
     }
     return worker_base_uptr_->seekToEnd();
@@ -122,7 +122,7 @@ bool BufferFillingWorkerFacade::seekToEnd() {
 
 bool BufferFillingWorkerFacade::skip(int frame_count) {
     if (!worker_base_uptr_) {
-        LOG_ERROR("[Worker] ERROR: Worker not initialized");
+        LOG4CPLUS_ERROR(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Worker.Facade")), "[Worker] ERROR: Worker not initialized");
         return false;
     }
     return worker_base_uptr_->skip(frame_count);

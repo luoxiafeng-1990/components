@@ -25,6 +25,7 @@ extern "C" {
 // 构造函数（v2.2新增，v2.9支持数据源抽象）
 FfmpegDecodeVideoFileWorker::FfmpegDecodeVideoFileWorker(const WorkerConfig& config)
     : WorkerBase(BufferAllocatorFactory::AllocatorType::AVFRAME, config)
+    , logger_(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Worker.VideoFile")))
     , packet_source_(nullptr)  // 将在下面根据配置创建
     , codec_ctx_ptr_(nullptr)
     // ⚠️ 注意：video_stream_index_ 已移除，视频流索引从数据源获取
@@ -42,18 +43,28 @@ FfmpegDecodeVideoFileWorker::FfmpegDecodeVideoFileWorker(const WorkerConfig& con
     // ⚠️ 注意：file_path_ 已移除，文件路径由数据源类管理
     
     // ⭐ v2.9新增：根据配置创建数据源
+    // ⭐ v2.19修复：支持共享数据源模式（与 FfmpegDecodeRtspWorker 保持一致）
     if (config.decoder.datasource_buffer_mode) {
         // Buffer 数据源模式：从 BufferPacketSource 获取 packet
-        if (config.decoder.codec_params) {
-            packet_source_ = std::make_unique<BufferPacketSource>(config.decoder.codec_params);
-            LOG_DEBUG("[FfmpegDecodeVideoFileWorker] Created BufferPacketSource (v2.13: 需要调用 setSourceBufferPool 关联源 Pool)");
+        
+        // ⭐ v2.19 新增：检查是否使用共享实例（MultiWorker 共享模式）
+        if (config.decoder.shared_packet_source) {
+            // ✅ 共享模式：使用 config 中的共享实例
+            packet_source_ = config.decoder.shared_packet_source;
+            LOG4CPLUS_INFO(logger_, "⭐ v2.19 使用共享 PacketSource（MultiWorker 共享模式）");
         } else {
-            LOG_WARN("[FfmpegDecodeVideoFileWorker] datasource_buffer_mode=true but codec_params is nullptr");
+            // ✅ 普通模式：创建独立的 BufferPacketSource 实例（ONE_TO_ONE）
+            if (config.decoder.codec_params) {
+                packet_source_ = std::make_shared<BufferPacketSource>(config.decoder.codec_params);
+                LOG4CPLUS_DEBUG(logger_, "Created BufferPacketSource (v2.20: 需要调用 setSourceBufferPool 关联源 Pool)");
+            } else {
+                LOG4CPLUS_WARN(logger_, "datasource_buffer_mode=true but codec_params is nullptr");
+            }
         }
     } else {
         // 文件模式：从文件读取 packet
-        packet_source_ = std::make_unique<FilePacketSource>(config.data_source.path);
-        LOG_DEBUG_FMT("[FfmpegDecodeVideoFileWorker] Created FilePacketSource for '%s'", config.data_source.path.c_str());
+        packet_source_ = std::make_shared<FilePacketSource>(config.data_source.path);
+        LOG4CPLUS_DEBUG_FMT(logger_, "Created FilePacketSource for '%s'", config.data_source.path.c_str());
     }
 }
 
@@ -63,19 +74,19 @@ bool FfmpegDecodeVideoFileWorker::setSourceBufferPool(std::weak_ptr<BufferPool> 
     // 检查是否是 BufferPacketSource
     auto* buffer_source = dynamic_cast<BufferPacketSource*>(packet_source_.get());
     if (!buffer_source) {
-        LOG_WARN("[FfmpegDecodeVideoFileWorker] setSourceBufferPool 失败：不是 Buffer 模式");
+        LOG4CPLUS_WARN(logger_, "setSourceBufferPool 失败：不是 Buffer 模式");
         return false;
     }
     
     // 设置源 BufferPool
     buffer_source->setSourceBufferPool(pool_weak);
-    LOG_DEBUG("[FfmpegDecodeVideoFileWorker] ✅ 已设置源 BufferPool（v2.13 Pool 模式）");
+    LOG4CPLUS_DEBUG(logger_, "✅ 已设置源 BufferPool（v2.13 Pool 模式）");
     
     return true;
 }
 
 FfmpegDecodeVideoFileWorker::~FfmpegDecodeVideoFileWorker() {
-    LOG_DEBUG("[FfmpegDecodeVideoFileWorker] 析构函数开始");
+    LOG4CPLUS_DEBUG(logger_, "析构函数开始");
     
     // ⭐ 关键修改：正确的清理顺序
     //
@@ -97,22 +108,22 @@ FfmpegDecodeVideoFileWorker::~FfmpegDecodeVideoFileWorker() {
         }
     }
     cached_frames_.clear();
-    LOG_DEBUG_FMT("[FfmpegDecodeVideoFileWorker] 清理了 %zu 个缓存帧", cached_frames_.size());
+    LOG4CPLUS_DEBUG_FMT(logger_, "清理了 %zu 个缓存帧", cached_frames_.size());
     
     // 步骤2：先清理 BufferPool 和 AVFrame
     if (!buffer_pool_type_map_.empty()) {
-        LOG_DEBUG("[FfmpegDecodeVideoFileWorker] 手动清理 BufferPool 和 AVFrame...");
+        LOG4CPLUS_DEBUG(logger_, "手动清理 BufferPool 和 AVFrame...");
         allocator_facade_.destroyPool();  // 释放所有 Pool 中的 Buffer 和 AVFrame
         clearAllBufferPools();
     }
     
     // 步骤3：再关闭解码器和数据源（此时 AVFrame 已全部释放）
     if (packet_source_ && packet_source_->isOpen()) {
-        LOG_DEBUG("[FfmpegDecodeVideoFileWorker] 关闭解码器和数据源...");
+        LOG4CPLUS_DEBUG(logger_, "关闭解码器和数据源...");
         close();  // 关闭解码器和数据源，不再清理 Pool（已在上面清理）
     }
     
-    LOG_DEBUG("[FfmpegDecodeVideoFileWorker] 析构函数体结束");
+    LOG4CPLUS_DEBUG(logger_, "析构函数体结束");
     
     // ⭐ 函数体执行完毕后，成员变量自动析构
     // ⭐ 但由于 Pool 已经手动清理，allocator_facade_.destroyPool() 会因为幂等性直接返回
@@ -179,10 +190,10 @@ bool FfmpegDecodeVideoFileWorker::open(const char* path) {
     if (output_width_ == 0 || output_height_ == 0) {
         output_width_ = getOriginalWidth();
         output_height_ = getOriginalHeight();
-        LOG_DEBUG_FMT("[Worker] Output resolution not set in config, using original resolution: %dx%d", 
+        LOG4CPLUS_DEBUG_FMT(logger_, "[Worker] Output resolution not set in config, using original resolution: %dx%d", 
                       output_width_, output_height_);
     } else {
-        LOG_DEBUG_FMT("[Worker] Output resolution from config: %dx%d", output_width_, output_height_);
+        LOG4CPLUS_DEBUG_FMT(logger_, "[Worker] Output resolution from config: %dx%d", output_width_, output_height_);
     }
     
     // 🎯 Worker职责：在open()时自动创建BufferPool（通过调用Allocator）
@@ -232,11 +243,11 @@ bool FfmpegDecodeVideoFileWorker::open(const char* path) {
     current_frame_index_ = 0;
     decoded_frames_ = 0;
     
-    LOG_DEBUG_FMT("[Worker] FfmpegDecodeVideoFileWorker: Opened '%s'", path);
-    LOG_DEBUG_FMT("[Worker]    Resolution: %dx%d → %dx%d", getOriginalWidth(), getOriginalHeight(), output_width_, output_height_);
-    LOG_DEBUG_FMT("[Worker]    Codec: %s", codec_ctx_ptr_->codec->name);
-    LOG_DEBUG_FMT("[Worker]    Total frames (estimated): %d", packet_source_ ? packet_source_->getTotalFrames() : -1);
-    LOG_DEBUG_FMT("[Worker]    BufferPool: '%s' (ID: %lu, %d buffers, %zu bytes each)", 
+    LOG4CPLUS_DEBUG_FMT(logger_, "[Worker] FfmpegDecodeVideoFileWorker: Opened '%s'", path);
+    LOG4CPLUS_DEBUG_FMT(logger_, "[Worker]    Resolution: %dx%d → %dx%d", getOriginalWidth(), getOriginalHeight(), output_width_, output_height_);
+    LOG4CPLUS_DEBUG_FMT(logger_, "[Worker]    Codec: %s", codec_ctx_ptr_->codec->name);
+    LOG4CPLUS_DEBUG_FMT(logger_, "[Worker]    Total frames (estimated): %d", packet_source_ ? packet_source_->getTotalFrames() : -1);
+    LOG4CPLUS_DEBUG_FMT(logger_, "[Worker]    BufferPool: '%s' (ID: %lu, %d buffers, %zu bytes each)", 
            actual_pool_name.c_str(), pool_id, worker_config_.data_source.buffer_count, frame_size);
     
     return true;
@@ -322,20 +333,20 @@ bool FfmpegDecodeVideoFileWorker::initializeDecoder(const AVCodecParameters* cod
         // ⭐ 用户指定了解码器名称（如 "h264_taco"）
         codec = avcodec_find_decoder_by_name(decoder_name_.c_str());
         if (!codec) {
-            LOG_WARN_FMT("[Worker] ⚠️ Warning: Specified decoder '%s' not found", decoder_name_.c_str());
+            LOG4CPLUS_WARN_FMT(logger_, "[Worker] ⚠️ Warning: Specified decoder '%s' not found", decoder_name_.c_str());
         } else {
-            LOG_DEBUG_FMT("[Worker] Using specified decoder: %s", decoder_name_.c_str());
+            LOG4CPLUS_DEBUG_FMT(logger_, "[Worker] Using specified decoder: %s", decoder_name_.c_str());
             
             // ⭐ v2.18 配置冲突检测：用户要求软件解码，但指定了硬件解码器
             if (!use_hardware_decoder_ && isHardwareDecoder(codec)) {
-                LOG_WARN("╔═══════════════════════════════════════════════════════════════╗");
-                LOG_WARN("║  ⚠️  Configuration Conflict Detected                        ║");
-                LOG_WARN("╚═══════════════════════════════════════════════════════════════╝");
-                LOG_WARN_FMT("  Requested: Software decoding (use_hardware_decoder_=false)");
-                LOG_WARN_FMT("  But specified decoder '%s' is a hardware decoder", decoder_name_.c_str());
-                LOG_WARN("");
-                LOG_WARN("  💡 Resolution: Ignoring decoder name, searching for software decoder...");
-                LOG_WARN("╚═══════════════════════════════════════════════════════════════╝");
+                LOG4CPLUS_WARN(logger_, "╔═══════════════════════════════════════════════════════════════╗");
+                LOG4CPLUS_WARN(logger_, "║  ⚠️  Configuration Conflict Detected                        ║");
+                LOG4CPLUS_WARN(logger_, "╚═══════════════════════════════════════════════════════════════╝");
+                LOG4CPLUS_WARN_FMT(logger_, "  Requested: Software decoding (use_hardware_decoder_=false)");
+                LOG4CPLUS_WARN_FMT(logger_, "  But specified decoder '%s' is a hardware decoder", decoder_name_.c_str());
+                LOG4CPLUS_WARN(logger_, "");
+                LOG4CPLUS_WARN(logger_, "  💡 Resolution: Ignoring decoder name, searching for software decoder...");
+                LOG4CPLUS_WARN(logger_, "╚═══════════════════════════════════════════════════════════════╝");
                 
                 // ✅ 重置 codec，让后续逻辑自动查找软件解码器（满足用户核心需求）
                 codec = nullptr;
@@ -346,13 +357,13 @@ bool FfmpegDecodeVideoFileWorker::initializeDecoder(const AVCodecParameters* cod
     if (!codec) {
         if (!use_hardware_decoder_) {
             // ⭐ v2.18 用户要求软件解码：查找纯软件解码器
-            LOG_INFO("[Worker] Searching for pure software decoder...");
+            LOG4CPLUS_INFO(logger_, "[Worker] Searching for pure software decoder...");
             codec = findPureSoftwareDecoder(codecpar->codec_id);
             if (!codec) {
                 setError("No pure software decoder available for this codec!");
                 return false;
             }
-            LOG_INFO_FMT("[Worker] ✅ Using software decoder: %s", codec->name);
+            LOG4CPLUS_INFO_FMT(logger_, "[Worker] ✅ Using software decoder: %s", codec->name);
         } else {
             // 硬件解码或自动选择：使用 FFmpeg 默认行为
             codec = avcodec_find_decoder(codecpar->codec_id);
@@ -363,9 +374,9 @@ bool FfmpegDecodeVideoFileWorker::initializeDecoder(const AVCodecParameters* cod
             
             // 日志：显示选择的解码器类型
             if (isHardwareDecoder(codec)) {
-                LOG_INFO_FMT("[Worker] Auto-selected hardware decoder: %s", codec->name);
+                LOG4CPLUS_INFO_FMT(logger_, "[Worker] Auto-selected hardware decoder: %s", codec->name);
             } else {
-                LOG_INFO_FMT("[Worker] Auto-selected software decoder: %s", codec->name);
+                LOG4CPLUS_INFO_FMT(logger_, "[Worker] Auto-selected software decoder: %s", codec->name);
             }
         }
     }
@@ -390,7 +401,7 @@ bool FfmpegDecodeVideoFileWorker::initializeDecoder(const AVCodecParameters* cod
     if (decoder_name_ == "h264_taco") {
         if (!configureSpecialDecoder()) {
             // 🔧 修复：配置失败是致命错误，必须返回
-            LOG_ERROR_FMT("[Worker] ERROR: Failed to configure special decoder options");
+            LOG4CPLUS_ERROR_FMT(logger_, "[Worker] ERROR: Failed to configure special decoder options");
             avcodec_free_context(&codec_ctx_ptr_);
             codec_ctx_ptr_ = nullptr;  // 🔧 置空防止 double free
             return false;
@@ -412,32 +423,32 @@ bool FfmpegDecodeVideoFileWorker::initializeDecoder(const AVCodecParameters* cod
 bool FfmpegDecodeVideoFileWorker::configureSpecialDecoder() {
     // 配置 h264_taco 解码器（从 worker_config_ 读取配置）
     if (!codec_ctx_ptr_->priv_data) {
-        LOG_WARN_FMT("[Worker]  Warning: codec_ctx->priv_data is NULL, cannot set options");
+        LOG4CPLUS_WARN_FMT(logger_, "[Worker]  Warning: codec_ctx->priv_data is NULL, cannot set options");
         return false;
     }
     
     // 🎯 从 worker_config_ 获取 taco 配置（非 const，可能需要修改）
     auto& taco = worker_config_.decoder.taco;
     
-    LOG_DEBUG_FMT("[Worker] Configuring h264_taco decoder options from config...");
+    LOG4CPLUS_DEBUG_FMT(logger_, "[Worker] Configuring h264_taco decoder options from config...");
     
     int ret;
     
     // 禁用重排序（从 config 读取）
     ret = av_opt_set_int(codec_ctx_ptr_->priv_data, "reorder_disable", 
                          taco.reorder_disable ? 1 : 0, 0);
-    LOG_DEBUG_FMT("[Worker]    reorder_disable=%d: %s", taco.reorder_disable ? 1 : 0, 
+    LOG4CPLUS_DEBUG_FMT(logger_, "[Worker]    reorder_disable=%d: %s", taco.reorder_disable ? 1 : 0, 
            ret < 0 ? "FAILED" : "OK");
     
     // 启用通道（从 config 读取）
     ret = av_opt_set_int(codec_ctx_ptr_->priv_data, "ch0_enable", 
                          taco.ch0_enable ? 1 : 0, 0);
-    LOG_DEBUG_FMT("[Worker]    ch0_enable=%d: %s", taco.ch0_enable ? 1 : 0, 
+    LOG4CPLUS_DEBUG_FMT(logger_, "[Worker]    ch0_enable=%d: %s", taco.ch0_enable ? 1 : 0, 
            ret < 0 ? "FAILED" : "OK");
     
     ret = av_opt_set_int(codec_ctx_ptr_->priv_data, "ch1_enable", 
                          taco.ch1_enable ? 1 : 0, 0);
-    LOG_DEBUG_FMT("[Worker]    ch1_enable=%d: %s", taco.ch1_enable ? 1 : 0, 
+    LOG4CPLUS_DEBUG_FMT(logger_, "[Worker]    ch1_enable=%d: %s", taco.ch1_enable ? 1 : 0, 
            ret < 0 ? "FAILED" : "OK");
     
     // ========== 通道0配置 ==========
@@ -448,7 +459,7 @@ bool FfmpegDecodeVideoFileWorker::configureSpecialDecoder() {
         av_opt_set_int(codec_ctx_ptr_->priv_data, "ch0_crop_y", taco.ch0_crop_y, 0);
         av_opt_set_int(codec_ctx_ptr_->priv_data, "ch0_crop_width", taco.ch0_crop_width, 0);
         av_opt_set_int(codec_ctx_ptr_->priv_data, "ch0_crop_height", taco.ch0_crop_height, 0);
-        LOG_DEBUG_FMT("[Worker]    ch0_crop: (%d, %d, %d, %d)", 
+        LOG4CPLUS_DEBUG_FMT(logger_, "[Worker]    ch0_crop: (%d, %d, %d, %d)", 
                taco.ch0_crop_x, taco.ch0_crop_y, 
                taco.ch0_crop_width, taco.ch0_crop_height);
     }
@@ -457,7 +468,7 @@ bool FfmpegDecodeVideoFileWorker::configureSpecialDecoder() {
     if (taco.ch0_scale_width > 0 && taco.ch0_scale_height > 0) {
         av_opt_set_int(codec_ctx_ptr_->priv_data, "ch0_scale_width", taco.ch0_scale_width, 0);
         av_opt_set_int(codec_ctx_ptr_->priv_data, "ch0_scale_height", taco.ch0_scale_height, 0);
-        LOG_DEBUG_FMT("[Worker]    ch0_scale: (%d, %d)", taco.ch0_scale_width, taco.ch0_scale_height);
+        LOG4CPLUS_DEBUG_FMT(logger_, "[Worker]    ch0_scale: (%d, %d)", taco.ch0_scale_width, taco.ch0_scale_height);
     }
     
     // ========== 通道1配置 ==========
@@ -468,7 +479,7 @@ bool FfmpegDecodeVideoFileWorker::configureSpecialDecoder() {
         av_opt_set_int(codec_ctx_ptr_->priv_data, "ch1_crop_y", taco.ch1_crop_y, 0);
         av_opt_set_int(codec_ctx_ptr_->priv_data, "ch1_crop_width", taco.ch1_crop_width, 0);
         av_opt_set_int(codec_ctx_ptr_->priv_data, "ch1_crop_height", taco.ch1_crop_height, 0);
-        LOG_DEBUG_FMT("[Worker]    ch1_crop: (%d, %d, %d, %d)", 
+        LOG4CPLUS_DEBUG_FMT(logger_, "[Worker]    ch1_crop: (%d, %d, %d, %d)", 
                taco.ch1_crop_x, taco.ch1_crop_y, 
                taco.ch1_crop_width, taco.ch1_crop_height);
     }
@@ -480,14 +491,14 @@ bool FfmpegDecodeVideoFileWorker::configureSpecialDecoder() {
         int orig_width = getOriginalWidth();
         int orig_height = getOriginalHeight();
         if (taco.ch1_scale_width > orig_width || taco.ch1_scale_height > orig_height) {
-            LOG_WARN("═══════════════════════════════════════════════════════════════");
-            LOG_WARN("  ⚠️  TACO 硬件缩放限制：只能缩小，不能放大");
-            LOG_WARN("═══════════════════════════════════════════════════════════════");
-            LOG_WARN_FMT("  原始分辨率: %dx%d", orig_width, orig_height);
-            LOG_WARN_FMT("  请求分辨率: %dx%d (超出限制)", 
+            LOG4CPLUS_WARN(logger_, "═══════════════════════════════════════════════════════════════");
+            LOG4CPLUS_WARN(logger_, "  ⚠️  TACO 硬件缩放限制：只能缩小，不能放大");
+            LOG4CPLUS_WARN(logger_, "═══════════════════════════════════════════════════════════════");
+            LOG4CPLUS_WARN_FMT(logger_, "  原始分辨率: %dx%d", orig_width, orig_height);
+            LOG4CPLUS_WARN_FMT(logger_, "  请求分辨率: %dx%d (超出限制)", 
                          taco.ch1_scale_width, taco.ch1_scale_height);
-            LOG_WARN_FMT("  自动回退：使用原始分辨率 %dx%d", orig_width, orig_height);
-            LOG_WARN("═══════════════════════════════════════════════════════════════");
+            LOG4CPLUS_WARN_FMT(logger_, "  自动回退：使用原始分辨率 %dx%d", orig_width, orig_height);
+            LOG4CPLUS_WARN(logger_, "═══════════════════════════════════════════════════════════════");
             
             // 清除缩放配置，使用原始分辨率
             taco.ch1_scale_width = 0;
@@ -496,21 +507,21 @@ bool FfmpegDecodeVideoFileWorker::configureSpecialDecoder() {
             // 配置有效，设置缩放参数
             av_opt_set_int(codec_ctx_ptr_->priv_data, "ch1_scale_width", taco.ch1_scale_width, 0);
             av_opt_set_int(codec_ctx_ptr_->priv_data, "ch1_scale_height", taco.ch1_scale_height, 0);
-            LOG_DEBUG_FMT("[Worker]    ch1_scale: (%d, %d)", taco.ch1_scale_width, taco.ch1_scale_height);
+            LOG4CPLUS_DEBUG_FMT(logger_, "[Worker]    ch1_scale: (%d, %d)", taco.ch1_scale_width, taco.ch1_scale_height);
         }
     }
     
     // 配置通道1 RGB（从 config 读取）
     ret = av_opt_set_int(codec_ctx_ptr_->priv_data, "ch1_rgb", 
                          taco.ch1_rgb ? 1 : 0, 0);
-    LOG_DEBUG_FMT("[Worker]    ch1_rgb=%d: %s", taco.ch1_rgb ? 1 : 0, 
+    LOG4CPLUS_DEBUG_FMT(logger_, "[Worker]    ch1_rgb=%d: %s", taco.ch1_rgb ? 1 : 0, 
            ret < 0 ? "FAILED" : "OK");
     
     // ⭐ v2.17: 设置 RGB 格式（使用整型枚举）
     if (taco.ch1_rgb && taco.ch1_rgb_format > 0) {
         ret = av_opt_set_int(codec_ctx_ptr_->priv_data, "ch1_rgb_format", 
                              taco.ch1_rgb_format, 0);
-        LOG_DEBUG_FMT("[Worker]    ch1_rgb_format=%d: %s", taco.ch1_rgb_format, 
+        LOG4CPLUS_DEBUG_FMT(logger_, "[Worker]    ch1_rgb_format=%d: %s", taco.ch1_rgb_format, 
                ret < 0 ? "FAILED" : "OK");
     }
     
@@ -518,7 +529,7 @@ bool FfmpegDecodeVideoFileWorker::configureSpecialDecoder() {
     if (taco.ch1_rgb && taco.ch1_rgb_std > 0) {
         ret = av_opt_set_int(codec_ctx_ptr_->priv_data, "ch1_rgb_std", 
                              taco.ch1_rgb_std, 0);
-        LOG_DEBUG_FMT("[Worker]    ch1_rgb_std=%d: %s", taco.ch1_rgb_std, 
+        LOG4CPLUS_DEBUG_FMT(logger_, "[Worker]    ch1_rgb_std=%d: %s", taco.ch1_rgb_std, 
                ret < 0 ? "FAILED" : "OK");
     }
     
@@ -562,7 +573,7 @@ bool FfmpegDecodeVideoFileWorker::seek(int frame_index) {
     current_frame_index_ = frame_index;
     // ⚠️ 注意：EOF 状态由数据源的 seek() 自动重置，不需要手动重置
     
-    LOG_DEBUG_FMT("[Worker] Successfully seeked to frame %d", frame_index);
+    LOG4CPLUS_DEBUG_FMT(logger_, "[Worker] Successfully seeked to frame %d", frame_index);
     return true;
 }
 
@@ -655,7 +666,7 @@ double FfmpegDecodeVideoFileWorker::getBytesPerPixel() const {
     } else {
         // YUV 模式：格式由解码器自动决定，无配置字段
         // 默认假设 YUV420（最常见，1.5 字节/像素）
-        LOG_WARN("[Worker] getBytesPerPixel() fallback: assuming YUV420 (1.5 bytes/pixel)");
+        LOG4CPLUS_WARN(logger_, "[Worker] getBytesPerPixel() fallback: assuming YUV420 (1.5 bytes/pixel)");
         return 1.5;
     }
 }
@@ -708,9 +719,8 @@ bool FfmpegDecodeVideoFileWorker::fillBufferMetadataFromFrame(AVFrame* frame_ptr
     // ⭐ 硬件解码器：提取物理内存地址
     if (!decoder_name_.empty() && use_hardware_decoder_) {
         if (!extractHardwareAddressFromMetadata(frame_ptr, buffer)) {
-            LOG_ERROR_FMT("[Worker] Hardware decoder '%s': Failed to extract physical address",
+            LOG4CPLUS_ERROR_FMT(logger_, "[Worker] Hardware decoder '%s': Failed to extract physical address",
                          decoder_name_.c_str());
-            return false;
         }
     }
     
@@ -729,7 +739,7 @@ bool FfmpegDecodeVideoFileWorker::fillBufferMetadataFromFrame(AVFrame* frame_ptr
         buffer->setSize(actual_frame_size);
         LOG_TRACE_FMT("[Worker] Updated buffer size to actual frame size: %d bytes", actual_frame_size);
     } else {
-        LOG_ERROR_FMT("[Worker] Failed to get frame buffer size: %d", actual_frame_size);
+        LOG4CPLUS_ERROR_FMT(logger_, "[Worker] Failed to get frame buffer size: %d", actual_frame_size);
     }
     
     // ⭐ 设置图像元数据（格式、宽高、linesize 等）
@@ -761,7 +771,7 @@ bool FfmpegDecodeVideoFileWorker::readAndSendPacket(AVPacket* packet_ptr) {
         
         if (read_ret < 0) {
             if (read_ret == AVERROR_EOF) {
-                LOG_DEBUG("🔄 EOF reached");
+                LOG4CPLUS_DEBUG(logger_, "🔄 EOF reached");
                 // 🔧 修复：Worker 不应该决定是否循环，只返回 false
                 // EOF 状态由数据源管理（通过 isEof() 查询）
                 // 循环逻辑由 ProductionLine 根据 loop_ 变量控制
@@ -771,14 +781,14 @@ bool FfmpegDecodeVideoFileWorker::readAndSendPacket(AVPacket* packet_ptr) {
                 // 🔧 修复：遇到损坏帧时，在内部循环跳过，继续读取下一个 packet
                 corrupted_retries++;
                 if (corrupted_retries <= MAX_CORRUPTED_RETRIES) {
-                    LOG_WARN_FMT("[Worker] WARNING: Corrupted packet detected (attempt %d/%d), skipping...\n", 
+                    LOG4CPLUS_WARN_FMT(logger_, "[Worker] WARNING: Corrupted packet detected (attempt %d/%d), skipping...\n", 
                            corrupted_retries, MAX_CORRUPTED_RETRIES);
                     av_packet_unref(packet_ptr);
                     // 继续循环，尝试读取下一个 packet
                     continue;
                 } else {
                     // 连续多次都是损坏帧，可能文件确实损坏严重，返回失败
-                    LOG_ERROR_FMT("[Worker] ERROR: Too many corrupted packets (%d), giving up\n", corrupted_retries);
+                    LOG4CPLUS_ERROR_FMT(logger_, "[Worker] ERROR: Too many corrupted packets (%d), giving up\n", corrupted_retries);
                     av_packet_unref(packet_ptr);
                     return false;
                 }
@@ -786,7 +796,7 @@ bool FfmpegDecodeVideoFileWorker::readAndSendPacket(AVPacket* packet_ptr) {
                 // 其他错误（非 EOF，非损坏帧）：记录错误并返回
                 char err_buf[AV_ERROR_MAX_STRING_SIZE];
                 av_strerror(read_ret, err_buf, sizeof(err_buf));
-                LOG_ERROR_FMT("[Worker] ERROR: readPacket failed: %d (%s)\n", read_ret, err_buf);
+                LOG4CPLUS_ERROR_FMT(logger_, "[Worker] ERROR: readPacket failed: %d (%s)\n", read_ret, err_buf);
                 av_packet_unref(packet_ptr);
                 return false;
             }
@@ -813,7 +823,7 @@ bool FfmpegDecodeVideoFileWorker::readAndSendPacket(AVPacket* packet_ptr) {
     if (ret < 0) {
         char err_buf[AV_ERROR_MAX_STRING_SIZE];
         av_strerror(ret, err_buf, sizeof(err_buf));
-        LOG_ERROR_FMT("[Worker] ERROR: avcodec_send_packet failed: %d (%s)", ret, err_buf);
+        LOG4CPLUS_ERROR_FMT(logger_, "[Worker] ERROR: avcodec_send_packet failed: %d (%s)", ret, err_buf);
         return false;
     }
     
@@ -823,12 +833,12 @@ bool FfmpegDecodeVideoFileWorker::readAndSendPacket(AVPacket* packet_ptr) {
 bool FfmpegDecodeVideoFileWorker::fillBuffer(int frame_index, Buffer* buffer) {
     // ========== 参数校验 ==========
     if (!buffer) {
-        LOG_ERROR_FMT("[Worker] ERROR: buffer is nullptr");
+        LOG4CPLUS_ERROR_FMT(logger_, "[Worker] ERROR: buffer is nullptr");
         return false;
     }
     
     if (!packet_source_->isOpen()) {
-        LOG_ERROR_FMT("[Worker] ERROR: Worker is not open");
+        LOG4CPLUS_ERROR_FMT(logger_, "[Worker] ERROR: Worker is not open");
         return false;
     }
     
@@ -837,18 +847,18 @@ bool FfmpegDecodeVideoFileWorker::fillBuffer(int frame_index, Buffer* buffer) {
     // 从 Buffer 获取关联的 AVFrame* 和 AVPacket*
     AVFrame* frame_ptr = buffer->getAVFrame();
     if (!frame_ptr) {
-        LOG_ERROR_FMT("[Worker] ERROR: buffer->getAVFrame() is nullptr");
+        LOG4CPLUS_ERROR_FMT(logger_, "[Worker] ERROR: buffer->getAVFrame() is nullptr");
         return false;
     }
     
     AVPacket* packet_ptr = buffer->getAVPacket();
     if (!packet_ptr) {
-        LOG_ERROR_FMT("[Worker] ERROR: buffer->getAVPacket() is nullptr");
+        LOG4CPLUS_ERROR_FMT(logger_, "[Worker] ERROR: buffer->getAVPacket() is nullptr");
         return false;
     }
     
     if (!packet_source_) {
-        LOG_ERROR_FMT("[Worker] ERROR: packet_source_ is nullptr");
+        LOG4CPLUS_ERROR_FMT(logger_, "[Worker] ERROR: packet_source_ is nullptr");
         return false;
     }
     
@@ -912,9 +922,9 @@ void FfmpegDecodeVideoFileWorker::setError(const std::string& error, int ffmpeg_
     if (ffmpeg_error != 0) {
         char err_buf[AV_ERROR_MAX_STRING_SIZE];
         av_strerror(ffmpeg_error, err_buf, sizeof(err_buf));
-        LOG_ERROR_FMT("[Worker] FfmpegDecodeVideoFileWorker Error: %s (FFmpeg: %s)\n", error.c_str(), err_buf);
+        LOG4CPLUS_ERROR_FMT(logger_, "[Worker] FfmpegDecodeVideoFileWorker Error: %s (FFmpeg: %s)\n", error.c_str(), err_buf);
     } else {
-        LOG_ERROR_FMT("[Worker] FfmpegDecodeVideoFileWorker Error: %s", error.c_str());
+        LOG4CPLUS_ERROR_FMT(logger_, "[Worker] FfmpegDecodeVideoFileWorker Error: %s", error.c_str());
     }
 }
 
@@ -974,16 +984,16 @@ int FfmpegDecodeVideoFileWorker::getOriginalHeight() const {
 }
 
 void FfmpegDecodeVideoFileWorker::printStats() const {
-    LOG_INFO("\n[Worker] 📊 FfmpegDecodeVideoFileWorker Statistics:");
+    LOG4CPLUS_INFO(logger_, "\n[Worker] 📊 FfmpegDecodeVideoFileWorker Statistics:");
     // ⭐ v2.9修改：从数据源获取文件路径
     std::string file_path = packet_source_ ? packet_source_->getFilePath() : std::string();
-    LOG_INFO_FMT("[Worker]    File: %s", file_path.empty() ? "(Buffer Mode)" : file_path.c_str());
-    LOG_INFO_FMT("[Worker]    Codec: %s", getCodecName());
-    LOG_INFO_FMT("[Worker]    Resolution: %dx%d → %dx%d", getOriginalWidth(), getOriginalHeight(), output_width_, output_height_);
-    LOG_INFO_FMT("[Worker]    Total frames: %d", packet_source_ ? packet_source_->getTotalFrames() : -1);
-    LOG_INFO_FMT("[Worker]    Current frame: %d", current_frame_index_);
-    LOG_INFO_FMT("[Worker]    Decoded frames: %d", decoded_frames_.load());
-    LOG_INFO_FMT("[Worker]    EOF: %s", packet_source_ && packet_source_->isEof() ? "YES" : "NO");
+    LOG4CPLUS_INFO_FMT(logger_, "[Worker]    File: %s", file_path.empty() ? "(Buffer Mode)" : file_path.c_str());
+    LOG4CPLUS_INFO_FMT(logger_, "[Worker]    Codec: %s", getCodecName());
+    LOG4CPLUS_INFO_FMT(logger_, "[Worker]    Resolution: %dx%d → %dx%d", getOriginalWidth(), getOriginalHeight(), output_width_, output_height_);
+    LOG4CPLUS_INFO_FMT(logger_, "[Worker]    Total frames: %d", packet_source_ ? packet_source_->getTotalFrames() : -1);
+    LOG4CPLUS_INFO_FMT(logger_, "[Worker]    Current frame: %d", current_frame_index_);
+    LOG4CPLUS_INFO_FMT(logger_, "[Worker]    Decoded frames: %d", decoded_frames_.load());
+    LOG4CPLUS_INFO_FMT(logger_, "[Worker]    EOF: %s", packet_source_ && packet_source_->isEof() ? "YES" : "NO");
 }
 
 // ============================================================================
@@ -999,7 +1009,7 @@ bool FfmpegDecodeVideoFileWorker::extractHardwareAddressFromMetadata(AVFrame* fr
     // 3. 提取失败返回 false，调用者会报错并终止解码
     
     if (!frame || !buffer) {
-        LOG_ERROR("[Worker] extractHardwareAddressFromMetadata: Invalid parameters");
+        LOG4CPLUS_ERROR(logger_, "[Worker] extractHardwareAddressFromMetadata: Invalid parameters");
         return false;
     }
     
@@ -1020,14 +1030,14 @@ bool FfmpegDecodeVideoFileWorker::extractHardwareAddressFromMetadata(AVFrame* fr
                     return true;
                 } else {
                     // ❌ blk_id 有效，但转换失败
-                    LOG_ERROR_FMT("[Worker] TACO: Failed to convert blk_id=%u to physical address", blk_id);
+                    LOG4CPLUS_ERROR_FMT(logger_, "[Worker] TACO: Failed to convert blk_id=%u to physical address", blk_id);
                     return false;
                 }
             }
         }
         
         // ❌ TACO 解码器但没有 metadata（异常情况）
-        LOG_ERROR("[Worker] TACO: AVFrame->metadata is missing or no 'pool_blk_id' entry");
+        LOG4CPLUS_ERROR(logger_, "[Worker] TACO: AVFrame->metadata is missing or no 'pool_blk_id' entry");
         return false;
     }
     
@@ -1052,12 +1062,12 @@ bool FfmpegDecodeVideoFileWorker::extractHardwareAddressFromMetadata(AVFrame* fr
     // ⭐ v2.18 改进：软件解码器不需要物理地址
     if (decoder_name_.empty() || !use_hardware_decoder_) {
         // 软件解码器，不需要物理地址
-        LOG_DEBUG("[Worker] Software decoder: No hardware address needed");
+        LOG4CPLUS_DEBUG(logger_, "[Worker] Software decoder: No hardware address needed");
         return true;  // ✅ 软件解码器返回 true（不是错误）
     }
     
     // 未识别的硬件解码器
-    LOG_ERROR_FMT("[Worker] Unknown hardware decoder '%s', cannot extract physical address", 
+    LOG4CPLUS_ERROR_FMT(logger_, "[Worker] Unknown hardware decoder '%s', cannot extract physical address", 
                  decoder_name_.c_str());
     return false;
 }

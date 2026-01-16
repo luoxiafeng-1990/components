@@ -2,21 +2,47 @@
 #define WORKER_BASE_HPP
 
 #include "productionline/worker/IVideoFileNavigator.hpp"
+#include <log4cplus/logger.h>
+#include <log4cplus/loggingmacros.h>
 #include "productionline/worker/WorkerConfig.hpp"
+#include <log4cplus/logger.h>
+#include <log4cplus/loggingmacros.h>
 #include "buffer/bufferpool/Buffer.hpp"
+#include <log4cplus/logger.h>
+#include <log4cplus/loggingmacros.h>
 #include "buffer/BufferAllocatorFacade.hpp"
+#include <log4cplus/logger.h>
+#include <log4cplus/loggingmacros.h>
 #include "buffer/BufferAllocatorFactory.hpp"
+#include <log4cplus/logger.h>
+#include <log4cplus/loggingmacros.h>
 #include "buffer/bufferpool/BufferPool.hpp"
+#include <log4cplus/logger.h>
+#include <log4cplus/loggingmacros.h>
 #include <memory>
+#include <log4cplus/logger.h>
+#include <log4cplus/loggingmacros.h>
 #include <utility>  // for std::move
+#include <log4cplus/logger.h>
+#include <log4cplus/loggingmacros.h>
 #include <map>
+#include <log4cplus/logger.h>
+#include <log4cplus/loggingmacros.h>
 #include <vector>
+#include <log4cplus/logger.h>
+#include <log4cplus/loggingmacros.h>
 #include <optional>
+#include <log4cplus/logger.h>
+#include <log4cplus/loggingmacros.h>
 #include <string>
+#include <log4cplus/logger.h>
+#include <log4cplus/loggingmacros.h>
 
 // FFmpeg 头文件（用于编解码器类型检测）
 extern "C" {
 #include <libavcodec/avcodec.h>
+#include <log4cplus/logger.h>
+#include <log4cplus/loggingmacros.h>
 }
 
 /**
@@ -60,7 +86,7 @@ enum class BufferPoolType {
     // ========== 扩展保留 ==========
     CUSTOM_1,                  // 自定义类型 1
     CUSTOM_2,                  // 自定义类型 2
-    CUSTOM_3,                  // 自定义类型 3
+    CUSTOM_3                   // 自定义类型 3
 };
 
 /**
@@ -157,6 +183,7 @@ public:
     ) : allocator_facade_(allocator_type)  // 🎯 父类直接创建Allocator门面
       , buffer_pool_type_map_()  // v2.0: 初始化 BufferPool 类型映射表
       , worker_config_(config)  // 🎯 v2.2: 存储配置
+      , logger_(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Worker")))  // 🎯 初始化 logger
     {
     }
     
@@ -621,6 +648,9 @@ protected:
      * - 符合依赖注入原则
      */
     WorkerConfig worker_config_;
+    
+    // 日志器
+    log4cplus::Logger logger_;
 };
 
 #endif // WORKER_BASE_HPP

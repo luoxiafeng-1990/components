@@ -1,0 +1,17 @@
+# ============================================================
+# 最小化日志配置（快速开始）
+# ============================================================
+
+# 根 Logger
+log4cplus.rootLogger=INFO, CONSOLE
+
+# Console Appender
+log4cplus.appender.CONSOLE=log4cplus::ConsoleAppender
+log4cplus.appender.CONSOLE.layout=log4cplus::PatternLayout
+log4cplus.appender.CONSOLE.layout.ConversionPattern=[%D{%Y-%m-%d %H:%M:%S.%q}] [%c] [%-5p] %m%n
+
+# 各模块级别（按需调整）
+log4cplus.logger.components.Test=INFO
+log4cplus.logger.components.MultiWorker=DEBUG
+log4cplus.logger.components.Worker=DEBUG
+log4cplus.logger.components.Allocator=WARN

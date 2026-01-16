@@ -1,4 +1,6 @@
 #ifndef PERFORMANCE_MONITOR_HPP
+#include <log4cplus/logger.h>
+#include <log4cplus/loggingmacros.h>
 #define PERFORMANCE_MONITOR_HPP
 
 #include <stddef.h>
@@ -236,6 +238,9 @@ private:
      * 停止报告定时器（内部方法）
      */
     void stopReportTimer();
+    
+    // 日志器
+    log4cplus::Logger logger_;
 };
 
 #endif // PERFORMANCE_MONITOR_HPP

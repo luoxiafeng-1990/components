@@ -19,8 +19,9 @@ FfmpegPacketRecorderWorker::FfmpegPacketRecorderWorker()
     , packet_source_(nullptr)
     , is_open_(false)
     , packet_count_(0)
+    , logger_(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Worker.Recorder")))
 {
-    LOG_DEBUG("[Worker] FfmpegPacketRecorderWorker created (using AVFrameAllocator, v2.13 多数据源支持)");
+    LOG4CPLUS_DEBUG(logger_, "FfmpegPacketRecorderWorker created (using AVFrameAllocator, v2.13 多数据源支持)");
 }
 
 FfmpegPacketRecorderWorker::FfmpegPacketRecorderWorker(const WorkerConfig& config)
@@ -28,12 +29,13 @@ FfmpegPacketRecorderWorker::FfmpegPacketRecorderWorker(const WorkerConfig& confi
     , packet_source_(nullptr)
     , is_open_(false)
     , packet_count_(0)
+    , logger_(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Worker.Recorder")))
 {
-    LOG_DEBUG("[Worker] FfmpegPacketRecorderWorker created (with config, using AVFrameAllocator, v2.13 多数据源支持)");
+    LOG4CPLUS_DEBUG(logger_, "FfmpegPacketRecorderWorker created (with config, using AVFrameAllocator, v2.13 多数据源支持)");
 }
 
 FfmpegPacketRecorderWorker::~FfmpegPacketRecorderWorker() {
-    LOG_DEBUG("🧹 Destroying FfmpegPacketRecorderWorker...");
+    LOG4CPLUS_DEBUG(logger_, "🧹 Destroying FfmpegPacketRecorderWorker...");
     close();
 }
 
@@ -44,7 +46,7 @@ bool FfmpegPacketRecorderWorker::open() {
     
     if (!path || strlen(path) == 0) {
         setError("Data source path not configured in worker_config_.data_source.path");
-        LOG_ERROR("[Worker] ❌ Please configure data source path in WorkerConfig");
+        LOG4CPLUS_ERROR(logger_, "❌ Please configure data source path in WorkerConfig");
         return false;
     }
     
@@ -57,12 +59,12 @@ bool FfmpegPacketRecorderWorker::open(const char* path) {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
     
     if (packet_source_ && packet_source_->isOpen()) {
-        LOG_WARN("[Worker] ⚠️  Stream already open, closing previous stream");
+        LOG4CPLUS_WARN(logger_, "⚠️  Stream already open, closing previous stream");
         close();
     }
     
-    LOG_INFO("");
-    LOG_INFO_FMT("📡 Opening data source for recording: %s", path);
+    LOG4CPLUS_INFO(logger_, "");
+    LOG4CPLUS_INFO_FMT(logger_, "📡 Opening data source for recording: %s", path);
     
     // ============ v2.13：根据路径自动创建数据源 ============
     packet_source_ = createPacketSource(std::string(path));
@@ -124,10 +126,10 @@ bool FfmpegPacketRecorderWorker::open(const char* path) {
     is_open_ = true;
     packet_count_ = 0;
     
-    LOG_DEBUG("[Worker] ✅ Data source opened for recording (v2.13 多数据源支持)");
-    LOG_DEBUG_FMT("[Worker]    Codec: %s", avcodec_get_name(codecpar->codec_id));
-    LOG_DEBUG_FMT("[Worker]    Resolution: %dx%d", codecpar->width, codecpar->height);
-    LOG_DEBUG_FMT("[Worker]    BufferPool: '%s' (ID: %lu, %d buffers, %zu bytes each)", 
+    LOG4CPLUS_DEBUG(logger_, "✅ Data source opened for recording (v2.13 多数据源支持)");
+    LOG4CPLUS_DEBUG_FMT(logger_, "   Codec: %s", avcodec_get_name(codecpar->codec_id));
+    LOG4CPLUS_DEBUG_FMT(logger_, "   Resolution: %dx%d", codecpar->width, codecpar->height);
+    LOG4CPLUS_DEBUG_FMT(logger_, "   BufferPool: '%s' (ID: %lu, %d buffers, %zu bytes each)", 
            pool_name.c_str(), pool_id, worker_config_.data_source.buffer_count, max_packet_size);
     
     return true;
@@ -141,8 +143,8 @@ void FfmpegPacketRecorderWorker::close() {
     
     std::lock_guard<std::recursive_mutex> lock(mutex_);
     
-    LOG_INFO("");
-    LOG_INFO("🛑 Closing packet recording stream...");
+    LOG4CPLUS_INFO(logger_, "");
+    LOG4CPLUS_INFO(logger_, "🛑 Closing packet recording stream...");
     
     // 清理 BufferPool
     clearAllBufferPools();
@@ -155,8 +157,8 @@ void FfmpegPacketRecorderWorker::close() {
     
     is_open_ = false;
     
-    LOG_DEBUG("[Worker] ✅ Packet recording stream closed (v2.13 多数据源支持)");
-    LOG_INFO_FMT("   Recorded packets: %d", packet_count_.load());
+    LOG4CPLUS_DEBUG(logger_, "✅ Packet recording stream closed (v2.13 多数据源支持)");
+    LOG4CPLUS_INFO_FMT(logger_, "   Recorded packets: %d", packet_count_.load());
 }
 
 bool FfmpegPacketRecorderWorker::isOpen() const {
@@ -165,7 +167,7 @@ bool FfmpegPacketRecorderWorker::isOpen() const {
 
 bool FfmpegPacketRecorderWorker::seek(int frame_index) {
     if (!packet_source_) {
-        LOG_WARN("[Worker] Cannot seek: packet source not initialized");
+        LOG4CPLUS_WARN(logger_, "Cannot seek: packet source not initialized");
         return false;
     }
     return packet_source_->seek(frame_index);
@@ -173,20 +175,20 @@ bool FfmpegPacketRecorderWorker::seek(int frame_index) {
 
 bool FfmpegPacketRecorderWorker::seekToBegin() {
     if (!packet_source_) {
-        LOG_WARN("[Worker] Cannot seek: packet source not initialized");
+        LOG4CPLUS_WARN(logger_, "Cannot seek: packet source not initialized");
         return false;
     }
     return packet_source_->seek(0);
 }
 
 bool FfmpegPacketRecorderWorker::seekToEnd() {
-    LOG_WARN("[Worker] Seek to end not supported");
+    LOG4CPLUS_WARN(logger_, "Seek to end not supported");
     return false;
 }
 
 bool FfmpegPacketRecorderWorker::skip(int frame_count) {
     (void)frame_count;
-    LOG_WARN("[Worker] Skip not supported");
+    LOG4CPLUS_WARN(logger_, "Skip not supported");
     return false;
 }
 
@@ -256,19 +258,19 @@ bool FfmpegPacketRecorderWorker::fillBuffer(int frame_index, Buffer* buffer) {
     (void)frame_index;
     
     if (!buffer) {
-        LOG_ERROR("[Worker] ERROR: buffer is nullptr");
+        LOG4CPLUS_ERROR(logger_, "ERROR: buffer is nullptr");
         return false;
     }
     
     if (!is_open_ || !packet_source_) {
-        LOG_ERROR("[Worker] ERROR: Worker is not open or packet source is null");
+        LOG4CPLUS_ERROR(logger_, "ERROR: Worker is not open or packet source is null");
         return false;
     }
     
     // 1. ⭐ 从 Buffer 获取预分配的 AVPacket（AVFrameAllocator 已经分配）
     AVPacket* packet = buffer->getAVPacket();
     if (!packet) {
-        LOG_ERROR("[Worker] ERROR: Buffer has no AVPacket (AVFrameAllocator not used?)");
+        LOG4CPLUS_ERROR(logger_, "ERROR: Buffer has no AVPacket (AVFrameAllocator not used?)");
         return false;
     }
     
@@ -279,12 +281,12 @@ bool FfmpegPacketRecorderWorker::fillBuffer(int frame_index, Buffer* buffer) {
     
     if (ret < 0) {
         if (ret == AVERROR_EOF) {
-            LOG_DEBUG("🔄 EOF reached (via packet source)");
+            LOG4CPLUS_DEBUG(logger_, "🔄 EOF reached (via packet source)");
             return false;
         } else {
             char err_buf[128];
             av_strerror(ret, err_buf, sizeof(err_buf));
-            LOG_ERROR_FMT("[Worker] ERROR: packet_source_->readPacket() failed: %d (%s)", ret, err_buf);
+            LOG4CPLUS_ERROR_FMT(logger_, "ERROR: packet_source_->readPacket() failed: %d (%s)", ret, err_buf);
             return false;
         }
     }
@@ -315,22 +317,22 @@ bool FfmpegPacketRecorderWorker::fillBuffer(int frame_index, Buffer* buffer) {
 std::unique_ptr<IPacketSource> FfmpegPacketRecorderWorker::createPacketSource(const std::string& path) {
     // 根据 URL/路径前缀判断数据源类型
     if (path.find("rtsp://") == 0 || path.find("rtsps://") == 0) {
-        LOG_INFO("📡 Detected RTSP stream source");
+        LOG4CPLUS_INFO(logger_, "📡 Detected RTSP stream source");
         return std::make_unique<RtspPacketSource>(path);
     } 
     else if (path.find("rtmp://") == 0 || path.find("rtmps://") == 0) {
-        LOG_INFO("📡 Detected RTMP stream source");
+        LOG4CPLUS_INFO(logger_, "📡 Detected RTMP stream source");
         // 未来扩展：return std::make_unique<RtmpPacketSource>(path);
-        LOG_ERROR("❌ RTMP protocol not supported yet");
+        LOG4CPLUS_ERROR(logger_, "❌ RTMP protocol not supported yet");
         return nullptr;
     }
     else if (path.find("http://") == 0 || path.find("https://") == 0) {
-        LOG_INFO("🌐 Detected HTTP/HTTPS stream source (e.g., HLS)");
+        LOG4CPLUS_INFO(logger_, "🌐 Detected HTTP/HTTPS stream source (e.g., HLS)");
         // HTTP 流可以用 FilePacketSource 处理（FFmpeg 原生支持）
         return std::make_unique<FilePacketSource>(path);
     }
     else {
-        LOG_INFO("📁 Detected local file source");
+        LOG4CPLUS_INFO(logger_, "📁 Detected local file source");
         return std::make_unique<FilePacketSource>(path);
     }
 }
@@ -344,9 +346,9 @@ void FfmpegPacketRecorderWorker::setError(const std::string& error, int ffmpeg_e
     if (ffmpeg_error != 0) {
         char err_buf[128];
         av_strerror(ffmpeg_error, err_buf, sizeof(err_buf));
-        LOG_ERROR_FMT("[Worker] FfmpegPacketRecorderWorker Error: %s (FFmpeg: %s)", error.c_str(), err_buf);
+        LOG4CPLUS_ERROR_FMT(logger_, "FfmpegPacketRecorderWorker Error: %s (FFmpeg: %s)", error.c_str(), err_buf);
     } else {
-        LOG_ERROR_FMT("[Worker] FfmpegPacketRecorderWorker Error: %s", error.c_str());
+        LOG4CPLUS_ERROR_FMT(logger_, "FfmpegPacketRecorderWorker Error: %s", error.c_str());
     }
 }
 

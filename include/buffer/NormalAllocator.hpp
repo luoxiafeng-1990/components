@@ -2,6 +2,8 @@
 
 #include "buffer/BufferAllocatorBase.hpp"
 #include <cstdlib>
+#include <log4cplus/logger.h>
+#include <log4cplus/loggingmacros.h>
 
 /**
  * @brief NormalAllocator - 普通内存分配器
@@ -127,5 +129,8 @@ protected:
 private:
     BufferMemoryAllocatorType type_;
     size_t alignment_;
+    
+    // 日志器
+    log4cplus::Logger logger_;
 };
 

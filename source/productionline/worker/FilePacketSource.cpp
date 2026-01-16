@@ -16,14 +16,14 @@ FilePacketSource::FilePacketSource(const std::string& file_path)
     , total_frames_(-1)
     , is_open_(false)  // 🎯 原子变量初始化
     , eof_reached_(false)
-{
-    LOG_DEBUG_FMT("[FilePacketSource] 构造函数: file_path='%s'", file_path_.c_str());
+    , logger_(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.DataSource.File"))){
+    LOG4CPLUS_DEBUG_FMT(logger_, "构造函数: file_path='%s'", file_path_.c_str());
 }
 
 FilePacketSource::~FilePacketSource() {
-    LOG_DEBUG("[FilePacketSource] 析构函数开始");
+    LOG4CPLUS_DEBUG(logger_, "析构函数开始");
     close();
-    LOG_DEBUG("[FilePacketSource] 析构函数体结束");
+    LOG4CPLUS_DEBUG(logger_, "析构函数体结束");
 }
 
 bool FilePacketSource::open() {
@@ -34,7 +34,7 @@ bool FilePacketSource::open() {
     // 1. 打开输入文件
     format_ctx_ptr_ = avformat_alloc_context();
     if (!format_ctx_ptr_) {
-        LOG_ERROR("[FilePacketSource] Failed to allocate AVFormatContext");
+        LOG4CPLUS_ERROR(logger_, "Failed to allocate AVFormatContext");
         return false;
     }
     
@@ -42,7 +42,7 @@ bool FilePacketSource::open() {
     if (ret < 0) {
         char err_buf[AV_ERROR_MAX_STRING_SIZE];
         av_strerror(ret, err_buf, sizeof(err_buf));
-        LOG_ERROR_FMT("[FilePacketSource] Failed to open file '%s': %s", 
+        LOG4CPLUS_ERROR_FMT(logger_, "Failed to open file '%s': %s", 
                      file_path_.c_str(), err_buf);
         format_ctx_ptr_ = nullptr;
         return false;
@@ -53,7 +53,7 @@ bool FilePacketSource::open() {
     if (ret < 0) {
         char err_buf[AV_ERROR_MAX_STRING_SIZE];
         av_strerror(ret, err_buf, sizeof(err_buf));
-        LOG_ERROR_FMT("[FilePacketSource] Failed to find stream info: %s", err_buf);
+        LOG4CPLUS_ERROR_FMT(logger_, "Failed to find stream info: %s", err_buf);
         close();
         return false;
     }
@@ -69,7 +69,7 @@ bool FilePacketSource::open() {
     
     is_open_.store(true, std::memory_order_release);  // 🎯 原子操作设置状态
     eof_reached_ = false;  // 重置 EOF 状态
-    LOG_DEBUG_FMT("[FilePacketSource] Opened file '%s', video stream index: %d, total frames: %d",
+    LOG4CPLUS_DEBUG_FMT(logger_, "Opened file '%s', video stream index: %d, total frames: %d",
                  file_path_.c_str(), video_stream_index_, total_frames_);
     
     return true;
@@ -110,12 +110,12 @@ int FilePacketSource::readPacket(AVPacket* packet) {
     
     if (ret < 0) {
         if (ret == AVERROR_EOF) {
-            LOG_DEBUG("[FilePacketSource] EOF reached");
+            LOG4CPLUS_DEBUG(logger_, "EOF reached");
             eof_reached_ = true;  // 设置 EOF 状态
         } else {
             char err_buf[AV_ERROR_MAX_STRING_SIZE];
             av_strerror(ret, err_buf, sizeof(err_buf));
-            LOG_WARN_FMT("[FilePacketSource] av_read_frame failed: %s", err_buf);
+            LOG4CPLUS_WARN_FMT(logger_, "av_read_frame failed: %s", err_buf);
         }
         return ret;
     }
@@ -139,7 +139,7 @@ int FilePacketSource::readPacket(AVPacket* packet) {
             skipped++;
         }
         // 跳过了太多非视频包，可能有问题
-        LOG_WARN("[FilePacketSource] Skipped too many non-video packets");
+        LOG4CPLUS_WARN(logger_, "Skipped too many non-video packets");
         return AVERROR(EINVAL);
     }
     
@@ -173,7 +173,7 @@ bool FilePacketSource::findVideoStream() {
     }
     
     if (video_stream_index_ == -1) {
-        LOG_ERROR("[FilePacketSource] No video stream found in file");
+        LOG4CPLUS_ERROR(logger_, "No video stream found in file");
         return false;
     }
     
@@ -200,25 +200,25 @@ int FilePacketSource::estimateTotalFrames() {
         double fps = (double)frame_rate.num / frame_rate.den;
         int frames = (int)(duration_seconds * fps);
         if (frames > 0) {
-            LOG_DEBUG_FMT("[FilePacketSource] Estimated frames from metadata: %d", frames);
+            LOG4CPLUS_DEBUG_FMT(logger_, "Estimated frames from metadata: %d", frames);
             return frames;
         }
     }
     
     // 方法2：基于文件大小估算（适用于裸数据流：.h264/.h265/.yuv等）
-    LOG_DEBUG("[FilePacketSource] Cannot estimate from metadata, trying file size method...");
+    LOG4CPLUS_DEBUG(logger_, "Cannot estimate from metadata, trying file size method...");
     
     // 获取文件大小
     long file_size = getFileSize();
     if (file_size <= 0) {
-        LOG_WARN("[FilePacketSource] Cannot get file size, total frames unknown");
+        LOG4CPLUS_WARN(logger_, "Cannot get file size, total frames unknown");
         return -1;
     }
     
     // 获取编解码器参数
     const AVCodecParameters* codecpar = stream->codecpar;
     if (!codecpar) {
-        LOG_WARN("[FilePacketSource] Cannot get codec parameters");
+        LOG4CPLUS_WARN(logger_, "Cannot get codec parameters");
         return -1;
     }
     
@@ -226,7 +226,7 @@ int FilePacketSource::estimateTotalFrames() {
     int height = codecpar->height;
     
     if (width <= 0 || height <= 0) {
-        LOG_WARN_FMT("[FilePacketSource] Invalid resolution: %dx%d", width, height);
+        LOG4CPLUS_WARN_FMT(logger_, "Invalid resolution: %dx%d", width, height);
         return -1;
     }
     
@@ -268,7 +268,7 @@ int FilePacketSource::estimateTotalFrames() {
                 break;
         }
         
-        LOG_DEBUG_FMT("[FilePacketSource] Raw video detected, estimated frames from file size: %d (resolution: %dx%d)",
+        LOG4CPLUS_DEBUG_FMT(logger_, "Raw video detected, estimated frames from file size: %d (resolution: %dx%d)",
                      estimated_frames, width, height);
     }
     // 情况B：编码数据（H.264/H.265/VP9等）
@@ -281,7 +281,7 @@ int FilePacketSource::estimateTotalFrames() {
             double fps = (double)frame_rate.num / frame_rate.den;
             double avg_frame_size = codecpar->bit_rate / 8.0 / fps;  // bytes per frame
             estimated_frames = (int)(file_size / avg_frame_size);
-            LOG_DEBUG_FMT("[FilePacketSource] Encoded video, estimated frames from bitrate: %d (bitrate: %ld, fps: %.2f)",
+            LOG4CPLUS_DEBUG_FMT(logger_, "Encoded video, estimated frames from bitrate: %d (bitrate: %ld, fps: %.2f)",
                          estimated_frames, codecpar->bit_rate, fps);
         } else {
             // 没有码率信息，使用经验值
@@ -298,7 +298,7 @@ int FilePacketSource::estimateTotalFrames() {
             }
             
             estimated_frames = (int)(file_size / avg_encoded_frame_size);
-            LOG_DEBUG_FMT("[FilePacketSource] Encoded video (no bitrate), estimated frames from file size: %d (resolution: %dx%d, avg_frame_size: %d)",
+            LOG4CPLUS_DEBUG_FMT(logger_, "Encoded video (no bitrate), estimated frames from file size: %d (resolution: %dx%d, avg_frame_size: %d)",
                          estimated_frames, width, height, avg_encoded_frame_size);
         }
     }
@@ -310,10 +310,10 @@ long FilePacketSource::getFileSize() const {
     if (!file_path_.empty()) {
         struct stat st;
         if (stat(file_path_.c_str(), &st) == 0) {
-            LOG_DEBUG_FMT("[FilePacketSource] Got file size from stat(): %lld bytes", (long long)st.st_size);
+            LOG4CPLUS_DEBUG_FMT(logger_, "Got file size from stat(): %lld bytes", (long long)st.st_size);
             return (long)st.st_size;
         }
-        LOG_WARN_FMT("[FilePacketSource] stat() failed for file: %s", file_path_.c_str());
+        LOG4CPLUS_WARN_FMT(logger_, "stat() failed for file: %s", file_path_.c_str());
     }
     
     return -1;
@@ -325,18 +325,18 @@ std::string FilePacketSource::getFilePath() const {
 
 bool FilePacketSource::seek(int frame_index) {
     if (!is_open_.load(std::memory_order_acquire) || !format_ctx_ptr_ || video_stream_index_ < 0) {
-        LOG_ERROR("[FilePacketSource] Cannot seek: not open or invalid state");
+        LOG4CPLUS_ERROR(logger_, "Cannot seek: not open or invalid state");
         return false;
     }
     
     if (frame_index < 0) {
-        LOG_ERROR_FMT("[FilePacketSource] Invalid frame index: %d", frame_index);
+        LOG4CPLUS_ERROR_FMT(logger_, "Invalid frame index: %d", frame_index);
         return false;
     }
     
     AVStream* stream = format_ctx_ptr_->streams[video_stream_index_];
     if (!stream) {
-        LOG_ERROR("[FilePacketSource] Invalid video stream");
+        LOG4CPLUS_ERROR(logger_, "Invalid video stream");
         return false;
     }
     
@@ -358,12 +358,12 @@ bool FilePacketSource::seek(int frame_index) {
         if (total_frames > 0 && frame_index < total_frames) {
             timestamp = (int64_t)frame_index * time_base.den * frame_rate.den / (time_base.num * frame_rate.num);
         } else {
-            LOG_ERROR_FMT("[FilePacketSource] Frame index %d out of range (estimated total: %d)", 
+            LOG4CPLUS_ERROR_FMT(logger_, "Frame index %d out of range (estimated total: %d)", 
                          frame_index, total_frames);
             return false;
         }
     } else {
-        LOG_ERROR("[FilePacketSource] Cannot calculate timestamp: missing stream information");
+        LOG4CPLUS_ERROR(logger_, "Cannot calculate timestamp: missing stream information");
         return false;
     }
     
@@ -373,12 +373,12 @@ bool FilePacketSource::seek(int frame_index) {
     if (ret < 0) {
         char err_buf[AV_ERROR_MAX_STRING_SIZE];
         av_strerror(ret, err_buf, sizeof(err_buf));
-        LOG_ERROR_FMT("[FilePacketSource] av_seek_frame failed: %s", err_buf);
+        LOG4CPLUS_ERROR_FMT(logger_, "av_seek_frame failed: %s", err_buf);
         return false;
     }
     
     eof_reached_ = false;  // seek 后重置 EOF 状态
-    LOG_DEBUG_FMT("[FilePacketSource] Successfully seeked to frame %d (timestamp: %ld)", frame_index, timestamp);
+    LOG4CPLUS_DEBUG_FMT(logger_, "Successfully seeked to frame %d (timestamp: %ld)", frame_index, timestamp);
     return true;
 }
 

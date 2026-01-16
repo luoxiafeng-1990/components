@@ -1,4 +1,6 @@
 #ifndef LINUX_FRAMEBUFFER_DEVICE_HPP
+#include <log4cplus/logger.h>
+#include <log4cplus/loggingmacros.h>
 #define LINUX_FRAMEBUFFER_DEVICE_HPP
 
 #include "display/IDisplayDevice.hpp"
@@ -204,6 +206,9 @@ private:
      * 解除硬件framebuffer内存的mmap映射
      */
     void unmapHardwareFramebufferMemory();
+    
+    // 日志器
+    log4cplus::Logger logger_;
 };
 
 #endif // LINUX_FRAMEBUFFER_DEVICE_HPP
