@@ -19,7 +19,45 @@
 
 ## 版本历史
 
-### v2.19（当前版本）- 共享数据源模式与硬件解码增强
+### v2.20（当前版本）- 日志系统重构与关键 Bug 修复
+**发布日期：** 2026-01-16
+
+**主要变更：**
+- ✅ **日志系统全面重构**：采用 log4cplus 层次化架构
+  - 实现 26 个模块的层次化日志管理（components.Worker、components.BufferPool 等）
+  - 每个类使用独立 logger 成员变量，替代全局 LOG_XXX 宏
+  - 支持通过配置文件动态调整日志级别（无需重编译）
+  - 新增 `logger.properties` 配置文件支持
+  - 新增 `LOGGER_CONFIG_README.md` 日志配置指南
+- ✅ **关键 Bug 修复**：修复多处导致段错误的初始化问题
+  - 修复 `WorkerBase` 构造函数未初始化 `logger_` 导致段错误
+  - 修复 `BufferPoolRegistry` 构造函数未初始化 `logger_` 导致段错误
+  - 修复 `MultiWorkerProductionLine` 中 use-after-move 错误（访问已移走的 `consumer_info`）
+- ✅ **日志格式统一**：移除硬编码模块名，自动显示层次化模块路径
+  - 所有 `LOG_XXX` 宏替换为 `LOG4CPLUS_XXX(logger_, ...)`
+  - 移除手动添加的 `[ModuleName]` 前缀
+  - 日志输出格式：`[YYYY-MM-DD HH:MM:SS.mmm] [components.Module.SubModule] [LEVEL] message`
+
+**设计原则：**
+- **层次化管理**：日志按模块层次组织，支持继承式配置
+- **配置驱动**：通过配置文件控制日志级别，提高灵活性
+- **类型安全**：每个类持有独立 logger，避免全局状态
+- **初始化安全**：确保所有 logger 在构造函数中正确初始化
+
+**架构优势：**
+- **动态调试**：运行时调整日志级别，无需重新编译
+- **精细控制**：可针对单个模块设置不同日志级别
+- **性能优化**：减少不必要的日志输出，提升运行效率
+- **易于维护**：统一的日志格式，便于问题排查
+
+**影响范围：**
+- 修改文件：45 个（包括所有核心模块）
+- 新增文件：3 个（logger.properties, logger.properties.minimal, LOGGER_CONFIG_README.md）
+- 涉及模块：Worker、BufferPool、Allocator、Display、ProductionLine、Monitor 等全部核心组件
+
+---
+
+### v2.19 - 共享数据源模式与硬件解码增强
 **发布日期：** 2025-01-14
 
 **主要变更：**
