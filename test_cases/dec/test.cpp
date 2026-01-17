@@ -37,7 +37,6 @@
 #include "productionline/io/BufferWriter.hpp"
 #include "productionline/io/BufferComparator.hpp"
 #include "monitor/PerformanceMonitor.hpp"
-#include "monitor/Timer.hpp"
 #include "common/Logger.hpp"
 #include "framework/TestMacros.hpp"
 
