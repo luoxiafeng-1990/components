@@ -1,6 +1,7 @@
 #include "productionline/VideoProductionLine.hpp"
 #include "buffer/bufferpool/BufferPoolRegistry.hpp"
 #include "common/Logger.hpp"
+#include "common/GlobalThreadPool.hpp"
 #include <stdio.h>
 #include <chrono>
 #include <string>
@@ -80,6 +81,9 @@ bool VideoProductionLine::start(const WorkerConfig& worker_config) {
         LOG4CPLUS_WARN(logger_, "Already running");
         return false;
     }
+    
+    // ⭐ 初始化全局线程池（从配置读取）
+    initializeGlobalThreadPool(worker_config.thread_pool_size);
     
     LOG4CPLUS_INFO(logger_, "BufferFillingWorkerFacade: " << worker_config.data_source.path);
     
@@ -433,3 +437,39 @@ void VideoProductionLine::setError(const std::string& error_msg) {
     LOG4CPLUS_ERROR_FMT(logger_, "VideoProductionLine Error: %s", error_msg.c_str());
 }
 
+// ============================================================
+// 全局资源初始化
+// ============================================================
+
+void VideoProductionLine::initializeGlobalThreadPool(int thread_pool_size) {
+    // 如果为 0，使用默认值 64
+    if (thread_pool_size == 0) {
+        thread_pool_size = 64;
+    }
+    
+    // 验证范围：必须 > 0 且 <= 128
+    if (thread_pool_size <= 0) {
+        LOG4CPLUS_WARN(logger_, "线程池大小必须 > 0，使用默认值 64");
+        thread_pool_size = 64;
+    } else if (thread_pool_size > 128) {
+        LOG4CPLUS_WARN(logger_, "线程池大小超过最大值 128，使用最大值 128");
+        thread_pool_size = 128;
+    }
+    
+    auto& global_pool = GlobalThreadPool::getInstance();
+    
+    // 检查线程池是否已初始化
+    if (global_pool.isInitialized()) {
+        int current_size = global_pool.getSize();
+        if (current_size != thread_pool_size) {
+            LOG4CPLUS_WARN(logger_, "全局线程池已初始化，使用现有大小: " << current_size 
+                           << "（请求大小: " << thread_pool_size << "）");
+        } else {
+            LOG4CPLUS_DEBUG(logger_, "全局线程池已初始化，大小匹配: " << current_size);
+        }
+    } else {
+        // 初始化全局线程池
+        global_pool.setSize(thread_pool_size);
+        LOG4CPLUS_INFO(logger_, "全局线程池已初始化 (size=" << thread_pool_size << ")");
+    }
+}

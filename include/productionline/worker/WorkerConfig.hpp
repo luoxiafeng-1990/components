@@ -5,6 +5,7 @@
 #include <string_view>
 #include <optional>
 #include <memory>
+#include <vector>
 #include "common/Logger.hpp"
 
 // FFmpeg 头文件（用于 AVRational 和 AVCodecParameters）
@@ -250,6 +251,17 @@ struct WorkerConfig {
     // ========================================
     WorkerType worker_type = WorkerType::AUTO;
     
+    // ========================================
+    // 全局资源配置
+    // ========================================
+    /**
+     * @brief 全局线程池大小（默认 64，范围：1-128）
+     * 
+     * 注意：只在第一次调用时生效，如果线程池已初始化则忽略
+     * 0 表示不初始化（使用默认值 64）
+     */
+    int thread_pool_size = 64;
+    
     WorkerConfig() = default;
     WorkerConfig(const WorkerConfig&) = default;
     WorkerConfig& operator=(const WorkerConfig&) = default;
@@ -277,26 +289,13 @@ public:
      * - HTTP/HLS 流：`http://example.com/playlist.m3u8`
      * - 本地文件：`/data/video.mp4`
      */
-    DataSourceConfigBuilder& setPath(std::string_view path) {
-        data_source_config_.path = std::string(path);
-        return *this;
-    }
+    DataSourceConfigBuilder& setPath(std::string_view path);
     
     // 兼容 const char*（保持向后兼容）
-    DataSourceConfigBuilder& setPath(const char* path) {
-        if (path) {
-            data_source_config_.path = path;
-        } else {
-            data_source_config_.path.clear();
-        }
-        return *this;
-    }
+    DataSourceConfigBuilder& setPath(const char* path);
     
     // 兼容 std::string
-    DataSourceConfigBuilder& setPath(const std::string& path) {
-        data_source_config_.path = path;
-        return *this;
-    }
+    DataSourceConfigBuilder& setPath(const std::string& path);
     
     /**
      * @brief 设置 BufferPool 的 Buffer 数量
@@ -307,14 +306,9 @@ public:
      * - 本地文件解码：128
      * - Packet 录制：64
      */
-    DataSourceConfigBuilder& setBufferCount(int count) {
-        data_source_config_.buffer_count = count;
-        return *this;
-    }
+    DataSourceConfigBuilder& setBufferCount(int count);
     
-    WorkerConfig::DataSourceConfig build() const {
-        return data_source_config_;
-    }
+    WorkerConfig::DataSourceConfig build() const;
     
 private:
     WorkerConfig::DataSourceConfig data_source_config_;
@@ -331,19 +325,13 @@ public:
      * @brief 设置显示设备宽度
      * @param width 显示设备宽度（像素）
      */
-    DisplayConfigBuilder& setDisplayWidth(int width) {
-        display_config_.width = width;
-        return *this;
-    }
+    DisplayConfigBuilder& setDisplayWidth(int width);
     
     /**
      * @brief 设置显示设备高度
      * @param height 显示设备高度（像素）
      */
-    DisplayConfigBuilder& setDisplayHeight(int height) {
-        display_config_.height = height;
-        return *this;
-    }
+    DisplayConfigBuilder& setDisplayHeight(int height);
     
     /**
      * @brief 设置显示设备分辨率
@@ -360,24 +348,15 @@ public:
      *     .build()
      * ```
      */
-    DisplayConfigBuilder& setDisplayResolution(int width, int height) {
-        display_config_.width = width;
-        display_config_.height = height;
-        return *this;
-    }
+    DisplayConfigBuilder& setDisplayResolution(int width, int height);
     
     /**
      * @brief 设置每像素位数
      * @param bpp 每像素位数（如 32 表示 ARGB8888）
      */
-    DisplayConfigBuilder& setBitsPerPixel(int bpp) {
-        display_config_.bits_per_pixel = bpp;
-        return *this;
-    }
+    DisplayConfigBuilder& setBitsPerPixel(int bpp);
     
-    WorkerConfig::DisplayConfig build() const {
-        return display_config_;
-    }
+    WorkerConfig::DisplayConfig build() const;
     
 private:
     WorkerConfig::DisplayConfig display_config_;
@@ -423,21 +402,14 @@ public:
      * @brief 设置是否禁用重排序
      * @param disable true=禁用重排序（推荐），false=启用重排序
      */
-    TacoConfigBuilder& setReorderDisable(bool disable = true) {
-        taco_config_.reorder_disable = disable;
-        return *this;
-    }
+    TacoConfigBuilder& setReorderDisable(bool disable = true);
     
     /**
      * @brief 同时设置两个通道的启用状态（快捷方法）
      * @param ch0 是否启用通道0
      * @param ch1 是否启用通道1
      */
-    TacoConfigBuilder& setChannels(bool ch0, bool ch1) {
-        taco_config_.ch0_enable = ch0;
-        taco_config_.ch1_enable = ch1;
-        return *this;
-    }
+    TacoConfigBuilder& setChannels(bool ch0, bool ch1);
     
     // ========================================
     // 通用配置接口（支持任意通道）
@@ -470,40 +442,7 @@ public:
         Channel ch,
         OutputFormat format = OutputFormat::YUV_AUTO,
         ColorStandard std = ColorStandard::BT601
-    ) {
-        int format_value = static_cast<int>(format);
-        int std_value = static_cast<int>(std);
-        
-        // 判断是 RGB 还是 YUV（RGB 格式枚举值 >= 1000）
-        bool is_rgb = (format_value >= 1000);
-        
-        if (ch == Channel::CH0) {
-            // 通道0仅支持 YUV
-            if (is_rgb) {
-                LOG_ERROR_FMT("TacoConfigBuilder: Channel 0 only supports YUV format, RGB format ignored");
-                return *this;
-            }
-            // 设置 YUV 格式
-            taco_config_.ch0_yuv_format = format_value;
-            taco_config_.ch0_yuv_std = std_value;
-            
-        } else if (ch == Channel::CH1) {
-            // 通道1支持 RGB 和 YUV
-            taco_config_.ch1_rgb = is_rgb;
-            
-            if (is_rgb) {
-                // RGB 格式：需要映射回驱动的原始值
-                taco_config_.ch1_rgb_format = mapEnumToRgbDriverValue(format);
-                taco_config_.ch1_rgb_std = std_value;
-            } else {
-                // YUV 格式
-                taco_config_.ch1_yuv_format = format_value;
-                taco_config_.ch1_yuv_std = std_value;
-            }
-        }
-        
-        return *this;
-    }
+    );
     
     /**
      * @brief 设置通道裁剪区域（通用接口）
@@ -523,20 +462,7 @@ public:
      * // 通道1裁剪
      * .setCrop(Channel::CH1, 0, 0, 1280, 720)
      */
-    TacoConfigBuilder& setCrop(Channel ch, int x, int y, int width, int height) {
-        if (ch == Channel::CH0) {
-            taco_config_.ch0_crop_x = x;
-            taco_config_.ch0_crop_y = y;
-            taco_config_.ch0_crop_width = width;
-            taco_config_.ch0_crop_height = height;
-        } else if (ch == Channel::CH1) {
-            taco_config_.ch1_crop_x = x;
-            taco_config_.ch1_crop_y = y;
-            taco_config_.ch1_crop_width = width;
-            taco_config_.ch1_crop_height = height;
-        }
-        return *this;
-    }
+    TacoConfigBuilder& setCrop(Channel ch, int x, int y, int width, int height);
     
     /**
      * @brief 设置通道缩放分辨率（通用接口）
@@ -554,23 +480,12 @@ public:
      * // 通道1缩放到 1280x720
      * .setScale(Channel::CH1, 1280, 720)
      */
-    TacoConfigBuilder& setScale(Channel ch, int width, int height) {
-        if (ch == Channel::CH0) {
-            taco_config_.ch0_scale_width = width;
-            taco_config_.ch0_scale_height = height;
-        } else if (ch == Channel::CH1) {
-            taco_config_.ch1_scale_width = width;
-            taco_config_.ch1_scale_height = height;
-        }
-        return *this;
-    }
+    TacoConfigBuilder& setScale(Channel ch, int width, int height);
     
     /**
      * @brief 构建最终的 TacoConfig 对象
      */
-    WorkerConfig::DecoderConfig::TacoConfig build() const {
-        return taco_config_;
-    }
+    WorkerConfig::DecoderConfig::TacoConfig build() const;
     
     // ========================================
     // 辅助映射函数（向后兼容，供外部使用）
@@ -583,40 +498,7 @@ public:
      * 
      * 向后兼容旧代码使用字符串配置的情况。
      */
-    static OutputFormat mapFormatNameToEnum(std::string_view format_name) {
-        // YUV 格式
-        if (format_name == "auto" || format_name == "yuv_auto") return OutputFormat::YUV_AUTO;
-        if (format_name == "nv12") return OutputFormat::YUV_NV12;
-        if (format_name == "nv21") return OutputFormat::YUV_NV21;
-        if (format_name == "i420" || format_name == "yuv420p") return OutputFormat::YUV_I420;
-        if (format_name == "yv12") return OutputFormat::YUV_YV12;
-        if (format_name == "p010") return OutputFormat::YUV_P010;
-        if (format_name == "nv16") return OutputFormat::YUV_NV16;
-        if (format_name == "nv61") return OutputFormat::YUV_NV61;
-        if (format_name == "i422" || format_name == "yuv422p") return OutputFormat::YUV_I422;
-        if (format_name == "nv24") return OutputFormat::YUV_NV24;
-        if (format_name == "i444" || format_name == "yuv444p") return OutputFormat::YUV_I444;
-        
-        // RGB 格式
-        if (format_name == "argb888") return OutputFormat::RGB_ARGB888;
-        if (format_name == "abgr888") return OutputFormat::RGB_ABGR888;
-        if (format_name == "rgba888") return OutputFormat::RGB_RGBA888;
-        if (format_name == "bgra888") return OutputFormat::RGB_BGRA888;
-        if (format_name == "rgb888") return OutputFormat::RGB_RGB888;
-        if (format_name == "bgr888") return OutputFormat::RGB_BGR888;
-        if (format_name == "xrgb888") return OutputFormat::RGB_XRGB888;
-        if (format_name == "xbgr888") return OutputFormat::RGB_XBGR888;
-        if (format_name == "rgbx888") return OutputFormat::RGB_RGBX888;
-        if (format_name == "bgrx888") return OutputFormat::RGB_BGRX888;
-        if (format_name == "rgb888_planar") return OutputFormat::RGB_RGB888_PLANAR;
-        if (format_name == "bgr888_planar") return OutputFormat::RGB_BGR888_PLANAR;
-        if (format_name == "r16g16b16") return OutputFormat::RGB_R16G16B16;
-        if (format_name == "b16g16r16") return OutputFormat::RGB_B16G16R16;
-        if (format_name == "gbrp") return OutputFormat::RGB_GBRP;
-        
-        // 默认返回 YUV_AUTO
-        return OutputFormat::YUV_AUTO;
-    }
+    static OutputFormat mapFormatNameToEnum(std::string_view format_name);
     
     /**
      * @brief 将颜色标准名称字符串映射为 ColorStandard 枚举
@@ -625,77 +507,21 @@ public:
      * 
      * 向后兼容旧代码使用字符串配置的情况。
      */
-    static ColorStandard mapColorStdNameToEnum(std::string_view std_name) {
-        if (std_name == "none") return ColorStandard::NONE;
-        if (std_name == "bt601") return ColorStandard::BT601;
-        if (std_name == "bt601_l" || std_name == "bt601_limited") return ColorStandard::BT601_LIMITED;
-        if (std_name == "bt709") return ColorStandard::BT709;
-        if (std_name == "bt709_l" || std_name == "bt709_limited") return ColorStandard::BT709_LIMITED;
-        if (std_name == "bt2020") return ColorStandard::BT2020;
-        if (std_name == "bt2020_l" || std_name == "bt2020_limited") return ColorStandard::BT2020_LIMITED;
-        
-        // 默认返回 BT601
-        return ColorStandard::BT601;
-    }
+    static ColorStandard mapColorStdNameToEnum(std::string_view std_name);
     
     /**
      * @brief 将 OutputFormat 枚举映射为格式名称字符串
      * @param format OutputFormat 枚举值
      * @return 格式名称字符串
      */
-    static std::string_view mapFormatEnumToName(OutputFormat format) {
-        switch (format) {
-            // YUV 格式
-            case OutputFormat::YUV_AUTO: return "yuv_auto";
-            case OutputFormat::YUV_NV12: return "nv12";
-            case OutputFormat::YUV_NV21: return "nv21";
-            case OutputFormat::YUV_I420: return "i420";
-            case OutputFormat::YUV_YV12: return "yv12";
-            case OutputFormat::YUV_P010: return "p010";
-            case OutputFormat::YUV_NV16: return "nv16";
-            case OutputFormat::YUV_NV61: return "nv61";
-            case OutputFormat::YUV_I422: return "i422";
-            case OutputFormat::YUV_NV24: return "nv24";
-            case OutputFormat::YUV_I444: return "i444";
-            
-            // RGB 格式
-            case OutputFormat::RGB_ARGB888: return "argb888";
-            case OutputFormat::RGB_ABGR888: return "abgr888";
-            case OutputFormat::RGB_RGBA888: return "rgba888";
-            case OutputFormat::RGB_BGRA888: return "bgra888";
-            case OutputFormat::RGB_RGB888: return "rgb888";
-            case OutputFormat::RGB_BGR888: return "bgr888";
-            case OutputFormat::RGB_XRGB888: return "xrgb888";
-            case OutputFormat::RGB_XBGR888: return "xbgr888";
-            case OutputFormat::RGB_RGBX888: return "rgbx888";
-            case OutputFormat::RGB_BGRX888: return "bgrx888";
-            case OutputFormat::RGB_RGB888_PLANAR: return "rgb888_planar";
-            case OutputFormat::RGB_BGR888_PLANAR: return "bgr888_planar";
-            case OutputFormat::RGB_R16G16B16: return "r16g16b16";
-            case OutputFormat::RGB_B16G16R16: return "b16g16r16";
-            case OutputFormat::RGB_GBRP: return "gbrp";
-            
-            default: return "unknown";
-        }
-    }
+    static std::string_view mapFormatEnumToName(OutputFormat format);
     
     /**
      * @brief 将 ColorStandard 枚举映射为颜色标准名称字符串
      * @param std ColorStandard 枚举值
      * @return 颜色标准名称字符串
      */
-    static std::string_view mapColorStdEnumToName(ColorStandard std) {
-        switch (std) {
-            case ColorStandard::NONE: return "none";
-            case ColorStandard::BT601: return "bt601";
-            case ColorStandard::BT601_LIMITED: return "bt601_limited";
-            case ColorStandard::BT709: return "bt709";
-            case ColorStandard::BT709_LIMITED: return "bt709_limited";
-            case ColorStandard::BT2020: return "bt2020";
-            case ColorStandard::BT2020_LIMITED: return "bt2020_limited";
-            default: return "unknown";
-        }
-    }
+    static std::string_view mapColorStdEnumToName(ColorStandard std);
 
 private:
     WorkerConfig::DecoderConfig::TacoConfig taco_config_;
@@ -706,26 +532,7 @@ private:
      * OutputFormat 枚举使用 1000+ 的值来区分 RGB 和 YUV，
      * 但 TACO 驱动需要原始的格式值（如 9 表示 ARGB888）。
      */
-    static int mapEnumToRgbDriverValue(OutputFormat format) {
-        switch (format) {
-            case OutputFormat::RGB_ARGB888: return 9;
-            case OutputFormat::RGB_ABGR888: return 11;
-            case OutputFormat::RGB_RGBA888: return 13;
-            case OutputFormat::RGB_BGRA888: return 15;
-            case OutputFormat::RGB_RGB888: return 1;
-            case OutputFormat::RGB_BGR888: return 3;
-            case OutputFormat::RGB_XRGB888: return 25;
-            case OutputFormat::RGB_XBGR888: return 27;
-            case OutputFormat::RGB_RGBX888: return 21;
-            case OutputFormat::RGB_BGRX888: return 23;
-            case OutputFormat::RGB_RGB888_PLANAR: return 2;
-            case OutputFormat::RGB_BGR888_PLANAR: return 4;
-            case OutputFormat::RGB_R16G16B16: return 17;
-            case OutputFormat::RGB_B16G16R16: return 19;
-            case OutputFormat::RGB_GBRP: return 28;
-            default: return 9; // 默认 ARGB888
-        }
-    }
+    static int mapEnumToRgbDriverValue(OutputFormat format);
 };
 
 /**
@@ -738,47 +545,21 @@ public:
     // ========== 通用解码器参数 ==========
     
     // 接受 std::string_view（推荐）
-    DecoderConfigBuilder& setDecoderName(std::string_view name) {
-        decoder_config_.name = std::string(name);
-        return *this;
-    }
+    DecoderConfigBuilder& setDecoderName(std::string_view name);
     
     // 兼容 const char*（保持向后兼容）
-    DecoderConfigBuilder& setDecoderName(const char* name) {
-        if (name) {
-            decoder_config_.name = name;
-        } else {
-            decoder_config_.name = std::nullopt;
-        }
-        return *this;
-    }
+    DecoderConfigBuilder& setDecoderName(const char* name);
     
     // 清除解码器名称（使用自动选择）
-    DecoderConfigBuilder& clearDecoderName() {
-        decoder_config_.name = std::nullopt;
-        return *this;
-    }
+    DecoderConfigBuilder& clearDecoderName();
     
     // 接受 std::string_view（推荐）
-    DecoderConfigBuilder& setHwaccelDevice(std::string_view device) {
-        decoder_config_.hwaccel_device = std::string(device);
-        return *this;
-    }
+    DecoderConfigBuilder& setHwaccelDevice(std::string_view device);
     
     // 兼容 const char*（保持向后兼容）
-    DecoderConfigBuilder& setHwaccelDevice(const char* device) {
-        if (device) {
-            decoder_config_.hwaccel_device = device;
-        } else {
-            decoder_config_.hwaccel_device = std::nullopt;
-        }
-        return *this;
-    }
+    DecoderConfigBuilder& setHwaccelDevice(const char* device);
     
-    DecoderConfigBuilder& setDecodeThreads(int threads) {
-        decoder_config_.decode_threads = threads;
-        return *this;
-    }
+    DecoderConfigBuilder& setDecodeThreads(int threads);
     
     // ========== 快捷预设 ==========
     /**
@@ -802,22 +583,12 @@ public:
     DecoderConfigBuilder& useTaco(
         std::string_view codec,
         const WorkerConfig::DecoderConfig::TacoConfig& taco_config
-    ) {
-        // 拼接解码器名称：codec + "_taco"
-        decoder_config_.name = std::string(codec) + "_taco";
-        decoder_config_.enable_hardware = true;
-        decoder_config_.taco = taco_config;
-        return *this;
-    }
+    );
     
     /**
      * @brief 预设：软件解码（自动选择）
      */
-    DecoderConfigBuilder& useSoftware() {
-        decoder_config_.name = std::nullopt;
-        decoder_config_.enable_hardware = false;
-        return *this;
-    }
+    DecoderConfigBuilder& useSoftware();
     
     /**
      * @brief 预设：NVIDIA CUDA 硬件解码（通用，支持多种编解码器）
@@ -844,12 +615,7 @@ public:
      * 
      * 生成的解码器名称格式为：{codec}_cuvid（如 "h264_cuvid"、"h265_cuvid"）
      */
-    DecoderConfigBuilder& useCuvid(std::string_view codec) {
-        decoder_config_.name = std::string(codec) + "_cuvid";
-        decoder_config_.enable_hardware = true;
-        decoder_config_.hwaccel_device = "cuda";
-        return *this;
-    }
+    DecoderConfigBuilder& useCuvid(std::string_view codec);
     
     /**
      * @brief 预设：Intel Quick Sync Video 硬件解码（通用，支持多种编解码器）
@@ -876,12 +642,7 @@ public:
      * 
      * 生成的解码器名称格式为：{codec}_qsv（如 "h264_qsv"、"h265_qsv"）
      */
-    DecoderConfigBuilder& useQsv(std::string_view codec) {
-        decoder_config_.name = std::string(codec) + "_qsv";
-        decoder_config_.enable_hardware = true;
-        decoder_config_.hwaccel_device = "qsv";
-        return *this;
-    }
+    DecoderConfigBuilder& useQsv(std::string_view codec);
     
     /**
      * @brief 预设：VA-API 硬件解码（通用，支持多种编解码器）
@@ -905,16 +666,9 @@ public:
      * 
      * 生成的解码器名称格式为：{codec}_vaapi（如 "h264_vaapi"、"h265_vaapi"）
      */
-    DecoderConfigBuilder& useVaapi(std::string_view codec) {
-        decoder_config_.name = std::string(codec) + "_vaapi";
-        decoder_config_.enable_hardware = true;
-        decoder_config_.hwaccel_device = "vaapi";
-        return *this;
-    }
+    DecoderConfigBuilder& useVaapi(std::string_view codec);
     
-    WorkerConfig::DecoderConfig build() const {
-        return decoder_config_;
-    }
+    WorkerConfig::DecoderConfig build() const;
     
 private:
     WorkerConfig::DecoderConfig decoder_config_;
@@ -932,45 +686,203 @@ public:
     /**
      * @brief 设置数据源配置
      */
-    WorkerConfigBuilder& setDataSourceConfig(const WorkerConfig::DataSourceConfig& data_source_config) {
-        worker_config_.data_source = data_source_config;
-        return *this;
-    }
+    WorkerConfigBuilder& setDataSourceConfig(const WorkerConfig::DataSourceConfig& data_source_config);
     
     /**
      * @brief 设置显示设备配置
      * @param display_config 显示设备配置
      */
-    WorkerConfigBuilder& setDisplayConfig(const WorkerConfig::DisplayConfig& display_config) {
-        worker_config_.display = display_config;
-        return *this;
-    }
+    WorkerConfigBuilder& setDisplayConfig(const WorkerConfig::DisplayConfig& display_config);
     
     /**
      * @brief 设置解码器配置
      */
-    WorkerConfigBuilder& setDecoderConfig(const WorkerConfig::DecoderConfig& decoder_config) {
-        worker_config_.decoder = decoder_config;
-        return *this;
-    }
+    WorkerConfigBuilder& setDecoderConfig(const WorkerConfig::DecoderConfig& decoder_config);
     
     /**
      * @brief 设置 Worker 类型
      */
-    WorkerConfigBuilder& setWorkerType(WorkerType type) {
-        worker_config_.worker_type = type;
-        return *this;
-    }
+    WorkerConfigBuilder& setWorkerType(WorkerType type);
+    
+    /**
+     * @brief 设置全局线程池大小
+     * 
+     * @param size 线程池大小（范围：1-128，默认：64）
+     * 
+     * @note 验证规则（在 VideoProductionLine::start() 中执行）：
+     *   - 必须 > 0，否则使用默认值 64
+     *   - 最大 128，超过则使用 128
+     *   - 0 表示使用默认值 64
+     * 
+     * @note 注意：只在第一次调用时生效，如果线程池已初始化则忽略
+     * 
+     * @example
+     * ```cpp
+     * WorkerConfigBuilder()
+     *     .setThreadPoolSize(32)
+     *     .setDataSourceConfig(...)
+     *     .build()
+     * ```
+     */
+    WorkerConfigBuilder& setThreadPoolSize(int size);
     
     /**
      * @brief 构建最终配置
      */
-    WorkerConfig build() const {
-        return worker_config_;
-    }
+    WorkerConfig build() const;
     
 private:
     WorkerConfig worker_config_;
+};
+
+// ============================================================
+// MultiWorker 配置结构（v2.20 新增：从 MultiWorkerProductionLine 移动）
+// ============================================================
+
+/**
+ * @brief ProducerConfig - 生产者配置
+ */
+struct ProducerConfig {
+    std::string producer_id;      // 组内唯一标识
+    WorkerConfig worker_config;
+};
+
+/**
+ * @brief ConsumerConfig - 消费者配置
+ */
+struct ConsumerConfig {
+    std::string consumer_id;      // 组内唯一标识（可选）
+    WorkerConfig worker_config;
+};
+
+/**
+ * @brief Connector - 连接器类
+ * 
+ * 核心职责：
+ * - 定义生产者-消费者之间的映射规则（1:1, 1:N, N:1, N:M）
+ * - 为每个消费者分配应该绑定的生产者 BufferPool
+ * - 不直接处理数据，只提供路由配置
+ * 
+ * 设计原则：
+ * - 简单：单一类，通过 Mode 枚举选择模式
+ * - 必要字段：mode, producer_indices, consumer_indices
+ * - 核心方法：getProducerIndexForConsumer()
+ * 
+ * ⭐ v2.18 新增：
+ * - 支持共享 PacketSource（ONE_TO_MANY 模式）
+ * - 存储共享实例，防止被销毁
+ * 
+ * ⭐ v2.20：从 Connector.hpp 移动到 WorkerConfig.hpp（统一配置管理）
+ */
+class Connector {
+public:
+    enum class Mode {
+        ONE_TO_ONE,      // 1:1 映射
+        ONE_TO_MANY,     // 1:N 映射（广播模式）
+        MANY_TO_ONE,     // N:1 映射（合并模式）
+        MANY_TO_MANY     // N:M 映射（轮询策略）
+    };
+    
+    /**
+     * @brief 构造函数
+     * @param mode 连接器模式
+     * @param producer_indices 生产者索引列表（在 Group 的 producers 数组中的位置）
+     * @param consumer_indices 消费者索引列表（在 Group 的 consumers 数组中的位置）
+     */
+    Connector(Mode mode,
+              const std::vector<size_t>& producer_indices,
+              const std::vector<size_t>& consumer_indices);
+    
+    /**
+     * @brief 获取消费者对应的生产者索引
+     * @param consumer_index 消费者在 consumer_indices 中的索引
+     * @return 生产者索引，-1 表示没有对应的生产者
+     */
+    int getProducerIndexForConsumer(size_t consumer_index) const;
+    
+    // 访问器
+    Mode getMode() const;
+    const std::vector<size_t>& getProducerIndices() const;
+    const std::vector<size_t>& getConsumerIndices() const;
+    
+    // ⭐ v2.18 新增：设置共享的 PacketSource
+    /**
+     * @brief 设置共享的 PacketSource（用于 ONE_TO_MANY 模式）
+     * @param source 共享的 PacketSource 实例
+     * 
+     * 功能：
+     * - Connector 持有共享实例，防止被销毁
+     * - 仅在 ONE_TO_MANY 模式下使用
+     */
+    void setSharedSource(std::shared_ptr<class IPacketSource> source);
+    
+    /**
+     * @brief 获取共享的 PacketSource
+     * @return 共享实例（如果没有则返回 nullptr）
+     */
+    std::shared_ptr<class IPacketSource> getSharedSource() const;
+
+private:
+    Mode mode_;
+    std::vector<size_t> producer_indices_;
+    std::vector<size_t> consumer_indices_;
+    std::vector<int> mapping_;  // consumer_index -> producer_index
+    
+    // ⭐ v2.18 新增：共享的 PacketSource（仅 ONE_TO_MANY 模式使用）
+    std::shared_ptr<class IPacketSource> shared_source_;
+    
+    void computeMapping();  // 根据 mode 计算映射关系
+};
+
+/**
+ * @brief ConnectorConfig - 连接器配置
+ */
+struct ConnectorConfig {
+    Connector::Mode mode;
+    std::vector<std::string> producer_ids;  // 关联的生产者 ID
+    std::vector<std::string> consumer_ids;   // 关联的消费者 ID
+};
+
+/**
+ * @brief WorkerGroup - Worker 工作组
+ * 
+ * ⭐ 核心概念：一个 Group = 多个生产者 + 多个消费者 + 多个连接器
+ * - Group 内强同步：通过连接器建立生产者-消费者关系
+ * - Group 间独立：多个 Group 并行运行，互不干扰
+ * - 数据源模式：消费者自动配置为 Buffer 模式，关联到生产者的 BufferPool
+ */
+struct WorkerGroup {
+    // 组标识
+    std::string group_id;
+    
+    // 多个生产者和消费者
+    std::vector<ProducerConfig> producer_configs;
+    std::vector<ConsumerConfig> consumer_configs;
+    
+    // 多个连接器
+    std::vector<ConnectorConfig> connector_configs;
+    
+    WorkerGroup() = default;
+    explicit WorkerGroup(const std::string& id) : group_id(id) {}
+};
+
+/**
+ * @brief MultiWorkerConfig - 多Worker配置结构
+ * 
+ * 设计理念：
+ * - 包含全局配置（如线程池大小）
+ * - 包含多个 WorkerGroup，每个 Group 包含多个生产者和消费者
+ * - 支持复杂的多 Worker 协作场景
+ */
+struct MultiWorkerConfig {
+    // ⭐ 核心：Worker Group 列表
+    std::vector<WorkerGroup> groups;
+    
+    // 全局线程池配置（用于初始化全局线程池）
+    // 默认值：64，范围：1-128
+    int thread_pool_size = 64;
+    
+    MultiWorkerConfig() = default;
 };
 
 #endif // WORKER_CONFIG_HPP

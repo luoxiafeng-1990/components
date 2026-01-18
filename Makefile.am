@@ -9,6 +9,7 @@ libcomponents_la_SOURCES = \
     source/productionline/worker/WorkerBase.cpp \
     source/productionline/worker/BufferFillingWorkerFacade.cpp \
     source/productionline/worker/BufferFillingWorkerFactory.cpp \
+    source/productionline/worker/WorkerConfig.cpp \
     source/productionline/worker/FfmpegDecodeRtspWorker.cpp \
     source/productionline/worker/FfmpegPacketRecorderWorker.cpp \
     source/productionline/worker/FfmpegDecodeVideoFileWorker.cpp \
@@ -28,7 +29,6 @@ libcomponents_la_SOURCES = \
     source/buffer/bufferpool/BufferPool.cpp \
     source/buffer/bufferpool/BufferPoolRegistry.cpp \
     source/productionline/VideoProductionLine.cpp \
-    source/productionline/Connector.cpp \
     source/productionline/MultiWorkerProductionLine.cpp \
     source/productionline/io/BufferWriter.cpp \
     source/productionline/io/BufferComparator.cpp

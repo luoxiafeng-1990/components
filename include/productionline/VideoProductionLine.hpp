@@ -4,6 +4,7 @@
 #include "productionline/worker/BufferFillingWorkerFacade.hpp"
 #include "productionline/worker/WorkerConfig.hpp"
 #include "monitor/PerformanceMonitor.hpp"
+#include "common/GlobalThreadPool.hpp"
 #include <string>
 #include <vector>
 #include <thread>
@@ -158,6 +159,18 @@ protected:
      * @param thread_id 线程ID
      */
     virtual void producerThreadFunc(int thread_id);
+    
+    /**
+     * @brief 初始化全局线程池（公共方法，供子类调用）
+     * 
+     * 验证规则：
+     * - 必须 > 0
+     * - 最大 128
+     * - 如果线程池已初始化，记录警告但继续使用现有大小
+     * 
+     * @param thread_pool_size 线程池大小（0=不初始化，使用默认值64）
+     */
+    void initializeGlobalThreadPool(int thread_pool_size);
     
     // ========== 成员变量（protected 以支持派生类访问）==========
     

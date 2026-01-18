@@ -2489,14 +2489,14 @@ static int test_multi_worker(const char* video_source) {
     // 1. 配置 MultiWorkerConfig
     LOG4CPLUS_INFO(test_logger, "[Step 1] Configuring MultiWorkerProductionLine...");
     
-    MultiWorkerProductionLine::MultiWorkerConfig config;
+    MultiWorkerConfig config;
     
     // 创建 WorkerGroup
-    MultiWorkerProductionLine::WorkerGroup group(is_rtsp ? "rtsp_decode_group" : "file_decode_group");
+    WorkerGroup group(is_rtsp ? "rtsp_decode_group" : "file_decode_group");
     
     // 1.1 配置生产者 Worker（从文件或RTSP录制包）
     LOG4CPLUS_INFO_FMT(test_logger, "    Configuring Producer Worker (%s Record)...", is_rtsp ? "RTSP" : "File");
-    MultiWorkerProductionLine::ProducerConfig producer_cfg;
+    ProducerConfig producer_cfg;
     producer_cfg.producer_id = "recorder";
     producer_cfg.worker_config = WorkerConfigBuilder()
         .setDataSourceConfig(
@@ -2516,7 +2516,7 @@ static int test_multi_worker(const char* video_source) {
         .setChannels(true, false)
         .build();
     
-    MultiWorkerProductionLine::ConsumerConfig consumer_hw_cfg;
+    ConsumerConfig consumer_hw_cfg;
     consumer_hw_cfg.consumer_id = "hw_dec";
     consumer_hw_cfg.worker_config = WorkerConfigBuilder()
         .setDisplayConfig(
@@ -2537,7 +2537,7 @@ static int test_multi_worker(const char* video_source) {
     // 1.3 配置 Consumer Worker 2（软件解码器）
     LOG4CPLUS_INFO(test_logger, "    Configuring Consumer Worker 2 (Software Decoder - libavcodec)...");
     
-    MultiWorkerProductionLine::ConsumerConfig consumer_sw_cfg;
+    ConsumerConfig consumer_sw_cfg;
     consumer_sw_cfg.consumer_id = "sw_dec";
     consumer_sw_cfg.worker_config = WorkerConfigBuilder()
         .setDisplayConfig(
@@ -2557,7 +2557,7 @@ static int test_multi_worker(const char* video_source) {
     
     // 1.4 配置连接器：一个生产者 → 两个消费者（ONE_TO_MANY 模式）
     LOG4CPLUS_INFO(test_logger, "    Configuring Connector (ONE_TO_MANY)...");
-    MultiWorkerProductionLine::ConnectorConfig connector_cfg;
+    ConnectorConfig connector_cfg;
     connector_cfg.mode = Connector::Mode::ONE_TO_MANY;
     connector_cfg.producer_ids.push_back("recorder");
     connector_cfg.consumer_ids.push_back("hw_dec");

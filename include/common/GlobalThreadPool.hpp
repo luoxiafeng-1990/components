@@ -74,6 +74,27 @@ public:
         }
     }
     
+    /**
+     * @brief 检查线程池是否已初始化
+     * @return true 如果已初始化，false 否则
+     */
+    bool isInitialized() const {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return thread_pool_ != nullptr;
+    }
+    
+    /**
+     * @brief 获取当前线程池大小
+     * @return 线程池大小（如果未初始化，返回 default_size_）
+     */
+    int getSize() const {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (thread_pool_) {
+            return thread_pool_->get_thread_count();
+        }
+        return default_size_;
+    }
+    
     // 禁止拷贝
     GlobalThreadPool(const GlobalThreadPool&) = delete;
     GlobalThreadPool& operator=(const GlobalThreadPool&) = delete;
@@ -82,7 +103,7 @@ private:
     GlobalThreadPool() = default;
     ~GlobalThreadPool() = default;
     
-    std::mutex mutex_;
+    mutable std::mutex mutex_;  // mutable 以支持 const 方法
     std::unique_ptr<BS::thread_pool<>> thread_pool_;
-    int default_size_ = 4;  // 默认线程池大小
+    int default_size_ = 64;  // 默认线程池大小（与配置默认值一致）
 };

@@ -1,7 +1,6 @@
 #include "productionline/MultiWorkerProductionLine.hpp"
 #include "productionline/worker/FfmpegPacketRecorderWorker.hpp"
 #include "productionline/worker/BufferPacketSource.hpp"
-#include "productionline/Connector.hpp"
 #include "buffer/bufferpool/BufferPoolRegistry.hpp"
 #include "common/Logger.hpp"
 #include "common/GlobalThreadPool.hpp"
@@ -221,9 +220,8 @@ bool MultiWorkerProductionLine::start() {
     
     LOG4CPLUS_INFO(logger_, "⭐ 启动 WorkerGroup 架构...");
     
-    // ========== 步骤2：初始化全局线程池 ==========
-    GlobalThreadPool::getInstance().setSize(config_.thread_pool_size);
-    LOG4CPLUS_INFO(logger_, "全局线程池已初始化 (size=" << config_.thread_pool_size << ")");
+    // ========== 步骤2：初始化全局线程池（调用父类方法，包含验证逻辑）==========
+    initializeGlobalThreadPool(config_.thread_pool_size);
     
     // ========== 步骤3：校验配置 ==========
     LOG4CPLUS_INFO(logger_, "校验配置...");

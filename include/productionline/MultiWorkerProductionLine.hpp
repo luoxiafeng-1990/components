@@ -3,7 +3,6 @@
 #include "productionline/VideoProductionLine.hpp"
 #include "productionline/worker/BufferFillingWorkerFacade.hpp"
 #include "productionline/worker/WorkerConfig.hpp"
-#include "productionline/Connector.hpp"
 #include "buffer/bufferpool/BufferPool.hpp"
 #include "buffer/bufferpool/BufferPoolRegistry.hpp"
 #include "common/Logger.hpp"
@@ -151,66 +150,8 @@ private:
  */
 class MultiWorkerProductionLine : public VideoProductionLine {
 public:
-    /**
-     * @brief ProducerConfig - 生产者配置
-     */
-    struct ProducerConfig {
-        std::string producer_id;      // 组内唯一标识
-        WorkerConfig worker_config;
-    };
-    
-    /**
-     * @brief ConsumerConfig - 消费者配置
-     */
-    struct ConsumerConfig {
-        std::string consumer_id;      // 组内唯一标识（可选）
-        WorkerConfig worker_config;
-    };
-    
-    /**
-     * @brief ConnectorConfig - 连接器配置
-     */
-    struct ConnectorConfig {
-        Connector::Mode mode;
-        std::vector<std::string> producer_ids;  // 关联的生产者 ID
-        std::vector<std::string> consumer_ids;   // 关联的消费者 ID
-    };
-    
-    /**
-     * @brief WorkerGroup - Worker 工作组
-     * 
-     * ⭐ 核心概念：一个 Group = 多个生产者 + 多个消费者 + 多个连接器
-     * - Group 内强同步：通过连接器建立生产者-消费者关系
-     * - Group 间独立：多个 Group 并行运行，互不干扰
-     * - 数据源模式：消费者自动配置为 Buffer 模式，关联到生产者的 BufferPool
-     */
-    struct WorkerGroup {
-        // 组标识
-        std::string group_id;
-        
-        // 多个生产者和消费者
-        std::vector<ProducerConfig> producer_configs;
-        std::vector<ConsumerConfig> consumer_configs;
-        
-        // 多个连接器
-        std::vector<ConnectorConfig> connector_configs;
-        
-        WorkerGroup() = default;
-        explicit WorkerGroup(const std::string& id) : group_id(id) {}
-    };
-    
-    /**
-     * @brief 多Worker配置结构
-     */
-    struct MultiWorkerConfig {
-        // ⭐ 核心：Worker Group 列表
-        std::vector<WorkerGroup> groups;
-        
-        // 全局线程池配置（用于初始化全局线程池）
-        int thread_pool_size = 4;
-        
-        MultiWorkerConfig() = default;
-    };
+    // ⭐ v2.20：配置结构已移动到 WorkerConfig.hpp
+    // 使用：ProducerConfig, ConsumerConfig, ConnectorConfig, WorkerGroup, MultiWorkerConfig
     
     /**
      * @brief 构造函数

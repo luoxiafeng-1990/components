@@ -1,0 +1,500 @@
+#include "productionline/worker/WorkerConfig.hpp"
+#include <stdexcept>
+
+// ============================================================
+// DataSourceConfigBuilder 实现
+// ============================================================
+
+DataSourceConfigBuilder& DataSourceConfigBuilder::setPath(std::string_view path) {
+    data_source_config_.path = std::string(path);
+    return *this;
+}
+
+DataSourceConfigBuilder& DataSourceConfigBuilder::setPath(const char* path) {
+    if (path) {
+        data_source_config_.path = path;
+    } else {
+        data_source_config_.path.clear();
+    }
+    return *this;
+}
+
+DataSourceConfigBuilder& DataSourceConfigBuilder::setPath(const std::string& path) {
+    data_source_config_.path = path;
+    return *this;
+}
+
+DataSourceConfigBuilder& DataSourceConfigBuilder::setBufferCount(int count) {
+    data_source_config_.buffer_count = count;
+    return *this;
+}
+
+WorkerConfig::DataSourceConfig DataSourceConfigBuilder::build() const {
+    return data_source_config_;
+}
+
+// ============================================================
+// DisplayConfigBuilder 实现
+// ============================================================
+
+DisplayConfigBuilder& DisplayConfigBuilder::setDisplayWidth(int width) {
+    display_config_.width = width;
+    return *this;
+}
+
+DisplayConfigBuilder& DisplayConfigBuilder::setDisplayHeight(int height) {
+    display_config_.height = height;
+    return *this;
+}
+
+DisplayConfigBuilder& DisplayConfigBuilder::setDisplayResolution(int width, int height) {
+    display_config_.width = width;
+    display_config_.height = height;
+    return *this;
+}
+
+DisplayConfigBuilder& DisplayConfigBuilder::setBitsPerPixel(int bpp) {
+    display_config_.bits_per_pixel = bpp;
+    return *this;
+}
+
+WorkerConfig::DisplayConfig DisplayConfigBuilder::build() const {
+    return display_config_;
+}
+
+// ============================================================
+// TacoConfigBuilder 实现
+// ============================================================
+
+TacoConfigBuilder& TacoConfigBuilder::setReorderDisable(bool disable) {
+    taco_config_.reorder_disable = disable;
+    return *this;
+}
+
+TacoConfigBuilder& TacoConfigBuilder::setChannels(bool ch0, bool ch1) {
+    taco_config_.ch0_enable = ch0;
+    taco_config_.ch1_enable = ch1;
+    return *this;
+}
+
+TacoConfigBuilder& TacoConfigBuilder::setOutputFormat(
+    Channel ch,
+    OutputFormat format,
+    ColorStandard std
+) {
+    int format_value = static_cast<int>(format);
+    int std_value = static_cast<int>(std);
+    
+    // 判断是 RGB 还是 YUV（RGB 格式枚举值 >= 1000）
+    bool is_rgb = (format_value >= 1000);
+    
+    if (ch == Channel::CH0) {
+        // 通道0仅支持 YUV
+        if (is_rgb) {
+            // 通道0不支持 RGB 格式，忽略此配置
+            return *this;
+        }
+        // 设置 YUV 格式
+        taco_config_.ch0_yuv_format = format_value;
+        taco_config_.ch0_yuv_std = std_value;
+        
+    } else if (ch == Channel::CH1) {
+        // 通道1支持 RGB 和 YUV
+        taco_config_.ch1_rgb = is_rgb;
+        
+        if (is_rgb) {
+            // RGB 格式：需要映射回驱动的原始值
+            taco_config_.ch1_rgb_format = mapEnumToRgbDriverValue(format);
+            taco_config_.ch1_rgb_std = std_value;
+        } else {
+            // YUV 格式
+            taco_config_.ch1_yuv_format = format_value;
+            taco_config_.ch1_yuv_std = std_value;
+        }
+    }
+    
+    return *this;
+}
+
+TacoConfigBuilder& TacoConfigBuilder::setCrop(Channel ch, int x, int y, int width, int height) {
+    if (ch == Channel::CH0) {
+        taco_config_.ch0_crop_x = x;
+        taco_config_.ch0_crop_y = y;
+        taco_config_.ch0_crop_width = width;
+        taco_config_.ch0_crop_height = height;
+    } else if (ch == Channel::CH1) {
+        taco_config_.ch1_crop_x = x;
+        taco_config_.ch1_crop_y = y;
+        taco_config_.ch1_crop_width = width;
+        taco_config_.ch1_crop_height = height;
+    }
+    return *this;
+}
+
+TacoConfigBuilder& TacoConfigBuilder::setScale(Channel ch, int width, int height) {
+    if (ch == Channel::CH0) {
+        taco_config_.ch0_scale_width = width;
+        taco_config_.ch0_scale_height = height;
+    } else if (ch == Channel::CH1) {
+        taco_config_.ch1_scale_width = width;
+        taco_config_.ch1_scale_height = height;
+    }
+    return *this;
+}
+
+WorkerConfig::DecoderConfig::TacoConfig TacoConfigBuilder::build() const {
+    return taco_config_;
+}
+
+// ============================================================
+// TacoConfigBuilder 静态辅助函数实现
+// ============================================================
+
+OutputFormat TacoConfigBuilder::mapFormatNameToEnum(std::string_view format_name) {
+    // YUV 格式
+    if (format_name == "auto" || format_name == "yuv_auto") return OutputFormat::YUV_AUTO;
+    if (format_name == "nv12") return OutputFormat::YUV_NV12;
+    if (format_name == "nv21") return OutputFormat::YUV_NV21;
+    if (format_name == "i420" || format_name == "yuv420p") return OutputFormat::YUV_I420;
+    if (format_name == "yv12") return OutputFormat::YUV_YV12;
+    if (format_name == "p010") return OutputFormat::YUV_P010;
+    if (format_name == "nv16") return OutputFormat::YUV_NV16;
+    if (format_name == "nv61") return OutputFormat::YUV_NV61;
+    if (format_name == "i422" || format_name == "yuv422p") return OutputFormat::YUV_I422;
+    if (format_name == "nv24") return OutputFormat::YUV_NV24;
+    if (format_name == "i444" || format_name == "yuv444p") return OutputFormat::YUV_I444;
+    
+    // RGB 格式
+    if (format_name == "argb888") return OutputFormat::RGB_ARGB888;
+    if (format_name == "abgr888") return OutputFormat::RGB_ABGR888;
+    if (format_name == "rgba888") return OutputFormat::RGB_RGBA888;
+    if (format_name == "bgra888") return OutputFormat::RGB_BGRA888;
+    if (format_name == "rgb888") return OutputFormat::RGB_RGB888;
+    if (format_name == "bgr888") return OutputFormat::RGB_BGR888;
+    if (format_name == "xrgb888") return OutputFormat::RGB_XRGB888;
+    if (format_name == "xbgr888") return OutputFormat::RGB_XBGR888;
+    if (format_name == "rgbx888") return OutputFormat::RGB_RGBX888;
+    if (format_name == "bgrx888") return OutputFormat::RGB_BGRX888;
+    if (format_name == "rgb888_planar") return OutputFormat::RGB_RGB888_PLANAR;
+    if (format_name == "bgr888_planar") return OutputFormat::RGB_BGR888_PLANAR;
+    if (format_name == "r16g16b16") return OutputFormat::RGB_R16G16B16;
+    if (format_name == "b16g16r16") return OutputFormat::RGB_B16G16R16;
+    if (format_name == "gbrp") return OutputFormat::RGB_GBRP;
+    
+    // 默认返回 YUV_AUTO
+    return OutputFormat::YUV_AUTO;
+}
+
+ColorStandard TacoConfigBuilder::mapColorStdNameToEnum(std::string_view std_name) {
+    if (std_name == "none") return ColorStandard::NONE;
+    if (std_name == "bt601") return ColorStandard::BT601;
+    if (std_name == "bt601_l" || std_name == "bt601_limited") return ColorStandard::BT601_LIMITED;
+    if (std_name == "bt709") return ColorStandard::BT709;
+    if (std_name == "bt709_l" || std_name == "bt709_limited") return ColorStandard::BT709_LIMITED;
+    if (std_name == "bt2020") return ColorStandard::BT2020;
+    if (std_name == "bt2020_l" || std_name == "bt2020_limited") return ColorStandard::BT2020_LIMITED;
+    
+    // 默认返回 BT601
+    return ColorStandard::BT601;
+}
+
+std::string_view TacoConfigBuilder::mapFormatEnumToName(OutputFormat format) {
+    switch (format) {
+        // YUV 格式
+        case OutputFormat::YUV_AUTO: return "yuv_auto";
+        case OutputFormat::YUV_NV12: return "nv12";
+        case OutputFormat::YUV_NV21: return "nv21";
+        case OutputFormat::YUV_I420: return "i420";
+        case OutputFormat::YUV_YV12: return "yv12";
+        case OutputFormat::YUV_P010: return "p010";
+        case OutputFormat::YUV_NV16: return "nv16";
+        case OutputFormat::YUV_NV61: return "nv61";
+        case OutputFormat::YUV_I422: return "i422";
+        case OutputFormat::YUV_NV24: return "nv24";
+        case OutputFormat::YUV_I444: return "i444";
+        
+        // RGB 格式
+        case OutputFormat::RGB_ARGB888: return "argb888";
+        case OutputFormat::RGB_ABGR888: return "abgr888";
+        case OutputFormat::RGB_RGBA888: return "rgba888";
+        case OutputFormat::RGB_BGRA888: return "bgra888";
+        case OutputFormat::RGB_RGB888: return "rgb888";
+        case OutputFormat::RGB_BGR888: return "bgr888";
+        case OutputFormat::RGB_XRGB888: return "xrgb888";
+        case OutputFormat::RGB_XBGR888: return "xbgr888";
+        case OutputFormat::RGB_RGBX888: return "rgbx888";
+        case OutputFormat::RGB_BGRX888: return "bgrx888";
+        case OutputFormat::RGB_RGB888_PLANAR: return "rgb888_planar";
+        case OutputFormat::RGB_BGR888_PLANAR: return "bgr888_planar";
+        case OutputFormat::RGB_R16G16B16: return "r16g16b16";
+        case OutputFormat::RGB_B16G16R16: return "b16g16r16";
+        case OutputFormat::RGB_GBRP: return "gbrp";
+        
+        default: return "unknown";
+    }
+}
+
+std::string_view TacoConfigBuilder::mapColorStdEnumToName(ColorStandard std) {
+    switch (std) {
+        case ColorStandard::NONE: return "none";
+        case ColorStandard::BT601: return "bt601";
+        case ColorStandard::BT601_LIMITED: return "bt601_limited";
+        case ColorStandard::BT709: return "bt709";
+        case ColorStandard::BT709_LIMITED: return "bt709_limited";
+        case ColorStandard::BT2020: return "bt2020";
+        case ColorStandard::BT2020_LIMITED: return "bt2020_limited";
+        default: return "unknown";
+    }
+}
+
+int TacoConfigBuilder::mapEnumToRgbDriverValue(OutputFormat format) {
+    switch (format) {
+        case OutputFormat::RGB_ARGB888: return 9;
+        case OutputFormat::RGB_ABGR888: return 11;
+        case OutputFormat::RGB_RGBA888: return 13;
+        case OutputFormat::RGB_BGRA888: return 15;
+        case OutputFormat::RGB_RGB888: return 1;
+        case OutputFormat::RGB_BGR888: return 3;
+        case OutputFormat::RGB_XRGB888: return 25;
+        case OutputFormat::RGB_XBGR888: return 27;
+        case OutputFormat::RGB_RGBX888: return 21;
+        case OutputFormat::RGB_BGRX888: return 23;
+        case OutputFormat::RGB_RGB888_PLANAR: return 2;
+        case OutputFormat::RGB_BGR888_PLANAR: return 4;
+        case OutputFormat::RGB_R16G16B16: return 17;
+        case OutputFormat::RGB_B16G16R16: return 19;
+        case OutputFormat::RGB_GBRP: return 28;
+        default: return 9; // 默认 ARGB888
+    }
+}
+
+// ============================================================
+// DecoderConfigBuilder 实现
+// ============================================================
+
+DecoderConfigBuilder& DecoderConfigBuilder::setDecoderName(std::string_view name) {
+    decoder_config_.name = std::string(name);
+    return *this;
+}
+
+DecoderConfigBuilder& DecoderConfigBuilder::setDecoderName(const char* name) {
+    if (name) {
+        decoder_config_.name = name;
+    } else {
+        decoder_config_.name = std::nullopt;
+    }
+    return *this;
+}
+
+DecoderConfigBuilder& DecoderConfigBuilder::clearDecoderName() {
+    decoder_config_.name = std::nullopt;
+    return *this;
+}
+
+DecoderConfigBuilder& DecoderConfigBuilder::setHwaccelDevice(std::string_view device) {
+    decoder_config_.hwaccel_device = std::string(device);
+    return *this;
+}
+
+DecoderConfigBuilder& DecoderConfigBuilder::setHwaccelDevice(const char* device) {
+    if (device) {
+        decoder_config_.hwaccel_device = device;
+    } else {
+        decoder_config_.hwaccel_device = std::nullopt;
+    }
+    return *this;
+}
+
+DecoderConfigBuilder& DecoderConfigBuilder::setDecodeThreads(int threads) {
+    decoder_config_.decode_threads = threads;
+    return *this;
+}
+
+DecoderConfigBuilder& DecoderConfigBuilder::useTaco(
+    std::string_view codec,
+    const WorkerConfig::DecoderConfig::TacoConfig& taco_config
+) {
+    // 拼接解码器名称：codec + "_taco"
+    decoder_config_.name = std::string(codec) + "_taco";
+    decoder_config_.enable_hardware = true;
+    decoder_config_.taco = taco_config;
+    return *this;
+}
+
+DecoderConfigBuilder& DecoderConfigBuilder::useSoftware() {
+    decoder_config_.name = std::nullopt;
+    decoder_config_.enable_hardware = false;
+    return *this;
+}
+
+DecoderConfigBuilder& DecoderConfigBuilder::useCuvid(std::string_view codec) {
+    decoder_config_.name = std::string(codec) + "_cuvid";
+    decoder_config_.enable_hardware = true;
+    decoder_config_.hwaccel_device = "cuda";
+    return *this;
+}
+
+DecoderConfigBuilder& DecoderConfigBuilder::useQsv(std::string_view codec) {
+    decoder_config_.name = std::string(codec) + "_qsv";
+    decoder_config_.enable_hardware = true;
+    decoder_config_.hwaccel_device = "qsv";
+    return *this;
+}
+
+DecoderConfigBuilder& DecoderConfigBuilder::useVaapi(std::string_view codec) {
+    decoder_config_.name = std::string(codec) + "_vaapi";
+    decoder_config_.enable_hardware = true;
+    decoder_config_.hwaccel_device = "vaapi";
+    return *this;
+}
+
+WorkerConfig::DecoderConfig DecoderConfigBuilder::build() const {
+    return decoder_config_;
+}
+
+// ============================================================
+// WorkerConfigBuilder 实现
+// ============================================================
+
+WorkerConfigBuilder& WorkerConfigBuilder::setDataSourceConfig(const WorkerConfig::DataSourceConfig& data_source_config) {
+    worker_config_.data_source = data_source_config;
+    return *this;
+}
+
+WorkerConfigBuilder& WorkerConfigBuilder::setDisplayConfig(const WorkerConfig::DisplayConfig& display_config) {
+    worker_config_.display = display_config;
+    return *this;
+}
+
+WorkerConfigBuilder& WorkerConfigBuilder::setDecoderConfig(const WorkerConfig::DecoderConfig& decoder_config) {
+    worker_config_.decoder = decoder_config;
+    return *this;
+}
+
+WorkerConfigBuilder& WorkerConfigBuilder::setWorkerType(WorkerType type) {
+    worker_config_.worker_type = type;
+    return *this;
+}
+
+WorkerConfigBuilder& WorkerConfigBuilder::setThreadPoolSize(int size) {
+    worker_config_.thread_pool_size = size;
+    return *this;
+}
+
+WorkerConfig WorkerConfigBuilder::build() const {
+    return worker_config_;
+}
+
+// ============================================================
+// Connector 类实现（v2.20：从 Connector.cpp 移动）
+// ============================================================
+
+Connector::Connector(Mode mode,
+                     const std::vector<size_t>& producer_indices,
+                     const std::vector<size_t>& consumer_indices)
+    : mode_(mode)
+    , producer_indices_(producer_indices)
+    , consumer_indices_(consumer_indices)
+    , shared_source_(nullptr)  // ⭐ v2.18：初始化共享实例
+{
+    if (producer_indices_.empty()) {
+        throw std::invalid_argument("Connector: producer_indices cannot be empty");
+    }
+    if (consumer_indices_.empty()) {
+        throw std::invalid_argument("Connector: consumer_indices cannot be empty");
+    }
+    
+    computeMapping();
+}
+
+void Connector::computeMapping() {
+    mapping_.clear();
+    mapping_.resize(consumer_indices_.size(), -1);
+    
+    switch (mode_) {
+        case Mode::ONE_TO_ONE: {
+            // 1:1 映射：producer_indices[i] -> consumer_indices[i]
+            if (producer_indices_.size() != consumer_indices_.size()) {
+                throw std::invalid_argument("Connector ONE_TO_ONE: producer_indices.size() must equal consumer_indices.size()");
+            }
+            for (size_t i = 0; i < consumer_indices_.size(); i++) {
+                mapping_[i] = static_cast<int>(i);  // consumer_index i 对应 producer_index i
+            }
+            break;
+        }
+        
+        case Mode::ONE_TO_MANY: {
+            // 1:N 映射：所有消费者都绑定到同一个生产者（索引0）
+            if (producer_indices_.size() != 1) {
+                throw std::invalid_argument("Connector ONE_TO_MANY: producer_indices.size() must be 1");
+            }
+            for (size_t i = 0; i < consumer_indices_.size(); i++) {
+                mapping_[i] = 0;  // 所有消费者都绑定到生产者索引0
+            }
+            break;
+        }
+        
+        case Mode::MANY_TO_ONE: {
+            // N:1 映射：所有生产者轮询绑定到同一个消费者
+            if (consumer_indices_.size() != 1) {
+                throw std::invalid_argument("Connector MANY_TO_ONE: consumer_indices.size() must be 1");
+            }
+            // 使用轮询策略：第一个消费者绑定到第一个生产者
+            // 注意：在实际使用中，可能需要更复杂的轮询逻辑
+            mapping_[0] = 0;  // 消费者索引0绑定到生产者索引0
+            break;
+        }
+        
+        case Mode::MANY_TO_MANY: {
+            // N:M 映射：轮询策略
+            // consumer_index i 绑定到 producer_index (i % producer_indices_.size())
+            for (size_t i = 0; i < consumer_indices_.size(); i++) {
+                mapping_[i] = static_cast<int>(i % producer_indices_.size());
+            }
+            break;
+        }
+    }
+}
+
+int Connector::getProducerIndexForConsumer(size_t consumer_index) const {
+    if (consumer_index >= consumer_indices_.size()) {
+        return -1;
+    }
+    
+    int producer_idx_in_mapping = mapping_[consumer_index];
+    if (producer_idx_in_mapping < 0) {
+        return -1;
+    }
+    
+    // producer_idx_in_mapping 是 producer_indices_ 数组中的索引
+    // 需要返回实际的 producer_indices_[producer_idx_in_mapping]
+    if (static_cast<size_t>(producer_idx_in_mapping) >= producer_indices_.size()) {
+        return -1;
+    }
+    
+    return static_cast<int>(producer_indices_[producer_idx_in_mapping]);
+}
+
+// ============================================================
+// Connector 访问器实现
+// ============================================================
+
+Connector::Mode Connector::getMode() const {
+    return mode_;
+}
+
+const std::vector<size_t>& Connector::getProducerIndices() const {
+    return producer_indices_;
+}
+
+const std::vector<size_t>& Connector::getConsumerIndices() const {
+    return consumer_indices_;
+}
+
+void Connector::setSharedSource(std::shared_ptr<class IPacketSource> source) {
+    shared_source_ = source;
+}
+
+std::shared_ptr<class IPacketSource> Connector::getSharedSource() const {
+    return shared_source_;
+}
