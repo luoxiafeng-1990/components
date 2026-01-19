@@ -6,6 +6,7 @@
 #include <optional>
 #include <memory>
 #include <vector>
+#include <map>
 #include "common/Logger.hpp"
 
 // FFmpeg 头文件（用于 AVRational 和 AVCodecParameters）
@@ -743,7 +744,7 @@ private:
  * @brief ProducerConfig - 生产者配置
  */
 struct ProducerConfig {
-    std::string producer_id;      // 组内唯一标识
+    std::string producer_name;      // 组内唯一标识
     WorkerConfig worker_config;
 };
 
@@ -751,7 +752,7 @@ struct ProducerConfig {
  * @brief ConsumerConfig - 消费者配置
  */
 struct ConsumerConfig {
-    std::string consumer_id;      // 组内唯一标识（可选）
+    std::string consumer_name;      // 组内唯一标识（可选）
     WorkerConfig worker_config;
 };
 
@@ -765,14 +766,16 @@ struct ConsumerConfig {
  * 
  * 设计原则：
  * - 简单：单一类，通过 Mode 枚举选择模式
- * - 必要字段：mode, producer_indices, consumer_indices
- * - 核心方法：getProducerIndexForConsumer()
+ * - 必要字段：mode, producer_names, consumer_names
+ * - 核心方法：getProducerNameForConsumer()
  * 
  * ⭐ v2.18 新增：
  * - 支持共享 PacketSource（ONE_TO_MANY 模式）
  * - 存储共享实例，防止被销毁
  * 
  * ⭐ v2.20：从 Connector.hpp 移动到 WorkerConfig.hpp（统一配置管理）
+ * 
+ * ⭐ v2.21：重构为使用名字而非索引，提高一致性和可读性
  */
 class Connector {
 public:
@@ -786,52 +789,67 @@ public:
     /**
      * @brief 构造函数
      * @param mode 连接器模式
-     * @param producer_indices 生产者索引列表（在 Group 的 producers 数组中的位置）
-     * @param consumer_indices 消费者索引列表（在 Group 的 consumers 数组中的位置）
+     * @param producer_names 生产者名称列表
+     * @param consumer_names 消费者名称列表
      */
     Connector(Mode mode,
-              const std::vector<size_t>& producer_indices,
-              const std::vector<size_t>& consumer_indices);
+              const std::vector<std::string>& producer_names,
+              const std::vector<std::string>& consumer_names);
     
     /**
-     * @brief 获取消费者对应的生产者索引
-     * @param consumer_index 消费者在 consumer_indices 中的索引
-     * @return 生产者索引，-1 表示没有对应的生产者
+     * @brief 获取消费者对应的生产者名称
+     * @param consumer_name 消费者名称
+     * @return 生产者名称，空字符串表示没有对应的生产者
      */
-    int getProducerIndexForConsumer(size_t consumer_index) const;
+    std::string getProducerNameForConsumer(const std::string& consumer_name) const;
+    
+    /**
+     * @brief 检查是否包含指定生产者
+     * @param producer_name 生产者名称
+     * @return true 如果包含该生产者，false 否则
+     */
+    bool containsProducer(const std::string& producer_name) const;
+    
+    /**
+     * @brief 检查是否包含指定消费者
+     * @param consumer_name 消费者名称
+     * @return true 如果包含该消费者，false 否则
+     */
+    bool containsConsumer(const std::string& consumer_name) const;
     
     // 访问器
     Mode getMode() const;
-    const std::vector<size_t>& getProducerIndices() const;
-    const std::vector<size_t>& getConsumerIndices() const;
+    const std::vector<std::string>& getProducerNames() const;
+    const std::vector<std::string>& getConsumerNames() const;
     
-    // ⭐ v2.18 新增：设置共享的 PacketSource
+    // ⭐ v2.18 新增：设置共享的 PacketSource（按生产者名称）
     /**
-     * @brief 设置共享的 PacketSource（用于 ONE_TO_MANY 模式）
+     * @brief 为指定生产者设置共享的 PacketSource
+     * @param producer_name 生产者名称
      * @param source 共享的 PacketSource 实例
      * 
      * 功能：
      * - Connector 持有共享实例，防止被销毁
-     * - 仅在 ONE_TO_MANY 模式下使用
+     * - 每个生产者都有自己独立的共享数据源
+     * - 支持多个生产者，每个生产者对应一个共享数据源
      */
-    void setSharedSource(std::shared_ptr<class IPacketSource> source);
+    void setSharedSource(const std::string& producer_name, std::shared_ptr<class IPacketSource> source);
     
     /**
-     * @brief 获取共享的 PacketSource
+     * @brief 获取指定生产者的共享 PacketSource
+     * @param producer_name 生产者名称
      * @return 共享实例（如果没有则返回 nullptr）
      */
-    std::shared_ptr<class IPacketSource> getSharedSource() const;
+    std::shared_ptr<class IPacketSource> getSharedSource(const std::string& producer_name) const;
 
 private:
     Mode mode_;
-    std::vector<size_t> producer_indices_;
-    std::vector<size_t> consumer_indices_;
-    std::vector<int> mapping_;  // consumer_index -> producer_index
+    std::vector<std::string> producer_names_;
+    std::vector<std::string> consumer_names_;
     
-    // ⭐ v2.18 新增：共享的 PacketSource（仅 ONE_TO_MANY 模式使用）
-    std::shared_ptr<class IPacketSource> shared_source_;
-    
-    void computeMapping();  // 根据 mode 计算映射关系
+    // ⭐ v2.18 新增：共享的 PacketSource（按生产者名称索引）
+    // 每个生产者都有自己独立的共享数据源
+    std::map<std::string, std::shared_ptr<class IPacketSource>> shared_sources_;
 };
 
 /**
@@ -839,32 +857,46 @@ private:
  */
 struct ConnectorConfig {
     Connector::Mode mode;
-    std::vector<std::string> producer_ids;  // 关联的生产者 ID
-    std::vector<std::string> consumer_ids;   // 关联的消费者 ID
+    std::vector<std::string> producer_names;  // 关联的生产者名称
+    std::vector<std::string> consumer_names;   // 关联的消费者名称
 };
 
 /**
- * @brief WorkerGroup - Worker 工作组
+ * @brief WorkerGroupConfig - Worker 工作组配置结构
+ * 
+ * ⭐ 设计说明：配置与运行时分离模式（Configuration vs Runtime State）
+ * 
+ * 职责：
+ * - 描述"要创建什么"（配置数据）
+ * - 在构造函数时传入，整个生命周期只读
+ * - 可序列化/反序列化（纯数据，不包含对象实例）
  * 
  * ⭐ 核心概念：一个 Group = 多个生产者 + 多个消费者 + 多个连接器
  * - Group 内强同步：通过连接器建立生产者-消费者关系
  * - Group 间独立：多个 Group 并行运行，互不干扰
  * - 数据源模式：消费者自动配置为 Buffer 模式，关联到生产者的 BufferPool
+ * 
+ * 注意：运行时数据（实际创建的对象、线程、统计信息等）存储在 WorkerGroupRuntime 中
+ * 
+ * @see WorkerGroupRuntime - 对应的运行时数据结构
  */
-struct WorkerGroup {
+struct WorkerGroupConfig {
     // 组标识
     std::string group_id;
     
-    // 多个生产者和消费者
+    // 多个生产者和消费者配置
     std::vector<ProducerConfig> producer_configs;
     std::vector<ConsumerConfig> consumer_configs;
     
-    // 多个连接器
+    // 多个连接器配置
     std::vector<ConnectorConfig> connector_configs;
     
-    WorkerGroup() = default;
-    explicit WorkerGroup(const std::string& id) : group_id(id) {}
+    WorkerGroupConfig() = default;
+    explicit WorkerGroupConfig(const std::string& id) : group_id(id) {}
 };
+
+// 向后兼容：保留 WorkerGroup 作为 WorkerGroupConfig 的别名
+using WorkerGroup = WorkerGroupConfig;
 
 /**
  * @brief MultiWorkerConfig - 多Worker配置结构
@@ -875,8 +907,8 @@ struct WorkerGroup {
  * - 支持复杂的多 Worker 协作场景
  */
 struct MultiWorkerConfig {
-    // ⭐ 核心：Worker Group 列表
-    std::vector<WorkerGroup> groups;
+    // ⭐ 核心：Worker Group 配置列表
+    std::vector<WorkerGroupConfig> groups;
     
     // 全局线程池配置（用于初始化全局线程池）
     // 默认值：64，范围：1-128

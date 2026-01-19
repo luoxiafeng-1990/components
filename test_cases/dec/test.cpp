@@ -2497,7 +2497,7 @@ static int test_multi_worker(const char* video_source) {
     // 1.1 配置生产者 Worker（从文件或RTSP录制包）
     LOG4CPLUS_INFO_FMT(test_logger, "    Configuring Producer Worker (%s Record)...", is_rtsp ? "RTSP" : "File");
     ProducerConfig producer_cfg;
-    producer_cfg.producer_id = "recorder";
+    producer_cfg.producer_name = "recorder";
     producer_cfg.worker_config = WorkerConfigBuilder()
         .setDataSourceConfig(
             DataSourceConfigBuilder()
@@ -2517,7 +2517,7 @@ static int test_multi_worker(const char* video_source) {
         .build();
     
     ConsumerConfig consumer_hw_cfg;
-    consumer_hw_cfg.consumer_id = "hw_dec";
+    consumer_hw_cfg.consumer_name = "hw_dec";
     consumer_hw_cfg.worker_config = WorkerConfigBuilder()
         .setDisplayConfig(
             DisplayConfigBuilder()
@@ -2538,7 +2538,7 @@ static int test_multi_worker(const char* video_source) {
     LOG4CPLUS_INFO(test_logger, "    Configuring Consumer Worker 2 (Software Decoder - libavcodec)...");
     
     ConsumerConfig consumer_sw_cfg;
-    consumer_sw_cfg.consumer_id = "sw_dec";
+    consumer_sw_cfg.consumer_name = "sw_dec";
     consumer_sw_cfg.worker_config = WorkerConfigBuilder()
         .setDisplayConfig(
             DisplayConfigBuilder()
@@ -2559,9 +2559,9 @@ static int test_multi_worker(const char* video_source) {
     LOG4CPLUS_INFO(test_logger, "    Configuring Connector (ONE_TO_MANY)...");
     ConnectorConfig connector_cfg;
     connector_cfg.mode = Connector::Mode::ONE_TO_MANY;
-    connector_cfg.producer_ids.push_back("recorder");
-    connector_cfg.consumer_ids.push_back("hw_dec");
-    connector_cfg.consumer_ids.push_back("sw_dec");
+    connector_cfg.producer_names.push_back("recorder");
+    connector_cfg.consumer_names.push_back("hw_dec");
+    connector_cfg.consumer_names.push_back("sw_dec");
     group.connector_configs.push_back(connector_cfg);
     
     // 添加 Group 到配置

@@ -1582,7 +1582,7 @@ static int test_mp4_decode_single_impl(const char *video_path,
 
     // 生产者：Packet Recorder（录制 packet）
     MultiWorkerProductionLine::ProducerConfig producer_config;
-    producer_config.producer_id = "packet_recorder";
+    producer_config.producer_name = "packet_recorder";
     producer_config.worker_config =
         WorkerConfigBuilder()
             .setDataSourceConfig(
@@ -1593,7 +1593,7 @@ static int test_mp4_decode_single_impl(const char *video_path,
 
     // 消费者1：硬件解码器（当前使用的解码器）
     MultiWorkerProductionLine::ConsumerConfig hw_consumer_config;
-    hw_consumer_config.consumer_id = "hw_decoder";
+    hw_consumer_config.consumer_name = "hw_decoder";
     hw_consumer_config.worker_config =
         WorkerConfigBuilder()
             .setDecoderConfig(decoderBuilder.build())
@@ -1605,7 +1605,7 @@ static int test_mp4_decode_single_impl(const char *video_path,
     DecoderConfigBuilder sw_decoder_builder;
     sw_decoder_builder.useSoftware();
     MultiWorkerProductionLine::ConsumerConfig sw_consumer_config;
-    sw_consumer_config.consumer_id = "sw_decoder";
+    sw_consumer_config.consumer_name = "sw_decoder";
     sw_consumer_config.worker_config =
         WorkerConfigBuilder()
             .setDecoderConfig(sw_decoder_builder.build())

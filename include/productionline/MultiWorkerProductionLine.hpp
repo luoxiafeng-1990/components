@@ -201,21 +201,7 @@ public:
     size_t getGroupCount() const { return groups_.size(); }
     
     /**
-     * @brief 获取指定 Group 的生产者 BufferPool ID
-     * @param group_index Group 索引
-     * @return BufferPool ID，如果索引无效则返回 0
-     */
-    uint64_t getGroupProducerBufferPoolId(size_t group_index) const;
-    
-    /**
-     * @brief 获取指定 Group 的消费者数量
-     * @param group_index Group 索引
-     * @return 消费者数量
-     */
-    size_t getGroupConsumerCount(size_t group_index) const;
-    
-    /**
-     * @brief 获取指定 Group 的消费者 BufferPool ID
+     * @brief 获取指定 Group 的消费者 BufferPool ID（通过索引）
      * @param group_index Group 索引
      * @param consumer_index 消费者索引（在该 Group 内）
      * @return BufferPool ID，如果索引无效则返回 0
@@ -243,30 +229,38 @@ private:
     // ========== 内部类型定义 ==========
     
     /**
-     * @brief GroupData - Group 运行时数据（简化版）
+     * @brief WorkerGroupRuntime - Group 运行时数据
+     * 
+     * ⭐ 设计说明：配置与运行时分离模式（Configuration vs Runtime State）
+     * 
+     * 职责：
+     * - 存储"实际创建的对象"和"运行时状态"
+     * - 在 start() 时根据 WorkerGroupConfig 创建
+     * - 在 stop() 时销毁
+     * - 包含不可序列化的对象（线程、智能指针等）
      */
-    struct GroupData {
+    struct WorkerGroupRuntime {
         std::string group_id;
         
         // 生产者信息
         struct ProducerInfo {
-            std::string producer_id;
+            std::string producer_name;
             std::unique_ptr<VideoProductionLine> producer_line;
             uint64_t buffer_pool_id{0};
             std::weak_ptr<BufferPool> buffer_pool_weak;
         };
-        std::vector<std::unique_ptr<ProducerInfo>> producers;
-        std::unordered_map<std::string, ProducerInfo*> producer_by_id;
+        std::vector<std::unique_ptr<ProducerInfo>> producer_infos;
+        std::unordered_map<std::string, ProducerInfo*> producer_info_mapped_by_name;
         
         // 消费者信息
         struct ConsumerInfo {
-            std::string consumer_id;
+            std::string consumer_name;
             std::shared_ptr<BufferFillingWorkerFacade> worker;
             uint64_t buffer_pool_id{0};
             std::weak_ptr<BufferPool> buffer_pool_weak;
         };
-        std::vector<std::unique_ptr<ConsumerInfo>> consumers;
-        std::unordered_map<std::string, ConsumerInfo*> consumer_by_id;
+        std::vector<std::unique_ptr<ConsumerInfo>> consumer_infos;
+        std::unordered_map<std::string, ConsumerInfo*> consumer_info_mapped_by_name;
         
         // 连接器列表
         std::vector<std::unique_ptr<Connector>> connectors;
@@ -279,7 +273,47 @@ private:
         std::atomic<int64_t> processed_count{0};
         std::atomic<int64_t> success_count{0};
         std::atomic<int64_t> error_count{0};
+        
+        // ========== 查询方法 ==========
+        
+        /**
+         * @brief 根据生产者名称获取 ProducerInfo 指针
+         * @param producer_name 生产者名称
+         * @return ProducerInfo 指针，如果不存在则返回 nullptr
+         */
+        ProducerInfo* getProducerInfo(const std::string& producer_name) const;
+        
+        /**
+         * @brief 根据消费者名称获取 ConsumerInfo 指针
+         * @param consumer_name 消费者名称
+         * @return ConsumerInfo 指针，如果不存在则返回 nullptr
+         */
+        ConsumerInfo* getConsumerInfo(const std::string& consumer_name) const;
+        
+        /**
+         * @brief 根据生产者名称获取 BufferPool ID
+         * @param producer_name 生产者名称
+         * @return BufferPool ID，如果不存在则返回 0
+         */
+        uint64_t getProducerBufferPoolId(const std::string& producer_name) const;
+        
+        /**
+         * @brief 根据消费者名称获取 BufferPool ID
+         * @param consumer_name 消费者名称
+         * @return BufferPool ID，如果不存在则返回 0
+         */
+        uint64_t getConsumerBufferPoolId(const std::string& consumer_name) const;
+        
+        /**
+         * @brief 根据消费者名称查找所属的 Connector
+         * @param consumer_name 消费者名称
+         * @return Connector 指针，如果不存在则返回 nullptr
+         */
+        Connector* getConnectorForConsumer(const std::string& consumer_name) const;
     };
+    
+    // 向后兼容：保留 GroupData 作为 WorkerGroupRuntime 的别名
+    using GroupData = WorkerGroupRuntime;
     
     // ========== 内部方法 ==========
     
@@ -307,12 +341,42 @@ private:
      * 2. 等待所有消费者完成
      * 3. 循环执行
      */
-    void groupThreadFunc(GroupData* group);
+    void groupThreadFunc(WorkerGroupRuntime* group);
     
     /**
      * @brief 设置错误信息并触发回调
      */
     void setError(const std::string& error_msg) const;
+    
+    /**
+     * @brief 为单个 Group 创建所有生产者
+     * @param group Group 运行时对象指针
+     * @param group_config Group 配置
+     * @return true 如果成功，false 如果失败（失败时已调用 setError 和 groups_.clear()）
+     */
+    bool createProducersForGroup(WorkerGroupRuntime* group, const WorkerGroupConfig& group_config);
+    
+    /**
+     * @brief 为单个 Group 创建所有 Connector 并设置 shared_source
+     * @param group Group 运行时对象指针
+     * @param group_config Group 配置
+     * @return true 如果成功，false 如果失败（失败时已调用 setError 和 groups_.clear()）
+     */
+    bool createConnectorsForGroup(WorkerGroupRuntime* group, const WorkerGroupConfig& group_config);
+    
+    /**
+     * @brief 为单个 Group 创建所有消费者
+     * @param group Group 运行时对象指针
+     * @param group_config Group 配置
+     * @return true 如果成功，false 如果失败（失败时已调用 setError 和 groups_.clear()）
+     */
+    bool createConsumersForGroup(WorkerGroupRuntime* group, const WorkerGroupConfig& group_config);
+    
+    /**
+     * @brief 启动所有 Group 线程
+     * @return true 如果成功，false 如果失败（失败时已调用 setError 和 groups_.clear()）
+     */
+    bool startGroupThreads();
     
     // ========== 成员变量 ==========
     
