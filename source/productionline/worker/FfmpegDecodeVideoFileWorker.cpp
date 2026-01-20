@@ -137,7 +137,7 @@ bool FfmpegDecodeVideoFileWorker::open(const char* path) {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
     
     // 如果已经打开，先关闭
-    if (packet_source_ && packet_source_->isOpen()) {
+    if (packet_source_ && packet_source_->isOpen() && packet_source_->getDataSourceType() != IPacketSource::SourceType::BUFFER_SOURCE) {
         close();
     }
     
@@ -196,14 +196,6 @@ bool FfmpegDecodeVideoFileWorker::open(const char* path) {
         LOG4CPLUS_DEBUG_FMT(logger_, "[Worker] Output resolution from config: %dx%d", output_width_, output_height_);
     }
     
-    // 🎯 Worker职责：在open()时自动创建BufferPool（通过调用Allocator）
-    // 计算帧大小（使用配置值）
-    size_t frame_size = output_width_ * output_height_ * (worker_config_.display.bits_per_pixel / 8);
-    if (frame_size == 0) {
-        setError("Invalid frame size, cannot create BufferPool");
-        packet_source_->close();
-        return false;
-    }
     // v2.0: allocatePoolWithBuffers 返回 pool_id
     std::string pool_name;
     if (path) {
@@ -215,7 +207,7 @@ bool FfmpegDecodeVideoFileWorker::open(const char* path) {
     
     uint64_t pool_id = allocator_facade_.allocatePoolWithBuffers(
         worker_config_.data_source.buffer_count,
-        frame_size,
+        0,
         pool_name,
         "Video"
     );
@@ -247,8 +239,8 @@ bool FfmpegDecodeVideoFileWorker::open(const char* path) {
     LOG4CPLUS_DEBUG_FMT(logger_, "[Worker]    Resolution: %dx%d → %dx%d", getOriginalWidth(), getOriginalHeight(), output_width_, output_height_);
     LOG4CPLUS_DEBUG_FMT(logger_, "[Worker]    Codec: %s", codec_ctx_ptr_->codec->name);
     LOG4CPLUS_DEBUG_FMT(logger_, "[Worker]    Total frames (estimated): %d", packet_source_ ? packet_source_->getTotalFrames() : -1);
-    LOG4CPLUS_DEBUG_FMT(logger_, "[Worker]    BufferPool: '%s' (ID: %lu, %d buffers, %zu bytes each)", 
-           actual_pool_name.c_str(), pool_id, worker_config_.data_source.buffer_count, frame_size);
+    LOG4CPLUS_DEBUG_FMT(logger_, "[Worker]    BufferPool: '%s' (ID: %lu, %d buffers)", 
+           actual_pool_name.c_str(), pool_id, worker_config_.data_source.buffer_count);
     
     return true;
 }
@@ -694,7 +686,7 @@ bool FfmpegDecodeVideoFileWorker::hasMoreFrames() const {
     if (!packet_source_) {
         return false;
     }
-    return !packet_source_->isEof();
+    return !packet_source_->isAtEnd();
 }
 
 bool FfmpegDecodeVideoFileWorker::isAtEnd() const {
@@ -702,7 +694,7 @@ bool FfmpegDecodeVideoFileWorker::isAtEnd() const {
     if (!packet_source_) {
         return true;
     }
-    return packet_source_->isEof();
+    return packet_source_->isAtEnd();
 }
 
 // ============================================================================
@@ -773,7 +765,7 @@ bool FfmpegDecodeVideoFileWorker::readAndSendPacket(AVPacket* packet_ptr) {
             if (read_ret == AVERROR_EOF) {
                 LOG4CPLUS_DEBUG(logger_, "🔄 EOF reached");
                 // 🔧 修复：Worker 不应该决定是否循环，只返回 false
-                // EOF 状态由数据源管理（通过 isEof() 查询）
+                // EOF 状态由数据源管理（通过 isAtEnd() 查询）
                 // 循环逻辑由 ProductionLine 根据 loop_ 变量控制
                 av_packet_unref(packet_ptr);
                 return false;
@@ -993,7 +985,7 @@ void FfmpegDecodeVideoFileWorker::printStats() const {
     LOG4CPLUS_INFO_FMT(logger_, "[Worker]    Total frames: %d", packet_source_ ? packet_source_->getTotalFrames() : -1);
     LOG4CPLUS_INFO_FMT(logger_, "[Worker]    Current frame: %d", current_frame_index_);
     LOG4CPLUS_INFO_FMT(logger_, "[Worker]    Decoded frames: %d", decoded_frames_.load());
-    LOG4CPLUS_INFO_FMT(logger_, "[Worker]    EOF: %s", packet_source_ && packet_source_->isEof() ? "YES" : "NO");
+    LOG4CPLUS_INFO_FMT(logger_, "[Worker]    EOF: %s", packet_source_ && packet_source_->isAtEnd() ? "YES" : "NO");
 }
 
 // ============================================================================

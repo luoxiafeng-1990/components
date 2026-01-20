@@ -245,11 +245,11 @@ const char* FfmpegPacketRecorderWorker::getPath() const {
 }
 
 bool FfmpegPacketRecorderWorker::hasMoreFrames() const {
-    return packet_source_ && packet_source_->isOpen() && !packet_source_->isEof();
+    return packet_source_ && packet_source_->isOpen() && !packet_source_->isAtEnd();
 }
 
 bool FfmpegPacketRecorderWorker::isAtEnd() const {
-    return !packet_source_ || packet_source_->isEof();
+    return !packet_source_ || packet_source_->isAtEnd();
 }
 
 // ============ WorkerBase 接口实现 ============

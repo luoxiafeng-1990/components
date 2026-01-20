@@ -62,11 +62,11 @@ public:
     long getFileSize() const override;        // 返回 -1（实时流无文件大小）
     std::string getFilePath() const override; // 返回 RTSP URL
     bool seek(int frame_index) override;      // 返回 false（实时流不支持 seek）
-    bool isEof() const override;
+    bool isAtEnd() const override;
     int getSourceWidth() const override;
     int getSourceHeight() const override;
     AVPixelFormat getSourcePixelFormat() const override;
-    
+    SourceType getDataSourceType() const override;
     // ============ 中断控制接口 ============
     
     /**

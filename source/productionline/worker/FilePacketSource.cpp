@@ -382,7 +382,7 @@ bool FilePacketSource::seek(int frame_index) {
     return true;
 }
 
-bool FilePacketSource::isEof() const {
+bool FilePacketSource::isAtEnd() const {
     return eof_reached_;
 }
 
@@ -400,4 +400,8 @@ int FilePacketSource::getSourceHeight() const {
 AVPixelFormat FilePacketSource::getSourcePixelFormat() const {
     const AVCodecParameters* params = getCodecParameters();
     return params ? static_cast<AVPixelFormat>(params->format) : AV_PIX_FMT_NONE;
+}
+
+FilePacketSource::SourceType FilePacketSource::getDataSourceType() const {
+    return SourceType::FILE_SOURCE;
 }

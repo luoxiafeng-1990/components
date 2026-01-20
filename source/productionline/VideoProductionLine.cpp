@@ -403,7 +403,7 @@ void VideoProductionLine::producerThreadFunc(int thread_id) {
     if (monitor_) {
         monitor_->stop();
     }
-    
+    pool_sptr->shutdown();
     // 线程结束
     LOG4CPLUS_INFO_FMT(logger_, "Thread #%d finished: produced=%d, skipped=%d, final_consecutive_failures=%d",
                  thread_id, thread_produced, thread_skipped, consecutive_failures);

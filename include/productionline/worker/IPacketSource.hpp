@@ -36,7 +36,11 @@ struct AVCodecParameters;
 class IPacketSource {
 public:
     virtual ~IPacketSource() = default;
-    
+    enum class SourceType {
+        FILE_SOURCE,
+        BUFFER_SOURCE,
+        NETWORK_SOURCE
+    };
     /**
      * @brief 打开数据源
      * @return true 如果成功
@@ -112,7 +116,7 @@ public:
      * - Buffer 模式：基于 BufferPool 的可用性，无法准确判断（让 readPacket() 超时返回）
      * - 网络流模式：基于连接状态
      */
-    virtual bool isEof() const = 0;
+    virtual bool isAtEnd() const = 0;
     
     /**
      * @brief 获取输入数据源的原始视频宽度
@@ -140,6 +144,12 @@ public:
      * @example H.264 编码的视频通常是 AV_PIX_FMT_YUV420P（编码前的格式）
      */
     virtual AVPixelFormat getSourcePixelFormat() const = 0;
+
+    /**
+     * @brief 获取数据源类型标识字符串
+     * @return 数据源类型字符串（如 "File", "Buffer", "Network" 等）
+     */
+    virtual enum SourceType getDataSourceType() const = 0;
 };
 
 #endif // IPACKET_SOURCE_HPP

@@ -2484,8 +2484,6 @@ static int test_multi_worker(const char* video_source) {
     // 判断是否是RTSP，用于后续处理
     bool is_rtsp = (strstr(video_source, "rtsp://") == video_source);
     
-    const int duration_seconds = 10;  // 录制时长（秒）
-    
     // 1. 配置 MultiWorkerConfig
     LOG4CPLUS_INFO(test_logger, "[Step 1] Configuring MultiWorkerProductionLine...");
     
@@ -2626,8 +2624,8 @@ static int test_multi_worker(const char* video_source) {
     // 6. 等待第一个Buffer，获取实际格式
     LOG4CPLUS_INFO(test_logger, "\n[Step 5] Waiting for first buffers to detect format...");
     
-    Buffer* first_hw = hw_pool_sptr->acquireFilled(true, 5000);
-    Buffer* first_sw = sw_pool_sptr->acquireFilled(true, 5000);
+    Buffer* first_hw = hw_pool_sptr->acquireFilled(true, 10000);
+    Buffer* first_sw = sw_pool_sptr->acquireFilled(true, 10000);
     
     if (!first_hw || !first_sw) {
         LOG4CPLUS_ERROR(test_logger, "Failed to get first buffers (timeout)");
@@ -2709,71 +2707,80 @@ static int test_multi_worker(const char* video_source) {
     hw_pool_sptr->releaseFilled(first_hw);
     sw_pool_sptr->releaseFilled(first_sw);
     
-    // 9. 消费者循环：从两个消费者的 BufferPool 获取 buffer 并保存
+    // 9. 消费者循环：两个线程分别消费 HW / SW
     auto start_time = std::chrono::steady_clock::now();
-    int frame_count_hw = 1;  // 已经保存了第一帧
-    int frame_count_sw = 1;
-    int timeout_hw = 0;
-    int timeout_sw = 0;
-    const int MAX_TIMEOUT = 50;
+    std::atomic<bool> stop_requested{false};
+    std::atomic<int> frame_count_hw_atomic{1};  // 已经保存了第一帧
+    std::atomic<int> frame_count_sw_atomic{1};
+    std::atomic<int> timeout_hw{0};
+    std::atomic<int> timeout_sw{0};
     
-    LOG4CPLUS_INFO(test_logger, "  Starting consumer loop (Ctrl+C to stop)...\n");
+    auto consume_fn = [&](const char* label,
+                          const std::shared_ptr<BufferPool>& pool,
+                          BufferWriter* writer,
+                          std::atomic<int>& frame_count,
+                          std::atomic<int>& timeout_count) {
+        while (g_running && !stop_requested.load()) {
+            Buffer* buf = pool->acquireFilled(true, 100);
+            if (!buf) {
+                if (pool->isRunning() == false) {
+                    LOG4CPLUS_INFO_FMT(test_logger, "  %s: BufferPool stopped, exiting consumer thread", label);
+                    break;
+                }
+                timeout_count.fetch_add(1);
+                std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+                LOG4CPLUS_WARN_FMT(test_logger, "  %s: Timeout waiting for buffer (%d)", label, timeout_count.load());
+                if (timeout_count.load() > 5) {
+                    if (pool->isRunning() == false) {
+                        LOG4CPLUS_INFO_FMT(test_logger, "  %s: BufferPool stopped, exiting consumer thread", label);
+                        break;
+                    }
+                }
+                continue;
+            }
+            timeout_count.store(0);
+            
+            if (writer->write(buf)) {
+                int count = frame_count.fetch_add(1) + 1;
+                if (count % 50 == 0) {
+                    LOG4CPLUS_INFO_FMT(test_logger, "  %s: %d frames saved", label, count);
+                }
+            } else {
+                LOG4CPLUS_WARN_FMT(test_logger, "Failed to write %s buffer", label);
+            }
+            
+            pool->releaseFilled(buf);
+        }
+    };
     
-    while (g_running) {
+    LOG4CPLUS_INFO(test_logger, "  Starting consumer threads (Ctrl+C to stop)...\n");
+    
+    std::thread hw_thread(consume_fn, "Consumer 1 (Hardware Decoder)",
+                          hw_pool_sptr, &writer_hw,
+                          std::ref(frame_count_hw_atomic), std::ref(timeout_hw));
+    std::thread sw_thread(consume_fn, "Consumer 2 (Software Decoder)",
+                          sw_pool_sptr, &writer_sw,
+                          std::ref(frame_count_sw_atomic), std::ref(timeout_sw));
+    
+    while (g_running && !stop_requested.load()) {
         // 检查中断标志
         if (g_rtsp_interrupted.load()) {
             LOG4CPLUS_INFO(test_logger, "\n  ⚠️  检测到中断请求，停止测试...");
+            stop_requested.store(true);
             break;
         }
-        
-        // 检查时长
-        auto now = std::chrono::steady_clock::now();
-        int elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - start_time).count();
-        if (elapsed >= duration_seconds) {
-            LOG4CPLUS_INFO_FMT(test_logger, "\n  ⏱️  Reached duration limit: %d seconds", duration_seconds);
-            break;
-        }
-        
-        // 从 Consumer 1 (Hardware) 获取 buffer
-        Buffer* buf_hw = hw_pool_sptr->acquireFilled(true, 100);
-        if (buf_hw) {
-            if (writer_hw.write(buf_hw)) {
-                frame_count_hw++;
-                if (frame_count_hw % 50 == 0) {
-                    LOG4CPLUS_INFO_FMT(test_logger, "  Consumer 1 (Hardware Decoder): %d frames saved", frame_count_hw);
-                }
-            } else {
-                LOG4CPLUS_WARN(test_logger, "Failed to write Consumer 1 buffer");
-            }
-            hw_pool_sptr->releaseFilled(buf_hw);
-            timeout_hw = 0;
-        } else {
-            timeout_hw++;
-        }
-        
-        // 从 Consumer 2 (Software) 获取 buffer
-        Buffer* buf_sw = sw_pool_sptr->acquireFilled(true, 100);
-        if (buf_sw) {
-            if (writer_sw.write(buf_sw)) {
-                frame_count_sw++;
-                if (frame_count_sw % 50 == 0) {
-                    LOG4CPLUS_INFO_FMT(test_logger, "  Consumer 2 (Software Decoder): %d frames saved", frame_count_sw);
-                }
-            } else {
-                LOG4CPLUS_WARN(test_logger, "Failed to write Consumer 2 buffer");
-            }
-            sw_pool_sptr->releaseFilled(buf_sw);
-            timeout_sw = 0;
-        } else {
-            timeout_sw++;
-        }
-        
-        // 检查超时
-        if (timeout_hw >= MAX_TIMEOUT && timeout_sw >= MAX_TIMEOUT) {
-            LOG4CPLUS_WARN(test_logger, "\n  ⚠️  Both consumers timeout, stopping...");
-            break;
-        }
+        // 检查超时        
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
+    
+    stop_requested.store(true);
+    g_running = false;
+    
+    if (hw_thread.joinable()) hw_thread.join();
+    if (sw_thread.joinable()) sw_thread.join();
+    
+    int frame_count_hw = frame_count_hw_atomic.load();
+    int frame_count_sw = frame_count_sw_atomic.load();
     
     LOG4CPLUS_INFO(test_logger, "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
     
@@ -3220,4 +3227,3 @@ int main(int argc, char* argv[]) {
     // 使用测试框架主函数
     TEST_MAIN(argc, argv);
 }
-

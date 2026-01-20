@@ -94,7 +94,7 @@ bool FfmpegDecodeRtspWorker::open() {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
     
     // 如果已经打开，先关闭
-    if (packet_source_ && packet_source_->isOpen()) {
+    if (packet_source_ && packet_source_->isOpen() && packet_source_->getDataSourceType() != IPacketSource::SourceType::BUFFER_SOURCE) {
         LOG4CPLUS_WARN(logger_, "[Worker] ⚠️  Stream already open, closing previous stream");
         close();
     }
@@ -170,14 +170,6 @@ bool FfmpegDecodeRtspWorker::open() {
         LOG4CPLUS_DEBUG_FMT(logger_, "[Worker] bits_per_pixel not set, using default: %d", bits_per_pixel);
     }
     
-    // 6. 🎯 Worker职责：在open()时自动创建输出BufferPool
-    size_t frame_size = output_width_ * output_height_ * (bits_per_pixel / 8);
-    if (frame_size == 0) {
-        setError("Invalid frame size, cannot create BufferPool");
-        packet_source_->close();
-        return false;
-    }
-    
     // 生成 BufferPool 名称
     std::string pool_name;
     if (is_buffer_mode) {
@@ -188,7 +180,7 @@ bool FfmpegDecodeRtspWorker::open() {
     
     uint64_t pool_id = allocator_facade_.allocatePoolWithBuffers(
         worker_config_.data_source.buffer_count,
-        frame_size,
+        0,
         pool_name,
         is_buffer_mode ? "RTSP_BUFFER" : "RTSP"
     );
@@ -222,9 +214,9 @@ bool FfmpegDecodeRtspWorker::open() {
     }
     LOG4CPLUS_DEBUG_FMT(logger_, "[Worker]    Output resolution: %dx%d@%dbpp", output_width_, output_height_, bits_per_pixel);
     LOG4CPLUS_DEBUG_FMT(logger_, "[Worker]    Codec: %s", codec_ctx_ptr_->codec->name);
-    LOG4CPLUS_DEBUG_FMT(logger_, "[Worker]    BufferPool: '%s' (ID: %lu, %d buffers, %zu bytes each)", 
+    LOG4CPLUS_DEBUG_FMT(logger_, "[Worker]    BufferPool: '%s' (ID: %lu, %d buffers)", 
                   actual_pool_name.c_str(), pool_id, 
-                  worker_config_.data_source.buffer_count, frame_size);
+                  worker_config_.data_source.buffer_count);
     
     return true;
 }
@@ -402,7 +394,7 @@ bool FfmpegDecodeRtspWorker::hasMoreFrames() const {
     if (!packet_source_) {
         return false;
     }
-    return !packet_source_->isEof();
+    return !packet_source_->isAtEnd();
 }
 
 bool FfmpegDecodeRtspWorker::isAtEnd() const {
@@ -410,7 +402,7 @@ bool FfmpegDecodeRtspWorker::isAtEnd() const {
     if (!packet_source_) {
         return true;
     }
-    return packet_source_->isEof();
+    return packet_source_->isAtEnd();
 }
 
 bool FfmpegDecodeRtspWorker::isConnected() const {

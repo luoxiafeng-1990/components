@@ -55,11 +55,11 @@ public:
     long getFileSize() const override;
     std::string getFilePath() const override;
     bool seek(int frame_index) override;
-    bool isEof() const override;
+    bool isAtEnd() const override;
     int getSourceWidth() const override;
     int getSourceHeight() const override;
     AVPixelFormat getSourcePixelFormat() const override;
-    
+    SourceType getDataSourceType() const override;
 private:
     std::string file_path_;              // 文件路径
     AVFormatContext* format_ctx_ptr_;   // FFmpeg 格式上下文

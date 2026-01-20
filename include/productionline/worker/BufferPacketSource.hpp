@@ -98,11 +98,11 @@ public:
      * @return 总是返回 false（Buffer 模式不支持 seek）
      */
     bool seek(int frame_index) override;
-    bool isEof() const override;
+    bool isAtEnd() const override;
     int getSourceWidth() const override;
     int getSourceHeight() const override;
     AVPixelFormat getSourcePixelFormat() const override;
-    
+    SourceType getDataSourceType() const override;
     /**
      * @brief 设置数据源 BufferPool（v2.13 新增）
      * @param pool_weak Record Worker 的 BufferPool（weak_ptr）

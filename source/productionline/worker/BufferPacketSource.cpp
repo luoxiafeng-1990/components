@@ -313,7 +313,9 @@ int BufferPacketSource::readPacket(AVPacket* packet) {
         if (!is_running_.load(std::memory_order_acquire)) {
             return AVERROR_EOF;
         }
-        
+        if (source_pool_.lock()->isRunning() == false) {
+            return AVERROR_EOF;  // Pool 已停止，数据源结束
+        }
         // 检查 Buffer 是否有效
         if (!current_buffer_) {
             return AVERROR(EAGAIN);
@@ -328,7 +330,6 @@ int BufferPacketSource::readPacket(AVPacket* packet) {
             av_strerror(ret, err_buf, sizeof(err_buf));
             LOG4CPLUS_ERROR_FMT(logger_, "Failed to copy packet: %s", err_buf);
         }
-        
         // 3. 标记自己已完成
         size_t remaining = remaining_subscribers_.fetch_sub(1, std::memory_order_acq_rel) - 1;
         
@@ -406,7 +407,7 @@ bool BufferPacketSource::seek(int frame_index) {
     return false;
 }
 
-bool BufferPacketSource::isEof() const {
+bool BufferPacketSource::isAtEnd() const {
     // Buffer 模式的 EOF 状态：检查 Pool 是否还有数据
     if (!is_open_.load(std::memory_order_acquire)) {
         return true;  // 未打开，视为 EOF
@@ -418,8 +419,11 @@ bool BufferPacketSource::isEof() const {
         return true;  // Pool 已销毁，视为 EOF
     }
     
-    // ⭐ 注意：无法在不阻塞的情况下准确判断 Pool 是否有数据
-    // 因此返回 false，让 readPacket() 尝试获取（会超时返回）
+    if (pool->isRunning()) 
+        return false;  // Pool 仍在运行，未到 EOF
+    else 
+        return true; // Pool 已停止，数据源结束
+    
     return false;
 }
 
@@ -474,3 +478,6 @@ int BufferPacketSource::copyPacket(AVPacket* dst_packet, const AVPacket* src_pac
     return 0;
 }
 
+BufferPacketSource::SourceType BufferPacketSource::getDataSourceType() const {
+    return SourceType::BUFFER_SOURCE;
+}

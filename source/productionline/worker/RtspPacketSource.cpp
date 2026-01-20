@@ -224,7 +224,7 @@ bool RtspPacketSource::seek(int frame_index) {
     return false;
 }
 
-bool RtspPacketSource::isEof() const {
+bool RtspPacketSource::isAtEnd() const {
     return eof_reached_.load(std::memory_order_acquire);
 }
 
@@ -296,4 +296,8 @@ void RtspPacketSource::clearInterrupt() {
     interrupt_requested_.store(false, std::memory_order_release);
     auto logger = log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.DataSource.Rtsp"));
     LOG4CPLUS_DEBUG(logger, "✅ 中断标志已清除");
+}
+
+RtspPacketSource::SourceType RtspPacketSource::getDataSourceType() const {
+    return SourceType::NETWORK_SOURCE;
 }
