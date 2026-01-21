@@ -812,6 +812,20 @@ bool FfmpegDecodeVideoFileWorker::readAndSendPacket(AVPacket* packet_ptr) {
     
     // 步骤3: 发送 packet 到解码器
     int ret = avcodec_send_packet(codec_ctx_ptr_, packet_ptr);
+    
+    // ⚠️ 重要：不要在这里调用 av_packet_unref()！
+    // 
+    // 原因：
+    //   1. packet_ptr 来自 buffer->getAVPacket()，是 Buffer 的一部分
+    //   2. Buffer 的生命周期由 BufferPool 管理
+    //   3. 当 buffer 被 releaseFilled() 归还到 pool 时，
+    //      BufferPool::releaseFilled() → Buffer::freeBuffer() → av_packet_unref()
+    //      会自动清理 packet 的引用计数
+    //   4. 如果在这里提前 unref，packet 会变成空状态（data=nullptr, size=0）
+    //   5. 导致同一个 buffer 被复用时，packet 无效，引发 AVERROR_INVALIDDATA
+    //
+    // avcodec_send_packet() 内部会拷贝数据，所以不需要担心数据被修改
+    
     if (ret < 0) {
         char err_buf[AV_ERROR_MAX_STRING_SIZE];
         av_strerror(ret, err_buf, sizeof(err_buf));

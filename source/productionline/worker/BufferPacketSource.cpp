@@ -10,6 +10,59 @@ extern "C" {
 #include <libavutil/error.h>
 }
 
+// ============================================================
+// PacketGuard 实现
+// ============================================================
+
+PacketGuard::PacketGuard(BufferPacketSource* source) 
+    : packet_(nullptr), source_(source) 
+{
+    if (source_) {
+        packet_ = source_->acquirePacket();
+    }
+}
+
+PacketGuard::~PacketGuard() {
+    if (packet_ && source_) {
+        source_->releasePacket();
+    }
+}
+
+PacketGuard::PacketGuard(PacketGuard&& other) noexcept 
+    : packet_(other.packet_), source_(other.source_) 
+{
+    other.packet_ = nullptr;
+    other.source_ = nullptr;
+}
+
+PacketGuard& PacketGuard::operator=(PacketGuard&& other) noexcept {
+    if (this != &other) {
+        // 先释放当前持有的资源
+        if (packet_ && source_) {
+            source_->releasePacket();
+        }
+        
+        // 转移所有权
+        packet_ = other.packet_;
+        source_ = other.source_;
+        other.packet_ = nullptr;
+        other.source_ = nullptr;
+    }
+    return *this;
+}
+
+AVPacket* PacketGuard::get() const {
+    return packet_;
+}
+
+PacketGuard::operator bool() const {
+    return packet_ != nullptr;
+}
+
+// ============================================================
+// BufferPacketSource 实现
+// ============================================================
+
 BufferPacketSource::BufferPacketSource(const AVCodecParameters* codec_params)
     : codec_params_(codec_params)
     , source_pool_()
@@ -18,7 +71,6 @@ BufferPacketSource::BufferPacketSource(const AVCodecParameters* codec_params)
     , total_subscribers_(0)
     , remaining_subscribers_(0)
     , current_buffer_(nullptr)
-    , previous_buffer_(nullptr)
     , mutex_()
     , cv_subscribers_()
     , cv_fetch_()
@@ -41,7 +93,6 @@ BufferPacketSource::BufferPacketSource(const AVCodecParameters* codec_params, si
     , total_subscribers_(subscriber_count)
     , remaining_subscribers_(0)  // ✅ 初始值为 0，表示没有订阅者在等待
     , current_buffer_(nullptr)
-    , previous_buffer_(nullptr)
     , mutex_()
     , cv_subscribers_()
     , cv_fetch_()
@@ -56,7 +107,7 @@ BufferPacketSource::BufferPacketSource(const AVCodecParameters* codec_params, si
     if (subscriber_count < 2) {
         LOG4CPLUS_WARN_FMT(logger_, "Shared mode with subscriber_count=%zu (should be >= 2)", subscriber_count);
     }
-    LOG4CPLUS_INFO_FMT(logger_, "⭐ v2.18 共享模式：创建发布者，订阅者数量=%zu", subscriber_count);
+    LOG4CPLUS_INFO_FMT(logger_, "⭐ v2.18 共享模式（RAII）：创建发布者，订阅者数量=%zu", subscriber_count);
 }
 
 BufferPacketSource::~BufferPacketSource() {
@@ -94,7 +145,6 @@ bool BufferPacketSource::open() {
         fetch_task_running_.store(false, std::memory_order_release);
         remaining_subscribers_.store(0, std::memory_order_release);  // ✅ 初始值为 0
         current_buffer_ = nullptr;
-        previous_buffer_ = nullptr;
         
         // 提交 Fetch 任务到全局线程池
         try {
@@ -182,11 +232,6 @@ void BufferPacketSource::close() {
                     current_buffer_ = nullptr;
                     LOG4CPLUS_DEBUG(logger_, "步骤4：已释放 current_buffer_");
                 }
-                if (previous_buffer_) {
-                    pool->releaseFilled(previous_buffer_);
-                    previous_buffer_ = nullptr;
-                    LOG4CPLUS_DEBUG(logger_, "步骤4：已释放 previous_buffer_");
-                }
             }
         }
         
@@ -199,7 +244,7 @@ bool BufferPacketSource::isOpen() const {
 }
 
 void BufferPacketSource::fetchTaskFunc() {
-    LOG4CPLUS_INFO(logger_, "Fetch 任务启动（全局线程池）");
+    LOG4CPLUS_INFO(logger_, "Fetch 任务启动（全局线程池，RAII 模式）");
     
     // RAII 保证任务退出时通知 close()
     struct TaskExitGuard {
@@ -219,8 +264,12 @@ void BufferPacketSource::fetchTaskFunc() {
         return;
     }
     
+    // ⏱️ 连续超时检测：记录最后一次成功获取 Buffer 的时间
+    auto last_success_time = std::chrono::steady_clock::now();
+    const std::chrono::seconds timeout_threshold(5);  // 5秒超时阈值
+    
     while (is_running_.load(std::memory_order_acquire)) {
-        // ========== 步骤1：等待所有订阅者完成上一个 Buffer ==========
+        // ========== 步骤1：等待所有订阅者完成（releasePacket 调用）==========
         {
             std::unique_lock<std::mutex> lock(mutex_);
             cv_fetch_.wait(lock, [this]() {
@@ -236,11 +285,10 @@ void BufferPacketSource::fetchTaskFunc() {
             }
         }
         
-        // ========== 步骤2：释放旧 Buffer ==========
-        if (previous_buffer_) {
-            pool->releaseFilled(previous_buffer_);
-            previous_buffer_ = nullptr;
-            // LOG4CPLUS_DEBUG(logger_, "Fetch 任务：已释放旧 Buffer");
+        // ========== 步骤2：释放当前 Buffer（单缓冲）==========
+        if (current_buffer_) {
+            pool->releaseFilled(current_buffer_);
+            current_buffer_ = nullptr;
         }
         
         // ========== 步骤3：获取新 Buffer ==========
@@ -249,8 +297,38 @@ void BufferPacketSource::fetchTaskFunc() {
         if (!new_buffer) {
             // 超时或没有数据
             if (!is_running_.load(std::memory_order_acquire)) {
+                LOG4CPLUS_DEBUG(logger_, "Fetch 任务：收到停止信号");
                 break;  // 停止信号
             }
+            
+            // ⏱️ 检查连续超时时长
+            auto now = std::chrono::steady_clock::now();
+            auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - last_success_time);
+            
+            if (elapsed >= timeout_threshold) {
+                // 连续 5 秒无法获取 Buffer，检查 Pool 状态
+                if (!pool->isRunning()) {
+                    LOG4CPLUS_WARN(logger_, "Fetch 任务：连续 5 秒无法获取 Buffer，且 Pool 已停止，退出任务");
+                    is_running_.store(false, std::memory_order_release);
+                    
+                    // 清空 current_buffer_，避免订阅者继续使用旧数据
+                    {
+                        std::lock_guard<std::mutex> lock(mutex_);
+                        current_buffer_ = nullptr;
+                    }
+                    
+                    // 唤醒所有等待的订阅者，让它们检测到 EOF
+                    cv_subscribers_.notify_all();
+                    break;  // Pool 已停止，退出任务
+                } else {
+                    // Pool 还在运行，但长时间无数据，打印警告
+                    LOG4CPLUS_WARN_FMT(logger_, "Fetch 任务：连续 %ld 秒无法获取 Buffer，但 Pool 仍在运行",
+                                      elapsed.count());
+                    // 重置计时器，继续等待
+                    last_success_time = now;
+                }
+            }
+            
             // 继续等待
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
             continue;
@@ -264,21 +342,18 @@ void BufferPacketSource::fetchTaskFunc() {
             continue;
         }
         
-        // ========== 步骤4：设置为当前 Buffer 并唤醒订阅者 ==========
+        // ✅ 成功获取有效 Buffer，重置超时计时器
+        last_success_time = std::chrono::steady_clock::now();
+        
+        // ========== 步骤4：设置新的 current_buffer_ 并唤醒订阅者 ==========
         {
             std::lock_guard<std::mutex> lock(mutex_);
             
-            // 暂存旧 Buffer（将在下一轮释放）
-            previous_buffer_ = current_buffer_;
-            
-            // 设置新 Buffer
+            // ✅ 单缓冲：直接设置
             current_buffer_ = new_buffer;
             
             // 重置订阅者计数器
             remaining_subscribers_.store(total_subscribers_, std::memory_order_release);
-            
-            // LOG4CPLUS_DEBUG_FMT(logger_, "Fetch 任务：获取新 Buffer，等待 %zu 个订阅者", 
-            //              total_subscribers_);
         }
         
         // 唤醒所有等待的订阅者
@@ -447,19 +522,78 @@ void BufferPacketSource::setSourceBufferPool(std::weak_ptr<BufferPool> pool_weak
     LOG4CPLUS_DEBUG(logger_, "⭐ v2.13：已设置源 BufferPool");
 }
 
+AVPacket* BufferPacketSource::acquirePacket() {
+    if (!is_shared_mode_) {
+        LOG4CPLUS_ERROR(logger_, "acquirePacket() only supported in shared mode");
+        return nullptr;
+    }
+    
+    std::unique_lock<std::mutex> lock(mutex_);
+    
+    // 等待新 Buffer 可用
+    cv_subscribers_.wait(lock, [this]() {
+        return current_buffer_ != nullptr || 
+               !is_running_.load(std::memory_order_acquire);
+    });
+    
+    // 检查是否被关闭
+    if (!is_running_.load(std::memory_order_acquire)) {
+        return nullptr;  // EOF
+    }
+    
+    auto pool = source_pool_.lock();
+    if (!pool || !pool->isRunning()) {
+        return nullptr;  // Pool 已停止
+    }
+    
+    // 检查 Buffer 是否有效
+    if (!current_buffer_) {
+        return nullptr;
+    }
+    
+    // ✅ 返回 AVPacket 指针，不递减 remaining_subscribers_
+    return current_buffer_->getAVPacket();
+}
+
+void BufferPacketSource::releasePacket() {
+    if (!is_shared_mode_) {
+        return;
+    }
+    
+    // ✅ 递减订阅者计数
+    size_t remaining = remaining_subscribers_.fetch_sub(1, std::memory_order_acq_rel) - 1;
+    
+    // 如果是最后一个完成的订阅者，唤醒 Fetch 任务
+    if (remaining == 0) {
+        cv_fetch_.notify_one();
+    }
+}
+
 int BufferPacketSource::copyPacket(AVPacket* dst_packet, const AVPacket* src_packet) {
     if (!dst_packet || !src_packet) {
         return AVERROR(EINVAL);
     }
     
-    // ✅ 方案B：真正的零拷贝 - 直接指向源 AVPacket
+    // ✅ 方案：使用裸指针方案（零拷贝视图）
     // 
     // 设计原则：
-    //   1. dst_packet 只是一个"视图"，指向 Buffer 中的 src_packet
-    //   2. 不涉及任何内存分配、拷贝或引用计数
-    //   3. avcodec_send_packet() 会在内部拷贝数据到解码器
-    //   4. 调用者不能调用 av_packet_unref(dst_packet)
-    //   5. Buffer 的生命周期由 Fetch 任务管理
+    //   1. dst_packet 只是一个"视图"，指向 src_packet 的数据
+    //   2. 不增加引用计数，不拥有数据
+    //   3. avcodec_send_packet() 会在内部处理引用计数（如果需要）
+    //   4. dst_packet 的生命周期必须短于 src_packet
+    //   5. 调用者**不能**调用 av_packet_unref(dst_packet)
+    //
+    // 为什么不用 av_packet_ref()：
+    //   - av_packet_ref() 会增加引用计数，需要对应的 unref
+    //   - 但 dst_packet 来自消费者 Buffer，其生命周期由 BufferPool 管理
+    //   - Buffer::freeBuffer() 会调用 av_packet_unref()，导致双重释放或引用计数混乱
+    //   - 共享模式下，Fetch任务会等待所有订阅者完成后才释放 src_packet
+    //   - 所以裸指针方案是安全的，且避免了引用计数管理的复杂性
+    //
+    // 为什么保留 side_data：
+    //   - H.264 解码需要 PPS/SPS 等关键信息
+    //   - 这些信息存储在 side_data 中
+    //   - 必须复制 side_data 指针（不是深拷贝，只是指针）
     
     // 方法：让 dst_packet 的所有字段指向 src_packet
     // 等价于：dst_packet 就是 src_packet 的别名
@@ -472,8 +606,12 @@ int BufferPacketSource::copyPacket(AVPacket* dst_packet, const AVPacket* src_pac
     dst_packet->flags = src_packet->flags;
     dst_packet->duration = src_packet->duration;
     dst_packet->pos = src_packet->pos;
-    dst_packet->side_data = nullptr;            // 简化处理
-    dst_packet->side_data_elems = 0;
+    
+    // ⭐ 关键修复：保留 side_data（不能设为 nullptr）
+    // side_data 包含 H.264 的 PPS/SPS/SEI 等关键解码信息
+    // 这里只是复制指针，不是深拷贝，所以是安全的
+    dst_packet->side_data = src_packet->side_data;
+    dst_packet->side_data_elems = src_packet->side_data_elems;
     
     return 0;
 }

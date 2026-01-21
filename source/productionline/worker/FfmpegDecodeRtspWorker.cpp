@@ -447,43 +447,79 @@ bool FfmpegDecodeRtspWorker::fillBufferMetadataFromFrame(AVFrame* frame_ptr, Buf
 
 /**
  * @brief 从数据源读取 packet 并发送到解码器
- * @param packet_ptr AVPacket 指针（必须已分配）
+ * @param packet_ptr AVPacket 指针（在旧接口模式下使用）
  * @return true 成功发送 packet 到解码器，false 失败或 EOF
+ * 
+ * ⚠️ 重要变更（RAII 架构）：
+ *   - 优先使用 PacketGuard 管理 AVPacket 生命周期（共享模式）
+ *   - 只有解码完成后才通知 BufferPacketSource
+ *   - 完全零拷贝，直接使用 Buffer 中的 AVPacket
+ *   - 兼容旧接口（非共享模式）
  */
 bool FfmpegDecodeRtspWorker::readAndSendPacket(AVPacket* packet_ptr) {
-    // 步骤1: 从数据源读取 packet
-    int read_ret = packet_source_->readPacket(packet_ptr);
+    // ✅ 检查是否是 BufferPacketSource（共享模式）
+    auto* buffer_source = dynamic_cast<BufferPacketSource*>(packet_source_.get());
     
-    if (read_ret < 0) {
-        if (read_ret == AVERROR_EOF) {
-            // ⚠️ 不调用 av_packet_unref()，因为 packet_ptr 只是指向 Buffer 的视图
-            return false;
-        } else {
-            char err_buf[AV_ERROR_MAX_STRING_SIZE];
-            av_strerror(read_ret, err_buf, sizeof(err_buf));
-            LOG4CPLUS_ERROR_FMT(logger_, "[Worker] ERROR: readPacket failed: %d (%s)", read_ret, err_buf);
-            // ⚠️ 不调用 av_packet_unref()
+    if (buffer_source) {
+        // ========== 新架构：使用 PacketGuard（RAII）==========
+        PacketGuard guard(buffer_source);
+        
+        if (!guard) {
+            // EOF 或错误
             return false;
         }
+        
+        // ✅ 获取 AVPacket 指针（零拷贝）
+        AVPacket* packet = guard.get();
+        
+        // ✅ 发送到解码器
+        int ret = avcodec_send_packet(codec_ctx_ptr_, packet);
+        
+        if (ret < 0) {
+            LOG4CPLUS_ERROR_FMT(logger_, "[Worker] ERROR: avcodec_send_packet failed: %d", ret);
+            return false;
+        }
+        
+        // ✅ guard 会在这里析构，自动调用 releasePacket()
+        return true;
+        
+    } else {
+        // ========== 旧架构：使用 readPacket（兼容非共享模式）==========
+        int read_ret = packet_source_->readPacket(packet_ptr);
+        
+        if (read_ret < 0) {
+            if (read_ret == AVERROR_EOF) {
+                return false;
+            } else {
+                char err_buf[AV_ERROR_MAX_STRING_SIZE];
+                av_strerror(read_ret, err_buf, sizeof(err_buf));
+                LOG4CPLUS_ERROR_FMT(logger_, "[Worker] ERROR: readPacket failed: %d (%s)", read_ret, err_buf);
+                return false;
+            }
+        }
+        
+        int ret = avcodec_send_packet(codec_ctx_ptr_, packet_ptr);
+        
+        // ⚠️ 重要：不要在这里调用 av_packet_unref()！
+        // 
+        // 原因：
+        //   1. packet_ptr 来自 buffer->getAVPacket()，是 Buffer 的一部分
+        //   2. Buffer 的生命周期由 BufferPool 管理
+        //   3. 当 buffer 被 releaseFilled() 归还到 pool 时，
+        //      BufferPool::releaseFilled() → Buffer::freeBuffer() → av_packet_unref()
+        //      会自动清理 packet 的引用计数
+        //   4. 如果在这里提前 unref，packet 会变成空状态（data=nullptr, size=0）
+        //   5. 导致同一个 buffer 被复用时，packet 无效，引发 AVERROR_INVALIDDATA
+        //
+        // avcodec_send_packet() 内部会拷贝数据，所以不需要担心数据被修改
+        
+        if (ret < 0) {
+            LOG4CPLUS_ERROR_FMT(logger_, "[Worker] ERROR: avcodec_send_packet failed: %d", ret);
+            return false;
+        }
+        
+        return true;
     }
-    
-    // 步骤2: 发送 packet 到解码器
-    // avcodec_send_packet() 会在内部拷贝数据，函数返回后 packet_ptr 就不再需要了
-    int ret = avcodec_send_packet(codec_ctx_ptr_, packet_ptr);
-    
-    // ✅ 不释放 packet 引用，因为：
-    //    1. packet_ptr 只是指向 Buffer 中 AVPacket 的"视图"
-    //    2. packet_ptr->buf == nullptr，没有引用计数
-    //    3. Buffer 的生命周期由 BufferPacketSource 的 Fetch 任务管理
-    //    4. 所有订阅者完成后，Fetch 任务会释放 Buffer
-    // av_packet_unref(packet_ptr);  // ❌ 不再调用
-    
-    if (ret < 0) {
-        LOG4CPLUS_ERROR_FMT(logger_, "[Worker] ERROR: avcodec_send_packet failed: %d", ret);
-        return false;
-    }
-    
-    return true;
 }
 
 bool FfmpegDecodeRtspWorker::fillBuffer(int frame_index, Buffer* buffer) {

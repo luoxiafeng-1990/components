@@ -15,6 +15,66 @@
 struct AVCodecParameters;
 struct AVPacket;
 class BufferPool;
+class BufferPacketSource;  // BufferPacketSource 前向声明
+
+/**
+ * @brief PacketGuard - RAII 包装器，管理 AVPacket 生命周期
+ * 
+ * 功能：自动管理 BufferPacketSource 的 acquire/release 生命周期
+ * 
+ * 使用方式：
+ * ```cpp
+ * PacketGuard guard(buffer_source);
+ * if (guard) {
+ *     AVPacket* packet = guard.get();
+ *     avcodec_send_packet(codec, packet);
+ *     avcodec_receive_frame(codec, frame);
+ * }
+ * // guard 析构时自动调用 releasePacket()
+ * ```
+ * 
+ * 优势：
+ * - RAII：自动管理资源，异常安全
+ * - 零拷贝：直接获取 AVPacket* 指针
+ * - 生命周期精确：只有解码完成后才通知 Fetch 任务
+ */
+class PacketGuard {
+public:
+    /**
+     * @brief 构造函数
+     * @param source BufferPacketSource 指针
+     */
+    explicit PacketGuard(BufferPacketSource* source);
+    
+    /**
+     * @brief 析构函数（自动调用 releasePacket）
+     */
+    ~PacketGuard();
+    
+    // 禁止拷贝
+    PacketGuard(const PacketGuard&) = delete;
+    PacketGuard& operator=(const PacketGuard&) = delete;
+    
+    // 支持移动
+    PacketGuard(PacketGuard&& other) noexcept;
+    PacketGuard& operator=(PacketGuard&& other) noexcept;
+    
+    /**
+     * @brief 获取 AVPacket 指针
+     * @return AVPacket* 指针（零拷贝）
+     */
+    AVPacket* get() const;
+    
+    /**
+     * @brief 检查是否有效
+     * @return true=有效, false=无效（EOF 或错误）
+     */
+    operator bool() const;
+    
+private:
+    AVPacket* packet_;              // 持有的 AVPacket 指针
+    BufferPacketSource* source_;    // 关联的数据源
+};
 
 /**
  * @brief BufferPacketSource - Buffer 数据源实现
@@ -111,6 +171,27 @@ public:
      */
     void setSourceBufferPool(std::weak_ptr<BufferPool> pool_weak);
     
+    /**
+     * @brief 获取 AVPacket 指针（共享模式，RAII 架构）
+     * @return AVPacket* 指针（零拷贝），nullptr=EOF 或错误
+     * 
+     * 说明：
+     * - 只在共享模式下使用
+     * - 不递减 remaining_subscribers_（由 releasePacket 负责）
+     * - 应该通过 PacketGuard 使用，而不是直接调用
+     */
+    AVPacket* acquirePacket();
+    
+    /**
+     * @brief 释放 AVPacket（共享模式，RAII 架构）
+     * 
+     * 说明：
+     * - 递减 remaining_subscribers_
+     * - 如果是最后一个订阅者，唤醒 Fetch 任务
+     * - 应该通过 PacketGuard 使用，而不是直接调用
+     */
+    void releasePacket();
+    
 private:
     // ========== 通用成员（普通模式和共享模式都使用）==========
     const AVCodecParameters* codec_params_;     // 编解码器参数（从 Record Worker 获取）
@@ -122,7 +203,6 @@ private:
     size_t total_subscribers_;                  // 订阅者总数（消费者数量）
     std::atomic<size_t> remaining_subscribers_; // 剩余未完成的订阅者数量
     Buffer* current_buffer_;                    // 当前共享的 Buffer
-    Buffer* previous_buffer_;                   // 待释放的旧 Buffer
     mutable std::mutex mutex_;                  // 互斥锁（保护共享状态）
     std::condition_variable cv_subscribers_;    // 条件变量（订阅者等待新 Buffer）
     std::condition_variable cv_fetch_;          // 条件变量（Fetch 任务等待订阅者完成）
@@ -145,6 +225,9 @@ private:
     
     // 日志器
     log4cplus::Logger logger_;
+    
+    // 允许 PacketGuard 访问私有成员
+    friend class PacketGuard;
 };
 
 #endif // BUFFER_PACKET_SOURCE_HPP
