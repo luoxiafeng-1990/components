@@ -38,7 +38,7 @@ BufferComparator::BufferComparator()
     , min_ssim_y_(1.0)
     , max_ssim_y_(0.0)
     , report_file_(nullptr)
-    , logger_(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.BufferComparator"))){
+{
 }
 
 BufferComparator::~BufferComparator() {
@@ -53,7 +53,7 @@ BufferComparator::~BufferComparator() {
 
 bool BufferComparator::open(const CompareConfig& config) {
     if (is_open_) {
-        LOG4CPLUS_WARN(logger_, "Already opened");
+        LOG_WARN("[BufferComparator] Already opened");
         return false;
     }
     
@@ -61,7 +61,7 @@ bool BufferComparator::open(const CompareConfig& config) {
     
     // 检查：至少启用一个指标
     if (!config_.enable_psnr && !config_.enable_ssim) {
-        LOG4CPLUS_ERROR(logger_, "At least one metric (PSNR or SSIM) must be enabled");
+        LOG_ERROR("[BufferComparator] At least one metric (PSNR or SSIM) must be enabled");
         return false;
     }
     
@@ -69,7 +69,7 @@ bool BufferComparator::open(const CompareConfig& config) {
     if (config_.save_report) {
         report_file_ = fopen(config_.report_path.c_str(), "w");
         if (!report_file_) {
-            LOG4CPLUS_ERROR_FMT(logger_, "Failed to open report file: %s", 
+            LOG_ERROR_FMT("[BufferComparator] Failed to open report file: %s", 
                          config_.report_path.c_str());
             return false;
         }
@@ -122,7 +122,7 @@ bool BufferComparator::open(const CompareConfig& config) {
     warnings_.clear();
     
     is_open_ = true;
-    LOG4CPLUS_INFO(logger_, "Opened successfully");
+    LOG_INFO("[BufferComparator] Opened successfully");
     return true;
 }
 
@@ -176,11 +176,11 @@ void BufferComparator::close() {
         fclose(report_file_);
         report_file_ = nullptr;
         
-        LOG4CPLUS_INFO_FMT(logger_, "Report saved to: %s", config_.report_path.c_str());
+        LOG_INFO_FMT("[BufferComparator] Report saved to: %s", config_.report_path.c_str());
     }
     
     is_open_ = false;
-    LOG4CPLUS_INFO(logger_, "Closed");
+    LOG_INFO("[BufferComparator] Closed");
 }
 
 FrameCompareResult BufferComparator::compare(
@@ -191,7 +191,7 @@ FrameCompareResult BufferComparator::compare(
     result.frame_index = compare_count_++;
     
     if (!is_open_) {
-        LOG4CPLUS_ERROR(logger_, "Not opened");
+        LOG_ERROR("[BufferComparator] Not opened");
         result.error_message = "Comparator not opened";
         result.passed = false;
         result.level = FrameCompareResult::FAIL;
@@ -199,7 +199,7 @@ FrameCompareResult BufferComparator::compare(
     }
     
     if (!reference_buffer || !test_buffer) {
-        LOG4CPLUS_ERROR(logger_, "Null buffer");
+        LOG_ERROR("[BufferComparator] Null buffer");
         result.error_message = "Null buffer";
         result.passed = false;
         result.level = FrameCompareResult::FAIL;
@@ -214,12 +214,12 @@ FrameCompareResult BufferComparator::compare(
     result.test_format_name = test_info.name;
     
     if (config_.verbose && result.frame_index == 0) {
-        LOG4CPLUS_INFO_FMT(logger_, "Frame %d format detected:", result.frame_index);
-        LOG4CPLUS_INFO_FMT(logger_, "  Reference: %s (%dx%d, %s, %d planes)", 
+        LOG_INFO_FMT("[BufferComparator] Frame %d format detected:", result.frame_index);
+        LOG_INFO_FMT("  Reference: %s (%dx%d, %s, %d planes)", 
                      ref_info.name.c_str(), ref_info.width, ref_info.height,
                      ref_info.is_yuv ? "YUV" : ref_info.is_rgb ? "RGB" : "Unknown",
                      ref_info.num_planes);
-        LOG4CPLUS_INFO_FMT(logger_, "  Test:      %s (%dx%d, %s, %d planes)",
+        LOG_INFO_FMT("  Test:      %s (%dx%d, %s, %d planes)",
                      test_info.name.c_str(), test_info.width, test_info.height,
                      test_info.is_yuv ? "YUV" : test_info.is_rgb ? "RGB" : "Unknown",
                      test_info.num_planes);
@@ -277,49 +277,49 @@ FrameCompareResult BufferComparator::compare(
 }
 
 void BufferComparator::printSummary() const {
-    LOG4CPLUS_INFO(logger_, "╔═══════════════════════════════════════════════════════╗");
-    LOG4CPLUS_INFO(logger_, "║  BufferComparator Summary                              ║");
-    LOG4CPLUS_INFO(logger_, "╚═══════════════════════════════════════════════════════╝");
-    LOG4CPLUS_INFO_FMT(logger_, "  Total frames compared: %d", compare_count_.load());
-    LOG4CPLUS_INFO_FMT(logger_, "  Passed: %d ✅ (%.1f%%)", 
+    LOG_INFO("╔═══════════════════════════════════════════════════════╗");
+    LOG_INFO("║  BufferComparator Summary                              ║");
+    LOG_INFO("╚═══════════════════════════════════════════════════════╝");
+    LOG_INFO_FMT("  Total frames compared: %d", compare_count_.load());
+    LOG_INFO_FMT("  Passed: %d ✅ (%.1f%%)", 
                  passed_count_.load(),
                  compare_count_ > 0 ? 100.0 * passed_count_.load() / compare_count_.load() : 0.0);
-    LOG4CPLUS_INFO_FMT(logger_, "  Warned: %d ⚠️  (%.1f%%)",
+    LOG_INFO_FMT("  Warned: %d ⚠️  (%.1f%%)",
                  warned_count_.load(),
                  compare_count_ > 0 ? 100.0 * warned_count_.load() / compare_count_.load() : 0.0);
-    LOG4CPLUS_INFO_FMT(logger_, "  Failed: %d ❌ (%.1f%%)",
+    LOG_INFO_FMT("  Failed: %d ❌ (%.1f%%)",
                  failed_count_.load(),
                  compare_count_ > 0 ? 100.0 * failed_count_.load() / compare_count_.load() : 0.0);
     
     if (compare_count_ > 0) {
         if (config_.enable_psnr) {
-            LOG4CPLUS_INFO(logger_, "");
-            LOG4CPLUS_INFO(logger_, "  PSNR Statistics:");
-            LOG4CPLUS_INFO_FMT(logger_, "    Average: Y=%.2f U=%.2f V=%.2f dB",
+            LOG_INFO("");
+            LOG_INFO("  PSNR Statistics:");
+            LOG_INFO_FMT("    Average: Y=%.2f U=%.2f V=%.2f dB",
                          sum_psnr_y_ / compare_count_.load(),
                          sum_psnr_u_ / compare_count_.load(),
                          sum_psnr_v_ / compare_count_.load());
-            LOG4CPLUS_INFO_FMT(logger_, "    Range:   Y=[%.2f, %.2f] dB", min_psnr_y_, max_psnr_y_);
+            LOG_INFO_FMT("    Range:   Y=[%.2f, %.2f] dB", min_psnr_y_, max_psnr_y_);
         }
         
         if (config_.enable_ssim) {
-            LOG4CPLUS_INFO(logger_, "");
-            LOG4CPLUS_INFO(logger_, "  SSIM Statistics:");
-            LOG4CPLUS_INFO_FMT(logger_, "    Average: Y=%.4f U=%.4f V=%.4f",
+            LOG_INFO("");
+            LOG_INFO("  SSIM Statistics:");
+            LOG_INFO_FMT("    Average: Y=%.4f U=%.4f V=%.4f",
                          sum_ssim_y_ / compare_count_.load(),
                          sum_ssim_u_ / compare_count_.load(),
                          sum_ssim_v_ / compare_count_.load());
-            LOG4CPLUS_INFO_FMT(logger_, "    Range:   Y=[%.4f, %.4f]", min_ssim_y_, max_ssim_y_);
+            LOG_INFO_FMT("    Range:   Y=[%.4f, %.4f]", min_ssim_y_, max_ssim_y_);
         }
     }
     
-    LOG4CPLUS_INFO(logger_, "");
+    LOG_INFO("");
     if (failed_count_.load() == 0) {
-        LOG4CPLUS_INFO(logger_, "  ✅ Result: ALL TESTS PASSED");
+        LOG_INFO("  ✅ Result: ALL TESTS PASSED");
     } else {
-        LOG4CPLUS_WARN_FMT(logger_, "  ❌ Result: %d TESTS FAILED", failed_count_.load());
+        LOG_WARN_FMT("  ❌ Result: %d TESTS FAILED", failed_count_.load());
     }
-    LOG4CPLUS_INFO(logger_, "╚═══════════════════════════════════════════════════════╝");
+    LOG_INFO("╚═══════════════════════════════════════════════════════╝");
 }
 
 // ============================================================================
@@ -380,7 +380,7 @@ bool BufferComparator::compareMetadata(
                               std::to_string(test_info.width) + "x" + std::to_string(test_info.height);
         result.passed = false;
         result.level = FrameCompareResult::FAIL;
-        LOG4CPLUS_ERROR_FMT(logger_, "%s", result.error_message.c_str());
+        LOG_ERROR_FMT("[BufferComparator] %s", result.error_message.c_str());
         return false;
     }
     
@@ -398,7 +398,7 @@ FrameCompareResult BufferComparator::compareAuto(
     // 情况1：格式完全一致 → 直接对比（最快）
     if (ref_info.format == test_info.format) {
         if (config_.verbose && compare_count_.load() == 1) {
-            LOG4CPLUS_DEBUG(logger_, "Strategy: SAME_FORMAT (fastest)");
+            LOG_DEBUG("[BufferComparator] Strategy: SAME_FORMAT (fastest)");
         }
         
         if (ref_info.is_yuv) {
@@ -411,9 +411,9 @@ FrameCompareResult BufferComparator::compareAuto(
     // 情况2：都是YUV家族 → YUV空间对比
     if (ref_info.is_yuv && test_info.is_yuv) {
         if (config_.verbose && compare_count_.load() == 1) {
-            LOG4CPLUS_DEBUG(logger_, "Strategy: YUV_FAMILY");
+            LOG_DEBUG("[BufferComparator] Strategy: YUV_FAMILY");
             if (ref_info.format != test_info.format) {
-                LOG4CPLUS_WARN(logger_, "  YUV formats differ, will convert if needed");
+                LOG_WARN("  YUV formats differ, will convert if needed");
             }
         }
         
@@ -424,7 +424,7 @@ FrameCompareResult BufferComparator::compareAuto(
     // 情况3：都是RGB家族 → RGB空间对比
     if (ref_info.is_rgb && test_info.is_rgb) {
         if (config_.verbose && compare_count_.load() == 1) {
-            LOG4CPLUS_DEBUG(logger_, "Strategy: RGB_FAMILY");
+            LOG_DEBUG("[BufferComparator] Strategy: RGB_FAMILY");
         }
         
         return compareRGB(ref_buffer, ref_info, test_buffer, test_info);
@@ -433,8 +433,8 @@ FrameCompareResult BufferComparator::compareAuto(
     // 情况4：YUV vs RGB → 转换到YUV空间对比（业界标准）
     if ((ref_info.is_yuv && test_info.is_rgb) || (ref_info.is_rgb && test_info.is_yuv)) {
         if (config_.verbose && compare_count_.load() == 1) {
-            LOG4CPLUS_WARN(logger_, "Strategy: MIXED_FORMAT (YUV vs RGB)");
-            LOG4CPLUS_WARN(logger_, "  Converting to YUV420P for comparison (industry standard)");
+            LOG_WARN("[BufferComparator] Strategy: MIXED_FORMAT (YUV vs RGB)");
+            LOG_WARN("  Converting to YUV420P for comparison (industry standard)");
         }
         
         return compareMixed(ref_buffer, ref_info, test_buffer, test_info);
@@ -515,14 +515,14 @@ FrameCompareResult BufferComparator::compareYUV(
         
         if (config_.verbose && result.frame_index % 50 == 0) {
             if (config_.enable_psnr && config_.enable_ssim) {
-                LOG4CPLUS_DEBUG_FMT(logger_, "  Frame %d: PASS (PSNR-Y: %.2f dB, SSIM-Y: %.4f) ⚡ quick%s", 
+                LOG_DEBUG_FMT("  Frame %d: PASS (PSNR-Y: %.2f dB, SSIM-Y: %.4f) ⚡ quick%s", 
                              result.frame_index, result.psnr_y, result.ssim_y,
                              config_.enable_parallel ? " [parallel]" : "");
             } else if (config_.enable_psnr) {
-                LOG4CPLUS_DEBUG_FMT(logger_, "  Frame %d: PASS (PSNR-Y: %.2f dB) ⚡ quick", 
+                LOG_DEBUG_FMT("  Frame %d: PASS (PSNR-Y: %.2f dB) ⚡ quick", 
                              result.frame_index, result.psnr_y);
             } else {
-                LOG4CPLUS_DEBUG_FMT(logger_, "  Frame %d: PASS (SSIM-Y: %.4f) ⚡ quick", 
+                LOG_DEBUG_FMT("  Frame %d: PASS (SSIM-Y: %.4f) ⚡ quick", 
                              result.frame_index, result.ssim_y);
             }
         }
@@ -539,13 +539,13 @@ FrameCompareResult BufferComparator::compareYUV(
         
         if (config_.verbose) {
             if (config_.enable_psnr && config_.enable_ssim) {
-                LOG4CPLUS_WARN_FMT(logger_, "  Frame %d: PSNR-Y=%.2f dB, SSIM-Y=%.4f, deep validation...",
+                LOG_WARN_FMT("  Frame %d: PSNR-Y=%.2f dB, SSIM-Y=%.4f, deep validation...",
                              result.frame_index, result.psnr_y, result.ssim_y);
             } else if (config_.enable_psnr) {
-                LOG4CPLUS_WARN_FMT(logger_, "  Frame %d: PSNR-Y=%.2f dB < %.2f dB, deep validation...",
+                LOG_WARN_FMT("  Frame %d: PSNR-Y=%.2f dB < %.2f dB, deep validation...",
                              result.frame_index, result.psnr_y, config_.quick_psnr_threshold);
             } else {
-                LOG4CPLUS_WARN_FMT(logger_, "  Frame %d: SSIM-Y=%.4f < %.4f, deep validation...",
+                LOG_WARN_FMT("  Frame %d: SSIM-Y=%.4f < %.4f, deep validation...",
                              result.frame_index, result.ssim_y, config_.ssim_threshold);
             }
         }
@@ -677,15 +677,15 @@ FrameCompareResult BufferComparator::compareYUV(
             
             if (config_.verbose) {
                 if (config_.enable_psnr && config_.enable_ssim) {
-                    LOG4CPLUS_WARN_FMT(logger_, "  Frame %d: WARN (PSNR: Y=%.2f U=%.2f V=%.2f dB, SSIM: Y=%.4f U=%.4f V=%.4f)%s",
+                    LOG_WARN_FMT("  Frame %d: WARN (PSNR: Y=%.2f U=%.2f V=%.2f dB, SSIM: Y=%.4f U=%.4f V=%.4f)%s",
                                  result.frame_index, result.psnr_y, result.psnr_u, result.psnr_v,
                                  result.ssim_y, result.ssim_u, result.ssim_v,
                                  config_.enable_parallel ? " [parallel]" : "");
                 } else if (config_.enable_psnr) {
-                    LOG4CPLUS_WARN_FMT(logger_, "  Frame %d: WARN (PSNR: Y=%.2f U=%.2f V=%.2f dB)",
+                    LOG_WARN_FMT("  Frame %d: WARN (PSNR: Y=%.2f U=%.2f V=%.2f dB)",
                                  result.frame_index, result.psnr_y, result.psnr_u, result.psnr_v);
                 } else {
-                    LOG4CPLUS_WARN_FMT(logger_, "  Frame %d: WARN (SSIM: Y=%.4f U=%.4f V=%.4f)",
+                    LOG_WARN_FMT("  Frame %d: WARN (SSIM: Y=%.4f U=%.4f V=%.4f)",
                                  result.frame_index, result.ssim_y, result.ssim_u, result.ssim_v);
                 }
             }
@@ -695,15 +695,15 @@ FrameCompareResult BufferComparator::compareYUV(
             failed_count_++;
             
             if (config_.enable_psnr && config_.enable_ssim) {
-                LOG4CPLUS_ERROR_FMT(logger_, "  Frame %d: FAIL (PSNR: Y=%.2f U=%.2f V=%.2f dB, SSIM: Y=%.4f U=%.4f V=%.4f)%s",
+                LOG_ERROR_FMT("  Frame %d: FAIL (PSNR: Y=%.2f U=%.2f V=%.2f dB, SSIM: Y=%.4f U=%.4f V=%.4f)%s",
                               result.frame_index, result.psnr_y, result.psnr_u, result.psnr_v,
                               result.ssim_y, result.ssim_u, result.ssim_v,
                               config_.enable_parallel ? " [parallel]" : "");
             } else if (config_.enable_psnr) {
-                LOG4CPLUS_ERROR_FMT(logger_, "  Frame %d: FAIL (PSNR: Y=%.2f U=%.2f V=%.2f dB)",
+                LOG_ERROR_FMT("  Frame %d: FAIL (PSNR: Y=%.2f U=%.2f V=%.2f dB)",
                               result.frame_index, result.psnr_y, result.psnr_u, result.psnr_v);
             } else {
-                LOG4CPLUS_ERROR_FMT(logger_, "  Frame %d: FAIL (SSIM: Y=%.4f U=%.4f V=%.4f)",
+                LOG_ERROR_FMT("  Frame %d: FAIL (SSIM: Y=%.4f U=%.4f V=%.4f)",
                               result.frame_index, result.ssim_y, result.ssim_u, result.ssim_v);
             }
         }
@@ -785,14 +785,14 @@ FrameCompareResult BufferComparator::compareRGB(
         
         if (config_.verbose && result.frame_index % 50 == 0) {
             if (config_.enable_psnr && config_.enable_ssim) {
-                LOG4CPLUS_DEBUG_FMT(logger_, "  Frame %d: PASS (PSNR-G: %.2f dB, SSIM-G: %.4f) ⚡ quick%s",
+                LOG_DEBUG_FMT("  Frame %d: PASS (PSNR-G: %.2f dB, SSIM-G: %.4f) ⚡ quick%s",
                              result.frame_index, result.psnr_y, result.ssim_y,
                              config_.enable_parallel ? " [parallel]" : "");
             } else if (config_.enable_psnr) {
-                LOG4CPLUS_DEBUG_FMT(logger_, "  Frame %d: PASS (PSNR-G: %.2f dB) ⚡ quick",
+                LOG_DEBUG_FMT("  Frame %d: PASS (PSNR-G: %.2f dB) ⚡ quick",
                              result.frame_index, result.psnr_y);
             } else {
-                LOG4CPLUS_DEBUG_FMT(logger_, "  Frame %d: PASS (SSIM-G: %.4f) ⚡ quick",
+                LOG_DEBUG_FMT("  Frame %d: PASS (SSIM-G: %.4f) ⚡ quick",
                              result.frame_index, result.ssim_y);
             }
         }
@@ -809,13 +809,13 @@ FrameCompareResult BufferComparator::compareRGB(
         
         if (config_.verbose) {
             if (config_.enable_psnr && config_.enable_ssim) {
-                LOG4CPLUS_WARN_FMT(logger_, "  Frame %d: PSNR-G=%.2f dB, SSIM-G=%.4f, deep validation...",
+                LOG_WARN_FMT("  Frame %d: PSNR-G=%.2f dB, SSIM-G=%.4f, deep validation...",
                              result.frame_index, result.psnr_y, result.ssim_y);
             } else if (config_.enable_psnr) {
-                LOG4CPLUS_WARN_FMT(logger_, "  Frame %d: PSNR-G=%.2f dB < %.2f dB, deep validation...",
+                LOG_WARN_FMT("  Frame %d: PSNR-G=%.2f dB < %.2f dB, deep validation...",
                              result.frame_index, result.psnr_y, config_.quick_psnr_threshold);
             } else {
-                LOG4CPLUS_WARN_FMT(logger_, "  Frame %d: SSIM-G=%.4f < %.4f, deep validation...",
+                LOG_WARN_FMT("  Frame %d: SSIM-G=%.4f < %.4f, deep validation...",
                              result.frame_index, result.ssim_y, config_.ssim_threshold);
             }
         }
@@ -977,15 +977,15 @@ FrameCompareResult BufferComparator::compareRGB(
             
             if (config_.verbose) {
                 if (config_.enable_psnr && config_.enable_ssim) {
-                    LOG4CPLUS_WARN_FMT(logger_, "  Frame %d: WARN (PSNR: R=%.2f G=%.2f B=%.2f dB, SSIM: R=%.4f G=%.4f B=%.4f)%s",
+                    LOG_WARN_FMT("  Frame %d: WARN (PSNR: R=%.2f G=%.2f B=%.2f dB, SSIM: R=%.4f G=%.4f B=%.4f)%s",
                                  result.frame_index, result.psnr_u, result.psnr_y, result.psnr_v,
                                  result.ssim_u, result.ssim_y, result.ssim_v,
                                  config_.enable_parallel ? " [parallel]" : "");
                 } else if (config_.enable_psnr) {
-                    LOG4CPLUS_WARN_FMT(logger_, "  Frame %d: WARN (PSNR: R=%.2f G=%.2f B=%.2f dB)",
+                    LOG_WARN_FMT("  Frame %d: WARN (PSNR: R=%.2f G=%.2f B=%.2f dB)",
                                  result.frame_index, result.psnr_u, result.psnr_y, result.psnr_v);
                 } else {
-                    LOG4CPLUS_WARN_FMT(logger_, "  Frame %d: WARN (SSIM: R=%.4f G=%.4f B=%.4f)",
+                    LOG_WARN_FMT("  Frame %d: WARN (SSIM: R=%.4f G=%.4f B=%.4f)",
                                  result.frame_index, result.ssim_u, result.ssim_y, result.ssim_v);
                 }
             }
@@ -995,15 +995,15 @@ FrameCompareResult BufferComparator::compareRGB(
             failed_count_++;
             
             if (config_.enable_psnr && config_.enable_ssim) {
-                LOG4CPLUS_ERROR_FMT(logger_, "  Frame %d: FAIL (PSNR: R=%.2f G=%.2f B=%.2f dB, SSIM: R=%.4f G=%.4f B=%.4f)%s",
+                LOG_ERROR_FMT("  Frame %d: FAIL (PSNR: R=%.2f G=%.2f B=%.2f dB, SSIM: R=%.4f G=%.4f B=%.4f)%s",
                               result.frame_index, result.psnr_u, result.psnr_y, result.psnr_v,
                               result.ssim_u, result.ssim_y, result.ssim_v,
                               config_.enable_parallel ? " [parallel]" : "");
             } else if (config_.enable_psnr) {
-                LOG4CPLUS_ERROR_FMT(logger_, "  Frame %d: FAIL (PSNR: R=%.2f G=%.2f B=%.2f dB)",
+                LOG_ERROR_FMT("  Frame %d: FAIL (PSNR: R=%.2f G=%.2f B=%.2f dB)",
                               result.frame_index, result.psnr_u, result.psnr_y, result.psnr_v);
             } else {
-                LOG4CPLUS_ERROR_FMT(logger_, "  Frame %d: FAIL (SSIM: R=%.4f G=%.4f B=%.4f)",
+                LOG_ERROR_FMT("  Frame %d: FAIL (SSIM: R=%.4f G=%.4f B=%.4f)",
                               result.frame_index, result.ssim_u, result.ssim_y, result.ssim_v);
             }
         }
@@ -1024,35 +1024,197 @@ FrameCompareResult BufferComparator::compareMixed(
     Buffer* ref_buffer, const FormatInfo& ref_info,
     Buffer* test_buffer, const FormatInfo& test_info
 ) {
-    // 转换到YUV420P（标准格式）
+    FrameCompareResult result;
+    
+    // 情况1：ref是YUV，test是RGB → 将ref转换为RGB后对比
+    if (ref_info.is_yuv && test_info.is_rgb) {
+        if (config_.verbose) {
+            LOG_DEBUG("[BufferComparator] Converting YUV (ref) to RGB for comparison");
+        }
+        
+        // 将YUV转换为RGB（使用test的RGB格式）
+        AVFrame* ref_rgb = convertYUVToRGB(ref_buffer, ref_info, test_info.format);
+        
+        if (!ref_rgb) {
+            LOG_ERROR("[BufferComparator] Failed to convert YUV to RGB");
+            result.error_message = "YUV to RGB conversion failed";
+            result.passed = false;
+            result.level = FrameCompareResult::FAIL;
+            return result;
+        }
+        
+        // 创建临时Buffer包装转换后的AVFrame
+        Buffer temp_ref_buffer(
+            0,  // 临时ID
+            ref_rgb->data[0],  // 虚拟地址
+            0,  // 物理地址
+            ref_rgb->linesize[0] * ref_rgb->height,  // 大小
+            Buffer::Ownership::EXTERNAL  // 外部管理（AVFrame）
+        );
+        
+        // 设置AVFrame关联
+        temp_ref_buffer.setAVFrame(ref_rgb);
+        
+        // 设置图像元数据
+        temp_ref_buffer.setImageMetadataFromAVFrame(ref_rgb);
+        
+        // 创建转换后的FormatInfo（使用analyzeFormat的方式初始化）
+        FormatInfo ref_rgb_info = {};
+        ref_rgb_info.format = test_info.format;  // 使用test的RGB格式
+        ref_rgb_info.width = ref_rgb->width;
+        ref_rgb_info.height = ref_rgb->height;
+        ref_rgb_info.name = av_get_pix_fmt_name(ref_rgb_info.format);
+        
+        const AVPixFmtDescriptor* desc = av_pix_fmt_desc_get(ref_rgb_info.format);
+        if (desc) {
+            ref_rgb_info.num_planes = desc->nb_components;
+            ref_rgb_info.is_planar = !(desc->flags & AV_PIX_FMT_FLAG_RGB);
+            ref_rgb_info.is_rgb = (desc->flags & AV_PIX_FMT_FLAG_RGB) != 0;
+            ref_rgb_info.is_yuv = false;
+        } else {
+            ref_rgb_info.is_rgb = true;
+            ref_rgb_info.is_yuv = false;
+            ref_rgb_info.is_planar = (ref_rgb_info.format == AV_PIX_FMT_GBRP);
+            ref_rgb_info.num_planes = ref_rgb_info.is_planar ? 3 : 1;
+        }
+        
+        // 使用RGB对比函数进行对比
+        result = compareRGB(&temp_ref_buffer, ref_rgb_info, test_buffer, test_info);
+        
+        // 清理：释放转换后的AVFrame（Buffer析构时不会释放，因为Ownership::EXTERNAL）
+        freeConvertedFrame(ref_rgb);
+        
+        return result;
+    }
+    
+    // 情况2：ref是RGB，test是YUV → 将test转换为RGB后对比
+    if (ref_info.is_rgb && test_info.is_yuv) {
+        if (config_.verbose) {
+            LOG_DEBUG("[BufferComparator] Converting YUV (test) to RGB for comparison");
+        }
+        
+        // 将YUV转换为RGB（使用ref的RGB格式）
+        AVFrame* test_rgb = convertYUVToRGB(test_buffer, test_info, ref_info.format);
+        
+        if (!test_rgb) {
+            LOG_ERROR("[BufferComparator] Failed to convert YUV to RGB");
+            result.error_message = "YUV to RGB conversion failed";
+            result.passed = false;
+            result.level = FrameCompareResult::FAIL;
+            return result;
+        }
+        
+        // 创建临时Buffer包装转换后的AVFrame
+        Buffer temp_test_buffer(
+            0,  // 临时ID
+            test_rgb->data[0],  // 虚拟地址
+            0,  // 物理地址
+            test_rgb->linesize[0] * test_rgb->height,  // 大小
+            Buffer::Ownership::EXTERNAL  // 外部管理（AVFrame）
+        );
+        
+        // 设置AVFrame关联
+        temp_test_buffer.setAVFrame(test_rgb);
+        
+        // 设置图像元数据
+        temp_test_buffer.setImageMetadataFromAVFrame(test_rgb);
+        
+        // 创建转换后的FormatInfo（使用analyzeFormat的方式初始化）
+        FormatInfo test_rgb_info = {};
+        test_rgb_info.format = ref_info.format;  // 使用ref的RGB格式
+        test_rgb_info.width = test_rgb->width;
+        test_rgb_info.height = test_rgb->height;
+        test_rgb_info.name = av_get_pix_fmt_name(test_rgb_info.format);
+        
+        const AVPixFmtDescriptor* desc = av_pix_fmt_desc_get(test_rgb_info.format);
+        if (desc) {
+            test_rgb_info.num_planes = desc->nb_components;
+            test_rgb_info.is_planar = !(desc->flags & AV_PIX_FMT_FLAG_RGB);
+            test_rgb_info.is_rgb = (desc->flags & AV_PIX_FMT_FLAG_RGB) != 0;
+            test_rgb_info.is_yuv = false;
+        } else {
+            test_rgb_info.is_rgb = true;
+            test_rgb_info.is_yuv = false;
+            test_rgb_info.is_planar = (test_rgb_info.format == AV_PIX_FMT_GBRP);
+            test_rgb_info.num_planes = test_rgb_info.is_planar ? 3 : 1;
+        }
+        
+        // 使用RGB对比函数进行对比
+        result = compareRGB(ref_buffer, ref_info, &temp_test_buffer, test_rgb_info);
+        
+        // 清理：释放转换后的AVFrame
+        freeConvertedFrame(test_rgb);
+        
+        return result;
+    }
+    
+    // 其他情况：都转换为YUV420P（用于其他混合格式对比）
     AVFrame* ref_yuv = convertToYUV420P(ref_buffer, ref_info);
     AVFrame* test_yuv = convertToYUV420P(test_buffer, test_info);
     
     if (!ref_yuv || !test_yuv) {
-        LOG4CPLUS_ERROR(logger_, "Format conversion failed");
+        LOG_ERROR("[BufferComparator] Format conversion failed");
         
         if (ref_yuv) freeConvertedFrame(ref_yuv);
         if (test_yuv) freeConvertedFrame(test_yuv);
         
-        FrameCompareResult result;
         result.error_message = "Format conversion failed";
         result.passed = false;
         result.level = FrameCompareResult::FAIL;
         return result;
     }
     
-    // 创建临时Buffer包装AVFrame
-    // TODO: 实现转换后的对比
-    // 由于需要创建临时Buffer，这里暂时返回错误
+    // 创建临时Buffer包装转换后的AVFrame
+    Buffer temp_ref_yuv(
+        0,
+        ref_yuv->data[0],
+        0,
+        ref_yuv->linesize[0] * ref_yuv->height,
+        Buffer::Ownership::EXTERNAL
+    );
+    temp_ref_yuv.setAVFrame(ref_yuv);
+    temp_ref_yuv.setImageMetadataFromAVFrame(ref_yuv);
     
+    Buffer temp_test_yuv(
+        0,
+        test_yuv->data[0],
+        0,
+        test_yuv->linesize[0] * test_yuv->height,
+        Buffer::Ownership::EXTERNAL
+    );
+    temp_test_yuv.setAVFrame(test_yuv);
+    temp_test_yuv.setImageMetadataFromAVFrame(test_yuv);
+    
+    // 创建转换后的FormatInfo（使用analyzeFormat的方式初始化）
+    FormatInfo ref_yuv_info = {};
+    ref_yuv_info.format = AV_PIX_FMT_YUV420P;
+    ref_yuv_info.width = ref_yuv->width;
+    ref_yuv_info.height = ref_yuv->height;
+    ref_yuv_info.name = av_get_pix_fmt_name(ref_yuv_info.format);
+    
+    const AVPixFmtDescriptor* desc_yuv = av_pix_fmt_desc_get(ref_yuv_info.format);
+    if (desc_yuv) {
+        ref_yuv_info.num_planes = desc_yuv->nb_components;
+        ref_yuv_info.is_planar = !(desc_yuv->flags & AV_PIX_FMT_FLAG_RGB);
+        ref_yuv_info.is_yuv = true;
+        ref_yuv_info.is_rgb = false;
+    } else {
+        ref_yuv_info.is_yuv = true;
+        ref_yuv_info.is_rgb = false;
+        ref_yuv_info.is_planar = true;
+        ref_yuv_info.num_planes = 3;
+    }
+    
+    FormatInfo test_yuv_info = ref_yuv_info;
+    test_yuv_info.width = test_yuv->width;
+    test_yuv_info.height = test_yuv->height;
+    
+    // 使用YUV对比函数进行对比
+    result = compareYUV(&temp_ref_yuv, ref_yuv_info, &temp_test_yuv, test_yuv_info);
+    
+    // 清理：释放转换后的AVFrame
     freeConvertedFrame(ref_yuv);
     freeConvertedFrame(test_yuv);
-    
-    FrameCompareResult result;
-    result.error_message = "Mixed format comparison not fully implemented";
-    result.passed = false;
-    result.level = FrameCompareResult::FAIL;
-    LOG4CPLUS_WARN(logger_, "Mixed format comparison not fully implemented");
     
     return result;
 }
@@ -1165,40 +1327,167 @@ double BufferComparator::calculatePSNR_YUV_V(
 // PSNR计算 - RGB格式
 // ============================================================================
 
+/**
+ * @brief 提取RGB通道到临时缓冲区（用于通道分离计算）
+ * @param buffer Buffer指针
+ * @param format 像素格式
+ * @param width 宽度
+ * @param height 高度
+ * @param channel 通道索引：0=R, 1=G, 2=B
+ * @param out_data 输出缓冲区（需要预先分配 width*height 字节）
+ * @return 成功返回true
+ */
+static bool extractRGBChannel(
+    Buffer* buffer, AVPixelFormat format, int width, int height,
+    int channel, uint8_t* out_data
+) {
+    if (!buffer || !out_data || channel < 0 || channel > 2) {
+        return false;
+    }
+    
+    uint8_t* src_data = buffer->getImagePlaneData(0);
+    const int* linesize = buffer->getImageLinesize();
+    
+    if (!src_data || !linesize) {
+        return false;
+    }
+    
+    int src_stride = linesize[0];
+    
+    // Planar格式（GBRP）：直接使用对应plane
+    if (format == AV_PIX_FMT_GBRP) {
+        uint8_t* plane_data = buffer->getImagePlaneData(channel);
+        if (!plane_data) return false;
+        int plane_stride = linesize[channel];
+        
+        for (int y = 0; y < height; y++) {
+            memcpy(out_data + y * width, plane_data + y * plane_stride, width);
+        }
+        return true;
+    }
+    
+    // Packed格式：需要从打包数据中提取
+    int bytes_per_pixel = 0;
+    int r_offset = -1, g_offset = -1, b_offset = -1;
+    
+    switch (format) {
+        case AV_PIX_FMT_RGB24:
+            bytes_per_pixel = 3;
+            r_offset = 0; g_offset = 1; b_offset = 2;
+            break;
+        case AV_PIX_FMT_BGR24:
+            bytes_per_pixel = 3;
+            r_offset = 2; g_offset = 1; b_offset = 0;
+            break;
+        case AV_PIX_FMT_ARGB:
+            bytes_per_pixel = 4;
+            r_offset = 1; g_offset = 2; b_offset = 3;
+            break;
+        case AV_PIX_FMT_RGBA:
+            bytes_per_pixel = 4;
+            r_offset = 0; g_offset = 1; b_offset = 2;
+            break;
+        case AV_PIX_FMT_ABGR:
+            bytes_per_pixel = 4;
+            r_offset = 3; g_offset = 2; b_offset = 1;
+            break;
+        case AV_PIX_FMT_BGRA:
+            bytes_per_pixel = 4;
+            r_offset = 2; g_offset = 1; b_offset = 0;
+            break;
+        case AV_PIX_FMT_RGB0:
+            bytes_per_pixel = 4;
+            r_offset = 0; g_offset = 1; b_offset = 2;
+            break;
+        case AV_PIX_FMT_BGR0:
+            bytes_per_pixel = 4;
+            r_offset = 2; g_offset = 1; b_offset = 0;
+            break;
+        case AV_PIX_FMT_0RGB:
+            bytes_per_pixel = 4;
+            r_offset = 1; g_offset = 2; b_offset = 3;
+            break;
+        case AV_PIX_FMT_0BGR:
+            bytes_per_pixel = 4;
+            r_offset = 3; g_offset = 2; b_offset = 1;
+            break;
+        default:
+            return false;  // 不支持的格式
+    }
+    
+    int channel_offset = (channel == 0) ? r_offset : (channel == 1) ? g_offset : b_offset;
+    if (channel_offset < 0) return false;
+    
+    // 提取通道数据
+    for (int y = 0; y < height; y++) {
+        const uint8_t* src_row = src_data + y * src_stride;
+        uint8_t* dst_row = out_data + y * width;
+        
+        for (int x = 0; x < width; x++) {
+            dst_row[x] = src_row[x * bytes_per_pixel + channel_offset];
+        }
+    }
+    
+    return true;
+}
+
 double BufferComparator::calculatePSNR_RGB_R(
     Buffer* buf1, Buffer* buf2,
     const FormatInfo& info1, const FormatInfo& info2
 ) {
-    // 简化实现：暂时使用plane 0
-    // TODO: 实现RGB通道分离
-    uint8_t* data1 = buf1->getImagePlaneData(0);
-    uint8_t* data2 = buf2->getImagePlaneData(0);
+    if (!buf1 || !buf2) return 0.0;
     
-    if (!data1 || !data2) {
+    // 分配临时缓冲区
+    std::vector<uint8_t> channel1(info1.width * info1.height);
+    std::vector<uint8_t> channel2(info2.width * info2.height);
+    
+    if (!extractRGBChannel(buf1, info1.format, info1.width, info1.height, 0, channel1.data()) ||
+        !extractRGBChannel(buf2, info2.format, info2.width, info2.height, 0, channel2.data())) {
         return 0.0;
     }
     
-    const int* linesize1 = buf1->getImageLinesize();
-    const int* linesize2 = buf2->getImageLinesize();
-    
-    // 简化：使用整体PSNR
-    return calculatePSNR(data1, data2, info1.width * 3, info1.height,
-                        linesize1[0], linesize2[0]);
+    // 计算R通道PSNR
+    return calculatePSNR(channel1.data(), channel2.data(), 
+                        info1.width, info1.height,
+                        info1.width, info2.width);
 }
 
 double BufferComparator::calculatePSNR_RGB_G(
     Buffer* buf1, Buffer* buf2,
     const FormatInfo& info1, const FormatInfo& info2
 ) {
-    // G通道最重要，这里简化为使用整体PSNR
-    return calculatePSNR_RGB_R(buf1, buf2, info1, info2);
+    if (!buf1 || !buf2) return 0.0;
+    
+    std::vector<uint8_t> channel1(info1.width * info1.height);
+    std::vector<uint8_t> channel2(info2.width * info2.height);
+    
+    if (!extractRGBChannel(buf1, info1.format, info1.width, info1.height, 1, channel1.data()) ||
+        !extractRGBChannel(buf2, info2.format, info2.width, info2.height, 1, channel2.data())) {
+        return 0.0;
+    }
+    
+    return calculatePSNR(channel1.data(), channel2.data(), 
+                        info1.width, info1.height,
+                        info1.width, info2.width);
 }
 
 double BufferComparator::calculatePSNR_RGB_B(
     Buffer* buf1, Buffer* buf2,
     const FormatInfo& info1, const FormatInfo& info2
 ) {
-    return calculatePSNR_RGB_R(buf1, buf2, info1, info2);
+    if (!buf1 || !buf2) return 0.0;
+    
+    std::vector<uint8_t> channel1(info1.width * info1.height);
+    std::vector<uint8_t> channel2(info2.width * info2.height);
+    
+    if (!extractRGBChannel(buf1, info1.format, info1.width, info1.height, 2, channel1.data()) ||
+        !extractRGBChannel(buf2, info2.format, info2.width, info2.height, 2, channel2.data())) {
+        return 0.0;
+    }
+    
+    return calculatePSNR(channel1.data(), channel2.data(), 
+                        info1.width, info1.height,
+                        info1.width, info2.width);
 }
 
 // ============================================================================
@@ -1239,6 +1528,61 @@ AVFrame* BufferComparator::convertToYUV420P(Buffer* buffer, const FormatInfo& in
     SwsContext* sws_ctx = sws_getContext(
         info.width, info.height, info.format,
         info.width, info.height, AV_PIX_FMT_YUV420P,
+        SWS_BILINEAR, nullptr, nullptr, nullptr
+    );
+    
+    if (!sws_ctx) {
+        av_frame_free(&dst_frame);
+        return nullptr;
+    }
+    
+    // 执行转换
+    sws_scale(sws_ctx, src_frame->data, src_frame->linesize, 0, info.height,
+              dst_frame->data, dst_frame->linesize);
+    
+    sws_freeContext(sws_ctx);
+    
+    return dst_frame;
+}
+
+/**
+ * @brief 将YUV格式转换为RGB格式
+ * @param buffer YUV格式的Buffer
+ * @param info YUV格式信息
+ * @param target_rgb_format 目标RGB格式
+ * @return 转换后的AVFrame，失败返回nullptr
+ */
+AVFrame* BufferComparator::convertYUVToRGB(
+    Buffer* buffer, const FormatInfo& info, AVPixelFormat target_rgb_format
+) {
+    if (!buffer || !buffer->hasImageMetadata()) {
+        return nullptr;
+    }
+    
+    AVFrame* src_frame = buffer->getAVFrame();
+    if (!src_frame) {
+        return nullptr;
+    }
+    
+    // 创建目标frame
+    AVFrame* dst_frame = av_frame_alloc();
+    if (!dst_frame) {
+        return nullptr;
+    }
+    
+    dst_frame->format = target_rgb_format;
+    dst_frame->width = info.width;
+    dst_frame->height = info.height;
+    
+    if (av_frame_get_buffer(dst_frame, 0) < 0) {
+        av_frame_free(&dst_frame);
+        return nullptr;
+    }
+    
+    // 创建转换上下文（YUV -> RGB）
+    SwsContext* sws_ctx = sws_getContext(
+        info.width, info.height, info.format,
+        info.width, info.height, target_rgb_format,
         SWS_BILINEAR, nullptr, nullptr, nullptr
     );
     
@@ -1502,33 +1846,57 @@ double BufferComparator::calculateSSIM_RGB_R(
     Buffer* buf1, Buffer* buf2,
     const FormatInfo& info1, const FormatInfo& info2
 ) {
-    // 简化实现：使用整体 SSIM（标准实现需要通道分离）
-    uint8_t* data1 = buf1->getImagePlaneData(0);
-    uint8_t* data2 = buf2->getImagePlaneData(0);
+    if (!buf1 || !buf2) return 0.0;
     
-    if (!data1 || !data2) {
+    std::vector<uint8_t> channel1(info1.width * info1.height);
+    std::vector<uint8_t> channel2(info2.width * info2.height);
+    
+    if (!extractRGBChannel(buf1, info1.format, info1.width, info1.height, 0, channel1.data()) ||
+        !extractRGBChannel(buf2, info2.format, info2.width, info2.height, 0, channel2.data())) {
         return 0.0;
     }
     
-    const int* linesize1 = buf1->getImageLinesize();
-    const int* linesize2 = buf2->getImageLinesize();
-    
-    return calculateSSIM(data1, data2, info1.width * 3, info1.height,
-                        linesize1[0], linesize2[0]);
+    return calculateSSIM(channel1.data(), channel2.data(), 
+                       info1.width, info1.height,
+                       info1.width, info2.width);
 }
 
 double BufferComparator::calculateSSIM_RGB_G(
     Buffer* buf1, Buffer* buf2,
     const FormatInfo& info1, const FormatInfo& info2
 ) {
-    return calculateSSIM_RGB_R(buf1, buf2, info1, info2);
+    if (!buf1 || !buf2) return 0.0;
+    
+    std::vector<uint8_t> channel1(info1.width * info1.height);
+    std::vector<uint8_t> channel2(info2.width * info2.height);
+    
+    if (!extractRGBChannel(buf1, info1.format, info1.width, info1.height, 1, channel1.data()) ||
+        !extractRGBChannel(buf2, info2.format, info2.width, info2.height, 1, channel2.data())) {
+        return 0.0;
+    }
+    
+    return calculateSSIM(channel1.data(), channel2.data(), 
+                       info1.width, info1.height,
+                       info1.width, info2.width);
 }
 
 double BufferComparator::calculateSSIM_RGB_B(
     Buffer* buf1, Buffer* buf2,
     const FormatInfo& info1, const FormatInfo& info2
 ) {
-    return calculateSSIM_RGB_R(buf1, buf2, info1, info2);
+    if (!buf1 || !buf2) return 0.0;
+    
+    std::vector<uint8_t> channel1(info1.width * info1.height);
+    std::vector<uint8_t> channel2(info2.width * info2.height);
+    
+    if (!extractRGBChannel(buf1, info1.format, info1.width, info1.height, 2, channel1.data()) ||
+        !extractRGBChannel(buf2, info2.format, info2.width, info2.height, 2, channel2.data())) {
+        return 0.0;
+    }
+    
+    return calculateSSIM(channel1.data(), channel2.data(), 
+                       info1.width, info1.height,
+                       info1.width, info2.width);
 }
 
 } // namespace io
