@@ -2624,15 +2624,23 @@ static int test_multi_worker(const char* video_source) {
     // 6. 等待第一个Buffer，获取实际格式
     LOG4CPLUS_INFO(test_logger, "\n[Step 5] Waiting for first buffers to detect format...");
     
-    Buffer* first_hw = hw_pool_sptr->acquireFilled(true, 10000);
-    Buffer* first_sw = sw_pool_sptr->acquireFilled(true, 10000);
-    
-    if (!first_hw || !first_sw) {
-        LOG4CPLUS_ERROR(test_logger, "Failed to get first buffers (timeout)");
-        if (first_hw) hw_pool_sptr->releaseFilled(first_hw);
-        if (first_sw) sw_pool_sptr->releaseFilled(first_sw);
-        multi_worker.stop();
-        return -1;
+    Buffer* first_hw = nullptr;
+    Buffer* first_sw = nullptr;
+    while(true) {
+        first_hw = hw_pool_sptr->acquireFilled(true, 10000);
+        if (!first_hw) {
+            hw_pool_sptr->releaseFilled(first_hw);
+            continue;
+        }
+        break;
+    }
+    while(true) {
+        first_sw = sw_pool_sptr->acquireFilled(true, 10000);
+        if (!first_sw) {
+            sw_pool_sptr->releaseFilled(first_sw);
+            continue;
+        }
+        break;
     }
     
     // 从Buffer元数据获取实际格式

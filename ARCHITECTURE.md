@@ -19,7 +19,32 @@
 
 ## 版本历史
 
-### v2.20（当前版本）- 日志系统重构与关键 Bug 修复
+### v2.22（当前版本）- 共享数据源三态控制与数据源配置重构
+**发布日期：** 2026-01-22
+
+**主要变更：**
+- ✅ **共享模式三态控制**：BufferPacketSource 引入 `acquire/commit/cancel` 三态 API（带 `worker_id`）
+  - `acquirePacket()`：阻塞等待新 buffer，版本号防止重复获取
+  - `commitPacket()`：成功解码后提交，递减订阅计数并驱动 Fetch 释放
+  - `cancelPacket()`：失败时取消，允许重试当前 buffer
+  - 移除 `PacketGuard`（RAII 不再适配成功/失败分支）
+- ✅ **共享模式状态追踪**：新增 `current_buffer_version_` + `worker_states_`，保证多消费者一致性
+- ✅ **数据源配置归一**：`buffer_mode/codec_params/time_base/shared_packet_source` 迁移至 `data_source`
+- ✅ **Worker 行为更新**：RTSP 解码在 Buffer 模式下显式 commit/cancel，并在 close 时清理未提交 packet
+
+**设计原则：**
+- **显式生命周期**：成功/失败分支清晰，避免隐式释放导致状态不一致
+- **版本号保护**：每个 Worker 只处理当前 buffer 一次
+- **配置职责清晰**：数据源相关参数统一归属 `data_source`
+
+**架构优势：**
+- **更可控的共享语义**：避免重复消费与错误释放
+- **可恢复性更强**：失败可取消并重试
+- **配置更直观**：Buffer 模式参数从解码器配置中剥离
+
+---
+
+### v2.21 - 日志系统重构与关键 Bug 修复
 **发布日期：** 2026-01-16
 
 **主要变更：**
@@ -65,7 +90,8 @@
   - 新增共享模式构造函数，接受 `subscriber_count` 参数
   - 实现订阅者同步机制：所有消费者处理同一个 packet
   - 使用互斥锁和条件变量确保线程安全
-  - 新增成员：`is_shared_mode_`、`total_subscribers_`、`current_request_count_`、`current_buffer_`
+  - 新增成员：`is_shared_mode_`、`total_subscribers_`、`remaining_subscribers_`、`current_buffer_`
+  - ⭐ v2.22：新增 `current_buffer_version_` + `worker_states_`，共享模式改为 `acquire/commit/cancel` 三态流程
 - ✅ **Connector 共享实例管理**：支持共享 PacketSource 生命周期管理
   - 新增 `setSharedSource()` 方法：存储共享的 PacketSource
   - 新增 `getSharedSource()` 方法：获取共享实例
@@ -105,10 +131,14 @@ auto shared_source = std::make_shared<BufferPacketSource>(
     consumer_count  // 共享模式
 );
 
-// 所有消费者共享同一个实例
-worker1->setPacketSource(shared_source);
-worker2->setPacketSource(shared_source);
-worker3->setPacketSource(shared_source);
+// 所有消费者共享同一个实例（通过配置注入）
+WorkerConfig consumer_cfg;
+consumer_cfg.data_source.buffer_mode = true;
+consumer_cfg.data_source.shared_packet_source = shared_source;
+
+FfmpegDecodeRtspWorker worker1(consumer_cfg);
+FfmpegDecodeRtspWorker worker2(consumer_cfg);
+FfmpegDecodeRtspWorker worker3(consumer_cfg);
 
 // 示例2：Connector 管理共享实例
 Connector connector(Connector::Mode::ONE_TO_MANY, {0}, {0, 1, 2});
@@ -440,9 +470,10 @@ packet->dts -= first_dts_offset_;
   - 线程池大小通过 `MultiWorkerConfig::thread_pool_size` 进行初始化配置  
   - 各组内部通过 `CountDownLatch` 实现一次调度内的同步
 - ✅ **Buffer 模式数据源 + 零拷贝**  
-  - 生产者写入自身 `BufferPool`；消费者统一以 `datasource_buffer_mode` 从指定 `BufferPool` 取数  
+  - 生产者写入自身 `BufferPool`；消费者统一以 `buffer_mode` 从指定 `BufferPool` 取数  
   - 通过 Connector 事先绑定好：**消费者只认 BufferPool，不直接感知具体生产者实现**  
   - 避免中间拷贝，保持数据链路简洁
+  - ⭐ v2.22: 配置从 `decoder.datasource_buffer_mode` 移至 `data_source.buffer_mode`
 - ✅ **配置驱动 + 严格校验**  
   - `validateConfig()` 在 `start()` 前对每个 Group 做完整校验：  
     - 每组必须至少 1 个 Producer + 1 个 Consumer  
@@ -662,17 +693,17 @@ MultiWorkerProductionLine
 **发布日期：** 2025-01
 
 **主要变更：**
-- ✅ **BufferPacketSource 重新设计**：移除中间缓存，直接关联 BufferPool
-  - 删除：`current_buffer_`（中间缓存变量）
+- ✅ **BufferPacketSource 重新设计**：普通模式移除中间缓存，直接关联 BufferPool
   - 删除：`use_pool_mode_`（兼容模式标志）
   - 删除：`setCurrentBuffer()` / `clearCurrentBuffer()` 方法
+  - 普通模式不再依赖 `current_buffer_`；共享模式下 `current_buffer_` 仅用于同步与生命周期管理
   - 新增：`std::weak_ptr<BufferPool> source_pool_`（直接关联）
   - 新增：`setSourceBufferPool(std::weak_ptr<BufferPool> pool_weak)` 方法
 - ✅ **真正的零拷贝数据流**：`readPacket()` 直接从 BufferPool 获取，立即释放
   - 获取：`Buffer* buffer = pool->acquireFilled(true, 100);`
   - 使用：`copyPacket(packet, buffer->getAVPacket());`
   - 释放：`pool->releaseFilled(buffer);`（立即释放，避免积压）
-- ✅ **配置字段重命名**：`use_buffer_mode` → `datasource_buffer_mode`（更清晰语义）
+- ✅ **配置字段重命名**：`use_buffer_mode` → `datasource_buffer_mode`（v2.14）→ `buffer_mode`（v2.22，移至 data_source 结构体）
 - ✅ **MultiWorkerProductionLine 简化**：移除中间拷贝逻辑
   - 删除：`producerThreadFunc()` 中的 `buffer_source->setCurrentBuffer()`
   - 消费者直接从生产者 BufferPool 读取
@@ -680,12 +711,13 @@ MultiWorkerProductionLine
 **v2.19 新增 - 共享模式（发布-订阅）：**
 - ✅ **共享模式构造函数**：支持多消费者共享同一个 packet
   - 新增：`BufferPacketSource(codec_params, subscriber_count)` 构造函数
-  - 新增成员：`is_shared_mode_`、`total_subscribers_`、`current_request_count_`、`current_buffer_`
-  - 新增同步机制：`std::mutex mutex_`、`std::condition_variable cv_`
+  - 新增成员：`is_shared_mode_`、`total_subscribers_`、`remaining_subscribers_`、`current_buffer_`
+  - 新增同步机制：`std::mutex mutex_`、`std::condition_variable cv_subscribers_`、`cv_fetch_`
 - ✅ **订阅者同步机制**：确保所有消费者处理同一帧
-  - 工作流程：消费者调用 `readPacket()` → 增加请求计数 → 等待所有订阅者到齐 → 获取 Buffer → 所有订阅者读取同一 packet → 释放 Buffer
+  - 工作流程：消费者 `acquirePacket(worker_id)` → 解码成功 `commitPacket(worker_id)` / 失败 `cancelPacket(worker_id)` → 所有订阅者提交后 Fetch 释放 Buffer
+  - ⭐ v2.22：增加 `current_buffer_version_` 与 `worker_states_`，避免重复消费
   - 线程安全：使用互斥锁和条件变量保护共享状态
-  - 防止数据竞争：确保 packet 在所有订阅者读取完成前不被释放
+  - 防止数据竞争：确保 packet 在所有订阅者提交前不被释放
 
 **设计原则：**
 - **真正零拷贝**：消除所有中间拷贝环节
@@ -730,17 +762,19 @@ auto shared_source = std::make_shared<BufferPacketSource>(
 // 2. 关联生产者的 BufferPool
 shared_source->setSourceBufferPool(producer_buffer_pool_weak);
 
-// 3. 所有消费者 Worker 共享同一个实例（通过 shared_ptr）
-worker1->setPacketSource(shared_source);  // 消费者1
-worker2->setPacketSource(shared_source);  // 消费者2
-worker3->setPacketSource(shared_source);  // 消费者3
+// 3. 所有消费者 Worker 共享同一个实例（通过配置注入）
+WorkerConfig consumer_cfg;
+consumer_cfg.data_source.buffer_mode = true;
+consumer_cfg.data_source.shared_packet_source = shared_source;
+
+FfmpegDecodeRtspWorker worker1(consumer_cfg);  // 消费者1
+FfmpegDecodeRtspWorker worker2(consumer_cfg);  // 消费者2
+FfmpegDecodeRtspWorker worker3(consumer_cfg);  // 消费者3
 
 // 4. 共享模式工作流程（自动同步）
-// - 消费者1 调用 readPacket() → 等待
-// - 消费者2 调用 readPacket() → 等待
-// - 消费者3 调用 readPacket() → 所有到齐，获取 Buffer
-// - 三个消费者同时读取同一个 packet
-// - 最后一个消费者读取完成后，自动释放 Buffer
+// - 消费者1/2/3 调用 acquirePacket(this) → 等待新 buffer
+// - 解码成功：commitPacket(this)；解码失败：cancelPacket(this)（允许重试）
+// - 所有订阅者 commit 完成后，Fetch 释放 Buffer
 
 // ❌ v2.13 旧方式（已废弃）
 // buffer_source->setCurrentBuffer(buffer);  // 需要外部设置
@@ -845,7 +879,7 @@ double bpp = worker.getBytesPerPixel();
   - 所有状态统一由数据源管理，避免状态不一致
 - ✅ **状态管理优化**：单一数据源管理状态，Worker 直接查询数据源，避免缓存导致的不一致
 - ✅ **线程安全改进**：数据源的 `is_open_` 使用 `std::atomic<bool>`，保证线程安全的状态检查
-- ✅ **配置系统增强**：`WorkerConfig` 添加 `use_buffer_mode`（默认 false，v2.14 重命名为 `datasource_buffer_mode`）和 `codec_params` 配置项
+- ✅ **配置系统增强**：`WorkerConfig` 添加 `use_buffer_mode`（默认 false，v2.14 重命名为 `datasource_buffer_mode`，v2.22 移至 `data_source.buffer_mode`）和 `codec_params` 配置项
 
 **v2.19 新增 - 共享模式支持：**
 - ✅ **智能指针升级**：Worker 的 `packet_source_` 从 `unique_ptr` 改为 `shared_ptr`
@@ -899,12 +933,13 @@ auto config = WorkerConfigBuilder()
     .build();
 // Worker 内部创建 FilePacketSource
 
-// Buffer 模式（MultiWorkerProductionLine）
+// Buffer 模式（MultiWorkerProductionLine，v2.22 配置归一）
+WorkerConfig::DataSourceConfig ds_cfg;
+ds_cfg.buffer_mode = true;
+ds_cfg.codec_params = record_codec_params;
+
 auto config = WorkerConfigBuilder()
-    .setDecoderConfig(DecoderConfigBuilder()
-        .setDataSourceBufferMode(true)  // v2.14: 字段重命名
-        .setCodecParams(record_codec_params)
-        .build())
+    .setDataSourceConfig(ds_cfg)
     .build();
 // Worker 内部创建 BufferPacketSource
 ```
@@ -2352,12 +2387,20 @@ ProductionLine（生产管理）
 
 ```cpp
 struct WorkerConfig {
+    // ⭐ v2.22 重构：数据源配置统一归属 DataSourceConfig
+    struct DataSourceConfig {
+        std::string path;                      // 数据源路径/URL
+        int buffer_count = 0;                  // BufferPool 的 Buffer 数量
+        bool buffer_mode = false;              // 数据源模式（false=文件数据源，true=Buffer数据源）
+        const AVCodecParameters* codec_params = nullptr;  // Buffer模式的编解码器参数
+        AVRational time_base = {0, 1};         // 时间基准
+        std::shared_ptr<IPacketSource> shared_packet_source = nullptr;  // 共享的 Packet 数据源
+    } data_source;
+    
     struct DecoderConfig {
         const char* name = nullptr;           // 解码器名称
         bool enable_hardware = true;          // 启用硬件加速
         const char* hwaccel_device = nullptr; // 硬件设备
-        bool datasource_buffer_mode = false;   // ⭐ v2.12新增：数据源模式（默认false=文件数据源，true=Buffer数据源）
-        const AVCodecParameters* codec_params = nullptr;  // ⭐ v2.12新增：Buffer模式的编解码器参数
         
         // h264_taco 特定配置
         struct TacoConfig {
@@ -5052,9 +5095,9 @@ ffmpeg -f rawvideo -pix_fmt nv21 -s 1920x1080 \
 ---
 
 **文档维护：** AI SDK Team  
-**最后更新：** 2024-12-31  
-**架构版本：** v2.11（编解码器类型检测 + Buffer动态大小调整）  
-**上一版本：** v2.9（软件解码器自动选择 + 物理地址提取重构）  
+**最后更新：** 2026-01-22  
+**架构版本：** v2.22（共享数据源三态控制 + 数据源配置重构）  
+**上一版本：** v2.21  
 **代码规范版本：** v1.0（统一类成员访问控制顺序为 public → private，遵循大厂代码规范）
 
 **v2.11 主要变更**：

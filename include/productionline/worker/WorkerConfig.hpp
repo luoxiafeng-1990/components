@@ -108,10 +108,14 @@ enum class ColorStandard {
  * - 职责清晰：每个 Builder 只负责自己层级的配置
  * 
  * 配置结构：
- * - DataSourceConfig: 数据源路径和 BufferPool 参数
+ * - DataSourceConfig: 数据源路径、模式（Buffer/文件）、共享数据源、编解码器参数
  * - DisplayConfig: 显示设备分辨率和格式
  * - DecoderConfig: 解码器类型和参数
  * - worker_type: Worker 实现类型
+ * 
+ * ⭐ v2.22 重构：数据源相关配置统一归属 DataSourceConfig
+ * - buffer_mode, shared_packet_source, codec_params, time_base 从 DecoderConfig 移至 DataSourceConfig
+ * - 逻辑更清晰，职责更明确
  */
 struct WorkerConfig {
     // ========================================
@@ -121,10 +125,38 @@ struct WorkerConfig {
      * @brief 数据源配置
      * 
      * 用于配置 Worker 的数据源（RTSP 流、HTTP 流、本地文件等）及其相关参数。
+     * 
+     * ⭐ v2.22 重构：将数据源相关配置从 DecoderConfig 移动到此处
+     * - buffer_mode: 数据源模式（Buffer/文件）
+     * - shared_packet_source: 共享的 Packet 数据源
+     * - codec_params: 编解码器参数（Buffer模式）
+     * - time_base: 时间基准（用于同步）
      */
     struct DataSourceConfig {
+        // ========================================
+        // 基础配置
+        // ========================================
         std::string path;                     ///< 数据源路径/URL（RTSP/HTTP/文件等）
         int buffer_count = 0;                 ///< BufferPool 的 Buffer 数量（0=使用 Worker 默认值）
+        
+        // ========================================
+        // 数据源模式配置（v2.22 从 DecoderConfig 移动）
+        // ========================================
+        bool buffer_mode = false;             ///< true=从Buffer数据源获取packet, false=从文件数据源读取
+        const struct AVCodecParameters* codec_params = nullptr;  ///< Buffer模式下的编解码器参数（从Record Worker获取）
+        AVRational time_base = {0, 1};        ///< 时间基准（从Record Worker获取，用于同步）
+        
+        // ⭐ v2.22 共享的 Packet 数据源（从 DecoderConfig 移动）
+        // 
+        // 使用场景：
+        // - 普通模式：nullptr（Worker 自己创建独立的 BufferPacketSource）
+        // - 共享模式：MultiWorkerProductionLine 创建唯一实例并传入
+        // 
+        // 优点：
+        // - Worker 仍然根据 config 创建 datasource（符合原始设计）
+        // - 不需要修改 Worker 接口（不需要 setPacketSource）
+        // - 使用基类指针 IPacketSource，支持多态
+        std::shared_ptr<class IPacketSource> shared_packet_source = nullptr;
         
         DataSourceConfig() = default;
         DataSourceConfig(const DataSourceConfig&) = default;
@@ -161,25 +193,6 @@ struct WorkerConfig {
         bool enable_hardware = true;                   // 启用硬件加速
         std::optional<std::string> hwaccel_device;     // 硬件设备（如 "cuda:0", "vaapi"）
         int decode_threads = 0;                        // 解码线程数（0=自动）
-        
-        // ========================================
-        // 数据源配置（v2.9新增：支持数据源抽象模式）
-        // ========================================
-        bool datasource_buffer_mode = false;           // true=从Buffer数据源获取packet, false=从文件数据源读取
-        const struct AVCodecParameters* codec_params = nullptr;  // Buffer模式下的编解码器参数（从Record Worker获取）
-        AVRational time_base = {0, 1};                 // 时间基准（从Record Worker获取，用于同步）
-        
-        // ⭐ v2.18 新增：共享的 Packet 数据源（用于 MultiWorker 共享模式）
-        // 
-        // 使用场景：
-        // - 普通模式：nullptr（Worker 自己创建独立的 BufferPacketSource）
-        // - 共享模式：MultiWorkerProductionLine 创建唯一实例并传入
-        // 
-        // 优点：
-        // - Worker 仍然根据 config 创建 datasource（符合原始设计）
-        // - 不需要修改 Worker 接口（不需要 setPacketSource）
-        // - 使用基类指针 IPacketSource，支持多态
-        std::shared_ptr<class IPacketSource> shared_packet_source = nullptr;
         
         // ========================================
         // h264_taco 特定配置（子子结构体）

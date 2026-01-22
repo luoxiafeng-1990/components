@@ -34,26 +34,29 @@ FfmpegDecodeRtspWorker::FfmpegDecodeRtspWorker(const WorkerConfig& config)
     , codec_options_ptr_(nullptr)
     , decoded_frames_(0)
     , dropped_frames_(0)
+    , current_packet_ptr_(nullptr)  // ⭐ v2.22 新增
+    , packet_acquired_(false)       // ⭐ v2.22 新增
 {
     LOG4CPLUS_DEBUG(logger_, "[Worker] FfmpegDecodeRtspWorker created with config");
     
     // ⭐ v2.18 重构：根据配置创建数据源（统一在构造函数中，学习 VideoFileWorker）
     // ⭐ v2.19 修复：支持共享数据源模式（与 FfmpegDecodeVideoFileWorker 保持一致）
-    if (config.decoder.datasource_buffer_mode) {
+    // ⭐ v2.22 重构：数据源配置从 decoder 移至 datasource
+    if (config.data_source.buffer_mode) {
         // Buffer 数据源模式：从 BufferPacketSource 获取 packet
         
         // ⭐ v2.19 新增：检查是否使用共享实例（MultiWorker 共享模式）
-        if (config.decoder.shared_packet_source) {
+        if (config.data_source.shared_packet_source) {
             // ✅ 共享模式：使用 config 中的共享实例（ONE_TO_MANY 零拷贝）
-            packet_source_ = config.decoder.shared_packet_source;
-            LOG4CPLUS_INFO(logger_, "⭐ v2.19 使用共享 PacketSource（MultiWorker 共享模式）");
+            packet_source_ = config.data_source.shared_packet_source;
+            LOG4CPLUS_INFO(logger_, "⭐ v2.22 使用共享 PacketSource（MultiWorker 共享模式）");
         } else {
             // ✅ 普通模式：创建独立的 BufferPacketSource 实例（ONE_TO_ONE）
-            if (config.decoder.codec_params) {
-                packet_source_ = std::make_shared<BufferPacketSource>(config.decoder.codec_params);
+            if (config.data_source.codec_params) {
+                packet_source_ = std::make_shared<BufferPacketSource>(config.data_source.codec_params);
                 LOG4CPLUS_DEBUG(logger_, "Created BufferPacketSource (v2.20: 需要调用 setSourceBufferPool 关联源 Pool)");
             } else {
-                LOG4CPLUS_WARN(logger_, "datasource_buffer_mode=true but codec_params is nullptr");
+                LOG4CPLUS_WARN(logger_, "buffer_mode=true but codec_params is nullptr");
             }
         }
     } else {
@@ -110,7 +113,7 @@ bool FfmpegDecodeRtspWorker::open() {
     int width = worker_config_.display.width;
     int height = worker_config_.display.height;
     int bits_per_pixel = worker_config_.display.bits_per_pixel;
-    bool is_buffer_mode = worker_config_.decoder.datasource_buffer_mode;
+    bool is_buffer_mode = worker_config_.data_source.buffer_mode;
     
     // 验证参数（RTSP 模式必须提供分辨率）
     if (!is_buffer_mode) {
@@ -249,6 +252,18 @@ void FfmpegDecodeRtspWorker::close() {
         
         LOG4CPLUS_INFO(logger_, "");
         LOG4CPLUS_INFO(logger_, "🛑 Closing RTSP stream...");
+        
+        // ⭐ v2.22 新增：清理未提交的 packet（Buffer 模式）
+        if (worker_config_.data_source.buffer_mode && packet_acquired_) {
+            auto ps = std::dynamic_pointer_cast<BufferPacketSource>(packet_source_);
+            if (ps) {
+                // 强制提交（避免订阅者计数永久占用）
+                LOG4CPLUS_DEBUG(logger_, "[Worker] Cleaning up pending packet on close");
+                ps->commitPacket(this);
+            }
+            packet_acquired_ = false;
+            current_packet_ptr_ = nullptr;
+        }
         
         // ⭐ v2.12新增：关闭数据源
         if (packet_source_) {
@@ -447,79 +462,42 @@ bool FfmpegDecodeRtspWorker::fillBufferMetadataFromFrame(AVFrame* frame_ptr, Buf
 
 /**
  * @brief 从数据源读取 packet 并发送到解码器
- * @param packet_ptr AVPacket 指针（在旧接口模式下使用）
+ * @param packet_ptr AVPacket 指针（RTSP/文件模式使用）
  * @return true 成功发送 packet 到解码器，false 失败或 EOF
  * 
- * ⚠️ 重要变更（RAII 架构）：
- *   - 优先使用 PacketGuard 管理 AVPacket 生命周期（共享模式）
- *   - 只有解码完成后才通知 BufferPacketSource
- *   - 完全零拷贝，直接使用 Buffer 中的 AVPacket
- *   - 兼容旧接口（非共享模式）
+ * ⭐ v2.22 修改：
+ *   - Buffer 模式的逻辑已移至 fillBuffer() 中
+ *   - 此函数仅用于 RTSP/文件模式
  */
 bool FfmpegDecodeRtspWorker::readAndSendPacket(AVPacket* packet_ptr) {
-    // ✅ 检查是否是 BufferPacketSource（共享模式）
-    auto* buffer_source = dynamic_cast<BufferPacketSource*>(packet_source_.get());
-    
-    if (buffer_source) {
-        // ========== 新架构：使用 PacketGuard（RAII）==========
-        PacketGuard guard(buffer_source);
-        
-        if (!guard) {
-            // EOF 或错误
-            return false;
-        }
-        
-        // ✅ 获取 AVPacket 指针（零拷贝）
-        AVPacket* packet = guard.get();
-        
-        // ✅ 发送到解码器
-        int ret = avcodec_send_packet(codec_ctx_ptr_, packet);
-        
-        if (ret < 0) {
-            LOG4CPLUS_ERROR_FMT(logger_, "[Worker] ERROR: avcodec_send_packet failed: %d", ret);
-            return false;
-        }
-        
-        // ✅ guard 会在这里析构，自动调用 releasePacket()
-        return true;
-        
-    } else {
-        // ========== 旧架构：使用 readPacket（兼容非共享模式）==========
-        int read_ret = packet_source_->readPacket(packet_ptr);
-        
-        if (read_ret < 0) {
-            if (read_ret == AVERROR_EOF) {
-                return false;
-            } else {
-                char err_buf[AV_ERROR_MAX_STRING_SIZE];
-                av_strerror(read_ret, err_buf, sizeof(err_buf));
-                LOG4CPLUS_ERROR_FMT(logger_, "[Worker] ERROR: readPacket failed: %d (%s)", read_ret, err_buf);
-                return false;
-            }
-        }
-        
-        int ret = avcodec_send_packet(codec_ctx_ptr_, packet_ptr);
-        
-        // ⚠️ 重要：不要在这里调用 av_packet_unref()！
-        // 
-        // 原因：
-        //   1. packet_ptr 来自 buffer->getAVPacket()，是 Buffer 的一部分
-        //   2. Buffer 的生命周期由 BufferPool 管理
-        //   3. 当 buffer 被 releaseFilled() 归还到 pool 时，
-        //      BufferPool::releaseFilled() → Buffer::freeBuffer() → av_packet_unref()
-        //      会自动清理 packet 的引用计数
-        //   4. 如果在这里提前 unref，packet 会变成空状态（data=nullptr, size=0）
-        //   5. 导致同一个 buffer 被复用时，packet 无效，引发 AVERROR_INVALIDDATA
-        //
-        // avcodec_send_packet() 内部会拷贝数据，所以不需要担心数据被修改
-        
-        if (ret < 0) {
-            LOG4CPLUS_ERROR_FMT(logger_, "[Worker] ERROR: avcodec_send_packet failed: %d", ret);
-            return false;
-        }
-        
-        return true;
+    // ⭐ v2.22 修改：Buffer 模式不再使用此函数
+    if (worker_config_.data_source.buffer_mode) {
+        LOG4CPLUS_ERROR(logger_, "[Worker] ERROR: readAndSendPacket() should not be called in buffer_mode");
+        return false;
     }
+    
+    // ========== 文件/RTSP 模式：使用 readPacket ==========
+    int read_ret = packet_source_->readPacket(packet_ptr);
+    
+    if (read_ret < 0) {
+        if (read_ret == AVERROR_EOF) {
+            return false;
+        } else {
+            char err_buf[AV_ERROR_MAX_STRING_SIZE];
+            av_strerror(read_ret, err_buf, sizeof(err_buf));
+            LOG4CPLUS_ERROR_FMT(logger_, "[Worker] ERROR: readPacket failed: %d (%s)", read_ret, err_buf);
+            return false;
+        }
+    }
+    
+    int ret = avcodec_send_packet(codec_ctx_ptr_, packet_ptr);
+    
+    if (ret < 0) {
+        LOG4CPLUS_ERROR_FMT(logger_, "[Worker] ERROR: avcodec_send_packet failed: %d", ret);
+        return false;
+    }
+    
+    return true;
 }
 
 bool FfmpegDecodeRtspWorker::fillBuffer(int frame_index, Buffer* buffer) {
@@ -564,12 +542,48 @@ bool FfmpegDecodeRtspWorker::fillBuffer(int frame_index, Buffer* buffer) {
         return fillBufferMetadataFromFrame(frame_ptr, buffer);
     }
     
-    // ========== 步骤2: 缓存为空，读取新 packet 并发送到解码器 ==========
-    if (!readAndSendPacket(packet_ptr)) {
-        return false;
+    // ========== 步骤2: Buffer 模式 - 获取 packet（只在未获取时）==========
+    if (worker_config_.data_source.buffer_mode) {
+        auto ps = std::dynamic_pointer_cast<BufferPacketSource>(packet_source_);
+        if (!ps) {
+            LOG4CPLUS_ERROR(logger_, "[Worker] ERROR: Failed to cast to BufferPacketSource");
+            return false;
+        }
+        
+        // ⭐ v2.22 新增：只在未获取时才尝试获取
+        if (!packet_acquired_) {
+            current_packet_ptr_ = ps->acquirePacket(this);  // ✅ 传递 this 指针
+            
+            if (!current_packet_ptr_) {
+                // EOF 或 已获取过当前版本（需要等待新 buffer）
+                return false;
+            }
+            
+            packet_acquired_ = true;
+        }
+        
+        // ========== 步骤3: 发送到解码器 ==========
+        int ret = avcodec_send_packet(codec_ctx_ptr_, current_packet_ptr_);
+        
+        if (ret < 0 && ret != AVERROR(EAGAIN)) {
+            // ❌ 发送失败，取消当前获取
+            LOG4CPLUS_ERROR_FMT(logger_, "[Worker] ERROR: avcodec_send_packet failed: %d", ret);
+            ps->cancelPacket(this);
+            packet_acquired_ = false;
+            current_packet_ptr_ = nullptr;
+            return false;
+        }
+        
+    } else {
+        // ========== 步骤2-3: RTSP/文件模式（保持不变）==========
+        if (!readAndSendPacket(packet_ptr)) {
+            return false;
+        }
     }
+   
+    // ========== 步骤4: 循环读取所有解码的帧到缓存 ==========
+    bool decoded_at_least_one = false;
     
-    // ========== 步骤3: 循环读取所有解码的帧到缓存 ==========
     while (true) {
         AVFrame* temp_frame = av_frame_alloc();
         if (!temp_frame) {
@@ -583,13 +597,44 @@ bool FfmpegDecodeRtspWorker::fillBuffer(int frame_index, Buffer* buffer) {
             break;
         }
         
-        // 成功解码一帧，放入缓存
+        // ✅ 成功解码一帧
+        decoded_at_least_one = true;
         cached_frames_.push_back(temp_frame);
     }
     
-    // ========== 步骤4: 从缓存取第一帧填充 buffer ==========
-    if (cached_frames_.empty()) {
+    // ========== 步骤5: 检查是否成功解码 ==========
+    if (!decoded_at_least_one) {
+        // ❌ 没有解码出帧
+        
+        if (worker_config_.data_source.buffer_mode) {
+            // ⭐ v2.22 新增：Buffer 模式 - 取消获取（下次重试）
+            auto ps = std::dynamic_pointer_cast<BufferPacketSource>(packet_source_);
+            if (ps) {
+                ps->cancelPacket(this);
+            }
+            packet_acquired_ = false;
+            current_packet_ptr_ = nullptr;
+        }
+        
         return false;
+    }
+    
+    // ========== 步骤6: 成功解码，提交（释放）==========
+    if (worker_config_.data_source.buffer_mode && packet_acquired_) {
+        auto ps = std::dynamic_pointer_cast<BufferPacketSource>(packet_source_);
+        if (ps) {
+            // ⭐ v2.22 新增：成功处理，提交释放
+            ps->commitPacket(this);
+        }
+        
+        // 重置状态
+        packet_acquired_ = false;
+        current_packet_ptr_ = nullptr;
+    }
+    
+    // ========== 步骤7: 从缓存取第一帧填充 buffer ==========
+    if (cached_frames_.empty()) {
+        return false;  // 不应该到这里
     }
     
     AVFrame* first_frame = cached_frames_.front();

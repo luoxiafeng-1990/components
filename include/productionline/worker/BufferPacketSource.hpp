@@ -8,6 +8,7 @@
 #include <atomic>
 #include <mutex>
 #include <condition_variable>
+#include <map>
 #include <log4cplus/logger.h>
 #include <log4cplus/loggingmacros.h>
 
@@ -17,64 +18,9 @@ struct AVPacket;
 class BufferPool;
 class BufferPacketSource;  // BufferPacketSource 前向声明
 
-/**
- * @brief PacketGuard - RAII 包装器，管理 AVPacket 生命周期
- * 
- * 功能：自动管理 BufferPacketSource 的 acquire/release 生命周期
- * 
- * 使用方式：
- * ```cpp
- * PacketGuard guard(buffer_source);
- * if (guard) {
- *     AVPacket* packet = guard.get();
- *     avcodec_send_packet(codec, packet);
- *     avcodec_receive_frame(codec, frame);
- * }
- * // guard 析构时自动调用 releasePacket()
- * ```
- * 
- * 优势：
- * - RAII：自动管理资源，异常安全
- * - 零拷贝：直接获取 AVPacket* 指针
- * - 生命周期精确：只有解码完成后才通知 Fetch 任务
- */
-class PacketGuard {
-public:
-    /**
-     * @brief 构造函数
-     * @param source BufferPacketSource 指针
-     */
-    explicit PacketGuard(BufferPacketSource* source);
-    
-    /**
-     * @brief 析构函数（自动调用 releasePacket）
-     */
-    ~PacketGuard();
-    
-    // 禁止拷贝
-    PacketGuard(const PacketGuard&) = delete;
-    PacketGuard& operator=(const PacketGuard&) = delete;
-    
-    // 支持移动
-    PacketGuard(PacketGuard&& other) noexcept;
-    PacketGuard& operator=(PacketGuard&& other) noexcept;
-    
-    /**
-     * @brief 获取 AVPacket 指针
-     * @return AVPacket* 指针（零拷贝）
-     */
-    AVPacket* get() const;
-    
-    /**
-     * @brief 检查是否有效
-     * @return true=有效, false=无效（EOF 或错误）
-     */
-    operator bool() const;
-    
-private:
-    AVPacket* packet_;              // 持有的 AVPacket 指针
-    BufferPacketSource* source_;    // 关联的数据源
-};
+// ⭐ v2.22 修改：移除 PacketGuard RAII 包装器
+// 原因：新的三状态 API（acquire/commit/cancel）提供了更精确的控制
+// Worker 需要根据解码结果决定是 commit 还是 cancel，RAII 模式不再适用
 
 /**
  * @brief BufferPacketSource - Buffer 数据源实现
@@ -172,25 +118,69 @@ public:
     void setSourceBufferPool(std::weak_ptr<BufferPool> pool_weak);
     
     /**
-     * @brief 获取 AVPacket 指针（共享模式，RAII 架构）
-     * @return AVPacket* 指针（零拷贝），nullptr=EOF 或错误
+     * @brief 获取 AVPacket 指针（共享模式，v3.0 新架构）
+     * @param worker_id Worker 的唯一标识（通常是 this 指针）
+     * @return AVPacket* 指针（零拷贝），nullptr=EOF 或已获取过当前版本
      * 
      * 说明：
      * - 只在共享模式下使用
-     * - 不递减 remaining_subscribers_（由 releasePacket 负责）
-     * - 应该通过 PacketGuard 使用，而不是直接调用
+     * - 阻塞等待直到有新 buffer 或 EOF
+     * - 防止同一个 Worker 重复获取同一个 buffer（通过版本号机制）
+     * - 不递减 remaining_subscribers_（由 commitPacket 负责）
+     * 
+     * 返回值：
+     * - 非空：成功获取 packet 指针
+     * - nullptr：EOF 或已获取过当前版本（需要等待新 buffer）
+     * 
+     * 使用方式：
+     * ```cpp
+     * AVPacket* packet = ps->acquirePacket(this);
+     * if (!packet) {
+     *     return false;  // EOF 或等待新 buffer
+     * }
+     * // 使用 packet...
+     * ```
      */
-    AVPacket* acquirePacket();
+    AVPacket* acquirePacket(void* worker_id);
     
     /**
-     * @brief 释放 AVPacket（共享模式，RAII 架构）
+     * @brief 提交释放 AVPacket（共享模式，v3.0 新架构）
+     * @param worker_id Worker 的唯一标识
+     * @return true=成功提交, false=失败（状态不对）
      * 
      * 说明：
+     * - 只有成功处理（解码出至少一帧）后才调用
      * - 递减 remaining_subscribers_
      * - 如果是最后一个订阅者，唤醒 Fetch 任务
-     * - 应该通过 PacketGuard 使用，而不是直接调用
+     * - 重置 Worker 状态，允许获取下一个 buffer
+     * 
+     * 使用方式：
+     * ```cpp
+     * if (decoded_at_least_one_frame) {
+     *     ps->commitPacket(this);
+     * }
+     * ```
      */
-    void releasePacket();
+    bool commitPacket(void* worker_id);
+    
+    /**
+     * @brief 取消当前获取（共享模式，v3.0 新架构）
+     * @param worker_id Worker 的唯一标识
+     * 
+     * 说明：
+     * - 失败时调用（如 send_packet 失败、receive_frame 失败）
+     * - 不递减 remaining_subscribers_（保持订阅者计数不变）
+     * - 重置 Worker 状态，允许重新获取当前 buffer（重试）
+     * 
+     * 使用方式：
+     * ```cpp
+     * if (send_packet_failed) {
+     *     ps->cancelPacket(this);
+     *     return false;  // 重试
+     * }
+     * ```
+     */
+    void cancelPacket(void* worker_id);
     
 private:
     // ========== 通用成员（普通模式和共享模式都使用）==========
@@ -198,7 +188,7 @@ private:
     std::weak_ptr<BufferPool> source_pool_;     // ⭐ v2.13：关联的 BufferPool（从 Record Worker）
     std::atomic<bool> is_open_;                 // 🎯 原子变量，保证线程安全的状态检查
     
-    // ========== 共享模式成员（v2.18 新增）==========
+    // ========== 共享模式成员（v2.18 新增，v3.0 扩展）==========
     bool is_shared_mode_;                       // 是否为共享模式
     size_t total_subscribers_;                  // 订阅者总数（消费者数量）
     std::atomic<size_t> remaining_subscribers_; // 剩余未完成的订阅者数量
@@ -209,6 +199,22 @@ private:
     std::condition_variable cv_task_exit_;      // 条件变量（等待 Fetch 任务退出）
     std::atomic<bool> is_running_;              // 是否运行中
     std::atomic<bool> fetch_task_running_;      // Fetch 任务是否正在运行
+    
+    // ========== v3.0 新增：版本号和 Worker 状态追踪 ==========
+    std::atomic<uint64_t> current_buffer_version_{0};  // 当前 buffer 的版本号（递增）
+    
+    /**
+     * @brief Worker 状态
+     * 
+     * 用于追踪每个 Worker 对当前 buffer 的状态
+     */
+    struct WorkerState {
+        uint64_t acquired_version = 0;    // Worker 获取的 buffer 版本号
+        bool has_acquired = false;        // 是否已获取当前版本
+        bool has_committed = false;       // 是否已 commit 当前版本（防止重复 commit）
+    };
+    
+    std::map<void*, WorkerState> worker_states_;  // Worker ID (this指针) -> 状态
     
     /**
      * @brief 从当前 Buffer 复制 packet 数据
@@ -225,9 +231,6 @@ private:
     
     // 日志器
     log4cplus::Logger logger_;
-    
-    // 允许 PacketGuard 访问私有成员
-    friend class PacketGuard;
 };
 
 #endif // BUFFER_PACKET_SOURCE_HPP

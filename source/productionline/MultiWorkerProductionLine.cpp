@@ -484,9 +484,9 @@ bool MultiWorkerProductionLine::createConsumersForGroup(WorkerGroupRuntime* grou
         const auto& ccfg = group_config.consumer_configs[consumer_cfg_idx];
         LOG4CPLUS_INFO(logger_, "     创建消费者 '" << ccfg.consumer_name << "'...");
         
-        // 配置 buffer mode
+        // ⭐ v2.22 重构：配置 buffer mode（数据源配置移至 datasource）
         WorkerConfig consumer_config = ccfg.worker_config;
-        consumer_config.decoder.datasource_buffer_mode = true;
+        consumer_config.data_source.buffer_mode = true;
         
         // 4.3.1 查找该消费者所属的 Connector（使用查询方法）
         Connector* owner_connector = group->getConnectorForConsumer(ccfg.consumer_name);
@@ -512,7 +512,7 @@ bool MultiWorkerProductionLine::createConsumersForGroup(WorkerGroupRuntime* grou
         
         if (shared_source) {
             // ⭐ 使用共享数据源（所有模式都支持）
-            consumer_config.decoder.shared_packet_source = shared_source;
+            consumer_config.data_source.shared_packet_source = shared_source;
             LOG4CPLUS_INFO(logger_, "       ✅ 使用生产者 '" << producer_name 
                            << "' 的共享 BufferPacketSource");
         } else {
@@ -543,8 +543,8 @@ bool MultiWorkerProductionLine::createConsumersForGroup(WorkerGroupRuntime* grou
                 return false;
             }
             
-            consumer_config.decoder.codec_params = codec_params;
-            consumer_config.decoder.time_base = time_base;
+            consumer_config.data_source.codec_params = codec_params;
+            consumer_config.data_source.time_base = time_base;
             LOG4CPLUS_INFO(logger_, "       ✅ 普通模式：从生产者 '" 
                            << producer_info->producer_name << "' 获取 codec_params");
         }

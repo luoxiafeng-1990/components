@@ -41,7 +41,8 @@ bool BufferFillingWorkerFacade::open() {
     }
     
     // ⭐ v2.9新增：检查是否是 Buffer 模式
-    bool is_buffer_mode = config_.decoder.datasource_buffer_mode;
+    // ⭐ v2.22 重构：数据源配置从 decoder 移至 datasource
+    bool is_buffer_mode = config_.data_source.buffer_mode;
     
     if (is_buffer_mode) {
         // Buffer 模式：不需要文件路径，直接调用 open(nullptr)

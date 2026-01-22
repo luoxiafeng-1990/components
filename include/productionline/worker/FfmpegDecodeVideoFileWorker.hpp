@@ -64,8 +64,10 @@ public:
      * @param config Worker配置（包含解码器配置、数据源配置等）
      * 
      * 注意：不再提供默认构造函数，所有 Worker 必须通过配置创建
-     * - 文件数据源模式：config.decoder.datasource_buffer_mode = false
-     * - Buffer 数据源模式：config.decoder.datasource_buffer_mode = true
+     * - 文件数据源模式：config.data_source.buffer_mode = false
+     * - Buffer 数据源模式：config.data_source.buffer_mode = true
+     * 
+     * ⭐ v2.22: 数据源配置从 decoder 移至 datasource
      */
     explicit FfmpegDecodeVideoFileWorker(const WorkerConfig& config);
     

@@ -11,53 +11,10 @@ extern "C" {
 }
 
 // ============================================================
-// PacketGuard 实现
+// PacketGuard 实现（v3.0 已移除）
 // ============================================================
-
-PacketGuard::PacketGuard(BufferPacketSource* source) 
-    : packet_(nullptr), source_(source) 
-{
-    if (source_) {
-        packet_ = source_->acquirePacket();
-    }
-}
-
-PacketGuard::~PacketGuard() {
-    if (packet_ && source_) {
-        source_->releasePacket();
-    }
-}
-
-PacketGuard::PacketGuard(PacketGuard&& other) noexcept 
-    : packet_(other.packet_), source_(other.source_) 
-{
-    other.packet_ = nullptr;
-    other.source_ = nullptr;
-}
-
-PacketGuard& PacketGuard::operator=(PacketGuard&& other) noexcept {
-    if (this != &other) {
-        // 先释放当前持有的资源
-        if (packet_ && source_) {
-            source_->releasePacket();
-        }
-        
-        // 转移所有权
-        packet_ = other.packet_;
-        source_ = other.source_;
-        other.packet_ = nullptr;
-        other.source_ = nullptr;
-    }
-    return *this;
-}
-
-AVPacket* PacketGuard::get() const {
-    return packet_;
-}
-
-PacketGuard::operator bool() const {
-    return packet_ != nullptr;
-}
+// ⭐ v2.22 修改：移除 PacketGuard RAII 包装器
+// 新的三状态 API（acquire/commit/cancel）提供了更精确的控制
 
 // ============================================================
 // BufferPacketSource 实现
@@ -274,21 +231,26 @@ void BufferPacketSource::fetchTaskFunc() {
             std::unique_lock<std::mutex> lock(mutex_);
             cv_fetch_.wait(lock, [this]() {
                 // ✅ 等待所有订阅者完成（remaining_subscribers_ == 0）
+                // 或者 Pool 已停止 或者 任务已停止
+                auto pool = source_pool_.lock();  // 重新获取 pool
                 return remaining_subscribers_.load(std::memory_order_acquire) == 0 ||
-                       !is_running_.load(std::memory_order_acquire);
+                       !is_running_.load(std::memory_order_acquire) ||
+                       (pool && !pool->isRunning());  // Pool 已停止
             });
-            
-            // 检查是否被停止
-            if (!is_running_.load(std::memory_order_acquire)) {
-                LOG4CPLUS_DEBUG(logger_, "Fetch 任务：收到停止信号");
-                break;
-            }
         }
         
         // ========== 步骤2：释放当前 Buffer（单缓冲）==========
-        if (current_buffer_) {
-            pool->releaseFilled(current_buffer_);
-            current_buffer_ = nullptr;
+        // 🔒 修复：在锁内读取和清空 current_buffer_，在锁外释放 Buffer
+        Buffer* buffer_to_release = nullptr;
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            if (current_buffer_) {
+                buffer_to_release = current_buffer_;
+                current_buffer_ = nullptr;
+            }
+        }
+        if (buffer_to_release) {
+            pool->releaseFilled(buffer_to_release);
         }
         
         // ========== 步骤3：获取新 Buffer ==========
@@ -296,40 +258,14 @@ void BufferPacketSource::fetchTaskFunc() {
         
         if (!new_buffer) {
             // 超时或没有数据
-            if (!is_running_.load(std::memory_order_acquire)) {
+            if (!is_running_.load(std::memory_order_acquire) || !pool->isRunning()) {
                 LOG4CPLUS_DEBUG(logger_, "Fetch 任务：收到停止信号");
+                is_running_.store(false, std::memory_order_release);
+                // 唤醒所有等待的订阅者，让它们检测到 EOF
+                cv_subscribers_.notify_all();
                 break;  // 停止信号
             }
-            
-            // ⏱️ 检查连续超时时长
-            auto now = std::chrono::steady_clock::now();
-            auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - last_success_time);
-            
-            if (elapsed >= timeout_threshold) {
-                // 连续 5 秒无法获取 Buffer，检查 Pool 状态
-                if (!pool->isRunning()) {
-                    LOG4CPLUS_WARN(logger_, "Fetch 任务：连续 5 秒无法获取 Buffer，且 Pool 已停止，退出任务");
-                    is_running_.store(false, std::memory_order_release);
-                    
-                    // 清空 current_buffer_，避免订阅者继续使用旧数据
-                    {
-                        std::lock_guard<std::mutex> lock(mutex_);
-                        current_buffer_ = nullptr;
-                    }
-                    
-                    // 唤醒所有等待的订阅者，让它们检测到 EOF
-                    cv_subscribers_.notify_all();
-                    break;  // Pool 已停止，退出任务
-                } else {
-                    // Pool 还在运行，但长时间无数据，打印警告
-                    LOG4CPLUS_WARN_FMT(logger_, "Fetch 任务：连续 %ld 秒无法获取 Buffer，但 Pool 仍在运行",
-                                      elapsed.count());
-                    // 重置计时器，继续等待
-                    last_success_time = now;
-                }
-            }
-            
-            // 继续等待
+            // Pool 还在运行，继续等待
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
             continue;
         }
@@ -348,14 +284,18 @@ void BufferPacketSource::fetchTaskFunc() {
         // ========== 步骤4：设置新的 current_buffer_ 并唤醒订阅者 ==========
         {
             std::lock_guard<std::mutex> lock(mutex_);
-            
             // ✅ 单缓冲：直接设置
             current_buffer_ = new_buffer;
+            
+            // ⭐ v2.22 新增：递增版本号
+            current_buffer_version_.fetch_add(1, std::memory_order_release);
+            
+            // ✅ 不需要清空 worker_states_！
+            // Worker 状态会根据版本号自动判断
             
             // 重置订阅者计数器
             remaining_subscribers_.store(total_subscribers_, std::memory_order_release);
         }
-        
         // 唤醒所有等待的订阅者
         cv_subscribers_.notify_all();
     }
@@ -387,9 +327,6 @@ int BufferPacketSource::readPacket(AVPacket* packet) {
         // 检查是否被关闭
         if (!is_running_.load(std::memory_order_acquire)) {
             return AVERROR_EOF;
-        }
-        if (source_pool_.lock()->isRunning() == false) {
-            return AVERROR_EOF;  // Pool 已停止，数据源结束
         }
         // 检查 Buffer 是否有效
         if (!current_buffer_) {
@@ -522,7 +459,7 @@ void BufferPacketSource::setSourceBufferPool(std::weak_ptr<BufferPool> pool_weak
     LOG4CPLUS_DEBUG(logger_, "⭐ v2.13：已设置源 BufferPool");
 }
 
-AVPacket* BufferPacketSource::acquirePacket() {
+AVPacket* BufferPacketSource::acquirePacket(void* worker_id) {
     if (!is_shared_mode_) {
         LOG4CPLUS_ERROR(logger_, "acquirePacket() only supported in shared mode");
         return nullptr;
@@ -530,43 +467,128 @@ AVPacket* BufferPacketSource::acquirePacket() {
     
     std::unique_lock<std::mutex> lock(mutex_);
     
-    // 等待新 Buffer 可用
+    // ⭐ v2.22 修改：阻塞等待新 buffer 或 EOF
     cv_subscribers_.wait(lock, [this]() {
         return current_buffer_ != nullptr || 
                !is_running_.load(std::memory_order_acquire);
     });
     
-    // 检查是否被关闭
-    if (!is_running_.load(std::memory_order_acquire)) {
-        return nullptr;  // EOF
+    // 检查 EOF
+    if (!is_running_.load(std::memory_order_acquire) && !current_buffer_) {
+        LOG4CPLUS_DEBUG_FMT(logger_, "[Worker %p] acquirePacket: EOF", worker_id);
+        return nullptr;  // EOF：已停止且无可用数据
     }
     
-    auto pool = source_pool_.lock();
-    if (!pool || !pool->isRunning()) {
-        return nullptr;  // Pool 已停止
-    }
-    
-    // 检查 Buffer 是否有效
     if (!current_buffer_) {
+        LOG4CPLUS_WARN_FMT(logger_, "[Worker %p] acquirePacket: Unexpected - no buffer", worker_id);
         return nullptr;
     }
     
-    // ✅ 返回 AVPacket 指针，不递减 remaining_subscribers_
+    uint64_t current_version = current_buffer_version_.load(std::memory_order_acquire);
+    
+    // ⭐ v2.22 新增：获取或创建 Worker 状态
+    WorkerState& state = worker_states_[worker_id];
+    
+    // ⭐ v2.22 新增：检查是否已处理过当前版本
+    // 注意：检查 acquired_version，不管 has_acquired 状态
+    // 因为 commit 后 has_acquired 会被重置，但 acquired_version 保持
+    if (state.acquired_version == current_version) {
+        // ❌ 已处理过当前版本（无论是否已 commit），不能重复获取
+        // LOG4CPLUS_DEBUG_FMT(logger_, 
+        //     "[Worker %p] acquirePacket: Already processed version %llu (has_acquired=%d, has_committed=%d)", 
+        //     worker_id, (unsigned long long)current_version, 
+        //     state.has_acquired, state.has_committed);
+        return nullptr;
+    }
+    
+    // ✅ 新版本或首次获取，可以获取
+    state.acquired_version = current_version;
+    state.has_acquired = true;
+    state.has_committed = false;  // 重置 commit 标志
+    
     return current_buffer_->getAVPacket();
 }
 
-void BufferPacketSource::releasePacket() {
+bool BufferPacketSource::commitPacket(void* worker_id) {
+    if (!is_shared_mode_) {
+        LOG4CPLUS_WARN(logger_, "commitPacket() only supported in shared mode");
+        return false;
+    }
+    
+    std::lock_guard<std::mutex> lock(mutex_);
+    
+    // 1. 检查 Worker 是否存在
+    auto it = worker_states_.find(worker_id);
+    if (it == worker_states_.end()) {
+        LOG4CPLUS_WARN_FMT(logger_, "[Worker %p] commitPacket: Worker not found", worker_id);
+        return false;
+    }
+    
+    WorkerState& state = it->second;
+    uint64_t current_version = current_buffer_version_.load(std::memory_order_acquire);
+    
+    // 2. 检查状态
+    if (!state.has_acquired) {
+        LOG4CPLUS_WARN_FMT(logger_, "[Worker %p] commitPacket: Not acquired", worker_id);
+        return false;
+    }
+    
+    if (state.acquired_version != current_version) {
+        LOG4CPLUS_WARN_FMT(logger_, 
+            "[Worker %p] commitPacket: Version mismatch (acquired=%llu, current=%llu)", 
+            worker_id, 
+            (unsigned long long)state.acquired_version,
+            (unsigned long long)current_version);
+        return false;
+    }
+    
+    // ⭐ v2.22 新增：检查是否已 commit（防止重复 commit）
+    if (state.has_committed) {
+        LOG4CPLUS_WARN_FMT(logger_, 
+            "[Worker %p] commitPacket: Already committed version %llu", 
+            worker_id, (unsigned long long)current_version);
+        return false;
+    }
+    
+    // ⭐ v2.22 修复：重置 has_acquired 并标记已 commit
+    state.has_acquired = false;
+    state.has_committed = true;
+    
+    // 3. 递减订阅者计数
+    size_t remaining = remaining_subscribers_.fetch_sub(1, std::memory_order_acq_rel) - 1;
+    
+    // 4. 如果所有订阅者都完成，唤醒 Fetch 任务
+    if (remaining == 0) {
+        // ⭐ v2.22 修复：不在这里清空 current_buffer_！
+        // current_buffer_ 的清空和释放由 fetchTaskFunc() 负责
+        cv_fetch_.notify_one();
+    }
+    
+    return true;
+}
+
+void BufferPacketSource::cancelPacket(void* worker_id) {
     if (!is_shared_mode_) {
         return;
     }
     
-    // ✅ 递减订阅者计数
-    size_t remaining = remaining_subscribers_.fetch_sub(1, std::memory_order_acq_rel) - 1;
+    std::lock_guard<std::mutex> lock(mutex_);
     
-    // 如果是最后一个完成的订阅者，唤醒 Fetch 任务
-    if (remaining == 0) {
-        cv_fetch_.notify_one();
+    auto it = worker_states_.find(worker_id);
+    if (it == worker_states_.end()) {
+        return;
     }
+    
+    WorkerState& state = it->second;
+    uint64_t current_version = current_buffer_version_.load(std::memory_order_acquire);
+    
+    LOG4CPLUS_DEBUG_FMT(logger_, 
+        "[Worker %p] cancelPacket: version=%llu", 
+        worker_id, (unsigned long long)current_version);
+    
+    // 重置获取状态（允许重新 acquire）
+    // 注意：不递减 remaining_subscribers_！
+    state.has_acquired = false;
 }
 
 int BufferPacketSource::copyPacket(AVPacket* dst_packet, const AVPacket* src_packet) {

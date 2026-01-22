@@ -144,15 +144,16 @@ public:
      * - 消费者 Worker 从生产者 Worker 的 BufferPool 获取数据
      * 
      * 前置条件：
-     * - WorkerConfig 中必须设置 `decoder.datasource_buffer_mode = true`
+     * - WorkerConfig 中必须设置 `data_source.buffer_mode = true`
      * - 构造函数中会创建 `BufferPacketSource`（而不是 `RtspPacketSource`）
      * 
      * 示例：
      * ```cpp
      * // 1. 创建消费者 Worker（Buffer 模式）
+     * // ⭐ v2.22: 数据源配置从 decoder 移至 datasource
      * WorkerConfig config;
-     * config.decoder.datasource_buffer_mode = true;
-     * config.decoder.codec_params = record_worker->getCodecParameters();
+     * config.data_source.buffer_mode = true;
+     * config.data_source.codec_params = record_worker->getCodecParameters();
      * FfmpegDecodeRtspWorker consumer_worker(config);
      * 
      * // 2. 关联 Record BufferPool
@@ -240,6 +241,10 @@ private:
     
     // ============ 帧缓存（用于多通道解码）============
     std::vector<AVFrame*> cached_frames_;  // 缓存解码后的帧（用于处理双通道等场景）
+    
+    // ============ v3.0 新增：Packet 状态管理（用于 Buffer 模式共享）============
+    AVPacket* current_packet_ptr_;         // 当前持有的 packet 指针（Buffer 模式下使用）
+    bool packet_acquired_;                 // 是否已获取 packet（Buffer 模式下使用）
     
     // ============ 内部辅助方法 ============
     

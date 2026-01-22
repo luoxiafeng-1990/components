@@ -44,21 +44,22 @@ FfmpegDecodeVideoFileWorker::FfmpegDecodeVideoFileWorker(const WorkerConfig& con
     
     // ⭐ v2.9新增：根据配置创建数据源
     // ⭐ v2.19修复：支持共享数据源模式（与 FfmpegDecodeRtspWorker 保持一致）
-    if (config.decoder.datasource_buffer_mode) {
+    // ⭐ v2.22 重构：数据源配置从 decoder 移至 datasource
+    if (config.data_source.buffer_mode) {
         // Buffer 数据源模式：从 BufferPacketSource 获取 packet
         
         // ⭐ v2.19 新增：检查是否使用共享实例（MultiWorker 共享模式）
-        if (config.decoder.shared_packet_source) {
+        if (config.data_source.shared_packet_source) {
             // ✅ 共享模式：使用 config 中的共享实例
-            packet_source_ = config.decoder.shared_packet_source;
-            LOG4CPLUS_INFO(logger_, "⭐ v2.19 使用共享 PacketSource（MultiWorker 共享模式）");
+            packet_source_ = config.data_source.shared_packet_source;
+            LOG4CPLUS_INFO(logger_, "⭐ v2.22 使用共享 PacketSource（MultiWorker 共享模式）");
         } else {
             // ✅ 普通模式：创建独立的 BufferPacketSource 实例（ONE_TO_ONE）
-            if (config.decoder.codec_params) {
-                packet_source_ = std::make_shared<BufferPacketSource>(config.decoder.codec_params);
+            if (config.data_source.codec_params) {
+                packet_source_ = std::make_shared<BufferPacketSource>(config.data_source.codec_params);
                 LOG4CPLUS_DEBUG(logger_, "Created BufferPacketSource (v2.20: 需要调用 setSourceBufferPool 关联源 Pool)");
             } else {
-                LOG4CPLUS_WARN(logger_, "datasource_buffer_mode=true but codec_params is nullptr");
+                LOG4CPLUS_WARN(logger_, "buffer_mode=true but codec_params is nullptr");
             }
         }
     } else {
