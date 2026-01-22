@@ -40,6 +40,7 @@
  #include <cmath>
  #include <thread>
  #include <chrono>
+ #include <map>
 #include <dirent.h>
 #include <unistd.h>
 #include <sys/types.h>
@@ -56,7 +57,7 @@
  #include "productionline/io/BufferComparator.hpp"
 #include "buffer/bufferpool/BufferPool.hpp"
 #include "buffer/bufferpool/BufferPoolRegistry.hpp"
-#include "monitor/Timer.hpp"
+#include "common/Timer.hpp"
 #include "common/Logger.hpp"
 #include "framework/TestMacros.hpp"
  
@@ -274,6 +275,67 @@ namespace productionline { namespace io {
     struct CompareConfig;
 }}
 
+/**
+ * ⭐ 从外部生成的 GOP 映射文件加载原视频的帧类型信息
+ *
+ * 期望的 CSV 格式（与 /tmp/gop_pts_map.csv 一致）：
+ *   pkt_pts,pkt_pts_time,pict_type,...
+ * 例如：
+ *   -1024,-0.066667,I,17,0,YUV
+ *   0,0.000000,B,17,0,YUV
+ *   512,0.033333,B,17,0,YUV
+ *
+ * 我们只关心：
+ *   - 第1列：pkt_pts（整数PTS）
+ *   - 第3列：pict_type（I/P/B）
+ */
+static bool load_source_gop_map(
+    const char* gop_csv_path,
+    std::map<long long, char>& pts_to_type
+) {
+    pts_to_type.clear();
+
+    if (!gop_csv_path || gop_csv_path[0] == '\0') {
+        return false;
+    }
+
+    FILE* fp = fopen(gop_csv_path, "r");
+    if (!fp) {
+        LOG_WARN_FMT("  ⚠️  Failed to open GOP map file: %s", gop_csv_path);
+        return false;
+    }
+
+    char line[512];
+    int loaded = 0;
+
+    while (fgets(line, sizeof(line), fp)) {
+        // 简单按逗号拆分：pkt_pts, pkt_pts_time, pict_type, ...
+        // 我们只解析前3列
+        long long pts = 0;
+        double pts_time = 0.0;
+        char pict_type = '?';
+
+        // 允许前面有负PTS（如 -1024,-0.066667,I,...）
+        // 使用 %lld,%lf,%c 解析前三个字段
+        if (sscanf(line, "%lld,%lf,%c", &pts, &pts_time, &pict_type) == 3) {
+            if (pict_type == 'I' || pict_type == 'P' || pict_type == 'B') {
+                pts_to_type[pts] = pict_type;
+                loaded++;
+            }
+        }
+    }
+
+    fclose(fp);
+
+    if (loaded == 0) {
+        LOG_WARN_FMT("  ⚠️  GOP map file parsed but no valid entries found: %s", gop_csv_path);
+        return false;
+    }
+
+    LOG_INFO_FMT("  ✅ Loaded %d GOP entries from %s", loaded, gop_csv_path);
+    return true;
+}
+
  static int run_decode_test_with_params(
      const char* video_path,
      int width,
@@ -333,6 +395,14 @@ namespace productionline { namespace io {
          LOG_ERROR("Failed to open BufferComparator");
          return -1;
      }
+     
+     // ⭐ 尝试从外部GOP映射文件加载原视频的帧类型（用于诊断和表格输出）
+     // 该文件可通过 ffprobe 预先生成：
+     //   ffprobe -v error -select_streams v:0 -show_frames \
+     //     -show_entries frame=pict_type,pkt_pts,pkt_pts_time \
+     //     -of csv=p=0 input.mp4 > /tmp/gop_pts_map.csv
+     std::map<long long, char> src_pts_to_type;
+     bool has_src_gop = load_source_gop_map("/tmp/gop_pts_map.csv", src_pts_to_type);
      LOG_INFO("  ✅ BufferComparator initialized");
      
      LOG_INFO("  Strategy: AUTO_LAYERED (fast → deep)");
@@ -657,21 +727,39 @@ namespace productionline { namespace io {
          hw_format = AV_PIX_FMT_NV12;
      }
 
-     // 获取软件解码格式信息（仅用于日志）
-     if (first_sw_buf->hasImageMetadata()) {
-         AVPixelFormat sw_format = first_sw_buf->getImageFormat();
-         LOG_INFO_FMT("Software format: %s (%dx%d) [for comparison only, not saved]", 
-                     av_get_pix_fmt_name(sw_format),
-                     first_sw_buf->getImageWidth(), 
-                     first_sw_buf->getImageHeight());
-     } else {
-         LOG_WARN("Software buffer has no metadata");
-     }
+    // 获取软件解码格式信息（仅用于日志）
+    if (first_sw_buf->hasImageMetadata()) {
+        AVPixelFormat sw_format = first_sw_buf->getImageFormat();
+        LOG_INFO_FMT("Software format: %s (%dx%d) [for comparison only, not saved]", 
+                    av_get_pix_fmt_name(sw_format),
+                    first_sw_buf->getImageWidth(), 
+                    first_sw_buf->getImageHeight());
+    } else {
+        LOG_WARN("Software buffer has no metadata");
+    }
+
+    // ⭐ 创建 BufferWriter 用于保存硬件解码输出
+    BufferWriter hw_writer;
+    std::string hw_output_yuv = "output/" + res_str + "_hw.yuv";
+    std::filesystem::create_directories("output");
+    
+    if (hw_format != AV_PIX_FMT_NONE) {
+        if (!hw_writer.openRaw(hw_output_yuv.c_str(), hw_format, hw_actual_width, hw_actual_height)) {
+            LOG_ERROR_FMT("Failed to open BufferWriter for hardware output: %s", hw_output_yuv.c_str());
+            // 不返回错误，继续测试（保存失败不影响比较）
+        } else {
+            LOG_INFO_FMT("  ✅ BufferWriter opened: %s (format: %s, %dx%d)", 
+                        hw_output_yuv.c_str(), hw_format_name.c_str(), 
+                        hw_actual_width, hw_actual_height);
+        }
+    } else {
+        LOG_WARN("Cannot create BufferWriter: format not detected");
+    }
  
-   // ========================================================================
-   // 步骤4：对比第0帧并保存（先比较计算PSNR，再保存文件）
-   // ========================================================================
-   LOG_INFO("\nStep 4: Comparing frame 0 and saving...");
+  // ========================================================================
+  // 步骤4：对比第0帧并保存（先比较计算PSNR，再保存文件）
+  // ========================================================================
+  LOG_INFO("\nStep 4: Comparing frame 0 and saving...");
    LOG_INFO("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
 
 #ifdef ENABLE_DEBUG_BUFFER_TAG
@@ -695,6 +783,13 @@ namespace productionline { namespace io {
 
    // ⭐ 先对比第0帧（计算PSNR和SSIM）
    FrameCompareResult first_result = comparator.compare(first_sw_buf, first_hw_buf);
+   
+   // ⭐ 保存第0帧硬件解码输出到YUV文件
+   if (hw_format != AV_PIX_FMT_NONE) {
+       if (!hw_writer.write(first_hw_buf)) {
+           LOG_WARN("  ⚠️  Frame 0: Failed to write hardware buffer to YUV file");
+       }
+   }
    
    if (first_result.passed) {
         if (compare_config.enable_psnr && compare_config.enable_ssim) {
@@ -846,12 +941,28 @@ namespace productionline { namespace io {
     
     int timeout_count = 0;
     const int MAX_TIMEOUT = 50;
+    
+    // ⭐ 帧类型统计（用于诊断硬件解码器的帧类型标记问题）
+    int hw_frame_type_i = 0, hw_frame_type_p = 0, hw_frame_type_b = 0, hw_frame_type_none = 0;
+    int sw_frame_type_i = 0, sw_frame_type_p = 0, sw_frame_type_b = 0, sw_frame_type_none = 0;
+    
+    // ⭐ PTS顺序检查（用于诊断硬件解码器的帧顺序问题）
+    int64_t last_hw_pts = AV_NOPTS_VALUE;
+    int hw_pts_order_error_count = 0;  // PTS不单调递增的次数
      
      // ⭐ PSNR统计：记录每帧的PSNR值（参考 run_psnr_compare_test）
      std::vector<double> psnr_y_values;
      std::vector<double> psnr_u_values;
      std::vector<double> psnr_v_values;
      std::vector<double> psnr_avg_values;
+     
+     // ⭐ 按帧类型统计PSNR：I帧、P帧、B帧
+     std::vector<double> psnr_y_i_frames;
+     std::vector<double> psnr_y_p_frames;
+     std::vector<double> psnr_y_b_frames;
+     std::vector<double> psnr_avg_i_frames;
+     std::vector<double> psnr_avg_p_frames;
+     std::vector<double> psnr_avg_b_frames;
      
      // ⭐ SSIM统计：记录每帧的SSIM值
      std::vector<double> ssim_y_values;
@@ -909,63 +1020,161 @@ namespace productionline { namespace io {
             }
         }
         
-        // 同时获取硬件和软件解码的 Buffer
-        Buffer* sw_buf = sw_pool->acquireFilled(true, acquire_timeout);
-        Buffer* hw_buf = hw_pool->acquireFilled(true, acquire_timeout);
+        // ⭐ 基于PTS的帧对齐：确保比较的是同一时刻的帧
+        // 由于B帧重排，软硬解码器输出的帧顺序可能不同，需要按PTS匹配
+        Buffer* sw_buf = nullptr;
+        Buffer* hw_buf = nullptr;
+        int pts_match_attempts = 0;
+        const int MAX_PTS_MATCH_ATTEMPTS = 10;  // 最多尝试10次匹配
         
-        if (!sw_buf || !hw_buf) {
-            // ⭐ 诊断：第一次超时时就记录详细信息
-            if (timeout_count == 0) {
-                LOG_WARN_FMT("  ⚠️  First timeout at frame_count=%d: HW filled=%d (free=%d), SW filled=%d (free=%d)", 
-                            frame_count, hw_filled, hw_free, sw_filled, sw_free);
-            }
+        // ⭐ 循环直到找到PTS匹配的帧
+        while (pts_match_attempts < MAX_PTS_MATCH_ATTEMPTS) {
+            // 如果没有buffer，获取新的buffer
             if (!sw_buf) {
-                LOG_DEBUG_FMT("Software decoder timeout (frame_count=%d, timeout_count=%d, hw_filled=%d, sw_filled=%d)", 
-                             frame_count, timeout_count, hw_filled, sw_filled);
+                sw_buf = sw_pool->acquireFilled(true, acquire_timeout);
             }
             if (!hw_buf) {
-                LOG_DEBUG_FMT("Hardware decoder timeout (frame_count=%d, timeout_count=%d, hw_filled=%d, sw_filled=%d)", 
-                             frame_count, timeout_count, hw_filled, sw_filled);
+                hw_buf = hw_pool->acquireFilled(true, acquire_timeout);
             }
             
-            // ⭐ 诊断：检查 BufferPool 状态
-            if (timeout_count % 10 == 0 && timeout_count > 0) {
-                LOG_WARN_FMT("  ⚠️  Timeout #%d: HW pool (filled=%d, free=%d), SW pool (filled=%d, free=%d)", 
-                            timeout_count, hw_filled, hw_free, sw_filled, sw_free);
+            // 如果任一pool没有数据，处理超时
+            if (!sw_buf || !hw_buf) {
+                // ⭐ 诊断：第一次超时时就记录详细信息
+                if (timeout_count == 0) {
+                    LOG_WARN_FMT("  ⚠️  First timeout at frame_count=%d: HW filled=%d (free=%d), SW filled=%d (free=%d)", 
+                                frame_count, hw_filled, hw_free, sw_filled, sw_free);
+                }
+                if (!sw_buf) {
+                    LOG_DEBUG_FMT("Software decoder timeout (frame_count=%d, timeout_count=%d, hw_filled=%d, sw_filled=%d)", 
+                                 frame_count, timeout_count, hw_filled, sw_filled);
+                }
+                if (!hw_buf) {
+                    LOG_DEBUG_FMT("Hardware decoder timeout (frame_count=%d, timeout_count=%d, hw_filled=%d, sw_filled=%d)", 
+                                 frame_count, timeout_count, hw_filled, sw_filled);
+                }
                 
-                // ⭐ 如果BufferPool已满但仍有filled buffers，说明消费速度太慢
-                if (hw_free == 0 && hw_filled > 0) {
-                    LOG_WARN("    ⚠️  Hardware BufferPool exhausted: all buffers are filled but not consumed!");
-                    LOG_WARN("    This indicates consumer (comparison/writing) is slower than producer (decoding)");
+                // ⭐ 诊断：检查 BufferPool 状态
+                if (timeout_count % 10 == 0 && timeout_count > 0) {
+                    LOG_WARN_FMT("  ⚠️  Timeout #%d: HW pool (filled=%d, free=%d), SW pool (filled=%d, free=%d)", 
+                                timeout_count, hw_filled, hw_free, sw_filled, sw_free);
+                    
+                    // ⭐ 如果BufferPool已满但仍有filled buffers，说明消费速度太慢
+                    if (hw_free == 0 && hw_filled > 0) {
+                        LOG_WARN("    ⚠️  Hardware BufferPool exhausted: all buffers are filled but not consumed!");
+                        LOG_WARN("    This indicates consumer (comparison/writing) is slower than producer (decoding)");
+                    }
+                    if (sw_free == 0 && sw_filled > 0) {
+                        LOG_WARN("    ⚠️  Software BufferPool exhausted: all buffers are filled but not consumed!");
+                    }
                 }
-                if (sw_free == 0 && sw_filled > 0) {
-                    LOG_WARN("    ⚠️  Software BufferPool exhausted: all buffers are filled but not consumed!");
+                
+                if (sw_buf) sw_pool->releaseFilled(sw_buf);
+                if (hw_buf) hw_pool->releaseFilled(hw_buf);
+                
+                timeout_count++;
+                
+                // ⭐ 检查是否自然结束（在超时之前检查）
+                if (!hw_producer.isRunning() && !sw_producer.isRunning()) {
+                    LOG_INFO("\n  Decoders finished naturally");
+                    LOG_INFO_FMT("    Frames processed: %d", frame_count);
+                    LOG_INFO_FMT("    Timeout count: %d", timeout_count);
+                    break;
                 }
+                
+                // ⭐ 只有在连续超时很多次且解码器仍在运行时才退出
+                if (timeout_count >= MAX_TIMEOUT) {
+                    LOG_INFO("\n  Decoders finished or timeout");
+                    LOG_INFO_FMT("    Total timeouts: %d (max: %d)", timeout_count, MAX_TIMEOUT);
+                    LOG_INFO_FMT("    Frames processed: %d", frame_count);
+                    LOG_INFO_FMT("    HW pool: filled=%d, free=%d", hw_filled, hw_free);
+                    LOG_INFO_FMT("    SW pool: filled=%d, free=%d", sw_filled, sw_free);
+                    // 跳出外层循环
+                    sw_buf = nullptr;
+                    hw_buf = nullptr;
+                    break;
+                }
+                // 超时后跳出PTS匹配循环，继续外层循环
+                break;
             }
             
+            // ⭐ 获取两个buffer的PTS
+            AVFrame* sw_avframe = sw_buf->getAVFrame();
+            AVFrame* hw_avframe = hw_buf->getAVFrame();
+            
+            int64_t sw_pts = AV_NOPTS_VALUE;
+            int64_t hw_pts = AV_NOPTS_VALUE;
+            
+            if (sw_avframe) {
+                sw_pts = sw_avframe->pts != AV_NOPTS_VALUE ? sw_avframe->pts : sw_avframe->best_effort_timestamp;
+            }
+            if (hw_avframe) {
+                hw_pts = hw_avframe->pts != AV_NOPTS_VALUE ? hw_avframe->pts : hw_avframe->best_effort_timestamp;
+            }
+            
+            // ⭐ 如果PTS都有效且匹配，找到对齐的帧
+            // ⭐ 注意：只按PTS对齐，不强制帧类型匹配
+            // 原因：1) PTS是唯一可靠的同步依据
+            //       2) 帧类型不一致可能是解码器标记差异，不应该阻止比较
+            //       3) 帧类型不匹配会在后续验证中警告，但不影响比较
+            if (sw_pts != AV_NOPTS_VALUE && hw_pts != AV_NOPTS_VALUE) {
+                if (sw_pts == hw_pts) {
+                    // PTS匹配，可以进行比较
+                    // 检查帧类型是否也匹配（用于警告，但不阻止比较）
+                    if (pts_match_attempts > 0 && frame_count <= 10) {
+                        LOG_DEBUG_FMT("  Frame %d: PTS matched after %d attempts (pts=%lld)", 
+                                    frame_count, pts_match_attempts, (long long)sw_pts);
+                    }
+                    break;  // 跳出循环，使用这两个buffer（帧类型会在后续验证中检查）
+                } else {
+                    // PTS不匹配，释放PTS较小的buffer，获取下一个
+                    if (sw_pts < hw_pts) {
+                        // SW的PTS较小，释放SW buffer获取下一个
+                        sw_pool->releaseFilled(sw_buf);
+                        sw_buf = nullptr;
+                        pts_match_attempts++;
+                        if (pts_match_attempts <= 3 && frame_count <= 10) {
+                            LOG_DEBUG_FMT("  Frame %d: SW pts=%lld < HW pts=%lld, skipping SW frame", 
+                                        frame_count, (long long)sw_pts, (long long)hw_pts);
+                        }
+                    } else {
+                        // HW的PTS较小，释放HW buffer获取下一个
+                        hw_pool->releaseFilled(hw_buf);
+                        hw_buf = nullptr;
+                        pts_match_attempts++;
+                        if (pts_match_attempts <= 3 && frame_count <= 10) {
+                            LOG_DEBUG_FMT("  Frame %d: HW pts=%lld < SW pts=%lld, skipping HW frame", 
+                                        frame_count, (long long)hw_pts, (long long)sw_pts);
+                        }
+                    }
+                    continue;  // 继续尝试匹配
+                }
+            } else {
+                // PTS无效，无法按PTS对齐，直接使用（向后兼容）
+                if (pts_match_attempts == 0 && frame_count <= 10) {
+                    LOG_WARN_FMT("  Frame %d: PTS unavailable (SW=%s, HW=%s), using sequential matching", 
+                                frame_count,
+                                sw_pts != AV_NOPTS_VALUE ? std::to_string(sw_pts).c_str() : "NOPTS",
+                                hw_pts != AV_NOPTS_VALUE ? std::to_string(hw_pts).c_str() : "NOPTS");
+                }
+                break;  // 跳出循环，使用这两个buffer（向后兼容）
+            }
+        }
+        
+        // ⭐ 如果尝试多次仍未找到匹配，记录警告但继续处理
+        if (pts_match_attempts >= MAX_PTS_MATCH_ATTEMPTS) {
+            LOG_WARN_FMT("  ⚠️  Frame %d: Failed to match PTS after %d attempts, using current buffers", 
+                        frame_count, pts_match_attempts);
+        }
+        
+        // 确保获取到了buffer（如果超时或自然结束，sw_buf或hw_buf可能为nullptr）
+        if (!sw_buf || !hw_buf) {
             if (sw_buf) sw_pool->releaseFilled(sw_buf);
             if (hw_buf) hw_pool->releaseFilled(hw_buf);
-            
-            timeout_count++;
-            
-            // ⭐ 检查是否自然结束（在超时之前检查）
+            // 如果是超时导致的，已经处理过了，continue外层循环
             if (!hw_producer.isRunning() && !sw_producer.isRunning()) {
-                LOG_INFO("\n  Decoders finished naturally");
-                LOG_INFO_FMT("    Frames processed: %d", frame_count);
-                LOG_INFO_FMT("    Timeout count: %d", timeout_count);
-                break;
+                break;  // 解码器已停止，跳出外层循环
             }
-            
-            // ⭐ 只有在连续超时很多次且解码器仍在运行时才退出
-            if (timeout_count >= MAX_TIMEOUT) {
-                LOG_INFO("\n  Decoders finished or timeout");
-                LOG_INFO_FMT("    Total timeouts: %d (max: %d)", timeout_count, MAX_TIMEOUT);
-                LOG_INFO_FMT("    Frames processed: %d", frame_count);
-                LOG_INFO_FMT("    HW pool: filled=%d, free=%d", hw_filled, hw_free);
-                LOG_INFO_FMT("    SW pool: filled=%d, free=%d", sw_filled, sw_free);
-                break;
-            }
-            continue;
+            continue;  // 继续外层循环
         }
         
         timeout_count = 0;
@@ -1009,10 +1218,145 @@ namespace productionline { namespace io {
         }
 #endif
 
+        // ⭐ 验证帧对齐情况（现在应该已通过PTS对齐）
+        // ⭐ 在compare之前检查，确认PTS对齐是否成功
+        AVFrame* sw_avframe = sw_buf ? sw_buf->getAVFrame() : nullptr;
+        AVFrame* hw_avframe = hw_buf ? hw_buf->getAVFrame() : nullptr;
+        bool frame_mismatch = false;
+        
+        // ⭐ 统计帧类型分布（用于诊断硬件解码器的帧类型标记问题）
+        if (sw_avframe) {
+            switch (sw_avframe->pict_type) {
+                case AV_PICTURE_TYPE_I: sw_frame_type_i++; break;
+                case AV_PICTURE_TYPE_P: sw_frame_type_p++; break;
+                case AV_PICTURE_TYPE_B: sw_frame_type_b++; break;
+                case AV_PICTURE_TYPE_NONE: sw_frame_type_none++; break;
+            }
+        }
+        if (hw_avframe) {
+            switch (hw_avframe->pict_type) {
+                case AV_PICTURE_TYPE_I: hw_frame_type_i++; break;
+                case AV_PICTURE_TYPE_P: hw_frame_type_p++; break;
+                case AV_PICTURE_TYPE_B: hw_frame_type_b++; break;
+                case AV_PICTURE_TYPE_NONE: hw_frame_type_none++; break;
+            }
+        }
+        
+        if (sw_avframe && hw_avframe) {
+            // 获取PTS
+            int64_t sw_pts = sw_avframe->pts != AV_NOPTS_VALUE ? sw_avframe->pts : sw_avframe->best_effort_timestamp;
+            int64_t hw_pts = hw_avframe->pts != AV_NOPTS_VALUE ? hw_avframe->pts : hw_avframe->best_effort_timestamp;
+            
+            // 检查帧类型是否一致（现在应该一致，因为已按PTS对齐）
+            if (sw_avframe->pict_type != hw_avframe->pict_type) {
+                frame_mismatch = true;
+                const char* sw_type_str = "?";
+                const char* hw_type_str = "?";
+                switch (sw_avframe->pict_type) {
+                    case AV_PICTURE_TYPE_I: sw_type_str = "I"; break;
+                    case AV_PICTURE_TYPE_P: sw_type_str = "P"; break;
+                    case AV_PICTURE_TYPE_B: sw_type_str = "B"; break;
+                    case AV_PICTURE_TYPE_NONE: sw_type_str = "N"; break;
+                }
+                switch (hw_avframe->pict_type) {
+                    case AV_PICTURE_TYPE_I: hw_type_str = "I"; break;
+                    case AV_PICTURE_TYPE_P: hw_type_str = "P"; break;
+                    case AV_PICTURE_TYPE_B: hw_type_str = "B"; break;
+                    case AV_PICTURE_TYPE_NONE: hw_type_str = "N"; break;
+                }
+                
+                // ⚠️ 警告：帧类型不一致（PTS对齐后仍不一致，可能是解码器问题）
+                LOG_WARN_FMT("  ⚠️  Frame %d: PTS matched but frame_type MISMATCH: SW=%s, HW=%s",
+                            frame_count, sw_type_str, hw_type_str);
+            }
+            
+            // 验证PTS是否一致（应该一致，因为已对齐）
+            if (sw_pts != AV_NOPTS_VALUE && hw_pts != AV_NOPTS_VALUE) {
+                if (sw_pts != hw_pts) {
+                    frame_mismatch = true;
+                    // ⚠️ 严重警告：PTS对齐失败
+                    LOG_ERROR_FMT("  ❌ Frame %d: PTS MISMATCH after alignment: SW pts=%lld, HW pts=%lld",
+                                frame_count, (long long)sw_pts, (long long)hw_pts);
+                }
+            }
+            
+            // 前10帧显示对齐信息，确认PTS对齐成功
+            if (frame_count <= 10) {
+                const char* sw_type_str = "?";
+                const char* hw_type_str = "?";
+                switch (sw_avframe->pict_type) {
+                    case AV_PICTURE_TYPE_I: sw_type_str = "I"; break;
+                    case AV_PICTURE_TYPE_P: sw_type_str = "P"; break;
+                    case AV_PICTURE_TYPE_B: sw_type_str = "B"; break;
+                    case AV_PICTURE_TYPE_NONE: sw_type_str = "N"; break;
+                }
+                switch (hw_avframe->pict_type) {
+                    case AV_PICTURE_TYPE_I: hw_type_str = "I"; break;
+                    case AV_PICTURE_TYPE_P: hw_type_str = "P"; break;
+                    case AV_PICTURE_TYPE_B: hw_type_str = "B"; break;
+                    case AV_PICTURE_TYPE_NONE: hw_type_str = "N"; break;
+                }
+                
+                char sw_pts_str[32], hw_pts_str[32];
+                if (sw_pts != AV_NOPTS_VALUE) {
+                    snprintf(sw_pts_str, sizeof(sw_pts_str), "%lld", (long long)sw_pts);
+                } else {
+                    strcpy(sw_pts_str, "NOPTS");
+                }
+                if (hw_pts != AV_NOPTS_VALUE) {
+                    snprintf(hw_pts_str, sizeof(hw_pts_str), "%lld", (long long)hw_pts);
+                } else {
+                    strcpy(hw_pts_str, "NOPTS");
+                }
+                
+                LOG_INFO_FMT("  Frame %d PTS-aligned: SW[%s, pts=%s], HW[%s, pts=%s]%s",
+                            frame_count,
+                            sw_type_str, sw_pts_str,
+                            hw_type_str, hw_pts_str,
+                            frame_mismatch ? " ⚠️" : " ✅");
+            }
+        }
+        
         // ⭐ 关键调用：使用 BufferComparator 对比两个 Buffer
         FrameCompareResult result;
         if (sw_buf && hw_buf) {
             result = comparator.compare(sw_buf, hw_buf);
+            
+            // ⭐ 检查硬件解码器的PTS顺序（诊断帧顺序问题）
+            AVFrame* hw_avframe_check = hw_buf->getAVFrame();
+            if (hw_avframe_check) {
+                int64_t current_hw_pts = hw_avframe_check->pts;
+                if (current_hw_pts == AV_NOPTS_VALUE) {
+                    current_hw_pts = hw_avframe_check->best_effort_timestamp;
+                }
+                
+                if (current_hw_pts != AV_NOPTS_VALUE && last_hw_pts != AV_NOPTS_VALUE) {
+                    // 检查PTS是否单调递增（显示顺序）
+                    if (current_hw_pts < last_hw_pts) {
+                        hw_pts_order_error_count++;
+                        if (hw_pts_order_error_count <= 5 || frame_count % 50 == 0) {
+                            LOG_WARN_FMT("  ⚠️  Frame %d: HW PTS顺序错误！当前PTS=%lld < 上一个PTS=%lld (可能缺少B帧重排序，导致保存的YUV文件播放时画面跳动)",
+                                        frame_count, (long long)current_hw_pts, (long long)last_hw_pts);
+                        }
+                    }
+                }
+                
+                if (current_hw_pts != AV_NOPTS_VALUE) {
+                    last_hw_pts = current_hw_pts;
+                }
+            }
+            
+            // ⭐ 保存硬件解码输出到YUV文件
+            // ⚠️ 注意：这里保存的顺序是解码器输出的顺序，如果B帧重排序有问题，
+            //    保存的帧可能是解码顺序（DTS顺序）而不是显示顺序（PTS顺序），
+            //    这会导致播放时画面跳动
+            if (hw_format != AV_PIX_FMT_NONE) {
+                if (!hw_writer.write(hw_buf)) {
+                    if (frame_count <= 10) {
+                        LOG_WARN_FMT("  ⚠️  Frame %d: Failed to write hardware buffer to YUV file", frame_count);
+                    }
+                }
+            }
         }
         
         // ⭐ 记录PSNR值（用于统计）
@@ -1021,6 +1365,174 @@ namespace productionline { namespace io {
             psnr_u_values.push_back(result.psnr_u);
             psnr_v_values.push_back(result.psnr_v);
             psnr_avg_values.push_back(result.psnr_avg);
+            
+            // ⭐ 按帧类型分类统计PSNR
+            // ⭐ 只使用解码器的pict_type，不再尝试“纠正”或使用外部GOP
+            char frame_type_char = '?';
+            AVFrame* avframe = sw_avframe;  // 优先使用软件解码器
+            
+            // 如果软件解码器没有，再从硬件解码器获取
+            if (!avframe && hw_avframe) {
+                avframe = hw_avframe;
+            }
+            
+            // ⭐ 每帧都输出SW和HW的帧类型，确认是否存在错位对比
+            const char* sw_type_str = "?";
+            const char* hw_type_str = "?";
+            int sw_pict_type_val = -1;
+            int hw_pict_type_val = -1;
+            
+            if (sw_avframe) {
+                sw_pict_type_val = (int)sw_avframe->pict_type;
+                switch (sw_avframe->pict_type) {
+                    case AV_PICTURE_TYPE_I: sw_type_str = "I"; break;
+                    case AV_PICTURE_TYPE_P: sw_type_str = "P"; break;
+                    case AV_PICTURE_TYPE_B: sw_type_str = "B"; break;
+                    case AV_PICTURE_TYPE_NONE: sw_type_str = "N"; break;
+                    default: sw_type_str = "?"; break;
+                }
+            }
+            if (hw_avframe) {
+                hw_pict_type_val = (int)hw_avframe->pict_type;
+                switch (hw_avframe->pict_type) {
+                    case AV_PICTURE_TYPE_I: hw_type_str = "I"; break;
+                    case AV_PICTURE_TYPE_P: hw_type_str = "P"; break;
+                    case AV_PICTURE_TYPE_B: hw_type_str = "B"; break;
+                    case AV_PICTURE_TYPE_NONE: hw_type_str = "N"; break;
+                    default: hw_type_str = "?"; break;
+                }
+            }
+            
+            // ⭐ 使用解码器的pict_type作为帧类型（只统计，不做纠正）
+            if (avframe) {
+                switch (avframe->pict_type) {
+                    case AV_PICTURE_TYPE_I:
+                        frame_type_char = 'I';
+                        psnr_y_i_frames.push_back(result.psnr_y);
+                        if (result.psnr_avg > 0.0) {
+                            psnr_avg_i_frames.push_back(result.psnr_avg);
+                        }
+                        break;
+                    case AV_PICTURE_TYPE_P:
+                        frame_type_char = 'P';
+                        psnr_y_p_frames.push_back(result.psnr_y);
+                        if (result.psnr_avg > 0.0) {
+                            psnr_avg_p_frames.push_back(result.psnr_avg);
+                        }
+                        break;
+                    case AV_PICTURE_TYPE_B:
+                        frame_type_char = 'B';
+                        psnr_y_b_frames.push_back(result.psnr_y);
+                        if (result.psnr_avg > 0.0) {
+                            psnr_avg_b_frames.push_back(result.psnr_avg);
+                        }
+                        break;
+                    case AV_PICTURE_TYPE_NONE:
+                        frame_type_char = 'N';  // None
+                        if (frame_count <= 10) {
+                            LOG_DEBUG_FMT("  Frame %d: AV_PICTURE_TYPE_NONE detected", result.frame_index);
+                        }
+                        break;
+                    default:
+                        frame_type_char = '?';
+                        if (frame_count <= 10) {
+                            LOG_DEBUG_FMT("  Frame %d: Unknown pict_type=%d", result.frame_index, (int)avframe->pict_type);
+                        }
+                        break;
+                }
+            } else {
+                if (frame_count <= 10) {
+                    LOG_DEBUG_FMT("  Frame %d: No AVFrame available for frame type detection", result.frame_index);
+                }
+            }
+            
+            // ⭐ 使用确定的帧类型进行分类统计
+            switch (frame_type_char) {
+                case 'I':
+                    psnr_y_i_frames.push_back(result.psnr_y);
+                    if (result.psnr_avg > 0.0) {
+                        psnr_avg_i_frames.push_back(result.psnr_avg);
+                    }
+                    break;
+                case 'P':
+                    psnr_y_p_frames.push_back(result.psnr_y);
+                    if (result.psnr_avg > 0.0) {
+                        psnr_avg_p_frames.push_back(result.psnr_avg);
+                    }
+                    break;
+                case 'B':
+                    psnr_y_b_frames.push_back(result.psnr_y);
+                    if (result.psnr_avg > 0.0) {
+                        psnr_avg_b_frames.push_back(result.psnr_avg);
+                    }
+                    break;
+                case 'N':
+                    // None 类型不参与I/P/B统计
+                    break;
+                default:
+                    // 未知类型暂不参与统计
+                    break;
+            }
+            
+            // ⭐ 每帧都输出SW和HW的帧类型信息（用于诊断错位问题）
+            if (sw_avframe && hw_avframe) {
+                bool sw_hw_match = (sw_avframe->pict_type == hw_avframe->pict_type);
+                
+                if (!sw_hw_match) {
+                    // 软硬件解码器标记不一致
+                    LOG_WARN_FMT("  Frame %d [%c[解码器]]: PSNR Y=%.2f U=%.2f V=%.2f dB (avg=%.2f dB) [SW=%s(pict_type=%d) vs HW=%s(pict_type=%d) ⚠️ MISMATCH]",
+                                frame_count, frame_type_char,
+                                result.psnr_y, result.psnr_u, result.psnr_v, result.psnr_avg,
+                                sw_type_str, sw_pict_type_val, hw_type_str, hw_pict_type_val);
+                } else {
+                    // 软硬件解码器标记一致
+                    LOG_INFO_FMT("  Frame %d [%c[解码器]]: PSNR Y=%.2f U=%.2f V=%.2f dB (avg=%.2f dB) [SW=HW=%s(pict_type=%d) ✅]",
+                                frame_count, frame_type_char,
+                                result.psnr_y, result.psnr_u, result.psnr_v, result.psnr_avg,
+                                sw_type_str, sw_pict_type_val);
+                }
+            } else {
+                // 如果无法获取帧类型，也输出日志
+                LOG_DEBUG_FMT("  Frame %d [%c[解码器]]: PSNR Y=%.2f U=%.2f V=%.2f dB (avg=%.2f dB) [SW=%s vs HW=%s (AVFrame unavailable)]",
+                            frame_count, frame_type_char, result.psnr_y, result.psnr_u, result.psnr_v, result.psnr_avg,
+                            sw_type_str, hw_type_str);
+            }
+
+            // ⭐ 每50帧输出一次表格行：Src(I/P/B) vs SW vs HW vs PSNR（基于PTS映射）
+            if (has_src_gop && (frame_count % 50 == 0)) {
+                char src_type = '?';
+                long long src_pts_key = 0;
+
+                if (sw_avframe) {
+                    int64_t sw_pts = sw_avframe->pts != AV_NOPTS_VALUE
+                        ? sw_avframe->pts
+                        : sw_avframe->best_effort_timestamp;
+                    src_pts_key = (long long)sw_pts;
+                    auto it = src_pts_to_type.find(src_pts_key);
+                    if (it != src_pts_to_type.end()) {
+                        src_type = it->second;
+                    }
+                }
+
+                char sw_type_ch = '?';
+                if (sw_type_str && sw_type_str[0] != '\0') {
+                    sw_type_ch = sw_type_str[0];
+                }
+                char hw_type_ch = '?';
+                if (hw_type_str && hw_type_str[0] != '\0') {
+                    hw_type_ch = hw_type_str[0];
+                }
+
+                LOG_INFO("  ── Frame Type Table (every 50 frames) ──");
+                LOG_INFO("     Idx  PTS       Src  SW  HW  PSNR-Y");
+                LOG_INFO_FMT("     %3d  %7lld   %c    %c   %c   %6.2f",
+                             frame_count,
+                             src_pts_key,
+                             src_type,
+                             sw_type_ch,
+                             hw_type_ch,
+                             result.psnr_y);
+            }
         }
         
         // ⭐ 记录SSIM值（用于统计）
@@ -1140,6 +1652,63 @@ namespace productionline { namespace io {
     
     LOG_INFO("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
     
+    // ⭐ 显示帧类型统计（用于诊断解码器的帧类型标记问题）
+    LOG_INFO("\nFrame Type Statistics:");
+    LOG_INFO("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    int sw_total = sw_frame_type_i + sw_frame_type_p + sw_frame_type_b + sw_frame_type_none;
+    int hw_total = hw_frame_type_i + hw_frame_type_p + hw_frame_type_b + hw_frame_type_none;
+    
+    LOG_INFO_FMT("  Software Decoder (pict_type): I=%d, P=%d, B=%d, None=%d (Total=%d)",
+                sw_frame_type_i, sw_frame_type_p, sw_frame_type_b, sw_frame_type_none, sw_total);
+    LOG_INFO_FMT("  Hardware Decoder (pict_type): I=%d, P=%d, B=%d, None=%d (Total=%d)",
+                hw_frame_type_i, hw_frame_type_p, hw_frame_type_b, hw_frame_type_none, hw_total);
+    
+    // ⭐ 检查硬件解码器是否将所有帧标记为B帧
+    if (hw_total > 0) {
+        double hw_b_ratio = (double)hw_frame_type_b / hw_total * 100.0;
+        if (hw_b_ratio > 95.0 && hw_frame_type_i == 0 && hw_frame_type_p == 0) {
+            LOG_WARN("  ⚠️  Hardware decoder appears to mark all frames as B-frames!");
+            LOG_WARN_FMT("     B-frame ratio: %.1f%% (I=%d, P=%d, B=%d)",
+                        hw_b_ratio, hw_frame_type_i, hw_frame_type_p, hw_frame_type_b);
+            LOG_WARN("     This may be a decoder bug or frame type identification issue.");
+        } else if (hw_b_ratio > 80.0) {
+            LOG_WARN_FMT("  ⚠️  Hardware decoder has high B-frame ratio: %.1f%%",
+                        hw_b_ratio);
+        }
+    }
+    
+    // ⭐ 提示：PSNR按解码器的pict_type分类统计
+    LOG_INFO("\nNote:");
+    LOG_INFO("  PSNR statistics are grouped by decoder-reported frame types (pict_type).");
+    LOG_INFO("  SW pict_type is used as primary source; HW pict_type is only for diagnostics.");
+    
+    // ⭐ 显示PTS顺序错误统计（用于诊断硬件解码器的帧顺序问题）
+    LOG_INFO("\nPTS Order Statistics:");
+    LOG_INFO("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    if (hw_pts_order_error_count > 0) {
+        LOG_WARN_FMT("  ⚠️  Hardware decoder PTS order errors: %d times", hw_pts_order_error_count);
+        LOG_WARN("     This indicates that hardware decoder output is in DECODE ORDER (DTS order)");
+        LOG_WARN("     rather than DISPLAY ORDER (PTS order). This causes:");
+        LOG_WARN("     1. Saved YUV file playback shows frame skipping/jumping");
+        LOG_WARN("     2. Frame type mismatch between SW and HW (B-frames vs P-frames)");
+        LOG_WARN("     3. B-frame reordering may be missing or incorrect in hardware decoder");
+        LOG_WARN_FMT("     Recommendation: Check hardware decoder B-frame reorder configuration");
+    } else {
+        LOG_INFO("  ✅ Hardware decoder PTS order: OK (monotonic increasing)");
+    }
+    
+    // ⭐ 关闭 BufferWriter
+    if (hw_format != AV_PIX_FMT_NONE) {
+        hw_writer.close();
+        int write_count = hw_writer.getWriteCount();
+        LOG_INFO_FMT("  ✅ BufferWriter closed: %d frames written to %s", 
+                    write_count, hw_output_yuv.c_str());
+        if (write_count > 0) {
+            LOG_INFO_FMT("    To play: ffplay -f rawvideo -pixel_format %s -video_size %dx%d %s",
+                        hw_ffplay_format.c_str(), hw_actual_width, hw_actual_height, hw_output_yuv.c_str());
+        }
+    }
+    
     if (frame_count == 1) {
         LOG_WARN("  ⚠️  Only 1 frame was processed in the loop!");
     } else if (frame_count < 10) {
@@ -1212,70 +1781,115 @@ namespace productionline { namespace io {
      double avg_psnr_y = 0.0, avg_psnr_u = 0.0, avg_psnr_v = 0.0, avg_psnr_avg = 0.0;
      double avg_ssim_y = 0.0, avg_ssim_u = 0.0, avg_ssim_v = 0.0, avg_ssim_avg = 0.0;
      
-     // ⭐ 打印详细的PSNR统计（参考 run_psnr_compare_test）
-     int psnr_passed_count = 0;
-     int psnr_warned_count = 0;
-     int psnr_failed_count = 0;
-     
-     if (!psnr_y_values.empty()) {
-         // 计算平均值
-         avg_psnr_y = std::accumulate(psnr_y_values.begin(), psnr_y_values.end(), 0.0) / psnr_y_values.size();
-         avg_psnr_u = std::accumulate(psnr_u_values.begin(), psnr_u_values.end(), 0.0) / psnr_u_values.size();
-         avg_psnr_v = std::accumulate(psnr_v_values.begin(), psnr_v_values.end(), 0.0) / psnr_v_values.size();
-         avg_psnr_avg = std::accumulate(psnr_avg_values.begin(), psnr_avg_values.end(), 0.0) / psnr_avg_values.size();
-         
-         // 计算最小值和最大值
-         auto minmax_y = std::minmax_element(psnr_y_values.begin(), psnr_y_values.end());
-         auto minmax_avg = std::minmax_element(psnr_avg_values.begin(), psnr_avg_values.end());
-         
-         double min_psnr_y = *minmax_y.first;
-         double max_psnr_y = *minmax_y.second;
-         double min_psnr_avg = *minmax_avg.first;
-         double max_psnr_avg = *minmax_avg.second;
-         
-         // 计算标准差
-         double variance_y = 0.0;
-         for (double val : psnr_y_values) {
-             variance_y += (val - avg_psnr_y) * (val - avg_psnr_y);
-         }
-         double stddev_y = std::sqrt(variance_y / psnr_y_values.size());
-         
-         // ⭐ 统计PSNR通过性判定（基于Y平面，主要指标）
-         for (double psnr_y : psnr_y_values) {
-             if (psnr_y >= compare_config.quick_psnr_threshold) {
-                 psnr_passed_count++;
-             } else if (psnr_y >= compare_config.quick_warn_threshold) {
-                 psnr_warned_count++;
-             } else {
-                 psnr_failed_count++;
-             }
-         }
-         
-         LOG_INFO("  PSNR Statistics (Hardware vs Software):");
-         LOG_INFO_FMT("    Average: Y=%.2f U=%.2f V=%.2f dB (avg=%.2f dB)",
-                     avg_psnr_y, avg_psnr_u, avg_psnr_v, avg_psnr_avg);
-         LOG_INFO_FMT("    Range Y:  [%.2f, %.2f] dB (stddev=%.2f)",
-                     min_psnr_y, max_psnr_y, stddev_y);
-         LOG_INFO_FMT("    Range Avg: [%.2f, %.2f] dB",
-                     min_psnr_avg, max_psnr_avg);
-         
-         // ⭐ 显示PSNR通过性判定统计
-         LOG_INFO("");
-         LOG_INFO("  PSNR Pass/Fail Assessment (based on PSNR-Y threshold):");
-         LOG_INFO_FMT("    Passed (PSNR-Y >= %.1f dB): %d ✅ (%.1f%%)",
-                     compare_config.quick_psnr_threshold,
-                     psnr_passed_count,
-                     100.0 * psnr_passed_count / psnr_y_values.size());
-         LOG_INFO_FMT("    Warned (%.1f <= PSNR-Y < %.1f dB): %d ⚠️  (%.1f%%)",
-                     compare_config.quick_warn_threshold,
-                     compare_config.quick_psnr_threshold,
-                     psnr_warned_count,
-                     100.0 * psnr_warned_count / psnr_y_values.size());
-         LOG_INFO_FMT("    Failed (PSNR-Y < %.1f dB): %d ❌ (%.1f%%)",
-                     compare_config.quick_warn_threshold,
-                     psnr_failed_count,
-                     100.0 * psnr_failed_count / psnr_y_values.size());
-     }
+        // ⭐ 打印详细的PSNR统计（参考 run_psnr_compare_test）
+        int psnr_passed_count = 0;
+        int psnr_warned_count = 0;
+        int psnr_failed_count = 0;
+        
+        if (!psnr_y_values.empty()) {
+            // 计算平均值
+            avg_psnr_y = std::accumulate(psnr_y_values.begin(), psnr_y_values.end(), 0.0) / psnr_y_values.size();
+            avg_psnr_u = std::accumulate(psnr_u_values.begin(), psnr_u_values.end(), 0.0) / psnr_u_values.size();
+            avg_psnr_v = std::accumulate(psnr_v_values.begin(), psnr_v_values.end(), 0.0) / psnr_v_values.size();
+            avg_psnr_avg = std::accumulate(psnr_avg_values.begin(), psnr_avg_values.end(), 0.0) / psnr_avg_values.size();
+            
+            // 计算最小值和最大值
+            auto minmax_y = std::minmax_element(psnr_y_values.begin(), psnr_y_values.end());
+            auto minmax_avg = std::minmax_element(psnr_avg_values.begin(), psnr_avg_values.end());
+            
+            double min_psnr_y = *minmax_y.first;
+            double max_psnr_y = *minmax_y.second;
+            double min_psnr_avg = *minmax_avg.first;
+            double max_psnr_avg = *minmax_avg.second;
+            
+            // 计算标准差
+            double variance_y = 0.0;
+            for (double val : psnr_y_values) {
+                variance_y += (val - avg_psnr_y) * (val - avg_psnr_y);
+            }
+            double stddev_y = std::sqrt(variance_y / psnr_y_values.size());
+            
+            // ⭐ 统计PSNR通过性判定（基于Y平面，主要指标）
+            for (double psnr_y : psnr_y_values) {
+                if (psnr_y >= compare_config.quick_psnr_threshold) {
+                    psnr_passed_count++;
+                } else if (psnr_y >= compare_config.quick_warn_threshold) {
+                    psnr_warned_count++;
+                } else {
+                    psnr_failed_count++;
+                }
+            }
+            
+            LOG_INFO("  PSNR Statistics (Hardware vs Software):");
+            LOG_INFO_FMT("    Average: Y=%.2f U=%.2f V=%.2f dB (avg=%.2f dB)",
+                        avg_psnr_y, avg_psnr_u, avg_psnr_v, avg_psnr_avg);
+            LOG_INFO_FMT("    Range Y:  [%.2f, %.2f] dB (stddev=%.2f)",
+                        min_psnr_y, max_psnr_y, stddev_y);
+            LOG_INFO_FMT("    Range Avg: [%.2f, %.2f] dB",
+                        min_psnr_avg, max_psnr_avg);
+            
+            // ⭐ 按帧类型显示平均PSNR
+            LOG_INFO("");
+            LOG_INFO("  PSNR Statistics by Frame Type:");
+            if (!psnr_y_i_frames.empty()) {
+                double avg_psnr_y_i = std::accumulate(psnr_y_i_frames.begin(), psnr_y_i_frames.end(), 0.0) / psnr_y_i_frames.size();
+                if (!psnr_avg_i_frames.empty()) {
+                    double avg_psnr_avg_i = std::accumulate(psnr_avg_i_frames.begin(), psnr_avg_i_frames.end(), 0.0) / psnr_avg_i_frames.size();
+                    LOG_INFO_FMT("    I-Frame: Count=%zu (with avg: %zu), Avg PSNR-Y=%.2f dB, Avg PSNR-Avg=%.2f dB",
+                                psnr_y_i_frames.size(), psnr_avg_i_frames.size(), avg_psnr_y_i, avg_psnr_avg_i);
+                } else {
+                    LOG_INFO_FMT("    I-Frame: Count=%zu, Avg PSNR-Y=%.2f dB, Avg PSNR-Avg=N/A (only Y-plane calculated)",
+                                psnr_y_i_frames.size(), avg_psnr_y_i);
+                }
+            } else {
+                LOG_INFO("    I-Frame: Count=0, No I-frames found");
+            }
+            
+            if (!psnr_y_p_frames.empty()) {
+                double avg_psnr_y_p = std::accumulate(psnr_y_p_frames.begin(), psnr_y_p_frames.end(), 0.0) / psnr_y_p_frames.size();
+                if (!psnr_avg_p_frames.empty()) {
+                    double avg_psnr_avg_p = std::accumulate(psnr_avg_p_frames.begin(), psnr_avg_p_frames.end(), 0.0) / psnr_avg_p_frames.size();
+                    LOG_INFO_FMT("    P-Frame: Count=%zu (with avg: %zu), Avg PSNR-Y=%.2f dB, Avg PSNR-Avg=%.2f dB",
+                                psnr_y_p_frames.size(), psnr_avg_p_frames.size(), avg_psnr_y_p, avg_psnr_avg_p);
+                } else {
+                    LOG_INFO_FMT("    P-Frame: Count=%zu, Avg PSNR-Y=%.2f dB, Avg PSNR-Avg=N/A (only Y-plane calculated)",
+                                psnr_y_p_frames.size(), avg_psnr_y_p);
+                }
+            } else {
+                LOG_INFO("    P-Frame: Count=0, No P-frames found");
+            }
+            
+            if (!psnr_y_b_frames.empty()) {
+                double avg_psnr_y_b = std::accumulate(psnr_y_b_frames.begin(), psnr_y_b_frames.end(), 0.0) / psnr_y_b_frames.size();
+                if (!psnr_avg_b_frames.empty()) {
+                    double avg_psnr_avg_b = std::accumulate(psnr_avg_b_frames.begin(), psnr_avg_b_frames.end(), 0.0) / psnr_avg_b_frames.size();
+                    LOG_INFO_FMT("    B-Frame: Count=%zu (with avg: %zu), Avg PSNR-Y=%.2f dB, Avg PSNR-Avg=%.2f dB",
+                                psnr_y_b_frames.size(), psnr_avg_b_frames.size(), avg_psnr_y_b, avg_psnr_avg_b);
+                } else {
+                    LOG_INFO_FMT("    B-Frame: Count=%zu, Avg PSNR-Y=%.2f dB, Avg PSNR-Avg=N/A (only Y-plane calculated)",
+                                psnr_y_b_frames.size(), avg_psnr_y_b);
+                }
+            } else {
+                LOG_INFO("    B-Frame: Count=0, No B-frames found");
+            }
+            
+            // ⭐ 显示PSNR通过性判定统计
+            LOG_INFO("");
+            LOG_INFO("  PSNR Pass/Fail Assessment (based on PSNR-Y threshold):");
+            LOG_INFO_FMT("    Passed (PSNR-Y >= %.1f dB): %d ✅ (%.1f%%)",
+                        compare_config.quick_psnr_threshold,
+                        psnr_passed_count,
+                        100.0 * psnr_passed_count / psnr_y_values.size());
+            LOG_INFO_FMT("    Warned (%.1f <= PSNR-Y < %.1f dB): %d ⚠️  (%.1f%%)",
+                        compare_config.quick_warn_threshold,
+                        compare_config.quick_psnr_threshold,
+                        psnr_warned_count,
+                        100.0 * psnr_warned_count / psnr_y_values.size());
+            LOG_INFO_FMT("    Failed (PSNR-Y < %.1f dB): %d ❌ (%.1f%%)",
+                        compare_config.quick_warn_threshold,
+                        psnr_failed_count,
+                        100.0 * psnr_failed_count / psnr_y_values.size());
+        }
      
      // ⭐ 打印详细的SSIM统计
      int ssim_passed_count = 0;
