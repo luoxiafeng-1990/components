@@ -129,7 +129,7 @@ static int test_play_rtsp_stream(const char* rtsp_url) {
     LOG4CPLUS_INFO_FMT(test_logger, "Configuring RTSP stream: %s", rtsp_url);
 
     auto tacoConfig = TacoConfigBuilder()
-        .setChannels(true, false)
+        .setChannels(true, true)
         .build();
 
     auto workerConfig = WorkerConfigBuilder()
@@ -737,7 +737,7 @@ static int test_h264_taco_video(const char* video_path) {
     LOG4CPLUS_INFO_FMT(test_logger, "[Test] 配置FFmpeg: %s", video_path);
 
     auto tacoConfig = TacoConfigBuilder()
-        .setChannels(true, false)
+        .setChannels(true, true)
         .build();
 
     auto workerConfig = WorkerConfigBuilder()
@@ -848,7 +848,6 @@ static int test_h264_taco_video(const char* video_path) {
         if (display_monitor ) {
             display_monitor->endTiming("display");
         }
-        frame_count++;
         
         // 每100帧打印一次统计
         if (frame_count % 100 == 0) {

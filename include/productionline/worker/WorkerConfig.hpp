@@ -7,6 +7,7 @@
 #include <memory>
 #include <vector>
 #include <map>
+#include <functional>
 #include "common/Logger.hpp"
 
 // FFmpeg 头文件（用于 AVRational 和 AVCodecParameters）
@@ -16,6 +17,28 @@ extern "C" {
 
 // 前向声明（避免循环依赖）
 class IPacketSource;
+class Buffer;
+
+// ⭐ v2.23 新增：帧同步回调类型（前向声明）
+// 完整定义在 WorkerSyncCoordinator.hpp 中
+using FrameSyncCallback = std::function<bool(
+    uint64_t frame_version,
+    const std::map<std::string, Buffer*>& worker_buffers,
+    void* context
+)>;
+
+// ⭐ v2.23 新增：回调链项
+struct CallbackChainItem {
+    FrameSyncCallback callback;
+    void* context;
+    std::string name;
+    
+    CallbackChainItem(FrameSyncCallback cb, void* ctx, const std::string& n)
+        : callback(cb), context(ctx), name(n) {}
+};
+
+// ⭐ v2.23 新增：回调链类型
+using CallbackChain = std::vector<CallbackChainItem>;
 
 /**
  * @brief Worker 类型枚举
@@ -872,6 +895,10 @@ struct ConnectorConfig {
     Connector::Mode mode;
     std::vector<std::string> producer_names;  // 关联的生产者名称
     std::vector<std::string> consumer_names;   // 关联的消费者名称
+    
+    // ⭐ v2.23 新增：帧同步配置
+    bool enable_frame_sync = false;          // 是否启用帧同步
+    CallbackChain callback_chain;            // 回调链（可选）
 };
 
 /**

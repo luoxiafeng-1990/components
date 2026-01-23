@@ -164,7 +164,7 @@ public:
     bool commitPacket(void* worker_id);
     
     /**
-     * @brief 取消当前获取（共享模式，v3.0 新架构）
+     * @brief 取消当前获取（共享模式，v2.22 新架构）
      * @param worker_id Worker 的唯一标识
      * 
      * 说明：
@@ -181,6 +181,18 @@ public:
      * ```
      */
     void cancelPacket(void* worker_id);
+    
+    /**
+     * @brief 获取当前 buffer 版本号（v2.23 新增）
+     * @return 当前 buffer 版本号
+     * 
+     * 说明：
+     * - 用于 WorkerSyncCoordinator 关联同一帧的多个 Worker
+     * - 版本号在 fetchTaskFunc 中递增
+     */
+    uint64_t getCurrentBufferVersion() const {
+        return current_buffer_version_.load(std::memory_order_acquire);
+    }
     
 private:
     // ========== 通用成员（普通模式和共享模式都使用）==========

@@ -470,10 +470,38 @@ bool FfmpegDecodeRtspWorker::fillBufferMetadataFromFrame(AVFrame* frame_ptr, Buf
  *   - 此函数仅用于 RTSP/文件模式
  */
 bool FfmpegDecodeRtspWorker::readAndSendPacket(AVPacket* packet_ptr) {
-    // ⭐ v2.22 修改：Buffer 模式不再使用此函数
     if (worker_config_.data_source.buffer_mode) {
-        LOG4CPLUS_ERROR(logger_, "[Worker] ERROR: readAndSendPacket() should not be called in buffer_mode");
-        return false;
+        auto ps = std::dynamic_pointer_cast<BufferPacketSource>(packet_source_);
+        if (!ps) {
+            LOG4CPLUS_ERROR(logger_, "[Worker] ERROR: Failed to cast to BufferPacketSource");
+            return false;
+        }
+        
+        // ⭐ v2.22 新增：只在未获取时才尝试获取
+        if (!packet_acquired_) {
+            current_packet_ptr_ = ps->acquirePacket(this);  // ✅ 传递 this 指针
+            
+            if (!current_packet_ptr_) {
+                // EOF 或 已获取过当前版本（需要等待新 buffer）
+                return false;
+            }
+            
+            packet_acquired_ = true;
+        }
+        
+        // ========== 步骤3: 发送到解码器 ==========
+        int ret = avcodec_send_packet(codec_ctx_ptr_, current_packet_ptr_);
+        
+        if (ret < 0 && ret != AVERROR(EAGAIN)) {
+            // ❌ 发送失败，取消当前获取
+            LOG4CPLUS_ERROR_FMT(logger_, "[Worker] ERROR: avcodec_send_packet failed: %d", ret);
+            ps->cancelPacket(this);
+            packet_acquired_ = false;
+            current_packet_ptr_ = nullptr;
+            return false;
+        }
+
+        return true;
     }
     
     // ========== 文件/RTSP 模式：使用 readPacket ==========
@@ -542,46 +570,11 @@ bool FfmpegDecodeRtspWorker::fillBuffer(int frame_index, Buffer* buffer) {
         return fillBufferMetadataFromFrame(frame_ptr, buffer);
     }
     
-    // ========== 步骤2: Buffer 模式 - 获取 packet（只在未获取时）==========
-    if (worker_config_.data_source.buffer_mode) {
-        auto ps = std::dynamic_pointer_cast<BufferPacketSource>(packet_source_);
-        if (!ps) {
-            LOG4CPLUS_ERROR(logger_, "[Worker] ERROR: Failed to cast to BufferPacketSource");
-            return false;
-        }
-        
-        // ⭐ v2.22 新增：只在未获取时才尝试获取
-        if (!packet_acquired_) {
-            current_packet_ptr_ = ps->acquirePacket(this);  // ✅ 传递 this 指针
-            
-            if (!current_packet_ptr_) {
-                // EOF 或 已获取过当前版本（需要等待新 buffer）
-                return false;
-            }
-            
-            packet_acquired_ = true;
-        }
-        
-        // ========== 步骤3: 发送到解码器 ==========
-        int ret = avcodec_send_packet(codec_ctx_ptr_, current_packet_ptr_);
-        
-        if (ret < 0 && ret != AVERROR(EAGAIN)) {
-            // ❌ 发送失败，取消当前获取
-            LOG4CPLUS_ERROR_FMT(logger_, "[Worker] ERROR: avcodec_send_packet failed: %d", ret);
-            ps->cancelPacket(this);
-            packet_acquired_ = false;
-            current_packet_ptr_ = nullptr;
-            return false;
-        }
-        
-    } else {
-        // ========== 步骤2-3: RTSP/文件模式（保持不变）==========
-        if (!readAndSendPacket(packet_ptr)) {
-            return false;
-        }
+    if (!readAndSendPacket(packet_ptr)) {
+        return false;
     }
    
-    // ========== 步骤4: 循环读取所有解码的帧到缓存 ==========
+    // ========== 步骤2: 循环读取所有解码的帧到缓存 ==========
     bool decoded_at_least_one = false;
     
     while (true) {
@@ -614,9 +607,8 @@ bool FfmpegDecodeRtspWorker::fillBuffer(int frame_index, Buffer* buffer) {
             }
             packet_acquired_ = false;
             current_packet_ptr_ = nullptr;
+            return false;
         }
-        
-        return false;
     }
     
     // ========== 步骤6: 成功解码，提交（释放）==========

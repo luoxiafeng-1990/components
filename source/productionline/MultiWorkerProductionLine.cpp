@@ -470,6 +470,22 @@ bool MultiWorkerProductionLine::createConnectorsForGroup(WorkerGroupRuntime* gro
         }
         
         group->connectors.push_back(std::move(connector));
+        
+        // ⭐ v2.23 新增：如果启用了帧同步，创建 WorkerSyncCoordinator
+        if (conn_cfg.enable_frame_sync && !conn_cfg.callback_chain.empty()) {
+            auto coordinator = std::make_unique<WorkerSyncCoordinator>(
+                conn_cfg.consumer_names,  // 该 Connector 的所有 Consumer
+                conn_cfg.callback_chain   // 回调链
+            );
+            
+            group->connector_coordinators[conn_idx] = std::move(coordinator);
+            
+            LOG4CPLUS_INFO(logger_, "     ⭐ 为连接器 #" << conn_idx 
+                           << " 创建了 WorkerSyncCoordinator"
+                           << " (Workers: " << conn_cfg.consumer_names.size()
+                           << ", Callbacks: " << conn_cfg.callback_chain.size() << ")");
+        }
+        
         LOG4CPLUS_INFO(logger_, "     连接器 #" << conn_idx << " 已创建");
     }
     
@@ -698,6 +714,15 @@ Connector* MultiWorkerProductionLine::WorkerGroupRuntime::getConnectorForConsume
     return nullptr;
 }
 
+size_t MultiWorkerProductionLine::WorkerGroupRuntime::getConnectorIndex(const Connector* connector) const {
+    for (size_t i = 0; i < connectors.size(); i++) {
+        if (connectors[i].get() == connector) {
+            return i;
+        }
+    }
+    return SIZE_MAX;
+}
+
 void MultiWorkerProductionLine::printDetailedStats() const {
     
     LOG4CPLUS_INFO(logger_, "========== 生产车间详细统计信息 ==========");
@@ -798,14 +823,12 @@ void MultiWorkerProductionLine::workerThreadFunc(
     
     // ========== 主循环：永不退出（除非 stop 或 fatal）==========
     while (group->is_running.load() && running_.load() && worker_stats->is_active.load()) {
-        
         // 步骤1：获取空闲 buffer（类似 producerThreadFunc）
         Buffer* buffer = nullptr;
         while (group->is_running.load() && running_.load() && buffer == nullptr) {
             buffer = pool_sptr->acquireFree(true, 100);  // 100ms 超时
             if (buffer == nullptr && group->is_running.load() && running_.load()) {
                 buffer_wait_count++;
-                
                 // 每100次等待才打印一次日志
                 if (buffer_wait_count % 100 == 0) {
                     LOG4CPLUS_DEBUG(logger_, "[Worker '" << consumer_name 
@@ -815,24 +838,63 @@ void MultiWorkerProductionLine::workerThreadFunc(
         }
         
         // 检查是否因为停止信号退出循环
-        if (!group->is_running.load() || !running_.load()) {
-                            break;
-                        }
+        if (!group->is_running.load() || !running_.load()) 
+            break;
                         
-        // ⭐ 成功获取 buffer，重置等待计数器
         buffer_wait_count = 0;
         
-        // 步骤2：调用 fillBuffer
-        // ⭐ fillBuffer 内部会调用 readAndSendPacket
-        // ⭐ readAndSendPacket 会等待所有订阅者，然后返回共享的 packet
-        // ⭐ 如果有缓存，fillBuffer 会立即返回；如果缓存空了，会在 readAndSendPacket 中等待
         bool fill_success = consumer_info->worker->fillBuffer(0, buffer);
-                        
+        
         if (fill_success) {
-            // ✅ 成功：提交 buffer
-            pool_sptr->submitFilled(buffer);
-            worker_stats->worker_frames_produced.fetch_add(1);
-            group->stats.frames_produced.fetch_add(1);
+            // ✅ 解码成功
+            
+            bool should_submit = true;
+            
+            // ⭐ v2.23 新增：帧同步协调（如果启用）
+            Connector* owner_connector = group->getConnectorForConsumer(consumer_name);
+            if (owner_connector) {
+                size_t conn_idx = group->getConnectorIndex(owner_connector);
+                auto it = group->connector_coordinators.find(conn_idx);
+                
+                if (it != group->connector_coordinators.end()) {
+                    // 该 Connector 启用了帧同步
+                    
+                    // 获取帧版本号（从 BufferPacketSource）
+                    // 注意：这里需要从 Connector 获取对应的 shared_source
+                    std::string producer_name = owner_connector->getProducerNameForConsumer(consumer_name);
+                    auto shared_source_base = owner_connector->getSharedSource(producer_name);
+                    
+                    if (shared_source_base) {
+                        // 转换为 BufferPacketSource（共享模式下一定是这个类型）
+                        auto shared_source = std::dynamic_pointer_cast<BufferPacketSource>(shared_source_base);
+                        
+                        if (shared_source) {
+                            uint64_t frame_version = shared_source->getCurrentBufferVersion();
+                            
+                            // 到达同步点（阻塞等待 + 执行回调链）
+                            should_submit = it->second->arrive(consumer_name, frame_version, buffer);
+                            
+                            if (!should_submit) {
+                                LOG4CPLUS_WARN(logger_, "[Worker '" << consumer_name 
+                                               << "'] 同步协调器拒绝提交 Frame " << frame_version);
+                            }
+                        } else {
+                            LOG4CPLUS_ERROR(logger_, "[Worker '" << consumer_name 
+                                            << "'] shared_source 不是 BufferPacketSource 类型");
+                        }
+                    }
+                }
+            }
+            
+            // 根据同步结果决定是否提交
+            if (should_submit) {
+                pool_sptr->submitFilled(buffer);
+                worker_stats->worker_frames_produced.fetch_add(1);
+                group->stats.frames_produced.fetch_add(1);
+            } else {
+                pool_sptr->releaseFree(buffer);
+            }
+            
             worker_stats->consecutive_failures.store(0);
             
         } else {

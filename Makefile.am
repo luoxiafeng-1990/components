@@ -9,6 +9,7 @@ libcomponents_la_SOURCES = \
     source/productionline/worker/WorkerBase.cpp \
     source/productionline/worker/BufferFillingWorkerFacade.cpp \
     source/productionline/worker/BufferFillingWorkerFactory.cpp \
+    source/productionline/worker/WorkerConfig.cpp \
     source/productionline/worker/FfmpegDecodeRtspWorker.cpp \
     source/productionline/worker/FfmpegPacketRecorderWorker.cpp \
     source/productionline/worker/FfmpegDecodeVideoFileWorker.cpp \
@@ -28,13 +29,13 @@ libcomponents_la_SOURCES = \
     source/buffer/bufferpool/BufferPool.cpp \
     source/buffer/bufferpool/BufferPoolRegistry.cpp \
     source/productionline/VideoProductionLine.cpp \
-    source/productionline/Connector.cpp \
     source/productionline/MultiWorkerProductionLine.cpp \
+    source/productionline/WorkerSyncCoordinator.cpp \
     source/productionline/io/BufferWriter.cpp \
     source/productionline/io/BufferComparator.cpp
 
 # ========== 测试程序（每个只包含自己的主文件）==========
-bin_PROGRAMS = display_test mp4_decode_test
+bin_PROGRAMS = display_test
 
 # ========== 公共链接库（定义为变量，便于维护）==========
 # 注意：log4cplus 使用动态链接
@@ -48,12 +49,6 @@ COMMON_LIBS = -lpthread -luring -lavformat -lavcodec -lavutil -lswscale -ltacosy
 display_test_SOURCES = test_cases/dec/test.cpp
 display_test_CPPFLAGS = -I$(top_srcdir)/test_cases $(AM_CPPFLAGS)
 display_test_LDADD = libcomponents.la $(COMMON_LIBS)
-
-# mp4_decode_test 主程序（视频解码测试）
-mp4_decode_test_SOURCES = test_cases/dec/mp4_decode_test.cpp
-mp4_decode_test_CPPFLAGS = -I$(top_srcdir)/test_cases $(AM_CPPFLAGS)
-mp4_decode_test_LDADD = libcomponents.la $(COMMON_LIBS)
-
 
 # ========== 编译选项 ==========
 AM_CPPFLAGS = -I$(top_srcdir)/include

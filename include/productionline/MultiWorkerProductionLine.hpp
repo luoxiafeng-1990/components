@@ -3,6 +3,7 @@
 #include "productionline/VideoProductionLine.hpp"
 #include "productionline/worker/BufferFillingWorkerFacade.hpp"
 #include "productionline/worker/WorkerConfig.hpp"
+#include "productionline/WorkerSyncCoordinator.hpp"
 #include "buffer/bufferpool/BufferPool.hpp"
 #include "buffer/bufferpool/BufferPoolRegistry.hpp"
 #include "common/Logger.hpp"
@@ -271,6 +272,9 @@ private:
         // 连接器列表
         std::vector<std::unique_ptr<Connector>> connectors;
         
+        // ⭐ v2.23 新增：每个 Connector 的同步协调器
+        std::map<size_t, std::unique_ptr<WorkerSyncCoordinator>> connector_coordinators;
+        
         // Group 独立线程
         std::thread group_thread;
         std::atomic<bool> is_running{false};
@@ -329,6 +333,13 @@ private:
          * @return Connector 指针，如果不存在则返回 nullptr
          */
         Connector* getConnectorForConsumer(const std::string& consumer_name) const;
+        
+        /**
+         * @brief 根据 Connector 指针获取其索引
+         * @param connector Connector 指针
+         * @return Connector 索引，如果不存在则返回 SIZE_MAX
+         */
+        size_t getConnectorIndex(const Connector* connector) const;
     };
     
     // ========== 内部方法 ==========
