@@ -335,7 +335,7 @@ int FfmpegDecodeRtspWorker::getCurrentFrameIndex() const {
 
 size_t FfmpegDecodeRtspWorker::getFrameSize() const {
     // ✅ 使用实际解码输出格式计算（getBytesPerPixel从实际格式获取）
-    return (size_t)(output_width_ * output_height_ * getBytesPerPixel());
+    return (size_t)(output_width_ * output_height_ * getOutputBytesPerPixel());
 }
 
 long FfmpegDecodeRtspWorker::getFileSize() const {
@@ -346,15 +346,23 @@ long FfmpegDecodeRtspWorker::getFileSize() const {
     return -1;
 }
 
-int FfmpegDecodeRtspWorker::getWidth() const {
+int FfmpegDecodeRtspWorker::getSourceWidth() const {
+    return packet_source_ ? packet_source_->getSourceWidth() : 0;
+}
+
+int FfmpegDecodeRtspWorker::getSourceHeight() const {
+    return packet_source_ ? packet_source_->getSourceHeight() : 0;
+}
+
+int FfmpegDecodeRtspWorker::getOutputWidth() const {
     return output_width_;
 }
 
-int FfmpegDecodeRtspWorker::getHeight() const {
+int FfmpegDecodeRtspWorker::getOutputHeight() const {
     return output_height_;
 }
 
-double FfmpegDecodeRtspWorker::getBytesPerPixel() const {
+double FfmpegDecodeRtspWorker::getOutputBytesPerPixel() const {
     // 1️⃣ 优先：从解码器实际输出格式计算（最准确）
     if (codec_ctx_ptr_ && codec_ctx_ptr_->pix_fmt != AV_PIX_FMT_NONE) {
         const AVPixFmtDescriptor* desc = av_pix_fmt_desc_get(codec_ctx_ptr_->pix_fmt);
@@ -392,16 +400,19 @@ double FfmpegDecodeRtspWorker::getBytesPerPixel() const {
     }
 }
 
-const char* FfmpegDecodeRtspWorker::getPath() const {
+std::string FfmpegDecodeRtspWorker::getPath() const {
     // ⭐ v2.12修改：从数据源获取
     if (!packet_source_) {
-        return nullptr;
+        return std::string();
     }
-    
-    // 返回 RTSP URL
-    static thread_local std::string cached_path;
-    cached_path = packet_source_->getFilePath();
-    return cached_path.empty() ? nullptr : cached_path.c_str();
+    return packet_source_->getPath();
+}
+
+IDataSourceNavigator::SourceType FfmpegDecodeRtspWorker::getDataSourceType() const {
+    if (packet_source_) {
+        return packet_source_->getDataSourceType();
+    }
+    return SourceType::NETWORK_SOURCE;  // 默认是网络流类型
 }
 
 bool FfmpegDecodeRtspWorker::hasMoreFrames() const {
@@ -676,7 +687,7 @@ void FfmpegDecodeRtspWorker::printStats() const {
     LOG4CPLUS_INFO(logger_, "");
     LOG4CPLUS_INFO(logger_, "📊 FfmpegDecodeRtspWorker Statistics:");
     // ⭐ v2.12修改：从数据源获取 RTSP URL
-    std::string rtsp_url = packet_source_ ? packet_source_->getFilePath() : std::string();
+    std::string rtsp_url = packet_source_ ? packet_source_->getPath() : std::string();
     LOG4CPLUS_INFO_FMT(logger_, "   RTSP URL: %s", rtsp_url.empty() ? "(Not Set)" : rtsp_url.c_str());
     LOG4CPLUS_INFO_FMT(logger_, "   Connected: %s", isConnected() ? "Yes" : "No");
     LOG4CPLUS_INFO_FMT(logger_, "   Decoded frames: %d", decoded_frames_.load());
@@ -982,14 +993,6 @@ bool FfmpegDecodeRtspWorker::extractHardwareAddressFromMetadata(AVFrame* frame, 
 
 
 
-
-int FfmpegDecodeRtspWorker::getSourceWidth() const {
-    return packet_source_ ? packet_source_->getSourceWidth() : 0;
-}
-
-int FfmpegDecodeRtspWorker::getSourceHeight() const {
-    return packet_source_ ? packet_source_->getSourceHeight() : 0;
-}
 
 AVPixelFormat FfmpegDecodeRtspWorker::getSourcePixelFormat() const {
     return packet_source_ ? packet_source_->getSourcePixelFormat() : AV_PIX_FMT_NONE;

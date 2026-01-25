@@ -74,10 +74,8 @@ public:
     virtual size_t getFrameSize() const override;
     virtual long getFileSize() const override;
     
-    virtual int getWidth() const override;
-    virtual int getHeight() const override;
-    virtual double getBytesPerPixel() const override;
-    virtual const char* getPath() const override;
+    std::string getPath() const override;
+    SourceType getDataSourceType() const override;
     
     virtual bool hasMoreFrames() const override;
     virtual bool isAtEnd() const override;
@@ -105,7 +103,7 @@ public:
      * @brief 获取编解码器参数（供BufferWriter使用）
      * @return 编解码器参数指针，如果未打开则返回nullptr
      */
-    const struct AVCodecParameters* getCodecParameters() const override;
+    const AVCodecParameters* getCodecParameters() const override;
     
     /**
      * @brief 获取时间基（供BufferWriter使用）
@@ -115,6 +113,21 @@ public:
     int getSourceWidth() const override;
     int getSourceHeight() const override;
     AVPixelFormat getSourcePixelFormat() const override;
+    
+    /**
+     * @brief 获取 Worker 输出宽度（Recorder不处理，等于数据源宽度）
+     */
+    int getOutputWidth() const override;
+    
+    /**
+     * @brief 获取 Worker 输出高度（Recorder不处理，等于数据源高度）
+     */
+    int getOutputHeight() const override;
+    
+    /**
+     * @brief 获取 Worker 输出每像素字节数（Recorder记录原始码流，返回0）
+     */
+    double getOutputBytesPerPixel() const override;
 
 private:
     std::string getLastError() const;

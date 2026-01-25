@@ -24,6 +24,7 @@ BufferPacketSource::BufferPacketSource(const AVCodecParameters* codec_params)
     : codec_params_(codec_params)
     , source_pool_()
     , is_open_(false)  // 🎯 原子变量初始化
+    , current_frame_index_(0)  // 当前帧索引初始化
     , is_shared_mode_(false)  // ⭐ v2.18：普通模式
     , total_subscribers_(0)
     , remaining_subscribers_(0)
@@ -46,6 +47,7 @@ BufferPacketSource::BufferPacketSource(const AVCodecParameters* codec_params, si
     : codec_params_(codec_params)
     , source_pool_()
     , is_open_(false)
+    , current_frame_index_(0)  // 当前帧索引初始化
     , is_shared_mode_(true)  // ⭐ v2.18：共享模式
     , total_subscribers_(subscriber_count)
     , remaining_subscribers_(0)  // ✅ 初始值为 0，表示没有订阅者在等待
@@ -353,6 +355,9 @@ int BufferPacketSource::readPacket(AVPacket* packet) {
             cv_fetch_.notify_one();
         }
         
+        if (ret == 0) {
+            current_frame_index_.fetch_add(1, std::memory_order_relaxed);  // 更新当前帧索引
+        }
         return ret;
     }
     
@@ -386,6 +391,7 @@ int BufferPacketSource::readPacket(AVPacket* packet) {
         return ret;
     }
     
+    current_frame_index_.fetch_add(1, std::memory_order_relaxed);  // 更新当前帧索引
     return 0;  // 成功
 }
 
@@ -408,9 +414,9 @@ long BufferPacketSource::getFileSize() const {
     return -1;
 }
 
-std::string BufferPacketSource::getFilePath() const {
+std::string BufferPacketSource::getPath() const {
     // Buffer 模式下，没有文件路径概念
-    return std::string();
+    return "BufferPool";
 }
 
 bool BufferPacketSource::seek(int frame_index) {
@@ -638,6 +644,41 @@ int BufferPacketSource::copyPacket(AVPacket* dst_packet, const AVPacket* src_pac
     return 0;
 }
 
-BufferPacketSource::SourceType BufferPacketSource::getDataSourceType() const {
+IDataSourceNavigator::SourceType BufferPacketSource::getDataSourceType() const {
     return SourceType::BUFFER_SOURCE;
+}
+
+bool BufferPacketSource::open(const char* path) {
+    (void)path;
+    LOG4CPLUS_WARN(logger_, "Buffer source does not support open(path), use open()");
+    return false;
+}
+
+bool BufferPacketSource::seekToBegin() {
+    LOG4CPLUS_WARN(logger_, "Buffer source does not support seekToBegin (streaming data)");
+    return false;
+}
+
+bool BufferPacketSource::seekToEnd() {
+    LOG4CPLUS_WARN(logger_, "Buffer source does not support seekToEnd (streaming data)");
+    return false;
+}
+
+bool BufferPacketSource::skip(int frame_count) {
+    (void)frame_count;
+    LOG4CPLUS_WARN(logger_, "Buffer source does not support skip (streaming data)");
+    return false;
+}
+
+int BufferPacketSource::getCurrentFrameIndex() const {
+    return current_frame_index_.load(std::memory_order_acquire);
+}
+
+size_t BufferPacketSource::getFrameSize() const {
+    // Buffer 模式无法估算帧大小
+    return 0;
+}
+
+bool BufferPacketSource::hasMoreFrames() const {
+    return !isAtEnd();
 }

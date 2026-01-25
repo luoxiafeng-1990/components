@@ -32,7 +32,7 @@ FfmpegDecodeVideoFileWorker::FfmpegDecodeVideoFileWorker(const WorkerConfig& con
     , output_width_(config.display.width)      // 🎯 从配置读取输出宽度（初始值）
     , output_height_(config.display.height)   // 🎯 从配置读取输出高度（初始值）
     // ⚠️ 注意：total_frames_ 已移除，总帧数从数据源获取
-    , current_frame_index_(0)
+    // ⚠️ 注意：current_frame_index_ 已删除（未被使用的死代码）
     // ⚠️ 注意：is_open_ 已移除，打开状态从数据源获取
     , use_hardware_decoder_(config.decoder.enable_hardware)  // 🎯 从配置读取
     , decoder_name_(config.decoder.name.value_or(""))  // 🎯 从配置读取（使用 optional 的 value_or）
@@ -189,8 +189,8 @@ bool FfmpegDecodeVideoFileWorker::open(const char* path) {
     // ⚠️ 注意：output_width_ 和 output_height_ 已在构造函数中从 config.display 读取
     // 只有在配置中未设置（为0）的情况下，才使用原始分辨率
     if (output_width_ == 0 || output_height_ == 0) {
-        output_width_ = getOriginalWidth();
-        output_height_ = getOriginalHeight();
+        output_width_ = getSourceWidth();
+        output_height_ = getSourceHeight();
         LOG4CPLUS_DEBUG_FMT(logger_, "[Worker] Output resolution not set in config, using original resolution: %dx%d", 
                       output_width_, output_height_);
     } else {
@@ -233,11 +233,10 @@ bool FfmpegDecodeVideoFileWorker::open(const char* path) {
     
     // ⚠️ 注意：is_open_ 已移除，打开状态由数据源管理
     // 此时 packet_source_->isOpen() 应该已经返回 true（在 packet_source_->open() 成功后）
-    current_frame_index_ = 0;
     decoded_frames_ = 0;
     
     LOG4CPLUS_DEBUG_FMT(logger_, "[Worker] FfmpegDecodeVideoFileWorker: Opened '%s'", path);
-    LOG4CPLUS_DEBUG_FMT(logger_, "[Worker]    Resolution: %dx%d → %dx%d", getOriginalWidth(), getOriginalHeight(), output_width_, output_height_);
+    LOG4CPLUS_DEBUG_FMT(logger_, "[Worker]    Resolution: %dx%d → %dx%d", getSourceWidth(), getSourceHeight(), output_width_, output_height_);
     LOG4CPLUS_DEBUG_FMT(logger_, "[Worker]    Codec: %s", codec_ctx_ptr_->codec->name);
     LOG4CPLUS_DEBUG_FMT(logger_, "[Worker]    Total frames (estimated): %d", packet_source_ ? packet_source_->getTotalFrames() : -1);
     LOG4CPLUS_DEBUG_FMT(logger_, "[Worker]    BufferPool: '%s' (ID: %lu, %d buffers)", 
@@ -481,8 +480,8 @@ bool FfmpegDecodeVideoFileWorker::configureSpecialDecoder() {
     // ⚠️ TACO 硬件限制：只能缩小，不能放大
     if (taco.ch1_scale_width > 0 && taco.ch1_scale_height > 0) {
         // 验证缩放配置是否超出原始分辨率
-        int orig_width = getOriginalWidth();
-        int orig_height = getOriginalHeight();
+        int orig_width = getSourceWidth();
+        int orig_height = getSourceHeight();
         if (taco.ch1_scale_width > orig_width || taco.ch1_scale_height > orig_height) {
             LOG4CPLUS_WARN(logger_, "═══════════════════════════════════════════════════════════════");
             LOG4CPLUS_WARN(logger_, "  ⚠️  TACO 硬件缩放限制：只能缩小，不能放大");
@@ -563,7 +562,6 @@ bool FfmpegDecodeVideoFileWorker::seek(int frame_index) {
     }
     
     // 2. 重置 Worker 状态
-    current_frame_index_ = frame_index;
     // ⚠️ 注意：EOF 状态由数据源的 seek() 自动重置，不需要手动重置
     
     LOG4CPLUS_DEBUG_FMT(logger_, "[Worker] Successfully seeked to frame %d", frame_index);
@@ -586,7 +584,9 @@ bool FfmpegDecodeVideoFileWorker::seekToEnd() {
 }
 
 bool FfmpegDecodeVideoFileWorker::skip(int frame_count) {
-    return seek(current_frame_index_ + frame_count);
+    // ⚠️ 注意：current_frame_index_ 已删除，skip 功能暂不支持
+    LOG4CPLUS_WARN(logger_, "[Worker] skip() is not supported (current_frame_index_ removed)");
+    return false;
 }
 
 // ============================================================================
@@ -602,12 +602,14 @@ int FfmpegDecodeVideoFileWorker::getTotalFrames() const {
 }
 
 int FfmpegDecodeVideoFileWorker::getCurrentFrameIndex() const {
-    return current_frame_index_;
+    // ⚠️ 注意：current_frame_index_ 已删除（未被使用的死代码）
+    // 返回 -1 表示不支持此功能
+    return -1;
 }
 
 size_t FfmpegDecodeVideoFileWorker::getFrameSize() const {
     // ✅ 使用实际解码输出格式计算（getBytesPerPixel从实际格式获取）
-    return (size_t)(output_width_ * output_height_ * getBytesPerPixel());
+    return (size_t)(output_width_ * output_height_ * getOutputBytesPerPixel());
 }
 
 long FfmpegDecodeVideoFileWorker::getFileSize() const {
@@ -618,15 +620,23 @@ long FfmpegDecodeVideoFileWorker::getFileSize() const {
     return -1;
 }
 
-int FfmpegDecodeVideoFileWorker::getWidth() const {
+int FfmpegDecodeVideoFileWorker::getSourceWidth() const {
+    return packet_source_ ? packet_source_->getSourceWidth() : 0;
+}
+
+int FfmpegDecodeVideoFileWorker::getSourceHeight() const {
+    return packet_source_ ? packet_source_->getSourceHeight() : 0;
+}
+
+int FfmpegDecodeVideoFileWorker::getOutputWidth() const {
     return output_width_;
 }
 
-int FfmpegDecodeVideoFileWorker::getHeight() const {
+int FfmpegDecodeVideoFileWorker::getOutputHeight() const {
     return output_height_;
 }
 
-double FfmpegDecodeVideoFileWorker::getBytesPerPixel() const {
+double FfmpegDecodeVideoFileWorker::getOutputBytesPerPixel() const {
     // 1️⃣ 优先：从解码器实际输出格式计算（最准确）
     if (codec_ctx_ptr_ && codec_ctx_ptr_->pix_fmt != AV_PIX_FMT_NONE) {
         const AVPixFmtDescriptor* desc = av_pix_fmt_desc_get(codec_ctx_ptr_->pix_fmt);
@@ -664,22 +674,19 @@ double FfmpegDecodeVideoFileWorker::getBytesPerPixel() const {
     }
 }
 
-const char* FfmpegDecodeVideoFileWorker::getPath() const {
+std::string FfmpegDecodeVideoFileWorker::getPath() const {
     // ⭐ v2.9修改：从数据源获取文件路径
     if (!packet_source_) {
-        return nullptr;
+        return std::string();
     }
-    
-    // Buffer 模式：返回 nullptr（无文件路径）
-    if (dynamic_cast<BufferPacketSource*>(packet_source_.get())) {
-        return nullptr;
+    return packet_source_->getPath();
+}
+
+IDataSourceNavigator::SourceType FfmpegDecodeVideoFileWorker::getDataSourceType() const {
+    if (packet_source_) {
+        return packet_source_->getDataSourceType();
     }
-    
-    // 文件模式：从数据源获取路径
-    // 注意：返回的指针需要保证生命周期，这里使用静态变量存储
-    static thread_local std::string cached_path;
-    cached_path = packet_source_->getFilePath();
-    return cached_path.empty() ? nullptr : cached_path.c_str();
+    return SourceType::FILE_SOURCE;  // 默认是文件类型
 }
 
 bool FfmpegDecodeVideoFileWorker::hasMoreFrames() const {
@@ -740,7 +747,6 @@ bool FfmpegDecodeVideoFileWorker::fillBufferMetadataFromFrame(AVFrame* frame_ptr
     
     // ⭐ 更新统计计数器
     decoded_frames_++;
-    current_frame_index_++;
     
     return true;
 }
@@ -970,35 +976,14 @@ AVRational FfmpegDecodeVideoFileWorker::getTimeBase() const {
     return {1, 25};  // 默认25fps
 }
 
-int FfmpegDecodeVideoFileWorker::getOriginalWidth() const {
-    if (packet_source_) {
-        const AVCodecParameters* codecpar = packet_source_->getCodecParameters();
-        if (codecpar) {
-            return codecpar->width;
-        }
-    }
-    return 0;
-}
-
-int FfmpegDecodeVideoFileWorker::getOriginalHeight() const {
-    if (packet_source_) {
-        const AVCodecParameters* codecpar = packet_source_->getCodecParameters();
-        if (codecpar) {
-            return codecpar->height;
-        }
-    }
-    return 0;
-}
-
 void FfmpegDecodeVideoFileWorker::printStats() const {
     LOG4CPLUS_INFO(logger_, "\n[Worker] 📊 FfmpegDecodeVideoFileWorker Statistics:");
     // ⭐ v2.9修改：从数据源获取文件路径
-    std::string file_path = packet_source_ ? packet_source_->getFilePath() : std::string();
+    std::string file_path = packet_source_ ? packet_source_->getPath() : std::string();
     LOG4CPLUS_INFO_FMT(logger_, "[Worker]    File: %s", file_path.empty() ? "(Buffer Mode)" : file_path.c_str());
     LOG4CPLUS_INFO_FMT(logger_, "[Worker]    Codec: %s", getCodecName());
-    LOG4CPLUS_INFO_FMT(logger_, "[Worker]    Resolution: %dx%d → %dx%d", getOriginalWidth(), getOriginalHeight(), output_width_, output_height_);
+    LOG4CPLUS_INFO_FMT(logger_, "[Worker]    Resolution: %dx%d → %dx%d", getSourceWidth(), getSourceHeight(), output_width_, output_height_);
     LOG4CPLUS_INFO_FMT(logger_, "[Worker]    Total frames: %d", packet_source_ ? packet_source_->getTotalFrames() : -1);
-    LOG4CPLUS_INFO_FMT(logger_, "[Worker]    Current frame: %d", current_frame_index_);
     LOG4CPLUS_INFO_FMT(logger_, "[Worker]    Decoded frames: %d", decoded_frames_.load());
     LOG4CPLUS_INFO_FMT(logger_, "[Worker]    EOF: %s", packet_source_ && packet_source_->isAtEnd() ? "YES" : "NO");
 }
@@ -1079,14 +1064,6 @@ bool FfmpegDecodeVideoFileWorker::extractHardwareAddressFromMetadata(AVFrame* fr
     return false;
 }
 
-
-int FfmpegDecodeVideoFileWorker::getSourceWidth() const {
-    return packet_source_ ? packet_source_->getSourceWidth() : 0;
-}
-
-int FfmpegDecodeVideoFileWorker::getSourceHeight() const {
-    return packet_source_ ? packet_source_->getSourceHeight() : 0;
-}
 
 AVPixelFormat FfmpegDecodeVideoFileWorker::getSourcePixelFormat() const {
     return packet_source_ ? packet_source_->getSourcePixelFormat() : AV_PIX_FMT_NONE;

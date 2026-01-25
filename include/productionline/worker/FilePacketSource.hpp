@@ -44,27 +44,45 @@ public:
     FilePacketSource(const FilePacketSource&) = delete;
     FilePacketSource& operator=(const FilePacketSource&) = delete;
     
-    // IPacketSource 接口实现
+    // ============ IDataSourceNavigator 接口实现 ============
+    
+    // 数据源生命周期
     bool open() override;
+    bool open(const char* path) override;
     void close() override;
     bool isOpen() const override;
-    int readPacket(AVPacket* packet) override;
-    const AVCodecParameters* getCodecParameters() const override;
-    int getVideoStreamIndex() const override;
-    int getTotalFrames() const override;
-    long getFileSize() const override;
-    std::string getFilePath() const override;
+    
+    // 数据源导航
     bool seek(int frame_index) override;
+    bool seekToBegin() override;
+    bool seekToEnd() override;
+    bool skip(int frame_count) override;
+    
+    // 数据源状态查询
+    int getTotalFrames() const override;
+    int getCurrentFrameIndex() const override;
+    size_t getFrameSize() const override;
+    long getFileSize() const override;
+    std::string getPath() const override;
+    bool hasMoreFrames() const override;
     bool isAtEnd() const override;
+    
+    // 数据源属性
     int getSourceWidth() const override;
     int getSourceHeight() const override;
     AVPixelFormat getSourcePixelFormat() const override;
+    const AVCodecParameters* getCodecParameters() const override;
     SourceType getDataSourceType() const override;
+    
+    // ============ IPacketSource 特有方法 ============
+    int readPacket(AVPacket* packet) override;
+    int getVideoStreamIndex() const override;
 private:
     std::string file_path_;              // 文件路径
     AVFormatContext* format_ctx_ptr_;   // FFmpeg 格式上下文
     int video_stream_index_;            // 视频流索引
     int total_frames_;                  // 总帧数（估算）
+    int current_frame_index_;           // 当前帧索引
     std::atomic<bool> is_open_;         // 🎯 原子变量，保证线程安全的状态检查
     bool eof_reached_;                  // 是否到达文件末尾
     

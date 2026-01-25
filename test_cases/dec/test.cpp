@@ -389,7 +389,7 @@ static int test_rtsp_record_stream(const char* rtsp_url) {
     }
     
     // 直接从门面类获取编解码器参数和时间基
-    const AVCodecParameters* codec_params = worker_facade_sptr->getCodecParameters();
+    const AVCodecParameters* codec_params = worker_facade_sptr->getSourceCodecParameters();
     if (!codec_params) {
         LOG4CPLUS_ERROR(test_logger, "Failed to get codec parameters from worker");
         producer.stop();
@@ -606,7 +606,7 @@ static int test_file_record(const char* input_file) {
     }
     
     // 直接从门面类获取编解码器参数和时间基
-    const AVCodecParameters* codec_params = worker_facade_sptr->getCodecParameters();
+    const AVCodecParameters* codec_params = worker_facade_sptr->getSourceCodecParameters();
     if (!codec_params) {
         LOG4CPLUS_ERROR(test_logger, "Failed to get codec parameters from worker");
         producer.stop();
@@ -2316,7 +2316,7 @@ static int test_rtsp_record_all_formats(const char* rtsp_url) {
         }
         
         // ⭐ 直接从门面类获取编解码器参数和时间基
-        const AVCodecParameters* codec_params = worker_facade_sptr->getCodecParameters();
+        const AVCodecParameters* codec_params = worker_facade_sptr->getSourceCodecParameters();
         if (!codec_params) {
             LOG4CPLUS_ERROR_FMT(test_logger, "  ❌ Failed to get codec parameters from worker");
             producer.stop();

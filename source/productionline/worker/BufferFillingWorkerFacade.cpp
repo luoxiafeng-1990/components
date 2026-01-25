@@ -147,20 +147,11 @@ long BufferFillingWorkerFacade::getFileSize() const {
     return worker_base_uptr_ ? worker_base_uptr_->getFileSize() : 0;
 }
 
-int BufferFillingWorkerFacade::getWidth() const {
-    return worker_base_uptr_ ? worker_base_uptr_->getWidth() : 0;
-}
-
-int BufferFillingWorkerFacade::getHeight() const {
-    return worker_base_uptr_ ? worker_base_uptr_->getHeight() : 0;
-}
-
-double BufferFillingWorkerFacade::getBytesPerPixel() const {
-    return worker_base_uptr_ ? worker_base_uptr_->getBytesPerPixel() : 0;
-}
-
-const char* BufferFillingWorkerFacade::getPath() const {
-    return worker_base_uptr_ ? worker_base_uptr_->getPath() : "";
+std::string BufferFillingWorkerFacade::getPath() const {
+    if (worker_base_uptr_) {
+        return worker_base_uptr_->getPath();
+    }
+    return std::string();
 }
 
 bool BufferFillingWorkerFacade::hasMoreFrames() const {
@@ -187,10 +178,25 @@ BufferPoolType BufferFillingWorkerFacade::getPrimaryBufferPoolType() {
     return BufferPoolType::DECODE_VIDEO_PRIMARY;  // 默认值
 }
 
-// ============ v2.16：编解码器参数和时间基获取 ============
-const struct AVCodecParameters* BufferFillingWorkerFacade::getCodecParameters() const {
+// ============ 数据源属性（v2.14）============
+
+int BufferFillingWorkerFacade::getSourceWidth() const {
+    return worker_base_uptr_ ? worker_base_uptr_->getSourceWidth() : 0;
+}
+
+int BufferFillingWorkerFacade::getSourceHeight() const {
+    return worker_base_uptr_ ? worker_base_uptr_->getSourceHeight() : 0;
+}
+
+AVPixelFormat BufferFillingWorkerFacade::getSourcePixelFormat() const {
+    return worker_base_uptr_ ? worker_base_uptr_->getSourcePixelFormat() : AV_PIX_FMT_NONE;
+}
+
+// ============ 编解码器参数和时间基获取（v2.14）============
+
+const struct AVCodecParameters* BufferFillingWorkerFacade::getSourceCodecParameters() const {
     if (worker_base_uptr_) {
-        return worker_base_uptr_->getCodecParameters();
+        return worker_base_uptr_->getSourceCodecParameters();
     }
     return nullptr;
 }
@@ -202,23 +208,16 @@ struct AVRational BufferFillingWorkerFacade::getTimeBase() const {
     return {1, 25};  // 默认 25fps
 }
 
-int BufferFillingWorkerFacade::getSourceWidth() const {
-    if (worker_base_uptr_) {
-        return worker_base_uptr_->getSourceWidth();
-    }
-    return 0;
+// ============ Worker 输出属性（v2.14）============
+
+int BufferFillingWorkerFacade::getOutputWidth() const {
+    return worker_base_uptr_ ? worker_base_uptr_->getOutputWidth() : 0;
 }
 
-int BufferFillingWorkerFacade::getSourceHeight() const {
-    if (worker_base_uptr_) {
-        return worker_base_uptr_->getSourceHeight();
-    }
-    return 0;
+int BufferFillingWorkerFacade::getOutputHeight() const {
+    return worker_base_uptr_ ? worker_base_uptr_->getOutputHeight() : 0;
 }
 
-AVPixelFormat BufferFillingWorkerFacade::getSourcePixelFormat() const {
-    if (worker_base_uptr_) {
-        return worker_base_uptr_->getSourcePixelFormat();
-    }
-    return AV_PIX_FMT_NONE;
+double BufferFillingWorkerFacade::getOutputBytesPerPixel() const {
+    return worker_base_uptr_ ? worker_base_uptr_->getOutputBytesPerPixel() : 0;
 }

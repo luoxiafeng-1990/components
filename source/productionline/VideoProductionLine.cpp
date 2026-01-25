@@ -129,7 +129,7 @@ bool VideoProductionLine::start(const WorkerConfig& worker_config) {
     size_t frame_size = worker_facade_sptr_->getFrameSize();
     
     LOG4CPLUS_INFO(logger_, "Worker已就绪: " << worker_facade_sptr_->getWorkerType());
-    LOG4CPLUS_INFO(logger_, "  - 分辨率: " << worker_facade_sptr_->getWidth() << "x" << worker_facade_sptr_->getHeight());
+    LOG4CPLUS_INFO(logger_, "  - 分辨率: " << worker_facade_sptr_->getOutputWidth() << "x" << worker_facade_sptr_->getOutputHeight());
     LOG4CPLUS_INFO(logger_, "  - 总帧数: " << total_frames_);
     LOG4CPLUS_INFO(logger_, "  - 帧大小: " << (frame_size / (1024.0 * 1024.0)) << " MB");
     

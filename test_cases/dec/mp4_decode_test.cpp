@@ -3904,7 +3904,7 @@ static int record_rtsp_stream_to_mp4(
         return -1;
     }
     
-        const AVCodecParameters* codec_params = record_worker_facade->getCodecParameters();
+        const AVCodecParameters* codec_params = record_worker_facade->getSourceCodecParameters();
         if (!codec_params) {
             LOG_ERROR("Failed to get codec parameters from recorder");
             recorder.stop();

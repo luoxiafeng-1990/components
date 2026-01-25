@@ -87,28 +87,44 @@ public:
     BufferPacketSource(const BufferPacketSource&) = delete;
     BufferPacketSource& operator=(const BufferPacketSource&) = delete;
     
-    // IPacketSource 接口实现
+    // ============ IDataSourceNavigator 接口实现 ============
+    
+    // 数据源生命周期
     bool open() override;
+    bool open(const char* path) override;     // 返回 false（Buffer 模式不支持路径）
     void close() override;
     bool isOpen() const override;
-    int readPacket(AVPacket* packet) override;
-    const AVCodecParameters* getCodecParameters() const override;
-    int getVideoStreamIndex() const override;
-    int getTotalFrames() const override;
-    long getFileSize() const override;
-    std::string getFilePath() const override;
     
+    // 数据源导航（Buffer 模式不支持导航）
     /**
      * @brief 定位到指定帧索引（Buffer 模式不支持）
      * @param frame_index 帧索引
      * @return 总是返回 false（Buffer 模式不支持 seek）
      */
     bool seek(int frame_index) override;
+    bool seekToBegin() override;              // 返回 false（Buffer 模式不支持）
+    bool seekToEnd() override;                // 返回 false（Buffer 模式不支持）
+    bool skip(int frame_count) override;      // 返回 false（Buffer 模式不支持）
+    
+    // 数据源状态查询
+    int getTotalFrames() const override;      // 返回 -1（流式数据无总帧数）
+    int getCurrentFrameIndex() const override;// 返回已读取的帧数
+    size_t getFrameSize() const override;     // 返回 0（无法估算）
+    long getFileSize() const override;        // 返回 -1（无文件大小）
+    std::string getPath() const override;     // 返回 "BufferPool"
+    bool hasMoreFrames() const override;      // 返回 !isAtEnd()
     bool isAtEnd() const override;
+    
+    // 数据源属性
     int getSourceWidth() const override;
     int getSourceHeight() const override;
     AVPixelFormat getSourcePixelFormat() const override;
+    const AVCodecParameters* getCodecParameters() const override;
     SourceType getDataSourceType() const override;
+    
+    // ============ IPacketSource 特有方法 ============
+    int readPacket(AVPacket* packet) override;
+    int getVideoStreamIndex() const override;
     /**
      * @brief 设置数据源 BufferPool（v2.13 新增）
      * @param pool_weak Record Worker 的 BufferPool（weak_ptr）
@@ -199,6 +215,7 @@ private:
     const AVCodecParameters* codec_params_;     // 编解码器参数（从 Record Worker 获取）
     std::weak_ptr<BufferPool> source_pool_;     // ⭐ v2.13：关联的 BufferPool（从 Record Worker）
     std::atomic<bool> is_open_;                 // 🎯 原子变量，保证线程安全的状态检查
+    std::atomic<int> current_frame_index_;      // 当前帧索引（已读取的帧数）
     
     // ========== 共享模式成员（v2.18 新增，v3.0 扩展）==========
     bool is_shared_mode_;                       // 是否为共享模式

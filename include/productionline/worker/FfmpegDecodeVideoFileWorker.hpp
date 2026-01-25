@@ -85,7 +85,7 @@ public:
         return "FfmpegDecodeVideoFileWorker";
     }
     
-    // 文件导航功能（继承自IVideoFileNavigator）
+    // 文件导航功能（继承自IDataSourceNavigator）
     /**
      * @brief 打开视频文件（单参数版本，支持覆盖 config 中的路径）
      * 
@@ -109,11 +109,9 @@ public:
     int getCurrentFrameIndex() const override;
     size_t getFrameSize() const override;
     long getFileSize() const override;
-    int getWidth() const override;
-    int getHeight() const override;
-    double getBytesPerPixel() const override;
-    const char* getPath() const override;
+    std::string getPath() const override;
     bool hasMoreFrames() const override;
+    SourceType getDataSourceType() const override;
     bool isAtEnd() const override;
     
     // ============ v2.13 BufferPacketSource 配置 ============
@@ -158,10 +156,10 @@ public:
     const char* getCodecName() const;
     
     /**
-     * @brief 获取编解码器参数（用于 BufferWriter 等场景）
+     * @brief 获取数据源的编解码器参数（用于 BufferWriter 等场景）
      * @return 编解码器参数指针，如果不可用则返回 nullptr
      */
-    const struct AVCodecParameters* getCodecParameters() const override;
+    const AVCodecParameters* getCodecParameters() const override;
     
     /**
      * @brief 获取时间基（用于 BufferWriter 等场景）
@@ -171,6 +169,24 @@ public:
     int getSourceWidth() const override;
     int getSourceHeight() const override;
     AVPixelFormat getSourcePixelFormat() const override;
+    
+    /**
+     * @brief 获取 Worker 输出的视频宽度
+     * @return Worker 输出宽度（可能经过 TACO 缩放）
+     */
+    int getOutputWidth() const override;
+    
+    /**
+     * @brief 获取 Worker 输出的视频高度
+     * @return Worker 输出高度（可能经过 TACO 缩放）
+     */
+    int getOutputHeight() const override;
+    
+    /**
+     * @brief 获取 Worker 输出的每像素字节数
+     * @return 每像素字节数（浮点数）
+     */
+    double getOutputBytesPerPixel() const override;
     
     /**
      * @brief 打印统计信息
@@ -190,7 +206,6 @@ private:
   
     int output_width_;                 // 输出宽度（运行时状态，可能缩放）
     int output_height_;                // 输出高度（运行时状态，可能缩放）
-    int current_frame_index_;          // 当前帧索引
    
     
     // ============ 解码器配置（用于特殊解码器）============
@@ -271,18 +286,6 @@ private:
      * @brief 设置错误信息
      */
     void setError(const std::string& error, int ffmpeg_error = 0);
-    
-    /**
-     * @brief 获取原始宽度（从数据源获取）
-     * @return 原始宽度，如果不可用则返回 0
-     */
-    int getOriginalWidth() const;
-    
-    /**
-     * @brief 获取原始高度（从数据源获取）
-     * @return 原始高度，如果不可用则返回 0
-     */
-    int getOriginalHeight() const;
 };
 
 #endif // FFMPEG_DECODE_VIDEO_FILE_WORKER_HPP

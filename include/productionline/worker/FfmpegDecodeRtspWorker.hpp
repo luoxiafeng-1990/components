@@ -90,7 +90,7 @@ public:
         return "FfmpegDecodeRtspWorker";
     }
     
-    // 文件导航功能（继承自IVideoFileNavigator）
+    // 文件导航功能（继承自IDataSourceNavigator）
     /**
      * @brief 打开 RTSP 流（无参版本，从 worker_config_ 读取所有参数）
      * 
@@ -125,11 +125,9 @@ public:
     int getCurrentFrameIndex() const override;
     size_t getFrameSize() const override;
     long getFileSize() const override;
-    int getWidth() const override;
-    int getHeight() const override;
-    double getBytesPerPixel() const override;
-    const char* getPath() const override;
+    std::string getPath() const override;
     bool hasMoreFrames() const override;
+    SourceType getDataSourceType() const override;
     bool isAtEnd() const override;
     
     // ============ RTSP 特有接口 ============
@@ -153,7 +151,7 @@ public:
      * // ⭐ v2.22: 数据源配置从 decoder 移至 datasource
      * WorkerConfig config;
      * config.data_source.buffer_mode = true;
-     * config.data_source.codec_params = record_worker->getCodecParameters();
+     * config.data_source.codec_params = record_worker->getSourceCodecParameters();
      * FfmpegDecodeRtspWorker consumer_worker(config);
      * 
      * // 2. 关联 Record BufferPool
@@ -193,7 +191,7 @@ public:
      * @brief 获取编解码器参数（用于 BufferWriter 等场景）
      * @return 编解码器参数指针，如果不可用则返回 nullptr
      */
-    const struct AVCodecParameters* getCodecParameters() const override;
+    const AVCodecParameters* getCodecParameters() const override;
     
     /**
      * @brief 获取时间基（用于 BufferWriter 等场景）
@@ -203,6 +201,21 @@ public:
     int getSourceWidth() const override;
     int getSourceHeight() const override;
     AVPixelFormat getSourcePixelFormat() const override;
+    
+    /**
+     * @brief 获取 Worker 输出的视频宽度
+     */
+    int getOutputWidth() const override;
+    
+    /**
+     * @brief 获取 Worker 输出的视频高度
+     */
+    int getOutputHeight() const override;
+    
+    /**
+     * @brief 获取 Worker 输出的每像素字节数
+     */
+    double getOutputBytesPerPixel() const override;
     
     /**
      * 打印统计信息

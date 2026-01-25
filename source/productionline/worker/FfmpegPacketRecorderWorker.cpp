@@ -223,25 +223,42 @@ long FfmpegPacketRecorderWorker::getFileSize() const {
     return packet_source_->getFileSize();
 }
 
-int FfmpegPacketRecorderWorker::getWidth() const {
+int FfmpegPacketRecorderWorker::getSourceWidth() const {
     if (!packet_source_) return 0;
     const AVCodecParameters* codecpar = packet_source_->getCodecParameters();
     return codecpar ? codecpar->width : 0;
 }
 
-int FfmpegPacketRecorderWorker::getHeight() const {
+int FfmpegPacketRecorderWorker::getSourceHeight() const {
     if (!packet_source_) return 0;
     const AVCodecParameters* codecpar = packet_source_->getCodecParameters();
     return codecpar ? codecpar->height : 0;
 }
 
-double FfmpegPacketRecorderWorker::getBytesPerPixel() const {
+int FfmpegPacketRecorderWorker::getOutputWidth() const {
+    return getSourceWidth();  // Recorder不处理，输出等于输入
+}
+
+int FfmpegPacketRecorderWorker::getOutputHeight() const {
+    return getSourceHeight();  // Recorder不处理，输出等于输入
+}
+
+double FfmpegPacketRecorderWorker::getOutputBytesPerPixel() const {
     return 0.0;  // 原始码流没有像素概念
 }
 
-const char* FfmpegPacketRecorderWorker::getPath() const {
-    if (!packet_source_) return "";
-    return packet_source_->getFilePath().c_str();
+std::string FfmpegPacketRecorderWorker::getPath() const {
+    if (!packet_source_) {
+        return std::string();
+    }
+    return packet_source_->getPath();
+}
+
+IDataSourceNavigator::SourceType FfmpegPacketRecorderWorker::getDataSourceType() const {
+    if (packet_source_) {
+        return packet_source_->getDataSourceType();
+    }
+    return SourceType::NETWORK_SOURCE;  // 默认是网络流类型
 }
 
 bool FfmpegPacketRecorderWorker::hasMoreFrames() const {
@@ -374,14 +391,6 @@ AVRational FfmpegPacketRecorderWorker::getTimeBase() const {
     // 从数据源获取编解码器参数，进而获取时间基
     // 注意：需要从 AVStream 获取，这里简化处理返回默认值
     return {1, 25};  // 默认25fps（TODO: 如需精确时间基，需要扩展 IPacketSource 接口）
-}
-
-int FfmpegPacketRecorderWorker::getSourceWidth() const {
-    return packet_source_ ? packet_source_->getSourceWidth() : 0;
-}
-
-int FfmpegPacketRecorderWorker::getSourceHeight() const {
-    return packet_source_ ? packet_source_->getSourceHeight() : 0;
 }
 
 AVPixelFormat FfmpegPacketRecorderWorker::getSourcePixelFormat() const {

@@ -420,7 +420,7 @@ bool MultiWorkerProductionLine::createConnectorsForGroup(WorkerGroupRuntime* gro
             if (producer_info->producer_line) {
                 auto worker_facade = producer_info->producer_line->getWorkerFacade();
                 if (worker_facade) {
-                    codec_params = worker_facade->getCodecParameters();
+                    codec_params = worker_facade->getSourceCodecParameters();
                 }
             }
             
@@ -548,7 +548,7 @@ bool MultiWorkerProductionLine::createConsumersForGroup(WorkerGroupRuntime* grou
             if (producer_info->producer_line) {
                 auto worker_facade = producer_info->producer_line->getWorkerFacade();
                 if (worker_facade) {
-                    codec_params = worker_facade->getCodecParameters();
+                    codec_params = worker_facade->getSourceCodecParameters();
                     time_base = worker_facade->getTimeBase();
                 }
             }
