@@ -50,6 +50,14 @@ display_test_SOURCES = test_cases/dec/test.cpp
 display_test_CPPFLAGS = -I$(top_srcdir)/test_cases $(AM_CPPFLAGS)
 display_test_LDADD = libcomponents.la $(COMMON_LIBS)
 
+bin_PROGRAMS += google_test
+google_test_SOURCES = \
+    test_cases/main.cpp \
+    test_cases/demo_google/test_ffmpeg_decode.cpp
+google_test_LDADD = -lgtest -lgtest_main -lpthread libcomponents.la $(COMMON_LIBS)
+google_test_CPPFLAGS = -I$(top_srcdir)/test_cases $(AM_CPPFLAGS)
+google_test_LDFLAGS = 
+
 # ========== 编译选项 ==========
 AM_CPPFLAGS = -I$(top_srcdir)/include
 
