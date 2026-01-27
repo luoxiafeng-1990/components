@@ -21,6 +21,7 @@ endif
 
 define COMPONENTS_INSTALL_TARGET_CMDS
 	$(INSTALL) -D -m 755 $(@D)/display_test $(TARGET_DIR)/usr/local/bin
+	$(INSTALL) -D -m 755 $(@D)/google_test $(TARGET_DIR)/usr/local/bin
 endef
 
 $(eval $(autotools-package))
