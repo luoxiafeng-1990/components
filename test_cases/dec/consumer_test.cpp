@@ -11,7 +11,8 @@
  * - BufferConsumerService: 消费者服务类（综合测试）
  */
 
-#include "productionline/consumer/BufferConsumer.hpp"
+#include "productionline/consumer/BufferConsumer.hpp"  // 包含 IBufferConsumer 接口、服务类、配置类
+// BufferConsumer.hpp 已包含 BufferConsumerStrategies.hpp（策略实现库）
 #include "productionline/io/BufferComparator.hpp"
 #include "productionline/VideoProductionLine.hpp"
 #include "productionline/MultiWorkerProductionLine.hpp"
@@ -101,10 +102,7 @@ static int test_display_consumer_rtsp(const char* rtsp_url) {
         return -1;
     }
     
-    // 2. 创建 DisplayConsumer
-    DisplayConsumer display_consumer(&display, true, false);  // ch0 启用，ch1 禁用
-    
-    // 3. 配置 WorkerConfig
+    // 2. 配置 WorkerConfig
     auto tacoConfig = TacoConfigBuilder()
         .setChannels(true, false)
         .build();
@@ -130,29 +128,33 @@ static int test_display_consumer_rtsp(const char* rtsp_url) {
         .setWorkerType(WorkerType::FFMPEG_RTSP)
         .build();
     
-    // 4. 创建 BufferConsumerService（使用 ConsumerConfigBuilder 构建配置）
+    // 4. 创建服务配置和消费者配置（重构后的新接口）
     BufferConsumerService service;
-    BufferConsumerService::Config config = ConsumerConfigBuilder()
+    auto service_config = ConsumerConfigBuilder()
         .setWorkerConfig(workerConfig)
         .setLoop(false)
         .setThreadCount(1)
+        .setAcquireTimeout(100)
+        .setMaxTimeoutCount(50)
+        .setDrainRemaining(true)
         .build();
-    config.acquire_timeout_ms = 100;
-    config.max_timeout_count = 50;
-    config.drain_remaining = true;
     
-    // 5. 设置错误回调
-    auto error_callback = [](const std::string& error) {
-        LOG4CPLUS_ERROR_FMT(test_logger, "RTSP Error: %s", error.c_str());
+    auto consumer_config = ConsumerStrategyConfigBuilder()
+        .setType(ConsumerConfig::Type::DISPLAY)
+        .setDisplayDevice(&display)
+        .setDisplayChannels(true, false)
+        .build();
+    
+    // 5. 设置错误回调（使用增强的错误回调）
+    ErrorCallback error_callback = [](const ConsumerErrorInfo& error) {
+        LOG4CPLUS_ERROR_FMT(test_logger, "RTSP Error: %s", error.toString().c_str());
         g_running = false;
     };
     
-    // 6. 一键运行（open → run → printStats → close）
-    BufferConsumerService::RunOptions opts;
-    opts.error_callback = error_callback;
-    
-    if (!service.runOnce(config, &display_consumer, opts)) {
-        LOG4CPLUS_ERROR(test_logger, "Failed to run BufferConsumerService");
+    // 6. 使用 execute() 方法（新接口：分离服务配置和消费者配置）
+    std::atomic<bool> running_flag(true);
+    if (!service.execute(service_config, consumer_config, &running_flag, error_callback)) {
+        LOG4CPLUS_ERROR(test_logger, "Failed to execute BufferConsumerService");
         return -1;
     }
     
@@ -179,10 +181,7 @@ static int test_display_consumer_file(const char* video_path) {
         return -1;
     }
     
-    // 2. 创建 DisplayConsumer
-    DisplayConsumer display_consumer(&display, true, false);
-    
-    // 3. 配置 WorkerConfig
+    // 2. 配置 WorkerConfig
     auto tacoConfig = TacoConfigBuilder()
         .setChannels(true, false)
         .build();
@@ -208,24 +207,29 @@ static int test_display_consumer_file(const char* video_path) {
         .setWorkerType(WorkerType::FFMPEG_VIDEO_FILE)
         .build();
     
-    // 4. 创建 BufferConsumerService（使用 ConsumerConfigBuilder 构建配置）
+    // 4. 创建服务配置和消费者配置（重构后的新接口）
     BufferConsumerService service;
-    BufferConsumerService::Config config = ConsumerConfigBuilder()
+    auto service_config = ConsumerConfigBuilder()
         .setWorkerConfig(workerConfig)
         .setLoop(false)
         .setThreadCount(1)
         .build();
     
-    auto error_callback = [](const std::string& error) {
-        LOG4CPLUS_ERROR_FMT(test_logger, "FFmpeg Error: %s", error.c_str());
+    auto consumer_config = ConsumerStrategyConfigBuilder()
+        .setType(ConsumerConfig::Type::DISPLAY)
+        .setDisplayDevice(&display)
+        .setDisplayChannels(true, false)
+        .build();
+    
+    ErrorCallback error_callback = [](const ConsumerErrorInfo& error) {
+        LOG4CPLUS_ERROR_FMT(test_logger, "FFmpeg Error: %s", error.toString().c_str());
         g_running = false;
     };
     
-    BufferConsumerService::RunOptions opts;
-    opts.error_callback = error_callback;
-    
-    if (!service.runOnce(config, &display_consumer, opts)) {
-        LOG4CPLUS_ERROR(test_logger, "Failed to run BufferConsumerService");
+    // 5. 使用 execute() 方法（新接口：分离服务配置和消费者配置）
+    std::atomic<bool> running_flag(true);
+    if (!service.execute(service_config, consumer_config, &running_flag, error_callback)) {
+        LOG4CPLUS_ERROR(test_logger, "Failed to execute BufferConsumerService");
         return -1;
     }
     
@@ -246,10 +250,9 @@ static int test_file_writer_consumer(const char* video_path) {
     signal(SIGINT, signal_handler);
     g_running = true;
     
-    // 1. 创建 FileWriterConsumer（只处理 ch0）
+    // 1. 准备输出路径
     std::string output_path = "./test_output_consumer/ch0_output.raw";
     system("mkdir -p ./test_output_consumer");
-    FileWriterConsumer file_consumer(output_path, true, false);  // ch0启用，ch1禁用
     
     // 2. 配置 WorkerConfig（只启用 ch0）
     auto tacoConfig = TacoConfigBuilder()
@@ -277,27 +280,32 @@ static int test_file_writer_consumer(const char* video_path) {
         .setWorkerType(WorkerType::FFMPEG_VIDEO_FILE)
         .build();
     
-    // 3. 创建 BufferConsumerService（使用 ConsumerConfigBuilder 构建配置）
+    // 3. 创建服务配置和消费者配置（重构后的新接口）
     BufferConsumerService service;
-    BufferConsumerService::Config config = ConsumerConfigBuilder()
+    auto service_config = ConsumerConfigBuilder()
         .setWorkerConfig(workerConfig)
         .setLoop(false)
         .setThreadCount(1)
         .build();
     
-    auto error_callback = [](const std::string& error) {
-        LOG4CPLUS_ERROR_FMT(test_logger, "Error: %s", error.c_str());
+    auto consumer_config = ConsumerStrategyConfigBuilder()
+        .setType(ConsumerConfig::Type::FILE_WRITER)
+        .setFileOutputPath(output_path)
+        .setFileChannels(true, false)
+        .build();
+    
+    ErrorCallback error_callback = [](const ConsumerErrorInfo& error) {
+        LOG4CPLUS_ERROR_FMT(test_logger, "Error: %s", error.toString().c_str());
         g_running = false;
     };
     
-    BufferConsumerService::RunOptions opts;
-    opts.error_callback = error_callback;
-    
-    LOG4CPLUS_INFO(test_logger, "✅ BufferConsumerService opened, starting write...");
+    LOG4CPLUS_INFO(test_logger, "✅ BufferConsumerService starting write...");
     LOG4CPLUS_INFO(test_logger, "   按 Ctrl+C 停止");
     
-    if (!service.runOnce(config, &file_consumer, opts)) {
-        LOG4CPLUS_ERROR(test_logger, "Failed to run BufferConsumerService");
+    // 4. 使用 execute() 方法（新接口：分离服务配置和消费者配置）
+    std::atomic<bool> running_flag(true);
+    if (!service.execute(service_config, consumer_config, &running_flag, error_callback)) {
+        LOG4CPLUS_ERROR(test_logger, "Failed to execute BufferConsumerService");
         return -1;
     }
     
@@ -324,7 +332,7 @@ static int test_multichannel_writer_consumer(const char* video_path) {
         "./test_output_consumer/ch0_output.raw",
         "./test_output_consumer/ch1_output.raw"
     };
-    MultiChannelFileWriterConsumer multi_consumer(output_paths, true, true);  // ch0 和 ch1 都启用
+    system("mkdir -p ./test_output_consumer");
     
     // 2. 配置 WorkerConfig（启用双通道）
     auto tacoConfig = TacoConfigBuilder()
@@ -352,27 +360,32 @@ static int test_multichannel_writer_consumer(const char* video_path) {
         .setWorkerType(WorkerType::FFMPEG_VIDEO_FILE)
         .build();
     
-    // 3. 创建 BufferConsumerService（使用 ConsumerConfigBuilder 构建配置）
+    // 3. 创建服务配置和消费者配置（重构后的新接口）
     BufferConsumerService service;
-    BufferConsumerService::Config config = ConsumerConfigBuilder()
+    auto service_config = ConsumerConfigBuilder()
         .setWorkerConfig(workerConfig)
         .setLoop(false)
         .setThreadCount(1)
         .build();
     
-    auto error_callback = [](const std::string& error) {
-        LOG4CPLUS_ERROR_FMT(test_logger, "Error: %s", error.c_str());
+    auto consumer_config = ConsumerStrategyConfigBuilder()
+        .setType(ConsumerConfig::Type::MULTI_CHANNEL_FILE)
+        .setMultiFileOutputPaths(output_paths)
+        .setMultiFileChannels(true, true)
+        .build();
+    
+    ErrorCallback error_callback = [](const ConsumerErrorInfo& error) {
+        LOG4CPLUS_ERROR_FMT(test_logger, "Error: %s", error.toString().c_str());
         g_running = false;
     };
     
-    BufferConsumerService::RunOptions opts;
-    opts.error_callback = error_callback;
-    
-    LOG4CPLUS_INFO(test_logger, "✅ BufferConsumerService opened, starting multi-channel write...");
+    LOG4CPLUS_INFO(test_logger, "✅ BufferConsumerService starting multi-channel write...");
     LOG4CPLUS_INFO(test_logger, "   按 Ctrl+C 停止");
     
-    if (!service.runOnce(config, &multi_consumer, opts)) {
-        LOG4CPLUS_ERROR(test_logger, "Failed to run BufferConsumerService");
+    // 4. 使用 execute() 方法（新接口：分离服务配置和消费者配置）
+    std::atomic<bool> running_flag(true);
+    if (!service.execute(service_config, consumer_config, &running_flag, error_callback)) {
+        LOG4CPLUS_ERROR(test_logger, "Failed to execute BufferConsumerService");
         return -1;
     }
     
@@ -1367,16 +1380,15 @@ static int run_decode_test_with_consumer(
         .setWorkerType(WorkerType::FFMPEG_VIDEO_FILE)
         .build();
     
-    // 2. 创建多通道文件写入消费者（同时保存 PP0 和 PP1 输出）
+    // 2. 准备输出路径（多通道文件写入）
     std::vector<std::string> output_paths = {
         "./test_output_consumer/" + res_str + "_PP0_output.raw",
         "./test_output_consumer/" + res_str + "_PP1_output.raw"
     };
-    MultiChannelFileWriterConsumer file_consumer(output_paths, true, true);  // ch0 和 ch1 都启用
     
-    // 3. 配置 BufferConsumerService，启用 PSNR 对比和诊断（使用 ConsumerConfigBuilder）
+    // 3. 配置服务配置和消费者配置（重构后的新接口）
     BufferConsumerService service;
-    BufferConsumerService::Config config = ConsumerConfigBuilder()
+    auto service_config = ConsumerConfigBuilder()
         .setWorkerConfig(workerConfig)
         .setLoop(false)
         .setThreadCount(1)
@@ -1401,21 +1413,28 @@ static int run_decode_test_with_consumer(
         .setVerboseDiagnosis(false)           // 精简日志：关闭详细诊断
         .build();
     
-    auto error_callback = [](const std::string& error) {
-        LOG4CPLUS_WARN_FMT(test_logger, "Error (non-fatal): %s", error.c_str());
+    auto consumer_config = ConsumerStrategyConfigBuilder()
+        .setType(ConsumerConfig::Type::MULTI_CHANNEL_FILE)
+        .setMultiFileOutputPaths(output_paths)
+        .setMultiFileChannels(true, true)
+        .build();
+    
+    ErrorCallback error_callback = [](const ConsumerErrorInfo& error) {
+        LOG4CPLUS_WARN_FMT(test_logger, "Error (non-fatal): %s", error.toString().c_str());
     };
     
-    // 4. 一键运行（根据参数决定是否自动输出统计）
-    BufferConsumerService::RunOptions opts;
-    opts.error_callback = error_callback;
-    opts.auto_print_stats = print_stats;
-    opts.auto_close = true;
+    LOG4CPLUS_INFO(test_logger, "✅ BufferConsumerService starting decode test...");
     
-    LOG4CPLUS_INFO(test_logger, "✅ BufferConsumerService opened, starting decode test...");
-    
-    if (!service.runOnce(config, &file_consumer, opts)) {
-        LOG4CPLUS_ERROR(test_logger, "Failed to run BufferConsumerService");
+    // 4. 使用 execute() 方法（新接口：分离服务配置和消费者配置）
+    std::atomic<bool> running_flag(true);
+    if (!service.execute(service_config, consumer_config, &running_flag, error_callback)) {
+        LOG4CPLUS_ERROR(test_logger, "Failed to execute BufferConsumerService");
         return -1;
+    }
+    
+    // 5. 打印统计信息（如果需要）
+    if (print_stats) {
+        service.printStats();
     }
     
     LOG4CPLUS_INFO_FMT(test_logger, "✅ Decode test completed: %s", test_tag ? test_tag : "unknown");
@@ -1636,10 +1655,8 @@ static int run_pp0_test_with_format(
     oss << "PP0_" << format_config.format_name;
     std::string output_path = "./test_output_consumer/" + oss.str() + ".raw";
     
-    FileWriterConsumer file_consumer(output_path, true, false);
-    
     BufferConsumerService service;
-    BufferConsumerService::Config config = ConsumerConfigBuilder()
+    auto service_config = ConsumerConfigBuilder()
         .setWorkerConfig(workerConfig)
         .setLoop(false)
         .setThreadCount(1)
@@ -1663,16 +1680,19 @@ static int run_pp0_test_with_format(
         .setEnableDecoderVerification(true)
         .build();
     
-    auto error_callback = [](const std::string& error) {
-        LOG4CPLUS_WARN_FMT(test_logger, "Error: %s", error.c_str());
+    auto consumer_config = ConsumerStrategyConfigBuilder()
+        .setType(ConsumerConfig::Type::FILE_WRITER)
+        .setFileOutputPath(output_path)
+        .setFileChannels(true, false)
+        .build();
+    
+    ErrorCallback error_callback = [](const ConsumerErrorInfo& error) {
+        LOG4CPLUS_WARN_FMT(test_logger, "Error: %s", error.toString().c_str());
     };
     
-    BufferConsumerService::RunOptions opts;
-    opts.error_callback = error_callback;
-    opts.auto_print_stats = false;   // 由上层决定何时统一输出
-    opts.auto_close = false;         // 需要在关闭前访问 comparator 统计
-    
-    if (!service.runOnce(config, &file_consumer, opts)) {
+    // 使用 execute() 方法（新接口：分离服务配置和消费者配置）
+    std::atomic<bool> running_flag(true);
+    if (!service.execute(service_config, consumer_config, &running_flag, error_callback)) {
         result_code = -1;
         return -1;
     }
@@ -1759,7 +1779,7 @@ static int run_pp1_test_with_format(
     FileWriterConsumer file_consumer(output_path, false, true);
     
     BufferConsumerService service;
-    BufferConsumerService::Config config = ConsumerConfigBuilder()
+    auto service_config = ConsumerConfigBuilder()
         .setWorkerConfig(workerConfig)
         .setLoop(false)
         .setThreadCount(1)
@@ -1784,16 +1804,19 @@ static int run_pp1_test_with_format(
         .setEnableDecoderVerification(true)
         .build();
     
-    auto error_callback = [](const std::string& error) {
-        LOG4CPLUS_WARN_FMT(test_logger, "Error: %s", error.c_str());
+    auto consumer_config = ConsumerStrategyConfigBuilder()
+        .setType(ConsumerConfig::Type::FILE_WRITER)
+        .setFileOutputPath(output_path)
+        .setFileChannels(false, true)  // PP1 只启用 ch1
+        .build();
+    
+    ErrorCallback error_callback = [](const ConsumerErrorInfo& error) {
+        LOG4CPLUS_WARN_FMT(test_logger, "Error: %s", error.toString().c_str());
     };
     
-    BufferConsumerService::RunOptions opts;
-    opts.error_callback = error_callback;
-    opts.auto_print_stats = false;   // 统计由上层统一输出
-    opts.auto_close = false;         // 需要在关闭前读取 comparator 统计
-    
-    if (!service.runOnce(config, &file_consumer, opts)) {
+    // 使用 execute() 方法（新接口：分离服务配置和消费者配置）
+    std::atomic<bool> running_flag(true);
+    if (!service.execute(service_config, consumer_config, &running_flag, error_callback)) {
         result_code = -1;
         return -1;
     }
@@ -1885,7 +1908,7 @@ static int run_multi_pp_test_with_format(
     MultiChannelFileWriterConsumer multi_consumer(output_paths, true, true);
     
     BufferConsumerService service;
-    BufferConsumerService::Config config = ConsumerConfigBuilder()
+    auto service_config = ConsumerConfigBuilder()
         .setWorkerConfig(workerConfig)
         .setLoop(false)
         .setThreadCount(1)
@@ -1911,16 +1934,19 @@ static int run_multi_pp_test_with_format(
         .setEnableDecoderVerification(true)
         .build();
     
-    auto error_callback = [](const std::string& error) {
-        LOG4CPLUS_WARN_FMT(test_logger, "Error: %s", error.c_str());
+    auto consumer_config = ConsumerStrategyConfigBuilder()
+        .setType(ConsumerConfig::Type::MULTI_CHANNEL_FILE)
+        .setMultiFileOutputPaths(output_paths)
+        .setMultiFileChannels(true, true)
+        .build();
+    
+    ErrorCallback error_callback = [](const ConsumerErrorInfo& error) {
+        LOG4CPLUS_WARN_FMT(test_logger, "Error: %s", error.toString().c_str());
     };
     
-    BufferConsumerService::RunOptions opts;
-    opts.error_callback = error_callback;
-    opts.auto_print_stats = false;   // 统计由上层统一输出
-    opts.auto_close = false;         // 需要在关闭前读取 comparator 统计
-    
-    if (!service.runOnce(config, &multi_consumer, opts)) {
+    // 使用 execute() 方法（新接口：分离服务配置和消费者配置）
+    std::atomic<bool> running_flag(true);
+    if (!service.execute(service_config, consumer_config, &running_flag, error_callback)) {
         result_code = -1;
         return -1;
     }
@@ -2401,10 +2427,8 @@ static int run_rtsp_decode_test_with_params(
         return -1;
     }
     
-    DisplayConsumer display_consumer(&display, true, false);
-    
     BufferConsumerService service;
-    BufferConsumerService::Config config = ConsumerConfigBuilder()
+    auto service_config = ConsumerConfigBuilder()
         .setWorkerConfig(workerConfig)
         .setLoop(false)
         .setThreadCount(1)
@@ -2414,19 +2438,24 @@ static int run_rtsp_decode_test_with_params(
         .setEnablePSNRCompare(false)   // RTSP 流不进行 PSNR 对比
         .build();
     
-    auto error_callback = [](const std::string& error) {
-        LOG4CPLUS_ERROR_FMT(test_logger, "RTSP Error: %s", error.c_str());
+    auto consumer_config = ConsumerStrategyConfigBuilder()
+        .setType(ConsumerConfig::Type::DISPLAY)
+        .setDisplayDevice(&display)
+        .setDisplayChannels(true, false)
+        .build();
+    
+    ErrorCallback error_callback = [](const ConsumerErrorInfo& error) {
+        LOG4CPLUS_ERROR_FMT(test_logger, "RTSP Error: %s", error.toString().c_str());
         g_running = false;
     };
-    
-    BufferConsumerService::RunOptions opts;
-    opts.error_callback = error_callback;
     
     LOG4CPLUS_INFO(test_logger, "✅ RTSP decode test started...");
     LOG4CPLUS_INFO(test_logger, "   按 Ctrl+C 停止");
     
-    if (!service.runOnce(config, &display_consumer, opts)) {
-        LOG4CPLUS_ERROR(test_logger, "Failed to run BufferConsumerService");
+    // 使用 execute() 方法（新接口：分离服务配置和消费者配置）
+    std::atomic<bool> running_flag(true);
+    if (!service.execute(service_config, consumer_config, &running_flag, error_callback)) {
+        LOG4CPLUS_ERROR(test_logger, "Failed to execute BufferConsumerService");
         return -1;
     }
     
@@ -2514,8 +2543,6 @@ static int test_all_consumers_comprehensive(const char* video_path) {
     // 3. 测试 DisplayConsumer（只启用 ch0）
     LOG4CPLUS_INFO(test_logger, "\n[Test 1/4] Testing DisplayConsumer...");
     {
-        DisplayConsumer display_consumer(&display, true, false);  // ch0启用，ch1禁用
-        
         // 配置 WorkerConfig（只启用 ch0）
         auto tacoConfig = TacoConfigBuilder()
             .setChannels(true, false)  // 只启用 ch0
@@ -2543,30 +2570,32 @@ static int test_all_consumers_comprehensive(const char* video_path) {
             .build();
         
         BufferConsumerService service;
-        BufferConsumerService::Config config = ConsumerConfigBuilder()
+        auto service_config = ConsumerConfigBuilder()
             .setWorkerConfig(workerConfig)
             .setLoop(false)
             .setThreadCount(1)
             .setDrainRemaining(true)
             .build();
         
-        auto error_callback = [](const std::string& error) {
-            LOG4CPLUS_ERROR_FMT(test_logger, "Error: %s", error.c_str());
+        auto consumer_config = ConsumerStrategyConfigBuilder()
+            .setType(ConsumerConfig::Type::DISPLAY)
+            .setDisplayDevice(&display)
+            .setDisplayChannels(true, false)
+            .build();
+        
+        ErrorCallback error_callback = [](const ConsumerErrorInfo& error) {
+            LOG4CPLUS_ERROR_FMT(test_logger, "Error: %s", error.toString().c_str());
             g_running = false;
         };
         
-        BufferConsumerService::RunOptions opts;
-        opts.error_callback = error_callback;
-        
-        (void)service.runOnce(config, &display_consumer, opts);
+        // 使用 execute() 方法（新接口：分离服务配置和消费者配置）
+        std::atomic<bool> running_flag(true);
+        (void)service.execute(service_config, consumer_config, &running_flag, error_callback);
     }
     
     // 4. 测试 FileWriterConsumer（只启用 ch0）
     LOG4CPLUS_INFO(test_logger, "\n[Test 2/4] Testing FileWriterConsumer...");
     {
-        FileWriterConsumer file_consumer("./test_output_consumer/comprehensive_ch0.raw", 
-                                         true, false);  // ch0启用，ch1禁用
-        
         // 配置 WorkerConfig（只启用 ch0）
         auto tacoConfig = TacoConfigBuilder()
             .setChannels(true, false)  // 只启用 ch0
@@ -2594,22 +2623,27 @@ static int test_all_consumers_comprehensive(const char* video_path) {
             .build();
         
         BufferConsumerService service;
-        BufferConsumerService::Config config = ConsumerConfigBuilder()
+        auto service_config = ConsumerConfigBuilder()
             .setWorkerConfig(workerConfig)
             .setLoop(false)
             .setThreadCount(1)
             .setDrainRemaining(true)
             .build();
         
-        auto error_callback = [](const std::string& error) {
-            LOG4CPLUS_ERROR_FMT(test_logger, "Error: %s", error.c_str());
+        auto consumer_config = ConsumerStrategyConfigBuilder()
+            .setType(ConsumerConfig::Type::FILE_WRITER)
+            .setFileOutputPath("./test_output_consumer/comprehensive_ch0.raw")
+            .setFileChannels(true, false)
+            .build();
+        
+        ErrorCallback error_callback = [](const ConsumerErrorInfo& error) {
+            LOG4CPLUS_ERROR_FMT(test_logger, "Error: %s", error.toString().c_str());
             g_running = false;
         };
         
-        BufferConsumerService::RunOptions opts;
-        opts.error_callback = error_callback;
-        
-        (void)service.runOnce(config, &file_consumer, opts);
+        // 使用 execute() 方法（新接口：分离服务配置和消费者配置）
+        std::atomic<bool> running_flag(true);
+        (void)service.execute(service_config, consumer_config, &running_flag, error_callback);
     }
     
     // 5. 测试 MultiChannelFileWriterConsumer（启用双通道）
@@ -2619,7 +2653,6 @@ static int test_all_consumers_comprehensive(const char* video_path) {
             "./test_output_consumer/comprehensive_multi_ch0.raw",
             "./test_output_consumer/comprehensive_multi_ch1.raw"
         };
-        MultiChannelFileWriterConsumer multi_consumer(multi_paths, true, true);  // ch0和ch1都启用
         
         // 配置 WorkerConfig（启用双通道）
         auto tacoConfig = TacoConfigBuilder()
@@ -2648,22 +2681,27 @@ static int test_all_consumers_comprehensive(const char* video_path) {
         .build();
         
         BufferConsumerService service;
-        BufferConsumerService::Config config = ConsumerConfigBuilder()
+        auto service_config = ConsumerConfigBuilder()
             .setWorkerConfig(workerConfig)
             .setLoop(false)
             .setThreadCount(1)
             .setDrainRemaining(true)
             .build();
         
-        auto error_callback = [](const std::string& error) {
-            LOG4CPLUS_ERROR_FMT(test_logger, "Error: %s", error.c_str());
+        auto consumer_config = ConsumerStrategyConfigBuilder()
+            .setType(ConsumerConfig::Type::MULTI_CHANNEL_FILE)
+            .setMultiFileOutputPaths(multi_paths)
+            .setMultiFileChannels(true, true)
+            .build();
+        
+        ErrorCallback error_callback = [](const ConsumerErrorInfo& error) {
+            LOG4CPLUS_ERROR_FMT(test_logger, "Error: %s", error.toString().c_str());
             g_running = false;
         };
         
-        BufferConsumerService::RunOptions opts;
-        opts.error_callback = error_callback;
-        
-        (void)service.runOnce(config, &multi_consumer, opts);
+        // 使用 execute() 方法（新接口：分离服务配置和消费者配置）
+        std::atomic<bool> running_flag(true);
+        (void)service.execute(service_config, consumer_config, &running_flag, error_callback);
     }
     
     // 6. 测试 PSNR 对比（集成在消费者中，自动进行对比）
@@ -2701,9 +2739,9 @@ static int test_all_consumers_comprehensive(const char* video_path) {
             true, false  // enable_ch0=true, enable_ch1=false
         );
         
-        // 配置 BufferConsumerService，启用 PSNR 对比和诊断（使用 ConsumerConfigBuilder）
+        // 配置服务配置和消费者配置（重构后的新接口）
         BufferConsumerService service;
-        BufferConsumerService::Config service_config = ConsumerConfigBuilder()
+        auto service_config = ConsumerConfigBuilder()
             .setWorkerConfig(hw_workerConfig)
             .setEnablePSNRCompare(true)          // ⭐ 启用 PSNR 对比
             .setQuickPSNRThreshold(38.0)
@@ -2720,16 +2758,20 @@ static int test_all_consumers_comprehensive(const char* video_path) {
             .setVerboseDiagnosis(false)          // ⭐ 精简日志：关闭详细诊断信息
             .build();
         
-        auto error_callback = [](const std::string& error) {
-            LOG4CPLUS_WARN_FMT(test_logger, "Service Error (non-fatal): %s", error.c_str());
+        auto consumer_config = ConsumerStrategyConfigBuilder()
+            .setType(ConsumerConfig::Type::FILE_WRITER)
+            .setFileOutputPath("./test_output_consumer/comprehensive_psnr_output.raw")
+            .setFileChannels(true, false)
+            .build();
+        
+        ErrorCallback error_callback = [](const ConsumerErrorInfo& error) {
+            LOG4CPLUS_WARN_FMT(test_logger, "Service Error (non-fatal): %s", error.toString().c_str());
         };
         
-        // 打开并运行服务（自动创建硬件解码器，如启用 PSNR，对应的软件解码器也会自动创建）
-        BufferConsumerService::RunOptions opts;
-        opts.error_callback = error_callback;
-        
-        if (!service.runOnce(service_config, &file_consumer, opts)) {
-            LOG4CPLUS_ERROR(test_logger, "Failed to run BufferConsumerService");
+        // 使用 execute() 方法（新接口：分离服务配置和消费者配置）
+        std::atomic<bool> running_flag(true);
+        if (!service.execute(service_config, consumer_config, &running_flag, error_callback)) {
+            LOG4CPLUS_ERROR(test_logger, "Failed to execute BufferConsumerService");
             return -1;
         }
     }

@@ -1,6 +1,6 @@
 <mxfile host="65bd71144e">
     <diagram id="LhBejCh7xFbcIp1JhNI3" name="第 1 页">
-        <mxGraphModel dx="335" dy="320" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="827" pageHeight="1169" math="0" shadow="0">
+        <mxGraphModel dx="1202" dy="893" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="827" pageHeight="1169" math="0" shadow="0">
             <root>
                 <mxCell id="0"/>
                 <mxCell id="1" parent="0"/>
@@ -1131,7 +1131,7 @@
         </mxGraphModel>
     </diagram>
     <diagram id="fetch-task-func-flow" name="BufferPacketSource::fetchTaskFunc()流程">
-        <mxGraphModel grid="1" page="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" pageScale="1" pageWidth="2400" pageHeight="2800" math="0" shadow="0">
+        <mxGraphModel dx="1202" dy="893" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="2400" pageHeight="2800" math="0" shadow="0">
             <root>
                 <mxCell id="0"/>
                 <mxCell id="1" parent="0"/>
@@ -1706,6 +1706,406 @@
                 </mxCell>
                 <mxCell id="note-usage" value="⭐ 使用场景：&#10;&#10;配置结构（可序列化）：&#10;• MultiWorkerConfig：全局配置，包含 groups 和 thread_pool_size&#10;• WorkerGroupConfig：Group 配置，包含 producer_configs、consumer_configs、connector_configs&#10;• ProducerConfig：生产者配置，包含 producer_name 和 worker_config&#10;• ConsumerConfig：消费者配置，包含 consumer_name 和 worker_config&#10;• ConnectorConfig：连接器配置，包含 mode、producer_names、consumer_names&#10;&#10;运行时结构（不可序列化）：&#10;• WorkerGroupRuntime：每个 Group 的运行时数据，在 start() 时根据 WorkerGroupConfig 创建&#10;• ProducerInfo：生产者运行时信息，持有 VideoProductionLine 实例&#10;• ConsumerInfo：消费者运行时信息，持有 BufferFillingWorkerFacade 实例&#10;• Connector：连接器运行时对象，管理生产者-消费者映射" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;align=left;verticalAlign=top;spacingLeft=10;spacingTop=10;fontColor=#000000;" parent="1" vertex="1">
                     <mxGeometry x="1350" y="1220" width="600" height="200" as="geometry"/>
+                </mxCell>
+            </root>
+        </mxGraphModel>
+    </diagram>
+    <diagram name="Consumer Component Architecture" id="consumer-architecture">
+        <mxGraphModel dx="1414" dy="1051" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="5000" pageHeight="3500" math="0" shadow="0">
+            <root>
+                <mxCell id="0"/>
+                <mxCell id="1" parent="0"/>
+                <mxCell id="title-consumer" value="消费者组件架构设计图 (优化后)" style="text;html=1;strokeColor=#1a1a1a;fillColor=#e8f4f8;strokeWidth=3;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=28;fontStyle=1;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="100" y="30" width="1800" height="70" as="geometry"/>
+                </mxCell>
+                <mxCell id="section-strategy" value="第一部分：策略接口层 (Strategy Pattern)" style="text;html=1;strokeColor=#1a1a1a;fillColor=#d5e8d4;strokeWidth=2;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=18;fontStyle=1;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="100" y="120" width="800" height="50" as="geometry"/>
+                </mxCell>
+                <mxCell id="interface-consumer" value="&lt;&lt;interface&gt;&gt;&#10;IBufferConsumer&#10;(纯虚函数接口)" style="swimlane;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;strokeWidth=3;fontSize=16;fontStyle=1;align=center;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="100" y="190" width="350" height="260" as="geometry"/>
+                </mxCell>
+                <mxCell id="method-consume" value="+ consume(Buffer*, int): bool [纯虚]" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=14;fontColor=#000000;" parent="interface-consumer" vertex="1">
+                    <mxGeometry x="15" y="50" width="320" height="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="method-initialize" value="+ initialize(Buffer*): bool" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=14;fontColor=#000000;" parent="interface-consumer" vertex="1">
+                    <mxGeometry x="15" y="80" width="320" height="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="method-cleanup" value="+ cleanup(): void" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=14;fontColor=#000000;" parent="interface-consumer" vertex="1">
+                    <mxGeometry x="15" y="110" width="320" height="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="method-getStats" value="+ getStats(): string" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=14;fontColor=#000000;" parent="interface-consumer" vertex="1">
+                    <mxGeometry x="15" y="140" width="320" height="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="method-shouldConsume" value="+ shouldConsumeChannel(int): bool" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=14;fontColor=#000000;" parent="interface-consumer" vertex="1">
+                    <mxGeometry x="15" y="170" width="320" height="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="note-interface" value="设计原则：&#10;• 单一职责：只负责消费逻辑&#10;• 开闭原则：对扩展开放，对修改关闭&#10;• 策略模式：定义算法族，使算法可互换" style="text;html=1;strokeColor=#9673a6;fillColor=#f3e5f5;strokeWidth=1;align=left;verticalAlign=top;whiteSpace=wrap;rounded=0;fontSize=12;fontColor=#000000;spacingLeft=10;spacingTop=5;" vertex="1" parent="interface-consumer">
+                    <mxGeometry x="15" y="40" width="320" height="205" as="geometry"/>
+                </mxCell>
+                <mxCell id="strategy-display" value="DisplayConsumer&#10;(显示器输出)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;strokeWidth=2;fontSize=14;fontStyle=1;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="500" y="190" width="220" height="60" as="geometry"/>
+                </mxCell>
+                <mxCell id="strategy-file" value="FileWriterConsumer&#10;(文件写入策略)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;strokeWidth=2;fontSize=14;fontStyle=1;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="500" y="270" width="220" height="60" as="geometry"/>
+                </mxCell>
+                <mxCell id="strategy-multi" value="MultiChannelFileWriterConsumer&#10;(多通道文件写入)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;strokeWidth=2;fontSize=13;fontStyle=1;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="500" y="350" width="240" height="60" as="geometry"/>
+                </mxCell>
+                <mxCell id="strategy-encoded" value="EncodedStreamWriterConsumer&#10;(编码流写入策略)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;strokeWidth=2;fontSize=13;fontStyle=1;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="500" y="430" width="240" height="60" as="geometry"/>
+                </mxCell>
+                <mxCell id="note-strategy" value="策略实现独立于主程序，便于维护和扩展" style="text;html=1;strokeColor=#82b366;fillColor=#e8f5e9;strokeWidth=1;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=12;fontStyle=2;fontColor=#000000;" vertex="1" parent="1">
+                    <mxGeometry x="500" y="510" width="240" height="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="inherit-display" value="继承" style="endArrow=block;endSize=14;endFill=1;html=1;rounded=0;strokeWidth=3;strokeColor=#82b366;entryX=0;entryY=0.5;entryDx=0;entryDy=0;exitX=1;exitY=0.25;exitDx=0;exitDy=0;fontColor=#000000;fontSize=12;" parent="1" source="interface-consumer" target="strategy-display" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="inherit-file" value="继承" style="endArrow=block;endSize=14;endFill=1;html=1;rounded=0;strokeWidth=3;strokeColor=#82b366;entryX=0;entryY=0.5;entryDx=0;entryDy=0;exitX=1;exitY=0.5;exitDx=0;exitDy=0;fontColor=#000000;fontSize=12;" parent="1" source="interface-consumer" target="strategy-file" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="inherit-multi" value="继承" style="endArrow=block;endSize=14;endFill=1;html=1;rounded=0;strokeWidth=3;strokeColor=#82b366;entryX=0;entryY=0.5;entryDx=0;entryDy=0;exitX=1;exitY=0.75;exitDx=0;exitDy=0;fontColor=#000000;fontSize=12;" parent="1" source="interface-consumer" target="strategy-encoded" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="inherit-encoded" value="继承" style="endArrow=block;endSize=14;endFill=1;html=1;rounded=0;strokeWidth=3;strokeColor=#82b366;entryX=0;entryY=0.5;entryDx=0;entryDy=0;exitX=1;exitY=1;exitDx=0;exitDy=0;fontColor=#000000;fontSize=12;" parent="1" source="interface-consumer" target="strategy-multi" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="section-service" value="第二部分：服务上下文层 (Context)" style="text;html=1;strokeColor=#1a1a1a;fillColor=#fff2cc;strokeWidth=2;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=18;fontStyle=1;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="800" y="120" width="900" height="50" as="geometry"/>
+                </mxCell>
+                <mxCell id="service-main" value="BufferConsumerService&#10;(消费者服务、核心服务)" style="swimlane;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;strokeWidth=3;fontSize=16;fontStyle=1;align=center;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="800" y="190" width="450" height="420" as="geometry"/>
+                </mxCell>
+                <mxCell id="service-method-open" value="+ open(Config, IBufferConsumer*, ErrorCallback): bool" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=13;fontColor=#000000;" parent="service-main" vertex="1">
+                    <mxGeometry x="15" y="50" width="420" height="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="service-method-run" value="+ run(atomic&lt;bool&gt;*): void" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=14;fontColor=#000000;" parent="service-main" vertex="1">
+                    <mxGeometry x="15" y="80" width="420" height="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="service-method-runOnce" value="+ runOnce(Config, IBufferConsumer*, RunOptions): bool" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=14;fontColor=#000000;" parent="service-main" vertex="1">
+                    <mxGeometry x="15" y="110" width="420" height="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="service-method-execute" value="+ execute(Config, ConsumerConfig, ...): bool" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=14;fontColor=#000000;" parent="service-main" vertex="1">
+                    <mxGeometry x="15" y="140" width="420" height="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="service-method-close" value="+ close(): void" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=14;fontColor=#000000;" parent="service-main" vertex="1">
+                    <mxGeometry x="15" y="170" width="420" height="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="service-method-printStats" value="+ printStats(): void" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=14;fontColor=#000000;" parent="service-main" vertex="1">
+                    <mxGeometry x="15" y="200" width="420" height="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="service-member-consumer" value="- consumer_: IBufferConsumer*" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=13;fontColor=#000000;" parent="service-main" vertex="1">
+                    <mxGeometry x="15" y="240" width="200" height="25" as="geometry"/>
+                </mxCell>
+                <mxCell id="service-member-producer" value="- producer_: VideoProductionLine*" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=13;fontColor=#000000;" parent="service-main" vertex="1">
+                    <mxGeometry x="15" y="265" width="200" height="25" as="geometry"/>
+                </mxCell>
+                <mxCell id="service-member-pool" value="- pool_sptr_: BufferPool*" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=13;fontColor=#000000;" parent="service-main" vertex="1">
+                    <mxGeometry x="15" y="290" width="200" height="25" as="geometry"/>
+                </mxCell>
+                <mxCell id="service-member-config" value="- config_: Config" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=13;fontColor=#000000;" parent="service-main" vertex="1">
+                    <mxGeometry x="15" y="315" width="200" height="25" as="geometry"/>
+                </mxCell>
+                <mxCell id="service-member-stats" value="- stats_: Stats" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=13;fontColor=#000000;" parent="service-main" vertex="1">
+                    <mxGeometry x="15" y="340" width="200" height="25" as="geometry"/>
+                </mxCell>
+                <mxCell id="service-member-error" value="- error_callback_: ErrorCallback" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=13;fontColor=#000000;" parent="service-main" vertex="1">
+                    <mxGeometry x="15" y="365" width="200" height="25" as="geometry"/>
+                </mxCell>
+                <mxCell id="service-note" value="功能：&#10;• Pipeline生命周期管理&#10;• BufferPool获取/释放&#10;• 线程安全统计&#10;&#10;设计模式：&#10;• 策略模式 (Context)&#10;• 模板方法模式" style="text;html=1;strokeColor=#d6b656;fillColor=#fff9e6;strokeWidth=1;align=left;verticalAlign=top;whiteSpace=wrap;rounded=0;fontSize=12;fontColor=#000000;spacingLeft=10;spacingTop=5;" vertex="1" parent="service-main">
+                    <mxGeometry x="40" y="70" width="395" height="320" as="geometry"/>
+                </mxCell>
+                <mxCell id="use-consumer" value="使用" style="endArrow=block;endSize=14;endFill=1;html=1;rounded=0;strokeWidth=3;strokeColor=#d6b656;entryX=0.5;entryY=0;entryDx=0;entryDy=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;dashed=1;fontColor=#000000;fontSize=13;" parent="1" source="service-main" target="interface-consumer" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="1025" y="650"/>
+                            <mxPoint x="275" y="650"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="section-factory" value="第三部分：工厂模式层 (Factory Pattern)" style="text;html=1;strokeColor=#1a1a1a;fillColor=#e1d5e7;strokeWidth=2;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=18;fontStyle=1;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="100" y="650" width="800" height="50" as="geometry"/>
+                </mxCell>
+                <mxCell id="factory-main" value="ConsumerFactory&#10;(工厂类-静态方法)" style="swimlane;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;strokeWidth=3;fontSize=16;fontStyle=1;align=center;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="100" y="720" width="320" height="200" as="geometry"/>
+                </mxCell>
+                <mxCell id="factory-method-create" value="+ create(ConsumerConfig): unique_ptr&lt;IBufferConsumer&gt;" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=13;fontColor=#000000;" parent="factory-main" vertex="1">
+                    <mxGeometry x="15" y="50" width="290" height="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="factory-method-createDisplay" value="+ createDisplayConsumer(...): IBufferConsumer*" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=14;fontColor=#000000;" parent="factory-main" vertex="1">
+                    <mxGeometry x="15" y="80" width="290" height="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="factory-method-createFile" value="+ createFileWriterConsumer(...): IBufferConsumer*" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=14;fontColor=#000000;" parent="factory-main" vertex="1">
+                    <mxGeometry x="15" y="110" width="290" height="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="factory-method-createMulti" value="+ createMultiChannelFileWriterConsumer(...): IBufferConsumer*" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=14;fontColor=#000000;" parent="factory-main" vertex="1">
+                    <mxGeometry x="15" y="140" width="290" height="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="factory-note" value="功能：&#10;• 根据配置创建策略实例&#10;• 隐藏具体创建细节&#10;• 提供统一创建接口" style="text;html=1;strokeColor=#9673a6;fillColor=#f3e5f5;strokeWidth=1;align=left;verticalAlign=top;whiteSpace=wrap;rounded=0;fontSize=12;fontColor=#000000;spacingLeft=10;spacingTop=5;" vertex="1" parent="factory-main">
+                    <mxGeometry x="15" y="30" width="290" height="170" as="geometry"/>
+                </mxCell>
+                <mxCell id="config-consumer" value="ConsumerConfig&#10;(配置结构)" style="swimlane;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;strokeWidth=3;fontSize=16;fontStyle=1;align=center;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="480" y="720" width="300" height="230" as="geometry"/>
+                </mxCell>
+                <mxCell id="config-consumer-note" value="功能：&#10;• 定义所有策略的配置参数&#10;• 通过 type 选择策略类型" style="text;html=1;strokeColor=#9673a6;fillColor=#f3e5f5;strokeWidth=1;align=left;verticalAlign=top;whiteSpace=wrap;rounded=0;fontSize=12;fontColor=#000000;spacingLeft=10;spacingTop=5;" vertex="1" parent="config-consumer">
+                    <mxGeometry x="15" y="30" width="270" height="200" as="geometry"/>
+                </mxCell>
+                <mxCell id="config-consumer-type" value="- Type type" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=14;fontColor=#000000;" parent="config-consumer" vertex="1">
+                    <mxGeometry x="15" y="70" width="270" height="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="config-consumer-display" value="- display_device" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=14;fontColor=#000000;" parent="config-consumer" vertex="1">
+                    <mxGeometry x="15" y="100" width="270" height="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="config-consumer-file" value="- file_output_path" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=14;fontColor=#000000;" parent="config-consumer" vertex="1">
+                    <mxGeometry x="15" y="130" width="270" height="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="config-consumer-multi" value="- multi_file_output_paths" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=14;fontColor=#000000;" parent="config-consumer" vertex="1">
+                    <mxGeometry x="15" y="160" width="270" height="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="config-consumer-encoded" value="- encoded_output_path, codec_params, time_base" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=13;fontColor=#000000;" parent="config-consumer" vertex="1">
+                    <mxGeometry x="15" y="190" width="270" height="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="factory-creates" value="创建" style="endArrow=block;endSize=14;endFill=1;html=1;rounded=0;strokeWidth=3;strokeColor=#9673a6;entryX=0;entryY=0.5;entryDx=0;entryDy=0;exitX=1;exitY=0.5;exitDx=0;exitDy=0;fontColor=#000000;fontSize=13;" parent="1" source="factory-main" target="interface-consumer" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="260" y="820"/>
+                            <mxPoint x="260" y="315"/>
+                            <mxPoint x="275" y="315"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="factory-uses-config" value="使用" style="endArrow=block;endSize=14;endFill=1;html=1;rounded=0;strokeWidth=3;strokeColor=#9673a6;entryX=0;entryY=0.5;entryDx=0;entryDy=0;exitX=1;exitY=0.5;exitDx=0;exitDy=0;dashed=1;fontColor=#000000;fontSize=13;" parent="1" source="factory-main" target="config-consumer" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="section-builder" value="第四部分：Builder模式层 (Builder Pattern)" style="text;html=1;strokeColor=#1a1a1a;fillColor=#e1d5e7;strokeWidth=2;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=18;fontStyle=1;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="850" y="650" width="850" height="50" as="geometry"/>
+                </mxCell>
+                <mxCell id="builder-main" value="ConsumerConfigBuilder&#10;(策略配置构建者)" style="swimlane;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;strokeWidth=3;fontSize=16;fontStyle=1;align=center;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="850" y="720" width="350" height="330" as="geometry"/>
+                </mxCell>
+                <mxCell id="builder-note" value="功能：&#10;• 简化配置构建过程&#10;• 链式调用，支持配置验证" style="text;html=1;strokeColor=#9673a6;fillColor=#f3e5f5;strokeWidth=1;align=left;verticalAlign=top;whiteSpace=wrap;rounded=0;fontSize=12;fontColor=#000000;spacingLeft=10;spacingTop=5;" vertex="1" parent="builder-main">
+                    <mxGeometry x="15" y="30" width="320" height="300" as="geometry"/>
+                </mxCell>
+                <mxCell id="builder-method-setWorker" value="+ setWorkerConfig(...): Builder&amp;" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=14;fontColor=#000000;" parent="builder-main" vertex="1">
+                    <mxGeometry x="15" y="60" width="320" height="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="builder-method-setLoop" value="+ setLoop(...): Builder&amp;" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=14;fontColor=#000000;" parent="builder-main" vertex="1">
+                    <mxGeometry x="15" y="80" width="320" height="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="builder-method-setMaxFrames" value="+ setMaxFrames(...): Builder&amp;" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=14;fontColor=#000000;" parent="builder-main" vertex="1">
+                    <mxGeometry x="15" y="110" width="320" height="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="builder-method-setPSNR" value="+ setEnablePSNRCompare(...): Builder&amp;" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=14;fontColor=#000000;" parent="builder-main" vertex="1">
+                    <mxGeometry x="15" y="140" width="320" height="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="builder-method-setProductionLine" value="+ setProductionLine(config): Builder&amp;" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=14;fontColor=#000000;" parent="builder-main" vertex="1">
+                    <mxGeometry x="15" y="170" width="320" height="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="builder-method-setRuntime" value="+ setRuntime(config): Builder&amp;" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=14;fontColor=#000000;" parent="builder-main" vertex="1">
+                    <mxGeometry x="15" y="200" width="320" height="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="builder-method-setPSNRConfig" value="+ setPSNR(config): Builder&amp;" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=14;fontColor=#000000;" parent="builder-main" vertex="1">
+                    <mxGeometry x="15" y="230" width="320" height="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="builder-method-validate" value="+ validate(): string" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=14;fontColor=#000000;" parent="builder-main" vertex="1">
+                    <mxGeometry x="15" y="260" width="320" height="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="builder-method-build" value="+ build(validate=true): Config" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=14;fontColor=#000000;" parent="builder-main" vertex="1">
+                    <mxGeometry x="15" y="290" width="320" height="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="config-service" value="BufferConsumerService::Config&#10;(服务配置结构)" style="swimlane;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;strokeWidth=3;fontSize=16;fontStyle=1;align=center;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="1260" y="720" width="440" height="300" as="geometry"/>
+                </mxCell>
+                <mxCell id="config-service-note" value="功能：&#10;• 服务配置统一管理&#10;• 分层配置结构（ProductionLine, Runtime, PSNR）&#10;• 支持配置验证" style="text;html=1;strokeColor=#6c8ebf;fillColor=#e1f5fe;strokeWidth=1;align=left;verticalAlign=top;whiteSpace=wrap;rounded=0;fontSize=12;fontColor=#000000;spacingLeft=10;spacingTop=5;" vertex="1" parent="config-service">
+                    <mxGeometry x="15" y="30" width="410" height="260" as="geometry"/>
+                </mxCell>
+                <mxCell id="config-worker" value="- WorkerConfig worker_config" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=14;fontColor=#000000;" parent="config-service" vertex="1">
+                    <mxGeometry x="15" y="90" width="410" height="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="config-prodline" value="- ProductionLineConfig production_line" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=14;fontColor=#000000;" parent="config-service" vertex="1">
+                    <mxGeometry x="15" y="120" width="410" height="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="config-runtime" value="- RuntimeConfig runtime" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=14;fontColor=#000000;" parent="config-service" vertex="1">
+                    <mxGeometry x="15" y="150" width="410" height="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="config-psnr" value="- PSNRConfig psnr" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=14;fontColor=#000000;" parent="config-service" vertex="1">
+                    <mxGeometry x="15" y="180" width="410" height="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="config-method-validate" value="+ validate(): string" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=14;fontColor=#000000;" parent="config-service" vertex="1">
+                    <mxGeometry x="15" y="220" width="410" height="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="subconfig-prodline" value="ProductionLineConfig" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;strokeWidth=2;fontSize=13;fontStyle=1;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="1760" y="720" width="220" height="90" as="geometry"/>
+                </mxCell>
+                <mxCell id="subconfig-prodline-loop" value="loop: bool" style="text;html=1;strokeColor=none;fillColor=#ffffff;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=13;fontColor=#000000;" parent="subconfig-prodline" vertex="1">
+                    <mxGeometry x="15" y="40" width="190" height="25" as="geometry"/>
+                </mxCell>
+                <mxCell id="subconfig-prodline-thread" value="thread_count: int" style="text;html=1;strokeColor=none;fillColor=#ffffff;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=13;fontColor=#000000;" parent="subconfig-prodline" vertex="1">
+                    <mxGeometry x="15" y="65" width="190" height="25" as="geometry"/>
+                </mxCell>
+                <mxCell id="subconfig-runtime" value="RuntimeConfig" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;strokeWidth=2;fontSize=13;fontStyle=1;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="1760" y="830" width="220" height="110" as="geometry"/>
+                </mxCell>
+                <mxCell id="subconfig-runtime-max" value="max_frames: int" style="text;html=1;strokeColor=none;fillColor=#ffffff;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=13;fontColor=#000000;" parent="subconfig-runtime" vertex="1">
+                    <mxGeometry x="15" y="40" width="190" height="25" as="geometry"/>
+                </mxCell>
+                <mxCell id="subconfig-runtime-timeout" value="acquire_timeout_ms: int" style="text;html=1;strokeColor=none;fillColor=#ffffff;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=13;fontColor=#000000;" parent="subconfig-runtime" vertex="1">
+                    <mxGeometry x="15" y="65" width="190" height="25" as="geometry"/>
+                </mxCell>
+                <mxCell id="subconfig-runtime-drain" value="drain_remaining: bool" style="text;html=1;strokeColor=none;fillColor=#ffffff;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=13;fontColor=#000000;" parent="subconfig-runtime" vertex="1">
+                    <mxGeometry x="15" y="90" width="190" height="25" as="geometry"/>
+                </mxCell>
+                <mxCell id="subconfig-psnr" value="PSNRConfig" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;strokeWidth=2;fontSize=13;fontStyle=1;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="1760" y="960" width="220" height="60" as="geometry"/>
+                </mxCell>
+                <mxCell id="subconfig-psnr-enable" value="enable: bool" style="text;html=1;strokeColor=none;fillColor=#ffffff;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=13;fontColor=#000000;" parent="subconfig-psnr" vertex="1">
+                    <mxGeometry x="15" y="40" width="190" height="25" as="geometry"/>
+                </mxCell>
+                <mxCell id="builder-builds" value="构建" style="endArrow=block;endSize=14;endFill=1;html=1;rounded=0;strokeWidth=3;strokeColor=#9673a6;entryX=0;entryY=0.5;entryDx=0;entryDy=0;exitX=1;exitY=0.5;exitDx=0;exitDy=0;fontColor=#000000;fontSize=13;" parent="1" source="builder-main" target="config-service" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="config-contains" value="包含" style="endArrow=block;endSize=14;endFill=1;html=1;rounded=0;strokeWidth=3;strokeColor=#6c8ebf;entryX=0;entryY=0.5;entryDx=0;entryDy=0;exitX=1;exitY=0.5;exitDx=0;exitDy=0;dashed=1;fontColor=#000000;fontSize=13;" parent="1" source="config-service" target="subconfig-prodline" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="config-contains-runtime" value="" style="endArrow=block;endSize=14;endFill=1;html=1;rounded=0;strokeWidth=3;strokeColor=#6c8ebf;entryX=0;entryY=0.5;entryDx=0;entryDy=0;exitX=1;exitY=0.5;exitDx=0;exitDy=0;dashed=1;" parent="1" source="config-service" target="subconfig-runtime" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="config-contains-psnr" value="" style="endArrow=block;endSize=14;endFill=1;html=1;rounded=0;strokeWidth=3;strokeColor=#6c8ebf;entryX=0;entryY=0.5;entryDx=0;entryDy=0;exitX=1;exitY=0.5;exitDx=0;exitDy=0;dashed=1;" parent="1" source="config-service" target="subconfig-psnr" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="section-error" value="第五部分：错误处理机制 (Enhanced Error Handling)" style="text;html=1;strokeColor=#1a1a1a;fillColor=#f8cecc;strokeWidth=2;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=18;fontStyle=1;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="100" y="1050" width="900" height="50" as="geometry"/>
+                </mxCell>
+                <mxCell id="error-enum" value="ConsumerErrorCode&#10;(枚举)" style="swimlane;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;strokeWidth=3;fontSize=15;fontStyle=1;align=center;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="100" y="1120" width="280" height="200" as="geometry"/>
+                </mxCell>
+                <mxCell id="error-enum-success" value="SUCCESS = 0" style="text;html=1;strokeColor=none;fillColor=#ffffff;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=13;fontColor=#000000;" parent="error-enum" vertex="1">
+                    <mxGeometry x="15" y="50" width="250" height="25" as="geometry"/>
+                </mxCell>
+                <mxCell id="error-enum-init" value="ERROR_INVALID_CONFIG = 1001" style="text;html=1;strokeColor=none;fillColor=#ffffff;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=13;fontColor=#000000;" parent="error-enum" vertex="1">
+                    <mxGeometry x="15" y="75" width="250" height="25" as="geometry"/>
+                </mxCell>
+                <mxCell id="error-enum-producer" value="ERROR_PRODUCER_START_FAILED = 2001" style="text;html=1;strokeColor=none;fillColor=#ffffff;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=13;fontColor=#000000;" parent="error-enum" vertex="1">
+                    <mxGeometry x="15" y="100" width="250" height="25" as="geometry"/>
+                </mxCell>
+                <mxCell id="error-enum-pool" value="ERROR_BUFFER_POOL_NOT_FOUND = 3001" style="text;html=1;strokeColor=none;fillColor=#ffffff;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=13;fontColor=#000000;" parent="error-enum" vertex="1">
+                    <mxGeometry x="15" y="125" width="250" height="25" as="geometry"/>
+                </mxCell>
+                <mxCell id="error-enum-consumer" value="ERROR_CONSUMER_INIT_FAILED = 4001" style="text;html=1;strokeColor=none;fillColor=#ffffff;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=13;fontColor=#000000;" parent="error-enum" vertex="1">
+                    <mxGeometry x="15" y="150" width="250" height="25" as="geometry"/>
+                </mxCell>
+                <mxCell id="error-enum-psnr" value="ERROR_PSNR_INIT_FAILED = 5001" style="text;html=1;strokeColor=none;fillColor=#ffffff;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=13;fontColor=#000000;" parent="error-enum" vertex="1">
+                    <mxGeometry x="15" y="175" width="250" height="25" as="geometry"/>
+                </mxCell>
+                <mxCell id="error-info" value="ConsumerErrorInfo&#10;(结构体)" style="swimlane;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;strokeWidth=3;fontSize=15;fontStyle=1;align=center;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="420" y="1120" width="320" height="200" as="geometry"/>
+                </mxCell>
+                <mxCell id="error-info-code" value="ConsumerErrorCode code" style="text;html=1;strokeColor=none;fillColor=#ffffff;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=13;fontColor=#000000;" parent="error-info" vertex="1">
+                    <mxGeometry x="15" y="50" width="290" height="25" as="geometry"/>
+                </mxCell>
+                <mxCell id="error-info-message" value="string message" style="text;html=1;strokeColor=none;fillColor=#ffffff;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=13;fontColor=#000000;" parent="error-info" vertex="1">
+                    <mxGeometry x="15" y="75" width="290" height="25" as="geometry"/>
+                </mxCell>
+                <mxCell id="error-info-location" value="string location" style="text;html=1;strokeColor=none;fillColor=#ffffff;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=13;fontColor=#000000;" parent="error-info" vertex="1">
+                    <mxGeometry x="15" y="100" width="290" height="25" as="geometry"/>
+                </mxCell>
+                <mxCell id="error-info-line" value="int line" style="text;html=1;strokeColor=none;fillColor=#ffffff;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=13;fontColor=#000000;" parent="error-info" vertex="1">
+                    <mxGeometry x="15" y="125" width="290" height="25" as="geometry"/>
+                </mxCell>
+                <mxCell id="error-info-context" value="map&lt;string, string&gt; context" style="text;html=1;strokeColor=none;fillColor=#ffffff;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=13;fontColor=#000000;" parent="error-info" vertex="1">
+                    <mxGeometry x="15" y="150" width="290" height="25" as="geometry"/>
+                </mxCell>
+                <mxCell id="error-info-tostring" value="+ toString(): string" style="text;html=1;strokeColor=none;fillColor=#ffffff;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=13;fontColor=#000000;" parent="error-info" vertex="1">
+                    <mxGeometry x="15" y="175" width="290" height="25" as="geometry"/>
+                </mxCell>
+                <mxCell id="error-callback" value="ErrorCallback&#10;(函数类型)" style="swimlane;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;strokeWidth=3;fontSize=15;fontStyle=1;align=center;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="780" y="1120" width="280" height="170" as="geometry"/>
+                </mxCell>
+                <mxCell id="error-callback-type" value="function&lt;void(const ConsumerErrorInfo&amp;)&gt;" style="text;html=1;strokeColor=none;fillColor=#ffffff;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=13;fontColor=#000000;" parent="error-callback" vertex="1">
+                    <mxGeometry x="15" y="30" width="250" height="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="error-callback-simple" value="SimpleErrorCallback&#10;(向后兼容)" style="text;html=1;strokeColor=none;fillColor=#ffffff;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=12;fontStyle=2;fontColor=#000000;" parent="error-callback" vertex="1">
+                    <mxGeometry x="15" y="60" width="250" height="90" as="geometry"/>
+                </mxCell>
+                <mxCell id="error-service-method" value="reportError()&#10;(统一错误处理入口)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;strokeWidth=2;fontSize=14;fontStyle=1;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="1100" y="1120" width="220" height="70" as="geometry"/>
+                </mxCell>
+                <mxCell id="error-enum-to-info" value="使用" style="endArrow=block;endSize=14;endFill=1;html=1;rounded=0;strokeWidth=3;strokeColor=#6c8ebf;entryX=0;entryY=0.5;entryDx=0;entryDy=0;exitX=1;exitY=0.5;exitDx=0;exitDy=0;dashed=1;fontColor=#000000;fontSize=13;" parent="1" source="error-enum" target="error-info" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="error-info-to-callback" value="使用" style="endArrow=block;endSize=14;endFill=1;html=1;rounded=0;strokeWidth=3;strokeColor=#d6b656;entryX=0;entryY=0.5;entryDx=0;entryDy=0;exitX=1;exitY=0.5;exitDx=0;exitDy=0;dashed=1;fontColor=#000000;fontSize=13;" parent="1" source="error-info" target="error-callback" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="error-service-uses" value="调用" style="endArrow=block;endSize=14;endFill=1;html=1;rounded=0;strokeWidth=3;strokeColor=#d79b00;entryX=0;entryY=0.5;entryDx=0;entryDy=0;exitX=1;exitY=0.5;exitDx=0;exitDy=0;fontColor=#000000;fontSize=13;" parent="1" source="error-service-method" target="error-callback" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="section-usage" value="使用流程" style="text;html=1;strokeColor=#1a1a1a;fillColor=#fff2cc;strokeWidth=2;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=18;fontStyle=1;fontColor=#000000;" vertex="1" parent="1">
+                    <mxGeometry x="100" y="1380" width="1800" height="50" as="geometry"/>
+                </mxCell>
+                <mxCell id="step1" value="步骤1: 内部服务配置&#10;配置 BufferConsumerService::Config&#10;包括 WorkerConfig, ProductionLineConfig, RuntimeConfig, PSNRConfig" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;strokeWidth=2;fontSize=13;fontColor=#000000;" vertex="1" parent="1">
+                    <mxGeometry x="100" y="1450" width="300" height="80" as="geometry"/>
+                </mxCell>
+                <mxCell id="step2" value="步骤2: 内部消费者配置&#10;使用 ConsumerConfigBuilder 构建 ConsumerConfig&#10;例如: DISPLAY类型, DisplayDevice, MaxFrames" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;strokeWidth=2;fontSize=13;fontColor=#000000;" vertex="1" parent="1">
+                    <mxGeometry x="450" y="1450" width="300" height="80" as="geometry"/>
+                </mxCell>
+                <mxCell id="step3" value="步骤3: 工厂创建消费者&#10;ConsumerFactory::create(consumer_config)&#10;返回 unique_ptr&lt;IBufferConsumer&gt;" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;strokeWidth=2;fontSize=13;fontColor=#000000;" vertex="1" parent="1">
+                    <mxGeometry x="800" y="1450" width="300" height="80" as="geometry"/>
+                </mxCell>
+                <mxCell id="step4" value="步骤4: 服务开启并消费&#10;service.open(service_config, consumer, error_callback)&#10;service.run(atomic_bool)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;strokeWidth=2;fontSize=13;fontColor=#000000;" vertex="1" parent="1">
+                    <mxGeometry x="1150" y="1450" width="300" height="80" as="geometry"/>
+                </mxCell>
+                <mxCell id="step5" value="步骤5: 内部内存释放&#10;service.close()&#10;释放 BufferPool, Buffer, Consumer&#10;重置统计信息" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;strokeWidth=2;fontSize=13;fontColor=#000000;" vertex="1" parent="1">
+                    <mxGeometry x="1500" y="1450" width="300" height="80" as="geometry"/>
+                </mxCell>
+                <mxCell id="arrow-step1-2" value="" style="endArrow=block;endSize=14;endFill=1;html=1;rounded=0;strokeWidth=3;strokeColor=#d6b656;" edge="1" parent="1" source="step1" target="step2">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="arrow-step2-3" value="" style="endArrow=block;endSize=14;endFill=1;html=1;rounded=0;strokeWidth=3;strokeColor=#d6b656;" edge="1" parent="1" source="step2" target="step3">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="arrow-step3-4" value="" style="endArrow=block;endSize=14;endFill=1;html=1;rounded=0;strokeWidth=3;strokeColor=#d6b656;" edge="1" parent="1" source="step3" target="step4">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="arrow-step4-5" value="" style="endArrow=block;endSize=14;endFill=1;html=1;rounded=0;strokeWidth=3;strokeColor=#d6b656;" edge="1" parent="1" source="step4" target="step5">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="section-patterns" value="设计模式" style="text;html=1;strokeColor=#1a1a1a;fillColor=#dae8fc;strokeWidth=2;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=18;fontStyle=1;fontColor=#000000;" vertex="1" parent="1">
+                    <mxGeometry x="100" y="1570" width="1800" height="50" as="geometry"/>
+                </mxCell>
+                <mxCell id="pattern-strategy" value="策略模式 (Strategy Pattern)&#10;IBufferConsumer 定义算法族&#10;BufferConsumerService 作为上下文" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;strokeWidth=2;fontSize=13;fontColor=#000000;" vertex="1" parent="1">
+                    <mxGeometry x="100" y="1640" width="280" height="70" as="geometry"/>
+                </mxCell>
+                <mxCell id="pattern-factory" value="工厂模式 (Factory Pattern)&#10;ConsumerFactory 隐藏创建细节&#10;ConsumerConfigBuilder 简化配置构建" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;strokeWidth=2;fontSize=13;fontColor=#000000;" vertex="1" parent="1">
+                    <mxGeometry x="420" y="1640" width="280" height="70" as="geometry"/>
+                </mxCell>
+                <mxCell id="pattern-builder" value="建造者模式 (Builder Pattern)&#10;ConsumerConfigBuilder 简化复杂对象构建" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;strokeWidth=2;fontSize=13;fontColor=#000000;" vertex="1" parent="1">
+                    <mxGeometry x="740" y="1640" width="280" height="70" as="geometry"/>
+                </mxCell>
+                <mxCell id="pattern-facade" value="门面模式 (Facade Pattern)&#10;BufferConsumerService 提供统一外部接口" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;strokeWidth=2;fontSize=13;fontColor=#000000;" vertex="1" parent="1">
+                    <mxGeometry x="1060" y="1640" width="280" height="70" as="geometry"/>
+                </mxCell>
+                <mxCell id="pattern-template" value="模板方法模式 (Template Method)&#10;BufferConsumerService 定义算法骨架&#10;IBufferConsumer 填充具体实现" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;strokeWidth=2;fontSize=13;fontColor=#000000;" vertex="1" parent="1">
+                    <mxGeometry x="1380" y="1640" width="280" height="70" as="geometry"/>
+                </mxCell>
+                <mxCell id="section-features" value="设计特点" style="text;html=1;strokeColor=#1a1a1a;fillColor=#ffe6cc;strokeWidth=2;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=18;fontStyle=1;fontColor=#000000;" vertex="1" parent="1">
+                    <mxGeometry x="100" y="1750" width="1800" height="50" as="geometry"/>
+                </mxCell>
+                <mxCell id="feature-1" value="1. 正交分解模块&#10;• 接口部分 (IBufferConsumer)&#10;• 策略配置 (ConsumerConfig, ConsumerFactory)&#10;• 策略实现 (DisplayConsumer, FileWriterConsumer等)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;strokeWidth=2;fontSize=13;align=left;verticalAlign=top;spacingLeft=10;spacingTop=5;fontColor=#000000;" vertex="1" parent="1">
+                    <mxGeometry x="100" y="1820" width="550" height="100" as="geometry"/>
+                </mxCell>
+                <mxCell id="feature-2" value="2. 策略实现独立&#10;• 便于维护和扩展&#10;• 降低耦合度&#10;• 提高可重用性" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;strokeWidth=2;fontSize=13;align=left;verticalAlign=top;spacingLeft=10;spacingTop=5;fontColor=#000000;" vertex="1" parent="1">
+                    <mxGeometry x="700" y="1820" width="550" height="100" as="geometry"/>
+                </mxCell>
+                <mxCell id="feature-3" value="3. 配置集中管理&#10;• 服务配置 (BufferConsumerService::Config)&#10;• 消费者配置 (ConsumerConfig)&#10;• 统一管理，支持验证" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;strokeWidth=2;fontSize=13;align=left;verticalAlign=top;spacingLeft=10;spacingTop=5;fontColor=#000000;" vertex="1" parent="1">
+                    <mxGeometry x="1300" y="1820" width="550" height="100" as="geometry"/>
+                </mxCell>
+                <mxCell id="legend" value="图例说明：&#10;• 紫色框：接口和配置类 (Interface &amp; Configuration)&#10;• 绿色框：策略实现 (Strategy Implementation)&#10;• 黄色框：服务类 (Service Class)&#10;• 蓝色框：设计模式说明 (Design Patterns)&#10;• 橙色框：功能架构 (Functional Architecture)&#10;• 红色框：错误处理 (Error Handling)&#10;• 实线箭头：继承/实现关系&#10;• 虚线箭头：使用/依赖关系" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#1a1a1a;strokeWidth=2;fontSize=14;align=left;verticalAlign=top;spacingLeft=15;spacingTop=10;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="100" y="1960" width="600" height="180" as="geometry"/>
+                </mxCell>
+                <mxCell id="note-design-patterns" value="⭐ 设计模式详细说明：&#10;&#10;1. 策略模式 (Strategy Pattern)&#10;   • IBufferConsumer 定义策略接口&#10;   • 多种具体策略实现（Display, FileWriter等）&#10;   • BufferConsumerService 作为上下文使用策略&#10;&#10;2. 工厂模式 (Factory Pattern)&#10;   • ConsumerFactory 根据配置创建策略实例&#10;   • 封装对象创建逻辑&#10;&#10;3. 构建器模式 (Builder Pattern)&#10;   • ConsumerConfigBuilder 链式构建配置&#10;   • 支持配置验证&#10;   • 分层配置结构（ProductionLine, Runtime, PSNR）&#10;&#10;4. 门面模式 (Facade Pattern)&#10;   • BufferConsumerService 简化复杂流程&#10;   • 提供统一接口（open/run/close）&#10;&#10;5. 模板方法模式 (Template Method)&#10;   • BufferConsumerService 定义算法骨架&#10;   • IBufferConsumer 填充具体实现" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;strokeWidth=2;fontSize=13;align=left;verticalAlign=top;spacingLeft=15;spacingTop=10;fontStyle=1;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="750" y="1960" width="550" height="250" as="geometry"/>
+                </mxCell>
+                <mxCell id="note-error-handling" value="⭐ 错误处理机制详细说明：&#10;&#10;1. 统一错误码枚举 (ConsumerErrorCode)&#10;   • 分类错误类型（初始化、生产者、BufferPool等）&#10;   • 每个错误码有唯一编号&#10;   • 便于错误分类和处理&#10;&#10;2. 增强的错误信息 (ConsumerErrorInfo)&#10;   • 包含错误码、消息、位置、行号、上下文&#10;   • 提供 toString() 方法便于日志输出&#10;   • 支持详细的错误追踪&#10;&#10;3. 增强的错误回调 (ErrorCallback)&#10;   • 使用 ConsumerErrorInfo 替代简单字符串&#10;   • 支持向后兼容 (SimpleErrorCallback)&#10;   • 提供灵活的错误处理机制&#10;&#10;4. 统一错误报告 (reportError)&#10;   • 所有错误通过 reportError() 统一处理&#10;   • 自动记录日志并调用回调&#10;   • 确保错误信息的一致性" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;strokeWidth=2;fontSize=13;align=left;verticalAlign=top;spacingLeft=15;spacingTop=10;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="1350" y="1960" width="550" height="250" as="geometry"/>
                 </mxCell>
             </root>
         </mxGraphModel>

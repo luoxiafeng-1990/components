@@ -35,11 +35,50 @@ namespace consumer {
 BufferConsumerService::BufferConsumerService()
     : is_open_(false)
     , consumer_(nullptr)
+    , error_callback_(nullptr)
     , psnr_initialized_(false)
     , logger_(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.BufferConsumerService")))
 {
     // Stats 结构体的 std::atomic 成员已在定义时初始化
     // PSNR 统计的 std::atomic 成员也已初始化
+}
+
+void BufferConsumerService::reportError(ConsumerErrorCode code,
+                                        const std::string& message,
+                                        const std::string& location,
+                                        int line,
+                                        const std::map<std::string, std::string>& context) {
+    ConsumerErrorInfo error;
+    error.code = code;
+    error.message = message;
+    error.location = location;
+    error.line = line;
+    error.context = context;
+    
+    // 记录日志
+    LOG4CPLUS_ERROR_FMT(logger_, "%s", error.toString().c_str());
+    
+    // 调用错误回调
+    if (error_callback_) {
+        error_callback_(error);
+    }
+}
+
+ErrorCallback BufferConsumerService::wrapSimpleErrorCallback(SimpleErrorCallback simple_callback) {
+    if (!simple_callback) {
+        return nullptr;
+    }
+    
+    return [simple_callback](const ConsumerErrorInfo& error) {
+        simple_callback(error.toString());
+    };
+}
+
+bool BufferConsumerService::open(const Config& config, 
+                                 IBufferConsumer* consumer,
+                                 SimpleErrorCallback simple_error_callback) {
+    ErrorCallback error_callback = wrapSimpleErrorCallback(simple_error_callback);
+    return open(config, consumer, error_callback);
 }
 
 BufferConsumerService::~BufferConsumerService() {
@@ -50,19 +89,35 @@ BufferConsumerService::~BufferConsumerService() {
 
 bool BufferConsumerService::open(const Config& config, 
                                  IBufferConsumer* consumer,
-                                 std::function<void(const std::string&)> error_callback) {
+                                 ErrorCallback error_callback) {
     if (is_open_) {
-        LOG4CPLUS_WARN(logger_, "Already opened");
+        reportError(ConsumerErrorCode::ERROR_ALREADY_OPEN,
+                   "Service is already opened",
+                   "BufferConsumerService::open");
         return false;
     }
     
     if (!consumer) {
-        LOG4CPLUS_ERROR(logger_, "Consumer is nullptr");
+        reportError(ConsumerErrorCode::ERROR_CONSUMER_NULL,
+                   "Consumer is nullptr",
+                   "BufferConsumerService::open");
+        return false;
+    }
+    
+    // 验证配置
+    std::string validation_error = config.validate();
+    if (!validation_error.empty()) {
+        reportError(ConsumerErrorCode::ERROR_INVALID_CONFIG,
+                   "Configuration validation failed: " + validation_error,
+                   "BufferConsumerService::open");
         return false;
     }
     
     config_ = config;
     consumer_ = consumer;
+    
+    // 设置错误回调
+    error_callback_ = error_callback;
     // 重置统计信息（手动重置每个 std::atomic 成员）
     stats_.total_consumed = 0;
     stats_.success_count = 0;
@@ -87,7 +142,7 @@ bool BufferConsumerService::open(const Config& config,
     }
     
     // 3. 初始化消费者（等待第一个 Buffer）
-    if (config_.wait_first_buffer) {
+    if (config_.runtime.wait_first_buffer) {
         if (!initializeConsumer()) {
             producer_->stop();
             return false;
@@ -95,7 +150,7 @@ bool BufferConsumerService::open(const Config& config,
     }
     
     // 4. 初始化 PSNR 对比（如果启用）
-    if (config_.enable_psnr_compare) {
+    if (config_.psnr.enable) {
         if (!initializePSNRCompare(error_callback)) {
             LOG4CPLUS_WARN(logger_, "Failed to initialize PSNR compare, continuing without it");
             // 不返回 false，允许继续运行（PSNR 对比是可选的）
@@ -107,20 +162,30 @@ bool BufferConsumerService::open(const Config& config,
     return true;
 }
 
-bool BufferConsumerService::initializeProducer(
-    std::function<void(const std::string&)> error_callback) {
+bool BufferConsumerService::initializeProducer(ErrorCallback error_callback) {
     // 创建生产线
     producer_ = std::make_unique<VideoProductionLine>(
-        config_.loop, config_.thread_count, config_.enable_monitor);
+        config_.production_line.loop, 
+        config_.production_line.thread_count, 
+        config_.production_line.enable_monitor);
     
-    // 设置错误回调
+    // 设置错误回调（转换为简单回调以兼容 VideoProductionLine）
     if (error_callback) {
-        producer_->setErrorCallback(error_callback);
+        SimpleErrorCallback simple_callback = [error_callback](const std::string& msg) {
+            ConsumerErrorInfo error;
+            error.code = ConsumerErrorCode::ERROR_PRODUCER_START_FAILED;
+            error.message = msg;
+            error.location = "VideoProductionLine";
+            error_callback(error);
+        };
+        producer_->setErrorCallback(simple_callback);
     }
     
     // 启动生产线
     if (!producer_->start(config_.worker_config)) {
-        LOG4CPLUS_ERROR(logger_, "Failed to start production line");
+        reportError(ConsumerErrorCode::ERROR_PRODUCER_START_FAILED,
+                   "Failed to start production line",
+                   "BufferConsumerService::initializeProducer");
         return false;
     }
     
@@ -130,14 +195,20 @@ bool BufferConsumerService::initializeProducer(
 bool BufferConsumerService::initializeBufferPool() {
     uint64_t pool_id = producer_->getWorkingBufferPoolId();
     if (pool_id == 0) {
-        LOG4CPLUS_ERROR(logger_, "No working BufferPool ID available");
+        reportError(ConsumerErrorCode::ERROR_BUFFER_POOL_NOT_FOUND,
+                   "No working BufferPool ID available",
+                   "BufferConsumerService::initializeBufferPool");
         return false;
     }
     
     auto pool_weak = BufferPoolRegistry::getInstance().getPool(pool_id);
     pool_sptr_ = pool_weak.lock();
     if (!pool_sptr_) {
-        LOG4CPLUS_ERROR(logger_, "BufferPool not found or destroyed");
+        reportError(ConsumerErrorCode::ERROR_BUFFER_POOL_DESTROYED,
+                   "BufferPool not found or destroyed",
+                   "BufferConsumerService::initializeBufferPool",
+                   0,
+                   {{"pool_id", std::to_string(pool_id)}});
         return false;
     }
     
@@ -148,12 +219,14 @@ bool BufferConsumerService::initializeBufferPool() {
 
 bool BufferConsumerService::initializeConsumer() {
     Buffer* first_buffer = pool_sptr_->acquireFilled(
-        true, config_.first_buffer_timeout_ms);
+        true, config_.runtime.first_buffer_timeout_ms);
     
     if (!first_buffer) {
-        LOG4CPLUS_ERROR_FMT(logger_, 
-                          "Failed to get first buffer after %d ms timeout",
-                          config_.first_buffer_timeout_ms);
+        reportError(ConsumerErrorCode::ERROR_FIRST_BUFFER_TIMEOUT,
+                   "Failed to get first buffer",
+                   "BufferConsumerService::initializeConsumer",
+                   0,
+                   {{"timeout_ms", std::to_string(config_.runtime.first_buffer_timeout_ms)}});
         return false;
     }
     
@@ -161,7 +234,9 @@ bool BufferConsumerService::initializeConsumer() {
     pool_sptr_->releaseFilled(first_buffer);
     
     if (!success) {
-        LOG4CPLUS_ERROR(logger_, "Failed to initialize consumer");
+        reportError(ConsumerErrorCode::ERROR_CONSUMER_INIT_FAILED,
+                   "Failed to initialize consumer",
+                   "BufferConsumerService::initializeConsumer");
         return false;
     }
     
@@ -190,7 +265,9 @@ bool BufferConsumerService::runOnce(
     RunOptions options
 ) {
     if (!consumer) {
-        LOG4CPLUS_ERROR(logger_, "runOnce failed: consumer is nullptr");
+        reportError(ConsumerErrorCode::ERROR_CONSUMER_NULL,
+                   "Consumer is nullptr",
+                   "BufferConsumerService::runOnce");
         return false;
     }
     
@@ -200,8 +277,14 @@ bool BufferConsumerService::runOnce(
         close();
     }
     
+    // 处理错误回调：优先使用增强的错误回调，否则使用简单回调
+    ErrorCallback error_callback = options.error_callback;
+    if (!error_callback && options.simple_error_callback) {
+        error_callback = wrapSimpleErrorCallback(options.simple_error_callback);
+    }
+    
     // 打开服务
-    if (!open(config, consumer, options.error_callback)) {
+    if (!open(config, consumer, error_callback)) {
         LOG4CPLUS_ERROR(logger_, "runOnce: failed to open BufferConsumerService");
         return false;
     }
@@ -227,13 +310,44 @@ bool BufferConsumerService::runOnce(
     return true;
 }
 
+bool BufferConsumerService::execute(
+    const Config& service_config,
+    const ConsumerConfig& consumer_config,
+    std::atomic<bool>* running_flag,
+    std::function<void(const std::string&)> error_callback) {
+    
+    // 1. 通过 ConsumerFactory 创建策略实例（第二部分：策略选择配置部分）
+    auto consumer = ConsumerFactory::create(consumer_config);
+    if (!consumer) {
+        LOG4CPLUS_ERROR(logger_, "execute: failed to create consumer strategy instance");
+        return false;
+    }
+    
+    // 2. 使用策略实例执行消费流程（第二部分：上下文，策略模式）
+    RunOptions opts;
+    opts.running_flag = running_flag;
+    opts.error_callback = error_callback;
+    opts.auto_print_stats = true;
+    opts.auto_close = true;
+    
+    return runOnce(service_config, consumer.get(), opts);
+}
+
+bool BufferConsumerService::execute(const Config& service_config,
+                                     const ConsumerConfig& consumer_config,
+                                     std::atomic<bool>* running_flag,
+                                     SimpleErrorCallback simple_error_callback) {
+    ErrorCallback error_callback = wrapSimpleErrorCallback(simple_error_callback);
+    return execute(service_config, consumer_config, running_flag, error_callback);
+}
+
 void BufferConsumerService::consumeLoop(std::atomic<bool>& running_flag) {
     int timeout_count = 0;
     
     while (running_flag.load()) {
         // ⭐ 检查是否达到最大帧数限制
-        if (config_.max_frames > 0 && stats_.total_consumed.load() >= config_.max_frames) {
-            LOG4CPLUS_INFO_FMT(logger_, "Reached max_frames limit (%d), stopping", config_.max_frames);
+        if (config_.runtime.max_frames > 0 && stats_.total_consumed.load() >= config_.runtime.max_frames) {
+            LOG4CPLUS_INFO_FMT(logger_, "Reached max_frames limit (%d), stopping", config_.runtime.max_frames);
             // ⭐ 处理等待队列中剩余的buffer（达到帧数限制时，可能还有未处理的buffer）
             processPendingBuffers();
             break;
@@ -249,7 +363,7 @@ void BufferConsumerService::consumeLoop(std::atomic<bool>& running_flag) {
         
         // 获取 Buffer
         Buffer* buffer = pool_sptr_->acquireFilled(
-            true, config_.acquire_timeout_ms);
+            true, config_.runtime.acquire_timeout_ms);
         
         if (buffer) {
             // 使用统一的辅助方法处理单个 Buffer（包含通道检查、PSNR 和消费逻辑）
@@ -259,7 +373,7 @@ void BufferConsumerService::consumeLoop(std::atomic<bool>& running_flag) {
             timeout_count = 0;
         } else {
             timeout_count++;
-            if (timeout_count >= config_.max_timeout_count) {
+            if (timeout_count >= config_.runtime.max_timeout_count) {
                 LOG4CPLUS_INFO(logger_, "Consumer timeout, stopping");
                 // ⭐ 处理等待队列中剩余的buffer（超时停止时，可能还有未处理的buffer）
                 processPendingBuffers();
@@ -271,7 +385,7 @@ void BufferConsumerService::consumeLoop(std::atomic<bool>& running_flag) {
 
 void BufferConsumerService::drainRemainingBuffers() {
     // ⭐ 首先处理等待队列中剩余的buffer
-    if (config_.enable_multi_channel_psnr) {
+    if (config_.psnr.enable_multi_channel) {
         processPendingBuffers();
     }
     
@@ -284,7 +398,7 @@ void BufferConsumerService::drainRemainingBuffers() {
     }
     
     // ⭐ 再次处理等待队列（处理drain过程中新加入的buffer）
-    if (config_.enable_multi_channel_psnr) {
+    if (config_.psnr.enable_multi_channel) {
         processPendingBuffers();
     }
     
@@ -316,7 +430,7 @@ void BufferConsumerService::processSingleBuffer(Buffer* buffer, bool from_drain)
     
     // 执行 PSNR 对比（如果启用）
     bool buffer_in_waiting_queue = false;
-    if (psnr_initialized_) {
+    if (psnr_initialized_ && config_.psnr.enable) {
         // ⭐ 多通道模式：performPSNRCompare 可能会将 buffer 加入等待队列
         // 如果 buffer 在等待队列中，会在所有通道到达后统一处理，这里不释放
         buffer_in_waiting_queue = performPSNRCompare(buffer);
@@ -349,8 +463,7 @@ void BufferConsumerService::processSingleBuffer(Buffer* buffer, bool from_drain)
     // 如果 buffer 在等待队列中，会在 processPendingBuffers 中统一处理
 }
 
-bool BufferConsumerService::initializePSNRCompare(
-    std::function<void(const std::string&)> error_callback) {
+bool BufferConsumerService::initializePSNRCompare(ErrorCallback error_callback) {
     LOG4CPLUS_INFO(logger_, "Initializing PSNR comparison (auto software decoder)...");
     
     // 1. 获取硬件解码器的实际输出格式和分辨率（包括后处理）
@@ -429,7 +542,7 @@ bool BufferConsumerService::initializePSNRCompare(
     }
     
     // 4. 初始化 BufferComparator（单通道或多通道模式）
-    if (config_.enable_multi_channel_psnr) {
+    if (config_.psnr.enable_multi_channel) {
         // 多通道模式：为每个通道创建独立的 comparator
         LOG4CPLUS_INFO(logger_, "  Multi-channel PSNR mode: creating separate comparators for each channel");
         
@@ -460,24 +573,24 @@ bool BufferConsumerService::initializePSNRCompare(
             io::CompareConfig compare_config;
             compare_config.strategy = io::CompareConfig::AUTO_LAYERED;
             compare_config.format_strategy = io::CompareConfig::AUTO;
-            compare_config.quick_psnr_threshold = config_.quick_psnr_threshold;
-            compare_config.quick_warn_threshold = config_.quick_warn_threshold;
+            compare_config.quick_psnr_threshold = config_.psnr.quick_psnr_threshold;
+            compare_config.quick_warn_threshold = config_.psnr.quick_warn_threshold;
             compare_config.enable_psnr = true;
             compare_config.enable_ssim = true;
-            compare_config.ssim_threshold = config_.ssim_threshold;
-            compare_config.ssim_warn_threshold = config_.ssim_warn_threshold;
-            compare_config.enable_parallel = config_.enable_parallel;
-            compare_config.use_perceptual_weighting = config_.use_perceptual_weighting;
+            compare_config.ssim_threshold = config_.psnr.ssim_threshold;
+            compare_config.ssim_warn_threshold = config_.psnr.ssim_warn_threshold;
+            compare_config.enable_parallel = config_.psnr.enable_parallel;
+            compare_config.use_perceptual_weighting = config_.psnr.use_perceptual_weighting;
             compare_config.verbose = false;
-            compare_config.save_report = config_.save_psnr_report;
+            compare_config.save_report = config_.psnr.save_report;
             
             // 设置通道特定的报告路径
             if (ch == 0) {
-                compare_config.report_path = config_.psnr_report_path_ch0;
+                compare_config.report_path = config_.psnr.report_path_ch0;
             } else if (ch == 1) {
-                compare_config.report_path = config_.psnr_report_path_ch1;
+                compare_config.report_path = config_.psnr.report_path_ch1;
             } else {
-                compare_config.report_path = config_.psnr_report_path + "_ch" + std::to_string(ch) + ".txt";
+                compare_config.report_path = config_.psnr.report_path + "_ch" + std::to_string(ch) + ".txt";
             }
             
             if (!comparator->open(compare_config)) {
@@ -511,17 +624,17 @@ bool BufferConsumerService::initializePSNRCompare(
         io::CompareConfig compare_config;
         compare_config.strategy = io::CompareConfig::AUTO_LAYERED;
         compare_config.format_strategy = io::CompareConfig::AUTO;
-        compare_config.quick_psnr_threshold = config_.quick_psnr_threshold;
-        compare_config.quick_warn_threshold = config_.quick_warn_threshold;
+        compare_config.quick_psnr_threshold = config_.psnr.quick_psnr_threshold;
+        compare_config.quick_warn_threshold = config_.psnr.quick_warn_threshold;
         compare_config.enable_psnr = true;
         compare_config.enable_ssim = true;
-        compare_config.ssim_threshold = config_.ssim_threshold;
-        compare_config.ssim_warn_threshold = config_.ssim_warn_threshold;
-        compare_config.enable_parallel = config_.enable_parallel;
-        compare_config.use_perceptual_weighting = config_.use_perceptual_weighting;
+        compare_config.ssim_threshold = config_.psnr.ssim_threshold;
+        compare_config.ssim_warn_threshold = config_.psnr.ssim_warn_threshold;
+        compare_config.enable_parallel = config_.psnr.enable_parallel;
+        compare_config.use_perceptual_weighting = config_.psnr.use_perceptual_weighting;
         compare_config.verbose = false;
-        compare_config.save_report = config_.save_psnr_report;
-        compare_config.report_path = config_.psnr_report_path;
+        compare_config.save_report = config_.psnr.save_report;
+        compare_config.report_path = config_.psnr.report_path;
         
         if (!psnr_comparator_->open(compare_config)) {
             LOG4CPLUS_ERROR(logger_, "Failed to open BufferComparator");
@@ -540,7 +653,7 @@ bool BufferConsumerService::initializePSNRCompare(
     LOG4CPLUS_INFO(logger_, "  PTS alignment: enabled");
     
     // 5. 验证解码器（如果启用）
-    if (config_.enable_decoder_verification) {
+    if (config_.psnr.enable_decoder_verification) {
         verifyDecoders();
     }
     
@@ -548,7 +661,7 @@ bool BufferConsumerService::initializePSNRCompare(
 }
 
 io::BufferComparator* BufferConsumerService::getPSNRComparator(int channel_id) const {
-    if (config_.enable_multi_channel_psnr) {
+    if (config_.psnr.enable_multi_channel) {
         // 多通道模式：根据 channel_id 返回对应的 comparator
         auto it = psnr_comparators_.find(channel_id);
         if (it != psnr_comparators_.end()) {
@@ -584,7 +697,7 @@ bool BufferConsumerService::performPSNRCompare(Buffer* hw_buffer) {
     }
     
     // ⭐ 多通道模式优化方案：等待同一PTS的所有通道buffer都到达后，一次性计算所有PSNR
-    if (config_.enable_multi_channel_psnr && hw_pts != AV_NOPTS_VALUE) {
+    if (config_.psnr.enable_multi_channel && hw_pts != AV_NOPTS_VALUE) {
         std::lock_guard<std::mutex> lock(pending_hw_buffers_mutex_);
         
         // 将当前硬件buffer加入等待队列
@@ -736,11 +849,11 @@ bool BufferConsumerService::performPSNRCompare(Buffer* hw_buffer) {
     
     // 单通道模式：直接处理（使用旧的逻辑作为fallback）
     // 注意：多通道模式应该已经在上面处理了，这里只处理单通道模式
-    if (!config_.enable_multi_channel_psnr || hw_pts == AV_NOPTS_VALUE) {
+    if (!config_.psnr.enable_multi_channel || hw_pts == AV_NOPTS_VALUE) {
         // 获取软件buffer
         Buffer* sw_buffer = acquireSoftwareBufferByPTS(hw_pts);
         if (!sw_buffer) {
-            if (config_.enable_multi_channel_psnr) {
+            if (config_.psnr.enable_multi_channel) {
                 LOG4CPLUS_WARN_FMT(logger_, "Channel %d: Failed to acquire software buffer for PSNR comparison (hw_pts=%ld)", 
                                  channel_id, (long)hw_pts);
             }
@@ -754,7 +867,7 @@ bool BufferConsumerService::performPSNRCompare(Buffer* hw_buffer) {
         sw_pool_sptr_->releaseFilled(sw_buffer);
         
         // 统计结果
-        if (config_.enable_multi_channel_psnr) {
+        if (config_.psnr.enable_multi_channel) {
             psnr_compare_count_by_channel_[channel_id]++;
             if (result.passed) {
                 psnr_pass_count_by_channel_[channel_id]++;
@@ -788,15 +901,15 @@ Buffer* BufferConsumerService::acquireSoftwareBufferByPTS(int64_t hw_pts) {
     
     Buffer* sw_buffer = nullptr;
     
-    if (config_.enable_pts_alignment) {
+    if (config_.psnr.enable_pts_alignment) {
         // PTS 对齐模式：尝试找到匹配的 PTS
         int attempts = 0;
         int64_t best_pts_diff = INT64_MAX;
         Buffer* best_buffer = nullptr;
         std::vector<Buffer*> candidates_to_release;
         
-        while (attempts < config_.max_pts_match_attempts) {
-            Buffer* candidate = sw_pool_sptr_->acquireFilled(true, config_.acquire_timeout_ms);
+        while (attempts < config_.psnr.max_pts_match_attempts) {
+            Buffer* candidate = sw_pool_sptr_->acquireFilled(true, config_.runtime.acquire_timeout_ms);
             if (!candidate) {
                 break;
             }
@@ -867,7 +980,7 @@ Buffer* BufferConsumerService::acquireSoftwareBufferByPTS(int64_t hw_pts) {
         }
     } else {
         // 非 PTS 对齐模式：直接获取下一个 buffer
-        sw_buffer = sw_pool_sptr_->acquireFilled(true, config_.acquire_timeout_ms);
+        sw_buffer = sw_pool_sptr_->acquireFilled(true, config_.runtime.acquire_timeout_ms);
     }
     
     return sw_buffer;
@@ -875,7 +988,7 @@ Buffer* BufferConsumerService::acquireSoftwareBufferByPTS(int64_t hw_pts) {
 
 void BufferConsumerService::processPendingBuffers() {
     // ⭐ 处理等待队列中剩余的buffer（当producer停止或超时时）
-    if (!config_.enable_multi_channel_psnr) {
+    if (!config_.psnr.enable_multi_channel) {
         return;  // 单通道模式不需要处理等待队列
     }
     
@@ -1096,7 +1209,7 @@ void BufferConsumerService::verifyDecoders() {
                                   expected_decoder.c_str(), hw_codec);
                 LOG4CPLUS_WARN(logger_, "    Hardware decoder may have failed to initialize and fell back to software decoder");
                 
-                if (config_.verbose_diagnosis) {
+                if (config_.psnr.verbose_diagnosis) {
                     LOG4CPLUS_WARN(logger_, "    💡 This is likely due to video file format issues:");
                     LOG4CPLUS_WARN(logger_, "       - Missing or corrupted SPS/PPS in the file");
                     LOG4CPLUS_WARN(logger_, "       - Stream corruption that prevents hardware decoder initialization");
@@ -1224,7 +1337,7 @@ void BufferConsumerService::printStats() const {
         LOG4CPLUS_INFO(logger_, "  Decoder Comparison Results");
         LOG4CPLUS_INFO(logger_, "═══════════════════════════════════════════════════════");
         
-        if (config_.enable_multi_channel_psnr && !psnr_comparators_.empty()) {
+        if (config_.psnr.enable_multi_channel && !psnr_comparators_.empty()) {
             // 多通道模式：分别输出每个通道的统计
             for (const auto& pair : psnr_comparators_) {
                 int ch = pair.first;
@@ -1237,14 +1350,14 @@ void BufferConsumerService::printStats() const {
                 comparator->printSummary();
                 
                 // 输出该通道的报告路径（如果保存了报告）
-                if (config_.save_psnr_report) {
+                if (config_.psnr.save_report) {
                     std::string report_path;
                     if (ch == 0) {
-                        report_path = config_.psnr_report_path_ch0;
+                        report_path = config_.psnr.report_path_ch0;
                     } else if (ch == 1) {
-                        report_path = config_.psnr_report_path_ch1;
+                        report_path = config_.psnr.report_path_ch1;
                     } else {
-                        report_path = config_.psnr_report_path + "_ch" + std::to_string(ch) + ".txt";
+                        report_path = config_.psnr.report_path + "_ch" + std::to_string(ch) + ".txt";
                     }
                     if (!report_path.empty()) {
                         LOG4CPLUS_INFO_FMT(logger_, "📄 Channel %d report saved to: %s", 
@@ -1269,9 +1382,9 @@ void BufferConsumerService::printStats() const {
             psnr_comparator_->printSummary();
             
             // 输出报告路径（如果保存了报告）
-            if (config_.save_psnr_report && !config_.psnr_report_path.empty()) {
+            if (config_.psnr.save_report && !config_.psnr.report_path.empty()) {
                 LOG4CPLUS_INFO_FMT(logger_, "📄 Detailed comparison report saved to: %s", 
-                                  config_.psnr_report_path.c_str());
+                                  config_.psnr.report_path.c_str());
             }
         }
         
@@ -1285,470 +1398,10 @@ void BufferConsumerService::printStats() const {
 // DisplayConsumer 实现
 // ============================================================================
 
-DisplayConsumer::DisplayConsumer(LinuxFramebufferDevice* display,
-                                 bool ch0_enable,
-                                 bool ch1_enable)
-    : display_(display)
-    , ch0_enable_(ch0_enable)
-    , ch1_enable_(ch1_enable)
-    , success_count_(0)
-    , failed_count_(0)
-    , total_count_(0)
-    , logger_(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Consumer.Display")))
-{
-    if (!display_) {
-        LOG4CPLUS_ERROR(logger_, "Display device is nullptr");
-    }
-}
-
-bool DisplayConsumer::initialize(Buffer* first_buffer) {
-    (void)first_buffer;
-    // 显示消费者不需要特殊初始化
-    return true;
-}
-
-bool DisplayConsumer::consume(Buffer* buffer, int channel_id) {
-    if (!display_ || !buffer) {
-        return false;
-    }
-    
-    total_count_++;
-    
-    // 等待垂直同步
-    display_->waitVerticalSync();
-    
-    // DMA 显示
-    if (display_->displayBufferByDMA(buffer)) {
-        success_count_++;
-        return true;
-    } else {
-        failed_count_++;
-        LOG4CPLUS_WARN_FMT(logger_, "DMA display failed for ch%d buffer (phys_addr=0x%llx)",
-                          channel_id, 
-                          (unsigned long long)buffer->getPhysicalAddress());
-        return false;
-    }
-}
-
-std::string DisplayConsumer::getStats() const {
-    std::ostringstream oss;
-    oss << "Display: total=" << total_count_
-        << ", success=" << success_count_
-        << ", failed=" << failed_count_;
-    if (total_count_ > 0) {
-        oss << ", success_rate=" << std::fixed << std::setprecision(1)
-            << (100.0 * success_count_ / total_count_) << "%";
-    }
-    return oss.str();
-}
-
-bool DisplayConsumer::shouldConsumeChannel(int channel_id) const {
-    if (channel_id == 0) {
-        return ch0_enable_;
-    } else if (channel_id == 1) {
-        return ch1_enable_;
-    }
-    return false;
-}
-
 // ============================================================================
-// FileWriterConsumer 实现
+// 第三部分：策略实现部分（已移至独立的策略库文件）
 // ============================================================================
-
-FileWriterConsumer::FileWriterConsumer(const std::string& output_path,
-                                       bool enable_ch0,
-                                       bool enable_ch1)
-    : output_path_(output_path)
-    , initialized_(false)
-    , enable_ch0_(enable_ch0)
-    , enable_ch1_(enable_ch1)
-    , write_count_(0)
-    , failed_count_(0)
-    , logger_(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Consumer.FileWriter")))
-{
-}
-
-FileWriterConsumer::~FileWriterConsumer() {
-    cleanup();
-}
-
-bool FileWriterConsumer::initialize(Buffer* first_buffer) {
-    if (!first_buffer || !first_buffer->hasImageMetadata()) {
-        LOG4CPLUS_ERROR(logger_, "First buffer has no image metadata");
-        return false;
-    }
-    
-    AVPixelFormat format = first_buffer->getImageFormat();
-    int width = first_buffer->getImageWidth();
-    int height = first_buffer->getImageHeight();
-    
-    writer_ = std::make_unique<io::BufferWriter>();
-    if (!writer_->openRaw(output_path_.c_str(), format, width, height)) {
-        LOG4CPLUS_ERROR_FMT(logger_, "Failed to open output file: %s", output_path_.c_str());
-        return false;
-    }
-    
-    initialized_ = true;
-    LOG4CPLUS_INFO_FMT(logger_, "Opened output file: %s (format: %s, %dx%d)",
-                      output_path_.c_str(),
-                      av_get_pix_fmt_name(format),
-                      width, height);
-    return true;
-}
-
-bool FileWriterConsumer::consume(Buffer* buffer, int channel_id) {
-    (void)channel_id;
-    
-    if (!initialized_ || !writer_) {
-        return false;
-    }
-    
-    if (writer_->write(buffer)) {
-        write_count_++;
-        return true;
-    } else {
-        failed_count_++;
-        return false;
-    }
-}
-
-void FileWriterConsumer::cleanup() {
-    if (writer_) {
-        writer_->close();
-        writer_.reset();
-    }
-    initialized_ = false;
-}
-
-std::string FileWriterConsumer::getStats() const {
-    std::ostringstream oss;
-    oss << "FileWriter: written=" << write_count_
-        << ", failed=" << failed_count_
-        << ", path=" << output_path_;
-    return oss.str();
-}
-
-bool FileWriterConsumer::shouldConsumeChannel(int channel_id) const {
-    if (channel_id == 0) {
-        return enable_ch0_;
-    } else if (channel_id == 1) {
-        return enable_ch1_;
-    }
-    return false;
-}
-
-// ============================================================================
-// MultiChannelFileWriterConsumer 实现
-// ============================================================================
-
-MultiChannelFileWriterConsumer::MultiChannelFileWriterConsumer(
-    const std::vector<std::string>& output_paths,
-    bool enable_ch0, bool enable_ch1)
-    : output_paths_(output_paths)
-    , enable_ch0_(enable_ch0)
-    , enable_ch1_(enable_ch1)
-    , write_count_(0)
-    , failed_count_(0)
-    , logger_(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Consumer.MultiChannelFileWriter")))
-{
-    writers_.resize(output_paths.size());
-    initialized_.resize(output_paths.size(), false);
-}
-
-MultiChannelFileWriterConsumer::~MultiChannelFileWriterConsumer() {
-    cleanup();
-}
-
-bool MultiChannelFileWriterConsumer::initialize(Buffer* first_buffer) {
-    if (!first_buffer || !first_buffer->hasImageMetadata()) {
-        LOG4CPLUS_ERROR(logger_, "First buffer has no image metadata");
-        return false;
-    }
-    
-    int channel_id = first_buffer->getOutputChannel();
-    AVPixelFormat format = first_buffer->getImageFormat();
-    int width = first_buffer->getImageWidth();
-    int height = first_buffer->getImageHeight();
-    
-    // 确定 writer 索引
-    int writer_index = -1;
-    if (channel_id == 0 && enable_ch0_) {
-        writer_index = 0;
-    } else if (channel_id == 1 && enable_ch1_) {
-        writer_index = enable_ch0_ ? 1 : 0;
-    }
-    
-    if (writer_index < 0 || writer_index >= (int)writers_.size()) {
-        LOG4CPLUS_ERROR_FMT(logger_, "Invalid writer index: %d (channel: %d)", 
-                          writer_index, channel_id);
-        return false;
-    }
-    
-    // 创建并初始化 writer
-    writers_[writer_index] = std::make_unique<io::BufferWriter>();
-    if (!writers_[writer_index]->openRaw(output_paths_[writer_index].c_str(), 
-                                        format, width, height)) {
-        LOG4CPLUS_ERROR_FMT(logger_, "Failed to open output file: %s", 
-                          output_paths_[writer_index].c_str());
-        return false;
-    }
-    
-    initialized_[writer_index] = true;
-    LOG4CPLUS_INFO_FMT(logger_, "Opened writer[%d] for channel %d: %s (format: %s, %dx%d)",
-                      writer_index, channel_id,
-                      output_paths_[writer_index].c_str(),
-                      av_get_pix_fmt_name(format),
-                      width, height);
-    
-    // 写入第一个 buffer
-    writers_[writer_index]->write(first_buffer);
-    return true;
-}
-
-bool MultiChannelFileWriterConsumer::consume(Buffer* buffer, int channel_id) {
-    if (!buffer) {
-        return false;
-    }
-    
-    // 确定 writer 索引
-    int writer_index = -1;
-    if (channel_id == 0 && enable_ch0_) {
-        writer_index = 0;
-    } else if (channel_id == 1 && enable_ch1_) {
-        writer_index = enable_ch0_ ? 1 : 0;
-    } else {
-        // 通道未启用
-        return true;  // 不算失败，只是跳过
-    }
-    
-    if (writer_index < 0 || writer_index >= (int)writers_.size()) {
-        return false;
-    }
-    
-    // 如果 writer 还未初始化，现在初始化（对于第二个通道）
-    if (!initialized_[writer_index]) {
-        if (!buffer->hasImageMetadata()) {
-            return false;
-        }
-        
-        AVPixelFormat format = buffer->getImageFormat();
-        int width = buffer->getImageWidth();
-        int height = buffer->getImageHeight();
-        
-        writers_[writer_index] = std::make_unique<io::BufferWriter>();
-        if (!writers_[writer_index]->openRaw(output_paths_[writer_index].c_str(), 
-                                            format, width, height)) {
-            LOG4CPLUS_ERROR_FMT(logger_, "Failed to open writer[%d]: %s", 
-                              writer_index, output_paths_[writer_index].c_str());
-            return false;
-        }
-        
-        initialized_[writer_index] = true;
-        LOG4CPLUS_INFO_FMT(logger_, "Opened writer[%d] for channel %d: %s",
-                          writer_index, channel_id, output_paths_[writer_index].c_str());
-    }
-    
-    // 写入 buffer
-    if (writers_[writer_index]->write(buffer)) {
-        write_count_++;
-        return true;
-    } else {
-        failed_count_++;
-        return false;
-    }
-}
-
-void MultiChannelFileWriterConsumer::cleanup() {
-    for (size_t i = 0; i < writers_.size(); i++) {
-        if (initialized_[i] && writers_[i]) {
-            LOG4CPLUS_INFO_FMT(logger_, "Closing writer[%zu]: %lld frames saved to %s",
-                              i, (long long)writers_[i]->getWriteCount(),
-                              output_paths_[i].c_str());
-            writers_[i]->close();
-            writers_[i].reset();
-        }
-    }
-    initialized_.clear();
-    initialized_.resize(output_paths_.size(), false);
-}
-
-std::string MultiChannelFileWriterConsumer::getStats() const {
-    std::ostringstream oss;
-    oss << "MultiChannelFileWriter: written=" << write_count_
-        << ", failed=" << failed_count_;
-    for (size_t i = 0; i < writers_.size(); i++) {
-        if (initialized_[i] && writers_[i]) {
-            oss << ", writer[" << i << "]=" << writers_[i]->getWriteCount() << " frames";
-        }
-    }
-    return oss.str();
-}
-
-bool MultiChannelFileWriterConsumer::shouldConsumeChannel(int channel_id) const {
-    if (channel_id == 0) {
-        return enable_ch0_;
-    } else if (channel_id == 1) {
-        return enable_ch1_;
-    }
-    return false;
-}
-
-// ============================================================================
-// CompareConsumer 实现
-// ============================================================================
-// ⚠️ 已废弃：CompareConsumer 不支持PTS对齐，仅用于简单的顺序对比。
-// 请使用 DualBufferCompareService 进行带PTS对齐的对比。
-// 如需使用此类，请取消以下注释。
-
-/*
-CompareConsumer::CompareConsumer(
-    io::BufferComparator* comparator,
-    std::shared_ptr<BufferPool> reference_pool)
-    : comparator_(comparator)
-    , reference_pool_(reference_pool)
-    , compare_count_(0)
-    , success_count_(0)
-    , failed_count_(0)
-    , logger_(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Consumer.Compare")))
-{
-    if (!comparator_) {
-        LOG4CPLUS_ERROR(logger_, "Comparator is nullptr");
-    }
-    if (!reference_pool_) {
-        LOG4CPLUS_ERROR(logger_, "Reference pool is nullptr");
-    }
-}
-
-bool CompareConsumer::initialize(Buffer* first_buffer) {
-    (void)first_buffer;
-    // 比较消费者不需要特殊初始化
-    return true;
-}
-
-bool CompareConsumer::consume(Buffer* buffer, int channel_id) {
-    (void)channel_id;
-    
-    if (!comparator_ || !reference_pool_) {
-        return false;
-    }
-    
-    // 从参考 Pool 获取对应的 Buffer
-    Buffer* ref_buffer = reference_pool_->acquireFilled(true, 5000);
-    if (!ref_buffer) {
-        LOG4CPLUS_WARN(logger_, "Failed to get reference buffer");
-        return false;
-    }
-    
-    // 执行比较
-    auto result = comparator_->compare(ref_buffer, buffer);
-    
-    // 释放参考 Buffer
-    reference_pool_->releaseFilled(ref_buffer);
-    
-    compare_count_++;
-    if (result.passed) {
-        success_count_++;
-        return true;
-    } else {
-        failed_count_++;
-        return false;
-    }
-}
-
-std::string CompareConsumer::getStats() const {
-    std::ostringstream oss;
-    oss << "Compare: total=" << compare_count_
-        << ", passed=" << success_count_
-        << ", failed=" << failed_count_;
-    if (compare_count_ > 0) {
-        oss << ", pass_rate=" << std::fixed << std::setprecision(1)
-            << (100.0 * success_count_ / compare_count_) << "%";
-    }
-    return oss.str();
-}
-*/
-
-// ============================================================================
-// EncodedStreamWriterConsumer 实现
-// ============================================================================
-
-EncodedStreamWriterConsumer::EncodedStreamWriterConsumer(
-    const std::string& output_path,
-    const AVCodecParameters* codec_params,
-    AVRational time_base)
-    : output_path_(output_path)
-    , codec_params_(codec_params)
-    , time_base_(time_base)
-    , initialized_(false)
-    , packet_count_(0)
-    , total_bytes_(0)
-    , failed_count_(0)
-    , logger_(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Consumer.EncodedStreamWriter")))
-{
-}
-
-EncodedStreamWriterConsumer::~EncodedStreamWriterConsumer() {
-    cleanup();
-}
-
-bool EncodedStreamWriterConsumer::initialize(Buffer* first_buffer) {
-    (void)first_buffer;
-    
-    if (!codec_params_) {
-        LOG4CPLUS_ERROR(logger_, "Codec parameters is nullptr");
-        return false;
-    }
-    
-    writer_ = std::make_unique<io::BufferWriter>();
-    if (!writer_->openEncoded(output_path_.c_str(), codec_params_, time_base_)) {
-        LOG4CPLUS_ERROR_FMT(logger_, "Failed to open encoded output file: %s", 
-                          output_path_.c_str());
-        return false;
-    }
-    
-    initialized_ = true;
-    LOG4CPLUS_INFO_FMT(logger_, "Opened encoded output file: %s", output_path_.c_str());
-    return true;
-}
-
-bool EncodedStreamWriterConsumer::consume(Buffer* buffer, int channel_id) {
-    (void)channel_id;
-    
-    if (!initialized_ || !writer_) {
-        return false;
-    }
-    
-    size_t used_size = buffer->getUsedSize();
-    if (used_size > 0) {
-        if (writer_->write(buffer)) {
-            packet_count_++;
-            total_bytes_ += used_size;
-            return true;
-        } else {
-            failed_count_++;
-            return false;
-        }
-    }
-    
-    return true;  // 空 buffer 不算失败
-}
-
-void EncodedStreamWriterConsumer::cleanup() {
-    if (writer_) {
-        writer_->close();
-        writer_.reset();
-    }
-    initialized_ = false;
-}
-
-std::string EncodedStreamWriterConsumer::getStats() const {
-    std::ostringstream oss;
-    oss << "EncodedStreamWriter: packets=" << packet_count_
-        << ", bytes=" << (total_bytes_ / (1024 * 1024)) << " MB"
-        << ", failed=" << failed_count_
-        << ", path=" << output_path_;
-    return oss.str();
-}
+// 策略实现代码已移至 BufferConsumerStrategies.cpp
 
 // ============================================================================
 // DualBufferCompareService 实现
@@ -2261,6 +1914,13 @@ void DualBufferCompareService::printStats() const {
 }
 
 // ============================================================================
+// ConsumerConfigBuilder 实现（第三部分：配置/工厂，策略模式）
+// ============================================================================
+
+// 注意：ConsumerConfigBuilder::createConsumer() 已删除
+// 请使用 ConsumerFactory::create() 创建消费者
+
+// ============================================================================
 // ConsumerConfigBuilder 实现
 // ============================================================================
 
@@ -2270,132 +1930,503 @@ ConsumerConfigBuilder& ConsumerConfigBuilder::setWorkerConfig(const WorkerConfig
 }
 
 ConsumerConfigBuilder& ConsumerConfigBuilder::setLoop(bool loop) {
-    config_.loop = loop;
+    config_.production_line.loop = loop;
     return *this;
 }
 
 ConsumerConfigBuilder& ConsumerConfigBuilder::setThreadCount(int thread_count) {
-    config_.thread_count = thread_count;
+    config_.production_line.thread_count = thread_count;
     return *this;
 }
 
 ConsumerConfigBuilder& ConsumerConfigBuilder::setEnableMonitor(bool enable) {
-    config_.enable_monitor = enable;
+    config_.production_line.enable_monitor = enable;
     return *this;
 }
 
 ConsumerConfigBuilder& ConsumerConfigBuilder::setMaxFrames(int max_frames) {
-    config_.max_frames = max_frames;
+    config_.runtime.max_frames = max_frames;
     return *this;
 }
 
 ConsumerConfigBuilder& ConsumerConfigBuilder::setAcquireTimeout(int timeout_ms) {
-    config_.acquire_timeout_ms = timeout_ms;
+    config_.runtime.acquire_timeout_ms = timeout_ms;
     return *this;
 }
 
 ConsumerConfigBuilder& ConsumerConfigBuilder::setMaxTimeoutCount(int count) {
-    config_.max_timeout_count = count;
+    config_.runtime.max_timeout_count = count;
     return *this;
 }
 
 ConsumerConfigBuilder& ConsumerConfigBuilder::setDrainRemaining(bool drain) {
-    config_.drain_remaining = drain;
+    config_.runtime.drain_remaining = drain;
     return *this;
 }
 
 ConsumerConfigBuilder& ConsumerConfigBuilder::setWaitFirstBuffer(bool wait) {
-    config_.wait_first_buffer = wait;
+    config_.runtime.wait_first_buffer = wait;
     return *this;
 }
 
 ConsumerConfigBuilder& ConsumerConfigBuilder::setFirstBufferTimeout(int timeout_ms) {
-    config_.first_buffer_timeout_ms = timeout_ms;
+    config_.runtime.first_buffer_timeout_ms = timeout_ms;
     return *this;
 }
 
 ConsumerConfigBuilder& ConsumerConfigBuilder::setEnablePSNRCompare(bool enable) {
-    config_.enable_psnr_compare = enable;
+    config_.psnr.enable = enable;
     return *this;
 }
 
 ConsumerConfigBuilder& ConsumerConfigBuilder::setEnableMultiChannelPSNR(bool enable) {
-    config_.enable_multi_channel_psnr = enable;
+    config_.psnr.enable_multi_channel = enable;
     return *this;
 }
 
 ConsumerConfigBuilder& ConsumerConfigBuilder::setQuickPSNRThreshold(double threshold) {
-    config_.quick_psnr_threshold = threshold;
+    config_.psnr.quick_psnr_threshold = threshold;
     return *this;
 }
 
 ConsumerConfigBuilder& ConsumerConfigBuilder::setQuickWarnThreshold(double threshold) {
-    config_.quick_warn_threshold = threshold;
+    config_.psnr.quick_warn_threshold = threshold;
     return *this;
 }
 
 ConsumerConfigBuilder& ConsumerConfigBuilder::setSSIMThreshold(double threshold) {
-    config_.ssim_threshold = threshold;
+    config_.psnr.ssim_threshold = threshold;
     return *this;
 }
 
 ConsumerConfigBuilder& ConsumerConfigBuilder::setSSIMWarnThreshold(double threshold) {
-    config_.ssim_warn_threshold = threshold;
+    config_.psnr.ssim_warn_threshold = threshold;
     return *this;
 }
 
 ConsumerConfigBuilder& ConsumerConfigBuilder::setEnableParallel(bool enable) {
-    config_.enable_parallel = enable;
+    config_.psnr.enable_parallel = enable;
     return *this;
 }
 
 ConsumerConfigBuilder& ConsumerConfigBuilder::setUsePerceptualWeighting(bool enable) {
-    config_.use_perceptual_weighting = enable;
+    config_.psnr.use_perceptual_weighting = enable;
     return *this;
 }
 
 ConsumerConfigBuilder& ConsumerConfigBuilder::setSavePSNRReport(bool save) {
-    config_.save_psnr_report = save;
+    config_.psnr.save_report = save;
     return *this;
 }
 
 ConsumerConfigBuilder& ConsumerConfigBuilder::setPSNRReportPath(const std::string& path) {
-    config_.psnr_report_path = path;
+    config_.psnr.report_path = path;
     return *this;
 }
 
 ConsumerConfigBuilder& ConsumerConfigBuilder::setPSNRReportPathCh0(const std::string& path) {
-    config_.psnr_report_path_ch0 = path;
+    config_.psnr.report_path_ch0 = path;
     return *this;
 }
 
 ConsumerConfigBuilder& ConsumerConfigBuilder::setPSNRReportPathCh1(const std::string& path) {
-    config_.psnr_report_path_ch1 = path;
+    config_.psnr.report_path_ch1 = path;
     return *this;
 }
 
 ConsumerConfigBuilder& ConsumerConfigBuilder::setEnablePTSAlignment(bool enable) {
-    config_.enable_pts_alignment = enable;
+    config_.psnr.enable_pts_alignment = enable;
     return *this;
 }
 
 ConsumerConfigBuilder& ConsumerConfigBuilder::setMaxPTSMatchAttempts(int attempts) {
-    config_.max_pts_match_attempts = attempts;
+    config_.psnr.max_pts_match_attempts = attempts;
     return *this;
 }
 
 ConsumerConfigBuilder& ConsumerConfigBuilder::setEnableDecoderVerification(bool enable) {
-    config_.enable_decoder_verification = enable;
+    config_.psnr.enable_decoder_verification = enable;
     return *this;
 }
 
 ConsumerConfigBuilder& ConsumerConfigBuilder::setVerboseDiagnosis(bool verbose) {
-    config_.verbose_diagnosis = verbose;
+    config_.psnr.verbose_diagnosis = verbose;
     return *this;
 }
 
-BufferConsumerService::Config ConsumerConfigBuilder::build() const {
+ConsumerConfigBuilder& ConsumerConfigBuilder::setProductionLine(const ProductionLineConfig& config) {
+    config_.production_line = config;
+    return *this;
+}
+
+ConsumerConfigBuilder& ConsumerConfigBuilder::setRuntime(const RuntimeConfig& config) {
+    config_.runtime = config;
+    return *this;
+}
+
+ConsumerConfigBuilder& ConsumerConfigBuilder::setPSNR(const PSNRConfig& config) {
+    config_.psnr = config;
+    return *this;
+}
+
+std::string ConsumerConfigBuilder::validate() const {
+    return config_.validate();
+}
+
+BufferConsumerService::Config ConsumerConfigBuilder::build(bool validate_config) const {
+    if (validate_config) {
+        std::string error = config_.validate();
+        if (!error.empty()) {
+            throw std::runtime_error("Configuration validation failed: " + error);
+        }
+    }
     return config_;
+}
+
+// 注意：消费者配置方法已删除
+// 请使用 ConsumerStrategyConfigBuilder 构建消费者配置，使用 ConsumerFactory 创建消费者
+
+
+// ============================================================================
+// 第二部分：策略选择配置部分 - ConsumerFactory 实现
+// ============================================================================
+
+log4cplus::Logger ConsumerFactory::logger_ = 
+    log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.ConsumerFactory"));
+
+std::unique_ptr<IBufferConsumer> ConsumerFactory::create(const ConsumerConfig& config) {
+    switch (config.type) {
+        case ConsumerConfig::Type::DISPLAY: {
+            if (!config.display_device) {
+                LOG4CPLUS_ERROR(logger_, "DisplayConsumer: display_device is nullptr");
+                return nullptr;
+            }
+            return std::make_unique<DisplayConsumer>(
+                config.display_device,
+                config.display_ch0_enable,
+                config.display_ch1_enable);
+        }
+        
+        case ConsumerConfig::Type::FILE_WRITER: {
+            if (config.file_output_path.empty()) {
+                LOG4CPLUS_ERROR(logger_, "FileWriterConsumer: file_output_path is empty");
+                return nullptr;
+            }
+            return std::make_unique<FileWriterConsumer>(
+                config.file_output_path,
+                config.file_ch0_enable,
+                config.file_ch1_enable);
+        }
+        
+        case ConsumerConfig::Type::MULTI_CHANNEL_FILE: {
+            if (config.multi_file_output_paths.empty()) {
+                LOG4CPLUS_ERROR(logger_, "MultiChannelFileWriterConsumer: multi_file_output_paths is empty");
+                return nullptr;
+            }
+            return std::make_unique<MultiChannelFileWriterConsumer>(
+                config.multi_file_output_paths,
+                config.multi_file_ch0_enable,
+                config.multi_file_ch1_enable);
+        }
+        
+        case ConsumerConfig::Type::BUFFER_COMPARE: {
+            if (!config.reference_pool) {
+                LOG4CPLUS_ERROR(logger_, "BufferCompareConsumer: reference_pool is nullptr");
+                return nullptr;
+            }
+            // 注意：BufferCompareConsumer 暂未实现，请使用 DualBufferCompareService
+            LOG4CPLUS_WARN(logger_, "BufferCompareConsumer not yet implemented, use DualBufferCompareService instead");
+            return nullptr;
+        }
+        
+        case ConsumerConfig::Type::ENCODED_STREAM: {
+            if (config.encoded_output_path.empty()) {
+                LOG4CPLUS_ERROR(logger_, "EncodedStreamWriterConsumer: encoded_output_path is empty");
+                return nullptr;
+            }
+            if (!config.codec_params) {
+                LOG4CPLUS_ERROR(logger_, "EncodedStreamWriterConsumer: codec_params is nullptr");
+                return nullptr;
+            }
+            return std::make_unique<EncodedStreamWriterConsumer>(
+                config.encoded_output_path,
+                config.codec_params,
+                config.time_base);
+        }
+        
+        default: {
+            LOG4CPLUS_ERROR(logger_, "Unknown consumer type");
+            return nullptr;
+        }
+    }
+}
+
+std::unique_ptr<IBufferConsumer> ConsumerFactory::createDisplayConsumer(
+    LinuxFramebufferDevice* display,
+    bool ch0_enable,
+    bool ch1_enable) {
+    return std::make_unique<DisplayConsumer>(display, ch0_enable, ch1_enable);
+}
+
+std::unique_ptr<IBufferConsumer> ConsumerFactory::createFileWriterConsumer(
+    const std::string& output_path,
+    bool ch0_enable,
+    bool ch1_enable) {
+    return std::make_unique<FileWriterConsumer>(output_path, ch0_enable, ch1_enable);
+}
+
+std::unique_ptr<IBufferConsumer> ConsumerFactory::createMultiChannelFileWriterConsumer(
+    const std::vector<std::string>& output_paths,
+    bool ch0_enable,
+    bool ch1_enable) {
+    return std::make_unique<MultiChannelFileWriterConsumer>(
+        output_paths, ch0_enable, ch1_enable);
+}
+
+std::unique_ptr<IBufferConsumer> ConsumerFactory::createBufferCompareConsumer(
+    std::shared_ptr<BufferPool> reference_pool,
+    const io::CompareConfig& compare_config,
+    bool ch0_enable,
+    bool ch1_enable) {
+    // 注意：BufferCompareConsumer 暂未实现，请使用 DualBufferCompareService
+    LOG4CPLUS_WARN(logger_, "BufferCompareConsumer not yet implemented, use DualBufferCompareService instead");
+    (void)reference_pool;
+    (void)compare_config;
+    (void)ch0_enable;
+    (void)ch1_enable;
+    return nullptr;
+}
+
+std::unique_ptr<IBufferConsumer> ConsumerFactory::createEncodedStreamConsumer(
+    const std::string& output_path,
+    const AVCodecParameters* codec_params,
+    AVRational time_base) {
+    return std::make_unique<EncodedStreamWriterConsumer>(output_path, codec_params, time_base);
+}
+
+// ============================================================================
+// ProductionLineTestService 实现
+// ============================================================================
+
+ProductionLineTestService::ProductionLineTestService()
+    : logger_(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.ProductionLineTestService")))
+{
+}
+
+ProductionLineTestService::~ProductionLineTestService() {
+    if (producer_) {
+        producer_->stop();
+    }
+}
+
+ProductionLineTestService::Result ProductionLineTestService::run(
+    const WorkerConfig& worker_config,
+    IBufferConsumer* consumer,
+    std::atomic<bool>* running_flag,
+    const Options& options,
+    std::function<void(const std::string&)> error_callback) {
+    
+    Result result;
+    
+    if (!consumer) {
+        LOG4CPLUS_ERROR(logger_, "Consumer is nullptr");
+        return result;
+    }
+    
+    // 1. 初始化生产线
+    if (!initializeProducer(worker_config, options, error_callback)) {
+        return result;
+    }
+    
+    // 2. 初始化BufferPool
+    if (!initializeBufferPool()) {
+        producer_->stop();
+        return result;
+    }
+    
+    // 3. 初始化消费者
+    if (options.wait_first_buffer) {
+        if (!initializeConsumer(consumer, options)) {
+            producer_->stop();
+            return result;
+        }
+    }
+    
+    // 4. 创建运行标志
+    std::atomic<bool> local_running_flag(true);
+    std::atomic<bool>* running_flag_ptr = running_flag ? running_flag : &local_running_flag;
+    
+    // 5. 消费循环
+    consumeLoop(options, consumer, *running_flag_ptr, result);
+    
+    // 6. 排空剩余Buffer
+    if (options.drain_remaining) {
+        drainRemainingBuffers(consumer, result);
+    }
+    
+    // 7. 清理消费者
+    consumer->cleanup();
+    
+    // 8. 获取平均帧率
+    result.avg_fps = producer_->getAverageFPS();
+    
+    // 9. 停止生产线
+    producer_->stop();
+    
+    result.success = true;
+    LOG4CPLUS_INFO_FMT(logger_, "Test completed: consumed=%d, success=%d, failed=%d",
+                      result.total_consumed, result.success_count, result.failed_count);
+    
+    return result;
+}
+
+bool ProductionLineTestService::initializeProducer(
+    const WorkerConfig& worker_config,
+    const Options& options,
+    std::function<void(const std::string&)> error_callback) {
+    
+    producer_ = std::make_unique<VideoProductionLine>(
+        options.loop, options.thread_count, options.enable_monitor);
+    
+    if (error_callback) {
+        producer_->setErrorCallback(error_callback);
+    }
+    
+    if (!producer_->start(worker_config)) {
+        LOG4CPLUS_ERROR(logger_, "Failed to start production line");
+        return false;
+    }
+    
+    LOG4CPLUS_INFO(logger_, "Production line started successfully");
+    return true;
+}
+
+bool ProductionLineTestService::initializeBufferPool() {
+    uint64_t pool_id = producer_->getWorkingBufferPoolId();
+    if (pool_id == 0) {
+        LOG4CPLUS_ERROR(logger_, "No working BufferPool ID available");
+        return false;
+    }
+    
+    auto pool_weak = BufferPoolRegistry::getInstance().getPool(pool_id);
+    pool_sptr_ = pool_weak.lock();
+    if (!pool_sptr_) {
+        LOG4CPLUS_ERROR(logger_, "BufferPool not found or destroyed");
+        return false;
+    }
+    
+    LOG4CPLUS_INFO_FMT(logger_, "BufferPool: '%s' (ID: %lu)",
+                      pool_sptr_->getName().c_str(), pool_id);
+    return true;
+}
+
+bool ProductionLineTestService::initializeConsumer(IBufferConsumer* consumer,
+                                                  const Options& options) {
+    Buffer* first_buffer = pool_sptr_->acquireFilled(
+        true, options.first_buffer_timeout_ms);
+    
+    if (!first_buffer) {
+        LOG4CPLUS_ERROR_FMT(logger_,
+                          "Failed to get first buffer after %d ms timeout",
+                          options.first_buffer_timeout_ms);
+        return false;
+    }
+    
+    bool success = consumer->initialize(first_buffer);
+    pool_sptr_->releaseFilled(first_buffer);
+    
+    if (!success) {
+        LOG4CPLUS_ERROR(logger_, "Failed to initialize consumer");
+        return false;
+    }
+    
+    LOG4CPLUS_INFO(logger_, "Consumer initialized successfully");
+    return true;
+}
+
+void ProductionLineTestService::consumeLoop(
+    const Options& options,
+    IBufferConsumer* consumer,
+    std::atomic<bool>& running_flag,
+    Result& result) {
+    
+    int timeout_count = 0;
+    
+    while (running_flag.load()) {
+        // 检查最大帧数限制
+        if (options.max_frames > 0 && result.total_consumed >= options.max_frames) {
+            LOG4CPLUS_INFO_FMT(logger_, "Reached max_frames limit (%d), stopping",
+                              options.max_frames);
+            break;
+        }
+        
+        // 检查生产者状态
+        if (!producer_->isRunning()) {
+            LOG4CPLUS_INFO(logger_, "Producer stopped naturally");
+            break;
+        }
+        
+        // 获取Buffer
+        Buffer* buffer = pool_sptr_->acquireFilled(true, options.acquire_timeout_ms);
+        
+        if (buffer) {
+            int channel_id = buffer->getOutputChannel();
+            
+            // 检查是否应该消费该通道
+            if (!consumer->shouldConsumeChannel(channel_id)) {
+                pool_sptr_->releaseFilled(buffer);
+                result.skipped_count++;
+                continue;
+            }
+            
+            // 消费Buffer
+            if (consumer->consume(buffer, channel_id)) {
+                result.success_count++;
+            } else {
+                result.failed_count++;
+            }
+            
+            pool_sptr_->releaseFilled(buffer);
+            result.total_consumed++;
+            timeout_count = 0;
+        } else {
+            timeout_count++;
+            if (timeout_count >= options.max_timeout_count) {
+                LOG4CPLUS_INFO(logger_, "Consumer timeout, stopping");
+                break;
+            }
+        }
+    }
+    
+    result.timeout_count = timeout_count;
+}
+
+void ProductionLineTestService::drainRemainingBuffers(IBufferConsumer* consumer,
+                                                     Result& result) {
+    Buffer* buffer = nullptr;
+    
+    while ((buffer = pool_sptr_->acquireFilled(false, 0)) != nullptr) {
+        int channel_id = buffer->getOutputChannel();
+        
+        if (!consumer->shouldConsumeChannel(channel_id)) {
+            pool_sptr_->releaseFilled(buffer);
+            continue;
+        }
+        
+        if (consumer->consume(buffer, channel_id)) {
+            result.success_count++;
+        } else {
+            result.failed_count++;
+        }
+        
+        pool_sptr_->releaseFilled(buffer);
+        result.total_consumed++;
+        result.drained_count++;
+    }
+    
+    if (result.drained_count > 0) {
+        LOG4CPLUS_INFO_FMT(logger_, "Drained %d remaining buffers", result.drained_count);
+    }
 }
 
 } // namespace consumer

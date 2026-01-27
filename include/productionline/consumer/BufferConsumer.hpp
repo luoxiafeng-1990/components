@@ -12,6 +12,7 @@
 #include <map>
 #include <set>
 #include <mutex>
+#include <sstream>
 #include <log4cplus/logger.h>
 
 // FFmpeg 前向声明
@@ -39,15 +40,118 @@ namespace productionline {
 namespace consumer {
 
 /**
- * @brief Buffer 消费者接口（策略模式）
+ * @brief 错误码枚举（统一错误处理）
+ * 
+ * 用于标识不同类型的错误，便于错误处理和诊断
+ */
+enum class ConsumerErrorCode {
+    SUCCESS = 0,                    // 成功
+    
+    // ========== 初始化错误 (1000-1999) ==========
+    ERROR_INVALID_CONFIG = 1001,    // 配置无效
+    ERROR_CONSUMER_NULL = 1002,     // 消费者指针为空
+    ERROR_ALREADY_OPEN = 1003,      // 服务已打开
+    ERROR_NOT_OPEN = 1004,          // 服务未打开
+    
+    // ========== 生产者错误 (2000-2999) ==========
+    ERROR_PRODUCER_START_FAILED = 2001,  // 生产者启动失败
+    ERROR_PRODUCER_NOT_RUNNING = 2002,   // 生产者未运行
+    
+    // ========== BufferPool 错误 (3000-3999) ==========
+    ERROR_BUFFER_POOL_NOT_FOUND = 3001,  // BufferPool 未找到
+    ERROR_BUFFER_POOL_DESTROYED = 3002,  // BufferPool 已销毁
+    ERROR_BUFFER_ACQUIRE_TIMEOUT = 3003, // Buffer 获取超时
+    ERROR_FIRST_BUFFER_TIMEOUT = 3004,   // 第一个 Buffer 获取超时
+    
+    // ========== 消费者错误 (4000-4999) ==========
+    ERROR_CONSUMER_INIT_FAILED = 4001,   // 消费者初始化失败
+    ERROR_CONSUMER_CONSUME_FAILED = 4002, // 消费者消费失败
+    
+    // ========== PSNR 对比错误 (5000-5999) ==========
+    ERROR_PSNR_INIT_FAILED = 5001,      // PSNR 初始化失败
+    ERROR_PSNR_SW_PRODUCER_FAILED = 5002, // 软件解码器创建失败
+    ERROR_PSNR_COMPARATOR_FAILED = 5003,  // PSNR 对比器创建失败
+    ERROR_PSNR_PTS_ALIGNMENT_FAILED = 5004, // PTS 对齐失败
+    
+    // ========== 运行时错误 (6000-6999) ==========
+    ERROR_RUNTIME_TIMEOUT = 6001,        // 运行时超时
+    ERROR_RUNTIME_MAX_FRAMES_REACHED = 6002, // 达到最大帧数
+    ERROR_RUNTIME_UNKNOWN = 6999          // 未知运行时错误
+};
+
+/**
+ * @brief 错误信息结构（增强的错误回调）
+ * 
+ * 包含完整的错误信息，便于错误处理和诊断
+ */
+struct ConsumerErrorInfo {
+    ConsumerErrorCode code;              // 错误码
+    std::string message;                 // 错误消息
+    std::string location;                // 错误位置（函数名、文件名等）
+    int line = 0;                        // 错误行号（可选）
+    std::map<std::string, std::string> context; // 错误上下文（键值对）
+    
+    /**
+     * @brief 转换为字符串（用于日志输出）
+     */
+    std::string toString() const {
+        std::ostringstream oss;
+        oss << "[" << static_cast<int>(code) << "] " << message;
+        if (!location.empty()) {
+            oss << " @ " << location;
+            if (line > 0) {
+                oss << ":" << line;
+            }
+        }
+        if (!context.empty()) {
+            oss << " {";
+            bool first = true;
+            for (const auto& pair : context) {
+                if (!first) oss << ", ";
+                oss << pair.first << "=" << pair.second;
+                first = false;
+            }
+            oss << "}";
+        }
+        return oss.str();
+    }
+};
+
+/**
+ * @brief 增强的错误回调函数类型
+ * 
+ * 使用 ConsumerErrorInfo 替代简单的字符串，提供更丰富的错误信息
+ */
+using ErrorCallback = std::function<void(const ConsumerErrorInfo&)>;
+
+/**
+ * @brief 兼容旧代码的简单错误回调函数类型
+ * 
+ * 用于向后兼容，自动转换为增强的错误回调
+ */
+using SimpleErrorCallback = std::function<void(const std::string&)>;
+
+/**
+ * @brief Buffer 消费者接口（第一部分：策略接口，策略模式）
  * 
  * 职责：
- * - 定义如何消费单个 Buffer
- * - 支持不同消费策略（显示、写入、比较等）
+ * - 定义消费算法的抽象接口
+ * - 使不同消费策略可互换
+ * - 单一职责：只负责消费逻辑
+ * 
+ * 设计模式：
+ * - 策略模式：定义一系列算法，使它们可互换
  * 
  * 设计原则：
  * - 单一职责：只负责消费逻辑
  * - 无状态：消费操作应该是无状态的（或通过构造函数注入状态）
+ * - 开闭原则：对扩展开放，对修改关闭（新增策略无需修改上下文）
+ * 
+ * 具体策略实现：
+ * - DisplayConsumer：显示策略
+ * - FileWriterConsumer：单文件写入策略
+ * - MultiChannelFileWriterConsumer：多通道文件写入策略
+ * - EncodedStreamWriterConsumer：编码流写入策略
  */
 class IBufferConsumer {
 public:
@@ -119,76 +223,237 @@ struct RunOptions {
     bool auto_close = true;
     
     /**
-     * @brief 错误回调（可选）
+     * @brief 增强的错误回调（推荐使用）
      * 
-     * @note 等价于直接传给 open() 的 error_callback。
+     * @note 提供完整的错误信息，包括错误码、位置、上下文等
      */
-    std::function<void(const std::string&)> error_callback = nullptr;
+    ErrorCallback error_callback = nullptr;
+    
+    /**
+     * @brief 简单错误回调（向后兼容）
+     * 
+     * @note 如果设置了 error_callback，此字段将被忽略
+     * @deprecated 建议使用 error_callback 替代
+     */
+    SimpleErrorCallback simple_error_callback = nullptr;
+};
+
+// ============================================================================
+// 第二部分：策略选择配置部分（前置声明，供 BufferConsumerService 使用）
+// ============================================================================
+
+/**
+ * @brief 消费者配置（策略选择配置）
+ * 
+ * 职责：
+ * - 定义所有消费策略的配置参数
+ * - 通过配置选择消费策略类型
+ * - 提供策略创建所需的所有参数
+ */
+struct ConsumerConfig {
+    /**
+     * @brief 消费者类型枚举
+     */
+    enum class Type {
+        DISPLAY,              // 显示消费
+        FILE_WRITER,          // 单文件写入消费
+        MULTI_CHANNEL_FILE,   // 多通道文件写入消费
+        BUFFER_COMPARE,       // Buffer比较消费
+        ENCODED_STREAM        // 编码流写入消费
+    };
+    
+    Type type = Type::DISPLAY;
+    
+    // ========== DisplayConsumer 配置 ==========
+    LinuxFramebufferDevice* display_device = nullptr;
+    bool display_ch0_enable = true;
+    bool display_ch1_enable = false;
+    
+    // ========== FileWriterConsumer 配置 ==========
+    std::string file_output_path;
+    bool file_ch0_enable = true;
+    bool file_ch1_enable = false;
+    
+    // ========== MultiChannelFileWriterConsumer 配置 ==========
+    std::vector<std::string> multi_file_output_paths;
+    bool multi_file_ch0_enable = true;
+    bool multi_file_ch1_enable = false;
+    
+    // ========== BufferCompareConsumer 配置 ==========
+    std::shared_ptr<BufferPool> reference_pool;
+    io::CompareConfig compare_config;
+    bool compare_ch0_enable = true;
+    bool compare_ch1_enable = false;
+    
+    // ========== EncodedStreamWriterConsumer 配置 ==========
+    std::string encoded_output_path;
+    const AVCodecParameters* codec_params = nullptr;
+    AVRational time_base = {0, 0};
 };
 
 /**
- * @brief BufferConsumerService - 消费者服务类（门面模式）
+ * @brief PSNR 对比配置（子配置）
+ * 
+ * 用于配置 PSNR 对比相关的参数
+ */
+struct PSNRConfig {
+    bool enable = false;                      // 是否启用 PSNR 对比
+    bool enable_multi_channel = false;        // 是否启用多通道 PSNR 对比
+    double quick_psnr_threshold = 38.0;       // PSNR 快速阈值
+    double quick_warn_threshold = 35.0;       // PSNR 警告阈值
+    double ssim_threshold = 0.95;             // SSIM 阈值
+    double ssim_warn_threshold = 0.90;       // SSIM 警告阈值
+    bool enable_parallel = true;              // 是否启用并行计算
+    bool use_perceptual_weighting = true;      // 是否使用感知加权
+    bool save_report = false;                  // 是否保存 PSNR 报告
+    std::string report_path = "./psnr_compare_report.txt";  // PSNR 报告路径（单通道模式）
+    std::string report_path_ch0 = "./psnr_compare_ch0_report.txt";  // PSNR 报告路径（ch0，多通道模式）
+    std::string report_path_ch1 = "./psnr_compare_ch1_report.txt";  // PSNR 报告路径（ch1，多通道模式）
+    bool enable_pts_alignment = true;         // 是否启用 PTS 对齐
+    int max_pts_match_attempts = 10;           // PTS 匹配最大尝试次数
+    bool enable_decoder_verification = true;   // 是否启用解码器验证
+    bool verbose_diagnosis = false;            // 是否输出详细诊断信息
+};
+
+/**
+ * @brief 生产者配置（子配置）
+ * 
+ * 用于配置 VideoProductionLine 相关参数
+ */
+struct ProductionLineConfig {
+    bool loop = false;                        // 是否循环播放
+    int thread_count = 1;                     // 线程数
+    bool enable_monitor = false;              // 是否启用监控
+};
+
+/**
+ * @brief 运行时配置（子配置）
+ * 
+ * 用于配置运行时行为参数
+ */
+struct RuntimeConfig {
+    int max_frames = -1;                      // 最大帧数（-1表示无限制）
+    int acquire_timeout_ms = 100;             // 获取 Buffer 超时时间（毫秒）
+    int max_timeout_count = 50;               // 最大超时次数
+    bool drain_remaining = true;              // 是否排空剩余 Buffer
+    bool wait_first_buffer = true;             // 是否等待第一个 Buffer
+    int first_buffer_timeout_ms = 5000;       // 第一个 Buffer 超时时间
+};
+
+/**
+ * @brief BufferConsumerService - 消费者服务类（第二部分：上下文，策略模式）
  * 
  * 职责：
- * - 封装完整的消费流程（创建生产线 → 启动 → 消费循环 → 清理）
- * - 管理生产线的生命周期
- * - 支持多种消费策略（通过 IBufferConsumer 接口）
+ * - 使用策略接口执行消费流程
+ * - 管理生产线、缓冲池、统计等基础设施
+ * - 不感知具体策略实现
  * 
  * 设计模式：
+ * - 策略模式：通过 IBufferConsumer* 持有策略实例，运行时动态选择消费算法
  * - 门面模式：简化复杂的消费流程
- * - 策略模式：支持不同的消费策略
  * - 模板方法模式：定义固定的消费流程骨架
  * 
- * 使用方式（类似 BufferWriter/BufferComparator）：
+ * 使用方式：
+ * 
+ * 方式一：传统方式（手动创建策略实例）
  * ```cpp
+ * DisplayConsumer consumer(&display, true, false);
+ * auto config = ConsumerConfigBuilder()
+ *     .setWorkerConfig(workerConfig)
+ *     .build();
+ * 
  * BufferConsumerService service;
- * DisplayConsumer consumer(&display);
- * 
- * BufferConsumerService::Config config;
- * config.worker_config = WorkerConfigBuilder()...build();
- * 
  * if (service.open(config, &consumer)) {
  *     service.run(running_flag);
  *     service.close();
  * }
  * ```
+ * 
+ * 方式二：简化方式（配置驱动，自动创建策略实例）
+ * ```cpp
+ * auto config = ConsumerConfigBuilder()
+ *     .setWorkerConfig(workerConfig)
+ *     .setConsumerType(ConsumerType::DISPLAY)
+ *     .setDisplayDevice(&display)
+ *     .setDisplayChannels(true, false)
+ *     .build();
+ * 
+ * BufferConsumerService service;
+ * service.execute(config, &running);  // 内部自动创建策略实例
+ * ```
  */
 class BufferConsumerService {
 public:
     /**
-     * @brief 服务配置
+     * @brief 服务配置（优化后的分层配置结构）
      */
     struct Config {
         WorkerConfig worker_config;           // Worker 配置（必需）
-        bool loop = false;                     // 是否循环播放
-        int thread_count = 1;                  // 线程数
-        bool enable_monitor = false;           // 是否启用监控
-        int max_frames = -1;                   // 最大帧数（-1表示无限制，双通道时建议翻倍）
-        int acquire_timeout_ms = 100;          // 获取 Buffer 超时时间（毫秒）
-        int max_timeout_count = 50;            // 最大超时次数（超过后停止）
-        bool drain_remaining = true;           // 是否排空剩余 Buffer
-        bool wait_first_buffer = true;         // 是否等待第一个 Buffer（用于初始化消费者）
-        int first_buffer_timeout_ms = 5000;    // 第一个 Buffer 超时时间
+        ProductionLineConfig production_line; // 生产者配置
+        RuntimeConfig runtime;                 // 运行时配置
+        PSNRConfig psnr;                      // PSNR 对比配置（可选）
         
-        // ========== PSNR 对比配置（可选）==========
-        bool enable_psnr_compare = false;      // 是否启用 PSNR 对比（自动创建软件解码器作为参考）
-        double quick_psnr_threshold = 38.0;     // PSNR 快速阈值
-        double quick_warn_threshold = 35.0;      // PSNR 警告阈值
-        double ssim_threshold = 0.95;           // SSIM 阈值
-        double ssim_warn_threshold = 0.90;      // SSIM 警告阈值
-        bool enable_parallel = true;            // 是否启用并行计算
-        bool use_perceptual_weighting = true;    // 是否使用感知加权
-        bool save_psnr_report = false;           // 是否保存 PSNR 报告
-        std::string psnr_report_path = "./psnr_compare_report.txt";  // PSNR 报告路径（单通道模式）
-        std::string psnr_report_path_ch0 = "./psnr_compare_ch0_report.txt";  // PSNR 报告路径（ch0，多通道模式）
-        std::string psnr_report_path_ch1 = "./psnr_compare_ch1_report.txt";  // PSNR 报告路径（ch1，多通道模式）
-        bool enable_multi_channel_psnr = false;   // 是否启用多通道 PSNR 对比（分别统计 PP0 和 PP1）
-        bool enable_pts_alignment = true;        // 是否启用 PTS 对齐（用于匹配硬件和软件解码器的帧）
-        int max_pts_match_attempts = 10;        // PTS 匹配最大尝试次数
+        /**
+         * @brief 验证配置有效性
+         * @return 错误信息，如果配置有效则返回空字符串
+         */
+        std::string validate() const {
+            // WorkerType::AUTO 是有效值，允许自动检测
+            if (runtime.max_frames < -1) {
+                return "RuntimeConfig is invalid: max_frames must be >= -1";
+            }
+            if (runtime.acquire_timeout_ms < 0) {
+                return "RuntimeConfig is invalid: acquire_timeout_ms must be >= 0";
+            }
+            if (runtime.max_timeout_count < 0) {
+                return "RuntimeConfig is invalid: max_timeout_count must be >= 0";
+            }
+            if (runtime.first_buffer_timeout_ms < 0) {
+                return "RuntimeConfig is invalid: first_buffer_timeout_ms must be >= 0";
+            }
+            if (production_line.thread_count < 1) {
+                return "ProductionLineConfig is invalid: thread_count must be >= 1";
+            }
+            if (psnr.enable && psnr.max_pts_match_attempts < 1) {
+                return "PSNRConfig is invalid: max_pts_match_attempts must be >= 1";
+            }
+            return "";  // 配置有效
+        }
         
-        // ========== 解码器诊断配置（可选）==========
-        bool enable_decoder_verification = true; // 是否启用解码器验证和诊断（检查硬件解码器是否真正使用）
-        bool verbose_diagnosis = false;          // 是否输出详细的诊断信息（包括可能的错误原因）
+        // ========== 向后兼容：保留旧字段的访问器 ==========
+        // 这些访问器允许旧代码继续工作，同时使用新的分层结构
+        
+        bool getLoop() const { return production_line.loop; }
+        void setLoop(bool loop) { production_line.loop = loop; }
+        
+        int getThreadCount() const { return production_line.thread_count; }
+        void setThreadCount(int count) { production_line.thread_count = count; }
+        
+        bool getEnableMonitor() const { return production_line.enable_monitor; }
+        void setEnableMonitor(bool enable) { production_line.enable_monitor = enable; }
+        
+        int getMaxFrames() const { return runtime.max_frames; }
+        void setMaxFrames(int frames) { runtime.max_frames = frames; }
+        
+        int getAcquireTimeout() const { return runtime.acquire_timeout_ms; }
+        void setAcquireTimeout(int timeout) { runtime.acquire_timeout_ms = timeout; }
+        
+        int getMaxTimeoutCount() const { return runtime.max_timeout_count; }
+        void setMaxTimeoutCount(int count) { runtime.max_timeout_count = count; }
+        
+        bool getDrainRemaining() const { return runtime.drain_remaining; }
+        void setDrainRemaining(bool drain) { runtime.drain_remaining = drain; }
+        
+        bool getWaitFirstBuffer() const { return runtime.wait_first_buffer; }
+        void setWaitFirstBuffer(bool wait) { runtime.wait_first_buffer = wait; }
+        
+        int getFirstBufferTimeout() const { return runtime.first_buffer_timeout_ms; }
+        void setFirstBufferTimeout(int timeout) { runtime.first_buffer_timeout_ms = timeout; }
+        
+        bool getEnablePSNRCompare() const { return psnr.enable; }
+        void setEnablePSNRCompare(bool enable) { psnr.enable = enable; }
+        
+        // ... 更多兼容性访问器可以根据需要添加
     };
     
     /**
@@ -224,12 +489,24 @@ public:
      * @brief 打开服务（初始化生产线和 BufferPool）
      * @param config 服务配置
      * @param consumer 消费者实例（由调用者管理生命周期）
-     * @param error_callback 错误回调（可选）
+     * @param error_callback 增强的错误回调（可选，推荐使用）
      * @return true 成功，false 失败
      */
     bool open(const Config& config, 
               IBufferConsumer* consumer,
-              std::function<void(const std::string&)> error_callback = nullptr);
+              ErrorCallback error_callback = nullptr);
+    
+    /**
+     * @brief 打开服务（兼容旧接口）
+     * @param config 服务配置
+     * @param consumer 消费者实例（由调用者管理生命周期）
+     * @param simple_error_callback 简单错误回调（向后兼容）
+     * @return true 成功，false 失败
+     * @deprecated 建议使用带 ErrorCallback 的版本
+     */
+    bool open(const Config& config, 
+              IBufferConsumer* consumer,
+              SimpleErrorCallback simple_error_callback);
     
     /**
      * @brief 运行消费循环（阻塞直到停止或完成）
@@ -250,6 +527,60 @@ public:
     bool runOnce(const Config& config,
                  IBufferConsumer* consumer,
                  RunOptions options = RunOptions());
+    
+    /**
+     * @brief 一键执行：自动创建策略实例 → open → run → printStats → close（新接口）
+     * 
+     * 职责：
+     * - 通过 ConsumerFactory 创建策略实例
+     * - 执行完整的消费流程
+     * - 自动管理策略实例的生命周期
+     * 
+     * @param service_config 服务配置（WorkerConfig、PSNR、超时等）
+     * @param consumer_config 消费者策略配置（类型和参数）
+     * @param running_flag 运行标志（可选，如果为 nullptr 则内部创建）
+     * @param error_callback 增强的错误回调（可选，推荐使用）
+     * @return true 成功执行完成，false 失败
+     * 
+     * @note 这是配置驱动的简化接口，内部会自动创建策略实例
+     * 
+     * @example
+     * ```cpp
+     * BufferConsumerService service;
+     * auto service_config = ConsumerConfigBuilder()
+     *     .setWorkerConfig(workerConfig)
+     *     .setMaxFrames(1000)
+     *     .build();
+     * 
+     * auto consumer_config = ConsumerStrategyConfigBuilder()
+     *     .setType(ConsumerConfig::Type::DISPLAY)
+     *     .setDisplayDevice(&display)
+     *     .setDisplayChannels(true, false)
+     *     .build();
+     * 
+     * std::atomic<bool> running(true);
+     * ErrorCallback error_handler = [](const ConsumerErrorInfo& error) {
+     *     LOG_ERROR("Error: " << error.toString());
+     * };
+     * if (service.execute(service_config, consumer_config, &running, error_handler)) {
+     *     LOG_INFO("✅ 执行成功");
+     * }
+     * ```
+     */
+    bool execute(const Config& service_config,
+                 const ConsumerConfig& consumer_config,
+                 std::atomic<bool>* running_flag = nullptr,
+                 ErrorCallback error_callback = nullptr);
+    
+    /**
+     * @brief 一键执行（兼容旧接口）
+     * @deprecated 建议使用带 ErrorCallback 的版本
+     */
+    bool execute(const Config& service_config,
+                 const ConsumerConfig& consumer_config,
+                 std::atomic<bool>* running_flag,
+                 SimpleErrorCallback simple_error_callback);
+    
     
     /**
      * @brief 关闭服务（停止生产线，清理资源）
@@ -296,6 +627,7 @@ private:
     Config config_;
     bool is_open_;
     IBufferConsumer* consumer_;
+    ErrorCallback error_callback_;  // 增强的错误回调
     std::unique_ptr<VideoProductionLine> producer_;
     std::shared_ptr<BufferPool> pool_sptr_;
     Stats stats_;
@@ -324,10 +656,29 @@ private:
     std::map<int, std::atomic<int>> psnr_fail_count_by_channel_;      // 每个通道的失败次数
     log4cplus::Logger logger_;
     
-    bool initializeProducer(std::function<void(const std::string&)> error_callback);
+    bool initializeProducer(ErrorCallback error_callback);
     bool initializeBufferPool();
     bool initializeConsumer();
-    bool initializePSNRCompare(std::function<void(const std::string&)> error_callback);
+    bool initializePSNRCompare(ErrorCallback error_callback);
+    
+    /**
+     * @brief 报告错误（统一错误处理入口）
+     * @param code 错误码
+     * @param message 错误消息
+     * @param location 错误位置（函数名等）
+     * @param line 错误行号（可选）
+     * @param context 错误上下文（可选）
+     */
+    void reportError(ConsumerErrorCode code,
+                     const std::string& message,
+                     const std::string& location = "",
+                     int line = 0,
+                     const std::map<std::string, std::string>& context = {});
+    
+    /**
+     * @brief 将简单错误回调转换为增强错误回调
+     */
+    ErrorCallback wrapSimpleErrorCallback(SimpleErrorCallback simple_callback);
     bool performPSNRCompare(Buffer* hw_buffer);
     Buffer* acquireSoftwareBufferByPTS(int64_t hw_pts);  // 通过PTS获取软件buffer（辅助函数）
     void processPendingBuffers();  // 处理等待队列中剩余的buffer（当producer停止或超时时）
@@ -349,20 +700,52 @@ private:
 };
 
 /**
- * @brief BufferConsumerService 配置构建器
+ * @brief BufferConsumerService 配置构建器（第三部分：配置/工厂）
  * 
- * 提供链式调用的方式构建 BufferConsumerService::Config
+ * 职责：
+ * - Builder 模式：通过链式调用构建 BufferConsumerService::Config
+ * - Factory 模式：根据配置创建策略实例
+ * - 统一管理配置和策略创建逻辑
  * 
- * @example
+ * 设计模式：
+ * - Builder 模式：链式构建配置，提高可读性
+ * - Factory 模式：根据配置创建策略实例，封装创建逻辑
+ * 
+ * 使用方式：
+ * 
+ * 方式一：使用实例方法创建策略实例
+ * ```cpp
+ * auto builder = ConsumerConfigBuilder()
+ *     .setWorkerConfig(workerConfig)
+ *     .setConsumerType(ConsumerType::DISPLAY)
+ *     .setDisplayDevice(&display)
+ *     .setDisplayChannels(true, false);
+ * 
+ * auto consumer = builder.createConsumer();  // 从当前配置创建策略实例
+ * auto config = builder.build();              // 构建配置
+ * ```
+ * 
+ * 方式二：使用静态方法创建策略实例
  * ```cpp
  * auto config = ConsumerConfigBuilder()
  *     .setWorkerConfig(workerConfig)
- *     .setLoop(false)
- *     .setThreadCount(1)
- *     .setMaxFrames(300)
- *     .setEnablePSNRCompare(true)
- *     .setQuickPSNRThreshold(38.0)
+ *     .setConsumerType(ConsumerType::DISPLAY)
+ *     .setDisplayDevice(&display)
  *     .build();
+ * 
+ * auto consumer = ConsumerConfigBuilder::createConsumer(config);  // 从配置创建策略实例
+ * ```
+ * 
+ * 方式三：配合 execute() 使用（推荐）
+ * ```cpp
+ * auto config = ConsumerConfigBuilder()
+ *     .setWorkerConfig(workerConfig)
+ *     .setConsumerType(ConsumerType::DISPLAY)
+ *     .setDisplayDevice(&display)
+ *     .build();
+ * 
+ * BufferConsumerService service;
+ * service.execute(config, &running);  // 内部自动调用 createConsumer()
  * ```
  */
 class ConsumerConfigBuilder {
@@ -505,10 +888,49 @@ public:
      */
     ConsumerConfigBuilder& setVerboseDiagnosis(bool verbose);
     
+    // ========== 分层配置的便捷方法 ==========
+    
     /**
-     * @brief 构建最终配置
+     * @brief 设置生产者配置（链式构建）
      */
-    BufferConsumerService::Config build() const;
+    ConsumerConfigBuilder& setProductionLine(const ProductionLineConfig& config);
+    
+    /**
+     * @brief 设置运行时配置（链式构建）
+     */
+    ConsumerConfigBuilder& setRuntime(const RuntimeConfig& config);
+    
+    /**
+     * @brief 设置 PSNR 配置（链式构建）
+     */
+    ConsumerConfigBuilder& setPSNR(const PSNRConfig& config);
+    
+    // ========== 配置验证 ==========
+    
+    /**
+     * @brief 验证当前配置
+     * @return 错误信息，如果配置有效则返回空字符串
+     */
+    std::string validate() const;
+    
+    /**
+     * @brief 构建最终配置（带验证）
+     * @param validate_config 是否在构建时验证配置（默认 true）
+     * @return 配置对象
+     * @throw std::runtime_error 如果配置无效且 validate_config=true
+     */
+    BufferConsumerService::Config build(bool validate_config = true) const;
+    
+    /**
+     * @brief 构建最终配置（不验证，用于向后兼容）
+     * @deprecated 建议使用 build(true) 进行验证
+     */
+    BufferConsumerService::Config buildUnsafe() const {
+        return build(false);
+    }
+    
+    // 注意：消费者配置已移至独立的 ConsumerConfig 和 ConsumerFactory
+    // 请使用 ConsumerStrategyConfigBuilder 构建消费者配置，使用 ConsumerFactory 创建消费者
     
 private:
     BufferConsumerService::Config config_;
@@ -519,125 +941,12 @@ private:
 /**
  * @brief 显示消费者（DMA 显示）
  */
-class DisplayConsumer : public IBufferConsumer {
-public:
-    /**
-     * @brief 构造函数
-     * @param display 显示设备指针
-     * @param ch0_enable 是否启用通道0（默认 true）
-     * @param ch1_enable 是否启用通道1（默认 true）
-     */
-    explicit DisplayConsumer(LinuxFramebufferDevice* display,
-                             bool ch0_enable = true,
-                             bool ch1_enable = true);
-    
-    bool initialize(Buffer* first_buffer) override;
-    bool consume(Buffer* buffer, int channel_id) override;
-    std::string getStats() const override;
-    bool shouldConsumeChannel(int channel_id) const override;
-
-private:
-    LinuxFramebufferDevice* display_;
-    bool ch0_enable_;
-    bool ch1_enable_;
-    int success_count_;
-    int failed_count_;
-    int total_count_;
-    log4cplus::Logger logger_;
-};
-
-/**
- * @brief 文件写入消费者（单文件）
- * 
- * 支持通道过滤：可以配置只处理 ch0 或 ch1
- */
-class FileWriterConsumer : public IBufferConsumer {
-public:
-    /**
-     * @brief 构造函数
-     * @param output_path 输出文件路径
-     * @param enable_ch0 是否启用通道0（默认 true）
-     * @param enable_ch1 是否启用通道1（默认 false）
-     */
-    explicit FileWriterConsumer(const std::string& output_path,
-                                bool enable_ch0 = true,
-                                bool enable_ch1 = false);
-    ~FileWriterConsumer();
-    
-    bool initialize(Buffer* first_buffer) override;
-    bool consume(Buffer* buffer, int channel_id) override;
-    void cleanup() override;
-    std::string getStats() const override;
-    bool shouldConsumeChannel(int channel_id) const override;
-
-private:
-    std::unique_ptr<io::BufferWriter> writer_;
-    std::string output_path_;
-    bool initialized_;
-    bool enable_ch0_;
-    bool enable_ch1_;
-    int write_count_;
-    int failed_count_;
-    log4cplus::Logger logger_;
-};
-
-/**
- * @brief 多通道文件写入消费者（支持 PP0/PP1 双通道）
- */
-class MultiChannelFileWriterConsumer : public IBufferConsumer {
-public:
-    MultiChannelFileWriterConsumer(
-        const std::vector<std::string>& output_paths,
-        bool enable_ch0, bool enable_ch1);
-    ~MultiChannelFileWriterConsumer();
-    
-    bool initialize(Buffer* first_buffer) override;
-    bool consume(Buffer* buffer, int channel_id) override;
-    void cleanup() override;
-    std::string getStats() const override;
-    bool shouldConsumeChannel(int channel_id) const override;
-
-private:
-    std::vector<std::unique_ptr<io::BufferWriter>> writers_;
-    std::vector<std::string> output_paths_;
-    std::vector<bool> initialized_;
-    bool enable_ch0_;
-    bool enable_ch1_;
-    int write_count_;
-    int failed_count_;
-    log4cplus::Logger logger_;
-};
-
-/**
- * @brief 比较消费者（BufferComparator）
- * 
- * 用于对比两个解码器的输出（硬件 vs 软件）
- * 
- * ⚠️ 已废弃：此消费者不支持PTS对齐，仅用于简单的顺序对比。
- * 请使用 DualBufferCompareService 进行带PTS对齐的对比。
- * 
- * 此类的实现已注释，如需使用请取消注释。
- */
-/*
-class CompareConsumer : public IBufferConsumer {
-public:
-    CompareConsumer(
-        io::BufferComparator* comparator,
-        std::shared_ptr<BufferPool> reference_pool);
-    
-    bool initialize(Buffer* first_buffer) override;
-    bool consume(Buffer* buffer, int channel_id) override;
-    std::string getStats() const override;
-
-private:
-    io::BufferComparator* comparator_;
-    std::shared_ptr<BufferPool> reference_pool_;
-    int compare_count_;
-    int success_count_;
-    int failed_count_;
-    log4cplus::Logger logger_;
-};
-*/
+// ============================================================================
+// 第三部分：策略实现部分（已移至独立的策略库文件）
+// ============================================================================
+// 策略实现类已移至 BufferConsumerStrategies.hpp/cpp
+// 包含策略库头文件以使用策略实现类
+#include "productionline/consumer/BufferConsumerStrategies.hpp"
 
 /**
  * @brief 双BufferPool对比服务（支持PTS对齐）
@@ -840,33 +1149,246 @@ private:
     void drainRemainingBuffers();
 };
 
+// EncodedStreamWriterConsumer 已移至 BufferConsumerStrategies.hpp
+
+// ============================================================================
+// 第二部分：策略选择配置部分（ConsumerConfig 已在上面定义）
+// ============================================================================
+
 /**
- * @brief 编码流写入消费者（MP4 封装）
+ * @brief 消费者工厂（根据配置创建策略实例）
  * 
- * 用于录制编码流（不解码，直接 remux）
+ * 职责：
+ * - 根据 ConsumerConfig 创建对应的消费策略实例
+ * - 隐藏策略创建细节
+ * - 提供统一的创建接口
  */
-class EncodedStreamWriterConsumer : public IBufferConsumer {
+class ConsumerFactory {
 public:
-    EncodedStreamWriterConsumer(
+    /**
+     * @brief 根据配置创建消费者实例
+     * @param config 消费者配置
+     * @return 消费者实例（unique_ptr，由调用者管理）
+     */
+    static std::unique_ptr<IBufferConsumer> create(const ConsumerConfig& config);
+    
+    /**
+     * @brief 创建显示消费者（便捷方法）
+     */
+    static std::unique_ptr<IBufferConsumer> createDisplayConsumer(
+        LinuxFramebufferDevice* display,
+        bool ch0_enable = true,
+        bool ch1_enable = false);
+    
+    /**
+     * @brief 创建文件写入消费者（便捷方法）
+     */
+    static std::unique_ptr<IBufferConsumer> createFileWriterConsumer(
+        const std::string& output_path,
+        bool ch0_enable = true,
+        bool ch1_enable = false);
+    
+    /**
+     * @brief 创建多通道文件写入消费者（便捷方法）
+     */
+    static std::unique_ptr<IBufferConsumer> createMultiChannelFileWriterConsumer(
+        const std::vector<std::string>& output_paths,
+        bool ch0_enable = true,
+        bool ch1_enable = false);
+    
+    /**
+     * @brief 创建Buffer比较消费者（便捷方法）
+     */
+    static std::unique_ptr<IBufferConsumer> createBufferCompareConsumer(
+        std::shared_ptr<BufferPool> reference_pool,
+        const io::CompareConfig& compare_config,
+        bool ch0_enable = true,
+        bool ch1_enable = false);
+    
+    /**
+     * @brief 创建编码流写入消费者（便捷方法）
+     */
+    static std::unique_ptr<IBufferConsumer> createEncodedStreamConsumer(
         const std::string& output_path,
         const AVCodecParameters* codec_params,
         AVRational time_base);
-    ~EncodedStreamWriterConsumer();
-    
-    bool initialize(Buffer* first_buffer) override;
-    bool consume(Buffer* buffer, int channel_id) override;
-    void cleanup() override;
-    std::string getStats() const override;
 
 private:
-    std::unique_ptr<io::BufferWriter> writer_;
-    std::string output_path_;
-    const AVCodecParameters* codec_params_;
-    AVRational time_base_;
-    bool initialized_;
-    int packet_count_;
-    int64_t total_bytes_;
-    int failed_count_;
+    static log4cplus::Logger logger_;
+};
+
+/**
+ * @brief 消费者策略配置建造者（简化策略配置构建）
+ * 
+ * 注意：此 Builder 用于构建独立的消费者策略配置（ConsumerConfig），
+ * 不包含 WorkerConfig 等服务配置。如需完整服务配置，请使用上方的 ConsumerConfigBuilder。
+ */
+class ConsumerStrategyConfigBuilder {
+public:
+    ConsumerStrategyConfigBuilder& setType(ConsumerConfig::Type type) {
+        config_.type = type;
+        return *this;
+    }
+    
+    // DisplayConsumer 配置方法
+    ConsumerStrategyConfigBuilder& setDisplayDevice(LinuxFramebufferDevice* device) {
+        config_.display_device = device;
+        return *this;
+    }
+    
+    ConsumerStrategyConfigBuilder& setDisplayChannels(bool ch0, bool ch1) {
+        config_.display_ch0_enable = ch0;
+        config_.display_ch1_enable = ch1;
+        return *this;
+    }
+    
+    // FileWriterConsumer 配置方法
+    ConsumerStrategyConfigBuilder& setFileOutputPath(const std::string& path) {
+        config_.file_output_path = path;
+        return *this;
+    }
+    
+    ConsumerStrategyConfigBuilder& setFileChannels(bool ch0, bool ch1) {
+        config_.file_ch0_enable = ch0;
+        config_.file_ch1_enable = ch1;
+        return *this;
+    }
+    
+    // MultiChannelFileWriterConsumer 配置方法
+    ConsumerStrategyConfigBuilder& setMultiFileOutputPaths(const std::vector<std::string>& paths) {
+        config_.multi_file_output_paths = paths;
+        return *this;
+    }
+    
+    ConsumerStrategyConfigBuilder& setMultiFileChannels(bool ch0, bool ch1) {
+        config_.multi_file_ch0_enable = ch0;
+        config_.multi_file_ch1_enable = ch1;
+        return *this;
+    }
+    
+    // BufferCompareConsumer 配置方法
+    ConsumerStrategyConfigBuilder& setReferencePool(std::shared_ptr<BufferPool> pool) {
+        config_.reference_pool = pool;
+        return *this;
+    }
+    
+    ConsumerStrategyConfigBuilder& setCompareConfig(const io::CompareConfig& compare_config) {
+        config_.compare_config = compare_config;
+        return *this;
+    }
+    
+    ConsumerStrategyConfigBuilder& setCompareChannels(bool ch0, bool ch1) {
+        config_.compare_ch0_enable = ch0;
+        config_.compare_ch1_enable = ch1;
+        return *this;
+    }
+    
+    // EncodedStreamWriterConsumer 配置方法
+    ConsumerStrategyConfigBuilder& setEncodedOutputPath(const std::string& path) {
+        config_.encoded_output_path = path;
+        return *this;
+    }
+    
+    ConsumerStrategyConfigBuilder& setEncodedCodecParams(const AVCodecParameters* params, AVRational time_base) {
+        config_.codec_params = params;
+        config_.time_base = time_base;
+        return *this;
+    }
+    
+    ConsumerConfig build() const {
+        return config_;
+    }
+
+private:
+    ConsumerConfig config_;
+};
+
+// ============================================================================
+// 测试服务（使用消费者组件）
+// ============================================================================
+
+/**
+ * @brief 生产线测试服务 - 封装固定流程，使用消费者组件
+ * 
+ * 职责：
+ * - 封装重复的测试流程：创建生产线 → 启动 → 获取Buffer → 消费 → 停止
+ * - 管理生产线和BufferPool生命周期
+ * - 提供统一的消费循环逻辑
+ */
+class ProductionLineTestService {
+public:
+    struct Options {
+        bool loop = false;                     // 是否循环
+        int thread_count = 1;                  // 线程数
+        bool enable_monitor = false;           // 是否启用监控
+        int max_frames = -1;                   // 最大帧数（-1表示无限制）
+        int acquire_timeout_ms = 100;         // 获取Buffer超时（毫秒）
+        int max_timeout_count = 50;            // 最大超时次数
+        bool drain_remaining = true;           // 是否排空剩余Buffer
+        bool wait_first_buffer = false;        // 是否等待第一个Buffer
+        int first_buffer_timeout_ms = 5000;    // 第一个Buffer超时
+    };
+    
+    struct Result {
+        bool success = false;
+        int total_consumed = 0;
+        int success_count = 0;
+        int failed_count = 0;
+        int skipped_count = 0;
+        int timeout_count = 0;
+        int drained_count = 0;
+        double avg_fps = 0.0;
+    };
+    
+    ProductionLineTestService();
+    ~ProductionLineTestService();
+    
+    // 禁止拷贝
+    ProductionLineTestService(const ProductionLineTestService&) = delete;
+    ProductionLineTestService& operator=(const ProductionLineTestService&) = delete;
+    
+    /**
+     * @brief 运行完整测试流程
+     * 
+     * @param worker_config Worker配置
+     * @param consumer 消费者实例（由调用者管理生命周期）
+     * @param running_flag 运行标志（可选）
+     * @param options 运行选项（可选）
+     * @param error_callback 错误回调（可选）
+     * @return Result 运行结果
+     */
+    Result run(
+        const WorkerConfig& worker_config,
+        IBufferConsumer* consumer,
+        std::atomic<bool>* running_flag = nullptr,
+        const Options& options = Options(),
+        std::function<void(const std::string&)> error_callback = nullptr
+    );
+    
+    /**
+     * @brief 获取生产线实例（用于高级操作）
+     */
+    VideoProductionLine* getProductionLine() { return producer_.get(); }
+    
+    /**
+     * @brief 获取BufferPool实例（用于高级操作）
+     */
+    std::shared_ptr<BufferPool> getBufferPool() { return pool_sptr_; }
+
+private:
+    bool initializeProducer(const WorkerConfig& worker_config,
+                           const Options& options,
+                           std::function<void(const std::string&)> error_callback);
+    bool initializeBufferPool();
+    bool initializeConsumer(IBufferConsumer* consumer, const Options& options);
+    void consumeLoop(const Options& options,
+                    IBufferConsumer* consumer,
+                    std::atomic<bool>& running_flag,
+                    Result& result);
+    void drainRemainingBuffers(IBufferConsumer* consumer, Result& result);
+    
+    std::unique_ptr<VideoProductionLine> producer_;
+    std::shared_ptr<BufferPool> pool_sptr_;
     log4cplus::Logger logger_;
 };
 
