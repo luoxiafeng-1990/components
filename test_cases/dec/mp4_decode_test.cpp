@@ -50,7 +50,7 @@
 #include "productionline/worker/WorkerConfig.hpp"
 #include "productionline/worker/BufferFillingWorkerFacade.hpp"
 #include "productionline/worker/FfmpegPacketRecorderWorker.hpp"
-#include "productionline/worker/FfmpegDecodeVideoFileWorker.hpp"
+#include "productionline/worker/FFmpegDecodeWorker.hpp"
 #include "productionline/worker/WorkerBase.hpp"
 #include "productionline/worker/RtspPacketSource.hpp"  // ⭐ 添加：用于 RTSP 中断处理
  #include "productionline/io/BufferWriter.hpp"
@@ -463,7 +463,7 @@ static bool load_source_gop_map(
              .setBitsPerPixel(32)
              .build())
          .setDecoderConfig(hw_decoderConfigBuilder.build())
-         .setWorkerType(WorkerType::FFMPEG_VIDEO_FILE)
+         .setWorkerType(WorkerType::FFMPEG_DECODE)
          .build();
 
     hw_producer.setErrorCallback([](const std::string& error) {
@@ -488,7 +488,7 @@ static bool load_source_gop_map(
              .setBitsPerPixel(32)
              .build())
          .setDecoderConfig(DecoderConfigBuilder().useSoftware().build())
-         .setWorkerType(WorkerType::FFMPEG_VIDEO_FILE)
+         .setWorkerType(WorkerType::FFMPEG_DECODE)
          .build();
 
     sw_producer.setErrorCallback([](const std::string& error) {
@@ -528,10 +528,10 @@ static bool load_source_gop_map(
          LOG_INFO("\n  🔍 Decoder Verification:");
          
          // 通过 dynamic_cast 获取实际的 Worker 并调用 getCodecName()
-         auto* hw_worker = dynamic_cast<FfmpegDecodeVideoFileWorker*>(
+         auto* hw_worker = dynamic_cast<FFmpegDecodeWorker*>(
              const_cast<WorkerBase*>(hw_worker_facade->getWorkerBase())
          );
-         auto* sw_worker = dynamic_cast<FfmpegDecodeVideoFileWorker*>(
+         auto* sw_worker = dynamic_cast<FFmpegDecodeWorker*>(
              const_cast<WorkerBase*>(sw_worker_facade->getWorkerBase())
          );
          
@@ -2190,7 +2190,7 @@ static int run_pp0_test_with_format(
             .setBitsPerPixel(32)
             .build())
         .setDecoderConfig(hw_decoderConfigBuilder.build())
-        .setWorkerType(WorkerType::FFMPEG_VIDEO_FILE)
+        .setWorkerType(WorkerType::FFMPEG_DECODE)
         .build();
     
     hw_producer.setErrorCallback([](const std::string& error) {
@@ -2211,7 +2211,7 @@ static int run_pp0_test_with_format(
             .setBitsPerPixel(32)
             .build())
         .setDecoderConfig(DecoderConfigBuilder().useSoftware().build())
-        .setWorkerType(WorkerType::FFMPEG_VIDEO_FILE)
+        .setWorkerType(WorkerType::FFMPEG_DECODE)
         .build();
     
     sw_producer.setErrorCallback([](const std::string& error) {
@@ -2489,7 +2489,7 @@ static int run_pp1_test_with_format(
             .setBitsPerPixel(32)
             .build())
         .setDecoderConfig(hw_decoderConfigBuilder.build())
-        .setWorkerType(WorkerType::FFMPEG_VIDEO_FILE)
+        .setWorkerType(WorkerType::FFMPEG_DECODE)
         .build();
     
     hw_producer.setErrorCallback([](const std::string& error) {
@@ -2510,7 +2510,7 @@ static int run_pp1_test_with_format(
             .setBitsPerPixel(32)
             .build())
         .setDecoderConfig(DecoderConfigBuilder().useSoftware().build())
-        .setWorkerType(WorkerType::FFMPEG_VIDEO_FILE)
+        .setWorkerType(WorkerType::FFMPEG_DECODE)
         .build();
     
     sw_producer.setErrorCallback([](const std::string& error) {
@@ -2829,7 +2829,7 @@ static int run_multi_pp_test_with_format(
             .setBitsPerPixel(32)
             .build())
         .setDecoderConfig(hw_decoderConfigBuilder.build())
-        .setWorkerType(WorkerType::FFMPEG_VIDEO_FILE)
+        .setWorkerType(WorkerType::FFMPEG_DECODE)
         .build();
     
     hw_producer.setErrorCallback([](const std::string& error) {
@@ -2850,7 +2850,7 @@ static int run_multi_pp_test_with_format(
             .setBitsPerPixel(32)
             .build())
         .setDecoderConfig(DecoderConfigBuilder().useSoftware().build())
-        .setWorkerType(WorkerType::FFMPEG_VIDEO_FILE)
+        .setWorkerType(WorkerType::FFMPEG_DECODE)
         .build();
     
     sw_producer.setErrorCallback([](const std::string& error) {

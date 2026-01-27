@@ -150,7 +150,7 @@ static int test_play_rtsp_stream(const char* rtsp_url) {
                 .useTaco("h264", tacoConfig)  // 使用 TACO 硬件解码器进行 H.264 RTSP 流解码
                 .build()
         )
-        .setWorkerType(WorkerType::FFMPEG_RTSP)
+        .setWorkerType(WorkerType::FFMPEG_DECODE)
         .build();
     
     // 5. 设置错误回调
@@ -758,7 +758,7 @@ static int test_h264_taco_video(const char* video_path) {
                 .useTaco("h264", tacoConfig)  // 使用 TACO 硬件解码器进行 H.264 视频文件解码
                 .build()
         )
-        .setWorkerType(WorkerType::FFMPEG_VIDEO_FILE)
+        .setWorkerType(WorkerType::FFMPEG_DECODE)
         .build();
     
     // 5. 设置错误回调
@@ -950,7 +950,7 @@ static int test_ffmpeg_software_decoder(const char* video_path) {
                 .useSoftware()  // ⭐ 使用软件解码器（自动选择，不指定解码器名称）
                 .build()
         )
-        .setWorkerType(WorkerType::FFMPEG_VIDEO_FILE)  // ⭐ 需要解码
+        .setWorkerType(WorkerType::FFMPEG_DECODE)  // ⭐ 需要解码
         .build();
     
     // 4. 设置错误回调
@@ -1180,7 +1180,7 @@ static void decode_production_line_worker(
                 .useTaco("h264", tacoConfig)  // 使用 TACO 硬件解码器进行 H.264 视频文件解码
                 .build()
         )
-        .setWorkerType(WorkerType::FFMPEG_VIDEO_FILE)
+        .setWorkerType(WorkerType::FFMPEG_DECODE)
         .build();
     
     // 3. 设置错误回调
@@ -1441,7 +1441,7 @@ static int test_buffer_writer_format(
                 .useTaco("h264", taco_config)
                 .build()
         )
-        .setWorkerType(WorkerType::FFMPEG_VIDEO_FILE)
+        .setWorkerType(WorkerType::FFMPEG_DECODE)
         .build();
     
     VideoProductionLine producer(false, 1, false);
@@ -2527,7 +2527,7 @@ static int test_multi_worker(const char* video_source) {
                 .useTaco("h264", tacoConfig)  // 硬件解码器
                 .build()
         )
-        .setWorkerType(WorkerType::FFMPEG_RTSP)
+        .setWorkerType(WorkerType::FFMPEG_DECODE)
         .build();
     group.consumer_configs.push_back(consumer_hw_cfg);
     
@@ -2548,7 +2548,7 @@ static int test_multi_worker(const char* video_source) {
                 .useSoftware()  // 软件解码器
                 .build()
         )
-        .setWorkerType(WorkerType::FFMPEG_RTSP)
+        .setWorkerType(WorkerType::FFMPEG_DECODE)
         .build();
     group.consumer_configs.push_back(consumer_sw_cfg);
     
@@ -2917,7 +2917,7 @@ static int test_mjpeg_decoder(const std::vector<std::string>& args) {
                 .useTaco("jpeg", tacoConfig)
                 .build()
         )
-        .setWorkerType(WorkerType::FFMPEG_VIDEO_FILE)
+        .setWorkerType(WorkerType::FFMPEG_DECODE)
         .build();
 
     // 3. 设置错误回调

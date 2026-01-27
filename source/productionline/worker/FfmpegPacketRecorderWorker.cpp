@@ -243,7 +243,8 @@ int FfmpegPacketRecorderWorker::getOutputHeight() const {
     return getSourceHeight();  // Recorder不处理，输出等于输入
 }
 
-double FfmpegPacketRecorderWorker::getOutputBytesPerPixel() const {
+double FfmpegPacketRecorderWorker::getOutputBytesPerPixel(int channel) const {
+    (void)channel;  // 未使用参数
     return 0.0;  // 原始码流没有像素概念
 }
 

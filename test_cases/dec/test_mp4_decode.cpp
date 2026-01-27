@@ -192,7 +192,7 @@ bool validate_psnr_streaming(const char *source_video, int width, int height,
 
   // ⭐ 根据输入类型选择WorkerType
   WorkerType worker_type =
-      is_rtsp ? WorkerType::FFMPEG_RTSP : WorkerType::FFMPEG_VIDEO_FILE;
+      is_rtsp ? WorkerType::FFMPEG_DECODE : WorkerType::FFMPEG_DECODE;
 
   // ⭐ RTSP流：使用更大的BufferPool（32个Buffer）以支持PSNR对比
   DataSourceConfigBuilder hw_dataSourceBuilder;
@@ -1042,7 +1042,7 @@ static int test_rtsp_decode_single_impl(const char *rtsp_url,
               .build()
       )
       .setDecoderConfig(decoderBuilder.build())
-      .setWorkerType(WorkerType::FFMPEG_RTSP)  // ⭐ RTSP专用WorkerType
+      .setWorkerType(WorkerType::FFMPEG_DECODE)  // ⭐ RTSP专用WorkerType
       .build();
 
   // ⭐ RTSP流特殊处理：设置buffer_mode=true
@@ -1468,7 +1468,7 @@ static int test_mp4_decode_single_impl(const char *video_path,
     }
   }
 
-  // ⭐ MP4文件：使用FFMPEG_VIDEO_FILE WorkerType
+  // ⭐ MP4文件：使用FFMPEG_DECODE WorkerType
   DataSourceConfigBuilder dataSourceBuilder;
   dataSourceBuilder.setPath(video_path);
 
@@ -1480,7 +1480,7 @@ static int test_mp4_decode_single_impl(const char *video_path,
                                                 .setBitsPerPixel(32)
                                                 .build())
                           .setDecoderConfig(decoderBuilder.build())
-                          .setWorkerType(WorkerType::FFMPEG_VIDEO_FILE)
+                          .setWorkerType(WorkerType::FFMPEG_DECODE)
                           .build();
 
   if (use_software) {
@@ -1598,7 +1598,7 @@ static int test_mp4_decode_single_impl(const char *video_path,
     hw_consumer_config.worker_config =
         WorkerConfigBuilder()
             .setDecoderConfig(decoderBuilder.build())
-            .setWorkerType(WorkerType::FFMPEG_VIDEO_FILE)
+            .setWorkerType(WorkerType::FFMPEG_DECODE)
             .build();
     group.consumer_configs.push_back(hw_consumer_config);
 
@@ -1610,7 +1610,7 @@ static int test_mp4_decode_single_impl(const char *video_path,
     sw_consumer_config.worker_config =
         WorkerConfigBuilder()
             .setDecoderConfig(sw_decoder_builder.build())
-            .setWorkerType(WorkerType::FFMPEG_VIDEO_FILE)
+            .setWorkerType(WorkerType::FFMPEG_DECODE)
             .build();
     group.consumer_configs.push_back(sw_consumer_config);
 

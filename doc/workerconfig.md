@@ -114,7 +114,7 @@ auto decoder = DecoderConfigBuilder()
 auto config = WorkerConfigBuilder()
     .setDataSourceConfig(dataSource)
     .setDecoderConfig(decoder)
-    .setWorkerType(WorkerType::FFMPEG_RTSP)
+    .setWorkerType(WorkerType::FFMPEG_DECODE)
     .build();
 ```
 
@@ -133,7 +133,7 @@ auto config = WorkerConfigBuilder()
             .useSoftware()
             .build()
     )
-    .setWorkerType(WorkerType::FFMPEG_VIDEO_FILE)
+    .setWorkerType(WorkerType::FFMPEG_DECODE)
     .build();
 ```
 
@@ -148,13 +148,12 @@ Worker 实现类型枚举。
 | 枚举值 | 含义 | 说明 |
 |--------|------|------|
 | `AUTO` | 自动检测 | 根据数据源路径自动选择 Worker 类型 |
-| `FFMPEG_RTSP` | FFmpeg RTSP 流 | 用于 RTSP 流解码 |
+| `FFMPEG_DECODE` | FFmpeg 解码 Worker | 统一处理文件和 RTSP 流解码 |
 | `FFMPEG_PACKET_RECORDER` | FFmpeg Packet 录制器 | 支持 RTSP/文件/HTTP 等多种数据源录制 |
-| `FFMPEG_VIDEO_FILE` | FFmpeg 视频文件 | 用于本地视频文件解码 |
 
 **使用示例**：
 ```cpp
-WorkerConfigBuilder().setWorkerType(WorkerType::FFMPEG_RTSP).build();
+WorkerConfigBuilder().setWorkerType(WorkerType::FFMPEG_DECODE).build();
 ```
 
 ---
@@ -643,7 +642,7 @@ auto config = WorkerConfigBuilder()
             )
             .build()
     )
-    .setWorkerType(WorkerType::FFMPEG_RTSP)
+    .setWorkerType(WorkerType::FFMPEG_DECODE)
     .setThreadPoolSize(32)
     .build();
 ```
@@ -700,7 +699,7 @@ ConsumerConfig consumer;
 consumer.consumer_name = "hw_decoder";
 consumer.worker_config = WorkerConfigBuilder()
     .setDecoderConfig(...)
-    .setWorkerType(WorkerType::FFMPEG_RTSP)
+    .setWorkerType(WorkerType::FFMPEG_DECODE)
     .build();
 ```
 
@@ -895,7 +894,7 @@ int main() {
                 )
                 .build()
         )
-        .setWorkerType(WorkerType::FFMPEG_RTSP)
+        .setWorkerType(WorkerType::FFMPEG_DECODE)
         .setThreadPoolSize(32)
         .build();
     
@@ -957,7 +956,7 @@ int main() {
                 )
                 .build()
         )
-        .setWorkerType(WorkerType::FFMPEG_RTSP)
+        .setWorkerType(WorkerType::FFMPEG_DECODE)
         .build();
     group.consumer_configs.push_back(consumer1);
     
@@ -970,7 +969,7 @@ int main() {
                 .useSoftware()
                 .build()
         )
-        .setWorkerType(WorkerType::FFMPEG_RTSP)
+        .setWorkerType(WorkerType::FFMPEG_DECODE)
         .build();
     group.consumer_configs.push_back(consumer2);
     
@@ -1029,7 +1028,7 @@ auto config = WorkerConfigBuilder()
             )
             .build()
     )
-    .setWorkerType(WorkerType::FFMPEG_RTSP)
+    .setWorkerType(WorkerType::FFMPEG_DECODE)
     .build();
 ```
 

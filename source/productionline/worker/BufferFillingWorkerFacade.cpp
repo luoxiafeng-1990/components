@@ -6,6 +6,7 @@
 
 BufferFillingWorkerFacade::BufferFillingWorkerFacade(const WorkerConfig& config)
     : config_(config)
+    , logger_(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Worker.Facade")))
 {
     if (!worker_base_uptr_) {
         worker_base_uptr_ = BufferFillingWorkerFactory::create(config_);
@@ -14,6 +15,7 @@ BufferFillingWorkerFacade::BufferFillingWorkerFacade(const WorkerConfig& config)
 
 BufferFillingWorkerFacade::~BufferFillingWorkerFacade() {
     // worker_base_uptr_ 会自动调用析构函数（智能指针）
+    
 }
 
 // ============ Buffer填充方法 ============
@@ -36,32 +38,13 @@ bool BufferFillingWorkerFacade::open() {
     }
     
     if (!worker_base_uptr_) {
-        LOG4CPLUS_ERROR(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Worker.Facade")), "[Worker] ERROR: Failed to create worker");
+        LOG4CPLUS_ERROR(logger_, "[Worker] ERROR: Failed to create worker");
         return false;
     }
     
-    // ⭐ v2.9新增：检查是否是 Buffer 模式
-    // ⭐ v2.22 重构：数据源配置从 decoder 移至 datasource
-    bool is_buffer_mode = config_.data_source.buffer_mode;
-    
-    if (is_buffer_mode) {
-        // Buffer 模式：不需要文件路径，直接调用 open(nullptr)
-        LOG4CPLUS_DEBUG(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Worker.Facade")), "[Worker] BufferFillingWorkerFacade: Opening in Buffer mode (no file path needed)");
-        return worker_base_uptr_->open(nullptr);
-    }
-    
-    // 文件模式：从 config_ 获取所有参数
-    const std::string& file_path = config_.data_source.path;
-    
-    if (file_path.empty()) {
-        LOG4CPLUS_ERROR(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Worker.Facade")), "[Worker] ERROR: File path not set in config");
-        return false;
-    }
-    
-    const char* path = file_path.c_str();
-    
-    LOG4CPLUS_DEBUG_FMT(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Worker.Facade")), "[Worker] BufferFillingWorkerFacade: Opening file: %s", path);
-    return worker_base_uptr_->open(path);
+    // ✅ 纯转发：WorkerBase::open() 会从 worker_config_.data_source.path 获取路径
+    // 子类的 open(const char* path) 会根据 path 是否为空自行判断模式
+    return worker_base_uptr_->open();
 }
 
 void BufferFillingWorkerFacade::close() {
@@ -71,12 +54,12 @@ void BufferFillingWorkerFacade::close() {
 }
 bool BufferFillingWorkerFacade::setSourceBufferPool(std::weak_ptr<BufferPool> pool_weak) {
     if (!worker_base_uptr_) {
-        LOG4CPLUS_ERROR(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Worker.Facade")), "[Worker] ERROR: Worker not initialized");
+        LOG4CPLUS_ERROR(logger_, "[Worker] ERROR: Worker not initialized");
         return false;
     }
     
     // ✅ 直接调用基类虚函数，自动多态分发
-    // 支持 Buffer 模式的 Worker（如 FfmpegDecodeVideoFileWorker、FfmpegDecodeRtspWorker）
+    // 支持 Buffer 模式的 Worker（如 FFmpegDecodeWorker）
     // 会重写此方法并返回 true，不支持的 Worker 会使用基类默认实现返回 false
     return worker_base_uptr_->setSourceBufferPool(pool_weak);
 }
@@ -89,7 +72,7 @@ bool BufferFillingWorkerFacade::isOpen() const {
 
 bool BufferFillingWorkerFacade::fillBuffer(int frame_index, Buffer* buffer) {
     if (!worker_base_uptr_) {
-        LOG4CPLUS_ERROR(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Worker.Facade")), "[Worker] ERROR: Worker not initialized");
+        LOG4CPLUS_ERROR(logger_, "[Worker] ERROR: Worker not initialized");
         return false;
     }
     return worker_base_uptr_->fillBuffer(frame_index, buffer);
@@ -99,7 +82,7 @@ bool BufferFillingWorkerFacade::fillBuffer(int frame_index, Buffer* buffer) {
 
 bool BufferFillingWorkerFacade::seek(int frame_index) {
     if (!worker_base_uptr_) {
-        LOG4CPLUS_ERROR(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Worker.Facade")), "[Worker] ERROR: Worker not initialized");
+        LOG4CPLUS_ERROR(logger_, "[Worker] ERROR: Worker not initialized");
         return false;
     }
     return worker_base_uptr_->seek(frame_index);
@@ -107,7 +90,7 @@ bool BufferFillingWorkerFacade::seek(int frame_index) {
 
 bool BufferFillingWorkerFacade::seekToBegin() {
     if (!worker_base_uptr_) {
-        LOG4CPLUS_ERROR(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Worker.Facade")), "[Worker] ERROR: Worker not initialized");
+        LOG4CPLUS_ERROR(logger_, "[Worker] ERROR: Worker not initialized");
         return false;
     }
     return worker_base_uptr_->seekToBegin();
@@ -115,7 +98,7 @@ bool BufferFillingWorkerFacade::seekToBegin() {
 
 bool BufferFillingWorkerFacade::seekToEnd() {
     if (!worker_base_uptr_) {
-        LOG4CPLUS_ERROR(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Worker.Facade")), "[Worker] ERROR: Worker not initialized");
+        LOG4CPLUS_ERROR(logger_, "[Worker] ERROR: Worker not initialized");
         return false;
     }
     return worker_base_uptr_->seekToEnd();
@@ -123,7 +106,7 @@ bool BufferFillingWorkerFacade::seekToEnd() {
 
 bool BufferFillingWorkerFacade::skip(int frame_count) {
     if (!worker_base_uptr_) {
-        LOG4CPLUS_ERROR(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Worker.Facade")), "[Worker] ERROR: Worker not initialized");
+        LOG4CPLUS_ERROR(logger_, "[Worker] ERROR: Worker not initialized");
         return false;
     }
     return worker_base_uptr_->skip(frame_count);
@@ -218,6 +201,6 @@ int BufferFillingWorkerFacade::getOutputHeight() const {
     return worker_base_uptr_ ? worker_base_uptr_->getOutputHeight() : 0;
 }
 
-double BufferFillingWorkerFacade::getOutputBytesPerPixel() const {
-    return worker_base_uptr_ ? worker_base_uptr_->getOutputBytesPerPixel() : 0;
+double BufferFillingWorkerFacade::getOutputBytesPerPixel(int channel) const {
+    return worker_base_uptr_ ? worker_base_uptr_->getOutputBytesPerPixel(channel) : 0;
 }

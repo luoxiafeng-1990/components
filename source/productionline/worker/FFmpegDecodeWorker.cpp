@@ -1,6 +1,7 @@
-#include "productionline/worker/FfmpegDecodeRtspWorker.hpp"
+#include "productionline/worker/FFmpegDecodeWorker.hpp"
 #include "productionline/worker/RtspPacketSource.hpp"
 #include "productionline/worker/BufferPacketSource.hpp"
+#include "productionline/worker/FilePacketSource.hpp"
 #include "common/Logger.hpp"
 #include "buffer/bufferpool/BufferPool.hpp"
 #include "buffer/NormalAllocator.hpp"
@@ -21,14 +22,14 @@ extern "C" {
 
 // ============ 构造/析构 ============
 
-// 构造函数（v2.12修改：必须通过配置创建，与 FfmpegDecodeVideoFileWorker 保持一致）
-FfmpegDecodeRtspWorker::FfmpegDecodeRtspWorker(const WorkerConfig& config)
+// 构造函数（v3.0：统一的 FFmpeg 解码 Worker，支持文件/RTSP/Buffer 模式）
+FFmpegDecodeWorker::FFmpegDecodeWorker(const WorkerConfig& config)
     : WorkerBase(BufferAllocatorFactory::AllocatorType::AVFRAME, config)  // 传递 config 给父类
-    , logger_(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Worker.Rtsp")))
+    , logger_(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Worker.Decode")))
     , packet_source_(nullptr)  // ⚠️ 数据源将在下面根据配置创建
     , codec_ctx_ptr_(nullptr)
-    , output_width_(0)
-    , output_height_(0)
+    , output_width_(config.display.width)      // 🎯 从配置读取输出宽度
+    , output_height_(config.display.height)    // 🎯 从配置读取输出高度
     , use_hardware_decoder_(config.decoder.enable_hardware)  // 🎯 从配置读取
     , decoder_name_(config.decoder.name.value_or(""))  // 🎯 从配置读取（使用 optional 的 value_or）
     , codec_options_ptr_(nullptr)
@@ -37,11 +38,12 @@ FfmpegDecodeRtspWorker::FfmpegDecodeRtspWorker(const WorkerConfig& config)
     , current_packet_ptr_(nullptr)  // ⭐ v2.22 新增
     , packet_acquired_(false)       // ⭐ v2.22 新增
 {
-    LOG4CPLUS_DEBUG(logger_, "[Worker] FfmpegDecodeRtspWorker created with config");
+    LOG4CPLUS_DEBUG(logger_, "[Worker] FFmpegDecodeWorker created with config");
     
-    // ⭐ v2.18 重构：根据配置创建数据源（统一在构造函数中，学习 VideoFileWorker）
-    // ⭐ v2.19 修复：支持共享数据源模式（与 FfmpegDecodeVideoFileWorker 保持一致）
+    // ⭐ v2.18 重构：根据配置创建数据源（统一在构造函数中）
+    // ⭐ v2.19 修复：支持共享数据源模式
     // ⭐ v2.22 重构：数据源配置从 decoder 移至 datasource
+    // ⭐ v2.23 优化：自动识别数据源类型（RTSP/文件）
     if (config.data_source.buffer_mode) {
         // Buffer 数据源模式：从 BufferPacketSource 获取 packet
         
@@ -60,22 +62,38 @@ FfmpegDecodeRtspWorker::FfmpegDecodeRtspWorker(const WorkerConfig& config)
             }
         }
     } else {
-        // ⭐ v2.18 新增：RTSP 模式也在构造函数中创建数据源（统一设计）
-        // 从配置读取 RTSP URL
-        const std::string& rtsp_url = config.data_source.path;
-        if (!rtsp_url.empty()) {
-            packet_source_ = std::make_shared<RtspPacketSource>(rtsp_url);
-            LOG4CPLUS_DEBUG_FMT(logger_, "Created RtspPacketSource for '%s'", rtsp_url.c_str());
+        // ⭐ v2.23 优化：根据路径自动识别数据源类型
+        const std::string& path = config.data_source.path;
+        if (path.empty()) {
+            LOG4CPLUS_WARN(logger_, "data_source.path is empty, cannot create packet source");
+        } else if (path.rfind("rtsp://", 0) == 0 || path.rfind("rtsps://", 0) == 0) {
+            // RTSP 流：以 rtsp:// 或 rtsps:// 开头
+            packet_source_ = std::make_shared<RtspPacketSource>(path);
+            LOG4CPLUS_DEBUG_FMT(logger_, "Created RtspPacketSource for '%s'", path.c_str());
         } else {
-            LOG4CPLUS_WARN(logger_, "RTSP URL not configured in worker_config_.data_source.path");
+            // 文件：其他路径视为本地文件
+            packet_source_ = std::make_shared<FilePacketSource>(path);
+            LOG4CPLUS_DEBUG_FMT(logger_, "Created FilePacketSource for '%s'", path.c_str());
         }
     }
 }
 
-FfmpegDecodeRtspWorker::~FfmpegDecodeRtspWorker() {
-    LOG4CPLUS_DEBUG(logger_, "🧹 Destroying FfmpegDecodeRtspWorker...");
+FFmpegDecodeWorker::~FFmpegDecodeWorker() {
+    LOG4CPLUS_DEBUG(logger_, "🧹 Destroying FFmpegDecodeWorker...");
     
-    // 清理缓存的帧（避免内存泄漏）
+    // ⭐ 关键：正确的清理顺序
+    //
+    // 问题根源：
+    // - 如果先调用 close()，再让成员变量析构
+    // - 顺序就变成：关闭解码器 → 释放 AVFrame
+    // - 但此时 AVFrame 可能还引用了解码器的资源，导致 free(): invalid pointer
+    //
+    // 正确顺序：
+    // 1. 先释放缓存的帧
+    // 2. 手动调用 allocator_facade_.destroyPool() 释放所有 AVFrame
+    // 3. 再调用 close() 关闭解码器和数据源
+    
+    // 步骤1：清理缓存的帧（避免内存泄漏）
     for (AVFrame* frame : cached_frames_) {
         if (frame) {
             av_frame_free(&frame);
@@ -83,17 +101,30 @@ FfmpegDecodeRtspWorker::~FfmpegDecodeRtspWorker() {
     }
     cached_frames_.clear();
     
-    close();
+    // 步骤2：先清理 BufferPool 和 AVFrame（避免 free(): invalid pointer）
+    if (!buffer_pool_type_map_.empty()) {
+        LOG4CPLUS_DEBUG(logger_, "手动清理 BufferPool 和 AVFrame...");
+        allocator_facade_.destroyPool();  // 释放所有 Pool 中的 Buffer 和 AVFrame
+        clearAllBufferPools();
+    }
+    
+    // 步骤3：再关闭解码器和数据源（此时 AVFrame 已全部释放）
+    if (packet_source_ && packet_source_->isOpen()) {
+        LOG4CPLUS_DEBUG(logger_, "关闭解码器和数据源...");
+        close();
+    }
+    
+    LOG4CPLUS_DEBUG(logger_, "🧹 FFmpegDecodeWorker destroyed");
 }
 
 // ============ IVideoReader 接口实现 ============
 
-bool FfmpegDecodeRtspWorker::open(const char* path) {
+bool FFmpegDecodeWorker::open(const char* path) {
     open();
     return true;
 }
 
-bool FfmpegDecodeRtspWorker::open() {
+bool FFmpegDecodeWorker::open() {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
     
     // 如果已经打开，先关闭
@@ -102,46 +133,36 @@ bool FfmpegDecodeRtspWorker::open() {
         close();
     }
     
-    // ⭐ v2.18 重构：统一处理，不区分 Buffer/RTSP 模式（学习 VideoFileWorker）
+    // ⭐ v2.18 重构：统一处理，不区分 Buffer/RTSP/File 模式
     // 数据源应该在构造函数中已经创建
     if (!packet_source_) {
-        setError("Cannot open: packet source is nullptr. Worker must be created with WorkerConfig");
+        LOG4CPLUS_ERROR(logger_, "[Worker] Cannot open: packet source is nullptr. Worker must be created with WorkerConfig");
         return false;
     }
     
     // 从配置读取输出参数
     int width = worker_config_.display.width;
     int height = worker_config_.display.height;
-    int bits_per_pixel = worker_config_.display.bits_per_pixel;
     bool is_buffer_mode = worker_config_.data_source.buffer_mode;
     
-    // 验证参数（RTSP 模式必须提供分辨率）
+    // 打印模式信息
     if (!is_buffer_mode) {
-        // RTSP 模式：必须配置分辨率
-        if (width == 0 || height == 0 || bits_per_pixel == 0) {
-            setError("Display resolution and bits_per_pixel must be configured for RTSP stream");
-            LOG4CPLUS_ERROR_FMT(logger_, "[Worker] ❌ Current config: %dx%d@%dbpp", width, height, bits_per_pixel);
-            LOG4CPLUS_ERROR(logger_, "[Worker]    Please set worker_config_.display.width/height/bits_per_pixel");
-            return false;
-        }
-        
         LOG4CPLUS_INFO(logger_, "");
-        LOG4CPLUS_INFO_FMT(logger_, "📡 Opening RTSP stream: %s", worker_config_.data_source.path.c_str());
-        LOG4CPLUS_INFO_FMT(logger_, "   Output resolution: %dx%d@%dbpp", width, height, bits_per_pixel);
+        LOG4CPLUS_INFO_FMT(logger_, "📡 Opening video source: %s", worker_config_.data_source.path.c_str());
     } else {
         LOG4CPLUS_INFO(logger_, "[Worker] 📦 Opening BufferPacketSource (Buffer mode)");
     }
     
     // 1. 打开数据源
     if (!packet_source_->open()) {
-        setError("Failed to open packet source");
+        LOG4CPLUS_ERROR(logger_, "[Worker] Failed to open packet source");
         return false;
     }
     
     // 2. 从数据源获取编解码器参数
     const AVCodecParameters* codecpar = packet_source_->getCodecParameters();
     if (!codecpar) {
-        setError("Failed to get codec parameters from packet source");
+        LOG4CPLUS_ERROR(logger_, "[Worker] Failed to get codec parameters from packet source");
         packet_source_->close();
         return false;
     }
@@ -149,13 +170,7 @@ bool FfmpegDecodeRtspWorker::open() {
     // 3. 检查编解码器类型是否匹配
     checkCodecMismatch(codecpar->codec_id, decoder_name_);
     
-    // 4. 初始化解码器
-    if (!initializeDecoder(codecpar)) {
-        packet_source_->close();
-        return false;
-    }
-    
-    // 5. 设置输出分辨率（智能判断，学习 VideoFileWorker）
+    // 4. 设置输出分辨率（必须在 initializeDecoder 之前，因为解码器初始化时会打印分辨率）
     if (width == 0 || height == 0) {
         // 配置未设置，使用原始分辨率或默认值
         output_width_ = getSourceWidth() > 0 ? getSourceWidth() : 1920;
@@ -163,40 +178,61 @@ bool FfmpegDecodeRtspWorker::open() {
         LOG4CPLUS_DEBUG_FMT(logger_, "[Worker] Output resolution not set in config, using: %dx%d", 
                       output_width_, output_height_);
     } else {
+        // 边界检查：验证用户配置的分辨率是否合理
+        if (width < 0 || height < 0) {
+            LOG4CPLUS_ERROR_FMT(logger_, "[Worker] Invalid resolution: %dx%d (negative values not allowed)", 
+                          width, height);
+            packet_source_->close();
+            return false;
+        }
+        if (width < MIN_RESOLUTION || height < MIN_RESOLUTION) {
+            LOG4CPLUS_ERROR_FMT(logger_, "[Worker] Resolution %dx%d too small (minimum: %dx%d)", 
+                          width, height, MIN_RESOLUTION, MIN_RESOLUTION);
+            packet_source_->close();
+            return false;
+        }
+        if (width > MAX_RESOLUTION || height > MAX_RESOLUTION) {
+            LOG4CPLUS_ERROR_FMT(logger_, "[Worker] Resolution %dx%d too large (maximum: %dx%d)", 
+                          width, height, MAX_RESOLUTION, MAX_RESOLUTION);
+            packet_source_->close();
+            return false;
+        }
+        
         output_width_ = width;
         output_height_ = height;
         LOG4CPLUS_DEBUG_FMT(logger_, "[Worker] Output resolution from config: %dx%d", output_width_, output_height_);
     }
     
-    if (bits_per_pixel == 0) {
-        bits_per_pixel = 32;  // 默认值
-        LOG4CPLUS_DEBUG_FMT(logger_, "[Worker] bits_per_pixel not set, using default: %d", bits_per_pixel);
+    // 5. 初始化解码器
+    if (!initializeDecoder(codecpar)) {
+        packet_source_->close();
+        return false;
     }
     
-    // 生成 BufferPool 名称
+    // 6. 生成 BufferPool 名称
     std::string pool_name;
     if (is_buffer_mode) {
-        pool_name = "FfmpegDecodeRtspWorker_BufferMode";
+        pool_name = "FFmpegDecodeWorker_BufferMode";
     } else {
-        pool_name = std::string("FfmpegDecodeRtspWorker_") + worker_config_.data_source.path;
+        pool_name = std::string("FFmpegDecodeWorker_") + worker_config_.data_source.path;
     }
     
     uint64_t pool_id = allocator_facade_.allocatePoolWithBuffers(
         worker_config_.data_source.buffer_count,
         0,
         pool_name,
-        is_buffer_mode ? "RTSP_BUFFER" : "RTSP"
+        is_buffer_mode ? "BUFFER_MODE" : "NORMAL_MODE"
     );
     
     if (pool_id == 0) {
-        setError("Failed to create BufferPool via Allocator");
+        LOG4CPLUS_ERROR(logger_, "[Worker] Failed to create BufferPool via Allocator");
         packet_source_->close();
         return false;
     }
     
     // 7. ✅ v2.18 修复：统一注册 BufferPool（Buffer 和 RTSP 模式都需要）
     if (!registerBufferPool(BufferPoolType::DECODE_VIDEO_PRIMARY, pool_id)) {
-        setError("Failed to register BufferPool");
+        LOG4CPLUS_ERROR(logger_, "[Worker] Failed to register BufferPool");
         packet_source_->close();
         return false;
     }
@@ -209,13 +245,15 @@ bool FfmpegDecodeRtspWorker::open() {
     decoded_frames_ = 0;
     dropped_frames_ = 0;
     
-    // 9. 详细日志输出（学习 VideoFileWorker）
-    const char* mode_str = is_buffer_mode ? "Buffer mode" : "RTSP stream";
-    LOG4CPLUS_DEBUG_FMT(logger_, "[Worker] FfmpegDecodeRtspWorker (%s): Opened", mode_str);
+    // 9. 详细日志输出
+    const char* mode_str = is_buffer_mode ? "Buffer mode" : 
+        (packet_source_->getDataSourceType() == IPacketSource::SourceType::NETWORK_SOURCE ? "RTSP stream" : "File");
+    LOG4CPLUS_DEBUG_FMT(logger_, "[Worker] FFmpegDecodeWorker (%s): Opened", mode_str);
     if (!is_buffer_mode) {
-        LOG4CPLUS_DEBUG_FMT(logger_, "[Worker]    RTSP URL: %s", worker_config_.data_source.path.c_str());
+        LOG4CPLUS_DEBUG_FMT(logger_, "[Worker]    Source: %s", worker_config_.data_source.path.c_str());
     }
-    LOG4CPLUS_DEBUG_FMT(logger_, "[Worker]    Output resolution: %dx%d@%dbpp", output_width_, output_height_, bits_per_pixel);
+    LOG4CPLUS_DEBUG_FMT(logger_, "[Worker]    Output resolution: %dx%d (%.1f bytes/pixel)", 
+                  output_width_, output_height_, getOutputBytesPerPixel());
     LOG4CPLUS_DEBUG_FMT(logger_, "[Worker]    Codec: %s", codec_ctx_ptr_->codec->name);
     LOG4CPLUS_DEBUG_FMT(logger_, "[Worker]    BufferPool: '%s' (ID: %lu, %d buffers)", 
                   actual_pool_name.c_str(), pool_id, 
@@ -226,7 +264,7 @@ bool FfmpegDecodeRtspWorker::open() {
 
 // ============ v2.13 BufferPacketSource 配置 ============
 
-bool FfmpegDecodeRtspWorker::setSourceBufferPool(std::weak_ptr<BufferPool> pool_weak) {
+bool FFmpegDecodeWorker::setSourceBufferPool(std::weak_ptr<BufferPool> pool_weak) {
     // 检查是否是 BufferPacketSource
     auto* buffer_source = dynamic_cast<BufferPacketSource*>(packet_source_.get());
     if (!buffer_source) {
@@ -241,7 +279,7 @@ bool FfmpegDecodeRtspWorker::setSourceBufferPool(std::weak_ptr<BufferPool> pool_
     return true;
 }
 
-void FfmpegDecodeRtspWorker::close() {
+void FFmpegDecodeWorker::close() {
     // ⚠️ 注意：打开状态由数据源管理
     if (!packet_source_ || !packet_source_->isOpen()) {
         return;  // 已经关闭过了
@@ -251,7 +289,7 @@ void FfmpegDecodeRtspWorker::close() {
         std::lock_guard<std::recursive_mutex> lock(mutex_);
         
         LOG4CPLUS_INFO(logger_, "");
-        LOG4CPLUS_INFO(logger_, "🛑 Closing RTSP stream...");
+        LOG4CPLUS_INFO(logger_, "🛑 Closing video source...");
         
         // ⭐ v2.22 新增：清理未提交的 packet（Buffer 模式）
         if (worker_config_.data_source.buffer_mode && packet_acquired_) {
@@ -286,12 +324,12 @@ void FfmpegDecodeRtspWorker::close() {
         clearAllBufferPools();
     }
     
-    LOG4CPLUS_DEBUG(logger_, "[Worker] RTSP stream closed");
+    LOG4CPLUS_DEBUG(logger_, "[Worker] Video source closed");
     LOG4CPLUS_INFO_FMT(logger_, "   Decoded frames: %d", decoded_frames_.load());
     LOG4CPLUS_INFO_FMT(logger_, "   Dropped frames: %d", dropped_frames_.load());
 }
 
-bool FfmpegDecodeRtspWorker::isOpen() const {
+bool FFmpegDecodeWorker::isOpen() const {
     // ⚠️ 注意：打开状态从数据源获取
     if (!packet_source_) {
         return false;
@@ -300,27 +338,63 @@ bool FfmpegDecodeRtspWorker::isOpen() const {
 }
 
 
-bool FfmpegDecodeRtspWorker::seek(int frame_index) {
-    LOG4CPLUS_WARN(logger_, "[Worker]  Warning: RTSP stream does not support seeking");
+bool FFmpegDecodeWorker::seek(int frame_index) {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
+    
+    // 1. 参数校验
+    if (!packet_source_) {
+        LOG4CPLUS_ERROR(logger_, "[Worker] Cannot seek: packet source is nullptr");
+        return false;
+    }
+    
+    if (!packet_source_->isOpen()) {
+        LOG4CPLUS_ERROR(logger_, "[Worker] Cannot seek: worker is not open");
+        return false;
+    }
+    
+    // 2. 委托给数据源实现 seek（多态调用）
+    //    - FilePacketSource: 实现真正的 seek
+    //    - RtspPacketSource: 返回 false（不支持）
+    //    - BufferPacketSource: 返回 false（不支持）
+    if (!packet_source_->seek(frame_index)) {
+        // 根据数据源类型返回适当的日志
+        if (packet_source_->getDataSourceType() == IPacketSource::SourceType::NETWORK_SOURCE) {
+            LOG4CPLUS_WARN(logger_, "[Worker] RTSP stream does not support seeking");
+        } else if (packet_source_->getDataSourceType() == IPacketSource::SourceType::BUFFER_SOURCE) {
+            LOG4CPLUS_WARN(logger_, "[Worker] Buffer source does not support seeking");
+        } else {
+            LOG4CPLUS_ERROR(logger_, "[Worker] Seek failed or not supported by packet source");
+        }
+        return false;
+    }
+    
+    // 3. seek 成功后，清理解码器状态（flush内部缓冲区）
+    if (codec_ctx_ptr_) {
+        avcodec_flush_buffers(codec_ctx_ptr_);
+    }
+    
+    // ⚠️ 注意：EOF 状态由数据源的 seek() 自动重置，不需要手动重置
+    
+    LOG4CPLUS_DEBUG_FMT(logger_, "[Worker] Successfully seeked to frame %d", frame_index);
+    return true;
+}
+
+bool FFmpegDecodeWorker::seekToBegin() {
+    // 委托给 seek(0)
+    return seek(0);
+}
+
+bool FFmpegDecodeWorker::seekToEnd() {
+    LOG4CPLUS_WARN(logger_, "[Worker] Warning: seekToEnd is not supported");
     return false;
 }
 
-bool FfmpegDecodeRtspWorker::seekToBegin() {
-    LOG4CPLUS_WARN(logger_, "[Worker]  Warning: RTSP stream does not support seeking");
+bool FFmpegDecodeWorker::skip(int frame_count) {
+    LOG4CPLUS_WARN(logger_, "[Worker] Warning: skip is not supported for streaming sources");
     return false;
 }
 
-bool FfmpegDecodeRtspWorker::seekToEnd() {
-    LOG4CPLUS_WARN(logger_, "[Worker]  Warning: RTSP stream does not support seeking");
-    return false;
-}
-
-bool FfmpegDecodeRtspWorker::skip(int frame_count) {
-    LOG4CPLUS_WARN(logger_, "[Worker]  Warning: RTSP stream does not support frame skipping");
-    return false;
-}
-
-int FfmpegDecodeRtspWorker::getTotalFrames() const {
+int FFmpegDecodeWorker::getTotalFrames() const {
     // ⭐ v2.12修改：从数据源获取（适配器模式）
     if (packet_source_) {
         return packet_source_->getTotalFrames();
@@ -328,17 +402,17 @@ int FfmpegDecodeRtspWorker::getTotalFrames() const {
     return INT_MAX;
 }
 
-int FfmpegDecodeRtspWorker::getCurrentFrameIndex() const {
+int FFmpegDecodeWorker::getCurrentFrameIndex() const {
     // 返回已解码帧数作为"当前索引"
     return decoded_frames_.load();
 }
 
-size_t FfmpegDecodeRtspWorker::getFrameSize() const {
+size_t FFmpegDecodeWorker::getFrameSize() const {
     // ✅ 使用实际解码输出格式计算（getBytesPerPixel从实际格式获取）
     return (size_t)(output_width_ * output_height_ * getOutputBytesPerPixel());
 }
 
-long FfmpegDecodeRtspWorker::getFileSize() const {
+long FFmpegDecodeWorker::getFileSize() const {
     // ⭐ v2.12修改：从数据源获取
     if (packet_source_) {
         return packet_source_->getFileSize();
@@ -346,61 +420,146 @@ long FfmpegDecodeRtspWorker::getFileSize() const {
     return -1;
 }
 
-int FfmpegDecodeRtspWorker::getSourceWidth() const {
+int FFmpegDecodeWorker::getSourceWidth() const {
     return packet_source_ ? packet_source_->getSourceWidth() : 0;
 }
 
-int FfmpegDecodeRtspWorker::getSourceHeight() const {
+int FFmpegDecodeWorker::getSourceHeight() const {
     return packet_source_ ? packet_source_->getSourceHeight() : 0;
 }
 
-int FfmpegDecodeRtspWorker::getOutputWidth() const {
+int FFmpegDecodeWorker::getOutputWidth() const {
     return output_width_;
 }
 
-int FfmpegDecodeRtspWorker::getOutputHeight() const {
+int FFmpegDecodeWorker::getOutputHeight() const {
     return output_height_;
 }
 
-double FfmpegDecodeRtspWorker::getOutputBytesPerPixel() const {
-    // 1️⃣ 优先：从解码器实际输出格式计算（最准确）
-    if (codec_ctx_ptr_ && codec_ctx_ptr_->pix_fmt != AV_PIX_FMT_NONE) {
-        const AVPixFmtDescriptor* desc = av_pix_fmt_desc_get(codec_ctx_ptr_->pix_fmt);
-        if (desc) {
-            int bits_per_pixel = av_get_bits_per_pixel(desc);
-            return bits_per_pixel / 8.0;  // 返回浮点数，支持1.5字节等
-        }
+double FFmpegDecodeWorker::getOutputBytesPerPixel(int channel) const {
+    // ========== 1. TACO 硬件解码器：从 priv_data 读取 PP 配置 ==========
+    if (use_hardware_decoder_ && codec_ctx_ptr_ && codec_ctx_ptr_->priv_data &&
+        decoder_name_.find("taco") != std::string::npos) {
+        return getTacoChannelBytesPerPixel(channel);
     }
     
-    // 2️⃣ Fallback：从 worker_config_.decoder.taco 的格式枚举推断（⭐ v2.17）
-    if (worker_config_.decoder.taco.ch1_rgb) {
-        // RGB 模式：根据 ch1_rgb_format 整型枚举推断
-        int rgb_fmt = worker_config_.decoder.taco.ch1_rgb_format;
+    // ========== 2. 通用平台（软件解码器等）==========
+    if (channel == 0) {
+        // 从解码器实际输出格式获取
+        if (codec_ctx_ptr_ && codec_ctx_ptr_->pix_fmt != AV_PIX_FMT_NONE) {
+            const AVPixFmtDescriptor* desc = av_pix_fmt_desc_get(codec_ctx_ptr_->pix_fmt);
+            if (desc) {
+                return av_get_bits_per_pixel(desc) / 8.0;
+            }
+        }
+        return 1.5;  // Fallback: YUV420
+    }
+    
+    return 0.0;  // 其他通道不支持
+}
+
+// ============================================================================
+// TACO 辅助函数（多通道支持）
+// ============================================================================
+
+double FFmpegDecodeWorker::getTacoChannelBytesPerPixel(int channel) const {
+    int64_t value = 0;
+    
+    if (channel == 0) {
+        // 通道0：检查是否启用
+        if (av_opt_get_int(codec_ctx_ptr_->priv_data, "ch0_enable", 0, &value) < 0 || value == 0) {
+            return 0.0;  // 通道未启用
+        }
         
-        // RGB 8-bit 有 Alpha 通道（4 字节/像素）
-        if (rgb_fmt == 9 || rgb_fmt == 10 || rgb_fmt == 11 || rgb_fmt == 12 ||  // argb888/abgr888/bgra888/rgba888
-            rgb_fmt == 21 || rgb_fmt == 22) {  // xrgb888/xbgr888
-            return 4.0;
+        // 通道0通常输出 YUV，从 codec_ctx_ptr_->pix_fmt 获取
+        if (codec_ctx_ptr_->pix_fmt != AV_PIX_FMT_NONE) {
+            const AVPixFmtDescriptor* desc = av_pix_fmt_desc_get(codec_ctx_ptr_->pix_fmt);
+            if (desc) {
+                return av_get_bits_per_pixel(desc) / 8.0;
+            }
         }
-        // RGB 8-bit 无 Alpha 通道（3 字节/像素）
-        else if (rgb_fmt == 1 || rgb_fmt == 3) {  // rgb888/bgr888
-            return 3.0;
+        return 1.5;  // Fallback: YUV420
+    }
+    
+    if (channel == 1) {
+        // 通道1：检查是否启用
+        if (av_opt_get_int(codec_ctx_ptr_->priv_data, "ch1_enable", 0, &value) < 0 || value == 0) {
+            return 0.0;  // 通道未启用
         }
-        // RGB 16-bit（6 字节/像素）
-        else if (rgb_fmt == 2 || rgb_fmt == 4) {  // r16g16b16/b16g16r16
-            return 6.0;
+        
+        // 检查是否是 RGB 模式
+        if (av_opt_get_int(codec_ctx_ptr_->priv_data, "ch1_rgb", 0, &value) < 0 || value == 0) {
+            // 不是 RGB，可能是 YUV
+            return 1.5;  // 假设 YUV420
         }
-        // 默认 ARGB888（4 字节/像素）
-        return 4.0;
-    } else {
-        // YUV 模式：格式由解码器自动决定，无配置字段
-        // 默认假设 YUV420（最常见，1.5 字节/像素）
-        LOG4CPLUS_WARN(logger_, "[Worker] getBytesPerPixel() fallback: assuming YUV420 (1.5 bytes/pixel)");
-        return 1.5;
+        
+        // 读取 RGB 格式枚举
+        int64_t rgb_format = 0;
+        if (av_opt_get_int(codec_ctx_ptr_->priv_data, "ch1_rgb_format", 0, &rgb_format) < 0) {
+            return 4.0;  // Fallback: ARGB888
+        }
+        
+        // 根据 RGB 格式枚举返回字节数
+        OutputFormat format = mapRgbDriverValueToEnum((int)rgb_format);
+        return getBytesPerPixelFromFormat(format);
+    }
+    
+    return 0.0;  // 无效通道
+}
+
+OutputFormat FFmpegDecodeWorker::mapRgbDriverValueToEnum(int driver_value) {
+    switch (driver_value) {
+        case 9:  return OutputFormat::RGB_ARGB888;
+        case 11: return OutputFormat::RGB_ABGR888;
+        case 13: return OutputFormat::RGB_RGBA888;
+        case 15: return OutputFormat::RGB_BGRA888;
+        case 1:  return OutputFormat::RGB_RGB888;
+        case 3:  return OutputFormat::RGB_BGR888;
+        case 25: return OutputFormat::RGB_XRGB888;
+        case 27: return OutputFormat::RGB_XBGR888;
+        case 21: return OutputFormat::RGB_RGBX888;
+        case 23: return OutputFormat::RGB_BGRX888;
+        case 2:  return OutputFormat::RGB_RGB888_PLANAR;
+        case 4:  return OutputFormat::RGB_BGR888_PLANAR;
+        case 17: return OutputFormat::RGB_R16G16B16;
+        case 19: return OutputFormat::RGB_B16G16R16;
+        case 28: return OutputFormat::RGB_GBRP;
+        default: return OutputFormat::RGB_ARGB888;  // 默认值
     }
 }
 
-std::string FfmpegDecodeRtspWorker::getPath() const {
+double FFmpegDecodeWorker::getBytesPerPixelFromFormat(OutputFormat format) {
+    switch (format) {
+        // 8-bit RGB 有 Alpha/X 通道（4 字节/像素）
+        case OutputFormat::RGB_ARGB888:
+        case OutputFormat::RGB_ABGR888:
+        case OutputFormat::RGB_RGBA888:
+        case OutputFormat::RGB_BGRA888:
+        case OutputFormat::RGB_XRGB888:
+        case OutputFormat::RGB_XBGR888:
+        case OutputFormat::RGB_RGBX888:
+        case OutputFormat::RGB_BGRX888:
+            return 4.0;
+        
+        // 8-bit RGB 无 Alpha 通道（3 字节/像素）
+        case OutputFormat::RGB_RGB888:
+        case OutputFormat::RGB_BGR888:
+        case OutputFormat::RGB_RGB888_PLANAR:
+        case OutputFormat::RGB_BGR888_PLANAR:
+        case OutputFormat::RGB_GBRP:
+            return 3.0;
+        
+        // 16-bit RGB（6 字节/像素）
+        case OutputFormat::RGB_R16G16B16:
+        case OutputFormat::RGB_B16G16R16:
+            return 6.0;
+        
+        default:
+            return 4.0;  // 默认 ARGB888
+    }
+}
+
+std::string FFmpegDecodeWorker::getPath() const {
     // ⭐ v2.12修改：从数据源获取
     if (!packet_source_) {
         return std::string();
@@ -408,14 +567,14 @@ std::string FfmpegDecodeRtspWorker::getPath() const {
     return packet_source_->getPath();
 }
 
-IDataSourceNavigator::SourceType FfmpegDecodeRtspWorker::getDataSourceType() const {
+IDataSourceNavigator::SourceType FFmpegDecodeWorker::getDataSourceType() const {
     if (packet_source_) {
         return packet_source_->getDataSourceType();
     }
     return SourceType::NETWORK_SOURCE;  // 默认是网络流类型
 }
 
-bool FfmpegDecodeRtspWorker::hasMoreFrames() const {
+bool FFmpegDecodeWorker::hasMoreFrames() const {
     // ⭐ v2.12修改：从数据源获取 EOF 状态
     if (!packet_source_) {
         return false;
@@ -423,7 +582,7 @@ bool FfmpegDecodeRtspWorker::hasMoreFrames() const {
     return !packet_source_->isAtEnd();
 }
 
-bool FfmpegDecodeRtspWorker::isAtEnd() const {
+bool FFmpegDecodeWorker::isAtEnd() const {
     // ⭐ v2.12修改：从数据源获取 EOF 状态
     if (!packet_source_) {
         return true;
@@ -431,7 +590,7 @@ bool FfmpegDecodeRtspWorker::isAtEnd() const {
     return packet_source_->isAtEnd();
 }
 
-bool FfmpegDecodeRtspWorker::isConnected() const {
+bool FFmpegDecodeWorker::isConnected() const {
     // 连接状态从数据源判断
     if (!packet_source_) {
         return false;
@@ -449,20 +608,35 @@ bool FfmpegDecodeRtspWorker::isConnected() const {
  * @param buffer Buffer 指针（用于存储元数据）
  * @return true 成功设置元数据，false 失败
  */
-bool FfmpegDecodeRtspWorker::fillBufferMetadataFromFrame(AVFrame* frame_ptr, Buffer* buffer) {
+bool FFmpegDecodeWorker::fillBufferMetadataFromFrame(AVFrame* frame_ptr, Buffer* buffer) {
     // ⭐ 硬件解码器：提取物理内存地址
     if (!decoder_name_.empty() && use_hardware_decoder_) {
         if (!extractHardwareAddressFromMetadata(frame_ptr, buffer)) {
             LOG4CPLUS_ERROR_FMT(logger_, "[Worker] Hardware decoder '%s': Failed to extract physical address",
                          decoder_name_.c_str());
-            return false;
+            // ⚠️ 容错处理，打印日志但继续执行
         }
     }
     
     // ⭐ 设置虚拟地址
     buffer->setVirtualAddress(frame_ptr->data[0]);
     
-    // ⭐ 设置图像元数据
+    // ⭐ 计算并设置帧大小
+    int actual_frame_size = av_image_get_buffer_size(
+        (AVPixelFormat)frame_ptr->format,
+        frame_ptr->width,
+        frame_ptr->height,
+        1  // alignment
+    );
+    
+    if (actual_frame_size > 0) {
+        buffer->setSize(actual_frame_size);
+        LOG_TRACE_FMT("[Worker] Updated buffer size to actual frame size: %d bytes", actual_frame_size);
+    } else {
+        LOG4CPLUS_ERROR_FMT(logger_, "[Worker] Failed to get frame buffer size: %d", actual_frame_size);
+    }
+    
+    // ⭐ 设置图像元数据（格式、宽高、linesize 等）
     buffer->setImageMetadataFromAVFrame(frame_ptr);
     
     // ⭐ 更新统计计数器
@@ -480,7 +654,7 @@ bool FfmpegDecodeRtspWorker::fillBufferMetadataFromFrame(AVFrame* frame_ptr, Buf
  *   - Buffer 模式的逻辑已移至 fillBuffer() 中
  *   - 此函数仅用于 RTSP/文件模式
  */
-bool FfmpegDecodeRtspWorker::readAndSendPacket(AVPacket* packet_ptr) {
+bool FFmpegDecodeWorker::readAndSendPacket(AVPacket* packet_ptr) {
     if (worker_config_.data_source.buffer_mode) {
         auto ps = std::dynamic_pointer_cast<BufferPacketSource>(packet_source_);
         if (!ps) {
@@ -516,30 +690,76 @@ bool FfmpegDecodeRtspWorker::readAndSendPacket(AVPacket* packet_ptr) {
     }
     
     // ========== 文件/RTSP 模式：使用 readPacket ==========
-    int read_ret = packet_source_->readPacket(packet_ptr);
+    // ⭐ 损坏帧重试机制
+    const int AVERROR_INVALIDDATA_VALUE = -1094995529;  // AVERROR(0x41444e49)
+    const int MAX_CORRUPTED_RETRIES = 10;  // 最大重试次数，避免无限循环
     
-    if (read_ret < 0) {
-        if (read_ret == AVERROR_EOF) {
-            return false;
+    int corrupted_retries = 0;
+    int read_ret;
+    
+    while (true) {
+        // 使用数据源抽象读取 packet
+        read_ret = packet_source_->readPacket(packet_ptr);
+        
+        if (read_ret < 0) {
+            if (read_ret == AVERROR_EOF) {
+                LOG4CPLUS_DEBUG(logger_, "🔄 EOF reached");
+                av_packet_unref(packet_ptr);
+                return false;
+            } else if (read_ret == AVERROR_INVALIDDATA_VALUE) {
+                // 🔧 遇到损坏帧时，在内部循环跳过，继续读取下一个 packet
+                corrupted_retries++;
+                if (corrupted_retries <= MAX_CORRUPTED_RETRIES) {
+                    LOG4CPLUS_WARN_FMT(logger_, "[Worker] WARNING: Corrupted packet detected (attempt %d/%d), skipping...", 
+                           corrupted_retries, MAX_CORRUPTED_RETRIES);
+                    av_packet_unref(packet_ptr);
+                    // 继续循环，尝试读取下一个 packet
+                    continue;
+                } else {
+                    // 连续多次都是损坏帧，可能文件确实损坏严重，返回失败
+                    LOG4CPLUS_ERROR_FMT(logger_, "[Worker] ERROR: Too many corrupted packets (%d), giving up", corrupted_retries);
+                    av_packet_unref(packet_ptr);
+                    return false;
+                }
+            } else {
+                // 其他错误（非 EOF，非损坏帧）：记录错误并返回
+                char err_buf[AV_ERROR_MAX_STRING_SIZE];
+                av_strerror(read_ret, err_buf, sizeof(err_buf));
+                LOG4CPLUS_ERROR_FMT(logger_, "[Worker] ERROR: readPacket failed: %d (%s)", read_ret, err_buf);
+                av_packet_unref(packet_ptr);
+                return false;
+            }
         } else {
-            char err_buf[AV_ERROR_MAX_STRING_SIZE];
-            av_strerror(read_ret, err_buf, sizeof(err_buf));
-            LOG4CPLUS_ERROR_FMT(logger_, "[Worker] ERROR: readPacket failed: %d (%s)", read_ret, err_buf);
-            return false;
+            // 成功读取到 packet，退出循环
+            break;
         }
     }
     
+    // ⭐ 视频流索引检查（仅文件模式需要）
+    if (auto* file_source = dynamic_cast<FilePacketSource*>(packet_source_.get())) {
+        (void)file_source;  // 仅用于类型检查
+        if (packet_ptr->stream_index != packet_source_->getVideoStreamIndex()) {
+            // 不是视频流的 packet 需要释放，然后继续读取下一个
+            av_packet_unref(packet_ptr);
+            return false;  // 让调用者再次调用以读取下一个 packet
+        }
+    }
+    // RTSP/Buffer 模式：packet 已经是视频流，不需要检查
+    
+    // 发送 packet 到解码器
     int ret = avcodec_send_packet(codec_ctx_ptr_, packet_ptr);
     
     if (ret < 0) {
-        LOG4CPLUS_ERROR_FMT(logger_, "[Worker] ERROR: avcodec_send_packet failed: %d", ret);
+        char err_buf[AV_ERROR_MAX_STRING_SIZE];
+        av_strerror(ret, err_buf, sizeof(err_buf));
+        LOG4CPLUS_ERROR_FMT(logger_, "[Worker] ERROR: avcodec_send_packet failed: %d (%s)", ret, err_buf);
         return false;
     }
     
     return true;
 }
 
-bool FfmpegDecodeRtspWorker::fillBuffer(int frame_index, Buffer* buffer) {
+bool FFmpegDecodeWorker::fillBuffer(int frame_index, Buffer* buffer) {
     // ========== 参数校验 ==========
     if (!buffer) {
         LOG4CPLUS_ERROR(logger_, "[Worker] ERROR: buffer is nullptr");
@@ -653,21 +873,16 @@ bool FfmpegDecodeRtspWorker::fillBuffer(int frame_index, Buffer* buffer) {
 // 提供原材料（BufferPool）
 // ============================================================================
 
-// ============ RTSP 特有接口 ============
+// ============ 特有接口 ============
 
-std::string FfmpegDecodeRtspWorker::getLastError() const {
-    std::lock_guard<std::recursive_mutex> lock(mutex_);
-    return last_error_;
-}
-
-const AVCodecParameters* FfmpegDecodeRtspWorker::getCodecParameters() const {
+const AVCodecParameters* FFmpegDecodeWorker::getCodecParameters() const {
     if (!packet_source_) {
         return nullptr;
     }
     return packet_source_->getCodecParameters();
 }
 
-AVRational FfmpegDecodeRtspWorker::getTimeBase() const {
+AVRational FFmpegDecodeWorker::getTimeBase() const {
     if (!packet_source_) {
         return {1, 25};  // 默认值
     }
@@ -678,31 +893,52 @@ AVRational FfmpegDecodeRtspWorker::getTimeBase() const {
         return {1, 25};  // 默认值
     }
     
-    // 对于 RTSP 流，通常使用帧率的倒数作为时间基
+    // 通常使用帧率的倒数作为时间基
     // 这里返回一个通用的时间基（可以根据实际需求调整）
     return {1, 25};  // 默认25fps
 }
 
-void FfmpegDecodeRtspWorker::printStats() const {
+const char* FFmpegDecodeWorker::getCodecName() const {
+    if (codec_ctx_ptr_ && codec_ctx_ptr_->codec) {
+        return codec_ctx_ptr_->codec->name;
+    }
+    return "unknown";
+}
+
+void FFmpegDecodeWorker::printStats() const {
     LOG4CPLUS_INFO(logger_, "");
-    LOG4CPLUS_INFO(logger_, "📊 FfmpegDecodeRtspWorker Statistics:");
-    // ⭐ v2.12修改：从数据源获取 RTSP URL
-    std::string rtsp_url = packet_source_ ? packet_source_->getPath() : std::string();
-    LOG4CPLUS_INFO_FMT(logger_, "   RTSP URL: %s", rtsp_url.empty() ? "(Not Set)" : rtsp_url.c_str());
-    LOG4CPLUS_INFO_FMT(logger_, "   Connected: %s", isConnected() ? "Yes" : "No");
-    LOG4CPLUS_INFO_FMT(logger_, "   Decoded frames: %d", decoded_frames_.load());
-    LOG4CPLUS_INFO_FMT(logger_, "   Dropped frames: %d", dropped_frames_.load());
+    LOG4CPLUS_INFO(logger_, "[Worker] 📊 Statistics:");
     
+    // 1. 通用信息
+    std::string path = packet_source_ ? packet_source_->getPath() : std::string();
+    LOG4CPLUS_INFO_FMT(logger_, "[Worker]    Source: %s", path.empty() ? "(Buffer Mode)" : path.c_str());
+    LOG4CPLUS_INFO_FMT(logger_, "[Worker]    Codec: %s", getCodecName());
+    LOG4CPLUS_INFO_FMT(logger_, "[Worker]    Resolution: %dx%d → %dx%d", getSourceWidth(), getSourceHeight(), output_width_, output_height_);
+    LOG4CPLUS_INFO_FMT(logger_, "[Worker]    Decoded frames: %d", decoded_frames_.load());
+    
+    // 2. 根据数据源类型显示特定信息
+    SourceType type = getDataSourceType();
+    if (type == SourceType::FILE_SOURCE) {
+        LOG4CPLUS_INFO_FMT(logger_, "[Worker]    Total frames: %d", packet_source_ ? packet_source_->getTotalFrames() : -1);
+        LOG4CPLUS_INFO_FMT(logger_, "[Worker]    EOF: %s", packet_source_ && packet_source_->isAtEnd() ? "YES" : "NO");
+    } else if (type == SourceType::NETWORK_SOURCE) {
+        LOG4CPLUS_INFO_FMT(logger_, "[Worker]    Connected: %s", isConnected() ? "Yes" : "No");
+        LOG4CPLUS_INFO_FMT(logger_, "[Worker]    Dropped frames: %d", dropped_frames_.load());
+    } else if (type == SourceType::BUFFER_SOURCE) {
+        LOG4CPLUS_INFO_FMT(logger_, "[Worker]    Dropped frames: %d", dropped_frames_.load());
+    }
+    
+    // 3. BufferPool 信息（通用）
     uint64_t pool_id = getOutputBufferPoolId(BufferPoolType::DECODE_VIDEO_PRIMARY);
-    LOG4CPLUS_INFO_FMT(logger_, "   BufferPool ID: %lu", pool_id);
+    LOG4CPLUS_INFO_FMT(logger_, "[Worker]    BufferPool ID: %lu", pool_id);
 }
 
 // ============ 内部实现 ============
 
-bool FfmpegDecodeRtspWorker::initializeDecoder(const AVCodecParameters* codec_params) {
+bool FFmpegDecodeWorker::initializeDecoder(const AVCodecParameters* codec_params) {
     // ⭐ v2.12修改：codec_params 必须提供（从 packet_source_ 获取）
     if (!codec_params) {
-        setError("Cannot initialize decoder: codec_params is nullptr");
+        LOG4CPLUS_ERROR(logger_, "[Worker] Cannot initialize decoder: codec_params is nullptr");
         return false;
     }
     const AVCodecParameters* codecpar = codec_params;
@@ -741,7 +977,7 @@ bool FfmpegDecodeRtspWorker::initializeDecoder(const AVCodecParameters* codec_pa
             LOG4CPLUS_INFO(logger_, "[Worker] Searching for pure software decoder...");
             codec = findPureSoftwareDecoder(codecpar->codec_id);
             if (!codec) {
-                setError("No pure software decoder available for this codec!");
+                LOG4CPLUS_ERROR(logger_, "[Worker] No pure software decoder available for this codec!");
                 return false;
             }
             LOG4CPLUS_INFO_FMT(logger_, "[Worker] ✅ Using software decoder: %s", codec->name);
@@ -749,7 +985,7 @@ bool FfmpegDecodeRtspWorker::initializeDecoder(const AVCodecParameters* codec_pa
             // 硬件解码或自动选择：使用 FFmpeg 默认行为
             codec = avcodec_find_decoder(codecpar->codec_id);
             if (!codec) {
-                setError("Decoder not found for codec");
+                LOG4CPLUS_ERROR(logger_, "[Worker] Decoder not found for codec");
                 return false;
             }
             
@@ -765,14 +1001,16 @@ bool FfmpegDecodeRtspWorker::initializeDecoder(const AVCodecParameters* codec_pa
     // 2. 分配解码器上下文
     codec_ctx_ptr_ = avcodec_alloc_context3(codec);
     if (!codec_ctx_ptr_) {
-        setError("Failed to allocate codec context");
+        LOG4CPLUS_ERROR(logger_, "[Worker] Failed to allocate codec context");
         return false;
     }
     
     // 3. 复制参数到解码器上下文
     int ret = avcodec_parameters_to_context(codec_ctx_ptr_, codecpar);
     if (ret < 0) {
-        setError("Failed to copy codec parameters", ret);
+        char err_buf[AV_ERROR_MAX_STRING_SIZE];
+        av_strerror(ret, err_buf, sizeof(err_buf));
+        LOG4CPLUS_ERROR_FMT(logger_, "[Worker] Failed to copy codec parameters (FFmpeg: %s)", err_buf);
         avcodec_free_context(&codec_ctx_ptr_);
         codec_ctx_ptr_ = nullptr;
         return false;
@@ -791,7 +1029,9 @@ bool FfmpegDecodeRtspWorker::initializeDecoder(const AVCodecParameters* codec_pa
     // 5. 打开解码器
     ret = avcodec_open2(codec_ctx_ptr_, codec, codec_options_ptr_ ? &codec_options_ptr_ : nullptr);
     if (ret < 0) {
-        setError("Failed to open codec", ret);
+        char err_buf[AV_ERROR_MAX_STRING_SIZE];
+        av_strerror(ret, err_buf, sizeof(err_buf));
+        LOG4CPLUS_ERROR_FMT(logger_, "[Worker] Failed to open codec (FFmpeg: %s)", err_buf);
         avcodec_free_context(&codec_ctx_ptr_);
         codec_ctx_ptr_ = nullptr;
         return false;
@@ -805,17 +1045,17 @@ bool FfmpegDecodeRtspWorker::initializeDecoder(const AVCodecParameters* codec_pa
     return true;
 }
 
-bool FfmpegDecodeRtspWorker::configureSpecialDecoder() {
+bool FFmpegDecodeWorker::configureSpecialDecoder() {
     // 配置 h264_taco 解码器（从 worker_config_ 读取配置）
     if (!codec_ctx_ptr_->priv_data) {
-        LOG4CPLUS_WARN(logger_, "[Worker]  Warning: codec_ctx->priv_data is NULL, cannot set options");
+        LOG4CPLUS_WARN_FMT(logger_, "[Worker]  Warning: codec_ctx->priv_data is NULL, cannot set options");
         return false;
     }
     
-    // 🎯 从 worker_config_ 获取 taco 配置
-    const auto& taco = worker_config_.decoder.taco;
+    // 🎯 从 worker_config_ 获取 taco 配置（非 const，可能需要修改）
+    auto& taco = worker_config_.decoder.taco;
     
-    LOG4CPLUS_DEBUG(logger_, "[Worker] Configuring h264_taco decoder options from config...");
+    LOG4CPLUS_DEBUG_FMT(logger_, "[Worker] Configuring h264_taco decoder options from config...");
     
     int ret;
     
@@ -869,11 +1109,31 @@ bool FfmpegDecodeRtspWorker::configureSpecialDecoder() {
                taco.ch1_crop_width, taco.ch1_crop_height);
     }
     
-    // 配置通道1缩放参数（从 config 读取）
+    // ⭐ 配置通道1缩放参数（从 config 读取）
+    // ⚠️ TACO 硬件限制：只能缩小，不能放大
     if (taco.ch1_scale_width > 0 && taco.ch1_scale_height > 0) {
-        av_opt_set_int(codec_ctx_ptr_->priv_data, "ch1_scale_width", taco.ch1_scale_width, 0);
-        av_opt_set_int(codec_ctx_ptr_->priv_data, "ch1_scale_height", taco.ch1_scale_height, 0);
-        LOG4CPLUS_DEBUG_FMT(logger_, "[Worker]    ch1_scale: (%d, %d)", taco.ch1_scale_width, taco.ch1_scale_height);
+        // 验证缩放配置是否超出原始分辨率
+        int orig_width = getSourceWidth();
+        int orig_height = getSourceHeight();
+        if (taco.ch1_scale_width > orig_width || taco.ch1_scale_height > orig_height) {
+            LOG4CPLUS_WARN(logger_, "═══════════════════════════════════════════════════════════════");
+            LOG4CPLUS_WARN(logger_, "  ⚠️  TACO 硬件缩放限制：只能缩小，不能放大");
+            LOG4CPLUS_WARN(logger_, "═══════════════════════════════════════════════════════════════");
+            LOG4CPLUS_WARN_FMT(logger_, "  原始分辨率: %dx%d", orig_width, orig_height);
+            LOG4CPLUS_WARN_FMT(logger_, "  请求分辨率: %dx%d (超出限制)", 
+                         taco.ch1_scale_width, taco.ch1_scale_height);
+            LOG4CPLUS_WARN_FMT(logger_, "  自动回退：使用原始分辨率 %dx%d", orig_width, orig_height);
+            LOG4CPLUS_WARN(logger_, "═══════════════════════════════════════════════════════════════");
+            
+            // 清除缩放配置，使用原始分辨率
+            taco.ch1_scale_width = 0;
+            taco.ch1_scale_height = 0;
+        } else {
+            // 配置有效，设置缩放参数
+            av_opt_set_int(codec_ctx_ptr_->priv_data, "ch1_scale_width", taco.ch1_scale_width, 0);
+            av_opt_set_int(codec_ctx_ptr_->priv_data, "ch1_scale_height", taco.ch1_scale_height, 0);
+            LOG4CPLUS_DEBUG_FMT(logger_, "[Worker]    ch1_scale: (%d, %d)", taco.ch1_scale_width, taco.ch1_scale_height);
+        }
     }
     
     // 配置通道1 RGB（从 config 读取）
@@ -901,28 +1161,15 @@ bool FfmpegDecodeRtspWorker::configureSpecialDecoder() {
     return true;
 }
 
-void FfmpegDecodeRtspWorker::setError(const std::string& error, int ffmpeg_error) {
-    std::lock_guard<std::recursive_mutex> lock(mutex_);
-    last_error_ = error;
-    
-    if (ffmpeg_error != 0) {
-        char err_buf[AV_ERROR_MAX_STRING_SIZE];
-        av_strerror(ffmpeg_error, err_buf, sizeof(err_buf));
-        LOG4CPLUS_ERROR_FMT(logger_, "[Worker] FfmpegDecodeRtspWorker Error: %s (FFmpeg: %s)", error.c_str(), err_buf);
-    } else {
-        LOG4CPLUS_ERROR_FMT(logger_, "[Worker] FfmpegDecodeRtspWorker Error: %s", error.c_str());
-    }
-}
-
 // ============================================================================
 // 硬件解码器元数据提取（重写基类虚函数）
 // ============================================================================
 
-bool FfmpegDecodeRtspWorker::extractHardwareAddressFromMetadata(AVFrame* frame, Buffer* buffer) {
+bool FFmpegDecodeWorker::extractHardwareAddressFromMetadata(AVFrame* frame, Buffer* buffer) {
     // ⭐ 职责：从 AVFrame 中提取硬件解码器的物理内存地址
     // 
     // 设计原则：
-    // 1. 此函数只在使用硬件解码器时调用（decoder_name_ 非空）
+    // 1. 此函数只在 decoder_name_ 非空 && use_hardware_decoder_==true 时被调用
     // 2. 不同硬件解码器有不同的提取方式
     // 3. 提取失败返回 false，调用者会报错并终止解码
     
@@ -931,8 +1178,7 @@ bool FfmpegDecodeRtspWorker::extractHardwareAddressFromMetadata(AVFrame* frame, 
         return false;
     }
     
-    // ========== h264_taco 硬件解码器 ==========
-    if (decoder_name_ == "h264_taco") {
+    if (decoder_name_.find("taco") != std::string::npos) {
         // TACO 特定逻辑：从 metadata 中提取 pool_blk_id，转换为物理地址
         uint64_t phys_addr = 0;
         uint32_t blk_id = 0;
@@ -972,7 +1218,7 @@ bool FfmpegDecodeRtspWorker::extractHardwareAddressFromMetadata(AVFrame* frame, 
     //
     // 示例：Intel QSV 解码器
     // if (decoder_name_ == "h264_qsv") {
-    //     // QSV 特定逻辑：从 AVFrame 的 data[3] 获取 mfxFrameSurface1 指针
+    //     // QSV 特定逻辑：从 AVFrame 的 data[3] 获取 mfxFrameSurface1*
     //     // mfxFrameSurface1* surface = (mfxFrameSurface1*)frame->data[3];
     //     // buffer->setPhysicalAddress((uint64_t)surface->Data.MemId);
     //     // return true;
@@ -985,8 +1231,8 @@ bool FfmpegDecodeRtspWorker::extractHardwareAddressFromMetadata(AVFrame* frame, 
         return true;  // ✅ 软件解码器返回 true（不是错误）
     }
     
-    // 未知硬件解码器
-    LOG4CPLUS_WARN_FMT(logger_, "[Worker] Hardware decoder '%s': No hardware address extraction implemented", 
+    // 未识别的硬件解码器
+    LOG4CPLUS_ERROR_FMT(logger_, "[Worker] Unknown hardware decoder '%s', cannot extract physical address", 
                  decoder_name_.c_str());
     return false;
 }
@@ -994,6 +1240,6 @@ bool FfmpegDecodeRtspWorker::extractHardwareAddressFromMetadata(AVFrame* frame, 
 
 
 
-AVPixelFormat FfmpegDecodeRtspWorker::getSourcePixelFormat() const {
+AVPixelFormat FFmpegDecodeWorker::getSourcePixelFormat() const {
     return packet_source_ ? packet_source_->getSourcePixelFormat() : AV_PIX_FMT_NONE;
 }

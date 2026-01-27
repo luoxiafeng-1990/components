@@ -160,6 +160,16 @@ inline const char* bufferPoolTypeToString(BufferPoolType type) {
  */
 class WorkerBase : public IDataSourceNavigator {
 public:
+    // ==================== 分辨率限制常量 ====================
+    
+    /// 最小允许的分辨率（宽或高）
+    static constexpr int MIN_RESOLUTION = 16;
+    
+    /// 最大允许的分辨率（宽或高），支持到 8K
+    static constexpr int MAX_RESOLUTION = 8192;
+    
+    // ==================== 构造/析构 ====================
+    
     /**
      * @brief 构造函数
      * 
@@ -225,7 +235,7 @@ public:
      */
     virtual bool extractHardwareAddressFromMetadata(struct AVFrame* frame, Buffer* buffer) {
         // 默认实现：不支持硬件地址提取
-        // 子类（如 FfmpegDecodeVideoFileWorker）可以重写此方法
+        // 子类（如 FFmpegDecodeWorker）可以重写此方法
         (void)frame;   // 避免未使用参数警告
         (void)buffer;
         return false;
@@ -236,7 +246,7 @@ public:
      * 
      * 纯虚函数：强制所有子类必须实现
      * 
-     * @return 类型名称（如 "FfmpegDecodeVideoFileWorker"、"MmapRawVideoFileWorker"）
+     * @return 类型名称（如 "FFmpegDecodeWorker"、"MmapRawVideoFileWorker"）
      */
     virtual const char* getWorkerType() const = 0;
     
@@ -336,7 +346,7 @@ public:
      * - 消费者 Worker 从生产者 Worker 的 BufferPool 获取数据
      * 
      * 默认实现：返回 false（不支持 Buffer 模式）
-     * 子类（如 FfmpegDecodeVideoFileWorker、FfmpegDecodeRtspWorker）可以重写此方法
+     * 子类（如 FFmpegDecodeWorker）可以重写此方法
      * 
      * @param pool_weak Record Worker 的 BufferPool（weak_ptr）
      * @return true 如果成功设置，false 如果失败（不支持 Buffer 模式）
@@ -413,14 +423,21 @@ public:
     
     /**
      * @brief 获取 Worker 输出的每像素字节数
+     * 
+     * @param channel 通道编号（默认 0）
+     *   - channel = 0：主通道（通常是 YUV 格式）
+     *   - channel = 1：第二通道（如 TACO 的 RGB 通道）
+     * 
      * @return 每像素字节数（浮点数，支持如NV12的1.5字节/像素）
+     *   - 返回 0.0 表示该通道不存在或未启用
      * 
      * @note 这是 Worker 解码后输出的像素格式，不是数据源编码格式
      *       - 计算基于 Worker 的解码器输出格式（YUV420、ARGB888等）
      *       - 数据源是压缩的（H.264、H.265），没有"每像素字节数"概念
      *       - 用于计算输出帧大小：getOutputWidth() * getOutputHeight() * getOutputBytesPerPixel()
+     * @note 向后兼容：不传参数时等同于 getOutputBytesPerPixel(0)
      */
-    virtual double getOutputBytesPerPixel() const = 0;
+    virtual double getOutputBytesPerPixel(int channel = 0) const = 0;
     
     /**
      * @brief 获取时间基（用于 BufferWriter 等场景）

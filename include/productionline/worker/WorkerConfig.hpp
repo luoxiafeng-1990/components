@@ -44,12 +44,15 @@ using CallbackChain = std::vector<CallbackChainItem>;
  * @brief Worker 类型枚举
  * 
  * 注意：此枚举独立定义，避免与 BufferFillingWorkerFactory 的循环依赖
+ * 
+ * v3.0 重构：
+ * - FFMPEG_DECODE: 统一的解码 Worker（支持文件/RTSP/Buffer 模式）
+ * - FFMPEG_PACKET_RECORDER: 录制 Worker
  */
 enum class WorkerType {
     AUTO,                   // 自动检测（默认）
-    FFMPEG_RTSP,            // FFmpeg RTSP 流
-    FFMPEG_PACKET_RECORDER, // FFmpeg Packet 录制器（支持 RTSP/文件/HTTP 等多种数据源）
-    FFMPEG_VIDEO_FILE       // FFmpeg 视频文件
+    FFMPEG_DECODE,          // FFmpeg 解码 Worker（统一处理文件和 RTSP 流）
+    FFMPEG_PACKET_RECORDER  // FFmpeg Packet 录制器（支持 RTSP/文件/HTTP 等多种数据源）
 };
 
 /**

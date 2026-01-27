@@ -143,7 +143,7 @@ int main() {
     // 配置消费者1（硬件解码器）
     ConsumerConfig consumer1_cfg;
     consumer1_cfg.consumer_name = "hw_decoder";
-    consumer1_cfg.worker_config.worker_type = WorkerType::FFMPEG_RTSP;
+    consumer1_cfg.worker_config.worker_type = WorkerType::FFMPEG_DECODE;
     consumer1_cfg.worker_config.decoder.use_hardware_decoder = true;
     consumer1_cfg.worker_config.decoder.decoder_name = "h264_taco";
     group_config.consumer_configs.push_back(consumer1_cfg);
@@ -151,7 +151,7 @@ int main() {
     // 配置消费者2（软件解码器）
     ConsumerConfig consumer2_cfg;
     consumer2_cfg.consumer_name = "sw_decoder";
-    consumer2_cfg.worker_config.worker_type = WorkerType::FFMPEG_RTSP;
+    consumer2_cfg.worker_config.worker_type = WorkerType::FFMPEG_DECODE;
     consumer2_cfg.worker_config.decoder.use_hardware_decoder = false;
     group_config.consumer_configs.push_back(consumer2_cfg);
     

@@ -1,5 +1,5 @@
-#ifndef FFMPEG_DECODE_RTSP_WORKER_HPP
-#define FFMPEG_DECODE_RTSP_WORKER_HPP
+#ifndef FFMPEG_DECODE_WORKER_HPP
+#define FFMPEG_DECODE_WORKER_HPP
 
 #include "productionline/worker/WorkerBase.hpp"
 #include "productionline/worker/IPacketSource.hpp"
@@ -22,24 +22,30 @@ struct AVFrame;
 // 前向声明 BufferPool（避免循环依赖）
 class BufferPool;
 
-#define MAX_RTSP_PATH_LENGTH 512
+#define MAX_VIDEO_PATH_LENGTH 512
 
 /**
- * @brief FfmpegDecodeRtspWorker - FFmpeg解码RTSP流Worker
+ * @brief FFmpegDecodeWorker - FFmpeg 通用解码 Worker
  * 
- * 架构角色：Worker（工人）- FFmpeg解码RTSP流类型
+ * 架构角色：Worker（工人）- FFmpeg 解码类型（统一处理文件和RTSP流）
  * 
- * 功能：使用FFmpeg解码RTSP视频流
- * 目的：填充Buffer，得到填充后的buffer
+ * 功能：使用 FFmpeg 解码视频（支持本地文件和 RTSP 流）
+ * 目的：填充 Buffer，得到填充后的 buffer
  * 
  * 功能：
+ * - 解码本地视频文件（MP4, AVI, MKV, MOV, FLV 等）
  * - 连接 RTSP 视频流并解码
- * - 同步解码模式：fillBuffer() 直接解码到 AVFrame（与 VideoFileWorker 一致）
+ * - 同步解码模式：fillBuffer() 直接解码到 AVFrame
  * - 零拷贝模式：利用特殊解码器（如 h264_taco）的物理地址
  * - 支持硬件加速解码（可选，通过 WorkerConfig 配置）
  * 
+ * 数据源自动识别（v2.23）：
+ * - 路径以 rtsp:// 或 rtsps:// 开头 → RTSP 流
+ * - 其他路径 → 本地文件
+ * - buffer_mode=true → Buffer 数据源（用于 MultiWorker 场景）
+ * 
  * 特点：
- * - 实时流处理（无总帧数概念）
+ * - 统一接口处理多种数据源
  * - 线程安全的帧访问
  * - 支持解码器配置（v2.2）：硬件/软件、解码器名称、特殊配置
  * - BufferPool 自动创建（v2.0架构要求）
@@ -52,8 +58,8 @@ class BufferPool;
  *         DecoderConfigBuilder().useTaco("h264").build()
  *     )
  *     .build();
- * FfmpegDecodeRtspWorker worker(config);
- * worker.open("rtsp://192.168.1.100:8554/stream", 1920, 1080, 32);
+ * FFmpegDecodeWorker worker(config);
+ * worker.open();  // 从 config 读取路径
  * 
  * // v2.0: 获取 BufferPool ID
  * uint64_t pool_id = worker.getOutputBufferPoolId();
@@ -65,38 +71,38 @@ class BufferPool;
  * pool->submitFilled(buffer);
  * ```
  */
-class FfmpegDecodeRtspWorker : public WorkerBase {
+class FFmpegDecodeWorker : public WorkerBase {
 public:
     // ============ 构造/析构 ============
     
     /**
      * @brief 构造函数（必须提供配置）
-     * @param config Worker配置（包含解码器配置、RTSP配置等）
+     * @param config Worker配置（包含解码器配置、数据源配置等）
      * 
      * 注意：不再提供默认构造函数，所有 Worker 必须通过配置创建
      */
-    explicit FfmpegDecodeRtspWorker(const WorkerConfig& config);
-    virtual ~FfmpegDecodeRtspWorker();
+    explicit FFmpegDecodeWorker(const WorkerConfig& config);
+    virtual ~FFmpegDecodeWorker();
     
     // 禁止拷贝
-    FfmpegDecodeRtspWorker(const FfmpegDecodeRtspWorker&) = delete;
-    FfmpegDecodeRtspWorker& operator=(const FfmpegDecodeRtspWorker&) = delete;
+    FFmpegDecodeWorker(const FFmpegDecodeWorker&) = delete;
+    FFmpegDecodeWorker& operator=(const FFmpegDecodeWorker&) = delete;
     
     // ============ WorkerBase 接口实现 ============
     
     // Buffer填充功能（原IBufferFillingWorker的方法）
     bool fillBuffer(int frame_index, Buffer* buffer) override;
     const char* getWorkerType() const override {
-        return "FfmpegDecodeRtspWorker";
+        return "FFmpegDecodeWorker";
     }
     
     // 文件导航功能（继承自IDataSourceNavigator）
     /**
-     * @brief 打开 RTSP 流（无参版本，从 worker_config_ 读取所有参数）
+     * @brief 打开数据源（无参版本，从 worker_config_ 读取所有参数）
      * 
      * v2.13 架构：Worker 从 worker_config_ 读取所有配置参数
      * 包括：
-     * - worker_config_.data_source.path（RTSP URL）
+     * - worker_config_.data_source.path（文件路径或 RTSP URL）
      * - worker_config_.display.width/height/bits_per_pixel
      * - worker_config_.decoder.name（解码器名称）
      * - worker_config_.decoder.taco（TACO 配置）
@@ -106,12 +112,9 @@ public:
     bool open() override;
     
     /**
-     * @brief 打开 RTSP 流（单参数版本）
-     * 
-     * ❌ RTSP 流不支持此方法，因为必须指定输出分辨率和格式
-     * 请使用无参的 open()，并在 WorkerConfig 中配置参数
-     * 
-     * @return false（不支持）
+     * @brief 打开数据源（单参数版本）
+     * @param path 文件路径或 RTSP URL
+     * @return 成功返回 true
      */
     bool open(const char* path) override;
     
@@ -130,7 +133,7 @@ public:
     SourceType getDataSourceType() const override;
     bool isAtEnd() const override;
     
-    // ============ RTSP 特有接口 ============
+    // ============ 数据源配置接口 ============
     
     /**
      * @brief 设置源 BufferPool（用于 Buffer 模式）
@@ -143,16 +146,15 @@ public:
      * 
      * 前置条件：
      * - WorkerConfig 中必须设置 `data_source.buffer_mode = true`
-     * - 构造函数中会创建 `BufferPacketSource`（而不是 `RtspPacketSource`）
+     * - 构造函数中会创建 `BufferPacketSource`（而不是其他数据源）
      * 
      * 示例：
      * ```cpp
      * // 1. 创建消费者 Worker（Buffer 模式）
-     * // ⭐ v2.22: 数据源配置从 decoder 移至 datasource
      * WorkerConfig config;
      * config.data_source.buffer_mode = true;
      * config.data_source.codec_params = record_worker->getSourceCodecParameters();
-     * FfmpegDecodeRtspWorker consumer_worker(config);
+     * FFmpegDecodeWorker consumer_worker(config);
      * 
      * // 2. 关联 Record BufferPool
      * auto record_pool_weak = BufferPoolRegistry::getInstance().getPool(record_pool_id);
@@ -183,11 +185,6 @@ public:
     bool isConnected() const;
     
     /**
-     * 获取最后错误信息
-     */
-    std::string getLastError() const;
-    
-    /**
      * @brief 获取编解码器参数（用于 BufferWriter 等场景）
      * @return 编解码器参数指针，如果不可用则返回 nullptr
      */
@@ -214,8 +211,14 @@ public:
     
     /**
      * @brief 获取 Worker 输出的每像素字节数
+     * @param channel 通道编号（默认 0）
      */
-    double getOutputBytesPerPixel() const override;
+    double getOutputBytesPerPixel(int channel = 0) const override;
+    
+    /**
+     * @brief 获取编解码器名称
+     */
+    const char* getCodecName() const;
     
     /**
      * 打印统计信息
@@ -228,7 +231,7 @@ private:
     
     // ============ 数据源抽象（v2.12新增）============
     // ⭐ v2.18 修改：从 unique_ptr 改为 shared_ptr（支持共享模式）
-    std::shared_ptr<IPacketSource> packet_source_;  // 数据源抽象（RTSP流 或 共享Buffer）
+    std::shared_ptr<IPacketSource> packet_source_;  // 数据源抽象（文件/RTSP流/共享Buffer）
     
     // ============ FFmpeg 资源 ============
     AVCodecContext* codec_ctx_ptr_;
@@ -248,9 +251,6 @@ private:
     
     // ============ 线程安全 ============
     mutable std::recursive_mutex mutex_;  // 使用递归锁避免死锁
-    
-    // ============ 错误处理 ============
-    std::string last_error_;
     
     // ============ 帧缓存（用于多通道解码）============
     std::vector<AVFrame*> cached_frames_;  // 缓存解码后的帧（用于处理双通道等场景）
@@ -301,11 +301,6 @@ private:
     bool fillBufferMetadataFromFrame(AVFrame* frame_ptr, Buffer* buffer);
     
     /**
-     * 设置错误信息
-     */
-    void setError(const std::string& error, int ffmpeg_error = 0);
-    
-    /**
      * @brief 从 AVFrame 中提取硬件解码器的物理内存地址（重写基类虚函数）
      * 
      * 职责：从 AVFrame 中提取硬件解码器的物理内存地址
@@ -318,11 +313,32 @@ private:
      * @param frame AVFrame 指针（需要包含 libavcodec/avcodec.h）
      * @param buffer Buffer 指针（用于存储提取的物理地址）
      * @return true 成功提取物理地址，false 提取失败或不支持
-     * 
-     * @note 与 FfmpegDecodeVideoFileWorker 保持一致的架构
      */
     virtual bool extractHardwareAddressFromMetadata(struct AVFrame* frame, Buffer* buffer) override;
+    
+    // ============ TACO 辅助函数（多通道支持）============
+    
+    /**
+     * @brief TACO 专用：从 codec priv_data 读取通道配置并计算字节数
+     * @param channel 通道编号
+     * @return 每像素字节数，0.0 表示通道未启用
+     */
+    double getTacoChannelBytesPerPixel(int channel) const;
+    
+    /**
+     * @brief 将 TACO RGB 驱动值映射为 OutputFormat 枚举
+     * @param driver_value TACO 驱动格式值（如 9=ARGB888）
+     * @return OutputFormat 枚举值
+     */
+    static OutputFormat mapRgbDriverValueToEnum(int driver_value);
+    
+    /**
+     * @brief 从 OutputFormat 计算每像素字节数
+     * @param format OutputFormat 枚举值
+     * @return 每像素字节数
+     */
+    static double getBytesPerPixelFromFormat(OutputFormat format);
 };
 
-#endif // FFMPEG_DECODE_RTSP_WORKER_HPP
+#endif // FFMPEG_DECODE_WORKER_HPP
 

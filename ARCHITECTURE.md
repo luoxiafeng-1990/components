@@ -1740,9 +1740,9 @@ class BufferFillingWorkerFactory {
 public:
     enum class WorkerType {
         AUTO,              // 自动检测
-        FFMPEG_RTSP,       // FfmpegDecodeRtspWorker
+        FFMPEG_DECODE        // FFmpegDecodeWorker
         FFMPEG_RECORD_RTSP,// FfmpegRecordRtspWorker
-        FFMPEG_VIDEO_FILE  // FfmpegDecodeVideoFileWorker
+          // (removed - merged into FFMPEG_DECODE)
         // MMAP_RAW 和 IOURING_RAW 已删除（未实现）
     };
     
@@ -2477,7 +2477,7 @@ auto workerConfig = WorkerConfigBuilder()
             .useH264Taco()
             .build()
     )
-    .setWorkerType(WorkerType::FFMPEG_VIDEO_FILE)
+    .setWorkerType(WorkerType::FFMPEG_DECODE)
     .build();
 
 VideoProductionLine producer;
@@ -2506,7 +2506,7 @@ auto workerConfig = WorkerConfigBuilder()
     .build();
 
 auto worker = BufferFillingWorkerFactory::create(
-    WorkerType::FFMPEG_VIDEO_FILE,
+    WorkerType::FFMPEG_DECODE,
     workerConfig
 );
 worker->open(workerConfig.file.file_path,
@@ -4034,7 +4034,7 @@ int main() {
                 .useH264Taco()  // 🎯 使用 h264_taco 预设
                 .build()
         )
-        .setWorkerType(WorkerType::FFMPEG_VIDEO_FILE)
+        .setWorkerType(WorkerType::FFMPEG_DECODE)
         .build();
     
     // 或者自定义配置
@@ -4104,7 +4104,7 @@ int main() {
         .setDecoderConfig(
             DecoderConfigBuilder().useTaco("h264").build()  // 硬件解码
         )
-        .setWorkerType(WorkerType::FFMPEG_VIDEO_FILE)
+        .setWorkerType(WorkerType::FFMPEG_DECODE)
         .build();
     
     // 2. 创建并启动生产线
@@ -4160,7 +4160,7 @@ auto workerConfig = WorkerConfigBuilder()
             .setBitsPerPixel(32)
             .build()
     )
-    .setWorkerType(WorkerType::FFMPEG_RTSP)
+    .setWorkerType(WorkerType::FFMPEG_DECODE)
     .build();
 
 // 2. 创建并启动生产线
@@ -4256,8 +4256,8 @@ auto config = WorkerConfigBuilder().setDecoderName(decoder).build();
 
 | 场景 | Worker类型 | Worker内部使用的Allocator | 理由 |
 |------|-----------|-------------------------|------|
-| 编码视频文件 | `FFMPEG_VIDEO_FILE` | NormalAllocator（Worker自动选择） | 支持多种编码格式，硬件加速 |
-| RTSP流 | `FFMPEG_RTSP` | AVFrameAllocator（Worker自动选择） | 实时流处理，零拷贝模式 |
+| 编码视频文件 | `FFMPEG_DECODE` | NormalAllocator（Worker自动选择） | 支持多种编码格式，硬件加速 |
+| RTSP流 | `FFMPEG_DECODE` | AVFrameAllocator（Worker自动选择） | 实时流处理，零拷贝模式 |
 | Raw视频文件 | ~~`MMAP_RAW`~~ / ~~`IOURING_RAW`~~ | _（未实现）_ | _计划中的功能_ |
 
 ### 2. BufferPool创建策略
@@ -4825,8 +4825,8 @@ feat(buffer): 新增AVFrame管理功能
 ### Q4: 如何选择合适的Worker类型？
 
 **A**:
-- **编码视频文件**：`FFMPEG_VIDEO_FILE`（支持 H.264/H.265 等，自动检测格式）
-- **RTSP 流（解码）**：`FFMPEG_RTSP`（实时解码 RTSP 流）
+- **编码视频文件**：`FFMPEG_DECODE`（支持 H.264/H.265 等，自动检测格式）
+- **RTSP 流（解码）**：`FFMPEG_DECODE`（实时解码 RTSP 流）
 - **RTSP 流（录制）**：`FFMPEG_RECORD_RTSP`（录制 RTSP 流）
 - **自动选择**：`AUTO`（工厂会自动检测最优类型）
 - ~~**Raw 视频文件**~~：_（`MMAP_RAW` 和 `IOURING_RAW` 未实现）_

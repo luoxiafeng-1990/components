@@ -127,7 +127,7 @@ public:
     /**
      * @brief 获取 Worker 输出每像素字节数（Recorder记录原始码流，返回0）
      */
-    double getOutputBytesPerPixel() const override;
+    double getOutputBytesPerPixel(int channel = 0) const override;
 
 private:
     std::string getLastError() const;

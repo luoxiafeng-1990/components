@@ -6,6 +6,7 @@
 #include "productionline/worker/WorkerConfig.hpp"
 #include "buffer/bufferpool/Buffer.hpp"
 #include "buffer/bufferpool/BufferPool.hpp"
+#include <log4cplus/logger.h>
 #include <memory>
 #include <stddef.h>
 #include <sys/types.h>
@@ -39,7 +40,7 @@
  * ```cpp
  * // 通过 WorkerConfig 配置 Worker 类型和所有参数
  * WorkerConfig config;
- * config.worker_type = WorkerType::FFMPEG_VIDEO_FILE;
+ * config.worker_type = WorkerType::FFMPEG_DECODE;
  * config.data_source.path = "video.mp4";
  * 
  * BufferFillingWorkerFacade worker(config);
@@ -52,6 +53,7 @@ private:
     // ============ 门面模式：持有具体实现 ============
     std::unique_ptr<WorkerBase> worker_base_uptr_;  // 实际的Worker实现（统一基类）
     WorkerConfig config_;  // Worker配置（包含 worker_type 和所有配置参数）
+    log4cplus::Logger logger_;  // 日志记录器
 
 public:
     // ============ 构造/析构 ============
@@ -295,12 +297,19 @@ public:
     /**
      * 获取 Worker 输出的每像素字节数
      * 
+     * @param channel 通道编号（默认 0）
+     *   - channel = 0：主通道
+     *   - channel = 1：第二通道（如 TACO RGB 通道）
+     * 
      * @return 每像素字节数（浮点数，支持如NV12的1.5字节/像素）
+     *   - 返回 0.0 表示该通道不存在或未启用
+     * 
      * @note 这是 Worker 解码后输出的像素格式
      *       - 计算基于 Worker 的解码器输出格式（YUV420、ARGB888等）
      *       - 用于计算输出帧大小：getOutputWidth() * getOutputHeight() * getOutputBytesPerPixel()
+     * @note 向后兼容：不传参数时等同于 getOutputBytesPerPixel(0)
      */
-    double getOutputBytesPerPixel() const;
+    double getOutputBytesPerPixel(int channel = 0) const;
 };
 
 #endif // BUFFER_FILLING_WORKER_FACADE_HPP
