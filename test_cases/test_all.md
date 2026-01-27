@@ -732,19 +732,19 @@ sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
 ```bash
 # Scale1: PP0 缩放 32768x32768 -> 256x256 (极端缩放)
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "~/qa_cases pp multi_pp_crop5 --psnr --ssim --display /usr/data/ffmpeg/1920x1080.mp4"
+    "~/qa_cases pp multi_pp_scale1 --psnr --ssim --display /usr/data/ffmpeg/1920x1080.mp4"
 
 # Scale2: PP1 缩放 4096x2160 -> 128x128 (4K 缩放到小尺寸)
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "~/qa_cases pp multi_pp_crop6 --psnr --ssim --display /usr/data/ffmpeg/4096x2160.mp4"
+    "~/qa_cases pp multi_pp_scale2 --psnr --ssim --display /usr/data/ffmpeg/4096x2160.mp4"
 
 # Scale3: 双通道缩放 (PP0+PP1) 32768x32768 -> 256x256
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "~/qa_cases pp --channel multi --crop 0,0,1920,1080 --resolution 256x256 --psnr --ssim --display /usr/data/ffmpeg/1920x1080.mp4"
+    "~/qa_cases pp multi_pp_scale3 --psnr --ssim --display /usr/data/ffmpeg/1920x1080.mp4"
 
 # Scale4: 双通道缩放 (PP0+PP1) 4096x2160 -> 128x128
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "~/qa_cases pp --channel multi --crop 0,0,4096,2160 --resolution 128x128 --psnr --ssim --display /usr/data/ffmpeg/4096x2160.mp4"
+    "~/qa_cases pp multi_pp_scale4 --psnr --ssim --display /usr/data/ffmpeg/4096x2160.mp4"
 ```
 
 **手动指定裁剪区域测试**

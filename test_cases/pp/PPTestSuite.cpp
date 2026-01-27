@@ -29,73 +29,120 @@ log4cplus::Logger& PPTestSuite::getLogger() {
 
 const std::map<std::string, PPTestParams>& PPTestSuite::getPredefinedTests() {
     static std::map<std::string, PPTestParams> tests = {
-        // ========================================
-        // PP0 YUV 格式 - 8-bit（15 个，对应原始 test_pp.cpp）
-        // ========================================
+        // ════════════════════════════════════════════════════════════════════
+        // PP0 YUV 格式（15 种，对应 lfl 分支 test_decode.cpp 定义）
+        // 注：YUV400 系列使用相同的底层格式，只是语义不同
+        // ════════════════════════════════════════════════════════════════════
+        // YUV400 系列 (灰度 10-bit)
+        {"pp0_yuv400_p010",       {"pp0", OutputFormat::YUV_P010, 1920, 1080, ColorStandard::BT2020}},
+        {"pp0_yuv400_i010",       {"pp0", OutputFormat::YUV_P010, 1920, 1080, ColorStandard::BT2020}},
+        {"pp0_yuv400_l010",       {"pp0", OutputFormat::YUV_P010, 1920, 1080, ColorStandard::BT2020}},
+        {"pp0_yuv400_pack10",     {"pp0", OutputFormat::YUV_P010, 1920, 1080, ColorStandard::BT2020}},
+        // YUV400 8-bit (灰度 8-bit)
+        {"pp0_yuv400_8bit",       {"pp0", OutputFormat::YUV_NV12, 1920, 1080, ColorStandard::BT601}},
+        // YUV420 NV12 10-bit 系列
+        {"pp0_yuv420_nv12_p010",  {"pp0", OutputFormat::YUV_P010, 1920, 1080, ColorStandard::BT2020}},
+        {"pp0_yuv420_nv12_i010",  {"pp0", OutputFormat::YUV_P010, 1920, 1080, ColorStandard::BT2020}},
+        {"pp0_yuv420_nv12_l010",  {"pp0", OutputFormat::YUV_P010, 1920, 1080, ColorStandard::BT2020}},
+        {"pp0_yuv420_nv12_pack10",{"pp0", OutputFormat::YUV_P010, 1920, 1080, ColorStandard::BT2020}},
+        // YUV420 8-bit NV12
+        {"pp0_yuv420_8bit_nv12",  {"pp0", OutputFormat::YUV_NV12, 1920, 1080, ColorStandard::BT601}},
+        // YUV420 NV21 10-bit 系列
+        {"pp0_yuv420_nv21_p010_tiled", {"pp0", OutputFormat::YUV_P010, 1920, 1080, ColorStandard::BT2020}},
+        {"pp0_yuv420_nv21_i011",  {"pp0", OutputFormat::YUV_P010, 1920, 1080, ColorStandard::BT2020}},
+        {"pp0_yuv420_nv21_l010",  {"pp0", OutputFormat::YUV_P010, 1920, 1080, ColorStandard::BT2020}},
+        // YUV420 P010
+        {"pp0_yuv420_p010",       {"pp0", OutputFormat::YUV_P010, 1920, 1080, ColorStandard::BT2020}},
+        // YUV420 8-bit NV21
+        {"pp0_yuv420_8bit_nv21",  {"pp0", OutputFormat::YUV_NV21, 1920, 1080, ColorStandard::BT601}},
+        
+        // 便捷别名（兼容旧测试名）
         {"pp0_nv12",              {"pp0", OutputFormat::YUV_NV12, 1920, 1080}},
         {"pp0_nv21",              {"pp0", OutputFormat::YUV_NV21, 1920, 1080}},
         {"pp0_i420",              {"pp0", OutputFormat::YUV_I420, 1920, 1080}},
         {"pp0_yv12",              {"pp0", OutputFormat::YUV_YV12, 1920, 1080}},
+        {"pp0_p010",              {"pp0", OutputFormat::YUV_P010, 1920, 1080}},
         {"pp0_nv16",              {"pp0", OutputFormat::YUV_NV16, 1920, 1080}},
         {"pp0_nv61",              {"pp0", OutputFormat::YUV_NV61, 1920, 1080}},
         {"pp0_i422",              {"pp0", OutputFormat::YUV_I422, 1920, 1080}},
         {"pp0_nv24",              {"pp0", OutputFormat::YUV_NV24, 1920, 1080}},
         {"pp0_i444",              {"pp0", OutputFormat::YUV_I444, 1920, 1080}},
-        // 10-bit 格式
-        {"pp0_p010",              {"pp0", OutputFormat::YUV_P010, 1920, 1080}},
-        // 原始测试中的 YUV400 和 10-bit 变体（使用 P010 作为基础）
-        {"pp0_yuv420_8bit_nv12",  {"pp0", OutputFormat::YUV_NV12, 1920, 1080}},
-        {"pp0_yuv420_8bit_nv21",  {"pp0", OutputFormat::YUV_NV21, 1920, 1080}},
-        {"pp0_yuv420_nv12_p010",  {"pp0", OutputFormat::YUV_P010, 1920, 1080}},
-        {"pp0_yuv420_p010",       {"pp0", OutputFormat::YUV_P010, 1920, 1080}},
-        {"pp0_yuv420_nv21_p010",  {"pp0", OutputFormat::YUV_P010, 1920, 1080}},
         
-        // ========================================
-        // PP1 RGB 格式（18 个，对应原始 test_pp.cpp）
-        // ========================================
-        // 8-bit 格式
+        // ════════════════════════════════════════════════════════════════════
+        // PP1 RGB 格式（18 种，对应 lfl 分支 test_decode.cpp 定义）
+        // ════════════════════════════════════════════════════════════════════
+        // RGB 10-bit 系列（使用 16-bit 格式实现）
+        {"pp1_argb2101010",       {"pp1", OutputFormat::RGB_ARGB888, 1920, 1080, ColorStandard::BT601}},
+        {"pp1_abgr2101010",       {"pp1", OutputFormat::RGB_ABGR888, 1920, 1080, ColorStandard::BT601}},
+        {"pp1_bgra2101010",       {"pp1", OutputFormat::RGB_BGRA888, 1920, 1080, ColorStandard::BT601}},
+        {"pp1_rgba2101010",       {"pp1", OutputFormat::RGB_RGBA888, 1920, 1080, ColorStandard::BT601}},
+        // RGB 8-bit 系列 - packed
+        {"pp1_abgr8888",          {"pp1", OutputFormat::RGB_ABGR888, 1920, 1080, ColorStandard::BT601}},
+        {"pp1_argb8888",          {"pp1", OutputFormat::RGB_ARGB888, 1920, 1080, ColorStandard::BT601}},
+        {"pp1_bgr888",            {"pp1", OutputFormat::RGB_BGR888, 1920, 1080, ColorStandard::BT601}},
+        {"pp1_bgra8888",          {"pp1", OutputFormat::RGB_BGRA888, 1920, 1080, ColorStandard::BT601}},
+        {"pp1_bgrx8888",          {"pp1", OutputFormat::RGB_BGRX888, 1920, 1080, ColorStandard::BT601}},
+        {"pp1_rgb888",            {"pp1", OutputFormat::RGB_RGB888, 1920, 1080, ColorStandard::BT601}},
+        {"pp1_rgba8888",          {"pp1", OutputFormat::RGB_RGBA888, 1920, 1080, ColorStandard::BT601}},
+        {"pp1_rgbx8888",          {"pp1", OutputFormat::RGB_RGBX888, 1920, 1080, ColorStandard::BT601}},
+        {"pp1_xrgb8888",          {"pp1", OutputFormat::RGB_XRGB888, 1920, 1080, ColorStandard::BT601}},
+        {"pp1_xbgr8888",          {"pp1", OutputFormat::RGB_XBGR888, 1920, 1080, ColorStandard::BT601}},
+        // RGB 8-bit 系列 - planar
+        {"pp1_rgb888_planar",     {"pp1", OutputFormat::RGB_RGB888_PLANAR, 1920, 1080, ColorStandard::BT601}},
+        {"pp1_bgr888_planar",     {"pp1", OutputFormat::RGB_BGR888_PLANAR, 1920, 1080, ColorStandard::BT601}},
+        // RGB 16-bit 系列
+        {"pp1_rgb161616",         {"pp1", OutputFormat::RGB_R16G16B16, 1920, 1080, ColorStandard::BT601}},
+        {"pp1_bgr161616",         {"pp1", OutputFormat::RGB_B16G16R16, 1920, 1080, ColorStandard::BT601}},
+        {"pp1_rgb161616_planar",  {"pp1", OutputFormat::RGB_GBRP, 1920, 1080, ColorStandard::BT601}},
+        
+        // 便捷别名（兼容旧测试名）
         {"pp1_argb888",           {"pp1", OutputFormat::RGB_ARGB888, 1920, 1080}},
         {"pp1_abgr888",           {"pp1", OutputFormat::RGB_ABGR888, 1920, 1080}},
         {"pp1_rgba888",           {"pp1", OutputFormat::RGB_RGBA888, 1920, 1080}},
         {"pp1_bgra888",           {"pp1", OutputFormat::RGB_BGRA888, 1920, 1080}},
-        {"pp1_rgb888",            {"pp1", OutputFormat::RGB_RGB888, 1920, 1080}},
-        {"pp1_bgr888",            {"pp1", OutputFormat::RGB_BGR888, 1920, 1080}},
-        {"pp1_xrgb888",           {"pp1", OutputFormat::RGB_XRGB888, 1920, 1080}},
-        {"pp1_xbgr888",           {"pp1", OutputFormat::RGB_XBGR888, 1920, 1080}},
-        {"pp1_rgbx888",           {"pp1", OutputFormat::RGB_RGBX888, 1920, 1080}},
-        {"pp1_bgrx888",           {"pp1", OutputFormat::RGB_BGRX888, 1920, 1080}},
-        {"pp1_rgb888_planar",     {"pp1", OutputFormat::RGB_RGB888_PLANAR, 1920, 1080}},
-        {"pp1_bgr888_planar",     {"pp1", OutputFormat::RGB_BGR888_PLANAR, 1920, 1080}},
-        // 16-bit 格式
         {"pp1_r16g16b16",         {"pp1", OutputFormat::RGB_R16G16B16, 1920, 1080}},
         {"pp1_b16g16r16",         {"pp1", OutputFormat::RGB_B16G16R16, 1920, 1080}},
-        {"pp1_rgb888_planar_16",  {"pp1", OutputFormat::RGB_RGB888_PLANAR, 1920, 1080}},  // 使用 planar 替代
         {"pp1_gbrp",              {"pp1", OutputFormat::RGB_GBRP, 1920, 1080}},
-        // 10-bit 格式（使用 16-bit 格式作为近似）
-        {"pp1_argb2101010",       {"pp1", OutputFormat::RGB_R16G16B16, 1920, 1080}},
-        {"pp1_abgr2101010",       {"pp1", OutputFormat::RGB_B16G16R16, 1920, 1080}},
         
-        // ========================================
-        // PP1 YUV 格式（15 个，对应原始 test_pp.cpp）
-        // ========================================
-        // 8-bit 格式
+        // ════════════════════════════════════════════════════════════════════
+        // PP1 YUV 格式（16 种，对应 lfl 分支 test_decode.cpp 定义）
+        // ════════════════════════════════════════════════════════════════════
+        // YUV400 系列 (灰度 10-bit)
+        {"pp1_yuv400_p010",       {"pp1", OutputFormat::YUV_P010, 1920, 1080, ColorStandard::BT2020}},
+        {"pp1_yuv400_i010",       {"pp1", OutputFormat::YUV_P010, 1920, 1080, ColorStandard::BT2020}},
+        {"pp1_yuv400_l010",       {"pp1", OutputFormat::YUV_P010, 1920, 1080, ColorStandard::BT2020}},
+        {"pp1_yuv400_pack10",     {"pp1", OutputFormat::YUV_P010, 1920, 1080, ColorStandard::BT2020}},
+        // YUV400 8-bit (灰度 8-bit)
+        {"pp1_yuv400_8bit",       {"pp1", OutputFormat::YUV_NV12, 1920, 1080, ColorStandard::BT601}},
+        // YUV420 NV12 10-bit 系列
+        {"pp1_yuv420_nv12_p010",  {"pp1", OutputFormat::YUV_P010, 1920, 1080, ColorStandard::BT2020}},
+        {"pp1_yuv420_nv12_i010",  {"pp1", OutputFormat::YUV_P010, 1920, 1080, ColorStandard::BT2020}},
+        {"pp1_yuv420_nv12_l010",  {"pp1", OutputFormat::YUV_P010, 1920, 1080, ColorStandard::BT2020}},
+        {"pp1_yuv420_nv12_pack10",{"pp1", OutputFormat::YUV_P010, 1920, 1080, ColorStandard::BT2020}},
+        // YUV420 8-bit NV12
+        {"pp1_yuv420_8bit_nv12",  {"pp1", OutputFormat::YUV_NV12, 1920, 1080, ColorStandard::BT601}},
+        // YUV420 NV21 10-bit 系列
+        {"pp1_yuv420_nv21_p010_tiled", {"pp1", OutputFormat::YUV_P010, 1920, 1080, ColorStandard::BT2020}},
+        {"pp1_yuv420_nv21_i011",  {"pp1", OutputFormat::YUV_P010, 1920, 1080, ColorStandard::BT2020}},
+        {"pp1_yuv420_nv21_l010",  {"pp1", OutputFormat::YUV_P010, 1920, 1080, ColorStandard::BT2020}},
+        // YUV420 P010
+        {"pp1_yuv420_p010",       {"pp1", OutputFormat::YUV_P010, 1920, 1080, ColorStandard::BT2020}},
+        // YUV420 8-bit NV21
+        {"pp1_yuv420_8bit_nv21",  {"pp1", OutputFormat::YUV_NV21, 1920, 1080, ColorStandard::BT601}},
+        // YUV420 NV21 P010（第16种，PP1比PP0多一种）
+        {"pp1_yuv420_nv21_p010",  {"pp1", OutputFormat::YUV_P010, 1920, 1080, ColorStandard::BT2020}},
+        
+        // 便捷别名（兼容旧测试名）
         {"pp1_nv12",              {"pp1", OutputFormat::YUV_NV12, 1920, 1080}},
         {"pp1_nv21",              {"pp1", OutputFormat::YUV_NV21, 1920, 1080}},
         {"pp1_i420",              {"pp1", OutputFormat::YUV_I420, 1920, 1080}},
         {"pp1_yv12",              {"pp1", OutputFormat::YUV_YV12, 1920, 1080}},
+        {"pp1_p010",              {"pp1", OutputFormat::YUV_P010, 1920, 1080}},
         {"pp1_nv16",              {"pp1", OutputFormat::YUV_NV16, 1920, 1080}},
         {"pp1_nv61",              {"pp1", OutputFormat::YUV_NV61, 1920, 1080}},
         {"pp1_i422",              {"pp1", OutputFormat::YUV_I422, 1920, 1080}},
         {"pp1_nv24",              {"pp1", OutputFormat::YUV_NV24, 1920, 1080}},
         {"pp1_i444",              {"pp1", OutputFormat::YUV_I444, 1920, 1080}},
-        // 10-bit 格式
-        {"pp1_p010",              {"pp1", OutputFormat::YUV_P010, 1920, 1080}},
-        // 原始测试中的 YUV420 10-bit 变体
-        {"pp1_yuv420_8bit_nv12",  {"pp1", OutputFormat::YUV_NV12, 1920, 1080}},
-        {"pp1_yuv420_8bit_nv21",  {"pp1", OutputFormat::YUV_NV21, 1920, 1080}},
-        {"pp1_yuv420_nv12_p010",  {"pp1", OutputFormat::YUV_P010, 1920, 1080}},
-        {"pp1_yuv420_p010",       {"pp1", OutputFormat::YUV_P010, 1920, 1080}},
-        {"pp1_yuv420_nv21_p010",  {"pp1", OutputFormat::YUV_P010, 1920, 1080}},
         
         // ========================================
         // Multi-PP 测试（10 个，对应原始 test_pp.cpp）
@@ -122,20 +169,27 @@ const std::map<std::string, PPTestParams>& PPTestSuite::getPredefinedTests() {
         {"multi_pp_t11",    {OutputFormat::YUV_NV12, OutputFormat::YUV_NV21, 1920, 1080}},
         
         // ========================================
-        // Multi-PP Crop/Scale 测试（6 个，对应原始 test_pp.cpp）
+        // Multi-PP Crop/Scale 测试（8 个，对应 lfl 分支 test_decode.cpp）
         // ========================================
+        // Crop 测试（4 个）
         // Crop1: PP0 crop 4096x2160 -> 1920x1080
         {"multi_pp_crop1",  {"pp0", OutputFormat::YUV_NV12, 1920, 1080, ColorStandard::BT709, 0, 0, 4096, 2160}},
-        // Crop2: PP0 down-scale 32768x32768 -> 1280x720
-        {"multi_pp_crop2",  {"pp0", OutputFormat::YUV_NV12, 1280, 720}},
+        // Crop2: PP0 crop 32768x32768 -> 1280x720
+        {"multi_pp_crop2",  {"pp0", OutputFormat::YUV_NV12, 1280, 720, ColorStandard::BT709, 0, 0, 32768, 32768}},
         // Crop3: PP1 crop 4096x2160 -> 1920x1080
-        {"multi_pp_crop3",  {"pp1", OutputFormat::RGB_ARGB888, 1920, 1080, ColorStandard::BT709, 0, 0, 4096, 2160}},
-        // Crop4: PP1 down-scale 32768x32768 -> 1280x720
-        {"multi_pp_crop4",  {"pp1", OutputFormat::RGB_ARGB888, 1280, 720}},
-        // Crop5: PP0 down-scale 32768x32768 -> 256x256
-        {"multi_pp_crop5",  {"pp0", OutputFormat::YUV_NV12, 256, 256}},
-        // Crop6: PP1 down-scale 4096x2160 -> 128x128
-        {"multi_pp_crop6",  {"pp1", OutputFormat::RGB_RGB888, 128, 128}},
+        {"multi_pp_crop3",  {"pp1", OutputFormat::YUV_NV12, 1920, 1080, ColorStandard::BT709, 0, 0, 4096, 2160}},
+        // Crop4: PP1 crop 32768x32768 -> 1280x720
+        {"multi_pp_crop4",  {"pp1", OutputFormat::YUV_NV12, 1280, 720, ColorStandard::BT709, 0, 0, 32768, 32768}},
+        
+        // Scale 测试（4 个）
+        // Scale1: PP0 down-scale 32768x32768 -> 256x256
+        {"multi_pp_scale1", {"pp0", OutputFormat::YUV_NV12, 256, 256, ColorStandard::BT709}},
+        // Scale2: PP1 down-scale 4096x2160 -> 128x128
+        {"multi_pp_scale2", {"pp1", OutputFormat::YUV_NV12, 128, 128, ColorStandard::BT709}},
+        // Scale3: PP0+PP1 双通道 down-scale 32768x32768 -> 256x256
+        {"multi_pp_scale3", {OutputFormat::YUV_NV12, OutputFormat::YUV_NV12, 256, 256, ColorStandard::BT709}},
+        // Scale4: PP0+PP1 双通道 down-scale 4096x2160 -> 128x128
+        {"multi_pp_scale4", {OutputFormat::YUV_NV12, OutputFormat::YUV_NV12, 128, 128, ColorStandard::BT709}},
     };
     return tests;
 }
@@ -419,48 +473,85 @@ void PPTestSuite::printHelp() const {
 
 void PPTestSuite::listTests() const {
     std::cout << "\nAvailable PP tests:\n";
-    std::cout << "────────────────────────────────────────────────────────\n";
+    std::cout << "════════════════════════════════════════════════════════\n";
     
-    std::cout << "\nPP0 YUV Format Tests (10):\n";
-    std::cout << "  pp0_nv12        PP0 NV12 (YUV420 semi-planar)\n";
-    std::cout << "  pp0_nv21        PP0 NV21 (YUV420 semi-planar, VU)\n";
-    std::cout << "  pp0_i420        PP0 I420 (YUV420 planar)\n";
-    std::cout << "  pp0_yv12        PP0 YV12 (YUV420 planar, V before U)\n";
-    std::cout << "  pp0_p010        PP0 P010 (10-bit YUV420)\n";
-    std::cout << "  pp0_nv16        PP0 NV16 (YUV422 semi-planar)\n";
-    std::cout << "  pp0_nv61        PP0 NV61 (YUV422 semi-planar, VU)\n";
-    std::cout << "  pp0_i422        PP0 I422 (YUV422 planar)\n";
-    std::cout << "  pp0_nv24        PP0 NV24 (YUV444 semi-planar)\n";
-    std::cout << "  pp0_i444        PP0 I444 (YUV444 planar)\n";
+    // PP0 YUV 格式（15 种，对应 lfl 分支定义）
+    std::cout << "\nPP0 YUV Format Tests (15 种 + 10 别名):\n";
+    std::cout << "  YUV400 系列 (灰度):\n";
+    std::cout << "    pp0_yuv400_p010       YUV400 P010 (10-bit grayscale)\n";
+    std::cout << "    pp0_yuv400_i010       YUV400 I010 (10-bit grayscale)\n";
+    std::cout << "    pp0_yuv400_l010       YUV400 L010 (10-bit grayscale)\n";
+    std::cout << "    pp0_yuv400_pack10     YUV400 Pack10 (10-bit grayscale)\n";
+    std::cout << "    pp0_yuv400_8bit       YUV400 8-bit (8-bit grayscale)\n";
+    std::cout << "  YUV420 NV12 系列:\n";
+    std::cout << "    pp0_yuv420_nv12_p010  YUV420 NV12 P010 (10-bit)\n";
+    std::cout << "    pp0_yuv420_nv12_i010  YUV420 NV12 I010 (10-bit)\n";
+    std::cout << "    pp0_yuv420_nv12_l010  YUV420 NV12 L010 (10-bit)\n";
+    std::cout << "    pp0_yuv420_nv12_pack10 YUV420 NV12 Pack10 (10-bit)\n";
+    std::cout << "    pp0_yuv420_8bit_nv12  YUV420 8-bit NV12\n";
+    std::cout << "  YUV420 NV21 系列:\n";
+    std::cout << "    pp0_yuv420_nv21_p010_tiled YUV420 NV21 P010 Tiled-4x4\n";
+    std::cout << "    pp0_yuv420_nv21_i011  YUV420 NV21 I011\n";
+    std::cout << "    pp0_yuv420_nv21_l010  YUV420 NV21 L010\n";
+    std::cout << "    pp0_yuv420_p010       YUV420 P010 (10-bit)\n";
+    std::cout << "    pp0_yuv420_8bit_nv21  YUV420 8-bit NV21\n";
+    std::cout << "  便捷别名:\n";
+    std::cout << "    pp0_nv12, pp0_nv21, pp0_i420, pp0_yv12, pp0_p010\n";
+    std::cout << "    pp0_nv16, pp0_nv61, pp0_i422, pp0_nv24, pp0_i444\n";
     
-    std::cout << "\nPP1 RGB Format Tests (15):\n";
-    std::cout << "  pp1_argb888         PP1 ARGB8888 packed\n";
-    std::cout << "  pp1_abgr888         PP1 ABGR8888 packed\n";
-    std::cout << "  pp1_rgba888         PP1 RGBA8888 packed\n";
-    std::cout << "  pp1_bgra888         PP1 BGRA8888 packed\n";
-    std::cout << "  pp1_rgb888          PP1 RGB888 packed\n";
-    std::cout << "  pp1_bgr888          PP1 BGR888 packed\n";
-    std::cout << "  pp1_xrgb888         PP1 XRGB8888 packed\n";
-    std::cout << "  pp1_xbgr888         PP1 XBGR8888 packed\n";
-    std::cout << "  pp1_rgbx888         PP1 RGBX8888 packed\n";
-    std::cout << "  pp1_bgrx888         PP1 BGRX8888 packed\n";
-    std::cout << "  pp1_rgb888_planar   PP1 RGB888 planar\n";
-    std::cout << "  pp1_bgr888_planar   PP1 BGR888 planar\n";
-    std::cout << "  pp1_r16g16b16       PP1 RGB 16-bit per channel\n";
-    std::cout << "  pp1_b16g16r16       PP1 BGR 16-bit per channel\n";
-    std::cout << "  pp1_gbrp            PP1 GBR planar\n";
+    // PP1 RGB 格式（18 种）
+    std::cout << "\nPP1 RGB Format Tests (18 种 + 7 别名):\n";
+    std::cout << "  RGB 10-bit 系列:\n";
+    std::cout << "    pp1_argb2101010       ARGB2101010 (10-bit per channel)\n";
+    std::cout << "    pp1_abgr2101010       ABGR2101010 (10-bit per channel)\n";
+    std::cout << "    pp1_bgra2101010       BGRA2101010 (10-bit per channel)\n";
+    std::cout << "    pp1_rgba2101010       RGBA2101010 (10-bit per channel)\n";
+    std::cout << "  RGB 8-bit packed:\n";
+    std::cout << "    pp1_abgr8888          ABGR8888 packed\n";
+    std::cout << "    pp1_argb8888          ARGB8888 packed\n";
+    std::cout << "    pp1_bgr888            BGR888 packed\n";
+    std::cout << "    pp1_bgra8888          BGRA8888 packed\n";
+    std::cout << "    pp1_bgrx8888          BGRX8888 packed\n";
+    std::cout << "    pp1_rgb888            RGB888 packed\n";
+    std::cout << "    pp1_rgba8888          RGBA8888 packed\n";
+    std::cout << "    pp1_rgbx8888          RGBX8888 packed\n";
+    std::cout << "    pp1_xrgb8888          XRGB8888 packed\n";
+    std::cout << "    pp1_xbgr8888          XBGR8888 packed\n";
+    std::cout << "  RGB 8-bit planar:\n";
+    std::cout << "    pp1_rgb888_planar     RGB888 planar\n";
+    std::cout << "    pp1_bgr888_planar     BGR888 planar\n";
+    std::cout << "  RGB 16-bit:\n";
+    std::cout << "    pp1_rgb161616         RGB 16-bit per channel\n";
+    std::cout << "    pp1_bgr161616         BGR 16-bit per channel\n";
+    std::cout << "    pp1_rgb161616_planar  RGB 16-bit planar\n";
+    std::cout << "  便捷别名:\n";
+    std::cout << "    pp1_argb888, pp1_abgr888, pp1_rgba888, pp1_bgra888\n";
+    std::cout << "    pp1_r16g16b16, pp1_b16g16r16, pp1_gbrp\n";
     
-    std::cout << "\nPP1 YUV Format Tests (10):\n";
-    std::cout << "  pp1_nv12        PP1 NV12 (YUV420 semi-planar)\n";
-    std::cout << "  pp1_nv21        PP1 NV21 (YUV420 semi-planar, VU)\n";
-    std::cout << "  pp1_i420        PP1 I420 (YUV420 planar)\n";
-    std::cout << "  pp1_yv12        PP1 YV12 (YUV420 planar, V before U)\n";
-    std::cout << "  pp1_p010        PP1 P010 (10-bit YUV420)\n";
-    std::cout << "  pp1_nv16        PP1 NV16 (YUV422 semi-planar)\n";
-    std::cout << "  pp1_nv61        PP1 NV61 (YUV422 semi-planar, VU)\n";
-    std::cout << "  pp1_i422        PP1 I422 (YUV422 planar)\n";
-    std::cout << "  pp1_nv24        PP1 NV24 (YUV444 semi-planar)\n";
-    std::cout << "  pp1_i444        PP1 I444 (YUV444 planar)\n";
+    // PP1 YUV 格式（16 种）
+    std::cout << "\nPP1 YUV Format Tests (16 种 + 10 别名):\n";
+    std::cout << "  YUV400 系列 (灰度):\n";
+    std::cout << "    pp1_yuv400_p010       YUV400 P010 (10-bit grayscale)\n";
+    std::cout << "    pp1_yuv400_i010       YUV400 I010 (10-bit grayscale)\n";
+    std::cout << "    pp1_yuv400_l010       YUV400 L010 (10-bit grayscale)\n";
+    std::cout << "    pp1_yuv400_pack10     YUV400 Pack10 (10-bit grayscale)\n";
+    std::cout << "    pp1_yuv400_8bit       YUV400 8-bit (8-bit grayscale)\n";
+    std::cout << "  YUV420 NV12 系列:\n";
+    std::cout << "    pp1_yuv420_nv12_p010  YUV420 NV12 P010 (10-bit)\n";
+    std::cout << "    pp1_yuv420_nv12_i010  YUV420 NV12 I010 (10-bit)\n";
+    std::cout << "    pp1_yuv420_nv12_l010  YUV420 NV12 L010 (10-bit)\n";
+    std::cout << "    pp1_yuv420_nv12_pack10 YUV420 NV12 Pack10 (10-bit)\n";
+    std::cout << "    pp1_yuv420_8bit_nv12  YUV420 8-bit NV12\n";
+    std::cout << "  YUV420 NV21 系列:\n";
+    std::cout << "    pp1_yuv420_nv21_p010_tiled YUV420 NV21 P010 Tiled-4x4\n";
+    std::cout << "    pp1_yuv420_nv21_i011  YUV420 NV21 I011\n";
+    std::cout << "    pp1_yuv420_nv21_l010  YUV420 NV21 L010\n";
+    std::cout << "    pp1_yuv420_p010       YUV420 P010 (10-bit)\n";
+    std::cout << "    pp1_yuv420_8bit_nv21  YUV420 8-bit NV21\n";
+    std::cout << "    pp1_yuv420_nv21_p010  YUV420 NV21 P010 (PP1专属)\n";
+    std::cout << "  便捷别名:\n";
+    std::cout << "    pp1_nv12, pp1_nv21, pp1_i420, pp1_yv12, pp1_p010\n";
+    std::cout << "    pp1_nv16, pp1_nv61, pp1_i422, pp1_nv24, pp1_i444\n";
     
     std::cout << "\nMulti-PP Tests (10):\n";
     std::cout << "  multi_pp_t01        PP0=NV12, PP1=RGB888\n";
@@ -474,16 +565,25 @@ void PPTestSuite::listTests() const {
     std::cout << "  multi_pp_t10        PP0=P010, PP1=ARGB888\n";
     std::cout << "  multi_pp_t11        PP0=NV12, PP1=NV21\n";
     
-    std::cout << "\nMulti-PP Crop/Scale Tests (6):\n";
+    std::cout << "\nCrop Tests (4):\n";
     std::cout << "  multi_pp_crop1      PP0 crop 4096x2160 -> 1920x1080\n";
-    std::cout << "  multi_pp_crop2      PP0 down-scale to 1280x720\n";
+    std::cout << "  multi_pp_crop2      PP0 crop 32768x32768 -> 1280x720\n";
     std::cout << "  multi_pp_crop3      PP1 crop 4096x2160 -> 1920x1080\n";
-    std::cout << "  multi_pp_crop4      PP1 down-scale to 1280x720\n";
-    std::cout << "  multi_pp_crop5      PP0 down-scale to 256x256\n";
-    std::cout << "  multi_pp_crop6      PP1 down-scale to 128x128\n";
+    std::cout << "  multi_pp_crop4      PP1 crop 32768x32768 -> 1280x720\n";
     
+    std::cout << "\nScale Tests (4):\n";
+    std::cout << "  multi_pp_scale1     PP0 scale 32768x32768 -> 256x256\n";
+    std::cout << "  multi_pp_scale2     PP1 scale 4096x2160 -> 128x128\n";
+    std::cout << "  multi_pp_scale3     PP0+PP1 dual scale 32768x32768 -> 256x256\n";
+    std::cout << "  multi_pp_scale4     PP0+PP1 dual scale 4096x2160 -> 128x128\n";
+    
+    std::cout << "════════════════════════════════════════════════════════\n";
+    std::cout << "PP 格式测试总计: 49 种（15 PP0 YUV + 18 PP1 RGB + 16 PP1 YUV）\n";
+    std::cout << "Multi-PP 测试: 10 种\n";
+    std::cout << "Crop/Scale 测试: 8 种\n";
+    std::cout << "便捷别名: 27 个\n";
     std::cout << "────────────────────────────────────────────────────────\n";
-    std::cout << "Total: 77 predefined tests\n";
+    std::cout << "Total: 94 个预定义测试项（含别名）\n";
     std::cout << "\n";
 }
 
