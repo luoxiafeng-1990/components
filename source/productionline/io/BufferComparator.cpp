@@ -273,6 +273,46 @@ FrameCompareResult BufferComparator::compare(
     updateStatistics(result);
     writeReport(result);
     
+    // ⭐ 统一在 compare() 返回前打印日志（修复 frame_index 不一致问题）
+    if (config_.verbose) {
+        // 只在失败/警告时打印，或每 50 帧打印一次进度
+        if (result.level == FrameCompareResult::FAIL) {
+            if (config_.enable_psnr && config_.enable_ssim) {
+                LOG_ERROR_FMT("  Frame %d: FAIL (PSNR-Y: %.2f dB, SSIM-Y: %.4f)", 
+                             result.frame_index, result.psnr_y, result.ssim_y);
+            } else if (config_.enable_psnr) {
+                LOG_ERROR_FMT("  Frame %d: FAIL (PSNR-Y: %.2f dB)", 
+                             result.frame_index, result.psnr_y);
+            } else {
+                LOG_ERROR_FMT("  Frame %d: FAIL (SSIM-Y: %.4f)", 
+                             result.frame_index, result.ssim_y);
+            }
+        } else if (result.level == FrameCompareResult::WARN) {
+            if (config_.enable_psnr && config_.enable_ssim) {
+                LOG_WARN_FMT("  Frame %d: WARN (PSNR-Y: %.2f dB, SSIM-Y: %.4f)", 
+                            result.frame_index, result.psnr_y, result.ssim_y);
+            } else if (config_.enable_psnr) {
+                LOG_WARN_FMT("  Frame %d: WARN (PSNR-Y: %.2f dB)", 
+                            result.frame_index, result.psnr_y);
+            } else {
+                LOG_WARN_FMT("  Frame %d: WARN (SSIM-Y: %.4f)", 
+                            result.frame_index, result.ssim_y);
+            }
+        } else if (result.frame_index % 50 == 0) {
+            // PASS: 每 50 帧打印一次进度
+            if (config_.enable_psnr && config_.enable_ssim) {
+                LOG_DEBUG_FMT("  Frame %d: PASS (PSNR-Y: %.2f dB, SSIM-Y: %.4f)", 
+                             result.frame_index, result.psnr_y, result.ssim_y);
+            } else if (config_.enable_psnr) {
+                LOG_DEBUG_FMT("  Frame %d: PASS (PSNR-Y: %.2f dB)", 
+                             result.frame_index, result.psnr_y);
+            } else {
+                LOG_DEBUG_FMT("  Frame %d: PASS (SSIM-Y: %.4f)", 
+                             result.frame_index, result.ssim_y);
+            }
+        }
+    }
+    
     return result;
 }
 
@@ -508,25 +548,10 @@ FrameCompareResult BufferComparator::compareYUV(
     }
     
     if (quick_pass) {
-        // ✅ 快速通过
+        // ✅ 快速通过（日志在 compare() 返回前统一打印）
         result.passed = true;
         result.level = FrameCompareResult::PASS;
         passed_count_++;
-        
-        if (config_.verbose && result.frame_index % 50 == 0) {
-            if (config_.enable_psnr && config_.enable_ssim) {
-                LOG_DEBUG_FMT("  Frame %d: PASS (PSNR-Y: %.2f dB, SSIM-Y: %.4f) ⚡ quick%s", 
-                             result.frame_index, result.psnr_y, result.ssim_y,
-                             config_.enable_parallel ? " [parallel]" : "");
-            } else if (config_.enable_psnr) {
-                LOG_DEBUG_FMT("  Frame %d: PASS (PSNR-Y: %.2f dB) ⚡ quick", 
-                             result.frame_index, result.psnr_y);
-            } else {
-                LOG_DEBUG_FMT("  Frame %d: PASS (SSIM-Y: %.4f) ⚡ quick", 
-                             result.frame_index, result.ssim_y);
-            }
-        }
-        
         return result;
     }
     
@@ -537,18 +562,7 @@ FrameCompareResult BufferComparator::compareYUV(
     if (config_.strategy == CompareConfig::AUTO_LAYERED ||
         config_.strategy == CompareConfig::DEEP_ALWAYS) {
         
-        if (config_.verbose) {
-            if (config_.enable_psnr && config_.enable_ssim) {
-                LOG_WARN_FMT("  Frame %d: PSNR-Y=%.2f dB, SSIM-Y=%.4f, deep validation...",
-                             result.frame_index, result.psnr_y, result.ssim_y);
-            } else if (config_.enable_psnr) {
-                LOG_WARN_FMT("  Frame %d: PSNR-Y=%.2f dB < %.2f dB, deep validation...",
-                             result.frame_index, result.psnr_y, config_.quick_psnr_threshold);
-            } else {
-                LOG_WARN_FMT("  Frame %d: SSIM-Y=%.4f < %.4f, deep validation...",
-                             result.frame_index, result.ssim_y, config_.ssim_threshold);
-            }
-        }
+        // 日志在 compare() 返回前统一打印
         
         // 🚀 方案B：完全并行 - 并行计算所有 U/V 平面（最多4个任务）
         if (config_.enable_parallel && config_.enable_psnr && config_.enable_ssim) {
@@ -674,38 +688,12 @@ FrameCompareResult BufferComparator::compareYUV(
             result.level = FrameCompareResult::WARN;
             result.passed = true;
             warned_count_++;
-            
-            if (config_.verbose) {
-                if (config_.enable_psnr && config_.enable_ssim) {
-                    LOG_WARN_FMT("  Frame %d: WARN (PSNR: Y=%.2f U=%.2f V=%.2f dB, SSIM: Y=%.4f U=%.4f V=%.4f)%s",
-                                 result.frame_index, result.psnr_y, result.psnr_u, result.psnr_v,
-                                 result.ssim_y, result.ssim_u, result.ssim_v,
-                                 config_.enable_parallel ? " [parallel]" : "");
-                } else if (config_.enable_psnr) {
-                    LOG_WARN_FMT("  Frame %d: WARN (PSNR: Y=%.2f U=%.2f V=%.2f dB)",
-                                 result.frame_index, result.psnr_y, result.psnr_u, result.psnr_v);
-                } else {
-                    LOG_WARN_FMT("  Frame %d: WARN (SSIM: Y=%.4f U=%.4f V=%.4f)",
-                                 result.frame_index, result.ssim_y, result.ssim_u, result.ssim_v);
-                }
-            }
+            // 日志在 compare() 返回前统一打印
         } else {
             result.level = FrameCompareResult::FAIL;
             result.passed = false;
             failed_count_++;
-            
-            if (config_.enable_psnr && config_.enable_ssim) {
-                LOG_ERROR_FMT("  Frame %d: FAIL (PSNR: Y=%.2f U=%.2f V=%.2f dB, SSIM: Y=%.4f U=%.4f V=%.4f)%s",
-                              result.frame_index, result.psnr_y, result.psnr_u, result.psnr_v,
-                              result.ssim_y, result.ssim_u, result.ssim_v,
-                              config_.enable_parallel ? " [parallel]" : "");
-            } else if (config_.enable_psnr) {
-                LOG_ERROR_FMT("  Frame %d: FAIL (PSNR: Y=%.2f U=%.2f V=%.2f dB)",
-                              result.frame_index, result.psnr_y, result.psnr_u, result.psnr_v);
-            } else {
-                LOG_ERROR_FMT("  Frame %d: FAIL (SSIM: Y=%.4f U=%.4f V=%.4f)",
-                              result.frame_index, result.ssim_y, result.ssim_u, result.ssim_v);
-            }
+            // 日志在 compare() 返回前统一打印
         }
     } else {
         // FAST_ONLY 模式
@@ -778,25 +766,10 @@ FrameCompareResult BufferComparator::compareRGB(
     }
     
     if (quick_pass) {
-        // ✅ 快速通过
+        // ✅ 快速通过（日志在 compare() 返回前统一打印）
         result.passed = true;
         result.level = FrameCompareResult::PASS;
         passed_count_++;
-        
-        if (config_.verbose && result.frame_index % 50 == 0) {
-            if (config_.enable_psnr && config_.enable_ssim) {
-                LOG_DEBUG_FMT("  Frame %d: PASS (PSNR-G: %.2f dB, SSIM-G: %.4f) ⚡ quick%s",
-                             result.frame_index, result.psnr_y, result.ssim_y,
-                             config_.enable_parallel ? " [parallel]" : "");
-            } else if (config_.enable_psnr) {
-                LOG_DEBUG_FMT("  Frame %d: PASS (PSNR-G: %.2f dB) ⚡ quick",
-                             result.frame_index, result.psnr_y);
-            } else {
-                LOG_DEBUG_FMT("  Frame %d: PASS (SSIM-G: %.4f) ⚡ quick",
-                             result.frame_index, result.ssim_y);
-            }
-        }
-        
         return result;
     }
     
@@ -807,7 +780,8 @@ FrameCompareResult BufferComparator::compareRGB(
     if (config_.strategy == CompareConfig::AUTO_LAYERED ||
         config_.strategy == CompareConfig::DEEP_ALWAYS) {
         
-        if (config_.verbose) {
+        // 日志在 compare() 返回前统一打印
+        if (false) {  // 保留代码结构，但不执行日志打印
             if (config_.enable_psnr && config_.enable_ssim) {
                 LOG_WARN_FMT("  Frame %d: PSNR-G=%.2f dB, SSIM-G=%.4f, deep validation...",
                              result.frame_index, result.psnr_y, result.ssim_y);
@@ -974,38 +948,12 @@ FrameCompareResult BufferComparator::compareRGB(
             result.level = FrameCompareResult::WARN;
             result.passed = true;
             warned_count_++;
-            
-            if (config_.verbose) {
-                if (config_.enable_psnr && config_.enable_ssim) {
-                    LOG_WARN_FMT("  Frame %d: WARN (PSNR: R=%.2f G=%.2f B=%.2f dB, SSIM: R=%.4f G=%.4f B=%.4f)%s",
-                                 result.frame_index, result.psnr_u, result.psnr_y, result.psnr_v,
-                                 result.ssim_u, result.ssim_y, result.ssim_v,
-                                 config_.enable_parallel ? " [parallel]" : "");
-                } else if (config_.enable_psnr) {
-                    LOG_WARN_FMT("  Frame %d: WARN (PSNR: R=%.2f G=%.2f B=%.2f dB)",
-                                 result.frame_index, result.psnr_u, result.psnr_y, result.psnr_v);
-                } else {
-                    LOG_WARN_FMT("  Frame %d: WARN (SSIM: R=%.4f G=%.4f B=%.4f)",
-                                 result.frame_index, result.ssim_u, result.ssim_y, result.ssim_v);
-                }
-            }
+            // 日志在 compare() 返回前统一打印
         } else {
             result.level = FrameCompareResult::FAIL;
             result.passed = false;
             failed_count_++;
-            
-            if (config_.enable_psnr && config_.enable_ssim) {
-                LOG_ERROR_FMT("  Frame %d: FAIL (PSNR: R=%.2f G=%.2f B=%.2f dB, SSIM: R=%.4f G=%.4f B=%.4f)%s",
-                              result.frame_index, result.psnr_u, result.psnr_y, result.psnr_v,
-                              result.ssim_u, result.ssim_y, result.ssim_v,
-                              config_.enable_parallel ? " [parallel]" : "");
-            } else if (config_.enable_psnr) {
-                LOG_ERROR_FMT("  Frame %d: FAIL (PSNR: R=%.2f G=%.2f B=%.2f dB)",
-                              result.frame_index, result.psnr_u, result.psnr_y, result.psnr_v);
-            } else {
-                LOG_ERROR_FMT("  Frame %d: FAIL (SSIM: R=%.4f G=%.4f B=%.4f)",
-                              result.frame_index, result.ssim_u, result.ssim_y, result.ssim_v);
-            }
+            // 日志在 compare() 返回前统一打印
         }
     } else {
         result.level = FrameCompareResult::FAIL;

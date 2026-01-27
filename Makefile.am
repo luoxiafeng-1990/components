@@ -31,7 +31,8 @@ libcomponents_la_SOURCES = \
     source/productionline/MultiWorkerProductionLine.cpp \
     source/productionline/WorkerSyncCoordinator.cpp \
     source/productionline/io/BufferWriter.cpp \
-    source/productionline/io/BufferComparator.cpp
+    source/productionline/io/BufferComparator.cpp \
+    source/productionline/io/BufferConsumerService.cpp
 
 # ========== 测试程序（每个只包含自己的主文件）==========
 bin_PROGRAMS = display_test
@@ -49,13 +50,27 @@ display_test_SOURCES = test_cases/dec/test.cpp
 display_test_CPPFLAGS = -I$(top_srcdir)/test_cases $(AM_CPPFLAGS)
 display_test_LDADD = libcomponents.la $(COMMON_LIBS)
 
-bin_PROGRAMS += google_test
-google_test_SOURCES = \
-    test_cases/main.cpp \
-    test_cases/demo_google/test_ffmpeg_decode.cpp
-google_test_LDADD = -lgtest -lgtest_main -lpthread libcomponents.la $(COMMON_LIBS)
-google_test_CPPFLAGS = -I$(top_srcdir)/test_cases $(AM_CPPFLAGS)
-google_test_LDFLAGS = 
+# Google Test 程序（需要安装 libgtest-dev）
+# bin_PROGRAMS += google_test
+# google_test_SOURCES = \
+#     test_cases/main.cpp \
+#     test_cases/demo_google/test_ffmpeg_decode.cpp
+# google_test_LDADD = -lgtest -lgtest_main -lpthread libcomponents.la $(COMMON_LIBS)
+# google_test_CPPFLAGS = -I$(top_srcdir)/test_cases $(AM_CPPFLAGS)
+# google_test_LDFLAGS = 
+
+# ========== QA 测试程序（模块化测试入口）==========
+bin_PROGRAMS += qa_cases
+qa_cases_SOURCES = \
+    test_cases/test_module_main.cpp \
+    test_cases/common/TestExecutor.cpp \
+    test_cases/vdec/VdecTestSuite.cpp \
+    test_cases/pp/PPTestSuite.cpp \
+    test_cases/record/RecordTestSuite.cpp \
+    test_cases/writer/WriterTestSuite.cpp
+qa_cases_LDADD = libcomponents.la $(COMMON_LIBS)
+qa_cases_CPPFLAGS = -I$(top_srcdir)/test_cases $(AM_CPPFLAGS)
+qa_cases_LDFLAGS = 
 
 # ========== 编译选项 ==========
 AM_CPPFLAGS = -I$(top_srcdir)/include

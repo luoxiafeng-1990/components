@@ -292,6 +292,56 @@ struct WorkerConfig {
     WorkerType worker_type = WorkerType::AUTO;
     
     // ========================================
+    // 消费者配置（v3.1 新增）
+    // ========================================
+    /**
+     * @brief 消费者配置
+     * 
+     * 用于配置 Buffer 消费行为的参数，控制数据的处理、保存和验证。
+     * 
+     * 设计理念：
+     * - 统一配置：所有配置都通过 WorkerConfig 传递，无需额外结构
+     * - 可选使用：组件层可以忽略这些参数，应用层按需使用
+     * - 向后兼容：新增字段不影响现有代码
+     */
+    struct ConsumerConfig {
+        // ========================================
+        // 执行控制
+        // ========================================
+        int max_frames = -1;              ///< 最大处理帧数（-1=无限制，处理到视频结束）
+        int save_frames = 0;              ///< 保存帧数（0=不保存，-1=全部保存）
+        std::string output_path;          ///< 输出文件路径（空=自动生成）
+        
+        // ========================================
+        // 性能验证
+        // ========================================
+        double target_fps = 30.0;         ///< 目标帧率（用于性能验证，0=不验证）
+        
+        // ========================================
+        // 质量验证（PSNR/SSIM）
+        // ========================================
+        bool enable_psnr = false;         ///< 是否启用 PSNR 验证
+        double min_psnr = 30.0;           ///< PSNR 阈值（低于此值视为失败，单位：dB）
+        bool enable_ssim = false;         ///< 是否启用 SSIM 验证
+        double min_ssim = 0.95;           ///< SSIM 阈值（低于此值视为失败，范围：0.0-1.0）
+        std::string reference_path;       ///< 参考文件路径（用于质量比对）
+        
+        // ========================================
+        // 其他选项
+        // ========================================
+        bool enable_display = false;      ///< 是否启用显示输出
+        bool verbose = false;             ///< 是否输出详细日志
+        int timeout_ms = 100;             ///< 单次获取 Buffer 超时（毫秒）
+        int max_timeout_count = 10;       ///< 最大连续超时次数（达到后视为视频结束）
+        
+        ConsumerConfig() = default;
+        ConsumerConfig(const ConsumerConfig&) = default;
+        ConsumerConfig& operator=(const ConsumerConfig&) = default;
+        ConsumerConfig(ConsumerConfig&&) = default;
+        ConsumerConfig& operator=(ConsumerConfig&&) = default;
+    } consumer;
+    
+    // ========================================
     // 全局资源配置
     // ========================================
     /**
@@ -765,6 +815,67 @@ public:
      * ```
      */
     WorkerConfigBuilder& setThreadPoolSize(int size);
+    
+    // ========================================
+    // 消费者配置（v3.1 新增）
+    // ========================================
+    
+    /**
+     * @brief 设置消费者配置
+     */
+    WorkerConfigBuilder& setConsumerConfig(const WorkerConfig::ConsumerConfig& consumer_config);
+    
+    /**
+     * @brief 设置最大处理帧数
+     * @param frames 最大帧数（-1=无限制）
+     */
+    WorkerConfigBuilder& setMaxFrames(int frames);
+    
+    /**
+     * @brief 设置保存帧数
+     * @param frames 保存帧数（0=不保存，-1=全部保存）
+     */
+    WorkerConfigBuilder& setSaveFrames(int frames);
+    
+    /**
+     * @brief 设置输出路径
+     * @param path 输出文件路径
+     */
+    WorkerConfigBuilder& setOutputPath(const std::string& path);
+    
+    /**
+     * @brief 设置目标帧率（用于性能验证）
+     * @param fps 目标帧率（0=不验证）
+     */
+    WorkerConfigBuilder& setTargetFps(double fps);
+    
+    /**
+     * @brief 启用 PSNR 验证
+     * @param enable 是否启用
+     * @param min_psnr PSNR 阈值（单位：dB）
+     * @param reference_path 参考文件路径（可选）
+     */
+    WorkerConfigBuilder& enablePsnr(bool enable = true, double min_psnr = 30.0, 
+                                     const std::string& reference_path = "");
+    
+    /**
+     * @brief 启用 SSIM 验证
+     * @param enable 是否启用
+     * @param min_ssim SSIM 阈值（范围：0.0-1.0）
+     * @param reference_path 参考文件路径（可选）
+     */
+    WorkerConfigBuilder& enableSsim(bool enable = true, double min_ssim = 0.95,
+                                     const std::string& reference_path = "");
+    
+    /**
+     * @brief 设置是否启用显示
+     */
+    WorkerConfigBuilder& setEnableDisplay(bool enable);
+    
+    /**
+     * @brief 设置详细日志模式
+     */
+    WorkerConfigBuilder& setVerbose(bool verbose);
     
     /**
      * @brief 构建最终配置
