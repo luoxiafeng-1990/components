@@ -8,7 +8,7 @@
 - **测试程序**: ~/qa_cases
 - **测试文件目录**: /usr/data/ffmpeg/
 - **密码**: 123456
-- **测试项总计**: 196 项
+- **测试项总计**: 280 项（含 ZYW 新增 84 项）
 
 ---
 
@@ -32,7 +32,8 @@
 | Record 录制测试 | 12 | ✅ 已覆盖 |
 | Writer 格式输出测试 | 22 | ✅ 已覆盖 |
 | **一致性验证测试（MD5对比）** | **3** | ⏳ 待实现 |
-| **合计** | **196** | 96 项框架已支持 |
+| **ZYW 新增 MP4 解码 + PP 测试** | **84** | ✅ 已覆盖 |
+| **合计** | **280** | 180 项框架已支持 |
 
 > **注意**: 一致性验证测试（comparison 模块）需要新增代码实现，将在方案二中完成。
 
@@ -1665,3 +1666,581 @@ echo "复测完成，报告: $NEW_REPORT"
 ---
 
 **文档生成日期**: 2026-01-27
+
+---
+
+## 7. ZYW 新增测试用例（MP4 解码 + PP 后处理）
+
+> 以下测试用例由 **张艺文 (zyw)** 在 3 个 commit 中新增，共 **84 个测试用例**。
+>
+> - Commit 1: `e74e179` - desperate the logic of mp4 decode and rtsp decode (16 个)
+> - Commit 2: `e2e5c20` - modify the logic about crop and scale (0 个，仅代码修改)
+> - Commit 3: `e642762` - merge pp_test and mp4_test (68 个)
+
+### 7.1 H264 PP0/PP1 Crop 测试（6个）
+
+| 序号 | 测试用例名 | 描述 |
+|:----:|-----------|------|
+| 1 | mp4_decode_h264_1280x720_30_pp0_crop | H264 720p PP0 裁剪 |
+| 2 | mp4_decode_h264_1920x1080_30_pp0_crop | H264 1080p PP0 裁剪 |
+| 3 | mp4_decode_h264_1280x720_30_pp1_rgb_crop | H264 720p PP1 RGB 裁剪 |
+| 4 | mp4_decode_h264_1920x1080_30_pp1_rgb_crop | H264 1080p PP1 RGB 裁剪 |
+| 5 | mp4_decode_h264_1280x720_30_pp1_yuv_crop | H264 720p PP1 YUV 裁剪 |
+| 6 | mp4_decode_h264_1920x1080_30_pp1_yuv_crop | H264 1080p PP1 YUV 裁剪 |
+
+```bash
+# H264 720p PP0 裁剪
+sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
+    "~/qa_cases vdec mp4_decode_h264_1280x720_30_pp0_crop"
+
+# H264 1080p PP0 裁剪
+sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
+    "~/qa_cases vdec mp4_decode_h264_1920x1080_30_pp0_crop"
+
+# H264 720p PP1 RGB 裁剪
+sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
+    "~/qa_cases vdec mp4_decode_h264_1280x720_30_pp1_rgb_crop"
+
+# H264 1080p PP1 RGB 裁剪
+sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
+    "~/qa_cases vdec mp4_decode_h264_1920x1080_30_pp1_rgb_crop"
+
+# H264 720p PP1 YUV 裁剪
+sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
+    "~/qa_cases vdec mp4_decode_h264_1280x720_30_pp1_yuv_crop"
+
+# H264 1080p PP1 YUV 裁剪
+sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
+    "~/qa_cases vdec mp4_decode_h264_1920x1080_30_pp1_yuv_crop"
+```
+
+### 7.2 H265 PP0/PP1 Crop 测试（6个）
+
+| 序号 | 测试用例名 | 描述 |
+|:----:|-----------|------|
+| 7 | mp4_decode_h265_1280x720_30_pp0_crop | H265 720p PP0 裁剪 |
+| 8 | mp4_decode_h265_1920x1080_30_pp0_crop | H265 1080p PP0 裁剪 |
+| 9 | mp4_decode_h265_1280x720_30_pp1_rgb_crop | H265 720p PP1 RGB 裁剪 |
+| 10 | mp4_decode_h265_1920x1080_30_pp1_rgb_crop | H265 1080p PP1 RGB 裁剪 |
+| 11 | mp4_decode_h265_1280x720_30_pp1_yuv_crop | H265 720p PP1 YUV 裁剪 |
+| 12 | mp4_decode_h265_1920x1080_30_pp1_yuv_crop | H265 1080p PP1 YUV 裁剪 |
+
+```bash
+# H265 720p PP0 裁剪
+sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
+    "~/qa_cases vdec mp4_decode_h265_1280x720_30_pp0_crop"
+
+# H265 1080p PP0 裁剪
+sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
+    "~/qa_cases vdec mp4_decode_h265_1920x1080_30_pp0_crop"
+
+# H265 720p PP1 RGB 裁剪
+sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
+    "~/qa_cases vdec mp4_decode_h265_1280x720_30_pp1_rgb_crop"
+
+# H265 1080p PP1 RGB 裁剪
+sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
+    "~/qa_cases vdec mp4_decode_h265_1920x1080_30_pp1_rgb_crop"
+
+# H265 720p PP1 YUV 裁剪
+sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
+    "~/qa_cases vdec mp4_decode_h265_1280x720_30_pp1_yuv_crop"
+
+# H265 1080p PP1 YUV 裁剪
+sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
+    "~/qa_cases vdec mp4_decode_h265_1920x1080_30_pp1_yuv_crop"
+```
+
+### 7.3 H264 Multi-PP 测试（4个）
+
+| 序号 | 测试用例名 | 描述 |
+|:----:|-----------|------|
+| 13 | mp4_decode_h264_1920x1080_30_multi_pp | H264 1080p 双通道 PP |
+| 14 | mp4_decode_h264_1920x1080_30_multi_pp_crop | H264 1080p 双通道 PP + 裁剪 |
+| 15 | mp4_decode_h264_1920x1080_30_multi_pp_scale | H264 1080p 双通道 PP + 缩放 |
+| 16 | mp4_decode_h264_1920x1080_30_multi_pp_crop_scale | H264 1080p 双通道 PP + 裁剪 + 缩放 |
+
+```bash
+# H264 1080p 双通道 PP
+sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
+    "~/qa_cases vdec mp4_decode_h264_1920x1080_30_multi_pp"
+
+# H264 1080p 双通道 PP + 裁剪
+sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
+    "~/qa_cases vdec mp4_decode_h264_1920x1080_30_multi_pp_crop"
+
+# H264 1080p 双通道 PP + 缩放
+sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
+    "~/qa_cases vdec mp4_decode_h264_1920x1080_30_multi_pp_scale"
+
+# H264 1080p 双通道 PP + 裁剪 + 缩放
+sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
+    "~/qa_cases vdec mp4_decode_h264_1920x1080_30_multi_pp_crop_scale"
+```
+
+### 7.4 H265 Multi-PP 测试（4个）
+
+| 序号 | 测试用例名 | 描述 |
+|:----:|-----------|------|
+| 17 | mp4_decode_h265_1920x1080_30_multi_pp | H265 1080p 双通道 PP |
+| 18 | mp4_decode_h265_1920x1080_30_multi_pp_crop | H265 1080p 双通道 PP + 裁剪 |
+| 19 | mp4_decode_h265_1920x1080_30_multi_pp_scale | H265 1080p 双通道 PP + 缩放 |
+| 20 | mp4_decode_h265_1920x1080_30_multi_pp_crop_scale | H265 1080p 双通道 PP + 裁剪 + 缩放 |
+
+```bash
+# H265 1080p 双通道 PP
+sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
+    "~/qa_cases vdec mp4_decode_h265_1920x1080_30_multi_pp"
+
+# H265 1080p 双通道 PP + 裁剪
+sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
+    "~/qa_cases vdec mp4_decode_h265_1920x1080_30_multi_pp_crop"
+
+# H265 1080p 双通道 PP + 缩放
+sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
+    "~/qa_cases vdec mp4_decode_h265_1920x1080_30_multi_pp_scale"
+
+# H265 1080p 双通道 PP + 裁剪 + 缩放
+sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
+    "~/qa_cases vdec mp4_decode_h265_1920x1080_30_multi_pp_crop_scale"
+```
+
+### 7.5 H264 PP0 YUV400 格式测试（5个）
+
+| 序号 | 测试用例名 | 描述 |
+|:----:|-----------|------|
+| 21 | mp4_decode_h264_1920x1080_30_pp0_yuv400_p010 | H264 1080p PP0 YUV400 P010 |
+| 22 | mp4_decode_h264_1920x1080_30_pp0_yuv400_i010 | H264 1080p PP0 YUV400 I010 |
+| 23 | mp4_decode_h264_1920x1080_30_pp0_yuv400_l010 | H264 1080p PP0 YUV400 L010 |
+| 24 | mp4_decode_h264_1920x1080_30_pp0_yuv400_pack10 | H264 1080p PP0 YUV400 PACK10 |
+| 25 | mp4_decode_h264_1920x1080_30_pp0_yuv400_8bit | H264 1080p PP0 YUV400 8bit |
+
+```bash
+# H264 1080p PP0 YUV400 P010
+sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
+    "~/qa_cases vdec mp4_decode_h264_1920x1080_30_pp0_yuv400_p010"
+
+# H264 1080p PP0 YUV400 I010
+sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
+    "~/qa_cases vdec mp4_decode_h264_1920x1080_30_pp0_yuv400_i010"
+
+# H264 1080p PP0 YUV400 L010
+sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
+    "~/qa_cases vdec mp4_decode_h264_1920x1080_30_pp0_yuv400_l010"
+
+# H264 1080p PP0 YUV400 PACK10
+sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
+    "~/qa_cases vdec mp4_decode_h264_1920x1080_30_pp0_yuv400_pack10"
+
+# H264 1080p PP0 YUV400 8bit
+sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
+    "~/qa_cases vdec mp4_decode_h264_1920x1080_30_pp0_yuv400_8bit"
+```
+
+### 7.6 H264 PP0 YUV420 格式测试（10个）
+
+| 序号 | 测试用例名 | 描述 |
+|:----:|-----------|------|
+| 26 | mp4_decode_h264_1920x1080_30_pp0_yuv420_nv12_p010 | H264 1080p PP0 YUV420 NV12 P010 |
+| 27 | mp4_decode_h264_1920x1080_30_pp0_yuv420_nv12_i010 | H264 1080p PP0 YUV420 NV12 I010 |
+| 28 | mp4_decode_h264_1920x1080_30_pp0_yuv420_nv12_l010 | H264 1080p PP0 YUV420 NV12 L010 |
+| 29 | mp4_decode_h264_1920x1080_30_pp0_yuv420_nv12_pack10 | H264 1080p PP0 YUV420 NV12 PACK10 |
+| 30 | mp4_decode_h264_1920x1080_30_pp0_yuv420_8bit_nv12 | H264 1080p PP0 YUV420 8bit NV12 |
+| 31 | mp4_decode_h264_1920x1080_30_pp0_yuv420_nv21_p010_tiled | H264 1080p PP0 YUV420 NV21 P010 Tiled |
+| 32 | mp4_decode_h264_1920x1080_30_pp0_yuv420_nv21_i011 | H264 1080p PP0 YUV420 NV21 I011 |
+| 33 | mp4_decode_h264_1920x1080_30_pp0_yuv420_nv21_l010 | H264 1080p PP0 YUV420 NV21 L010 |
+| 34 | mp4_decode_h264_1920x1080_30_pp0_yuv420_p010 | H264 1080p PP0 YUV420 P010 |
+| 35 | mp4_decode_h264_1920x1080_30_pp0_yuv420_8bit_nv21 | H264 1080p PP0 YUV420 8bit NV21 |
+
+```bash
+# H264 1080p PP0 YUV420 NV12 P010
+sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
+    "~/qa_cases vdec mp4_decode_h264_1920x1080_30_pp0_yuv420_nv12_p010"
+
+# H264 1080p PP0 YUV420 NV12 I010
+sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
+    "~/qa_cases vdec mp4_decode_h264_1920x1080_30_pp0_yuv420_nv12_i010"
+
+# H264 1080p PP0 YUV420 NV12 L010
+sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
+    "~/qa_cases vdec mp4_decode_h264_1920x1080_30_pp0_yuv420_nv12_l010"
+
+# H264 1080p PP0 YUV420 NV12 PACK10
+sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
+    "~/qa_cases vdec mp4_decode_h264_1920x1080_30_pp0_yuv420_nv12_pack10"
+
+# H264 1080p PP0 YUV420 8bit NV12
+sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
+    "~/qa_cases vdec mp4_decode_h264_1920x1080_30_pp0_yuv420_8bit_nv12"
+
+# H264 1080p PP0 YUV420 NV21 P010 Tiled
+sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
+    "~/qa_cases vdec mp4_decode_h264_1920x1080_30_pp0_yuv420_nv21_p010_tiled"
+
+# H264 1080p PP0 YUV420 NV21 I011
+sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
+    "~/qa_cases vdec mp4_decode_h264_1920x1080_30_pp0_yuv420_nv21_i011"
+
+# H264 1080p PP0 YUV420 NV21 L010
+sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
+    "~/qa_cases vdec mp4_decode_h264_1920x1080_30_pp0_yuv420_nv21_l010"
+
+# H264 1080p PP0 YUV420 P010
+sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
+    "~/qa_cases vdec mp4_decode_h264_1920x1080_30_pp0_yuv420_p010"
+
+# H264 1080p PP0 YUV420 8bit NV21
+sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
+    "~/qa_cases vdec mp4_decode_h264_1920x1080_30_pp0_yuv420_8bit_nv21"
+```
+
+### 7.7 H264 PP1 RGB 格式测试（7个）
+
+| 序号 | 测试用例名 | 描述 |
+|:----:|-----------|------|
+| 36 | mp4_decode_h264_1920x1080_30_pp1_abgr8888 | H264 1080p PP1 ABGR8888 |
+| 37 | mp4_decode_h264_1920x1080_30_pp1_argb8888 | H264 1080p PP1 ARGB8888 |
+| 38 | mp4_decode_h264_1920x1080_30_pp1_bgr888 | H264 1080p PP1 BGR888 |
+| 39 | mp4_decode_h264_1920x1080_30_pp1_bgra8888 | H264 1080p PP1 BGRA8888 |
+| 40 | mp4_decode_h264_1920x1080_30_pp1_rgb888_planar | H264 1080p PP1 RGB888 Planar |
+| 41 | mp4_decode_h264_1920x1080_30_pp1_rgb888 | H264 1080p PP1 RGB888 |
+| 42 | mp4_decode_h264_1920x1080_30_pp1_rgba8888 | H264 1080p PP1 RGBA8888 |
+
+```bash
+# H264 1080p PP1 ABGR8888
+sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
+    "~/qa_cases vdec mp4_decode_h264_1920x1080_30_pp1_abgr8888"
+
+# H264 1080p PP1 ARGB8888
+sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
+    "~/qa_cases vdec mp4_decode_h264_1920x1080_30_pp1_argb8888"
+
+# H264 1080p PP1 BGR888
+sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
+    "~/qa_cases vdec mp4_decode_h264_1920x1080_30_pp1_bgr888"
+
+# H264 1080p PP1 BGRA8888
+sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
+    "~/qa_cases vdec mp4_decode_h264_1920x1080_30_pp1_bgra8888"
+
+# H264 1080p PP1 RGB888 Planar
+sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
+    "~/qa_cases vdec mp4_decode_h264_1920x1080_30_pp1_rgb888_planar"
+
+# H264 1080p PP1 RGB888
+sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
+    "~/qa_cases vdec mp4_decode_h264_1920x1080_30_pp1_rgb888"
+
+# H264 1080p PP1 RGBA8888
+sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
+    "~/qa_cases vdec mp4_decode_h264_1920x1080_30_pp1_rgba8888"
+```
+
+### 7.8 H264 PP1 YUV400 格式测试（5个）
+
+| 序号 | 测试用例名 | 描述 |
+|:----:|-----------|------|
+| 43 | mp4_decode_h264_1920x1080_30_pp1_yuv400_p010 | H264 1080p PP1 YUV400 P010 |
+| 44 | mp4_decode_h264_1920x1080_30_pp1_yuv400_i010 | H264 1080p PP1 YUV400 I010 |
+| 45 | mp4_decode_h264_1920x1080_30_pp1_yuv400_l010 | H264 1080p PP1 YUV400 L010 |
+| 46 | mp4_decode_h264_1920x1080_30_pp1_yuv400_pack10 | H264 1080p PP1 YUV400 PACK10 |
+| 47 | mp4_decode_h264_1920x1080_30_pp1_yuv400_8bit | H264 1080p PP1 YUV400 8bit |
+
+```bash
+# H264 1080p PP1 YUV400 P010
+sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
+    "~/qa_cases vdec mp4_decode_h264_1920x1080_30_pp1_yuv400_p010"
+
+# H264 1080p PP1 YUV400 I010
+sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
+    "~/qa_cases vdec mp4_decode_h264_1920x1080_30_pp1_yuv400_i010"
+
+# H264 1080p PP1 YUV400 L010
+sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
+    "~/qa_cases vdec mp4_decode_h264_1920x1080_30_pp1_yuv400_l010"
+
+# H264 1080p PP1 YUV400 PACK10
+sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
+    "~/qa_cases vdec mp4_decode_h264_1920x1080_30_pp1_yuv400_pack10"
+
+# H264 1080p PP1 YUV400 8bit
+sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
+    "~/qa_cases vdec mp4_decode_h264_1920x1080_30_pp1_yuv400_8bit"
+```
+
+### 7.9 H264 PP1 YUV420 格式测试（10个）
+
+| 序号 | 测试用例名 | 描述 |
+|:----:|-----------|------|
+| 48 | mp4_decode_h264_1920x1080_30_pp1_yuv420_nv12_p010 | H264 1080p PP1 YUV420 NV12 P010 |
+| 49 | mp4_decode_h264_1920x1080_30_pp1_yuv420_nv12_i010 | H264 1080p PP1 YUV420 NV12 I010 |
+| 50 | mp4_decode_h264_1920x1080_30_pp1_yuv420_nv12_l010 | H264 1080p PP1 YUV420 NV12 L010 |
+| 51 | mp4_decode_h264_1920x1080_30_pp1_yuv420_nv12_pack10 | H264 1080p PP1 YUV420 NV12 PACK10 |
+| 52 | mp4_decode_h264_1920x1080_30_pp1_yuv420_8bit_nv12 | H264 1080p PP1 YUV420 8bit NV12 |
+| 53 | mp4_decode_h264_1920x1080_30_pp1_yuv420_nv21_p010_tiled | H264 1080p PP1 YUV420 NV21 P010 Tiled |
+| 54 | mp4_decode_h264_1920x1080_30_pp1_yuv420_nv21_i010 | H264 1080p PP1 YUV420 NV21 I010 |
+| 55 | mp4_decode_h264_1920x1080_30_pp1_yuv420_nv21_l010 | H264 1080p PP1 YUV420 NV21 L010 |
+| 56 | mp4_decode_h264_1920x1080_30_pp1_yuv420_p010 | H264 1080p PP1 YUV420 P010 |
+| 57 | mp4_decode_h264_1920x1080_30_pp1_yuv420_8bit_nv21 | H264 1080p PP1 YUV420 8bit NV21 |
+
+```bash
+# H264 1080p PP1 YUV420 NV12 P010
+sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
+    "~/qa_cases vdec mp4_decode_h264_1920x1080_30_pp1_yuv420_nv12_p010"
+
+# H264 1080p PP1 YUV420 NV12 I010
+sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
+    "~/qa_cases vdec mp4_decode_h264_1920x1080_30_pp1_yuv420_nv12_i010"
+
+# H264 1080p PP1 YUV420 NV12 L010
+sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
+    "~/qa_cases vdec mp4_decode_h264_1920x1080_30_pp1_yuv420_nv12_l010"
+
+# H264 1080p PP1 YUV420 NV12 PACK10
+sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
+    "~/qa_cases vdec mp4_decode_h264_1920x1080_30_pp1_yuv420_nv12_pack10"
+
+# H264 1080p PP1 YUV420 8bit NV12
+sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
+    "~/qa_cases vdec mp4_decode_h264_1920x1080_30_pp1_yuv420_8bit_nv12"
+
+# H264 1080p PP1 YUV420 NV21 P010 Tiled
+sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
+    "~/qa_cases vdec mp4_decode_h264_1920x1080_30_pp1_yuv420_nv21_p010_tiled"
+
+# H264 1080p PP1 YUV420 NV21 I010
+sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
+    "~/qa_cases vdec mp4_decode_h264_1920x1080_30_pp1_yuv420_nv21_i010"
+
+# H264 1080p PP1 YUV420 NV21 L010
+sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
+    "~/qa_cases vdec mp4_decode_h264_1920x1080_30_pp1_yuv420_nv21_l010"
+
+# H264 1080p PP1 YUV420 P010
+sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
+    "~/qa_cases vdec mp4_decode_h264_1920x1080_30_pp1_yuv420_p010"
+
+# H264 1080p PP1 YUV420 8bit NV21
+sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
+    "~/qa_cases vdec mp4_decode_h264_1920x1080_30_pp1_yuv420_8bit_nv21"
+```
+
+### 7.10 H264 Multi-PP 组合测试（11个）
+
+| 序号 | 测试用例名 | 描述 |
+|:----:|-----------|------|
+| 58 | mp4_decode_h264_1920x1080_30_multi_pp_t01 | H264 1080p Multi-PP 组合测试 T01 |
+| 59 | mp4_decode_h264_1920x1080_30_multi_pp_t02 | H264 1080p Multi-PP 组合测试 T02 |
+| 60 | mp4_decode_h264_1920x1080_30_multi_pp_t03 | H264 1080p Multi-PP 组合测试 T03 |
+| 61 | mp4_decode_h264_1920x1080_30_multi_pp_t04 | H264 1080p Multi-PP 组合测试 T04 |
+| 62 | mp4_decode_h264_1920x1080_30_multi_pp_t05 | H264 1080p Multi-PP 组合测试 T05 |
+| 63 | mp4_decode_h264_1920x1080_30_multi_pp_t06 | H264 1080p Multi-PP 组合测试 T06 |
+| 64 | mp4_decode_h264_1920x1080_30_multi_pp_t07 | H264 1080p Multi-PP 组合测试 T07 |
+| 65 | mp4_decode_h264_1920x1080_30_multi_pp_t08 | H264 1080p Multi-PP 组合测试 T08 |
+| 66 | mp4_decode_h264_1920x1080_30_multi_pp_t09 | H264 1080p Multi-PP 组合测试 T09 |
+| 67 | mp4_decode_h264_1920x1080_30_multi_pp_t10 | H264 1080p Multi-PP 组合测试 T10 |
+| 68 | mp4_decode_h264_1920x1080_30_multi_pp_t11 | H264 1080p Multi-PP 组合测试 T11 |
+
+```bash
+# H264 1080p Multi-PP 组合测试 T01
+sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
+    "~/qa_cases vdec mp4_decode_h264_1920x1080_30_multi_pp_t01"
+
+# H264 1080p Multi-PP 组合测试 T02
+sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
+    "~/qa_cases vdec mp4_decode_h264_1920x1080_30_multi_pp_t02"
+
+# H264 1080p Multi-PP 组合测试 T03
+sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
+    "~/qa_cases vdec mp4_decode_h264_1920x1080_30_multi_pp_t03"
+
+# H264 1080p Multi-PP 组合测试 T04
+sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
+    "~/qa_cases vdec mp4_decode_h264_1920x1080_30_multi_pp_t04"
+
+# H264 1080p Multi-PP 组合测试 T05
+sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
+    "~/qa_cases vdec mp4_decode_h264_1920x1080_30_multi_pp_t05"
+
+# H264 1080p Multi-PP 组合测试 T06
+sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
+    "~/qa_cases vdec mp4_decode_h264_1920x1080_30_multi_pp_t06"
+
+# H264 1080p Multi-PP 组合测试 T07
+sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
+    "~/qa_cases vdec mp4_decode_h264_1920x1080_30_multi_pp_t07"
+
+# H264 1080p Multi-PP 组合测试 T08
+sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
+    "~/qa_cases vdec mp4_decode_h264_1920x1080_30_multi_pp_t08"
+
+# H264 1080p Multi-PP 组合测试 T09
+sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
+    "~/qa_cases vdec mp4_decode_h264_1920x1080_30_multi_pp_t09"
+
+# H264 1080p Multi-PP 组合测试 T10
+sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
+    "~/qa_cases vdec mp4_decode_h264_1920x1080_30_multi_pp_t10"
+
+# H264 1080p Multi-PP 组合测试 T11
+sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
+    "~/qa_cases vdec mp4_decode_h264_1920x1080_30_multi_pp_t11"
+```
+
+### 7.11 H264 PP0 格式测试 - Commit 1 新增（4个）
+
+| 序号 | 测试用例名 | 描述 |
+|:----:|-----------|------|
+| 69 | mp4_decode_h264_1280x720_30_pp0_nv12 | H264 720p PP0 NV12 |
+| 70 | mp4_decode_h264_1280x720_30_pp0_p010 | H264 720p PP0 P010 |
+| 71 | mp4_decode_h264_1920x1080_30_pp0_nv21 | H264 1080p PP0 NV21 |
+| 72 | mp4_decode_h264_3840x2160_30_pp0_nv12 | H264 4K PP0 NV12 |
+
+```bash
+# H264 720p PP0 NV12
+sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
+    "~/qa_cases vdec mp4_decode_h264_1280x720_30_pp0_nv12"
+
+# H264 720p PP0 P010
+sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
+    "~/qa_cases vdec mp4_decode_h264_1280x720_30_pp0_p010"
+
+# H264 1080p PP0 NV21
+sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
+    "~/qa_cases vdec mp4_decode_h264_1920x1080_30_pp0_nv21"
+
+# H264 4K PP0 NV12
+sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
+    "~/qa_cases vdec mp4_decode_h264_3840x2160_30_pp0_nv12"
+```
+
+### 7.12 H264 PP1 格式测试 - Commit 1 新增（2个）
+
+| 序号 | 测试用例名 | 描述 |
+|:----:|-----------|------|
+| 73 | mp4_decode_h264_1280x720_30_pp1_argb8888 | H264 720p PP1 ARGB8888 |
+| 74 | mp4_decode_h264_3840x2160_30_pp1_argb8888 | H264 4K PP1 ARGB8888 |
+
+```bash
+# H264 720p PP1 ARGB8888
+sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
+    "~/qa_cases vdec mp4_decode_h264_1280x720_30_pp1_argb8888"
+
+# H264 4K PP1 ARGB8888
+sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
+    "~/qa_cases vdec mp4_decode_h264_3840x2160_30_pp1_argb8888"
+```
+
+### 7.13 H264 Crop 测试 - Commit 1 新增（2个）
+
+| 序号 | 测试用例名 | 描述 |
+|:----:|-----------|------|
+| 75 | mp4_decode_h264_1280x720_30_pp0_crop_1024x576 | H264 720p PP0 裁剪到 1024x576 |
+| 76 | mp4_decode_h264_1920x1080_30_pp0_crop_1600x900 | H264 1080p PP0 裁剪到 1600x900 |
+
+```bash
+# H264 720p PP0 裁剪到 1024x576
+sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
+    "~/qa_cases vdec mp4_decode_h264_1280x720_30_pp0_crop_1024x576"
+
+# H264 1080p PP0 裁剪到 1600x900
+sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
+    "~/qa_cases vdec mp4_decode_h264_1920x1080_30_pp0_crop_1600x900"
+```
+
+### 7.14 H264 Scale 测试 - Commit 1 新增（2个）
+
+| 序号 | 测试用例名 | 描述 |
+|:----:|-----------|------|
+| 77 | mp4_decode_h264_1280x720_30_pp0_scale_512x288 | H264 720p PP0 缩放到 512x288 |
+| 78 | mp4_decode_h264_1920x1080_30_pp0_scale_800x450 | H264 1080p PP0 缩放到 800x450 |
+
+```bash
+# H264 720p PP0 缩放到 512x288
+sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
+    "~/qa_cases vdec mp4_decode_h264_1280x720_30_pp0_scale_512x288"
+
+# H264 1080p PP0 缩放到 800x450
+sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
+    "~/qa_cases vdec mp4_decode_h264_1920x1080_30_pp0_scale_800x450"
+```
+
+### 7.15 H265 PP0 格式测试 - Commit 1 新增（3个）
+
+| 序号 | 测试用例名 | 描述 |
+|:----:|-----------|------|
+| 79 | mp4_decode_h265_1280x720_30_pp0_nv12 | H265 720p PP0 NV12 |
+| 80 | mp4_decode_h265_1920x1080_30_pp0_p010 | H265 1080p PP0 P010 |
+| 81 | mp4_decode_h265_3840x2160_30_pp0_nv12 | H265 4K PP0 NV12 |
+
+```bash
+# H265 720p PP0 NV12
+sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
+    "~/qa_cases vdec mp4_decode_h265_1280x720_30_pp0_nv12"
+
+# H265 1080p PP0 P010
+sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
+    "~/qa_cases vdec mp4_decode_h265_1920x1080_30_pp0_p010"
+
+# H265 4K PP0 NV12
+sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
+    "~/qa_cases vdec mp4_decode_h265_3840x2160_30_pp0_nv12"
+```
+
+### 7.16 H265 PP1 格式测试 - Commit 1 新增（2个）
+
+| 序号 | 测试用例名 | 描述 |
+|:----:|-----------|------|
+| 82 | mp4_decode_h265_1280x720_30_pp1_rgb888 | H265 720p PP1 RGB888 |
+| 83 | mp4_decode_h265_1920x1080_30_pp1_argb8888 | H265 1080p PP1 ARGB8888 |
+
+```bash
+# H265 720p PP1 RGB888
+sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
+    "~/qa_cases vdec mp4_decode_h265_1280x720_30_pp1_rgb888"
+
+# H265 1080p PP1 ARGB8888
+sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
+    "~/qa_cases vdec mp4_decode_h265_1920x1080_30_pp1_argb8888"
+```
+
+### 7.17 H265 Crop+Scale 测试 - Commit 1 新增（1个）
+
+| 序号 | 测试用例名 | 描述 |
+|:----:|-----------|------|
+| 84 | mp4_decode_h265_1920x1080_30_pp0_crop_scale | H265 1080p PP0 裁剪 + 缩放 |
+
+```bash
+# H265 1080p PP0 裁剪 + 缩放
+sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
+    "~/qa_cases vdec mp4_decode_h265_1920x1080_30_pp0_crop_scale"
+```
+
+### 7.18 ZYW 新增测试用例汇总
+
+| 类别 | 测试项数 | Commit |
+|------|:-------:|--------|
+| H264 PP0/PP1 Crop 测试 | 6 | e642762 |
+| H265 PP0/PP1 Crop 测试 | 6 | e642762 |
+| H264 Multi-PP 测试 | 4 | e642762 |
+| H265 Multi-PP 测试 | 4 | e642762 |
+| H264 PP0 YUV400 格式测试 | 5 | e642762 |
+| H264 PP0 YUV420 格式测试 | 10 | e642762 |
+| H264 PP1 RGB 格式测试 | 7 | e642762 |
+| H264 PP1 YUV400 格式测试 | 5 | e642762 |
+| H264 PP1 YUV420 格式测试 | 10 | e642762 |
+| H264 Multi-PP 组合测试 | 11 | e642762 |
+| H264 PP0 格式测试 | 4 | e74e179 |
+| H264 PP1 格式测试 | 2 | e74e179 |
+| H264 Crop 测试 | 2 | e74e179 |
+| H264 Scale 测试 | 2 | e74e179 |
+| H265 PP0 格式测试 | 3 | e74e179 |
+| H265 PP1 格式测试 | 2 | e74e179 |
+| H265 Crop+Scale 测试 | 1 | e74e179 |
+| **合计** | **84** | |
+
+---
+
+### 7.19 重复检查结果
+
+经检查，**84 个测试用例均无重复**，所有测试用例名称唯一。

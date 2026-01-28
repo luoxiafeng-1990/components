@@ -4,7 +4,7 @@
 #
 ################################################################################
 
-COMPONENTS_VERSION = 2.23
+COMPONENTS_VERSION = 2.24
 COMPONENTS_SITE = ../packages/components
 COMPONENTS_SITE_METHOD = local
 COMPONENTS_INSTALL_STAGING = YES
@@ -20,7 +20,6 @@ COMPONENTS_CONF_OPTS += --enable-debug
 endif
 
 define COMPONENTS_INSTALL_TARGET_CMDS
-	$(INSTALL) -D -m 755 $(@D)/display_test $(TARGET_DIR)/usr/local/bin
 	$(INSTALL) -D -m 755 $(@D)/qa_cases $(TARGET_DIR)/usr/local/bin
 endef
 

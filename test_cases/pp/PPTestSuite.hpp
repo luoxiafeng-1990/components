@@ -8,6 +8,10 @@
  * - Multi-PP（双通道）测试
  * - 裁剪和缩放测试
  * 
+ * 架构设计：
+ * - 与 BufferConsumerService 的 ExecuteMode 对齐
+ * - PP 测试全部使用 ExecuteMode::SINGLE + CONSUME_SAVE_RAW
+ * 
  * 使用示例：
  * @code
  * ./qa_cases pp --format nv12 --channel pp0 --input video.mp4
@@ -15,14 +19,14 @@
  * ./qa_cases pp -h
  * @endcode
  * 
- * @version 3.1
+ * @version 4.0 - 重构为 ExecuteMode 风格
  */
 
 #ifndef PP_TEST_SUITE_HPP
 #define PP_TEST_SUITE_HPP
 
 #include "../common/ITestModule.hpp"
-#include "../common/TestExecutor.hpp"
+#include "productionline/io/BufferConsumerService.hpp"
 #include "productionline/worker/WorkerConfig.hpp"
 
 #include <string>
@@ -32,6 +36,9 @@
 
 namespace test {
 namespace pp {
+
+// 类型别名：使用新架构的 ConsumeResult
+using TestResult = consumer::ConsumeResult;
 
 /**
  * @brief PP 测试参数
@@ -110,6 +117,10 @@ struct PPTestParams {
  * @brief 后处理测试套件
  * 
  * 实现 ITestModule 接口，提供完整的后处理测试功能。
+ * 
+ * 架构设计：
+ * - 所有 PP 测试使用 ExecuteMode::SINGLE
+ * - 默认消费标志：CONSUME_COUNT | CONSUME_SAVE_RAW
  */
 class PPTestSuite : public common::ITestModule {
 public:
@@ -129,65 +140,34 @@ public:
     std::vector<std::string> getTestNames() const override;
     
     // ========================================
-    // 核心测试方法（参数化设计）
+    // 核心测试方法（与 ExecuteMode 对齐）
     // ========================================
     
     /**
-     * @brief 执行 PP 测试（通用入口）
+     * @brief 单路消费测试（ExecuteMode::SINGLE）
+     * 
+     * PP 测试统一入口，根据 PPTestParams 构建 WorkerConfig
      * 
      * @param path 视频文件路径
-     * @param params 测试参数
+     * @param params PP 测试参数
+     * @param flags 消费类型标志（默认 CONSUME_COUNT | CONSUME_SAVE_RAW）
      * @return 测试结果
      */
-    static common::TestResult runPPTest(
+    static TestResult runSingle(
         const std::string& path,
-        const PPTestParams& params
-    );
-    
-    /**
-     * @brief 执行 PP0 格式测试
-     */
-    static common::TestResult runPP0Test(
-        const std::string& path,
-        OutputFormat format,
-        int width = 1920, int height = 1080,
-        ColorStandard color_std = ColorStandard::BT601
-    );
-    
-    /**
-     * @brief 执行 PP1 格式测试
-     */
-    static common::TestResult runPP1Test(
-        const std::string& path,
-        OutputFormat format,
-        int width = 1920, int height = 1080,
-        ColorStandard color_std = ColorStandard::BT601
-    );
-    
-    /**
-     * @brief 执行 Multi-PP 测试
-     */
-    static common::TestResult runMultiPPTest(
-        const std::string& path,
-        OutputFormat pp0_format,
-        OutputFormat pp1_format,
-        int width = 1920, int height = 1080,
-        ColorStandard color_std = ColorStandard::BT601
-    );
-    
-    /**
-     * @brief 执行裁剪缩放测试
-     */
-    static common::TestResult runCropScaleTest(
-        const std::string& path,
-        int crop_x, int crop_y, int crop_w, int crop_h,
-        int scale_w, int scale_h
+        const PPTestParams& params,
+        uint32_t flags = consumer::CONSUME_COUNT | consumer::CONSUME_SAVE_RAW
     );
     
     /**
      * @brief 获取预定义测试参数
      */
     static const std::map<std::string, PPTestParams>& getPredefinedTests();
+    
+    /**
+     * @brief 从 PPTestParams 构建 WorkerConfig
+     */
+    static WorkerConfig buildConfig(const std::string& path, const PPTestParams& params);
 
 private:
     /**

@@ -5,7 +5,7 @@
 
 #include "PPTestSuite.hpp"
 #include "../common/WorkerConfigFactory.hpp"
-#include "../common/TestExecutor.hpp"
+#include "productionline/io/BufferConsumerService.hpp"
 
 #include <iostream>
 #include <getopt.h>
@@ -190,6 +190,69 @@ const std::map<std::string, PPTestParams>& PPTestSuite::getPredefinedTests() {
         {"multi_pp_scale3", {OutputFormat::YUV_NV12, OutputFormat::YUV_NV12, 256, 256, ColorStandard::BT709}},
         // Scale4: PP0+PP1 双通道 down-scale 4096x2160 -> 128x128
         {"multi_pp_scale4", {OutputFormat::YUV_NV12, OutputFormat::YUV_NV12, 128, 128, ColorStandard::BT709}},
+        
+        // ════════════════════════════════════════════════════════════════════
+        // ZYW 新增测试 - PP Crop 测试（带分辨率）
+        // ════════════════════════════════════════════════════════════════════
+        // PP0 Crop
+        {"pp0_720p_crop",           {"pp0", OutputFormat::YUV_NV12, 1280, 720, ColorStandard::BT709, 0, 0, 1280, 720}},
+        {"pp0_1080p_crop",          {"pp0", OutputFormat::YUV_NV12, 1920, 1080, ColorStandard::BT709, 0, 0, 1920, 1080}},
+        // PP1 RGB Crop
+        {"pp1_720p_rgb_crop",       {"pp1", OutputFormat::RGB_RGB888, 1280, 720, ColorStandard::BT709, 0, 0, 1280, 720}},
+        {"pp1_1080p_rgb_crop",      {"pp1", OutputFormat::RGB_RGB888, 1920, 1080, ColorStandard::BT709, 0, 0, 1920, 1080}},
+        // PP1 YUV Crop
+        {"pp1_720p_yuv_crop",       {"pp1", OutputFormat::YUV_NV12, 1280, 720, ColorStandard::BT709, 0, 0, 1280, 720}},
+        {"pp1_1080p_yuv_crop",      {"pp1", OutputFormat::YUV_NV12, 1920, 1080, ColorStandard::BT709, 0, 0, 1920, 1080}},
+        
+        // ════════════════════════════════════════════════════════════════════
+        // ZYW 新增测试 - Multi-PP 扩展测试
+        // ════════════════════════════════════════════════════════════════════
+        {"multi_pp",                {OutputFormat::YUV_NV12, OutputFormat::RGB_RGB888, 1920, 1080}},
+        {"multi_pp_crop",           {OutputFormat::YUV_NV12, OutputFormat::RGB_RGB888, 1920, 1080, ColorStandard::BT709}},
+        {"multi_pp_scale",          {OutputFormat::YUV_NV12, OutputFormat::RGB_RGB888, 960, 540, ColorStandard::BT709}},
+        {"multi_pp_crop_scale",     {OutputFormat::YUV_NV12, OutputFormat::RGB_RGB888, 960, 540, ColorStandard::BT709}},
+        
+        // ════════════════════════════════════════════════════════════════════
+        // ZYW 新增测试 - PP0 带分辨率的格式测试
+        // ════════════════════════════════════════════════════════════════════
+        {"pp0_720p_nv12",           {"pp0", OutputFormat::YUV_NV12, 1280, 720}},
+        {"pp0_720p_p010",           {"pp0", OutputFormat::YUV_P010, 1280, 720}},
+        {"pp0_1080p_nv21",          {"pp0", OutputFormat::YUV_NV21, 1920, 1080}},
+        {"pp0_4k_nv12",             {"pp0", OutputFormat::YUV_NV12, 3840, 2160}},
+        
+        // ════════════════════════════════════════════════════════════════════
+        // ZYW 新增测试 - PP1 带分辨率的格式测试
+        // ════════════════════════════════════════════════════════════════════
+        {"pp1_720p_argb8888",       {"pp1", OutputFormat::RGB_ARGB888, 1280, 720}},
+        {"pp1_4k_argb8888",         {"pp1", OutputFormat::RGB_ARGB888, 3840, 2160}},
+        {"pp1_720p_rgb888",         {"pp1", OutputFormat::RGB_RGB888, 1280, 720}},
+        {"pp1_1080p_argb8888",      {"pp1", OutputFormat::RGB_ARGB888, 1920, 1080}},
+        
+        // ════════════════════════════════════════════════════════════════════
+        // ZYW 新增测试 - Crop 带输出分辨率
+        // ════════════════════════════════════════════════════════════════════
+        {"crop_720p_1024x576",      {"pp0", OutputFormat::YUV_NV12, 1024, 576, ColorStandard::BT709, 0, 0, 1280, 720}},
+        {"crop_1080p_1600x900",     {"pp0", OutputFormat::YUV_NV12, 1600, 900, ColorStandard::BT709, 0, 0, 1920, 1080}},
+        
+        // ════════════════════════════════════════════════════════════════════
+        // ZYW 新增测试 - Scale 带输出分辨率
+        // ════════════════════════════════════════════════════════════════════
+        {"scale_720p_512x288",      {"pp0", OutputFormat::YUV_NV12, 512, 288, ColorStandard::BT709}},
+        {"scale_1080p_800x450",     {"pp0", OutputFormat::YUV_NV12, 800, 450, ColorStandard::BT709}},
+        
+        // ════════════════════════════════════════════════════════════════════
+        // ZYW 新增测试 - H265 PP0/PP1 格式测试
+        // ════════════════════════════════════════════════════════════════════
+        {"pp0_h265_720p_nv12",      {"pp0", OutputFormat::YUV_NV12, 1280, 720}},
+        {"pp0_h265_1080p_p010",     {"pp0", OutputFormat::YUV_P010, 1920, 1080}},
+        {"pp0_h265_4k_nv12",        {"pp0", OutputFormat::YUV_NV12, 3840, 2160}},
+        {"pp1_h265_720p_rgb888",    {"pp1", OutputFormat::RGB_RGB888, 1280, 720}},
+        {"pp1_h265_1080p_argb8888", {"pp1", OutputFormat::RGB_ARGB888, 1920, 1080}},
+        
+        // ════════════════════════════════════════════════════════════════════
+        // ZYW 新增测试 - H265 Crop+Scale
+        // ════════════════════════════════════════════════════════════════════
+        {"h265_1080p_crop_scale",   {"pp0", OutputFormat::YUV_NV12, 960, 540, ColorStandard::BT709, 0, 0, 1920, 1080}},
     };
     return tests;
 }
@@ -214,46 +277,19 @@ int PPTestSuite::run(int argc, char* argv[]) {
         return 1;
     }
     
-    // 构建完整配置
-    WorkerConfig full_config;
-    if (params.channel == "pp0") {
-        full_config = common::WorkerConfigFactory::createPP0YuvConfig(
-            config.data_source.path, params.format, params.width, params.height, params.color_std);
-    } else if (params.channel == "pp1") {
-        int fmt_val = static_cast<int>(params.format);
-        if (fmt_val >= 1000) {
-            full_config = common::WorkerConfigFactory::createPP1RgbConfig(
-                config.data_source.path, params.format, params.width, params.height, params.color_std);
-        } else {
-            full_config = common::WorkerConfigFactory::createPP1YuvConfig(
-                config.data_source.path, params.format, params.width, params.height, params.color_std);
-        }
-    } else if (params.channel == "multi") {
-        full_config = common::WorkerConfigFactory::createMultiPPConfig(
-            config.data_source.path, params.format, params.pp1_format, 
-            params.width, params.height, params.color_std);
+    // 构建消费标志
+    uint32_t flags = consumer::CONSUME_COUNT | consumer::CONSUME_SAVE_RAW;
+    if (config.consumer.enable_display) {
+        flags |= consumer::CONSUME_DISPLAY;
     }
     
-    // 应用裁剪参数（如果有）
-    if (params.crop_w > 0 && params.crop_h > 0) {
-        full_config = common::WorkerConfigFactory::createCropConfig(
-            config.data_source.path, params.crop_x, params.crop_y, params.crop_w, params.crop_h,
-            params.width, params.height);
-    }
-    
-    // 合并命令行传入的 consumer 配置
-    full_config.consumer = config.consumer;
-    if (full_config.consumer.save_frames == 0) {
-        full_config.consumer.save_frames = 10;  // 默认保存前10帧验证
-    }
+    // 使用 runSingle（ExecuteMode::SINGLE）
+    auto result = runSingle(config.data_source.path, params, flags);
     
     std::string fmt_name(TacoConfigBuilder::mapFormatEnumToName(params.format));
     std::string test_name = params.channel + " " + fmt_name;
     
-    common::TestExecutor::printHeader(test_name, full_config);
-    auto result = common::TestExecutor::runDecode(full_config);
-    
-    common::TestExecutor::printResult(test_name, result);
+    consumer::BufferConsumerService::printResult(test_name, result);
     
     return result.success ? 0 : 1;
 }
@@ -397,7 +433,7 @@ bool PPTestSuite::parseArgs(int argc, char* argv[], WorkerConfig& config, PPTest
     }
     
     if (input_path.empty()) {
-        std::cerr << "Error: No input file specified\n";
+        LOG4CPLUS_ERROR(getLogger(), "No input file specified");
         printHelp();
         return false;
     }
@@ -421,12 +457,13 @@ int PPTestSuite::runPredefinedTest(const std::string& test_name, const std::stri
     const auto& tests = getPredefinedTests();
     auto it = tests.find(test_name);
     if (it == tests.end()) {
-        std::cerr << "Error: Unknown test '" << test_name << "'\n";
+        LOG4CPLUS_ERROR_FMT(getLogger(), "Unknown test '%s'", test_name.c_str());
         return 1;
     }
     
-    auto result = runPPTest(path, it->second);
-    common::TestExecutor::printResult(test_name, result);
+    // 使用 runSingle（ExecuteMode::SINGLE）
+    auto result = runSingle(path, it->second, consumer::CONSUME_COUNT | consumer::CONSUME_SAVE_RAW);
+    consumer::BufferConsumerService::printResult(test_name, result);
     return result.success ? 0 : 1;
 }
 
@@ -588,13 +625,10 @@ void PPTestSuite::listTests() const {
 }
 
 // ========================================
-// 核心测试方法实现
+// 核心测试方法实现（与 ExecuteMode 对齐）
 // ========================================
 
-common::TestResult PPTestSuite::runPPTest(
-    const std::string& path,
-    const PPTestParams& params
-) {
+WorkerConfig PPTestSuite::buildConfig(const std::string& path, const PPTestParams& params) {
     WorkerConfig config;
     
     if (params.channel == "pp0") {
@@ -622,58 +656,32 @@ common::TestResult PPTestSuite::runPPTest(
             params.width, params.height);
     }
     
+    return config;
+}
+
+TestResult PPTestSuite::runSingle(
+    const std::string& path,
+    const PPTestParams& params,
+    uint32_t flags
+) {
+    auto& logger = getLogger();
+    
+    // 构建配置
+    WorkerConfig config = buildConfig(path, params);
     config.consumer.save_frames = 10;  // 默认保存前10帧验证
     
+    // 生成测试名称
     std::string fmt_name(TacoConfigBuilder::mapFormatEnumToName(params.format));
     std::string test_name = params.channel + " " + fmt_name;
     
-    common::TestExecutor::printHeader(test_name, config);
-    return common::TestExecutor::runDecode(config);
-}
-
-common::TestResult PPTestSuite::runPP0Test(
-    const std::string& path,
-    OutputFormat format,
-    int width, int height,
-    ColorStandard color_std
-) {
-    return runPPTest(path, PPTestParams("pp0", format, width, height, color_std));
-}
-
-common::TestResult PPTestSuite::runPP1Test(
-    const std::string& path,
-    OutputFormat format,
-    int width, int height,
-    ColorStandard color_std
-) {
-    return runPPTest(path, PPTestParams("pp1", format, width, height, color_std));
-}
-
-common::TestResult PPTestSuite::runMultiPPTest(
-    const std::string& path,
-    OutputFormat pp0_format,
-    OutputFormat pp1_format,
-    int width, int height,
-    ColorStandard color_std
-) {
-    return runPPTest(path, PPTestParams(pp0_format, pp1_format, width, height, color_std));
-}
-
-common::TestResult PPTestSuite::runCropScaleTest(
-    const std::string& path,
-    int crop_x, int crop_y, int crop_w, int crop_h,
-    int scale_w, int scale_h
-) {
-    auto config = common::WorkerConfigFactory::createCropConfig(
-        path, crop_x, crop_y, crop_w, crop_h, scale_w, scale_h);
-    config.consumer.save_frames = 10;
+    consumer::BufferConsumerService::printHeader(test_name, config);
     
-    std::ostringstream test_name;
-    test_name << "Crop(" << crop_x << "," << crop_y << "," << crop_w << "," << crop_h 
-              << ") Scale(" << scale_w << "x" << scale_h << ")";
+    LOG4CPLUS_DEBUG_FMT(logger, "runSingle: mode=SINGLE, flags=0x%X, channel=%s", 
+                        flags, params.channel.c_str());
     
-    common::TestExecutor::printHeader(test_name.str(), config);
-    return common::TestExecutor::runDecode(config);
+    // 使用 BufferConsumerService，ExecuteMode::SINGLE
+    consumer::BufferConsumerService service;
+    return service.start({config}, consumer::ExecuteMode::SINGLE, flags);
 }
 
 } // namespace pp

@@ -1,11 +1,13 @@
 /**
  * @file RecordTestSuite.cpp
  * @brief RecordTestSuite 实现
+ * 
+ * 重构为 ExecuteMode 风格，与 BufferConsumerService 架构对齐
  */
 
 #include "RecordTestSuite.hpp"
 #include "../common/WorkerConfigFactory.hpp"
-#include "../common/TestExecutor.hpp"
+#include "productionline/io/BufferConsumerService.hpp"
 
 #include <iostream>
 #include <getopt.h>
@@ -30,22 +32,22 @@ log4cplus::Logger& RecordTestSuite::getLogger() {
 const std::map<std::string, RecordTestParams>& RecordTestSuite::getPredefinedTests() {
     static std::map<std::string, RecordTestParams> tests = {
         // 基本录制测试
-        {"rtsp_to_mp4",     {"mp4", 10.0, -1}},
-        {"rtsp_to_mkv",     {"mkv", 10.0, -1}},
-        {"rtsp_to_mov",     {"mov", 10.0, -1}},
-        {"rtsp_to_ts",      {"ts",  10.0, -1}},
-        {"rtsp_to_flv",     {"flv", 10.0, -1}},
-        {"rtsp_to_avi",     {"avi", 10.0, -1}},
-        {"rtsp_to_3gp",     {"3gp", 10.0, -1}},
+        {"rtsp_to_mp4",     {"mp4", 10.0}},
+        {"rtsp_to_mkv",     {"mkv", 10.0}},
+        {"rtsp_to_mov",     {"mov", 10.0}},
+        {"rtsp_to_ts",      {"ts",  10.0}},
+        {"rtsp_to_flv",     {"flv", 10.0}},
+        {"rtsp_to_avi",     {"avi", 10.0}},
+        {"rtsp_to_3gp",     {"3gp", 10.0}},
         
         // 长时间录制测试
-        {"rtsp_long_mp4",   {"mp4", 60.0, -1}},
-        {"rtsp_long_mkv",   {"mkv", 60.0, -1}},
+        {"rtsp_long_mp4",   {"mp4", 60.0}},
+        {"rtsp_long_mkv",   {"mkv", 60.0}},
         
         // 文件重封装测试
-        {"file_to_mp4",     {"mp4", -1, -1}},
-        {"file_to_mkv",     {"mkv", -1, -1}},
-        {"file_to_ts",      {"ts",  -1, -1}},
+        {"file_to_mp4",     {"mp4", -1}},
+        {"file_to_mkv",     {"mkv", -1}},
+        {"file_to_ts",      {"ts",  -1}},
     };
     return tests;
 }
@@ -71,16 +73,11 @@ int RecordTestSuite::run(int argc, char* argv[]) {
         return 1;
     }
     
-    common::TestResult result;
-    
-    if (common::WorkerConfigFactory::isRtspUrl(config.data_source.path)) {
-        result = runRtspRecord(config.data_source.path, output_path, params);
-    } else {
-        result = runFileRecord(config.data_source.path, output_path, params);
-    }
+    // 使用 runSingle（ExecuteMode::SINGLE + CONSUME_SAVE_ENCODED）
+    auto result = runSingle(config.data_source.path, output_path, params);
     
     std::string test_name = "Record to " + params.format;
-    common::TestExecutor::printResult(test_name, result);
+    consumer::BufferConsumerService::printResult(test_name, result);
     
     return result.success ? 0 : 1;
 }
@@ -98,16 +95,14 @@ bool RecordTestSuite::parseArgs(int argc, char* argv[], WorkerConfig& config,
         {"output",    required_argument, 0, 'o'},
         {"format",    required_argument, 0, 'F'},
         {"duration",  required_argument, 0, 'd'},
-        {"all-formats", no_argument,     0, 'a'},
         {"verbose",   no_argument,       0, 'v'},
         {0, 0, 0, 0}
     };
     
     std::string input_path;
-    bool all_formats = false;
     
     int opt;
-    while ((opt = getopt_long(argc, argv, "hlr:f:i:o:F:d:av",
+    while ((opt = getopt_long(argc, argv, "hlr:f:i:o:F:d:v",
                               long_options, nullptr)) != -1) {
         switch (opt) {
             case 'h':
@@ -134,10 +129,6 @@ bool RecordTestSuite::parseArgs(int argc, char* argv[], WorkerConfig& config,
             
             case 'd':
                 params.duration = std::stod(optarg);
-                break;
-            
-            case 'a':
-                all_formats = true;
                 break;
             
             case 'v':
@@ -185,13 +176,6 @@ bool RecordTestSuite::parseArgs(int argc, char* argv[], WorkerConfig& config,
         output_path = "/tmp/qa_record_" + std::to_string(time(nullptr)) + "." + params.format;
     }
     
-    // 如果测试所有格式
-    if (all_formats) {
-        auto result = runAllFormatsRecord(input_path, "/tmp");
-        common::TestExecutor::printResult("All Formats Record", result);
-        return false; // 已经执行完毕
-    }
-    
     return true;
 }
 
@@ -212,8 +196,9 @@ void RecordTestSuite::printHelp() const {
     std::cout << "  -o, --output <path>     输出文件路径\n";
     std::cout << "  -F, --format <fmt>      输出格式 (mp4|mkv|mov|ts|flv|avi|3gp)\n";
     std::cout << "  -d, --duration <sec>    录制时长（秒，-1=无限制）\n";
-    std::cout << "  -a, --all-formats       测试所有格式\n";
     std::cout << "  -v, --verbose           详细日志\n";
+    std::cout << "\n";
+    std::cout << "ExecuteMode: SINGLE + CONSUME_SAVE_ENCODED\n";
     std::cout << "\n";
     std::cout << "Supported formats:\n";
     std::cout << "  mp4   - MPEG-4 Part 14 (最常用)\n";
@@ -229,12 +214,11 @@ void RecordTestSuite::printHelp() const {
     std::cout << "  qa_cases record --rtsp rtsp://... --output /tmp/out.mp4\n";
     std::cout << "  qa_cases record --file input.mkv --output /tmp/out.mp4\n";
     std::cout << "  qa_cases record rtsp_to_mp4 rtsp://192.168.1.100/stream\n";
-    std::cout << "  qa_cases record --all-formats rtsp://192.168.1.100/stream\n";
     std::cout << "\n";
 }
 
 void RecordTestSuite::listTests() const {
-    std::cout << "\nAvailable RECORD tests:\n";
+    std::cout << "\nAvailable RECORD tests (ExecuteMode::SINGLE + CONSUME_SAVE_ENCODED):\n";
     std::cout << "────────────────────────────────────────────────────────\n";
     
     std::cout << "\nRTSP Recording Tests:\n";
@@ -260,73 +244,36 @@ void RecordTestSuite::listTests() const {
 }
 
 // ========================================
-// 核心测试方法实现
+// 核心测试方法实现（与 ExecuteMode 对齐）
 // ========================================
 
-common::TestResult RecordTestSuite::runRtspRecord(
-    const std::string& rtsp_url,
-    const std::string& output_path,
-    const RecordTestParams& params
-) {
-    auto config = common::WorkerConfigFactory::createRtspRecord(rtsp_url);
-    
-    std::ostringstream test_name;
-    test_name << "RTSP Record to " << params.format;
-    
-    common::TestExecutor::printHeader(test_name.str(), config);
-    return common::TestExecutor::runRecord(config, output_path, params.duration);
-}
-
-common::TestResult RecordTestSuite::runFileRecord(
-    const std::string& input_path,
-    const std::string& output_path,
-    const RecordTestParams& params
-) {
-    auto config = common::WorkerConfigFactory::createRtspRecord(input_path);
-    
-    std::ostringstream test_name;
-    test_name << "File Remux to " << params.format;
-    
-    common::TestExecutor::printHeader(test_name.str(), config);
-    return common::TestExecutor::runRecord(config, output_path, params.duration);
-}
-
-common::TestResult RecordTestSuite::runAllFormatsRecord(
+TestResult RecordTestSuite::runSingle(
     const std::string& input_source,
-    const std::string& output_dir
+    const std::string& output_path,
+    const RecordTestParams& params
 ) {
-    common::TestResult total_result;
-    total_result.success = true;
+    auto& logger = getLogger();
     
-    std::vector<std::string> formats = {"mp4", "mkv", "mov", "ts", "flv", "avi", "3gp"};
+    // 构建配置
+    auto config = common::WorkerConfigFactory::createRtspRecord(input_source);
+    config.consumer.output_path = output_path;
+    config.consumer.max_duration_seconds = params.duration;
     
-    for (const auto& fmt : formats) {
-        std::string output_path = output_dir + "/qa_record_" + 
-                                  std::to_string(time(nullptr)) + "." + fmt;
-        
-        RecordTestParams params(fmt, 5.0); // 每个格式录 5 秒
-        
-        common::TestResult result;
-        if (common::WorkerConfigFactory::isRtspUrl(input_source)) {
-            result = runRtspRecord(input_source, output_path, params);
-        } else {
-            result = runFileRecord(input_source, output_path, params);
-        }
-        
-        std::cout << "  " << fmt << ": " 
-                  << (result.success ? "\033[32mPASS\033[0m" : "\033[31mFAIL\033[0m")
-                  << " (" << result.packets_recorded << " packets)\n";
-        
-        if (!result.success) {
-            total_result.success = false;
-            total_result.error_message += fmt + " failed; ";
-        }
-        
-        total_result.packets_recorded += result.packets_recorded;
-        total_result.bytes_recorded += result.bytes_recorded;
+    // 生成测试名称
+    std::ostringstream test_name;
+    test_name << "Record to " << params.format;
+    if (params.duration > 0) {
+        test_name << " (" << params.duration << "s)";
     }
     
-    return total_result;
+    consumer::BufferConsumerService::printHeader(test_name.str(), config);
+    
+    LOG4CPLUS_DEBUG_FMT(logger, "runSingle: mode=SINGLE, flags=CONSUME_SAVE_ENCODED, output=%s", 
+                        output_path.c_str());
+    
+    // 使用 BufferConsumerService，ExecuteMode::SINGLE + CONSUME_SAVE_ENCODED
+    consumer::BufferConsumerService service;
+    return service.start({config}, consumer::ExecuteMode::SINGLE, consumer::CONSUME_SAVE_ENCODED);
 }
 
 } // namespace record

@@ -311,6 +311,7 @@ struct WorkerConfig {
         int max_frames = -1;              ///< 最大处理帧数（-1=无限制，处理到视频结束）
         int save_frames = 0;              ///< 保存帧数（0=不保存，-1=全部保存）
         std::string output_path;          ///< 输出文件路径（空=自动生成）
+        double max_duration_seconds = -1; ///< 最大执行时长（秒，-1=无限制，用于录制场景）
         
         // ========================================
         // 性能验证

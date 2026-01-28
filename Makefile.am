@@ -32,10 +32,12 @@ libcomponents_la_SOURCES = \
     source/productionline/WorkerSyncCoordinator.cpp \
     source/productionline/io/BufferWriter.cpp \
     source/productionline/io/BufferComparator.cpp \
+    source/productionline/io/BufferConsumerStrategies.cpp \
     source/productionline/io/BufferConsumerService.cpp
 
-# ========== 测试程序（每个只包含自己的主文件）==========
-bin_PROGRAMS = display_test
+# ========== 测试程序 ==========
+# 注意：display_test 已废弃（原 test_cases/dec/ 目录已重命名为 old_case/）
+# bin_PROGRAMS = display_test
 
 # ========== 公共链接库（定义为变量，便于维护）==========
 # 注意：log4cplus 使用动态链接
@@ -45,10 +47,10 @@ bin_PROGRAMS = display_test
 # 3. 运行时需要目标系统有 log4cplus 动态库（Buildroot 会自动安装到 TARGET_DIR）
 COMMON_LIBS = -lpthread -luring -lavformat -lavcodec -lavutil -lswscale -ltacosys -llog4cplus
 
-# display_test 主程序（已移动到 test_cases/ 目录）
-display_test_SOURCES = test_cases/dec/test.cpp
-display_test_CPPFLAGS = -I$(top_srcdir)/test_cases $(AM_CPPFLAGS)
-display_test_LDADD = libcomponents.la $(COMMON_LIBS)
+# display_test 主程序（已废弃，原 test_cases/dec/ 目录已重命名为 old_case/）
+# display_test_SOURCES = test_cases/dec/test.cpp
+# display_test_CPPFLAGS = -I$(top_srcdir)/test_cases $(AM_CPPFLAGS)
+# display_test_LDADD = libcomponents.la $(COMMON_LIBS)
 
 # Google Test 程序（需要安装 libgtest-dev）
 # bin_PROGRAMS += google_test
@@ -60,10 +62,9 @@ display_test_LDADD = libcomponents.la $(COMMON_LIBS)
 # google_test_LDFLAGS = 
 
 # ========== QA 测试程序（模块化测试入口）==========
-bin_PROGRAMS += qa_cases
+bin_PROGRAMS = qa_cases
 qa_cases_SOURCES = \
     test_cases/test_module_main.cpp \
-    test_cases/common/TestExecutor.cpp \
     test_cases/vdec/VdecTestSuite.cpp \
     test_cases/pp/PPTestSuite.cpp \
     test_cases/record/RecordTestSuite.cpp \

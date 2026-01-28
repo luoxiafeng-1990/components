@@ -1,11 +1,13 @@
 /**
  * @file WriterTestSuite.cpp
  * @brief WriterTestSuite 实现
+ * 
+ * 重构为 ExecuteMode 风格，与 BufferConsumerService 架构对齐
  */
 
 #include "WriterTestSuite.hpp"
 #include "../common/WorkerConfigFactory.hpp"
-#include "../common/TestExecutor.hpp"
+#include "productionline/io/BufferConsumerService.hpp"
 
 #include <iostream>
 #include <getopt.h>
@@ -85,7 +87,7 @@ const std::map<std::string, WriterTestParams>& WriterTestSuite::getPredefinedTes
         {"rgb_b16g16r16",   {OutputFormat::RGB_B16G16R16,   "BGR161616 (BGR48)"}},
         
         // ========================================
-        // YUV 格式（15 个，包含 YUV400 变体）
+        // YUV 格式（10 个）
         // ========================================
         {"yuv_nv12",        {OutputFormat::YUV_NV12,  "YUV420 NV12"}},
         {"yuv_nv21",        {OutputFormat::YUV_NV21,  "YUV420 NV21"}},
@@ -102,7 +104,7 @@ const std::map<std::string, WriterTestParams>& WriterTestSuite::getPredefinedTes
         // 批量测试
         // ========================================
         {"all_rgb",         {OutputFormat::RGB_RGB888, "All 12 RGB formats"}},
-        {"all_yuv",         {OutputFormat::YUV_NV12,   "All 15 YUV formats"}},
+        {"all_yuv",         {OutputFormat::YUV_NV12,   "All 10 YUV formats"}},
     };
     return tests;
 }
@@ -128,20 +130,79 @@ int WriterTestSuite::run(int argc, char* argv[]) {
         return 1;
     }
     
-    common::TestResult result;
+    TestResult result;
     
     // 检查是否是批量测试
     if (params.description == "All 12 RGB formats") {
-        result = runAllRgbFormats(config.data_source.path, 
-                                   output_path.empty() ? "/tmp" : output_path);
-    } else if (params.description == "All 15 YUV formats") {
-        result = runAllYuvFormats(config.data_source.path,
-                                   output_path.empty() ? "/tmp" : output_path);
+        // 批量测试所有 RGB 格式
+        result.success = true;
+        const auto& formats = getRgbFormats();
+        int passed = 0;
+        
+        std::cout << "\n";
+        std::cout << "═══════════════════════════════════════════════════════\n";
+        std::cout << "  Writer Test: All 12 RGB Formats (ExecuteMode::SINGLE)\n";
+        std::cout << "═══════════════════════════════════════════════════════\n\n";
+        
+        for (const auto& [format, desc] : formats) {
+            WriterTestParams p(format, desc);
+            p.save_frames = 5;
+            std::string out_file = (output_path.empty() ? "/tmp" : output_path) + 
+                                   "/rgb_" + TacoConfigBuilder::mapFormatEnumToName(format).data() + ".raw";
+            
+            std::cout << "Testing " << desc << "... ";
+            std::cout.flush();
+            
+            auto r = runSingle(config.data_source.path, p, out_file);
+            if (r.success) {
+                std::cout << "PASSED (" << r.frames_consumed << " frames)\n";
+                passed++;
+            } else {
+                std::cout << "FAILED: " << r.error_message << "\n";
+                result.success = false;
+            }
+            result.frames_consumed += r.frames_consumed;
+        }
+        
+        std::cout << "\n  RGB Format Summary: " << passed << "/" << formats.size() << " passed\n";
+    } else if (params.description == "All 10 YUV formats") {
+        // 批量测试所有 YUV 格式
+        result.success = true;
+        const auto& formats = getYuvFormats();
+        int passed = 0;
+        
+        std::cout << "\n";
+        std::cout << "═══════════════════════════════════════════════════════\n";
+        std::cout << "  Writer Test: All 10 YUV Formats (ExecuteMode::SINGLE)\n";
+        std::cout << "═══════════════════════════════════════════════════════\n\n";
+        
+        for (const auto& [format, desc] : formats) {
+            WriterTestParams p(format, desc);
+            p.save_frames = 5;
+            std::string out_file = (output_path.empty() ? "/tmp" : output_path) + 
+                                   "/yuv_" + TacoConfigBuilder::mapFormatEnumToName(format).data() + ".raw";
+            
+            std::cout << "Testing " << desc << "... ";
+            std::cout.flush();
+            
+            auto r = runSingle(config.data_source.path, p, out_file);
+            if (r.success) {
+                std::cout << "PASSED (" << r.frames_consumed << " frames)\n";
+                passed++;
+            } else {
+                std::cout << "FAILED: " << r.error_message << "\n";
+                result.success = false;
+            }
+            result.frames_consumed += r.frames_consumed;
+        }
+        
+        std::cout << "\n  YUV Format Summary: " << passed << "/" << formats.size() << " passed\n";
     } else {
-        result = runWriterTest(config.data_source.path, params, output_path);
+        // 单格式测试
+        result = runSingle(config.data_source.path, params, output_path);
     }
     
-    common::TestExecutor::printResult("Writer " + params.description, result);
+    consumer::BufferConsumerService::printResult("Writer " + params.description, result);
     
     return result.success ? 0 : 1;
 }
@@ -235,7 +296,7 @@ bool WriterTestSuite::parseArgs(int argc, char* argv[], WorkerConfig& config,
     if (all_rgb) {
         params.description = "All 12 RGB formats";
     } else if (all_yuv) {
-        params.description = "All 15 YUV formats";
+        params.description = "All 10 YUV formats";
     }
     
     // 检查输入
@@ -256,6 +317,8 @@ void WriterTestSuite::printHelp() const {
     std::cout << "  Writer Test Suite - BufferWriter Format Tests\n";
     std::cout << "═══════════════════════════════════════════════════════\n";
     std::cout << "\n";
+    std::cout << "ExecuteMode: SINGLE + CONSUME_SAVE_RAW\n";
+    std::cout << "\n";
     std::cout << "Usage: qa_cases writer [options] [test_name|input_file]\n";
     std::cout << "\n";
     std::cout << "Options:\n";
@@ -266,7 +329,7 @@ void WriterTestSuite::printHelp() const {
     std::cout << "  -f, --format <fmt>   Output format (nv12, rgb888, etc.)\n";
     std::cout << "  -n, --frames <n>     Number of frames to save (default: 10)\n";
     std::cout << "  -R, --all-rgb        Test all 12 RGB formats\n";
-    std::cout << "  -Y, --all-yuv        Test all 15 YUV formats\n";
+    std::cout << "  -Y, --all-yuv        Test all 10 YUV formats\n";
     std::cout << "  -v, --verbose        Verbose output\n";
     std::cout << "\n";
     std::cout << "Examples:\n";
@@ -280,7 +343,7 @@ void WriterTestSuite::printHelp() const {
 void WriterTestSuite::listTests() const {
     std::cout << "\n";
     std::cout << "═══════════════════════════════════════════════════════\n";
-    std::cout << "  Available Writer Tests\n";
+    std::cout << "  Available Writer Tests (ExecuteMode::SINGLE)\n";
     std::cout << "═══════════════════════════════════════════════════════\n";
     
     std::cout << "\nRGB Format Tests (12):\n";
@@ -311,7 +374,7 @@ void WriterTestSuite::listTests() const {
     
     std::cout << "\nBatch Tests:\n";
     std::cout << "  all_rgb             Test all 12 RGB formats\n";
-    std::cout << "  all_yuv             Test all 15 YUV formats\n";
+    std::cout << "  all_yuv             Test all 10 YUV formats\n";
     
     std::cout << "────────────────────────────────────────────────────────\n";
     std::cout << "Total: 24 predefined tests\n";
@@ -319,14 +382,16 @@ void WriterTestSuite::listTests() const {
 }
 
 // ========================================
-// 核心测试方法实现
+// 核心测试方法实现（与 ExecuteMode 对齐）
 // ========================================
 
-common::TestResult WriterTestSuite::runWriterTest(
+TestResult WriterTestSuite::runSingle(
     const std::string& input_path,
     const WriterTestParams& params,
     const std::string& output_path
 ) {
+    auto& logger = getLogger();
+    
     // 创建配置 - 根据格式选择合适的工厂方法
     // RGB 格式值 >= 1000，YUV 格式值 < 1000
     WorkerConfig config;
@@ -358,117 +423,20 @@ common::TestResult WriterTestSuite::runWriterTest(
     std::cout << "═══════════════════════════════════════════════════════\n";
     std::cout << "  Writer Test: " << params.description << "\n";
     std::cout << "═══════════════════════════════════════════════════════\n";
+    std::cout << "  Mode:    ExecuteMode::SINGLE + CONSUME_SAVE_RAW\n";
     std::cout << "  Input:   " << input_path << "\n";
     std::cout << "  Output:  " << config.consumer.output_path << "\n";
     std::cout << "  Format:  " << params.description << "\n";
     std::cout << "  Frames:  " << params.save_frames << "\n";
     std::cout << "═══════════════════════════════════════════════════════\n";
     
-    return common::TestExecutor::runDecode(config);
-}
-
-common::TestResult WriterTestSuite::runAllRgbFormats(
-    const std::string& input_path,
-    const std::string& output_dir
-) {
-    common::TestResult total_result;
-    total_result.success = true;
+    LOG4CPLUS_DEBUG_FMT(logger, "runSingle: mode=SINGLE, flags=CONSUME_COUNT|CONSUME_SAVE_RAW, format=%s", 
+                        params.description.c_str());
     
-    const auto& formats = getRgbFormats();
-    int passed = 0;
-    int failed = 0;
-    
-    std::cout << "\n";
-    std::cout << "═══════════════════════════════════════════════════════\n";
-    std::cout << "  Writer Test: All 12 RGB Formats\n";
-    std::cout << "═══════════════════════════════════════════════════════\n";
-    std::cout << "  Input:  " << input_path << "\n";
-    std::cout << "  Output: " << output_dir << "/\n";
-    std::cout << "═══════════════════════════════════════════════════════\n\n";
-    
-    for (const auto& [format, desc] : formats) {
-        WriterTestParams params(format, desc);
-        params.save_frames = 5;  // 批量测试减少帧数
-        
-        std::string output_file = output_dir + "/rgb_" + 
-            TacoConfigBuilder::mapFormatEnumToName(format).data() + ".raw";
-        
-        std::cout << "Testing " << desc << "... ";
-        std::cout.flush();
-        
-        auto result = runWriterTest(input_path, params, output_file);
-        
-        if (result.success) {
-            std::cout << "PASSED (" << result.frames_decoded << " frames)\n";
-            passed++;
-        } else {
-            std::cout << "FAILED: " << result.error_message << "\n";
-            failed++;
-            total_result.success = false;
-        }
-        
-        total_result.frames_decoded += result.frames_decoded;
-        total_result.duration_seconds += result.duration_seconds;
-    }
-    
-    std::cout << "\n";
-    std::cout << "────────────────────────────────────────────────────────\n";
-    std::cout << "  RGB Format Summary: " << passed << "/" << formats.size() << " passed\n";
-    std::cout << "────────────────────────────────────────────────────────\n";
-    
-    return total_result;
-}
-
-common::TestResult WriterTestSuite::runAllYuvFormats(
-    const std::string& input_path,
-    const std::string& output_dir
-) {
-    common::TestResult total_result;
-    total_result.success = true;
-    
-    const auto& formats = getYuvFormats();
-    int passed = 0;
-    int failed = 0;
-    
-    std::cout << "\n";
-    std::cout << "═══════════════════════════════════════════════════════\n";
-    std::cout << "  Writer Test: All 15 YUV Formats\n";
-    std::cout << "═══════════════════════════════════════════════════════\n";
-    std::cout << "  Input:  " << input_path << "\n";
-    std::cout << "  Output: " << output_dir << "/\n";
-    std::cout << "═══════════════════════════════════════════════════════\n\n";
-    
-    for (const auto& [format, desc] : formats) {
-        WriterTestParams params(format, desc);
-        params.save_frames = 5;  // 批量测试减少帧数
-        
-        std::string output_file = output_dir + "/yuv_" + 
-            TacoConfigBuilder::mapFormatEnumToName(format).data() + ".raw";
-        
-        std::cout << "Testing " << desc << "... ";
-        std::cout.flush();
-        
-        auto result = runWriterTest(input_path, params, output_file);
-        
-        if (result.success) {
-            std::cout << "PASSED (" << result.frames_decoded << " frames)\n";
-            passed++;
-        } else {
-            std::cout << "FAILED: " << result.error_message << "\n";
-            failed++;
-            total_result.success = false;
-        }
-        
-        total_result.frames_decoded += result.frames_decoded;
-        total_result.duration_seconds += result.duration_seconds;
-    }
-    
-    std::cout << "\n";
-    std::cout << "────────────────────────────────────────────────────────\n";
-    std::cout << "  YUV Format Summary: " << passed << "/" << formats.size() << " passed\n";
-    std::cout << "────────────────────────────────────────────────────────\n";
-    
-    return total_result;
+    // 使用 BufferConsumerService，ExecuteMode::SINGLE + CONSUME_SAVE_RAW
+    consumer::BufferConsumerService service;
+    return service.start({config}, consumer::ExecuteMode::SINGLE, 
+                        consumer::CONSUME_COUNT | consumer::CONSUME_SAVE_RAW);
 }
 
 } // namespace writer

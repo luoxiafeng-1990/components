@@ -8,6 +8,10 @@
  * - RTSP 流解码
  * - PSNR/SSIM 质量验证
  * 
+ * 架构设计：
+ * - 与 BufferConsumerService 的 ExecuteMode 对齐
+ * - 测试方法直接映射到 SINGLE / COMPARE / PARALLEL 模式
+ * 
  * 使用示例：
  * @code
  * ./qa_cases vdec --file video.mp4 --codec h264 --width 1920 --height 1080
@@ -15,14 +19,14 @@
  * ./qa_cases vdec -h
  * @endcode
  * 
- * @version 3.1
+ * @version 4.0 - 重构为 ExecuteMode 风格
  */
 
 #ifndef VDEC_TEST_SUITE_HPP
 #define VDEC_TEST_SUITE_HPP
 
 #include "../common/ITestModule.hpp"
-#include "../common/TestExecutor.hpp"
+#include "productionline/io/BufferConsumerService.hpp"
 #include "productionline/worker/WorkerConfig.hpp"
 
 #include <string>
@@ -32,6 +36,9 @@
 
 namespace test {
 namespace vdec {
+
+// 类型别名：使用新架构的 ConsumeResult
+using TestResult = consumer::ConsumeResult;
 
 /**
  * @brief 解码测试参数
@@ -55,6 +62,12 @@ struct DecodeTestParams {
  * @brief 视频解码测试套件
  * 
  * 实现 ITestModule 接口，提供完整的视频解码测试功能。
+ * 
+ * 架构设计：
+ * - 所有测试方法与 BufferConsumerService::ExecuteMode 对齐
+ * - runSingle()   → ExecuteMode::SINGLE
+ * - runCompare()  → ExecuteMode::COMPARE (PSNR/SSIM)
+ * - runParallel() → ExecuteMode::PARALLEL (多线程/多Worker)
  */
 class VdecTestSuite : public common::ITestModule {
 public:
@@ -74,87 +87,56 @@ public:
     std::vector<std::string> getTestNames() const override;
     
     // ========================================
-    // 核心测试方法（参数化设计）
+    // 核心测试方法（与 ExecuteMode 对齐）
     // ========================================
     
     /**
-     * @brief 执行解码测试（通用入口）
+     * @brief 单路消费测试（ExecuteMode::SINGLE）
      * 
-     * @param path 视频文件路径或 RTSP URL
-     * @param params 测试参数
+     * @param config 单个 Worker 配置
+     * @param flags 消费类型标志（CONSUME_COUNT | CONSUME_DISPLAY | CONSUME_SAVE_RAW）
+     * @param test_name 测试名称（用于日志输出）
      * @return 测试结果
      */
-    static common::TestResult runDecodeTest(
-        const std::string& path,
-        const DecodeTestParams& params
+    static TestResult runSingle(
+        const WorkerConfig& config,
+        uint32_t flags,
+        const std::string& test_name = ""
     );
     
     /**
-     * @brief 执行解码测试（简化版）
+     * @brief 对比消费测试（ExecuteMode::COMPARE）
      * 
-     * @param path 视频文件路径
-     * @param codec 编解码器 (h264, h265, mjpeg, software)
-     * @param width 分辨率宽度
-     * @param height 分辨率高度
-     * @param target_fps 目标帧率
-     * @return 测试结果
+     * 用于 PSNR/SSIM 质量验证，同步比较多个 Worker 的输出
+     * 
+     * @param configs Worker 配置列表（通常是 HW + SW）
+     * @param test_name 测试名称（用于日志输出）
+     * @return 测试结果（包含 psnr_average, ssim_average）
      */
-    static common::TestResult runDecodeTest(
-        const std::string& path,
-        const std::string& codec,
-        int width,
-        int height,
-        double target_fps
+    static TestResult runCompare(
+        const std::vector<WorkerConfig>& configs,
+        const std::string& test_name = ""
     );
     
     /**
-     * @brief 执行质量验证测试（PSNR/SSIM）
+     * @brief 并行消费测试（ExecuteMode::PARALLEL）
      * 
-     * @param path 视频文件路径
-     * @param params 测试参数
-     * @param reference_path 参考文件路径
-     * @param enable_psnr 启用 PSNR
-     * @param enable_ssim 启用 SSIM
-     * @return 测试结果
+     * 多路并行解码，每个 Worker 独立线程
+     * 
+     * @param configs Worker 配置列表
+     * @param flags 消费类型标志
+     * @param test_name 测试名称（用于日志输出）
+     * @return 测试结果（包含 worker_results）
      */
-    static common::TestResult runQualityTest(
-        const std::string& path,
-        const DecodeTestParams& params,
-        const std::string& reference_path,
-        bool enable_psnr = true,
-        bool enable_ssim = false
+    static TestResult runParallel(
+        const std::vector<WorkerConfig>& configs,
+        uint32_t flags,
+        const std::string& test_name = ""
     );
     
-    /**
-     * @brief 执行多 Worker 测试
-     * 
-     * 对应原始 test.cpp 中的 multi_worker 测试
-     * 同时运行硬件解码器和软件解码器，验证多 Worker 协同工作
-     * 
-     * @param path 视频文件路径或 RTSP URL
-     * @param params 测试参数
-     * @return 测试结果
-     */
-    static common::TestResult runMultiWorkerTest(
-        const std::string& path,
-        const DecodeTestParams& params
-    );
-    
-    /**
-     * @brief 执行多线程解码测试
-     * 
-     * 对应原始 test.cpp 中的 ffmpeg_multithread 测试
-     * 
-     * @param path 视频文件路径
-     * @param params 测试参数
-     * @param thread_count 线程数量
-     * @return 测试结果
-     */
-    static common::TestResult runMultithreadTest(
-        const std::string& path,
-        const DecodeTestParams& params,
-        int thread_count = 4
-    );
+    // ========================================
+    // 辅助方法
+    // ========================================
     
     /**
      * @brief 获取预定义测试参数
@@ -162,6 +144,11 @@ public:
      * @return 预定义测试名称到参数的映射
      */
     static const std::map<std::string, DecodeTestParams>& getPredefinedTests();
+    
+    /**
+     * @brief 从 WorkerConfig 构建消费标志
+     */
+    static uint32_t buildConsumeFlags(const WorkerConfig& config);
 
 private:
     /**
