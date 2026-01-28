@@ -51,22 +51,39 @@ public:
     RtspPacketSource(const RtspPacketSource&) = delete;
     RtspPacketSource& operator=(const RtspPacketSource&) = delete;
     
-    // IPacketSource 接口实现
+    // ============ IDataSourceNavigator 接口实现 ============
+    
+    // 数据源生命周期
     bool open() override;
+    bool open(const char* path) override;     // 返回 false（RTSP 需要完整配置）
     void close() override;
     bool isOpen() const override;
-    int readPacket(AVPacket* packet) override;
-    const AVCodecParameters* getCodecParameters() const override;
-    int getVideoStreamIndex() const override;
-    int getTotalFrames() const override;      // 返回 INT_MAX（实时流无限）
-    long getFileSize() const override;        // 返回 -1（实时流无文件大小）
-    std::string getFilePath() const override; // 返回 RTSP URL
+    
+    // 数据源导航（实时流不支持导航）
     bool seek(int frame_index) override;      // 返回 false（实时流不支持 seek）
-    bool isEof() const override;
+    bool seekToBegin() override;              // 返回 false（实时流不支持）
+    bool seekToEnd() override;                // 返回 false（实时流不支持）
+    bool skip(int frame_count) override;      // 返回 false（实时流不支持）
+    
+    // 数据源状态查询
+    int getTotalFrames() const override;      // 返回 INT_MAX（实时流无限）
+    int getCurrentFrameIndex() const override;// 返回已读取的帧数
+    size_t getFrameSize() const override;     // 返回 0（实时流无法估算）
+    long getFileSize() const override;        // 返回 -1（实时流无文件大小）
+    std::string getPath() const override;     // 返回 RTSP URL
+    bool hasMoreFrames() const override;      // 返回 !isAtEnd()
+    bool isAtEnd() const override;
+    
+    // 数据源属性
     int getSourceWidth() const override;
     int getSourceHeight() const override;
     AVPixelFormat getSourcePixelFormat() const override;
+    const AVCodecParameters* getCodecParameters() const override;
+    SourceType getDataSourceType() const override;
     
+    // ============ IPacketSource 特有方法 ============
+    int readPacket(AVPacket* packet) override;
+    int getVideoStreamIndex() const override;
     // ============ 中断控制接口 ============
     
     /**
@@ -108,6 +125,7 @@ private:
     std::string rtsp_url_;              // RTSP 流地址
     AVFormatContext* format_ctx_ptr_;   // FFmpeg 格式上下文
     int video_stream_index_;            // 视频流索引
+    std::atomic<int> current_frame_index_;  // 当前帧索引（已读取的帧数）
     std::atomic<bool> is_open_;         // 🎯 原子变量，保证线程安全的状态检查
     std::atomic<bool> connected_;       // 连接状态
     std::atomic<bool> eof_reached_;     // 是否到达流末尾

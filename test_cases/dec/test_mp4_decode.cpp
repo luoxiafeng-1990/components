@@ -192,7 +192,7 @@ bool validate_psnr_streaming(const char *source_video, int width, int height,
 
   // ⭐ 根据输入类型选择WorkerType
   WorkerType worker_type =
-      is_rtsp ? WorkerType::FFMPEG_RTSP : WorkerType::FFMPEG_VIDEO_FILE;
+      is_rtsp ? WorkerType::FFMPEG_DECODE : WorkerType::FFMPEG_DECODE;
 
   // ⭐ RTSP流：使用更大的BufferPool（32个Buffer）以支持PSNR对比
   DataSourceConfigBuilder hw_dataSourceBuilder;
@@ -1042,15 +1042,16 @@ static int test_rtsp_decode_single_impl(const char *rtsp_url,
               .build()
       )
       .setDecoderConfig(decoderBuilder.build())
-      .setWorkerType(WorkerType::FFMPEG_RTSP)  // ⭐ RTSP专用WorkerType
+      .setWorkerType(WorkerType::FFMPEG_DECODE)  // ⭐ RTSP专用WorkerType
       .build();
 
-  // ⭐ RTSP流特殊处理：设置datasource_buffer_mode=true
+  // ⭐ RTSP流特殊处理：设置buffer_mode=true
+  // ⭐ v2.22 重构：数据源配置从 decoder 移至 datasource
   // 让BufferFillingWorkerFacade调用open(nullptr)，从而触发无参open()
   // 无参open()会从WorkerConfig读取所有参数（RTSP URL、分辨率等）
-  workerConfig.decoder.datasource_buffer_mode = true;
-  LOG_DEBUG_FMT("  RTSP stream: Setting datasource_buffer_mode=true (workerConfig.decoder.datasource_buffer_mode = %d)", 
-                workerConfig.decoder.datasource_buffer_mode ? 1 : 0);
+  workerConfig.data_source.buffer_mode = true;
+  LOG_DEBUG_FMT("  RTSP stream: Setting buffer_mode=true (workerConfig.data_source.buffer_mode = %d)", 
+                workerConfig.data_source.buffer_mode ? 1 : 0);
 
   if (use_software) {
     LOG_INFO_FMT("✅ Decoder configured: Software decoder (libavcodec), %dx%d",
@@ -1075,7 +1076,7 @@ static int test_rtsp_decode_single_impl(const char *rtsp_url,
   LOG_INFO("✅ VideoProductionLine created (1 producer thread, recommended for RTSP)");
 
   // ========== 第4步：启动生产线 ==========
-  // ⭐ 参考 test.cpp：直接调用 start()，不设置 datasource_buffer_mode
+  // ⭐ 参考 test.cpp：直接调用 start()，不设置 buffer_mode
   LOG_INFO("[Step 4/8] Starting decode...");
 
   if (!producer.start(workerConfig)) {
@@ -1467,7 +1468,7 @@ static int test_mp4_decode_single_impl(const char *video_path,
     }
   }
 
-  // ⭐ MP4文件：使用FFMPEG_VIDEO_FILE WorkerType
+  // ⭐ MP4文件：使用FFMPEG_DECODE WorkerType
   DataSourceConfigBuilder dataSourceBuilder;
   dataSourceBuilder.setPath(video_path);
 
@@ -1479,7 +1480,7 @@ static int test_mp4_decode_single_impl(const char *video_path,
                                                 .setBitsPerPixel(32)
                                                 .build())
                           .setDecoderConfig(decoderBuilder.build())
-                          .setWorkerType(WorkerType::FFMPEG_VIDEO_FILE)
+                          .setWorkerType(WorkerType::FFMPEG_DECODE)
                           .build();
 
   if (use_software) {
@@ -1597,7 +1598,7 @@ static int test_mp4_decode_single_impl(const char *video_path,
     hw_consumer_config.worker_config =
         WorkerConfigBuilder()
             .setDecoderConfig(decoderBuilder.build())
-            .setWorkerType(WorkerType::FFMPEG_VIDEO_FILE)
+            .setWorkerType(WorkerType::FFMPEG_DECODE)
             .build();
     group.consumer_configs.push_back(hw_consumer_config);
 
@@ -1609,7 +1610,7 @@ static int test_mp4_decode_single_impl(const char *video_path,
     sw_consumer_config.worker_config =
         WorkerConfigBuilder()
             .setDecoderConfig(sw_decoder_builder.build())
-            .setWorkerType(WorkerType::FFMPEG_VIDEO_FILE)
+            .setWorkerType(WorkerType::FFMPEG_DECODE)
             .build();
     group.consumer_configs.push_back(sw_consumer_config);
 

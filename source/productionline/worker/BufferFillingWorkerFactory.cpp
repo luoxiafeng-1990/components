@@ -1,8 +1,7 @@
 #include "productionline/worker/BufferFillingWorkerFactory.hpp"
 #include "common/Logger.hpp"
-#include "productionline/worker/FfmpegDecodeRtspWorker.hpp"
+#include "productionline/worker/FFmpegDecodeWorker.hpp"
 #include "productionline/worker/FfmpegPacketRecorderWorker.hpp"
-#include "productionline/worker/FfmpegDecodeVideoFileWorker.hpp"
 #include <stdlib.h>
 #include <string.h>
 
@@ -36,16 +35,15 @@ std::unique_ptr<WorkerBase> BufferFillingWorkerFactory::create(const WorkerConfi
 }
 
 BufferFillingWorkerFactory::WorkerType BufferFillingWorkerFactory::getRecommendedType() {
-    // 推荐使用 FFmpeg Video File Worker
-    return WorkerType::FFMPEG_VIDEO_FILE;
+    // 推荐使用 FFmpeg Decode Worker（统一处理文件和 RTSP）
+    return WorkerType::FFMPEG_DECODE;
 }
 
 const char* BufferFillingWorkerFactory::typeToString(WorkerType type) {
     switch (type) {
         case WorkerType::AUTO:                  return "AUTO";
-        case WorkerType::FFMPEG_RTSP:           return "FFMPEG_RTSP";
+        case WorkerType::FFMPEG_DECODE:         return "FFMPEG_DECODE";
         case WorkerType::FFMPEG_PACKET_RECORDER: return "FFMPEG_PACKET_RECORDER";
-        case WorkerType::FFMPEG_VIDEO_FILE:     return "FFMPEG_VIDEO_FILE";
         default:                                return "UNKNOWN";
     }
 }
@@ -54,22 +52,19 @@ const char* BufferFillingWorkerFactory::typeToString(WorkerType type) {
 
 std::unique_ptr<WorkerBase> BufferFillingWorkerFactory::autoDetect(const WorkerConfig& config) {
     LOG4CPLUS_INFO(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Worker.Factory")), "🔍 Auto-detecting Worker type...");
-    LOG4CPLUS_INFO(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Worker.Factory")), "   Using FfmpegDecodeVideoFileWorker as default");
+    LOG4CPLUS_INFO(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Worker.Factory")), "   Using FFmpegDecodeWorker as default");
     
-    // 默认使用 FFmpeg Video File Worker
-    return std::make_unique<FfmpegDecodeVideoFileWorker>(config);
+    // 默认使用 FFmpeg Decode Worker（统一处理文件和 RTSP）
+    return std::make_unique<FFmpegDecodeWorker>(config);
 }
 
 std::unique_ptr<WorkerBase> BufferFillingWorkerFactory::createByType(WorkerType type, const WorkerConfig& config) {
     switch (type) {
-        case WorkerType::FFMPEG_RTSP:
-            return std::make_unique<FfmpegDecodeRtspWorker>(config);
+        case WorkerType::FFMPEG_DECODE:
+            return std::make_unique<FFmpegDecodeWorker>(config);
             
         case WorkerType::FFMPEG_PACKET_RECORDER:
             return std::make_unique<FfmpegPacketRecorderWorker>(config);
-            
-        case WorkerType::FFMPEG_VIDEO_FILE:
-            return std::make_unique<FfmpegDecodeVideoFileWorker>(config);
             
         case WorkerType::AUTO:
         default:
@@ -83,12 +78,12 @@ BufferFillingWorkerFactory::WorkerType BufferFillingWorkerFactory::getTypeFromEn
         return WorkerType::AUTO;
     }
     
-    if (strcmp(env, "rtsp") == 0 || strcmp(env, "ffmpeg_rtsp") == 0) {
-        return WorkerType::FFMPEG_RTSP;
+    if (strcmp(env, "ffmpeg") == 0 || strcmp(env, "ffmpeg_decode") == 0 ||
+        strcmp(env, "rtsp") == 0 || strcmp(env, "ffmpeg_rtsp") == 0 ||
+        strcmp(env, "ffmpeg_video_file") == 0) {
+        return WorkerType::FFMPEG_DECODE;
     } else if (strcmp(env, "packet_recorder") == 0 || strcmp(env, "ffmpeg_packet_recorder") == 0) {
         return WorkerType::FFMPEG_PACKET_RECORDER;
-    } else if (strcmp(env, "ffmpeg") == 0 || strcmp(env, "ffmpeg_video_file") == 0) {
-        return WorkerType::FFMPEG_VIDEO_FILE;
     }
     
     return WorkerType::AUTO;

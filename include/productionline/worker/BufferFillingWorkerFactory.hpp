@@ -18,10 +18,8 @@
  * - 支持自动检测和手动指定两种模式
  * 
  * 创建的Worker类型：
- * - FfmpegDecodeVideoFileWorker: FFmpeg解码视频文件Worker
- * - MmapRawVideoFileWorker: Mmap方式打开raw视频文件Worker
- * - FfmpegDecodeRtspWorker: FFmpeg解码RTSP流Worker
- * - IoUringRawVideoFileWorker: IoUring方式打开raw视频文件Worker
+ * - FFmpegDecodeWorker: FFmpeg解码Worker（统一处理文件和RTSP流）
+ * - FfmpegPacketRecorderWorker: FFmpeg录制Worker
  * 
  * 优势：
  * - 用户无需了解具体实现类

@@ -14,6 +14,7 @@ FilePacketSource::FilePacketSource(const std::string& file_path)
     , format_ctx_ptr_(nullptr)
     , video_stream_index_(-1)
     , total_frames_(-1)
+    , current_frame_index_(0)  // 当前帧索引初始化
     , is_open_(false)  // 🎯 原子变量初始化
     , eof_reached_(false)
     , logger_(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.DataSource.File"))){
@@ -69,6 +70,7 @@ bool FilePacketSource::open() {
     
     is_open_.store(true, std::memory_order_release);  // 🎯 原子操作设置状态
     eof_reached_ = false;  // 重置 EOF 状态
+    current_frame_index_ = 0;  // 重置当前帧索引
     LOG4CPLUS_DEBUG_FMT(logger_, "Opened file '%s', video stream index: %d, total frames: %d",
                  file_path_.c_str(), video_stream_index_, total_frames_);
     
@@ -92,6 +94,7 @@ void FilePacketSource::close() {
     
     video_stream_index_ = -1;
     total_frames_ = -1;
+    current_frame_index_ = 0;  // 重置当前帧索引
     // is_open_ 已经在上面设置为 false，不需要再次设置
     eof_reached_ = false;  // 重置 EOF 状态
 }
@@ -133,6 +136,7 @@ int FilePacketSource::readPacket(AVPacket* packet) {
                 return ret;  // EOF 或错误
             }
             if (packet->stream_index == video_stream_index_) {
+                current_frame_index_++;  // 更新当前帧索引
                 return 0;  // 找到视频流
             }
             av_packet_unref(packet);
@@ -143,6 +147,7 @@ int FilePacketSource::readPacket(AVPacket* packet) {
         return AVERROR(EINVAL);
     }
     
+    current_frame_index_++;  // 更新当前帧索引
     return 0;  // 成功
 }
 
@@ -319,7 +324,7 @@ long FilePacketSource::getFileSize() const {
     return -1;
 }
 
-std::string FilePacketSource::getFilePath() const {
+std::string FilePacketSource::getPath() const {
     return file_path_;
 }
 
@@ -378,11 +383,12 @@ bool FilePacketSource::seek(int frame_index) {
     }
     
     eof_reached_ = false;  // seek 后重置 EOF 状态
+    current_frame_index_ = frame_index;  // 更新当前帧索引
     LOG4CPLUS_DEBUG_FMT(logger_, "Successfully seeked to frame %d (timestamp: %ld)", frame_index, timestamp);
     return true;
 }
 
-bool FilePacketSource::isEof() const {
+bool FilePacketSource::isAtEnd() const {
     return eof_reached_;
 }
 
@@ -400,4 +406,50 @@ int FilePacketSource::getSourceHeight() const {
 AVPixelFormat FilePacketSource::getSourcePixelFormat() const {
     const AVCodecParameters* params = getCodecParameters();
     return params ? static_cast<AVPixelFormat>(params->format) : AV_PIX_FMT_NONE;
+}
+
+IDataSourceNavigator::SourceType FilePacketSource::getDataSourceType() const {
+    return SourceType::FILE_SOURCE;
+}
+
+bool FilePacketSource::open(const char* path) {
+    if (path && path[0] != '\0') {
+        file_path_ = path;
+    }
+    return open();
+}
+
+bool FilePacketSource::seekToBegin() {
+    return seek(0);
+}
+
+bool FilePacketSource::seekToEnd() {
+    if (total_frames_ > 0) {
+        return seek(total_frames_ - 1);
+    }
+    return false;
+}
+
+bool FilePacketSource::skip(int frame_count) {
+    int target = current_frame_index_ + frame_count;
+    if (target < 0) {
+        target = 0;
+    }
+    return seek(target);
+}
+
+int FilePacketSource::getCurrentFrameIndex() const {
+    return current_frame_index_;
+}
+
+size_t FilePacketSource::getFrameSize() const {
+    long file_size = getFileSize();
+    if (file_size > 0 && total_frames_ > 0) {
+        return static_cast<size_t>(file_size / total_frames_);
+    }
+    return 0;
+}
+
+bool FilePacketSource::hasMoreFrames() const {
+    return !isAtEnd();
 }

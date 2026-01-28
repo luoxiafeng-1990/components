@@ -381,6 +381,65 @@ WorkerConfigBuilder& WorkerConfigBuilder::setThreadPoolSize(int size) {
     return *this;
 }
 
+// ========================================
+// 消费者配置方法实现（v3.1 新增）
+// ========================================
+
+WorkerConfigBuilder& WorkerConfigBuilder::setConsumerConfig(const WorkerConfig::ConsumerConfig& consumer_config) {
+    worker_config_.consumer = consumer_config;
+    return *this;
+}
+
+WorkerConfigBuilder& WorkerConfigBuilder::setMaxFrames(int frames) {
+    worker_config_.consumer.max_frames = frames;
+    return *this;
+}
+
+WorkerConfigBuilder& WorkerConfigBuilder::setSaveFrames(int frames) {
+    worker_config_.consumer.save_frames = frames;
+    return *this;
+}
+
+WorkerConfigBuilder& WorkerConfigBuilder::setOutputPath(const std::string& path) {
+    worker_config_.consumer.output_path = path;
+    return *this;
+}
+
+WorkerConfigBuilder& WorkerConfigBuilder::setTargetFps(double fps) {
+    worker_config_.consumer.target_fps = fps;
+    return *this;
+}
+
+WorkerConfigBuilder& WorkerConfigBuilder::enablePsnr(bool enable, double min_psnr, 
+                                                      const std::string& reference_path) {
+    worker_config_.consumer.enable_psnr = enable;
+    worker_config_.consumer.min_psnr = min_psnr;
+    if (!reference_path.empty()) {
+        worker_config_.consumer.reference_path = reference_path;
+    }
+    return *this;
+}
+
+WorkerConfigBuilder& WorkerConfigBuilder::enableSsim(bool enable, double min_ssim,
+                                                      const std::string& reference_path) {
+    worker_config_.consumer.enable_ssim = enable;
+    worker_config_.consumer.min_ssim = min_ssim;
+    if (!reference_path.empty()) {
+        worker_config_.consumer.reference_path = reference_path;
+    }
+    return *this;
+}
+
+WorkerConfigBuilder& WorkerConfigBuilder::setEnableDisplay(bool enable) {
+    worker_config_.consumer.enable_display = enable;
+    return *this;
+}
+
+WorkerConfigBuilder& WorkerConfigBuilder::setVerbose(bool verbose) {
+    worker_config_.consumer.verbose = verbose;
+    return *this;
+}
+
 WorkerConfig WorkerConfigBuilder::build() const {
     return worker_config_;
 }

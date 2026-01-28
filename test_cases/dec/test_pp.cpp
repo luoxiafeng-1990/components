@@ -248,7 +248,7 @@ static int test_single_pp(
                     .setBitsPerPixel(32)  // 默认32位（ARGB），Worker会根据实际格式调整
                     .build()
             )
-            .setWorkerType(WorkerType::FFMPEG_VIDEO_FILE)
+            .setWorkerType(WorkerType::FFMPEG_DECODE)
             .build();
         
     if (has_crop || has_scale) {
@@ -317,7 +317,7 @@ static int test_single_pp(
                     .setBitsPerPixel(32)  // 默认32位（ARGB），Worker会根据实际格式调整
                     .build()
             )
-            .setWorkerType(WorkerType::FFMPEG_VIDEO_FILE)
+            .setWorkerType(WorkerType::FFMPEG_DECODE)
             .build();
     }
     
@@ -606,7 +606,7 @@ static int test_multi_pp(
               .setBitsPerPixel(32)  // 默认32位（ARGB），Worker会根据实际格式调整
               .build()
       )
-      .setWorkerType(WorkerType::FFMPEG_VIDEO_FILE)
+      .setWorkerType(WorkerType::FFMPEG_DECODE)
       .build();
   
   // ========================================================================
@@ -1267,7 +1267,7 @@ static int test_pp1_only(
               .setBitsPerPixel(32)  // 默认32位（ARGB），Worker会根据实际格式调整
                     .build()
             )
-            .setWorkerType(WorkerType::FFMPEG_VIDEO_FILE)
+            .setWorkerType(WorkerType::FFMPEG_DECODE)
             .build();
   
   // ========================================================================

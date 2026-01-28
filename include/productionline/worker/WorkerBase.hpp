@@ -1,7 +1,7 @@
   #ifndef WORKER_BASE_HPP
 #define WORKER_BASE_HPP
 
-#include "productionline/worker/IVideoFileNavigator.hpp"
+#include "productionline/worker/IDataSourceNavigator.hpp"
 #include <log4cplus/logger.h>
 #include <log4cplus/loggingmacros.h>
 #include "productionline/worker/WorkerConfig.hpp"
@@ -142,7 +142,7 @@ inline const char* bufferPoolTypeToString(BufferPoolType type) {
  * - 管理Worker创建的BufferPool（通过Allocator创建）
  * 
  * 继承关系：
- * - WorkerBase 继承 IVideoFileNavigator
+ * - WorkerBase 继承 IDataSourceNavigator
  * - 所有具体Worker实现类继承 WorkerBase
  * 
  * 优势：
@@ -158,8 +158,18 @@ inline const char* bufferPoolTypeToString(BufferPoolType type) {
  * - 所有Allocator配置细节封装在Factory中
  * - 子类无需关心Allocator内部实现
  */
-class WorkerBase : public IVideoFileNavigator {
+class WorkerBase : public IDataSourceNavigator {
 public:
+    // ==================== 分辨率限制常量 ====================
+    
+    /// 最小允许的分辨率（宽或高）
+    static constexpr int MIN_RESOLUTION = 16;
+    
+    /// 最大允许的分辨率（宽或高），支持到 8K
+    static constexpr int MAX_RESOLUTION = 8192;
+    
+    // ==================== 构造/析构 ====================
+    
     /**
      * @brief 构造函数
      * 
@@ -225,7 +235,7 @@ public:
      */
     virtual bool extractHardwareAddressFromMetadata(struct AVFrame* frame, Buffer* buffer) {
         // 默认实现：不支持硬件地址提取
-        // 子类（如 FfmpegDecodeVideoFileWorker）可以重写此方法
+        // 子类（如 FFmpegDecodeWorker）可以重写此方法
         (void)frame;   // 避免未使用参数警告
         (void)buffer;
         return false;
@@ -236,7 +246,7 @@ public:
      * 
      * 纯虚函数：强制所有子类必须实现
      * 
-     * @return 类型名称（如 "FfmpegDecodeVideoFileWorker"、"MmapRawVideoFileWorker"）
+     * @return 类型名称（如 "FFmpegDecodeWorker"、"MmapRawVideoFileWorker"）
      */
     virtual const char* getWorkerType() const = 0;
     
@@ -314,9 +324,16 @@ public:
      * }
      * @endcode
      */
-    virtual const struct AVCodecParameters* getCodecParameters() const {
+    virtual const AVCodecParameters* getCodecParameters() const override {
         // 默认实现：不支持编解码器参数
         return nullptr;
+    }
+    
+    /**
+     * @brief 向后兼容的别名（deprecated，请使用 getCodecParameters()）
+     */
+    const AVCodecParameters* getSourceCodecParameters() const {
+        return getCodecParameters();
     }
     
     /**
@@ -329,7 +346,7 @@ public:
      * - 消费者 Worker 从生产者 Worker 的 BufferPool 获取数据
      * 
      * 默认实现：返回 false（不支持 Buffer 模式）
-     * 子类（如 FfmpegDecodeVideoFileWorker、FfmpegDecodeRtspWorker）可以重写此方法
+     * 子类（如 FFmpegDecodeWorker）可以重写此方法
      * 
      * @param pool_weak Record Worker 的 BufferPool（weak_ptr）
      * @return true 如果成功设置，false 如果失败（不支持 Buffer 模式）
@@ -381,6 +398,46 @@ public:
     virtual AVPixelFormat getSourcePixelFormat() const {
         return AV_PIX_FMT_NONE;
     }
+    
+    // ==================== Worker 输出属性（处理后的结果）====================
+    // 这些是 Worker 处理后的输出属性，不是数据源原始属性
+    
+    /**
+     * @brief 获取 Worker 输出的视频宽度
+     * @return 输出宽度（像素），可能与数据源原始宽度不同
+     * 
+     * @note 这是 Worker 处理后的输出分辨率，不是数据源原始分辨率
+     *       - 对于解码Worker：可能经过硬件缩放（如TACO ch1_scale）
+     *       - 对于RecorderWorker：等于数据源原始分辨率（不处理）
+     *       - 与 getSourceWidth() 的区别：Source是输入，Output是输出
+     */
+    virtual int getOutputWidth() const = 0;
+    
+    /**
+     * @brief 获取 Worker 输出的视频高度
+     * @return 输出高度（像素），可能与数据源原始高度不同
+     * 
+     * @note 这是 Worker 处理后的输出分辨率，不是数据源原始分辨率
+     */
+    virtual int getOutputHeight() const = 0;
+    
+    /**
+     * @brief 获取 Worker 输出的每像素字节数
+     * 
+     * @param channel 通道编号（默认 0）
+     *   - channel = 0：主通道（通常是 YUV 格式）
+     *   - channel = 1：第二通道（如 TACO 的 RGB 通道）
+     * 
+     * @return 每像素字节数（浮点数，支持如NV12的1.5字节/像素）
+     *   - 返回 0.0 表示该通道不存在或未启用
+     * 
+     * @note 这是 Worker 解码后输出的像素格式，不是数据源编码格式
+     *       - 计算基于 Worker 的解码器输出格式（YUV420、ARGB888等）
+     *       - 数据源是压缩的（H.264、H.265），没有"每像素字节数"概念
+     *       - 用于计算输出帧大小：getOutputWidth() * getOutputHeight() * getOutputBytesPerPixel()
+     * @note 向后兼容：不传参数时等同于 getOutputBytesPerPixel(0)
+     */
+    virtual double getOutputBytesPerPixel(int channel = 0) const = 0;
     
     /**
      * @brief 获取时间基（用于 BufferWriter 等场景）
@@ -439,11 +496,11 @@ public:
         (void)enable;
     }
     
-    // ==================== 文件导航功能（继承自IVideoFileNavigator）====================
-    // 以下方法继承自 IVideoFileNavigator，子类必须实现
+    // ==================== 数据源导航功能（继承自IDataSourceNavigator）====================
+    // 以下方法继承自 IDataSourceNavigator，子类必须实现
     
     /**
-     * @brief 打开视频文件（从 worker_config_ 读取所有参数）
+     * @brief 打开数据源（从 worker_config_ 读取所有参数）
      * 
      * v2.13设计：
      * - Worker 从自己的 worker_config_ 读取所有参数
@@ -456,9 +513,9 @@ public:
     }
     
     /**
-     * @brief 打开视频文件（指定路径）
+     * @brief 打开数据源（指定路径）
      * 
-     * @param path 文件路径（可以覆盖 config 中的路径）
+     * @param path 数据源路径（可以覆盖 config 中的路径）
      * @return 成功返回true
      * 
      * @note 子类必须实现此方法
@@ -474,12 +531,10 @@ public:
     virtual int getCurrentFrameIndex() const override = 0;
     virtual size_t getFrameSize() const override = 0;
     virtual long getFileSize() const override = 0;
-    virtual int getWidth() const override = 0;
-    virtual int getHeight() const override = 0;
-    virtual double getBytesPerPixel() const override = 0;
-    virtual const char* getPath() const override = 0;
+    virtual std::string getPath() const override = 0;
     virtual bool hasMoreFrames() const override = 0;
     virtual bool isAtEnd() const override = 0;
+    virtual SourceType getDataSourceType() const override = 0;
     
 protected:
     // ========== 编解码器类型检测工具（v2.18 新增）==========

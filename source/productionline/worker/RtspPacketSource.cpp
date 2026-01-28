@@ -20,6 +20,7 @@ RtspPacketSource::RtspPacketSource(const std::string& rtsp_url)
     : rtsp_url_(rtsp_url)
     , format_ctx_ptr_(nullptr)
     , video_stream_index_(-1)
+    , current_frame_index_(0)  // 当前帧索引初始化
     , is_open_(false)
     , connected_(false)
     , eof_reached_(false)
@@ -97,6 +98,7 @@ bool RtspPacketSource::open() {
     // 6. 设置状态
     connected_.store(true, std::memory_order_release);
     eof_reached_.store(false, std::memory_order_release);
+    current_frame_index_.store(0, std::memory_order_release);  // 重置当前帧索引
     
     LOG4CPLUS_DEBUG_FMT(logger_, "Opened RTSP stream '%s', video stream index: %d", 
                   rtsp_url_.c_str(), video_stream_index_);
@@ -119,6 +121,7 @@ void RtspPacketSource::close() {
     }
     
     video_stream_index_ = -1;
+    current_frame_index_.store(0, std::memory_order_release);  // 重置当前帧索引
     connected_.store(false, std::memory_order_release);
     eof_reached_.store(false, std::memory_order_release);
     
@@ -179,6 +182,7 @@ int RtspPacketSource::readPacket(AVPacket* packet) {
         // 检查是否是视频流
         if (packet->stream_index == video_stream_index_) {
             // 成功读取到视频流的 packet
+            current_frame_index_.fetch_add(1, std::memory_order_relaxed);  // 更新当前帧索引
             return 0;
         } else {
             // 不是视频流，释放并继续读取
@@ -214,7 +218,7 @@ long RtspPacketSource::getFileSize() const {
     return -1;
 }
 
-std::string RtspPacketSource::getFilePath() const {
+std::string RtspPacketSource::getPath() const {
     return rtsp_url_;
 }
 
@@ -224,7 +228,7 @@ bool RtspPacketSource::seek(int frame_index) {
     return false;
 }
 
-bool RtspPacketSource::isEof() const {
+bool RtspPacketSource::isAtEnd() const {
     return eof_reached_.load(std::memory_order_acquire);
 }
 
@@ -296,4 +300,43 @@ void RtspPacketSource::clearInterrupt() {
     interrupt_requested_.store(false, std::memory_order_release);
     auto logger = log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.DataSource.Rtsp"));
     LOG4CPLUS_DEBUG(logger, "✅ 中断标志已清除");
+}
+
+IDataSourceNavigator::SourceType RtspPacketSource::getDataSourceType() const {
+    return SourceType::NETWORK_SOURCE;
+}
+
+bool RtspPacketSource::open(const char* path) {
+    (void)path;
+    LOG4CPLUS_WARN(logger_, "RTSP source does not support open(path), use open() with pre-configured URL");
+    return false;
+}
+
+bool RtspPacketSource::seekToBegin() {
+    LOG4CPLUS_WARN(logger_, "RTSP stream does not support seekToBegin");
+    return false;
+}
+
+bool RtspPacketSource::seekToEnd() {
+    LOG4CPLUS_WARN(logger_, "RTSP stream does not support seekToEnd");
+    return false;
+}
+
+bool RtspPacketSource::skip(int frame_count) {
+    (void)frame_count;
+    LOG4CPLUS_WARN(logger_, "RTSP stream does not support skip");
+    return false;
+}
+
+int RtspPacketSource::getCurrentFrameIndex() const {
+    return current_frame_index_.load(std::memory_order_acquire);
+}
+
+size_t RtspPacketSource::getFrameSize() const {
+    // RTSP 实时流无法估算帧大小
+    return 0;
+}
+
+bool RtspPacketSource::hasMoreFrames() const {
+    return !isAtEnd();
 }

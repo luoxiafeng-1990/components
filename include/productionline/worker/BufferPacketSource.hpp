@@ -8,6 +8,7 @@
 #include <atomic>
 #include <mutex>
 #include <condition_variable>
+#include <map>
 #include <log4cplus/logger.h>
 #include <log4cplus/loggingmacros.h>
 
@@ -15,6 +16,11 @@
 struct AVCodecParameters;
 struct AVPacket;
 class BufferPool;
+class BufferPacketSource;  // BufferPacketSource 前向声明
+
+// ⭐ v2.22 修改：移除 PacketGuard RAII 包装器
+// 原因：新的三状态 API（acquire/commit/cancel）提供了更精确的控制
+// Worker 需要根据解码结果决定是 commit 还是 cancel，RAII 模式不再适用
 
 /**
  * @brief BufferPacketSource - Buffer 数据源实现
@@ -81,28 +87,44 @@ public:
     BufferPacketSource(const BufferPacketSource&) = delete;
     BufferPacketSource& operator=(const BufferPacketSource&) = delete;
     
-    // IPacketSource 接口实现
+    // ============ IDataSourceNavigator 接口实现 ============
+    
+    // 数据源生命周期
     bool open() override;
+    bool open(const char* path) override;     // 返回 false（Buffer 模式不支持路径）
     void close() override;
     bool isOpen() const override;
-    int readPacket(AVPacket* packet) override;
-    const AVCodecParameters* getCodecParameters() const override;
-    int getVideoStreamIndex() const override;
-    int getTotalFrames() const override;
-    long getFileSize() const override;
-    std::string getFilePath() const override;
     
+    // 数据源导航（Buffer 模式不支持导航）
     /**
      * @brief 定位到指定帧索引（Buffer 模式不支持）
      * @param frame_index 帧索引
      * @return 总是返回 false（Buffer 模式不支持 seek）
      */
     bool seek(int frame_index) override;
-    bool isEof() const override;
+    bool seekToBegin() override;              // 返回 false（Buffer 模式不支持）
+    bool seekToEnd() override;                // 返回 false（Buffer 模式不支持）
+    bool skip(int frame_count) override;      // 返回 false（Buffer 模式不支持）
+    
+    // 数据源状态查询
+    int getTotalFrames() const override;      // 返回 -1（流式数据无总帧数）
+    int getCurrentFrameIndex() const override;// 返回已读取的帧数
+    size_t getFrameSize() const override;     // 返回 0（无法估算）
+    long getFileSize() const override;        // 返回 -1（无文件大小）
+    std::string getPath() const override;     // 返回 "BufferPool"
+    bool hasMoreFrames() const override;      // 返回 !isAtEnd()
+    bool isAtEnd() const override;
+    
+    // 数据源属性
     int getSourceWidth() const override;
     int getSourceHeight() const override;
     AVPixelFormat getSourcePixelFormat() const override;
+    const AVCodecParameters* getCodecParameters() const override;
+    SourceType getDataSourceType() const override;
     
+    // ============ IPacketSource 特有方法 ============
+    int readPacket(AVPacket* packet) override;
+    int getVideoStreamIndex() const override;
     /**
      * @brief 设置数据源 BufferPool（v2.13 新增）
      * @param pool_weak Record Worker 的 BufferPool（weak_ptr）
@@ -111,24 +133,117 @@ public:
      */
     void setSourceBufferPool(std::weak_ptr<BufferPool> pool_weak);
     
+    /**
+     * @brief 获取 AVPacket 指针（共享模式，v3.0 新架构）
+     * @param worker_id Worker 的唯一标识（通常是 this 指针）
+     * @return AVPacket* 指针（零拷贝），nullptr=EOF 或已获取过当前版本
+     * 
+     * 说明：
+     * - 只在共享模式下使用
+     * - 阻塞等待直到有新 buffer 或 EOF
+     * - 防止同一个 Worker 重复获取同一个 buffer（通过版本号机制）
+     * - 不递减 remaining_subscribers_（由 commitPacket 负责）
+     * 
+     * 返回值：
+     * - 非空：成功获取 packet 指针
+     * - nullptr：EOF 或已获取过当前版本（需要等待新 buffer）
+     * 
+     * 使用方式：
+     * ```cpp
+     * AVPacket* packet = ps->acquirePacket(this);
+     * if (!packet) {
+     *     return false;  // EOF 或等待新 buffer
+     * }
+     * // 使用 packet...
+     * ```
+     */
+    AVPacket* acquirePacket(void* worker_id);
+    
+    /**
+     * @brief 提交释放 AVPacket（共享模式，v3.0 新架构）
+     * @param worker_id Worker 的唯一标识
+     * @return true=成功提交, false=失败（状态不对）
+     * 
+     * 说明：
+     * - 只有成功处理（解码出至少一帧）后才调用
+     * - 递减 remaining_subscribers_
+     * - 如果是最后一个订阅者，唤醒 Fetch 任务
+     * - 重置 Worker 状态，允许获取下一个 buffer
+     * 
+     * 使用方式：
+     * ```cpp
+     * if (decoded_at_least_one_frame) {
+     *     ps->commitPacket(this);
+     * }
+     * ```
+     */
+    bool commitPacket(void* worker_id);
+    
+    /**
+     * @brief 取消当前获取（共享模式，v2.22 新架构）
+     * @param worker_id Worker 的唯一标识
+     * 
+     * 说明：
+     * - 失败时调用（如 send_packet 失败、receive_frame 失败）
+     * - 不递减 remaining_subscribers_（保持订阅者计数不变）
+     * - 重置 Worker 状态，允许重新获取当前 buffer（重试）
+     * 
+     * 使用方式：
+     * ```cpp
+     * if (send_packet_failed) {
+     *     ps->cancelPacket(this);
+     *     return false;  // 重试
+     * }
+     * ```
+     */
+    void cancelPacket(void* worker_id);
+    
+    /**
+     * @brief 获取当前 buffer 版本号（v2.23 新增）
+     * @return 当前 buffer 版本号
+     * 
+     * 说明：
+     * - 用于 WorkerSyncCoordinator 关联同一帧的多个 Worker
+     * - 版本号在 fetchTaskFunc 中递增
+     */
+    uint64_t getCurrentBufferVersion() const {
+        return current_buffer_version_.load(std::memory_order_acquire);
+    }
+    
 private:
     // ========== 通用成员（普通模式和共享模式都使用）==========
     const AVCodecParameters* codec_params_;     // 编解码器参数（从 Record Worker 获取）
     std::weak_ptr<BufferPool> source_pool_;     // ⭐ v2.13：关联的 BufferPool（从 Record Worker）
     std::atomic<bool> is_open_;                 // 🎯 原子变量，保证线程安全的状态检查
+    std::atomic<int> current_frame_index_;      // 当前帧索引（已读取的帧数）
     
-    // ========== 共享模式成员（v2.18 新增）==========
+    // ========== 共享模式成员（v2.18 新增，v3.0 扩展）==========
     bool is_shared_mode_;                       // 是否为共享模式
     size_t total_subscribers_;                  // 订阅者总数（消费者数量）
     std::atomic<size_t> remaining_subscribers_; // 剩余未完成的订阅者数量
     Buffer* current_buffer_;                    // 当前共享的 Buffer
-    Buffer* previous_buffer_;                   // 待释放的旧 Buffer
     mutable std::mutex mutex_;                  // 互斥锁（保护共享状态）
     std::condition_variable cv_subscribers_;    // 条件变量（订阅者等待新 Buffer）
     std::condition_variable cv_fetch_;          // 条件变量（Fetch 任务等待订阅者完成）
     std::condition_variable cv_task_exit_;      // 条件变量（等待 Fetch 任务退出）
     std::atomic<bool> is_running_;              // 是否运行中
     std::atomic<bool> fetch_task_running_;      // Fetch 任务是否正在运行
+    
+    // ========== v3.0 新增：版本号和 Worker 状态追踪 ==========
+    std::atomic<uint64_t> current_buffer_version_{0};  // 当前 buffer 的版本号（递增）
+    
+    /**
+     * @brief Worker 状态
+     * 
+     * 用于追踪每个 Worker 对当前 buffer 的状态
+     */
+    struct WorkerState {
+        uint64_t acquired_version = 0;    // Worker 获取的 buffer 版本号
+        bool has_acquired = false;        // 是否已获取当前版本
+        bool has_committed = false;       // 是否已 commit 当前版本（防止重复 commit）
+    };
+    
+    std::map<void*, WorkerState> worker_states_;  // Worker ID (this指针) -> 状态
     
     /**
      * @brief 从当前 Buffer 复制 packet 数据

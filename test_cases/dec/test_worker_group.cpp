@@ -91,7 +91,7 @@ int main(int argc, char* argv[]) {
                 .useTaco("h264")  // 使用 TACO 硬件解码器
                 .build()
         )
-        .setWorkerType(WorkerType::FFMPEG_RTSP)  // RTSP 解码 Worker
+        .setWorkerType(WorkerType::FFMPEG_DECODE)  // RTSP 解码 Worker
         .build();
     group.consumer_configs.push_back(consumer1_config);
     
@@ -109,7 +109,7 @@ int main(int argc, char* argv[]) {
                 .useSoftware()  // 使用软件解码器
                 .build()
         )
-        .setWorkerType(WorkerType::FFMPEG_RTSP)  // RTSP 解码 Worker
+        .setWorkerType(WorkerType::FFMPEG_DECODE)  // RTSP 解码 Worker
         .build();
     group.consumer_configs.push_back(consumer2_config);
     

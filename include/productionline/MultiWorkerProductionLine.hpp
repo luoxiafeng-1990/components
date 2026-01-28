@@ -3,10 +3,12 @@
 #include "productionline/VideoProductionLine.hpp"
 #include "productionline/worker/BufferFillingWorkerFacade.hpp"
 #include "productionline/worker/WorkerConfig.hpp"
+#include "productionline/WorkerSyncCoordinator.hpp"
 #include "buffer/bufferpool/BufferPool.hpp"
 #include "buffer/bufferpool/BufferPoolRegistry.hpp"
 #include "common/Logger.hpp"
 #include "common/GlobalThreadPool.hpp"
+#include "common/Timer.hpp"
 #include <string>
 #include <vector>
 #include <thread>
@@ -209,16 +211,21 @@ public:
     uint64_t getGroupConsumerBufferPoolId(size_t group_index, size_t consumer_index) const;
     
     /**
-     * @brief 获取统计信息
+     * @brief 获取所有生产线的总成功帧数（实时计算）
      */
-    struct Statistics {
-        std::atomic<int64_t> total_packets_processed{0};
-        std::atomic<int64_t> total_packets_succeeded{0};
-        std::atomic<int64_t> total_packets_failed{0};
-        std::atomic<int64_t> total_decode_time_us{0};
-    };
+    int64_t getAllLineFramesProduced() const;
     
-    const Statistics& getStatistics() const { return stats_; }
+    /**
+     * @brief 获取所有生产线的总失败帧数（实时计算）
+     */
+    int64_t getAllLineFramesFailed() const;
+    
+    /**
+     * @brief 获取指定 Group 的活跃 Worker 数量（实时计算）
+     * @param group_index Group 索引
+     * @return 活跃 Worker 数量，如果索引无效则返回 0
+     */
+    int getActiveWorkerCount(size_t group_index) const;
     
     /**
      * @brief 打印详细统计信息
@@ -265,14 +272,30 @@ private:
         // 连接器列表
         std::vector<std::unique_ptr<Connector>> connectors;
         
+        // ⭐ v2.23 新增：每个 Connector 的同步协调器
+        std::map<size_t, std::unique_ptr<WorkerSyncCoordinator>> connector_coordinators;
+        
         // Group 独立线程
         std::thread group_thread;
         std::atomic<bool> is_running{false};
         
-        // Group 级别统计
-        std::atomic<int64_t> processed_count{0};
-        std::atomic<int64_t> success_count{0};
-        std::atomic<int64_t> error_count{0};
+        // ⭐ Group 级别统计
+        struct GroupStats {
+            std::atomic<int64_t> frames_produced{0};  // Group 成功帧数
+            std::atomic<int64_t> frames_failed{0};    // Group 失败帧数
+        };
+        GroupStats stats;  // Group 统计信息
+        
+        // ⭐ Worker 生产统计
+        struct WorkerProductionStats {
+            std::atomic<int64_t> worker_frames_produced{0};  // Worker 累计生产的帧数
+            std::atomic<int64_t> worker_frames_failed{0};    // Worker 累计失败的帧数
+            std::atomic<int64_t> consecutive_failures{0};    // 连续失败次数（用于熔断）
+            std::atomic<bool> is_active{true};               // 是否活跃
+        };
+        
+        // Worker 统计映射：consumer_name -> WorkerProductionStats
+        std::unordered_map<std::string, std::unique_ptr<WorkerProductionStats>> worker_stats;
         
         // ========== 查询方法 ==========
         
@@ -310,10 +333,14 @@ private:
          * @return Connector 指针，如果不存在则返回 nullptr
          */
         Connector* getConnectorForConsumer(const std::string& consumer_name) const;
+        
+        /**
+         * @brief 根据 Connector 指针获取其索引
+         * @param connector Connector 指针
+         * @return Connector 索引，如果不存在则返回 SIZE_MAX
+         */
+        size_t getConnectorIndex(const Connector* connector) const;
     };
-    
-    // 向后兼容：保留 GroupData 作为 WorkerGroupRuntime 的别名
-    using GroupData = WorkerGroupRuntime;
     
     // ========== 内部方法 ==========
     
@@ -332,16 +359,29 @@ private:
     bool validateConfig() const;
     
     /**
-     * @brief WorkerGroup 独立线程函数
-     * 
-     * 每个 Group 有自己的线程，独立运行生产-消费循环
+     * @brief WorkerGroup 调度线程函数
      * 
      * 核心逻辑：
-     * 1. 触发该 Group 内所有消费者处理（消费者自动从生产者 Pool 获取数据）
-     * 2. 等待所有消费者完成
-     * 3. 循环执行
+     * 1. 为该 Group 内所有 Worker 提交常驻任务到线程池
+     * 2. 任务提交后，调度线程结束
      */
-    void groupThreadFunc(WorkerGroupRuntime* group);
+    void groupThreadFunc(const std::shared_ptr<WorkerGroupRuntime>& group);
+    
+    /**
+     * @brief Worker 常驻线程函数
+     * 
+     * 核心逻辑：
+     * 1. 循环执行：acquireFree -> fillBuffer -> submitFilled
+     * 2. fillBuffer 内部会调用 readAndSendPacket，可能等待其他订阅者
+     * 3. 永不退出（除非 stop 或 fatal 错误）
+     * 
+     * @param group Group 运行时对象指针
+     * @param consumer_info Consumer 信息指针
+     * @param consumer_name Consumer 名称
+     */
+    void workerThreadFunc(const std::shared_ptr<WorkerGroupRuntime>& group, 
+                         WorkerGroupRuntime::ConsumerInfo* consumer_info,
+                         const std::string& consumer_name);
     
     /**
      * @brief 设置错误信息并触发回调
@@ -378,25 +418,35 @@ private:
      */
     bool startGroupThreads();
     
+    /**
+     * @brief 启动统计报告定时器
+     */
+    void startStatsReportTimer();
+    
+    /**
+     * @brief 停止统计报告定时器
+     */
+    void stopStatsReportTimer();
+    
     // ========== 成员变量 ==========
     
     // 配置
     MultiWorkerConfig config_;
     
     // ⭐ 核心：WorkerGroup 列表
-    std::vector<std::unique_ptr<GroupData>> groups_;
+    std::vector<std::shared_ptr<WorkerGroupRuntime>> groups_;
     
     // 错误处理（mutable 允许在 const 函数中修改）
     mutable std::mutex error_mutex_;
     mutable std::queue<std::string> error_queue_;  // 错误队列（用于诊断）
-    
-    // 统计信息
-    Statistics stats_;
     
     // ⭐ Logger（每个类持有自己的 Logger 实例）
     log4cplus::Logger logger_;
     
     // 日志前缀
     std::string log_prefix_;
+    
+    // 统计报告定时器
+    Timer stats_report_timer_;
+    std::atomic<Timer::TimerId> stats_report_timer_id_{0};
 };
-

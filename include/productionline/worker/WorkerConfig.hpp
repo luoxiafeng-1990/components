@@ -7,6 +7,7 @@
 #include <memory>
 #include <vector>
 #include <map>
+#include <functional>
 #include "common/Logger.hpp"
 
 // FFmpeg 头文件（用于 AVRational 和 AVCodecParameters）
@@ -16,17 +17,42 @@ extern "C" {
 
 // 前向声明（避免循环依赖）
 class IPacketSource;
+class Buffer;
+
+// ⭐ v2.23 新增：帧同步回调类型（前向声明）
+// 完整定义在 WorkerSyncCoordinator.hpp 中
+using FrameSyncCallback = std::function<bool(
+    uint64_t frame_version,
+    const std::map<std::string, Buffer*>& worker_buffers,
+    void* context
+)>;
+
+// ⭐ v2.23 新增：回调链项
+struct CallbackChainItem {
+    FrameSyncCallback callback;
+    void* context;
+    std::string name;
+    
+    CallbackChainItem(FrameSyncCallback cb, void* ctx, const std::string& n)
+        : callback(cb), context(ctx), name(n) {}
+};
+
+// ⭐ v2.23 新增：回调链类型
+using CallbackChain = std::vector<CallbackChainItem>;
 
 /**
  * @brief Worker 类型枚举
  * 
  * 注意：此枚举独立定义，避免与 BufferFillingWorkerFactory 的循环依赖
+ * 
+ * v3.0 重构：
+ * - FFMPEG_DECODE: 统一的解码 Worker（支持文件/RTSP/Buffer 模式）
+ * - FFMPEG_PACKET_RECORDER: 录制 Worker
  */
 enum class WorkerType {
     AUTO,                   // 自动检测（默认）
-    FFMPEG_RTSP,            // FFmpeg RTSP 流
-    FFMPEG_PACKET_RECORDER, // FFmpeg Packet 录制器（支持 RTSP/文件/HTTP 等多种数据源）
-    FFMPEG_VIDEO_FILE       // FFmpeg 视频文件
+    FFMPEG_DECODE,          // FFmpeg 解码 Worker（统一处理文件和 RTSP 流）
+    FFMPEG_PACKET_RECORDER  // FFmpeg Packet 录制器（支持 RTSP/文件/HTTP 等多种数据源）
 };
 
 /**
@@ -108,10 +134,14 @@ enum class ColorStandard {
  * - 职责清晰：每个 Builder 只负责自己层级的配置
  * 
  * 配置结构：
- * - DataSourceConfig: 数据源路径和 BufferPool 参数
+ * - DataSourceConfig: 数据源路径、模式（Buffer/文件）、共享数据源、编解码器参数
  * - DisplayConfig: 显示设备分辨率和格式
  * - DecoderConfig: 解码器类型和参数
  * - worker_type: Worker 实现类型
+ * 
+ * ⭐ v2.22 重构：数据源相关配置统一归属 DataSourceConfig
+ * - buffer_mode, shared_packet_source, codec_params, time_base 从 DecoderConfig 移至 DataSourceConfig
+ * - 逻辑更清晰，职责更明确
  */
 struct WorkerConfig {
     // ========================================
@@ -121,10 +151,38 @@ struct WorkerConfig {
      * @brief 数据源配置
      * 
      * 用于配置 Worker 的数据源（RTSP 流、HTTP 流、本地文件等）及其相关参数。
+     * 
+     * ⭐ v2.22 重构：将数据源相关配置从 DecoderConfig 移动到此处
+     * - buffer_mode: 数据源模式（Buffer/文件）
+     * - shared_packet_source: 共享的 Packet 数据源
+     * - codec_params: 编解码器参数（Buffer模式）
+     * - time_base: 时间基准（用于同步）
      */
     struct DataSourceConfig {
+        // ========================================
+        // 基础配置
+        // ========================================
         std::string path;                     ///< 数据源路径/URL（RTSP/HTTP/文件等）
         int buffer_count = 0;                 ///< BufferPool 的 Buffer 数量（0=使用 Worker 默认值）
+        
+        // ========================================
+        // 数据源模式配置（v2.22 从 DecoderConfig 移动）
+        // ========================================
+        bool buffer_mode = false;             ///< true=从Buffer数据源获取packet, false=从文件数据源读取
+        const struct AVCodecParameters* codec_params = nullptr;  ///< Buffer模式下的编解码器参数（从Record Worker获取）
+        AVRational time_base = {0, 1};        ///< 时间基准（从Record Worker获取，用于同步）
+        
+        // ⭐ v2.22 共享的 Packet 数据源（从 DecoderConfig 移动）
+        // 
+        // 使用场景：
+        // - 普通模式：nullptr（Worker 自己创建独立的 BufferPacketSource）
+        // - 共享模式：MultiWorkerProductionLine 创建唯一实例并传入
+        // 
+        // 优点：
+        // - Worker 仍然根据 config 创建 datasource（符合原始设计）
+        // - 不需要修改 Worker 接口（不需要 setPacketSource）
+        // - 使用基类指针 IPacketSource，支持多态
+        std::shared_ptr<class IPacketSource> shared_packet_source = nullptr;
         
         DataSourceConfig() = default;
         DataSourceConfig(const DataSourceConfig&) = default;
@@ -161,25 +219,6 @@ struct WorkerConfig {
         bool enable_hardware = true;                   // 启用硬件加速
         std::optional<std::string> hwaccel_device;     // 硬件设备（如 "cuda:0", "vaapi"）
         int decode_threads = 0;                        // 解码线程数（0=自动）
-        
-        // ========================================
-        // 数据源配置（v2.9新增：支持数据源抽象模式）
-        // ========================================
-        bool datasource_buffer_mode = false;           // true=从Buffer数据源获取packet, false=从文件数据源读取
-        const struct AVCodecParameters* codec_params = nullptr;  // Buffer模式下的编解码器参数（从Record Worker获取）
-        AVRational time_base = {0, 1};                 // 时间基准（从Record Worker获取，用于同步）
-        
-        // ⭐ v2.18 新增：共享的 Packet 数据源（用于 MultiWorker 共享模式）
-        // 
-        // 使用场景：
-        // - 普通模式：nullptr（Worker 自己创建独立的 BufferPacketSource）
-        // - 共享模式：MultiWorkerProductionLine 创建唯一实例并传入
-        // 
-        // 优点：
-        // - Worker 仍然根据 config 创建 datasource（符合原始设计）
-        // - 不需要修改 Worker 接口（不需要 setPacketSource）
-        // - 使用基类指针 IPacketSource，支持多态
-        std::shared_ptr<class IPacketSource> shared_packet_source = nullptr;
         
         // ========================================
         // h264_taco 特定配置（子子结构体）
@@ -251,6 +290,56 @@ struct WorkerConfig {
     // Worker 类型
     // ========================================
     WorkerType worker_type = WorkerType::AUTO;
+    
+    // ========================================
+    // 消费者配置（v3.1 新增）
+    // ========================================
+    /**
+     * @brief 消费者配置
+     * 
+     * 用于配置 Buffer 消费行为的参数，控制数据的处理、保存和验证。
+     * 
+     * 设计理念：
+     * - 统一配置：所有配置都通过 WorkerConfig 传递，无需额外结构
+     * - 可选使用：组件层可以忽略这些参数，应用层按需使用
+     * - 向后兼容：新增字段不影响现有代码
+     */
+    struct ConsumerConfig {
+        // ========================================
+        // 执行控制
+        // ========================================
+        int max_frames = -1;              ///< 最大处理帧数（-1=无限制，处理到视频结束）
+        int save_frames = 0;              ///< 保存帧数（0=不保存，-1=全部保存）
+        std::string output_path;          ///< 输出文件路径（空=自动生成）
+        
+        // ========================================
+        // 性能验证
+        // ========================================
+        double target_fps = 30.0;         ///< 目标帧率（用于性能验证，0=不验证）
+        
+        // ========================================
+        // 质量验证（PSNR/SSIM）
+        // ========================================
+        bool enable_psnr = false;         ///< 是否启用 PSNR 验证
+        double min_psnr = 30.0;           ///< PSNR 阈值（低于此值视为失败，单位：dB）
+        bool enable_ssim = false;         ///< 是否启用 SSIM 验证
+        double min_ssim = 0.95;           ///< SSIM 阈值（低于此值视为失败，范围：0.0-1.0）
+        std::string reference_path;       ///< 参考文件路径（用于质量比对）
+        
+        // ========================================
+        // 其他选项
+        // ========================================
+        bool enable_display = false;      ///< 是否启用显示输出
+        bool verbose = false;             ///< 是否输出详细日志
+        int timeout_ms = 100;             ///< 单次获取 Buffer 超时（毫秒）
+        int max_timeout_count = 10;       ///< 最大连续超时次数（达到后视为视频结束）
+        
+        ConsumerConfig() = default;
+        ConsumerConfig(const ConsumerConfig&) = default;
+        ConsumerConfig& operator=(const ConsumerConfig&) = default;
+        ConsumerConfig(ConsumerConfig&&) = default;
+        ConsumerConfig& operator=(ConsumerConfig&&) = default;
+    } consumer;
     
     // ========================================
     // 全局资源配置
@@ -727,6 +816,67 @@ public:
      */
     WorkerConfigBuilder& setThreadPoolSize(int size);
     
+    // ========================================
+    // 消费者配置（v3.1 新增）
+    // ========================================
+    
+    /**
+     * @brief 设置消费者配置
+     */
+    WorkerConfigBuilder& setConsumerConfig(const WorkerConfig::ConsumerConfig& consumer_config);
+    
+    /**
+     * @brief 设置最大处理帧数
+     * @param frames 最大帧数（-1=无限制）
+     */
+    WorkerConfigBuilder& setMaxFrames(int frames);
+    
+    /**
+     * @brief 设置保存帧数
+     * @param frames 保存帧数（0=不保存，-1=全部保存）
+     */
+    WorkerConfigBuilder& setSaveFrames(int frames);
+    
+    /**
+     * @brief 设置输出路径
+     * @param path 输出文件路径
+     */
+    WorkerConfigBuilder& setOutputPath(const std::string& path);
+    
+    /**
+     * @brief 设置目标帧率（用于性能验证）
+     * @param fps 目标帧率（0=不验证）
+     */
+    WorkerConfigBuilder& setTargetFps(double fps);
+    
+    /**
+     * @brief 启用 PSNR 验证
+     * @param enable 是否启用
+     * @param min_psnr PSNR 阈值（单位：dB）
+     * @param reference_path 参考文件路径（可选）
+     */
+    WorkerConfigBuilder& enablePsnr(bool enable = true, double min_psnr = 30.0, 
+                                     const std::string& reference_path = "");
+    
+    /**
+     * @brief 启用 SSIM 验证
+     * @param enable 是否启用
+     * @param min_ssim SSIM 阈值（范围：0.0-1.0）
+     * @param reference_path 参考文件路径（可选）
+     */
+    WorkerConfigBuilder& enableSsim(bool enable = true, double min_ssim = 0.95,
+                                     const std::string& reference_path = "");
+    
+    /**
+     * @brief 设置是否启用显示
+     */
+    WorkerConfigBuilder& setEnableDisplay(bool enable);
+    
+    /**
+     * @brief 设置详细日志模式
+     */
+    WorkerConfigBuilder& setVerbose(bool verbose);
+    
     /**
      * @brief 构建最终配置
      */
@@ -859,6 +1009,10 @@ struct ConnectorConfig {
     Connector::Mode mode;
     std::vector<std::string> producer_names;  // 关联的生产者名称
     std::vector<std::string> consumer_names;   // 关联的消费者名称
+    
+    // ⭐ v2.23 新增：帧同步配置
+    bool enable_frame_sync = false;          // 是否启用帧同步
+    CallbackChain callback_chain;            // 回调链（可选）
 };
 
 /**

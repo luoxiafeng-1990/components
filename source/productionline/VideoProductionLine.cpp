@@ -129,7 +129,7 @@ bool VideoProductionLine::start(const WorkerConfig& worker_config) {
     size_t frame_size = worker_facade_sptr_->getFrameSize();
     
     LOG4CPLUS_INFO(logger_, "Worker已就绪: " << worker_facade_sptr_->getWorkerType());
-    LOG4CPLUS_INFO(logger_, "  - 分辨率: " << worker_facade_sptr_->getWidth() << "x" << worker_facade_sptr_->getHeight());
+    LOG4CPLUS_INFO(logger_, "  - 分辨率: " << worker_facade_sptr_->getOutputWidth() << "x" << worker_facade_sptr_->getOutputHeight());
     LOG4CPLUS_INFO(logger_, "  - 总帧数: " << total_frames_);
     LOG4CPLUS_INFO(logger_, "  - 帧大小: " << (frame_size / (1024.0 * 1024.0)) << " MB");
     
@@ -301,13 +301,6 @@ void VideoProductionLine::producerThreadFunc(int thread_id) {
     }
     
     while (running_.load()) {
-        // 获取下一个有效的帧索引（封装后的清晰接口）
-        auto frame_index_opt = getNextFrameIndex();
-        if (!frame_index_opt.has_value()) {
-            break;  // 无更多帧，退出循环
-        }
-        int frame_index = frame_index_opt.value();
-        
         // 🎯 统一的流程：从工作 BufferPool 获取 buffer（使用临时 shared_ptr）
         Buffer* buffer = nullptr;
         while (running_.load() && buffer == nullptr) {
@@ -317,24 +310,21 @@ void VideoProductionLine::producerThreadFunc(int thread_id) {
                 buffer_wait_count++;
                 // 每100次等待才打印一次日志，避免过于频繁
                 if (buffer_wait_count % 100 == 1) {
-                    LOG4CPLUS_DEBUG_FMT(logger_, "[VideoProductionLine][Thread #%d] Waiting for free buffer from pool '%s' (frame_index=%d, wait_count=%d)...",
-                                  thread_id, pool_sptr->getName().c_str(), frame_index, buffer_wait_count);
+                    LOG4CPLUS_DEBUG_FMT(logger_, "[VideoProductionLine][Thread #%d] Waiting for free buffer from pool '%s' (thread_produced=%d, wait_count=%d)...",
+                                  thread_id, pool_sptr->getName().c_str(), thread_produced, buffer_wait_count);
                 }
             }
         }
-        
+
         // 检查是否因为停止信号退出循环
         if (!running_.load()) {
             break;
         }
         
-        // 4. 🎯 统一的接口：调用 Worker 填充 buffer（使用fillBuffer）
-        // 使用 PerformanceMonitor 测量填充buffer的耗时
         if (monitor_) {
             monitor_->beginTiming("fill_buffer");
         }
-        bool fill_success = worker_facade_sptr_->fillBuffer(frame_index, buffer);
-      
+        bool fill_success = worker_facade_sptr_->fillBuffer(thread_produced, buffer);
         
         // 5. 🎯 统一的处理：提交或归还
         if (fill_success) {
@@ -354,7 +344,7 @@ void VideoProductionLine::producerThreadFunc(int thread_id) {
                     // 🔧 修复：循环模式下，当 Worker 到达 EOF 时，重置 Worker
                     // 这确保循环播放时 Worker 能够从文件开头重新开始读取
                     LOG4CPLUS_DEBUG_FMT(logger_, "[Thread #%d] Worker reached EOF in loop mode, resetting to begin (frame_index=%d)", 
-                                  thread_id, frame_index);
+                                  thread_id, thread_produced);
                     if (worker_facade_sptr_->seekToBegin()) {
                         // 重置成功：归还 buffer，重置失败计数，继续下一次循环
                         // 注意：不增加 skipped_frames，因为这是正常的循环重置操作
@@ -403,7 +393,7 @@ void VideoProductionLine::producerThreadFunc(int thread_id) {
     if (monitor_) {
         monitor_->stop();
     }
-    
+    pool_sptr->shutdown();
     // 线程结束
     LOG4CPLUS_INFO_FMT(logger_, "Thread #%d finished: produced=%d, skipped=%d, final_consecutive_failures=%d",
                  thread_id, thread_produced, thread_skipped, consecutive_failures);

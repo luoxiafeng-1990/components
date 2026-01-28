@@ -22,7 +22,6 @@ MultiWorkerProductionLine::MultiWorkerProductionLine(
     : VideoProductionLine(loop, thread_count, enable_monitor)
     , config_(config)
     , groups_()
-    , stats_()
     , logger_(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.MultiWorker")))
     , log_prefix_("")
 {
@@ -287,23 +286,20 @@ void MultiWorkerProductionLine::stop() {
         return;
     }
     
-    LOG4CPLUS_INFO(logger_, "⭐ 停止 WorkerGroup 架构...");
+    LOG4CPLUS_INFO(logger_, "⭐ 停止生产车间...");
     
     // 设置停止标志
     running_.store(false);
     
-    // 停止所有 WorkerGroup 线程
+    // 停止所有 Group 调度
     for (auto& group : groups_) {
         if (group) {
             group->is_running.store(false);
-            if (group->group_thread.joinable()) {
-                LOG4CPLUS_INFO(logger_, " 等待 Group '" << group->group_id << "' 线程退出...");
-                group->group_thread.join();
-            }
         }
     }
     
-    // 等待全局线程池任务完成
+    // 等待线程池任务完成（所有 Worker 线程会自动退出）
+    LOG4CPLUS_INFO(logger_, "等待所有 Worker 线程退出...");
     GlobalThreadPool::getInstance().wait();
     
     // 停止所有生产者和消费者
@@ -325,15 +321,13 @@ void MultiWorkerProductionLine::stop() {
         }
         
         LOG4CPLUS_INFO(logger_, " Group '" << group->group_id << "' 已停止 "
-                       << "(processed=" << group->processed_count.load() 
-                       << ", success=" << group->success_count.load()
-                       << ", error=" << group->error_count.load() << ")");
+                       << "(success=" << group->stats.frames_produced.load()
+                       << ", failed=" << group->stats.frames_failed.load() << ")");
     }
     
-    LOG4CPLUS_INFO(logger_, "⭐ WorkerGroup 架构已停止");
-    LOG4CPLUS_INFO(logger_, "总统计: processed=" << stats_.total_packets_processed.load() 
-                   << ", success=" << stats_.total_packets_succeeded.load()
-                   << ", failed=" << stats_.total_packets_failed.load());
+    LOG4CPLUS_INFO(logger_, "⭐ 生产车间已停止");
+    LOG4CPLUS_INFO(logger_, "总统计: success=" << getAllLineFramesProduced()
+                   << ", failed=" << getAllLineFramesFailed());
 }
 
 // ============================================================
@@ -426,7 +420,7 @@ bool MultiWorkerProductionLine::createConnectorsForGroup(WorkerGroupRuntime* gro
             if (producer_info->producer_line) {
                 auto worker_facade = producer_info->producer_line->getWorkerFacade();
                 if (worker_facade) {
-                    codec_params = worker_facade->getCodecParameters();
+                    codec_params = worker_facade->getSourceCodecParameters();
                 }
             }
             
@@ -476,6 +470,22 @@ bool MultiWorkerProductionLine::createConnectorsForGroup(WorkerGroupRuntime* gro
         }
         
         group->connectors.push_back(std::move(connector));
+        
+        // ⭐ v2.23 新增：如果启用了帧同步，创建 WorkerSyncCoordinator
+        if (conn_cfg.enable_frame_sync && !conn_cfg.callback_chain.empty()) {
+            auto coordinator = std::make_unique<WorkerSyncCoordinator>(
+                conn_cfg.consumer_names,  // 该 Connector 的所有 Consumer
+                conn_cfg.callback_chain   // 回调链
+            );
+            
+            group->connector_coordinators[conn_idx] = std::move(coordinator);
+            
+            LOG4CPLUS_INFO(logger_, "     ⭐ 为连接器 #" << conn_idx 
+                           << " 创建了 WorkerSyncCoordinator"
+                           << " (Workers: " << conn_cfg.consumer_names.size()
+                           << ", Callbacks: " << conn_cfg.callback_chain.size() << ")");
+        }
+        
         LOG4CPLUS_INFO(logger_, "     连接器 #" << conn_idx << " 已创建");
     }
     
@@ -490,9 +500,9 @@ bool MultiWorkerProductionLine::createConsumersForGroup(WorkerGroupRuntime* grou
         const auto& ccfg = group_config.consumer_configs[consumer_cfg_idx];
         LOG4CPLUS_INFO(logger_, "     创建消费者 '" << ccfg.consumer_name << "'...");
         
-        // 配置 buffer mode
+        // ⭐ v2.22 重构：配置 buffer mode（数据源配置移至 datasource）
         WorkerConfig consumer_config = ccfg.worker_config;
-        consumer_config.decoder.datasource_buffer_mode = true;
+        consumer_config.data_source.buffer_mode = true;
         
         // 4.3.1 查找该消费者所属的 Connector（使用查询方法）
         Connector* owner_connector = group->getConnectorForConsumer(ccfg.consumer_name);
@@ -518,7 +528,7 @@ bool MultiWorkerProductionLine::createConsumersForGroup(WorkerGroupRuntime* grou
         
         if (shared_source) {
             // ⭐ 使用共享数据源（所有模式都支持）
-            consumer_config.decoder.shared_packet_source = shared_source;
+            consumer_config.data_source.shared_packet_source = shared_source;
             LOG4CPLUS_INFO(logger_, "       ✅ 使用生产者 '" << producer_name 
                            << "' 的共享 BufferPacketSource");
         } else {
@@ -538,7 +548,7 @@ bool MultiWorkerProductionLine::createConsumersForGroup(WorkerGroupRuntime* grou
             if (producer_info->producer_line) {
                 auto worker_facade = producer_info->producer_line->getWorkerFacade();
                 if (worker_facade) {
-                    codec_params = worker_facade->getCodecParameters();
+                    codec_params = worker_facade->getSourceCodecParameters();
                     time_base = worker_facade->getTimeBase();
                 }
             }
@@ -549,8 +559,8 @@ bool MultiWorkerProductionLine::createConsumersForGroup(WorkerGroupRuntime* grou
                 return false;
             }
             
-            consumer_config.decoder.codec_params = codec_params;
-            consumer_config.decoder.time_base = time_base;
+            consumer_config.data_source.codec_params = codec_params;
+            consumer_config.data_source.time_base = time_base;
             LOG4CPLUS_INFO(logger_, "       ✅ 普通模式：从生产者 '" 
                            << producer_info->producer_name << "' 获取 codec_params");
         }
@@ -599,29 +609,42 @@ bool MultiWorkerProductionLine::createConsumersForGroup(WorkerGroupRuntime* grou
 }
 
 bool MultiWorkerProductionLine::startGroupThreads() {
-    LOG4CPLUS_INFO(logger_, "启动所有 WorkerGroup 线程...");
+    LOG4CPLUS_INFO(logger_, "启动所有 WorkerGroup 调度任务...");
+    
+    // 获取全局线程池
+    auto& thread_pool = GlobalThreadPool::getInstance().getThreadPool();
     
     for (size_t i = 0; i < groups_.size(); i++) {
         auto& group = groups_[i];
+        
+        // ========== 初始化 Worker 统计 ==========
+        for (auto& consumer_info : group->consumer_infos) {
+            if (consumer_info) {
+                auto stats = std::make_unique<WorkerGroupRuntime::WorkerProductionStats>();
+                group->worker_stats[consumer_info->consumer_name] = std::move(stats);
+            }
+        }
+        
+        // ========== 提交 Group 调度任务到线程池 ==========
         group->is_running.store(true);
         
         try {
-            group->group_thread = std::thread(&MultiWorkerProductionLine::groupThreadFunc, this, group.get());
+            thread_pool.detach_task([this, group]() {
+                groupThreadFunc(group);
+            });
+            
             LOG4CPLUS_INFO(logger_, " [Group " << i << "] '" << group->group_id 
-                           << "' 线程已启动");
+                           << "' 调度任务已提交到线程池");
         } catch (const std::exception& e) {
-            LOG4CPLUS_ERROR(logger_, "Failed to start Group thread: " << e.what());
+            LOG4CPLUS_ERROR(logger_, "Failed to submit Group task: " << e.what());
             running_.store(false);
             for (auto& g : groups_) {
                 if (g) {
                     g->is_running.store(false);
-                    if (g->group_thread.joinable()) {
-                        g->group_thread.join();
-                    }
                 }
             }
             groups_.clear();
-            setError(std::string("Failed to start Group thread: ") + e.what());
+            setError(std::string("Failed to submit Group task: ") + e.what());
             return false;
         }
     }
@@ -691,26 +714,49 @@ Connector* MultiWorkerProductionLine::WorkerGroupRuntime::getConnectorForConsume
     return nullptr;
 }
 
+size_t MultiWorkerProductionLine::WorkerGroupRuntime::getConnectorIndex(const Connector* connector) const {
+    for (size_t i = 0; i < connectors.size(); i++) {
+        if (connectors[i].get() == connector) {
+            return i;
+        }
+    }
+    return SIZE_MAX;
+}
+
 void MultiWorkerProductionLine::printDetailedStats() const {
     
-    LOG4CPLUS_INFO(logger_, "========== WorkerGroup 详细统计信息 ==========");
+    LOG4CPLUS_INFO(logger_, "========== 生产车间详细统计信息 ==========");
     LOG4CPLUS_INFO(logger_, "全局统计:");
-    LOG4CPLUS_INFO(logger_, "  总处理packet数: " << stats_.total_packets_processed.load());
-    LOG4CPLUS_INFO(logger_, "  成功packet数: " << stats_.total_packets_succeeded.load());
-    LOG4CPLUS_INFO(logger_, "  失败packet数: " << stats_.total_packets_failed.load());
+    LOG4CPLUS_INFO(logger_, "  成功生产帧数: " << getAllLineFramesProduced());
+    LOG4CPLUS_INFO(logger_, "  失败帧数: " << getAllLineFramesFailed());
     
-    LOG4CPLUS_INFO(logger_, "WorkerGroup 统计 (共 " << groups_.size() << " 个):");
+    LOG4CPLUS_INFO(logger_, "生产线统计 (共 " << groups_.size() << " 条):");
     for (size_t i = 0; i < groups_.size(); i++) {
         if (!groups_[i]) continue;
         
         const auto& group = groups_[i];
-        LOG4CPLUS_INFO(logger_, "  [Group " << i << "] '" << group->group_id << "':");
-        LOG4CPLUS_INFO(logger_, "    已处理: " << group->processed_count.load());
-        LOG4CPLUS_INFO(logger_, "    成功: " << group->success_count.load());
-        LOG4CPLUS_INFO(logger_, "    错误: " << group->error_count.load());
+        LOG4CPLUS_INFO(logger_, "  [生产线 " << i << "] '" << group->group_id << "':");
+        LOG4CPLUS_INFO(logger_, "    成功: " << group->stats.frames_produced.load());
+        LOG4CPLUS_INFO(logger_, "    失败: " << group->stats.frames_failed.load());
         LOG4CPLUS_INFO(logger_, "    生产者数量: " << group->producer_infos.size());
-        LOG4CPLUS_INFO(logger_, "    消费者数量: " << group->consumer_infos.size());
+        LOG4CPLUS_INFO(logger_, "    Worker 数量: " << group->consumer_infos.size());
+        LOG4CPLUS_INFO(logger_, "    活跃 Worker: " << getActiveWorkerCount(i));
         LOG4CPLUS_INFO(logger_, "    连接器数量: " << group->connectors.size());
+        
+        // ⭐ 打印每个 Worker 的详细统计
+        for (const auto& consumer_info : group->consumer_infos) {
+            if (consumer_info) {
+                auto state_it = group->worker_stats.find(consumer_info->consumer_name);
+                if (state_it != group->worker_stats.end()) {
+                    const auto* worker_stats = state_it->second.get();
+                    LOG4CPLUS_INFO(logger_, "      Worker '" << consumer_info->consumer_name << "':");
+                    LOG4CPLUS_INFO(logger_, "        成功生产帧数: " << worker_stats->worker_frames_produced.load());
+                    LOG4CPLUS_INFO(logger_, "        失败帧数: " << worker_stats->worker_frames_failed.load());
+                    LOG4CPLUS_INFO(logger_, "        连续失败: " << worker_stats->consecutive_failures.load());
+                    LOG4CPLUS_INFO(logger_, "        是否活跃: " << (worker_stats->is_active.load() ? "是" : "否"));
+                }
+            }
+        }
     }
     LOG4CPLUS_INFO(logger_, "================================================");
 }
@@ -719,138 +765,214 @@ void MultiWorkerProductionLine::printDetailedStats() const {
 // 内部方法实现
 // ============================================================
 
-void MultiWorkerProductionLine::groupThreadFunc(WorkerGroupRuntime* group) {
-    LOG4CPLUS_INFO(logger_, "[Group '" << group->group_id << "'] 线程启动");
+void MultiWorkerProductionLine::groupThreadFunc(const std::shared_ptr<WorkerGroupRuntime>& group) {
+    LOG4CPLUS_INFO(logger_, "[Group '" << group->group_id << "'] 启动所有 Worker 任务");
     
     // 获取全局线程池
     auto& thread_pool = GlobalThreadPool::getInstance().getThreadPool();
     
-    // 默认超时时间（5秒）
-    const int DEFAULT_TIMEOUT_MS = 5000;
-    
-    while (group->is_running.load() && running_.load()) {
-        // ========== 步骤1：统计活跃的消费者 ==========
-        int active_consumers = 0;
+    // ========== 为每个 Worker 提交常驻任务（只提交一次）==========
         for (auto& connector : group->connectors) {
             for (const auto& consumer_name : connector->getConsumerNames()) {
                 auto it = group->consumer_info_mapped_by_name.find(consumer_name);
-                if (it != group->consumer_info_mapped_by_name.end() && 
-                    it->second && 
-                    it->second->worker->isOpen()) {
-                    active_consumers++;
-                }
-            }
-        }
-        
-        if (active_consumers == 0) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(100));
-            continue;
-        }
-        
-        // ========== 步骤2：创建同步门闩 ==========
-        auto latch = std::make_shared<CountDownLatch>(active_consumers);
-        std::atomic<int> success_count{0};
-        std::atomic<int> error_count{0};
-        
-        // ========== 步骤3：提交任务给所有活跃消费者 ==========
-        for (auto& connector : group->connectors) {
-            for (const auto& consumer_name : connector->getConsumerNames()) {
-                auto it = group->consumer_info_mapped_by_name.find(consumer_name);
-                if (it == group->consumer_info_mapped_by_name.end() || 
-                    !it->second || 
-                    !it->second->worker->isOpen()) {
-                    continue;
-                }
-                
-                auto* consumer_info = it->second;
-                
-                // 提交到全局线程池
-                thread_pool.detach_task([this, group, consumer_info, latch, &success_count, &error_count]() {
-                    // ========== 步骤1：检查 BufferPool 是否可用 ==========
-                    auto pool_sptr = consumer_info->buffer_pool_weak.lock();
-                    if (!pool_sptr) {
-                        LOG4CPLUS_ERROR(logger_, "[Consumer '" << consumer_info->consumer_name 
-                                       << "'] BufferPool 不存在或已销毁");
-                        error_count.fetch_add(1);
-                        group->error_count.fetch_add(1);
-                        latch->countDown();
-                        return;
-                    }
-                    
-                    // ========== 步骤2：循环调用 fillBuffer 直到失败 ==========
-                    int frames_processed = 0;
-                    
-                    while (true) {
-                        // 2.1 获取空闲 Buffer（100ms 超时）
-                        Buffer* buffer = pool_sptr->acquireFree(true, 100);
-                        if (!buffer) {
-                            // 无法获取空闲 Buffer（资源限制），退出循环
-                            // LOG4CPLUS_DEBUG(logger_, "[Consumer '" << consumer_info->consumer_name 
-                            //                << "'] 无法获取空闲 Buffer（超时），已处理 " << frames_processed << " 帧");
-                            break;
-                        }
-                        
-                        // 2.2 调用 fillBuffer 填充数据
-                        bool process_success = consumer_info->worker->fillBuffer(0, buffer);
-                        
-                        if (process_success) {
-                            // ✅ 填充成功：提交到已填充队列，继续循环
-                            pool_sptr->submitFilled(buffer);
-                            frames_processed++;
-                            success_count.fetch_add(1);
-                        } else {
-                            // ❌ 填充失败（缓存已空，无法立即读取新 packet）：释放 buffer，退出循环
-                            pool_sptr->releaseFree(buffer);
-                            break;
-                        }
-                    }
-                    
-                    // ========== 步骤3：统计结果 ==========
-                    if (frames_processed > 0) {
-                        // 成功处理了至少一帧
-                        group->success_count.fetch_add(frames_processed);
-                        // LOG4CPLUS_DEBUG(logger_, "[Consumer '" << consumer_info->consumer_name 
-                        //                << "'] 本轮处理 " << frames_processed << " 帧");
-                    } else {
-                        // 一帧都没处理成功，可能是真正的错误
-                        error_count.fetch_add(1);
-                        group->error_count.fetch_add(1);
-                    }
-                    
-                    latch->countDown();
-                });
-            }
-        }
-        
-        // ========== 步骤4：同步等待所有消费者完成 ==========
-        bool all_done = latch->wait(DEFAULT_TIMEOUT_MS);
-        
-        if (!all_done) {
-            LOG4CPLUS_ERROR(logger_, "[Group '" << group->group_id 
-                           << "'] 等待消费者完成超时");
-        } else {
-            group->processed_count.fetch_add(1);
-            
-            if (success_count.load() > 0) {
-                group->success_count.fetch_add(success_count.load());
-                stats_.total_packets_succeeded.fetch_add(success_count.load());
-            }
-            if (error_count.load() > 0) {
-                group->error_count.fetch_add(error_count.load());
-                stats_.total_packets_failed.fetch_add(error_count.load());
+            if (it == group->consumer_info_mapped_by_name.end() || 
+                !it->second || 
+                !it->second->worker->isOpen()) {
+                LOG4CPLUS_WARN(logger_, "   Worker '" << consumer_name << "' 不可用，跳过");
+                continue;
             }
             
-            stats_.total_packets_processed.fetch_add(1);
+            auto* consumer_info = it->second;
+            
+            // 提交 Worker 常驻任务到线程池
+            thread_pool.detach_task([this, group, consumer_info, consumer_name]() {
+                workerThreadFunc(group, consumer_info, consumer_name);
+            });
+            
+            LOG4CPLUS_INFO(logger_, "   Worker '" << consumer_name << "' 任务已提交");
         }
-        
-        // ⚠️ 注意：这里需要一个短暂的延迟
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
     
-    LOG4CPLUS_INFO(logger_, "[Group '" << group->group_id << "'] 线程结束 "
-                   << "(processed=" << group->processed_count.load() 
-                   << ", success=" << group->success_count.load()
-                   << ", error=" << group->error_count.load() << ")");
+    LOG4CPLUS_INFO(logger_, "[Group '" << group->group_id << "'] 所有 Worker 任务已提交");
+}
+
+void MultiWorkerProductionLine::workerThreadFunc(
+    const std::shared_ptr<WorkerGroupRuntime>& group,
+    WorkerGroupRuntime::ConsumerInfo* consumer_info,
+    const std::string& consumer_name
+) {
+    LOG4CPLUS_INFO(logger_, "[Worker '" << consumer_name << "'] 线程启动");
+    
+    // 获取 Worker 统计
+    auto stats_it = group->worker_stats.find(consumer_name);
+    if (stats_it == group->worker_stats.end()) {
+        LOG4CPLUS_ERROR(logger_, "[Worker '" << consumer_name << "'] 统计信息不存在");
+        return;
+    }
+    auto* worker_stats = stats_it->second.get();
+    
+    // 获取 BufferPool
+    auto pool_sptr = consumer_info->buffer_pool_weak.lock();
+    if (!pool_sptr) {
+        LOG4CPLUS_ERROR(logger_, "[Worker '" << consumer_name << "'] BufferPool 已销毁");
+                        return;
+    }
+                    
+    const int MAX_CONSECUTIVE_FAILURES = 100;
+    int buffer_wait_count = 0;
+    
+    // ========== 主循环：永不退出（除非 stop 或 fatal）==========
+    while (group->is_running.load() && running_.load() && worker_stats->is_active.load()) {
+        // 步骤1：获取空闲 buffer（类似 producerThreadFunc）
+        Buffer* buffer = nullptr;
+        while (group->is_running.load() && running_.load() && buffer == nullptr) {
+            buffer = pool_sptr->acquireFree(true, 100);  // 100ms 超时
+            if (buffer == nullptr && group->is_running.load() && running_.load()) {
+                buffer_wait_count++;
+                // 每100次等待才打印一次日志
+                if (buffer_wait_count % 100 == 0) {
+                    LOG4CPLUS_DEBUG(logger_, "[Worker '" << consumer_name 
+                                   << "'] 等待空闲 buffer (count=" << buffer_wait_count << ")");
+                }
+            }
+        }
+        
+        // 检查是否因为停止信号退出循环
+        if (!group->is_running.load() || !running_.load()) 
+            break;
+                        
+        buffer_wait_count = 0;
+        
+        bool fill_success = consumer_info->worker->fillBuffer(0, buffer);
+        
+        if (fill_success) {
+            // ✅ 解码成功
+            
+            bool should_submit = true;
+            
+            // ⭐ v2.23 新增：帧同步协调（如果启用）
+            Connector* owner_connector = group->getConnectorForConsumer(consumer_name);
+            if (owner_connector) {
+                size_t conn_idx = group->getConnectorIndex(owner_connector);
+                auto it = group->connector_coordinators.find(conn_idx);
+                
+                if (it != group->connector_coordinators.end()) {
+                    // 该 Connector 启用了帧同步
+                    
+                    // 获取帧版本号（从 BufferPacketSource）
+                    // 注意：这里需要从 Connector 获取对应的 shared_source
+                    std::string producer_name = owner_connector->getProducerNameForConsumer(consumer_name);
+                    auto shared_source_base = owner_connector->getSharedSource(producer_name);
+                    
+                    if (shared_source_base) {
+                        // 转换为 BufferPacketSource（共享模式下一定是这个类型）
+                        auto shared_source = std::dynamic_pointer_cast<BufferPacketSource>(shared_source_base);
+                        
+                        if (shared_source) {
+                            uint64_t frame_version = shared_source->getCurrentBufferVersion();
+                            
+                            // 到达同步点（阻塞等待 + 执行回调链）
+                            should_submit = it->second->arrive(consumer_name, frame_version, buffer);
+                            
+                            if (!should_submit) {
+                                LOG4CPLUS_WARN(logger_, "[Worker '" << consumer_name 
+                                               << "'] 同步协调器拒绝提交 Frame " << frame_version);
+                            }
+                        } else {
+                            LOG4CPLUS_ERROR(logger_, "[Worker '" << consumer_name 
+                                            << "'] shared_source 不是 BufferPacketSource 类型");
+                        }
+                    }
+                }
+            }
+            
+            // 根据同步结果决定是否提交
+            if (should_submit) {
+                pool_sptr->submitFilled(buffer);
+                worker_stats->worker_frames_produced.fetch_add(1);
+                group->stats.frames_produced.fetch_add(1);
+            } else {
+                pool_sptr->releaseFree(buffer);
+            }
+            
+            worker_stats->consecutive_failures.store(0);
+            
+        } else {
+            // ❌ 失败：释放 buffer
+            pool_sptr->releaseFree(buffer);
+            
+            // 检查原因
+            if (consumer_info->worker->isAtEnd()) {
+                // EOF：数据源已结束
+                // ⭐ 参考 VideoProductionLine 的逻辑：
+                // Consumer Worker 在共享模式下，EOF 意味着 Producer 已停止
+                // 应该退出线程，而不是继续等待
+                LOG4CPLUS_INFO(logger_, "[Worker '" << consumer_name 
+                               << "'] 检测到数据源 EOF，正常退出");
+                break;  // 退出线程
+                
+            } else {
+                // 非 EOF 失败：可能是解码错误
+                int failures = worker_stats->consecutive_failures.fetch_add(1) + 1;
+                worker_stats->worker_frames_failed.fetch_add(1);
+                group->stats.frames_failed.fetch_add(1);
+                
+                if (failures >= MAX_CONSECUTIVE_FAILURES) {
+                    // FATAL：连续失败过多
+                    LOG4CPLUS_ERROR(logger_, "[Worker '" << consumer_name 
+                                   << "'] 连续失败 " << failures << " 次 - FATAL");
+                    worker_stats->is_active.store(false);
+                    break;
+                }
+                
+                // 短暂休眠，避免忙等
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            }
+        }
+    }
+    pool_sptr->shutdown();
+    LOG4CPLUS_INFO(logger_, "[Worker '" << consumer_name << "'] 线程结束 "
+                   << "(produced=" << worker_stats->worker_frames_produced.load() 
+                   << ", failed=" << worker_stats->worker_frames_failed.load() << ")");
+}
+
+// ============================================================
+// 全局查询接口实现
+// ============================================================
+
+int64_t MultiWorkerProductionLine::getAllLineFramesProduced() const {
+    int64_t total = 0;
+    for (const auto& group : groups_) {
+        if (group) {
+            total += group->stats.frames_produced.load();
+        }
+    }
+    return total;
+}
+
+int64_t MultiWorkerProductionLine::getAllLineFramesFailed() const {
+    int64_t total = 0;
+    for (const auto& group : groups_) {
+        if (group) {
+            total += group->stats.frames_failed.load();
+        }
+    }
+    return total;
+}
+
+int MultiWorkerProductionLine::getActiveWorkerCount(size_t group_index) const {
+    if (group_index >= groups_.size() || !groups_[group_index]) {
+        return 0;
+    }
+    
+    const auto& group = groups_[group_index];
+    int count = 0;
+    for (const auto& [name, stats] : group->worker_stats) {
+        if (stats && stats->is_active.load()) {
+            count++;
+        }
+    }
+    return count;
 }
 
 void MultiWorkerProductionLine::setError(const std::string& error_msg) const {
@@ -866,5 +988,47 @@ void MultiWorkerProductionLine::setError(const std::string& error_msg) const {
     
     // 打印到控制台
     LOG4CPLUS_ERROR(logger_, "错误: " << error_msg);
+}
+
+// ============================================================
+// 统计报告定时器
+// ============================================================
+
+void MultiWorkerProductionLine::startStatsReportTimer() {
+    // 先停止旧定时器（如果存在）
+    Timer::TimerId old_timer_id = stats_report_timer_id_.exchange(0);
+    if (old_timer_id != 0) {
+        stats_report_timer_.cancel(old_timer_id);
+    }
+    
+    // 启动定时器服务
+    stats_report_timer_.start();
+    
+    // 创建新定时器（每5秒调用一次 printDetailedStats）
+    Timer::TimerId new_timer_id = stats_report_timer_.scheduleRepeated(
+        5000,  // 5秒
+        [this]() {
+            // 在定时器线程中调用，printDetailedStats 是 const 方法，线程安全
+            this->printDetailedStats();
+        }
+    );
+    
+    // 保存定时器ID
+    stats_report_timer_id_.store(new_timer_id);
+    
+    LOG4CPLUS_INFO(logger_, "📊 统计报告定时器已启动（每5秒）");
+}
+
+void MultiWorkerProductionLine::stopStatsReportTimer() {
+    // 取消定时器
+    Timer::TimerId timer_id = stats_report_timer_id_.exchange(0);
+    if (timer_id != 0) {
+        stats_report_timer_.cancel(timer_id);
+    }
+    
+    // 停止定时器服务
+    stats_report_timer_.stop();
+    
+    LOG4CPLUS_INFO(logger_, "📊 统计报告定时器已停止");
 }
 

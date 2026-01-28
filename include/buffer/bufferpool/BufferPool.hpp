@@ -273,7 +273,13 @@ public:
      * - 防止死锁
      */
     void shutdown();
-    
+
+    /**
+     * @brief 获取运行状态
+     * 
+     * @return true 运行中，false 已停止
+     */
+    bool isRunning() const { return running_.load(); }
     // ====== 调试接口 ======
     
     /**

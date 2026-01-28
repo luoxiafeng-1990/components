@@ -6,6 +6,7 @@
 
 BufferFillingWorkerFacade::BufferFillingWorkerFacade(const WorkerConfig& config)
     : config_(config)
+    , logger_(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Worker.Facade")))
 {
     if (!worker_base_uptr_) {
         worker_base_uptr_ = BufferFillingWorkerFactory::create(config_);
@@ -14,6 +15,7 @@ BufferFillingWorkerFacade::BufferFillingWorkerFacade(const WorkerConfig& config)
 
 BufferFillingWorkerFacade::~BufferFillingWorkerFacade() {
     // worker_base_uptr_ 会自动调用析构函数（智能指针）
+    
 }
 
 // ============ Buffer填充方法 ============
@@ -36,31 +38,13 @@ bool BufferFillingWorkerFacade::open() {
     }
     
     if (!worker_base_uptr_) {
-        LOG4CPLUS_ERROR(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Worker.Facade")), "[Worker] ERROR: Failed to create worker");
+        LOG4CPLUS_ERROR(logger_, "[Worker] ERROR: Failed to create worker");
         return false;
     }
     
-    // ⭐ v2.9新增：检查是否是 Buffer 模式
-    bool is_buffer_mode = config_.decoder.datasource_buffer_mode;
-    
-    if (is_buffer_mode) {
-        // Buffer 模式：不需要文件路径，直接调用 open(nullptr)
-        LOG4CPLUS_DEBUG(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Worker.Facade")), "[Worker] BufferFillingWorkerFacade: Opening in Buffer mode (no file path needed)");
-        return worker_base_uptr_->open(nullptr);
-    }
-    
-    // 文件模式：从 config_ 获取所有参数
-    const std::string& file_path = config_.data_source.path;
-    
-    if (file_path.empty()) {
-        LOG4CPLUS_ERROR(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Worker.Facade")), "[Worker] ERROR: File path not set in config");
-        return false;
-    }
-    
-    const char* path = file_path.c_str();
-    
-    LOG4CPLUS_DEBUG_FMT(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Worker.Facade")), "[Worker] BufferFillingWorkerFacade: Opening file: %s", path);
-    return worker_base_uptr_->open(path);
+    // ✅ 纯转发：WorkerBase::open() 会从 worker_config_.data_source.path 获取路径
+    // 子类的 open(const char* path) 会根据 path 是否为空自行判断模式
+    return worker_base_uptr_->open();
 }
 
 void BufferFillingWorkerFacade::close() {
@@ -70,12 +54,12 @@ void BufferFillingWorkerFacade::close() {
 }
 bool BufferFillingWorkerFacade::setSourceBufferPool(std::weak_ptr<BufferPool> pool_weak) {
     if (!worker_base_uptr_) {
-        LOG4CPLUS_ERROR(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Worker.Facade")), "[Worker] ERROR: Worker not initialized");
+        LOG4CPLUS_ERROR(logger_, "[Worker] ERROR: Worker not initialized");
         return false;
     }
     
     // ✅ 直接调用基类虚函数，自动多态分发
-    // 支持 Buffer 模式的 Worker（如 FfmpegDecodeVideoFileWorker、FfmpegDecodeRtspWorker）
+    // 支持 Buffer 模式的 Worker（如 FFmpegDecodeWorker）
     // 会重写此方法并返回 true，不支持的 Worker 会使用基类默认实现返回 false
     return worker_base_uptr_->setSourceBufferPool(pool_weak);
 }
@@ -88,7 +72,7 @@ bool BufferFillingWorkerFacade::isOpen() const {
 
 bool BufferFillingWorkerFacade::fillBuffer(int frame_index, Buffer* buffer) {
     if (!worker_base_uptr_) {
-        LOG4CPLUS_ERROR(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Worker.Facade")), "[Worker] ERROR: Worker not initialized");
+        LOG4CPLUS_ERROR(logger_, "[Worker] ERROR: Worker not initialized");
         return false;
     }
     return worker_base_uptr_->fillBuffer(frame_index, buffer);
@@ -98,7 +82,7 @@ bool BufferFillingWorkerFacade::fillBuffer(int frame_index, Buffer* buffer) {
 
 bool BufferFillingWorkerFacade::seek(int frame_index) {
     if (!worker_base_uptr_) {
-        LOG4CPLUS_ERROR(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Worker.Facade")), "[Worker] ERROR: Worker not initialized");
+        LOG4CPLUS_ERROR(logger_, "[Worker] ERROR: Worker not initialized");
         return false;
     }
     return worker_base_uptr_->seek(frame_index);
@@ -106,7 +90,7 @@ bool BufferFillingWorkerFacade::seek(int frame_index) {
 
 bool BufferFillingWorkerFacade::seekToBegin() {
     if (!worker_base_uptr_) {
-        LOG4CPLUS_ERROR(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Worker.Facade")), "[Worker] ERROR: Worker not initialized");
+        LOG4CPLUS_ERROR(logger_, "[Worker] ERROR: Worker not initialized");
         return false;
     }
     return worker_base_uptr_->seekToBegin();
@@ -114,7 +98,7 @@ bool BufferFillingWorkerFacade::seekToBegin() {
 
 bool BufferFillingWorkerFacade::seekToEnd() {
     if (!worker_base_uptr_) {
-        LOG4CPLUS_ERROR(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Worker.Facade")), "[Worker] ERROR: Worker not initialized");
+        LOG4CPLUS_ERROR(logger_, "[Worker] ERROR: Worker not initialized");
         return false;
     }
     return worker_base_uptr_->seekToEnd();
@@ -122,7 +106,7 @@ bool BufferFillingWorkerFacade::seekToEnd() {
 
 bool BufferFillingWorkerFacade::skip(int frame_count) {
     if (!worker_base_uptr_) {
-        LOG4CPLUS_ERROR(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Worker.Facade")), "[Worker] ERROR: Worker not initialized");
+        LOG4CPLUS_ERROR(logger_, "[Worker] ERROR: Worker not initialized");
         return false;
     }
     return worker_base_uptr_->skip(frame_count);
@@ -146,20 +130,11 @@ long BufferFillingWorkerFacade::getFileSize() const {
     return worker_base_uptr_ ? worker_base_uptr_->getFileSize() : 0;
 }
 
-int BufferFillingWorkerFacade::getWidth() const {
-    return worker_base_uptr_ ? worker_base_uptr_->getWidth() : 0;
-}
-
-int BufferFillingWorkerFacade::getHeight() const {
-    return worker_base_uptr_ ? worker_base_uptr_->getHeight() : 0;
-}
-
-double BufferFillingWorkerFacade::getBytesPerPixel() const {
-    return worker_base_uptr_ ? worker_base_uptr_->getBytesPerPixel() : 0;
-}
-
-const char* BufferFillingWorkerFacade::getPath() const {
-    return worker_base_uptr_ ? worker_base_uptr_->getPath() : "";
+std::string BufferFillingWorkerFacade::getPath() const {
+    if (worker_base_uptr_) {
+        return worker_base_uptr_->getPath();
+    }
+    return std::string();
 }
 
 bool BufferFillingWorkerFacade::hasMoreFrames() const {
@@ -186,10 +161,25 @@ BufferPoolType BufferFillingWorkerFacade::getPrimaryBufferPoolType() {
     return BufferPoolType::DECODE_VIDEO_PRIMARY;  // 默认值
 }
 
-// ============ v2.16：编解码器参数和时间基获取 ============
-const struct AVCodecParameters* BufferFillingWorkerFacade::getCodecParameters() const {
+// ============ 数据源属性（v2.14）============
+
+int BufferFillingWorkerFacade::getSourceWidth() const {
+    return worker_base_uptr_ ? worker_base_uptr_->getSourceWidth() : 0;
+}
+
+int BufferFillingWorkerFacade::getSourceHeight() const {
+    return worker_base_uptr_ ? worker_base_uptr_->getSourceHeight() : 0;
+}
+
+AVPixelFormat BufferFillingWorkerFacade::getSourcePixelFormat() const {
+    return worker_base_uptr_ ? worker_base_uptr_->getSourcePixelFormat() : AV_PIX_FMT_NONE;
+}
+
+// ============ 编解码器参数和时间基获取（v2.14）============
+
+const struct AVCodecParameters* BufferFillingWorkerFacade::getSourceCodecParameters() const {
     if (worker_base_uptr_) {
-        return worker_base_uptr_->getCodecParameters();
+        return worker_base_uptr_->getSourceCodecParameters();
     }
     return nullptr;
 }
@@ -201,23 +191,16 @@ struct AVRational BufferFillingWorkerFacade::getTimeBase() const {
     return {1, 25};  // 默认 25fps
 }
 
-int BufferFillingWorkerFacade::getSourceWidth() const {
-    if (worker_base_uptr_) {
-        return worker_base_uptr_->getSourceWidth();
-    }
-    return 0;
+// ============ Worker 输出属性（v2.14）============
+
+int BufferFillingWorkerFacade::getOutputWidth() const {
+    return worker_base_uptr_ ? worker_base_uptr_->getOutputWidth() : 0;
 }
 
-int BufferFillingWorkerFacade::getSourceHeight() const {
-    if (worker_base_uptr_) {
-        return worker_base_uptr_->getSourceHeight();
-    }
-    return 0;
+int BufferFillingWorkerFacade::getOutputHeight() const {
+    return worker_base_uptr_ ? worker_base_uptr_->getOutputHeight() : 0;
 }
 
-AVPixelFormat BufferFillingWorkerFacade::getSourcePixelFormat() const {
-    if (worker_base_uptr_) {
-        return worker_base_uptr_->getSourcePixelFormat();
-    }
-    return AV_PIX_FMT_NONE;
+double BufferFillingWorkerFacade::getOutputBytesPerPixel(int channel) const {
+    return worker_base_uptr_ ? worker_base_uptr_->getOutputBytesPerPixel(channel) : 0;
 }
