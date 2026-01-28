@@ -5,6 +5,7 @@
 #include <vector>
 #include <atomic>
 #include <cstdio>
+#include <log4cplus/logger.h>
 
 // FFmpeg前向声明
 extern "C" {
@@ -226,6 +227,9 @@ public:
 private:
     CompareConfig config_;
     bool is_open_;
+    
+    // ========== 日志系统 ==========
+    log4cplus::Logger logger_;
     
     // ========== 统计信息（原子变量，线程安全）==========
     std::atomic<int> compare_count_;
