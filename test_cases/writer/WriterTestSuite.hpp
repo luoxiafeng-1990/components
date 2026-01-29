@@ -47,13 +47,15 @@ struct WriterTestParams {
     int width;              ///< 输出宽度
     int height;             ///< 输出高度
     int save_frames;        ///< 保存帧数
+    bool use_hardware;      ///< 是否使用硬件解码（默认 true）
     
     WriterTestParams(
         OutputFormat fmt = OutputFormat::YUV_NV12,
         const std::string& desc = "NV12",
         int w = 1920, int h = 1080,
-        int frames = 10
-    ) : format(fmt), description(desc), width(w), height(h), save_frames(frames) {}
+        int frames = 10,
+        bool hw = true
+    ) : format(fmt), description(desc), width(w), height(h), save_frames(frames), use_hardware(hw) {}
 };
 
 /**

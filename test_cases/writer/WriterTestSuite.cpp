@@ -215,6 +215,7 @@ bool WriterTestSuite::parseArgs(int argc, char* argv[], WorkerConfig& config,
         {"help",      no_argument,       0, 'h'},
         {"list",      no_argument,       0, 'l'},
         {"input",     required_argument, 0, 'i'},
+        {"decoder",   required_argument, 0, 'D'},
         {"output",    required_argument, 0, 'o'},
         {"format",    required_argument, 0, 'f'},
         {"frames",    required_argument, 0, 'n'},
@@ -230,7 +231,7 @@ bool WriterTestSuite::parseArgs(int argc, char* argv[], WorkerConfig& config,
     bool all_yuv = false;
     
     int opt;
-    while ((opt = getopt_long(argc, argv, "hli:o:f:n:RYv",
+    while ((opt = getopt_long(argc, argv, "hli:D:o:f:n:RYv",
                               long_options, nullptr)) != -1) {
         switch (opt) {
             case 'h':
@@ -244,6 +245,19 @@ bool WriterTestSuite::parseArgs(int argc, char* argv[], WorkerConfig& config,
             case 'i':
                 input_path = optarg;
                 break;
+            
+            case 'D': {
+                std::string decoder_type = optarg;
+                if (decoder_type == "hw" || decoder_type == "hardware") {
+                    params.use_hardware = true;
+                } else if (decoder_type == "sw" || decoder_type == "software") {
+                    params.use_hardware = false;
+                } else {
+                    std::cerr << "Invalid decoder type: " << optarg << ", use 'hw' or 'sw'\n";
+                    return false;
+                }
+                break;
+            }
             
             case 'o':
                 output_path = optarg;
@@ -325,6 +339,7 @@ void WriterTestSuite::printHelp() const {
     std::cout << "  -h, --help           Show this help message\n";
     std::cout << "  -l, --list           List all predefined tests\n";
     std::cout << "  -i, --input <file>   Input video file\n";
+    std::cout << "  -D, --decoder <type> Decoder type (hw|hardware|sw|software, default: hw)\n";
     std::cout << "  -o, --output <path>  Output file/directory\n";
     std::cout << "  -f, --format <fmt>   Output format (nv12, rgb888, etc.)\n";
     std::cout << "  -n, --frames <n>     Number of frames to save (default: 10)\n";
@@ -392,12 +407,17 @@ TestResult WriterTestSuite::runSingle(
 ) {
     auto& logger = getLogger();
     
-    // 创建配置 - 根据格式选择合适的工厂方法
-    // RGB 格式值 >= 1000，YUV 格式值 < 1000
+    // 创建配置 - 根据解码方式和格式选择合适的工厂方法
     WorkerConfig config;
     
-    if (static_cast<int>(params.format) >= 1000) {
-        // RGB 格式 - 使用 PP1 通道
+    if (!params.use_hardware) {
+        // 软件解码模式
+        config = common::WorkerConfigFactory::createSoftwareDecode(
+            input_path, params.width, params.height);
+        LOG4CPLUS_WARN(logger, 
+            "Software decode mode: Hardware PP features are not available");
+    } else if (static_cast<int>(params.format) >= 1000) {
+        // 硬件解码 + RGB 格式 - 使用 PP1 通道
         config = common::WorkerConfigFactory::createPP1RgbConfig(
             input_path,
             params.format,
@@ -405,7 +425,7 @@ TestResult WriterTestSuite::runSingle(
             params.height
         );
     } else {
-        // YUV 格式 - 使用 PP0 通道
+        // 硬件解码 + YUV 格式 - 使用 PP0 通道
         config = common::WorkerConfigFactory::createPP0YuvConfig(
             input_path,
             params.format,

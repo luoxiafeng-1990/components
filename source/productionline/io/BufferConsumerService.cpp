@@ -61,8 +61,9 @@ ConsumeResult BufferConsumerService::start(
             break;
             
         case ExecuteMode::COMPARE:
-            LOG4CPLUS_INFO_FMT(logger_, "Starting COMPARE mode with %zu workers", configs.size());
-            result = startProductionLinesCompare(configs);
+            LOG4CPLUS_INFO_FMT(logger_, "Starting COMPARE mode with %zu workers, flags=0x%X", 
+                              configs.size(), consume_flags);
+            result = startProductionLinesCompare(configs, consume_flags);
             break;
             
         case ExecuteMode::PARALLEL:
@@ -158,7 +159,8 @@ ConsumeResult BufferConsumerService::startProductionLine(
 // ============================================================
 
 ConsumeResult BufferConsumerService::startProductionLinesCompare(
-    const std::vector<WorkerConfig>& configs
+    const std::vector<WorkerConfig>& configs,
+    uint32_t consume_flags
 ) {
     ConsumeResult result;
     auto start_time = std::chrono::steady_clock::now();
@@ -204,7 +206,7 @@ ConsumeResult BufferConsumerService::startProductionLinesCompare(
             producers.push_back(std::move(producer));
         }
         
-        // 2. 创建 CompareConsumer
+        // 2. 创建 CompareConsumer（COMPARE 模式核心）
         const auto& consumer_config = configs[0].consumer;
         auto compare_consumer = std::make_shared<CompareConsumer>(
             consumer_config.min_psnr,
@@ -213,16 +215,58 @@ ConsumeResult BufferConsumerService::startProductionLinesCompare(
             consumer_config.enable_ssim
         );
         
-        // 3. 执行同步消费循环
-        consumeLoopCompare(pools, compare_consumer, consumer_config, result);
+        // 3. 根据 consume_flags 决定是否叠加其他消费类型
+        std::shared_ptr<IBufferConsumer> consumer;
         
-        // 4. 获取比较结果
+        // 检查是否有额外的消费类型（DISPLAY、SAVE_RAW、SAVE_ENCODED）
+        uint32_t extra_flags = consume_flags & (CONSUME_DISPLAY | CONSUME_SAVE_RAW | CONSUME_SAVE_ENCODED);
+        
+        if (extra_flags != 0) {
+            // 使用 MultiConsumer 组合多个消费策略
+            auto multi = std::make_shared<MultiConsumer>();
+            
+            // CompareConsumer 作为核心（第一个添加）
+            multi->addStrategy(compare_consumer);
+            
+            // 叠加其他消费类型（使用第一个 config 的配置）
+            if (consume_flags & CONSUME_DISPLAY) {
+                multi->addStrategy(std::make_shared<DisplayConsumer>());
+                LOG4CPLUS_DEBUG(logger_, "COMPARE mode: added DisplayConsumer");
+            }
+            if (consume_flags & CONSUME_SAVE_RAW) {
+                multi->addStrategy(std::make_shared<SaveRawConsumer>(
+                    configs[0].consumer.output_path,
+                    configs[0].consumer.save_frames
+                ));
+                LOG4CPLUS_DEBUG_FMT(logger_, "COMPARE mode: added SaveRawConsumer to %s", 
+                                   configs[0].consumer.output_path.c_str());
+            }
+            if (consume_flags & CONSUME_SAVE_ENCODED) {
+                multi->addStrategy(std::make_shared<SaveEncodedConsumer>(
+                    configs[0].consumer.output_path,
+                    configs[0].data_source.codec_params,
+                    configs[0].data_source.time_base
+                ));
+                LOG4CPLUS_DEBUG_FMT(logger_, "COMPARE mode: added SaveEncodedConsumer to %s", 
+                                   configs[0].consumer.output_path.c_str());
+            }
+            
+            consumer = multi;
+        } else {
+            // 只有 CompareConsumer
+            consumer = compare_consumer;
+        }
+        
+        // 4. 执行同步消费循环
+        consumeLoopCompare(pools, consumer, consumer_config, result);
+        
+        // 5. 获取比较结果（从 CompareConsumer 获取）
         result.psnr_average = compare_consumer->getAveragePsnr();
         result.ssim_average = compare_consumer->getAverageSsim();
         result.compare_passed = compare_consumer->isPassed();
         result.frames_compared = compare_consumer->getComparedCount();
         
-        // 5. 停止所有生产线
+        // 6. 停止所有生产线
         for (auto& producer : producers) {
             producer->stop();
         }

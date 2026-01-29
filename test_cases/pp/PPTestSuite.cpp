@@ -301,6 +301,7 @@ bool PPTestSuite::parseArgs(int argc, char* argv[], WorkerConfig& config, PPTest
         {"help",       no_argument,       0, 'h'},
         {"list",       no_argument,       0, 'l'},
         {"input",      required_argument, 0, 'i'},
+        {"decoder",    required_argument, 0, 'D'},
         {"format",     required_argument, 0, 'f'},
         {"channel",    required_argument, 0, 'c'},
         {"width",      required_argument, 0, 'W'},
@@ -321,7 +322,7 @@ bool PPTestSuite::parseArgs(int argc, char* argv[], WorkerConfig& config, PPTest
     std::string color_std_str = "bt601";
     
     int opt;
-    while ((opt = getopt_long(argc, argv, "hli:f:c:W:H:R:C:s:o:n:dm:v",
+    while ((opt = getopt_long(argc, argv, "hli:D:f:c:W:H:R:C:s:o:n:dm:v",
                               long_options, nullptr)) != -1) {
         switch (opt) {
             case 'h':
@@ -335,6 +336,20 @@ bool PPTestSuite::parseArgs(int argc, char* argv[], WorkerConfig& config, PPTest
             case 'i':
                 input_path = optarg;
                 break;
+            
+            case 'D': {
+                std::string decoder_type = optarg;
+                if (decoder_type == "hw" || decoder_type == "hardware") {
+                    params.use_hardware = true;
+                } else if (decoder_type == "sw" || decoder_type == "software") {
+                    params.use_hardware = false;
+                } else {
+                    LOG4CPLUS_ERROR_FMT(getLogger(), 
+                        "Invalid decoder type '%s', use 'hw' or 'sw'", optarg);
+                    return false;
+                }
+                break;
+            }
             
             case 'f':
                 format_str = optarg;
@@ -479,6 +494,7 @@ void PPTestSuite::printHelp() const {
     std::cout << "  -h, --help              显示帮助信息\n";
     std::cout << "  -l, --list              列出所有预定义测试\n";
     std::cout << "  -i, --input <path>      输入视频路径\n";
+    std::cout << "  -D, --decoder <type>    解码方式 (hw|hardware|sw|software，默认: hw)\n";
     std::cout << "  -f, --format <fmt>      输出格式 (nv12|argb888|...)\n";
     std::cout << "  -c, --channel <ch>      通道选择 (pp0|pp1|multi)\n";
     std::cout << "  -W, --width <n>         输出宽度\n";
@@ -631,6 +647,16 @@ void PPTestSuite::listTests() const {
 WorkerConfig PPTestSuite::buildConfig(const std::string& path, const PPTestParams& params) {
     WorkerConfig config;
     
+    // 软件解码模式：不使用硬件 PP，直接解码
+    if (!params.use_hardware) {
+        config = common::WorkerConfigFactory::createSoftwareDecode(
+            path, params.width, params.height);
+        LOG4CPLUS_WARN(getLogger(), 
+            "Software decode mode: Hardware PP features are not available");
+        return config;
+    }
+    
+    // 硬件解码模式：使用 TACO PP
     if (params.channel == "pp0") {
         config = common::WorkerConfigFactory::createPP0YuvConfig(
             path, params.format, params.width, params.height, params.color_std);

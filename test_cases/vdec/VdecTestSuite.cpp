@@ -89,8 +89,8 @@ const std::map<std::string, DecodeTestParams>& VdecTestSuite::getPredefinedTests
         // ========================================
         // 软件解码测试
         // ========================================
-        {"sw_h264_1920x1080_30",  {"software", 1920, 1080, 30.0, ""}},
-        {"sw_h265_1920x1080_30",  {"software", 1920, 1080, 30.0, ""}},
+        {"sw_h264_1920x1080_30",  {"h264", 1920, 1080, 30.0, "", false}},
+        {"sw_h265_1920x1080_30",  {"h265", 1920, 1080, 30.0, "", false}},
         
         // ========================================
         // RTSP H.264 测试（CBR/VBR）
@@ -194,9 +194,26 @@ int VdecTestSuite::run(int argc, char* argv[]) {
     }
     
     // 生成测试名称
+    // 方案 A：使用预定义测试名称（如果匹配）
+    // 方案 B：使用文件路径 + 实际配置（如果未匹配预定义测试）
     std::ostringstream test_name;
-    test_name << params.codec << " " << params.width << "x" << params.height 
-              << " " << static_cast<int>(params.fps) << "fps";
+    if (params.isPredefined()) {
+        // 使用预定义测试名称 + 参数信息
+        test_name << params.predefined_name << " (" 
+                  << params.codec << " " << params.width << "x" << params.height 
+                  << " " << static_cast<int>(params.fps) << "fps)";
+    } else {
+        // 未匹配预定义测试，使用文件名 + 实际配置
+        // 提取文件名（去掉路径）
+        std::string filename = config.data_source.path;
+        size_t pos = filename.find_last_of("/\\");
+        if (pos != std::string::npos) {
+            filename = filename.substr(pos + 1);
+        }
+        test_name << "Custom: " << filename << " (" 
+                  << params.codec << " " << params.width << "x" << params.height 
+                  << " " << static_cast<int>(params.fps) << "fps)";
+    }
     
     // ========================================
     // 根据 profile 字段判断执行模式
@@ -214,7 +231,16 @@ int VdecTestSuite::run(int argc, char* argv[]) {
             config.data_source.path, params.width, params.height);
         sw_config.consumer.target_fps = params.fps;
         
-        auto result = runCompare({hw_config, sw_config}, test_name.str() + " (COMPARE)");
+        // COMPARE 模式也支持叠加其他消费类型（display、save）
+        uint32_t compare_flags = 0;
+        if (config.consumer.enable_display) {
+            compare_flags |= consumer::CONSUME_DISPLAY;
+        }
+        if (config.consumer.save_frames != 0) {
+            compare_flags |= consumer::CONSUME_SAVE_RAW;
+        }
+        
+        auto result = runCompare({hw_config, sw_config}, compare_flags, test_name.str() + " (COMPARE)");
         consumer::BufferConsumerService::printResult(test_name.str(), result);
         return result.success ? 0 : 1;
     }
@@ -228,22 +254,35 @@ int VdecTestSuite::run(int argc, char* argv[]) {
         
         std::vector<WorkerConfig> configs;
         for (int i = 0; i < thread_count; i++) {
-            auto cfg = common::WorkerConfigFactory::createDecode(
-                config.data_source.path, params.codec, params.width, params.height);
+            WorkerConfig cfg;
+            if (params.use_hardware) {
+                cfg = common::WorkerConfigFactory::createDecode(
+                    config.data_source.path, params.codec, params.width, params.height);
+            } else {
+                cfg = common::WorkerConfigFactory::createSoftwareDecode(
+                    config.data_source.path, params.width, params.height);
+            }
             cfg.consumer = config.consumer;
             cfg.consumer.target_fps = params.fps;
             configs.push_back(cfg);
         }
         
-        auto result = runParallel(configs, consumer::CONSUME_COUNT, 
+        uint32_t parallel_flags = buildConsumeFlags(config);
+        auto result = runParallel(configs, parallel_flags, 
                                    test_name.str() + " (PARALLEL x" + std::to_string(thread_count) + ")");
         consumer::BufferConsumerService::printResult(test_name.str(), result);
         return result.success ? 0 : 1;
     }
     
     // SINGLE 模式：默认单路消费
-    auto full_config = common::WorkerConfigFactory::createDecode(
-        config.data_source.path, params.codec, params.width, params.height);
+    WorkerConfig full_config;
+    if (params.use_hardware) {
+        full_config = common::WorkerConfigFactory::createDecode(
+            config.data_source.path, params.codec, params.width, params.height);
+    } else {
+        full_config = common::WorkerConfigFactory::createSoftwareDecode(
+            config.data_source.path, params.width, params.height);
+    }
     full_config.consumer = config.consumer;
     full_config.consumer.target_fps = params.fps;
     
@@ -263,6 +302,7 @@ bool VdecTestSuite::parseArgs(int argc, char* argv[], WorkerConfig& config, Deco
         {"file",       required_argument, 0, 'f'},
         {"rtsp",       required_argument, 0, 'r'},
         {"codec",      required_argument, 0, 'c'},
+        {"decoder",    required_argument, 0, 'D'},
         {"width",      required_argument, 0, 'W'},
         {"height",     required_argument, 0, 'H'},
         {"resolution", required_argument, 0, 'R'},
@@ -283,7 +323,7 @@ bool VdecTestSuite::parseArgs(int argc, char* argv[], WorkerConfig& config, Deco
     std::string input_path;
     
     int opt;
-    while ((opt = getopt_long(argc, argv, "hlf:r:c:W:H:R:F:m:s:o:dpSP:M:e:v", 
+    while ((opt = getopt_long(argc, argv, "hlf:r:c:D:W:H:R:F:m:s:o:dpSP:M:e:v", 
                               long_options, nullptr)) != -1) {
         switch (opt) {
             case 'h':
@@ -302,6 +342,20 @@ bool VdecTestSuite::parseArgs(int argc, char* argv[], WorkerConfig& config, Deco
             case 'c':
                 params.codec = optarg;
                 break;
+            
+            case 'D': {
+                std::string decoder_type = optarg;
+                if (decoder_type == "hw" || decoder_type == "hardware") {
+                    params.use_hardware = true;
+                } else if (decoder_type == "sw" || decoder_type == "software") {
+                    params.use_hardware = false;
+                } else {
+                    LOG4CPLUS_ERROR_FMT(getLogger(), 
+                        "Invalid decoder type '%s', use 'hw' or 'sw'", optarg);
+                    return false;
+                }
+                break;
+            }
             
             case 'W':
                 params.width = std::stoi(optarg);
@@ -381,6 +435,7 @@ bool VdecTestSuite::parseArgs(int argc, char* argv[], WorkerConfig& config, Deco
         auto it = tests.find(arg);
         if (it != tests.end()) {
             params = it->second;
+            params.predefined_name = arg;  // 记录匹配的预定义测试名称
             // 下一个参数作为路径
             if (i + 1 < argc) {
                 input_path = argv[++i];
@@ -395,7 +450,7 @@ bool VdecTestSuite::parseArgs(int argc, char* argv[], WorkerConfig& config, Deco
     }
     
     if (input_path.empty()) {
-        LOG4CPLUS_ERROR(getLogger(), "No input file or RTSP URL specified");
+        std::cerr << "Error: No input file or RTSP URL specified\n" << std::endl;
         printHelp();
         return false;
     }
@@ -424,131 +479,121 @@ int VdecTestSuite::runPredefinedTest(const std::string& test_name, const std::st
 }
 
 void VdecTestSuite::printHelp() const {
-    auto& logger = getLogger();
-    LOG4CPLUS_INFO(logger, "");
-    LOG4CPLUS_INFO(logger, "VDEC Module - 视频解码测试");
-    LOG4CPLUS_INFO(logger, "");
-    LOG4CPLUS_INFO(logger, "Usage:");
-    LOG4CPLUS_INFO(logger, "  qa_cases vdec [options] <video_path>");
-    LOG4CPLUS_INFO(logger, "  qa_cases vdec [options] <test_name> <video_path>");
-    LOG4CPLUS_INFO(logger, "");
-    LOG4CPLUS_INFO(logger, "Options:");
-    LOG4CPLUS_INFO(logger, "  -h, --help              显示帮助信息");
-    LOG4CPLUS_INFO(logger, "  -l, --list              列出所有预定义测试");
-    LOG4CPLUS_INFO(logger, "  -f, --file <path>       视频文件路径");
-    LOG4CPLUS_INFO(logger, "  -r, --rtsp <url>        RTSP URL");
-    LOG4CPLUS_INFO(logger, "  -c, --codec <name>      编解码器 (h264|h265|mjpeg|software)");
-    LOG4CPLUS_INFO(logger, "  -W, --width <n>         分辨率宽度");
-    LOG4CPLUS_INFO(logger, "  -H, --height <n>        分辨率高度");
-    LOG4CPLUS_INFO(logger, "  -R, --resolution <WxH>  分辨率 (如 1920x1080)");
-    LOG4CPLUS_INFO(logger, "  -F, --fps <n>           目标帧率");
-    LOG4CPLUS_INFO(logger, "  -m, --max-frames <n>    最大帧数 (-1=无限制)");
-    LOG4CPLUS_INFO(logger, "  -s, --save <n>          保存帧数 (0=不保存, -1=全部)");
-    LOG4CPLUS_INFO(logger, "  -o, --output <path>     输出文件路径");
-    LOG4CPLUS_INFO(logger, "  -d, --display           启用显示输出 (CONSUME_DISPLAY)");
-    LOG4CPLUS_INFO(logger, "  -p, --psnr              启用 PSNR 验证 (ExecuteMode::COMPARE)");
-    LOG4CPLUS_INFO(logger, "  -S, --ssim              启用 SSIM 验证 (ExecuteMode::COMPARE)");
-    LOG4CPLUS_INFO(logger, "  -P, --min-psnr <n>      PSNR 阈值 (默认: 30.0 dB)");
-    LOG4CPLUS_INFO(logger, "  -M, --min-ssim <n>      SSIM 阈值 (默认: 0.95)");
-    LOG4CPLUS_INFO(logger, "  -e, --reference <path>  参考文件路径");
-    LOG4CPLUS_INFO(logger, "  -v, --verbose           详细日志");
-    LOG4CPLUS_INFO(logger, "");
-    LOG4CPLUS_INFO(logger, "ExecuteMode Mapping:");
-    LOG4CPLUS_INFO(logger, "  SINGLE   - 默认单路解码");
-    LOG4CPLUS_INFO(logger, "  COMPARE  - --psnr/--ssim 启用时，HW vs SW 对比");
-    LOG4CPLUS_INFO(logger, "  PARALLEL - multi_worker/multithread_N 测试");
-    LOG4CPLUS_INFO(logger, "");
-    LOG4CPLUS_INFO(logger, "Examples:");
-    LOG4CPLUS_INFO(logger, "  qa_cases vdec video.mp4                           # SINGLE");
-    LOG4CPLUS_INFO(logger, "  qa_cases vdec --display video.mp4                 # SINGLE + DISPLAY");
-    LOG4CPLUS_INFO(logger, "  qa_cases vdec --psnr video.mp4                    # COMPARE (HW vs SW)");
-    LOG4CPLUS_INFO(logger, "  qa_cases vdec multithread_4 video.mp4             # PARALLEL x4");
-    LOG4CPLUS_INFO(logger, "");
+    std::cout << "\n"
+              << "VDEC Module - 视频解码测试\n"
+              << "\n"
+              << "Usage:\n"
+              << "  qa_cases vdec [options] <video_path>\n"
+              << "  qa_cases vdec [options] <test_name> <video_path>\n"
+              << "\n"
+              << "Options:\n"
+              << "  -h, --help              显示帮助信息\n"
+              << "  -l, --list              列出所有预定义测试\n"
+              << "  -f, --file <path>       视频文件路径\n"
+              << "  -r, --rtsp <url>        RTSP URL\n"
+              << "  -c, --codec <name>      编解码格式 (h264|h265|mjpeg)\n"
+              << "  -D, --decoder <type>    解码方式 (hw|hardware|sw|software，默认: hw)\n"
+              << "  -W, --width <n>         分辨率宽度\n"
+              << "  -H, --height <n>        分辨率高度\n"
+              << "  -R, --resolution <WxH>  分辨率 (如 1920x1080)\n"
+              << "  -F, --fps <n>           目标帧率\n"
+              << "  -m, --max-frames <n>    最大帧数 (-1=无限制)\n"
+              << "  -s, --save <n>          保存帧数 (0=不保存, -1=全部)\n"
+              << "  -o, --output <path>     输出文件路径\n"
+              << "  -d, --display           启用显示输出 (CONSUME_DISPLAY)\n"
+              << "  -p, --psnr              启用 PSNR 验证 (ExecuteMode::COMPARE)\n"
+              << "  -S, --ssim              启用 SSIM 验证 (ExecuteMode::COMPARE)\n"
+              << "  -P, --min-psnr <n>      PSNR 阈值 (默认: 30.0 dB)\n"
+              << "  -M, --min-ssim <n>      SSIM 阈值 (默认: 0.95)\n"
+              << "  -e, --reference <path>  参考文件路径\n"
+              << "  -v, --verbose           详细日志\n"
+              << "\n"
+              << "ExecuteMode Mapping:\n"
+              << "  SINGLE   - 默认单路解码，支持 --decoder hw/sw\n"
+              << "  COMPARE  - --psnr/--ssim 启用时，HW vs SW 对比\n"
+              << "  PARALLEL - multi_worker/multithread_N 测试，支持 --decoder hw/sw\n"
+              << "\n"
+              << "Examples:\n"
+              << "  qa_cases vdec video.mp4                           # SINGLE\n"
+              << "  qa_cases vdec --display video.mp4                 # SINGLE + DISPLAY\n"
+              << "  qa_cases vdec --psnr video.mp4                    # COMPARE (HW vs SW)\n"
+              << "  qa_cases vdec multithread_4 video.mp4             # PARALLEL x4\n"
+              << std::endl;
 }
 
 void VdecTestSuite::listTests() const {
-    auto& logger = getLogger();
-    LOG4CPLUS_INFO(logger, "");
-    LOG4CPLUS_INFO(logger, "Available VDEC tests:");
-    LOG4CPLUS_INFO(logger, "────────────────────────────────────────────────────────");
-    
-    LOG4CPLUS_INFO(logger, "");
-    LOG4CPLUS_INFO(logger, "H.264 Tests (9) - ExecuteMode::SINGLE:");
-    LOG4CPLUS_INFO(logger, "  h264_128x128_30         H.264 128x128 30fps main");
-    LOG4CPLUS_INFO(logger, "  h264_320x240_30         H.264 320x240 30fps high");
-    LOG4CPLUS_INFO(logger, "  h264_640x480_30         H.264 640x480 30fps main");
-    LOG4CPLUS_INFO(logger, "  h264_640x480_60         H.264 640x480 60fps high");
-    LOG4CPLUS_INFO(logger, "  h264_1280x720_30        H.264 720p 30fps high");
-    LOG4CPLUS_INFO(logger, "  h264_1920x1080_30       H.264 1080p 30fps high");
-    LOG4CPLUS_INFO(logger, "  h264_1920x1080_60       H.264 1080p 60fps high");
-    LOG4CPLUS_INFO(logger, "  h264_2560x1440_30       H.264 1440p 30fps high");
-    LOG4CPLUS_INFO(logger, "  h264_3840x2160_30       H.264 4K 30fps high");
-    
-    LOG4CPLUS_INFO(logger, "");
-    LOG4CPLUS_INFO(logger, "H.265/HEVC Tests (9) - ExecuteMode::SINGLE:");
-    LOG4CPLUS_INFO(logger, "  h265_128x128_30         H.265 128x128 30fps");
-    LOG4CPLUS_INFO(logger, "  h265_320x240_30         H.265 320x240 30fps");
-    LOG4CPLUS_INFO(logger, "  h265_640x480_30         H.265 640x480 30fps");
-    LOG4CPLUS_INFO(logger, "  h265_640x480_60         H.265 640x480 60fps");
-    LOG4CPLUS_INFO(logger, "  h265_1280x720_30        H.265 720p 30fps");
-    LOG4CPLUS_INFO(logger, "  h265_1920x1080_30       H.265 1080p 30fps");
-    LOG4CPLUS_INFO(logger, "  h265_1920x1080_60       H.265 1080p 60fps");
-    LOG4CPLUS_INFO(logger, "  h265_2560x1440_30       H.265 1440p 30fps");
-    LOG4CPLUS_INFO(logger, "  h265_3840x2160_30       H.265 4K 30fps");
-    
-    LOG4CPLUS_INFO(logger, "");
-    LOG4CPLUS_INFO(logger, "MJPEG Tests (9) - ExecuteMode::SINGLE:");
-    LOG4CPLUS_INFO(logger, "  mjpeg_128x128_30        MJPEG 128x128 30fps");
-    LOG4CPLUS_INFO(logger, "  mjpeg_320x240_30        MJPEG 320x240 30fps");
-    LOG4CPLUS_INFO(logger, "  mjpeg_640x480_30        MJPEG 640x480 30fps");
-    LOG4CPLUS_INFO(logger, "  mjpeg_640x480_60        MJPEG 640x480 60fps");
-    LOG4CPLUS_INFO(logger, "  mjpeg_1280x720_30       MJPEG 720p 30fps");
-    LOG4CPLUS_INFO(logger, "  mjpeg_1920x1080_30      MJPEG 1080p 30fps");
-    LOG4CPLUS_INFO(logger, "  mjpeg_1920x1080_60      MJPEG 1080p 60fps");
-    LOG4CPLUS_INFO(logger, "  mjpeg_2560x1440_30      MJPEG 1440p 30fps");
-    LOG4CPLUS_INFO(logger, "  mjpeg_3840x2160_30      MJPEG 4K 30fps");
-    
-    LOG4CPLUS_INFO(logger, "");
-    LOG4CPLUS_INFO(logger, "Software Decode Tests (2) - ExecuteMode::SINGLE:");
-    LOG4CPLUS_INFO(logger, "  sw_h264_1920x1080_30    Software H.264 1080p 30fps");
-    LOG4CPLUS_INFO(logger, "  sw_h265_1920x1080_30    Software H.265 1080p 30fps");
-    
-    LOG4CPLUS_INFO(logger, "");
-    LOG4CPLUS_INFO(logger, "RTSP H.264 Tests (6) - ExecuteMode::SINGLE:");
-    LOG4CPLUS_INFO(logger, "  rtsp_h264_1280x720_30_cbr   RTSP H.264 720p CBR");
-    LOG4CPLUS_INFO(logger, "  rtsp_h264_1280x720_30_vbr   RTSP H.264 720p VBR");
-    LOG4CPLUS_INFO(logger, "  rtsp_h264_1920x1080_30_cbr  RTSP H.264 1080p CBR");
-    LOG4CPLUS_INFO(logger, "  rtsp_h264_1920x1080_30_vbr  RTSP H.264 1080p VBR");
-    LOG4CPLUS_INFO(logger, "  rtsp_h264_3840x2160_30_cbr  RTSP H.264 4K CBR");
-    LOG4CPLUS_INFO(logger, "  rtsp_h264_3840x2160_30_vbr  RTSP H.264 4K VBR");
-    
-    LOG4CPLUS_INFO(logger, "");
-    LOG4CPLUS_INFO(logger, "RTSP H.265 Tests (6) - ExecuteMode::SINGLE:");
-    LOG4CPLUS_INFO(logger, "  rtsp_h265_1280x720_30_cbr   RTSP H.265 720p CBR");
-    LOG4CPLUS_INFO(logger, "  rtsp_h265_1280x720_30_vbr   RTSP H.265 720p VBR");
-    LOG4CPLUS_INFO(logger, "  rtsp_h265_1920x1080_30_cbr  RTSP H.265 1080p CBR");
-    LOG4CPLUS_INFO(logger, "  rtsp_h265_1920x1080_30_vbr  RTSP H.265 1080p VBR");
-    LOG4CPLUS_INFO(logger, "  rtsp_h265_3840x2160_30_cbr  RTSP H.265 4K CBR");
-    LOG4CPLUS_INFO(logger, "  rtsp_h265_3840x2160_30_vbr  RTSP H.265 4K VBR");
-    
-    LOG4CPLUS_INFO(logger, "");
-    LOG4CPLUS_INFO(logger, "RTSP MJPEG Tests (1) - ExecuteMode::SINGLE:");
-    LOG4CPLUS_INFO(logger, "  rtsp_mjpeg_32768x18432_30   RTSP MJPEG Ultra-High");
-    
-    LOG4CPLUS_INFO(logger, "");
-    LOG4CPLUS_INFO(logger, "Multi-Worker Tests (2) - ExecuteMode::PARALLEL:");
-    LOG4CPLUS_INFO(logger, "  multi_worker               HW+SW concurrent decode");
-    LOG4CPLUS_INFO(logger, "  multi_worker_4k            HW+SW concurrent 4K decode");
-    
-    LOG4CPLUS_INFO(logger, "");
-    LOG4CPLUS_INFO(logger, "Multi-Thread Tests (3) - ExecuteMode::PARALLEL:");
-    LOG4CPLUS_INFO(logger, "  multithread_2              2-thread decode");
-    LOG4CPLUS_INFO(logger, "  multithread_4              4-thread decode");
-    LOG4CPLUS_INFO(logger, "  multithread_8              8-thread decode");
-    
-    LOG4CPLUS_INFO(logger, "────────────────────────────────────────────────────────");
-    LOG4CPLUS_INFO(logger, "Total: 47 predefined tests");
-    LOG4CPLUS_INFO(logger, "");
+    std::cout << "\n"
+              << "Available VDEC tests:\n"
+              << "────────────────────────────────────────────────────────\n"
+              << "\n"
+              << "H.264 Tests (9) - ExecuteMode::SINGLE:\n"
+              << "  h264_128x128_30         H.264 128x128 30fps main\n"
+              << "  h264_320x240_30         H.264 320x240 30fps high\n"
+              << "  h264_640x480_30         H.264 640x480 30fps main\n"
+              << "  h264_640x480_60         H.264 640x480 60fps high\n"
+              << "  h264_1280x720_30        H.264 720p 30fps high\n"
+              << "  h264_1920x1080_30       H.264 1080p 30fps high\n"
+              << "  h264_1920x1080_60       H.264 1080p 60fps high\n"
+              << "  h264_2560x1440_30       H.264 1440p 30fps high\n"
+              << "  h264_3840x2160_30       H.264 4K 30fps high\n"
+              << "\n"
+              << "H.265/HEVC Tests (9) - ExecuteMode::SINGLE:\n"
+              << "  h265_128x128_30         H.265 128x128 30fps\n"
+              << "  h265_320x240_30         H.265 320x240 30fps\n"
+              << "  h265_640x480_30         H.265 640x480 30fps\n"
+              << "  h265_640x480_60         H.265 640x480 60fps\n"
+              << "  h265_1280x720_30        H.265 720p 30fps\n"
+              << "  h265_1920x1080_30       H.265 1080p 30fps\n"
+              << "  h265_1920x1080_60       H.265 1080p 60fps\n"
+              << "  h265_2560x1440_30       H.265 1440p 30fps\n"
+              << "  h265_3840x2160_30       H.265 4K 30fps\n"
+              << "\n"
+              << "MJPEG Tests (9) - ExecuteMode::SINGLE:\n"
+              << "  mjpeg_128x128_30        MJPEG 128x128 30fps\n"
+              << "  mjpeg_320x240_30        MJPEG 320x240 30fps\n"
+              << "  mjpeg_640x480_30        MJPEG 640x480 30fps\n"
+              << "  mjpeg_640x480_60        MJPEG 640x480 60fps\n"
+              << "  mjpeg_1280x720_30       MJPEG 720p 30fps\n"
+              << "  mjpeg_1920x1080_30      MJPEG 1080p 30fps\n"
+              << "  mjpeg_1920x1080_60      MJPEG 1080p 60fps\n"
+              << "  mjpeg_2560x1440_30      MJPEG 1440p 30fps\n"
+              << "  mjpeg_3840x2160_30      MJPEG 4K 30fps\n"
+              << "\n"
+              << "Software Decode Tests (2) - ExecuteMode::SINGLE:\n"
+              << "  sw_h264_1920x1080_30    Software H.264 1080p 30fps\n"
+              << "  sw_h265_1920x1080_30    Software H.265 1080p 30fps\n"
+              << "\n"
+              << "RTSP H.264 Tests (6) - ExecuteMode::SINGLE:\n"
+              << "  rtsp_h264_1280x720_30_cbr   RTSP H.264 720p CBR\n"
+              << "  rtsp_h264_1280x720_30_vbr   RTSP H.264 720p VBR\n"
+              << "  rtsp_h264_1920x1080_30_cbr  RTSP H.264 1080p CBR\n"
+              << "  rtsp_h264_1920x1080_30_vbr  RTSP H.264 1080p VBR\n"
+              << "  rtsp_h264_3840x2160_30_cbr  RTSP H.264 4K CBR\n"
+              << "  rtsp_h264_3840x2160_30_vbr  RTSP H.264 4K VBR\n"
+              << "\n"
+              << "RTSP H.265 Tests (6) - ExecuteMode::SINGLE:\n"
+              << "  rtsp_h265_1280x720_30_cbr   RTSP H.265 720p CBR\n"
+              << "  rtsp_h265_1280x720_30_vbr   RTSP H.265 720p VBR\n"
+              << "  rtsp_h265_1920x1080_30_cbr  RTSP H.265 1080p CBR\n"
+              << "  rtsp_h265_1920x1080_30_vbr  RTSP H.265 1080p VBR\n"
+              << "  rtsp_h265_3840x2160_30_cbr  RTSP H.265 4K CBR\n"
+              << "  rtsp_h265_3840x2160_30_vbr  RTSP H.265 4K VBR\n"
+              << "\n"
+              << "RTSP MJPEG Tests (1) - ExecuteMode::SINGLE:\n"
+              << "  rtsp_mjpeg_32768x18432_30   RTSP MJPEG Ultra-High\n"
+              << "\n"
+              << "Multi-Worker Tests (2) - ExecuteMode::PARALLEL:\n"
+              << "  multi_worker               HW+SW concurrent decode\n"
+              << "  multi_worker_4k            HW+SW concurrent 4K decode\n"
+              << "\n"
+              << "Multi-Thread Tests (3) - ExecuteMode::PARALLEL:\n"
+              << "  multithread_2              2-thread decode\n"
+              << "  multithread_4              4-thread decode\n"
+              << "  multithread_8              8-thread decode\n"
+              << "\n"
+              << "────────────────────────────────────────────────────────\n"
+              << "Total: 47 predefined tests\n"
+              << std::endl;
 }
 
 // ========================================
@@ -574,6 +619,7 @@ TestResult VdecTestSuite::runSingle(
 
 TestResult VdecTestSuite::runCompare(
     const std::vector<WorkerConfig>& configs,
+    uint32_t flags,
     const std::string& test_name
 ) {
     auto& logger = getLogger();
@@ -585,6 +631,7 @@ TestResult VdecTestSuite::runCompare(
         LOG4CPLUS_INFO(logger, "═══════════════════════════════════════════════════════");
         LOG4CPLUS_INFO_FMT(logger, "  Mode:       ExecuteMode::COMPARE");
         LOG4CPLUS_INFO_FMT(logger, "  Workers:    %zu", configs.size());
+        LOG4CPLUS_INFO_FMT(logger, "  Flags:      0x%X", flags);
         if (!configs.empty()) {
             LOG4CPLUS_INFO_FMT(logger, "  Input:      %s", configs[0].data_source.path.c_str());
             if (configs[0].consumer.enable_psnr) {
@@ -593,14 +640,23 @@ TestResult VdecTestSuite::runCompare(
             if (configs[0].consumer.enable_ssim) {
                 LOG4CPLUS_INFO_FMT(logger, "  SSIM:       enabled (min: %.2f)", configs[0].consumer.min_ssim);
             }
+            // 显示叠加的消费类型
+            if (flags & consumer::CONSUME_DISPLAY) {
+                LOG4CPLUS_INFO(logger, "  Display:    enabled (stacked)");
+            }
+            if (flags & consumer::CONSUME_SAVE_RAW) {
+                LOG4CPLUS_INFO_FMT(logger, "  Save:       enabled to %s (stacked)", 
+                                  configs[0].consumer.output_path.c_str());
+            }
         }
         LOG4CPLUS_INFO(logger, "═══════════════════════════════════════════════════════");
     }
     
-    LOG4CPLUS_DEBUG_FMT(logger, "runCompare: mode=COMPARE, workers=%zu", configs.size());
+    LOG4CPLUS_DEBUG_FMT(logger, "runCompare: mode=COMPARE, workers=%zu, flags=0x%X", 
+                        configs.size(), flags);
     
     consumer::BufferConsumerService service;
-    return service.start(configs, consumer::ExecuteMode::COMPARE, 0);
+    return service.start(configs, consumer::ExecuteMode::COMPARE, flags);
 }
 
 TestResult VdecTestSuite::runParallel(

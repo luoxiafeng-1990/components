@@ -44,18 +44,24 @@ using TestResult = consumer::ConsumeResult;
  * @brief 解码测试参数
  */
 struct DecodeTestParams {
-    std::string codec;      ///< 编解码器 (h264, h265, mjpeg, software)
-    int width;              ///< 分辨率宽度
-    int height;             ///< 分辨率高度
-    double fps;             ///< 目标帧率
-    std::string profile;    ///< profile (main, baseline, high)
+    std::string codec;           ///< 编解码器 (h264, h265, mjpeg)
+    int width;                   ///< 分辨率宽度
+    int height;                  ///< 分辨率高度
+    double fps;                  ///< 目标帧率
+    std::string profile;         ///< profile (main, baseline, high)
+    bool use_hardware;           ///< 是否使用硬件解码（默认 true）
+    std::string predefined_name; ///< 匹配的预定义测试名称（空表示未使用预定义测试）
     
     DecodeTestParams(
         const std::string& c = "h264",
         int w = 1920, int h = 1080,
         double f = 30.0,
-        const std::string& p = "main"
-    ) : codec(c), width(w), height(h), fps(f), profile(p) {}
+        const std::string& p = "main",
+        bool hw = true
+    ) : codec(c), width(w), height(h), fps(f), profile(p), use_hardware(hw) {}
+    
+    /// 是否使用了预定义测试
+    bool isPredefined() const { return !predefined_name.empty(); }
 };
 
 /**
@@ -110,11 +116,18 @@ public:
      * 用于 PSNR/SSIM 质量验证，同步比较多个 Worker 的输出
      * 
      * @param configs Worker 配置列表（通常是 HW + SW）
+     * @param flags 消费类型标志（可叠加 DISPLAY、SAVE_RAW 等，与 Compare 同时执行）
      * @param test_name 测试名称（用于日志输出）
      * @return 测试结果（包含 psnr_average, ssim_average）
+     * 
+     * 示例：
+     *   runCompare(configs, 0);  // 只做 PSNR/SSIM 比较
+     *   runCompare(configs, CONSUME_DISPLAY);  // 比较 + 显示
+     *   runCompare(configs, CONSUME_DISPLAY | CONSUME_SAVE_RAW);  // 比较 + 显示 + 保存
      */
     static TestResult runCompare(
         const std::vector<WorkerConfig>& configs,
+        uint32_t flags = 0,
         const std::string& test_name = ""
     );
     

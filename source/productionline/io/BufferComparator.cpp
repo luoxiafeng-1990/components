@@ -551,6 +551,9 @@ FrameCompareResult BufferComparator::compareYUV(
         // ✅ 快速通过（日志在 compare() 返回前统一打印）
         result.passed = true;
         result.level = FrameCompareResult::PASS;
+        // 快速通过时，使用 Y 平面值作为平均值（因为未计算 U/V）
+        result.psnr_avg = result.psnr_y;
+        result.ssim_avg = result.ssim_y;
         passed_count_++;
         return result;
     }
@@ -769,6 +772,9 @@ FrameCompareResult BufferComparator::compareRGB(
         // ✅ 快速通过（日志在 compare() 返回前统一打印）
         result.passed = true;
         result.level = FrameCompareResult::PASS;
+        // 快速通过时，使用 G 通道值作为平均值（因为未计算 R/B）
+        result.psnr_avg = result.psnr_y;  // G → psnr_y
+        result.ssim_avg = result.ssim_y;  // G → ssim_y
         passed_count_++;
         return result;
     }

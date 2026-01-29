@@ -81,9 +81,23 @@ bool DisplayConsumer::consume(const std::vector<Buffer*>& buffers, int frame_ind
     }
     
     Buffer* buffer = buffers[0];
+    bool success = false;
     
-    // 显示 Buffer 内容
-    if (display_->displayBuffer(buffer)) {
+    // 智能选择显示方式：
+    // 1. 如果 Buffer 有物理地址，优先使用 DMA 零拷贝
+    // 2. 否则使用 memcpy 方式拷贝到 framebuffer
+    
+    if (buffer->getPhysicalAddress() != 0) {
+        // DMA 零拷贝方式（性能最优）
+        success = display_->displayBufferByDMA(buffer);
+    }
+    
+    if (!success) {
+        // 回退到 memcpy 方式（兼容性最好）
+        success = display_->displayBufferByMemcpyToFramebuffer(buffer);
+    }
+    
+    if (success) {
         success_count_++;
     } else {
         failed_count_++;

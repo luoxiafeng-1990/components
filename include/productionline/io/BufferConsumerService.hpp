@@ -171,11 +171,16 @@ private:
      * 
      * 1. 创建 N 个 VideoProductionLine
      * 2. 获取 N 个 BufferPool
-     * 3. 创建 CompareConsumer
-     * 4. 同步获取 N 个 Buffer，传给 CompareConsumer
+     * 3. 创建 CompareConsumer（核心）
+     * 4. 可选叠加其他消费类型（DISPLAY、SAVE_RAW 等）
+     * 5. 同步获取 N 个 Buffer，传给消费策略
+     * 
+     * @param configs Worker 配置列表
+     * @param consume_flags 额外的消费类型标志（可叠加 DISPLAY、SAVE_RAW 等）
      */
     ConsumeResult startProductionLinesCompare(
-        const std::vector<WorkerConfig>& configs
+        const std::vector<WorkerConfig>& configs,
+        uint32_t consume_flags
     );
     
     /**

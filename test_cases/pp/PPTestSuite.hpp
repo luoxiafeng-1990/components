@@ -57,11 +57,14 @@ struct PPTestParams {
     int crop_w;
     int crop_h;
     
+    // 解码方式
+    bool use_hardware;          ///< 是否使用硬件解码（默认 true）
+    
     // 默认构造 - channel 为空表示未使用预定义测试
     PPTestParams()
         : channel(""), format(OutputFormat::YUV_NV12), pp1_format(OutputFormat::YUV_AUTO),
           width(1920), height(1080), color_std(ColorStandard::BT601),
-          crop_x(0), crop_y(0), crop_w(0), crop_h(0) {}
+          crop_x(0), crop_y(0), crop_w(0), crop_h(0), use_hardware(true) {}
     
     // 单通道构造（4参数）
     PPTestParams(
@@ -70,7 +73,7 @@ struct PPTestParams {
         int w, int h
     ) : channel(ch), format(fmt), pp1_format(OutputFormat::YUV_AUTO),
         width(w), height(h), color_std(ColorStandard::BT601),
-        crop_x(0), crop_y(0), crop_w(0), crop_h(0) {}
+        crop_x(0), crop_y(0), crop_w(0), crop_h(0), use_hardware(true) {}
     
     // 单通道构造（5参数，带 ColorStandard）
     PPTestParams(
@@ -80,7 +83,7 @@ struct PPTestParams {
         ColorStandard std
     ) : channel(ch), format(fmt), pp1_format(OutputFormat::YUV_AUTO),
         width(w), height(h), color_std(std),
-        crop_x(0), crop_y(0), crop_w(0), crop_h(0) {}
+        crop_x(0), crop_y(0), crop_w(0), crop_h(0), use_hardware(true) {}
     
     // 单通道构造（带裁剪参数，9参数）
     PPTestParams(
@@ -91,7 +94,7 @@ struct PPTestParams {
         int cx, int cy, int cw, int ch_
     ) : channel(ch), format(fmt), pp1_format(OutputFormat::YUV_AUTO),
         width(w), height(h), color_std(std),
-        crop_x(cx), crop_y(cy), crop_w(cw), crop_h(ch_) {}
+        crop_x(cx), crop_y(cy), crop_w(cw), crop_h(ch_), use_hardware(true) {}
     
     // Multi-PP 构造（4参数）
     PPTestParams(
@@ -100,7 +103,7 @@ struct PPTestParams {
         int w, int h
     ) : channel("multi"), format(pp0_fmt), pp1_format(pp1_fmt),
         width(w), height(h), color_std(ColorStandard::BT601),
-        crop_x(0), crop_y(0), crop_w(0), crop_h(0) {}
+        crop_x(0), crop_y(0), crop_w(0), crop_h(0), use_hardware(true) {}
     
     // Multi-PP 构造（5参数，带 ColorStandard）
     PPTestParams(
@@ -110,7 +113,7 @@ struct PPTestParams {
         ColorStandard std
     ) : channel("multi"), format(pp0_fmt), pp1_format(pp1_fmt),
         width(w), height(h), color_std(std),
-        crop_x(0), crop_y(0), crop_w(0), crop_h(0) {}
+        crop_x(0), crop_y(0), crop_w(0), crop_h(0), use_hardware(true) {}
 };
 
 /**
