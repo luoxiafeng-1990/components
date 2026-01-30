@@ -4,12 +4,14 @@
  */
 
 #include "productionline/io/BufferConsumerService.hpp"
+#include "productionline/MultiWorkerProductionLine.hpp"
 #include "common/GlobalThreadPool.hpp"
 #include "buffer/bufferpool/BufferPoolRegistry.hpp"
 
 #include <future>
 #include <sstream>
 #include <iomanip>
+#include <thread>
 
 namespace consumer {
 
@@ -131,10 +133,30 @@ ConsumeResult BufferConsumerService::startProductionLine(
         }
         
         // 5. 执行消费循环
-        consumeLoop(pool, consumer, config.consumer, result);
+        consumeLoop(pool, consumer, config.consumer_type, result);
         
-        // 6. 停止生产线
+        // 6. 停止生产线（等待生产者完成所有帧的生产）
         producer.stop();
+        
+        // 7. 排空剩余的已填充 Buffer（drain 阶段）
+        // 此时生产者已停止，BufferPool 中应该有所有剩余的 filled buffer
+        LOG4CPLUS_DEBUG(logger_, "Draining remaining buffers after producer stopped...");
+        int drained_count = 0;
+        int drain_frame_index = result.frames_consumed;
+        Buffer* remaining = nullptr;
+        while ((remaining = pool->acquireFilled(false, 0)) != nullptr) {
+            std::vector<Buffer*> buffers = {remaining};
+            consumer->consume(buffers, drain_frame_index++);
+            result.frames_consumed++;
+            drained_count++;
+            pool->releaseFilled(remaining);
+        }
+        if (drained_count > 0) {
+            LOG4CPLUS_DEBUG_FMT(logger_, "Drained %d remaining buffers", drained_count);
+        }
+        
+        // 8. 清理消费者
+        consumer->finalize();
         
         result.success = true;
         
@@ -207,12 +229,12 @@ ConsumeResult BufferConsumerService::startProductionLinesCompare(
         }
         
         // 2. 创建 CompareConsumer（COMPARE 模式核心）
-        const auto& consumer_config = configs[0].consumer;
+        const auto& consumer_type_config = configs[0].consumer_type;
         auto compare_consumer = std::make_shared<CompareConsumer>(
-            consumer_config.min_psnr,
-            consumer_config.min_ssim,
-            consumer_config.enable_psnr,
-            consumer_config.enable_ssim
+            consumer_type_config.compare.min_psnr,
+            consumer_type_config.compare.min_ssim,
+            consumer_type_config.compare.enable_psnr,
+            consumer_type_config.compare.enable_ssim
         );
         
         // 3. 根据 consume_flags 决定是否叠加其他消费类型
@@ -230,25 +252,26 @@ ConsumeResult BufferConsumerService::startProductionLinesCompare(
             
             // 叠加其他消费类型（使用第一个 config 的配置）
             if (consume_flags & CONSUME_DISPLAY) {
-                multi->addStrategy(std::make_shared<DisplayConsumer>());
+                multi->addStrategy(std::make_shared<DisplayConsumer>(
+                    consumer_type_config.display.device_id));
                 LOG4CPLUS_DEBUG(logger_, "COMPARE mode: added DisplayConsumer");
             }
             if (consume_flags & CONSUME_SAVE_RAW) {
                 multi->addStrategy(std::make_shared<SaveRawConsumer>(
-                    configs[0].consumer.output_path,
-                    configs[0].consumer.save_frames
+                    consumer_type_config.save_raw.output_path,
+                    consumer_type_config.save_raw.max_frames
                 ));
                 LOG4CPLUS_DEBUG_FMT(logger_, "COMPARE mode: added SaveRawConsumer to %s", 
-                                   configs[0].consumer.output_path.c_str());
+                                   consumer_type_config.save_raw.output_path.c_str());
             }
             if (consume_flags & CONSUME_SAVE_ENCODED) {
                 multi->addStrategy(std::make_shared<SaveEncodedConsumer>(
-                    configs[0].consumer.output_path,
+                    consumer_type_config.save_encoded.output_path,
                     configs[0].data_source.codec_params,
                     configs[0].data_source.time_base
                 ));
                 LOG4CPLUS_DEBUG_FMT(logger_, "COMPARE mode: added SaveEncodedConsumer to %s", 
-                                   configs[0].consumer.output_path.c_str());
+                                   consumer_type_config.save_encoded.output_path.c_str());
             }
             
             consumer = multi;
@@ -258,18 +281,62 @@ ConsumeResult BufferConsumerService::startProductionLinesCompare(
         }
         
         // 4. 执行同步消费循环
-        consumeLoopCompare(pools, consumer, consumer_config, result);
+        consumeLoopCompare(pools, consumer, consumer_type_config, result);
         
-        // 5. 获取比较结果（从 CompareConsumer 获取）
+        // 5. 停止所有生产线（等待生产者完成所有帧的生产）
+        for (auto& producer : producers) {
+            producer->stop();
+        }
+        
+        // 6. 排空剩余的已填充 Buffer（drain 阶段）
+        // 此时所有生产者已停止，BufferPool 中应该有所有剩余的 filled buffer
+        LOG4CPLUS_DEBUG(logger_, "Draining remaining buffers after producers stopped...");
+        int drained_count = 0;
+        int drain_frame_index = result.frames_consumed;
+        bool has_remaining = true;
+        while (has_remaining) {
+            std::vector<Buffer*> buffers;
+            has_remaining = true;
+            
+            // 尝试从所有 pool 获取 buffer（非阻塞）
+            for (auto& pool : pools) {
+                Buffer* buffer = pool->acquireFilled(false, 0);
+                if (!buffer) {
+                    has_remaining = false;
+                    break;
+                }
+                buffers.push_back(buffer);
+            }
+            
+            if (has_remaining && buffers.size() == pools.size()) {
+                // 成功获取所有 buffer，进行消费
+                consumer->consume(buffers, drain_frame_index++);
+                result.frames_consumed++;
+                drained_count++;
+                // 释放所有 buffer
+                for (size_t i = 0; i < buffers.size(); i++) {
+                    pools[i]->releaseFilled(buffers[i]);
+                }
+            } else {
+                // 未能获取所有 buffer，释放已获取的并退出
+                for (size_t i = 0; i < buffers.size(); i++) {
+                    pools[i]->releaseFilled(buffers[i]);
+                }
+                break;
+            }
+        }
+        if (drained_count > 0) {
+            LOG4CPLUS_DEBUG_FMT(logger_, "Drained %d remaining buffer sets", drained_count);
+        }
+        
+        // 7. 清理消费者
+        consumer->finalize();
+        
+        // 8. 获取比较结果（从 CompareConsumer 获取）
         result.psnr_average = compare_consumer->getAveragePsnr();
         result.ssim_average = compare_consumer->getAverageSsim();
         result.compare_passed = compare_consumer->isPassed();
         result.frames_compared = compare_consumer->getComparedCount();
-        
-        // 6. 停止所有生产线
-        for (auto& producer : producers) {
-            producer->stop();
-        }
         
         result.success = true;
         
@@ -347,6 +414,297 @@ ConsumeResult BufferConsumerService::startProductionLinesParallel(
 }
 
 // ============================================================
+// MultiWorker Compare 辅助函数
+// ============================================================
+
+/**
+ * @brief 从 ConsumerTypeConfig 生成消费 flags
+ */
+static uint32_t getConsumeFlagsFromConfig(const WorkerConfig::ConsumerTypeConfig& config) {
+    uint32_t flags = 0;
+    
+    if (config.display.enable) {
+        flags |= CONSUME_DISPLAY;
+    }
+    if (config.save_raw.enable) {
+        flags |= CONSUME_SAVE_RAW;
+    }
+    if (config.save_encoded.enable) {
+        flags |= CONSUME_SAVE_ENCODED;
+    }
+    // 注：compare 是执行模式（ExecuteMode），不是消费类型
+    if (config.count.enable) {
+        flags |= CONSUME_COUNT;
+    }
+    
+    // 如果没有启用任何消费类型，默认启用 COUNT
+    if (flags == 0) {
+        flags = CONSUME_COUNT;
+    }
+    
+    return flags;
+}
+
+/**
+ * @brief 为单个 Worker 创建消费者
+ */
+static std::shared_ptr<IBufferConsumer> createConsumerForWorker(
+    const WorkerConfig& worker_config,
+    uint32_t flags,
+    const AVCodecParameters* codec_params,
+    const AVRational& time_base)
+{
+    // 如果没有指定 flags，从配置生成
+    if (flags == 0) {
+        flags = getConsumeFlagsFromConfig(worker_config.consumer_type);
+    }
+    
+    const auto& config = worker_config.consumer_type;
+    std::vector<std::shared_ptr<IBufferConsumer>> consumers;
+    
+    // 1. 显示消费者
+    if (flags & CONSUME_DISPLAY) {
+        consumers.push_back(std::make_shared<DisplayConsumer>(
+            config.display.device_id));
+    }
+    
+    // 2. 保存原始数据消费者
+    if (flags & CONSUME_SAVE_RAW) {
+        consumers.push_back(std::make_shared<SaveRawConsumer>(
+            config.save_raw.output_path,
+            config.save_raw.max_frames));
+    }
+    
+    // 3. 保存编码数据消费者
+    if (flags & CONSUME_SAVE_ENCODED) {
+        consumers.push_back(std::make_shared<SaveEncodedConsumer>(
+            config.save_encoded.output_path,
+            codec_params,
+            time_base));
+    }
+    
+    // 4. 统计消费者（如果没有其他消费者或显式启用）
+    if (consumers.empty() || (flags & CONSUME_COUNT)) {
+        consumers.push_back(std::make_shared<CountConsumer>());
+    }
+    
+    // 如果只有一个消费者，直接返回
+    if (consumers.size() == 1) {
+        return consumers[0];
+    }
+    
+    // 多个消费者，使用 MultiConsumer 组合
+    auto multi = std::make_shared<MultiConsumer>();
+    for (auto& c : consumers) {
+        multi->addStrategy(c);
+    }
+    return multi;
+}
+
+// ============================================================
+// MultiWorker Compare 模式实现
+// ============================================================
+
+ConsumeResult BufferConsumerService::startMultiWorkerCompare(
+    const MultiWorkerConfig& multi_config,
+    CompareResultCallback compare_callback)
+{
+    ConsumeResult result;
+    auto start_time = std::chrono::steady_clock::now();
+    
+    LOG4CPLUS_INFO(logger_, "========================================");
+    LOG4CPLUS_INFO(logger_, "Starting MultiWorker Compare Mode");
+    LOG4CPLUS_INFO(logger_, "========================================");
+    
+    if (multi_config.groups.empty()) {
+        result.success = false;
+        result.error_message = "No worker groups configured";
+        return result;
+    }
+    
+    try {
+        // 1. 创建 MultiWorkerProductionLine（配置由测试 case 传入，包含 callback_chain）
+        auto production_line = std::make_unique<MultiWorkerProductionLine>(multi_config);
+        
+        // 2. 获取所有 worker 的 BufferPool
+        struct WorkerConsumeContext {
+            std::string worker_name;
+            std::shared_ptr<BufferPool> pool;
+            std::shared_ptr<IBufferConsumer> consumer;
+            int frame_count = 0;
+        };
+        
+        std::vector<WorkerConsumeContext> worker_contexts;
+        
+        // 遍历所有 group 和 worker（consumer）
+        for (size_t group_idx = 0; group_idx < multi_config.groups.size(); ++group_idx) {
+            const auto& group_config = multi_config.groups[group_idx];
+            
+            for (size_t worker_idx = 0; worker_idx < group_config.consumer_configs.size(); ++worker_idx) {
+                const auto& consumer_config = group_config.consumer_configs[worker_idx];
+                const auto& worker_config = consumer_config.worker_config;
+                
+                // 获取 BufferPool ID
+                uint64_t pool_id = production_line->getGroupConsumerBufferPoolId(
+                    group_idx, worker_idx);
+                
+                if (pool_id == 0) {
+                    LOG4CPLUS_WARN_FMT(logger_, 
+                        "No BufferPool for group[%zu] worker[%zu]", 
+                        group_idx, worker_idx);
+                    continue;
+                }
+                
+                // 获取 BufferPool
+                auto pool = BufferPoolRegistry::getInstance().getPool(pool_id).lock();
+                if (!pool) {
+                    LOG4CPLUS_ERROR_FMT(logger_, 
+                        "Failed to get BufferPool for group[%zu] worker[%zu]",
+                        group_idx, worker_idx);
+                    continue;
+                }
+                
+                // 生成 flags（比较在 WorkerSyncCoordinator 内部完成，这里只处理消费类型）
+                uint32_t flags = getConsumeFlagsFromConfig(worker_config.consumer_type);
+                
+                // 为该 worker 创建消费者
+                auto consumer = createConsumerForWorker(
+                    worker_config, 
+                    flags,
+                    worker_config.data_source.codec_params,
+                    worker_config.data_source.time_base);
+                
+                WorkerConsumeContext ctx;
+                ctx.worker_name = consumer_config.consumer_name.empty() 
+                    ? ("worker_" + std::to_string(group_idx) + "_" + std::to_string(worker_idx))
+                    : consumer_config.consumer_name;
+                ctx.pool = pool;
+                ctx.consumer = consumer;
+                
+                worker_contexts.push_back(std::move(ctx));
+                
+                LOG4CPLUS_INFO_FMT(logger_, 
+                    "Added worker context: %s (pool_id=%llu, flags=0x%x)",
+                    worker_contexts.back().worker_name.c_str(), 
+                    (unsigned long long)pool_id, flags);
+            }
+        }
+        
+        if (worker_contexts.empty()) {
+            result.success = false;
+            result.error_message = "No worker contexts created";
+            return result;
+        }
+        
+        // 4. 启动 ProductionLine
+        if (!production_line->start()) {
+            result.success = false;
+            result.error_message = "Failed to start MultiWorkerProductionLine";
+            return result;
+        }
+        
+        // 5. 消费循环 - 轮询所有 worker 的 BufferPool
+        // 使用第一个 group 第一个 consumer 的配置作为默认
+        const auto& first_config = multi_config.groups[0].consumer_configs[0].worker_config.consumer_type;
+        int max_frames = first_config.max_frames;
+        int timeout_ms = first_config.timeout_ms;
+        int max_timeout_count = first_config.max_timeout_count;
+        
+        int total_frames = 0;
+        int consecutive_timeout = 0;
+        
+        running_ = true;
+        
+        while (!stop_requested_) {
+            // 检查最大帧数
+            if (max_frames > 0 && total_frames >= max_frames) {
+                LOG4CPLUS_INFO_FMT(logger_, "Reached max frames: %d", max_frames);
+                break;
+            }
+            
+            bool any_consumed = false;
+            
+            // 轮询每个 worker 的 BufferPool
+            for (auto& ctx : worker_contexts) {
+                Buffer* buffer = ctx.pool->acquireFilled(false, timeout_ms);
+                if (buffer) {
+                    // 首帧初始化
+                    if (ctx.frame_count == 0) {
+                        std::vector<Buffer*> first_buffers = {buffer};
+                        ctx.consumer->initialize(first_buffers);
+                    }
+                    
+                    // 消费
+                    std::vector<Buffer*> buffers = {buffer};
+                    ctx.consumer->consume(buffers, ctx.frame_count);
+                    ctx.frame_count++;
+                    
+                    // 释放
+                    ctx.pool->releaseFilled(buffer);
+                    
+                    any_consumed = true;
+                }
+            }
+            
+            if (any_consumed) {
+                total_frames++;
+                consecutive_timeout = 0;
+            } else {
+                consecutive_timeout++;
+                if (consecutive_timeout >= max_timeout_count) {
+                    LOG4CPLUS_INFO_FMT(logger_, 
+                        "Max timeout count reached: %d", consecutive_timeout);
+                    break;
+                }
+                
+                // 短暂休眠避免空转
+                std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            }
+        }
+        
+        running_ = false;
+        
+        // 6. 清理消费者
+        for (auto& ctx : worker_contexts) {
+            if (ctx.frame_count > 0) {
+                ctx.consumer->finalize();
+            }
+        }
+        
+        // 7. 停止
+        production_line->stop();
+        
+        // 8. 填充结果
+        result.success = true;
+        result.frames_consumed = total_frames;
+        
+        // 打印统计
+        LOG4CPLUS_INFO(logger_, "========================================");
+        LOG4CPLUS_INFO(logger_, "MultiWorker Compare Complete");
+        LOG4CPLUS_INFO_FMT(logger_, "Total frames processed: %d", total_frames);
+        for (const auto& ctx : worker_contexts) {
+            LOG4CPLUS_INFO_FMT(logger_, "  %s: %d frames", 
+                ctx.worker_name.c_str(), ctx.frame_count);
+        }
+        LOG4CPLUS_INFO(logger_, "========================================");
+        
+    } catch (const std::exception& e) {
+        result.success = false;
+        result.error_message = std::string("Exception: ") + e.what();
+        LOG4CPLUS_ERROR_FMT(logger_, "startMultiWorkerCompare exception: %s", e.what());
+    }
+    
+    // 计算执行时间
+    auto end_time = std::chrono::steady_clock::now();
+    result.duration_seconds = std::chrono::duration<double>(end_time - start_time).count();
+    if (result.duration_seconds > 0) {
+        result.average_fps = result.frames_consumed / result.duration_seconds;
+    }
+    
+    return result;
+}
+
+// ============================================================
 // 辅助方法
 // ============================================================
 
@@ -372,17 +730,18 @@ std::shared_ptr<IBufferConsumer> BufferConsumerService::createConsumerFromFlags(
             return std::make_shared<CountConsumer>();
         }
         if (flags & CONSUME_DISPLAY) {
-            return std::make_shared<DisplayConsumer>();
+            return std::make_shared<DisplayConsumer>(
+                config.consumer_type.display.device_id);
         }
         if (flags & CONSUME_SAVE_RAW) {
             return std::make_shared<SaveRawConsumer>(
-                config.consumer.output_path,
-                config.consumer.save_frames
+                config.consumer_type.save_raw.output_path,
+                config.consumer_type.save_raw.max_frames
             );
         }
         if (flags & CONSUME_SAVE_ENCODED) {
             return std::make_shared<SaveEncodedConsumer>(
-                config.consumer.output_path,
+                config.consumer_type.save_encoded.output_path,
                 config.data_source.codec_params,
                 config.data_source.time_base
             );
@@ -396,17 +755,18 @@ std::shared_ptr<IBufferConsumer> BufferConsumerService::createConsumerFromFlags(
     multi->addStrategy(std::make_shared<CountConsumer>());
     
     if (flags & CONSUME_DISPLAY) {
-        multi->addStrategy(std::make_shared<DisplayConsumer>());
+        multi->addStrategy(std::make_shared<DisplayConsumer>(
+            config.consumer_type.display.device_id));
     }
     if (flags & CONSUME_SAVE_RAW) {
         multi->addStrategy(std::make_shared<SaveRawConsumer>(
-            config.consumer.output_path,
-            config.consumer.save_frames
+            config.consumer_type.save_raw.output_path,
+            config.consumer_type.save_raw.max_frames
         ));
     }
     if (flags & CONSUME_SAVE_ENCODED) {
         multi->addStrategy(std::make_shared<SaveEncodedConsumer>(
-            config.consumer.output_path,
+            config.consumer_type.save_encoded.output_path,
             config.data_source.codec_params,
             config.data_source.time_base
         ));
@@ -418,7 +778,7 @@ std::shared_ptr<IBufferConsumer> BufferConsumerService::createConsumerFromFlags(
 void BufferConsumerService::consumeLoop(
     std::shared_ptr<BufferPool> pool,
     std::shared_ptr<IBufferConsumer> consumer,
-    const WorkerConfig::ConsumerConfig& config,
+    const WorkerConfig::ConsumerTypeConfig& config,
     ConsumeResult& result
 ) {
     int frame_index = 0;
@@ -475,18 +835,14 @@ void BufferConsumerService::consumeLoop(
         }
     }
     
-    // 清理
-    if (initialized) {
-        consumer->finalize();
-    }
-    
+    // 注意：drain 和 finalize 由调用者负责（在 producer.stop() 之后执行）
     LOG4CPLUS_DEBUG_FMT(logger_, "Consume loop finished, %d frames consumed", result.frames_consumed);
 }
 
 void BufferConsumerService::consumeLoopCompare(
     const std::vector<std::shared_ptr<BufferPool>>& pools,
     std::shared_ptr<IBufferConsumer> consumer,
-    const WorkerConfig::ConsumerConfig& config,
+    const WorkerConfig::ConsumerTypeConfig& config,
     ConsumeResult& result
 ) {
     int frame_index = 0;
@@ -560,11 +916,7 @@ void BufferConsumerService::consumeLoopCompare(
         }
     }
     
-    // 清理
-    if (initialized) {
-        consumer->finalize();
-    }
-    
+    // 注意：drain 和 finalize 由调用者负责（在 producers.stop() 之后执行）
     LOG4CPLUS_DEBUG_FMT(logger_, "Compare loop finished, %d frames consumed", result.frames_consumed);
 }
 
@@ -580,6 +932,7 @@ void BufferConsumerService::printResult(const std::string& test_name, const Cons
     LOG4CPLUS_INFO_FMT(logger, "  Test: %s", test_name.c_str());
     LOG4CPLUS_INFO(logger, "───────────────────────────────────────────────────────");
     LOG4CPLUS_INFO_FMT(logger, "  Status:          %s", result.success ? "PASSED" : "FAILED");
+    LOG4CPLUS_INFO_FMT(logger, "  Result:          %s", result.getOverallResult() ? "PASSED" : "FAILED");
     LOG4CPLUS_INFO_FMT(logger, "  Frames:          %d", result.frames_consumed);
     LOG4CPLUS_INFO_FMT(logger, "  Duration:        %.2f s", result.duration_seconds);
     LOG4CPLUS_INFO_FMT(logger, "  Average FPS:     %.2f", result.average_fps);
@@ -628,13 +981,18 @@ void BufferConsumerService::printHeader(const std::string& test_name, const Work
     if (config.decoder.name.has_value()) {
         LOG4CPLUS_INFO_FMT(logger, "  Decoder:         %s", config.decoder.name.value().c_str());
     }
-    LOG4CPLUS_INFO_FMT(logger, "  Max Frames:      %d", config.consumer.max_frames);
-    if (config.consumer.enable_display) {
+    LOG4CPLUS_INFO_FMT(logger, "  Max Frames:      %d", config.consumer_type.max_frames);
+    if (config.consumer_type.display.enable) {
         LOG4CPLUS_INFO(logger, "  Display:         enabled");
     }
-    if (config.consumer.save_frames != 0) {
-        LOG4CPLUS_INFO_FMT(logger, "  Save:            %d frames to %s", 
-            config.consumer.save_frames, config.consumer.output_path.c_str());
+    if (config.consumer_type.save_raw.enable) {
+        LOG4CPLUS_INFO_FMT(logger, "  Save Raw:        to %s (max %d frames)", 
+            config.consumer_type.save_raw.output_path.c_str(),
+            config.consumer_type.save_raw.max_frames);
+    }
+    if (config.consumer_type.save_encoded.enable) {
+        LOG4CPLUS_INFO_FMT(logger, "  Save Encoded:    to %s", 
+            config.consumer_type.save_encoded.output_path.c_str());
     }
     LOG4CPLUS_INFO(logger, "═══════════════════════════════════════════════════════");
 }

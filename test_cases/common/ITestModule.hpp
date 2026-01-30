@@ -7,7 +7,7 @@
  * - 统一的命令行接口
  * - 全局和模块级帮助信息
  * 
- * @version 3.1
+ * @version 3.2 - 添加公共的 runSingle/runCompare/runParallel 方法
  */
 
 #ifndef ITEST_MODULE_HPP
@@ -16,6 +16,10 @@
 #include <string>
 #include <vector>
 #include <memory>
+
+#include "productionline/io/BufferConsumerService.hpp"
+#include "productionline/worker/WorkerConfig.hpp"
+#include <log4cplus/logger.h>
 
 namespace test {
 namespace common {
@@ -83,6 +87,59 @@ public:
     virtual std::vector<std::string> getTestNames() const {
         return {}; // 默认返回空列表
     }
+
+protected:
+    /// 基类日志实例（所有测试模块共享）
+    static log4cplus::Logger& getLogger() {
+        static log4cplus::Logger logger = log4cplus::Logger::getInstance(
+            LOG4CPLUS_TEXT("components.test"));
+        return logger;
+    }
+    // ========================================
+    // 公共执行方法（所有子类共享）
+    // ========================================
+    
+    /**
+     * @brief 单路消费测试（ExecuteMode::SINGLE）
+     * 
+     * @param config Worker 配置
+     * @param flags 消费类型标志
+     * @param test_name 测试名称（用于日志输出）
+     * @return 测试结果
+     */
+    consumer::ConsumeResult runSingle(
+        const WorkerConfig& config,
+        uint32_t flags,
+        const std::string& test_name = ""
+    );
+    
+    /**
+     * @brief 对比消费测试（ExecuteMode::COMPARE）
+     * 
+     * @param configs Worker 配置列表
+     * @param flags 消费类型标志
+     * @param test_name 测试名称（用于日志输出）
+     * @return 测试结果
+     */
+    consumer::ConsumeResult runCompare(
+        const std::vector<WorkerConfig>& configs,
+        uint32_t flags,
+        const std::string& test_name = ""
+    );
+    
+    /**
+     * @brief 并行消费测试（ExecuteMode::PARALLEL）
+     * 
+     * @param configs Worker 配置列表
+     * @param flags 消费类型标志
+     * @param test_name 测试名称（用于日志输出）
+     * @return 测试结果
+     */
+    consumer::ConsumeResult runParallel(
+        const std::vector<WorkerConfig>& configs,
+        uint32_t flags,
+        const std::string& test_name = ""
+    );
 };
 
 /**

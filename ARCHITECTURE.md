@@ -19,7 +19,145 @@
 
 ## 版本历史
 
-### v2.22（当前版本）- 共享数据源三态控制与数据源配置重构
+### v2.24（当前版本）- 消费类型配置重构与 MultiWorker 比较模式
+
+**发布日期：** 2026-01-29
+
+**主要变更：**
+
+- ✅ **ConsumerTypeConfig 重构**：将 `WorkerConfig::ConsumerConfig` 重命名为 `ConsumerTypeConfig`
+  - 成员变量 `consumer` 重命名为 `consumer_type`
+  - 使用嵌套结构体分类不同消费类型，每种类型都有独立的 `enable` 标志
+  - 支持多种消费类型叠加（如同时显示和保存）
+
+- ✅ **消费类型嵌套结构**：
+  - `DisplayType display` - 显示消费类型（设备 ID 配置）
+  - `SaveRawType save_raw` - 保存原始 YUV/RGB 数据（`BufferWriter::openRaw()`）
+  - `SaveEncodedType save_encoded` - 保存编码数据（`BufferWriter::openEncoded()`）
+  - `CompareType compare` - 比较消费类型（PSNR/SSIM 阈值配置）
+  - `PerformanceType performance` - 性能验证类型（目标帧率）
+  - `CountType count` - 仅统计消费类型
+
+- ✅ **startMultiWorkerCompare 新函数**：使用 `MultiWorkerProductionLine` 实现多 Worker 比较
+  - 比较在内部通过 `WorkerSyncCoordinator` 完成
+  - 支持每个 Worker 独立配置消费类型（显示、保存路径等）
+  - 外部消费策略独立于比较逻辑
+
+- ✅ **比较回调机制**：`callbacks::CompareCallbackContext` 和 `createCompareCallback()`
+  - 用于 `WorkerSyncCoordinator` 的 `callback_chain`
+  - 支持在帧同步完成后执行自定义比较逻辑
+  - 统计通过/失败帧数、计算平均 PSNR/SSIM
+
+- ✅ **WorkerConfigBuilder 更新**：
+  - `setConsumerConfig()` → `setConsumerTypeConfig()`
+  - 新增方法：`enableDisplay()`、`enableSaveRaw()`、`enableSaveEncoded()`、`enableCompare()`、`enablePerformance()`
+
+**设计原则：**
+- **类型分离**：每种消费类型独立配置，通过 `enable` 标志控制
+- **多类型叠加**：支持同时启用多种消费类型（如显示 + 保存）
+- **配置归属清晰**：消费循环控制（`max_frames`、`timeout_ms`）与消费类型分开
+- **独立配置**：每个 Worker 可以有不同的消费类型配置
+
+**配置结构变更：**
+```cpp
+// 旧结构
+struct WorkerConfig {
+    struct ConsumerConfig {
+        int max_frames;
+        bool enable_display;
+        int save_frames;
+        std::string output_path;
+        // ...
+    } consumer;
+};
+
+// 新结构 (v2.24)
+struct WorkerConfig {
+    struct ConsumerTypeConfig {
+        // 执行控制
+        int max_frames;
+        int timeout_ms;
+        
+        // 消费类型（每种独立启用）
+        struct DisplayType {
+            bool enable;
+            int device_id;
+        } display;
+        
+        struct SaveRawType {
+            bool enable;
+            std::string output_path;
+            int max_frames;
+        } save_raw;
+        
+        struct SaveEncodedType {
+            bool enable;
+            std::string output_path;
+        } save_encoded;
+        
+        struct CompareType {
+            bool enable;
+            bool enable_psnr;
+            double min_psnr;
+            bool enable_ssim;
+            double min_ssim;
+        } compare;
+        
+        struct PerformanceType {
+            bool enable;
+            double target_fps;
+        } performance;
+        
+        struct CountType {
+            bool enable;
+        } count;
+    } consumer_type;
+};
+```
+
+**使用示例：**
+```cpp
+// v2.24 新方式：使用嵌套结构体
+WorkerConfig config;
+config.consumer_type.display.enable = true;
+config.consumer_type.display.device_id = 0;
+config.consumer_type.save_raw.enable = true;
+config.consumer_type.save_raw.output_path = "/tmp/output.yuv";
+config.consumer_type.save_raw.max_frames = 100;
+
+// 使用 Builder
+auto config = WorkerConfigBuilder()
+    .setMaxFrames(100)
+    .enableDisplay(true, 0)
+    .enableSaveRaw(true, "/tmp/output.yuv", 100)
+    .enableCompare(true, 35.0, 0.95)
+    .build();
+
+// MultiWorker 比较模式
+BufferConsumerService service;
+service.startMultiWorkerCompare(multi_config, compare_callback);
+```
+
+**架构优势：**
+- **配置清晰**：每种消费类型的参数集中在一起
+- **独立控制**：可以精确控制每种消费类型的启用/禁用
+- **扩展性好**：新增消费类型只需添加新的嵌套结构体
+- **向后兼容**：通过 Builder 方法保持使用便利性
+
+---
+
+### v2.23 - 帧同步回调机制
+
+**发布日期：** 2026-01-23
+
+**主要变更：**
+- ✅ **WorkerSyncCoordinator**：协调多 Worker 帧同步，支持回调链
+- ✅ **CallbackChainItem**：定义回调函数、上下文和名称
+- ✅ **ConnectorConfig 扩展**：新增 `enable_frame_sync` 和 `callback_chain`
+
+---
+
+### v2.22 - 共享数据源三态控制与数据源配置重构
 **发布日期：** 2026-01-22
 
 **主要变更：**

@@ -292,55 +292,99 @@ struct WorkerConfig {
     WorkerType worker_type = WorkerType::AUTO;
     
     // ========================================
-    // 消费者配置（v3.1 新增）
+    // 消费类型配置（v3.2 重构）
     // ========================================
     /**
-     * @brief 消费者配置
+     * @brief 消费类型配置
      * 
      * 用于配置 Buffer 消费行为的参数，控制数据的处理、保存和验证。
      * 
      * 设计理念：
-     * - 统一配置：所有配置都通过 WorkerConfig 传递，无需额外结构
-     * - 可选使用：组件层可以忽略这些参数，应用层按需使用
-     * - 向后兼容：新增字段不影响现有代码
+     * - 每种消费类型独立配置，通过 enable 标志控制
+     * - 支持多种消费类型叠加（如同时显示和保存）
+     * - 执行控制参数用于消费循环，与消费类型分离
+     * 
+     * v3.2 变更：
+     * - 结构体名从 ConsumerConfig 改为 ConsumerTypeConfig
+     * - 成员变量名从 consumer 改为 consumer_type
+     * - 使用嵌套结构体分类不同消费类型
      */
-    struct ConsumerConfig {
+    struct ConsumerTypeConfig {
         // ========================================
-        // 执行控制
+        // 执行控制（通用，用于消费循环）
         // ========================================
-        int max_frames = -1;              ///< 最大处理帧数（-1=无限制，处理到视频结束）
-        int save_frames = 0;              ///< 保存帧数（0=不保存，-1=全部保存）
-        std::string output_path;          ///< 输出文件路径（空=自动生成）
-        double max_duration_seconds = -1; ///< 最大执行时长（秒，-1=无限制，用于录制场景）
-        
-        // ========================================
-        // 性能验证
-        // ========================================
-        double target_fps = 30.0;         ///< 目标帧率（用于性能验证，0=不验证）
-        
-        // ========================================
-        // 质量验证（PSNR/SSIM）
-        // ========================================
-        bool enable_psnr = false;         ///< 是否启用 PSNR 验证
-        double min_psnr = 30.0;           ///< PSNR 阈值（低于此值视为失败，单位：dB）
-        bool enable_ssim = false;         ///< 是否启用 SSIM 验证
-        double min_ssim = 0.95;           ///< SSIM 阈值（低于此值视为失败，范围：0.0-1.0）
-        std::string reference_path;       ///< 参考文件路径（用于质量比对）
-        
-        // ========================================
-        // 其他选项
-        // ========================================
-        bool enable_display = false;      ///< 是否启用显示输出
-        bool verbose = false;             ///< 是否输出详细日志
+        int max_frames = -1;              ///< 最大处理帧数（-1=无限制）
+        double max_duration_seconds = -1; ///< 最大执行时长（秒，-1=无限制）
         int timeout_ms = 100;             ///< 单次获取 Buffer 超时（毫秒）
-        int max_timeout_count = 10;       ///< 最大连续超时次数（达到后视为视频结束）
+        int max_timeout_count = 10;       ///< 最大连续超时次数
+        bool verbose = false;             ///< 是否输出详细日志
         
-        ConsumerConfig() = default;
-        ConsumerConfig(const ConsumerConfig&) = default;
-        ConsumerConfig& operator=(const ConsumerConfig&) = default;
-        ConsumerConfig(ConsumerConfig&&) = default;
-        ConsumerConfig& operator=(ConsumerConfig&&) = default;
-    } consumer;
+        // ========================================
+        // 显示消费类型（CONSUME_DISPLAY）
+        // ========================================
+        struct DisplayType {
+            bool enable = false;          ///< 是否启用显示
+            int device_id = 0;            ///< Framebuffer 设备 ID
+            DisplayType() = default;
+        } display;
+        
+        // ========================================
+        // 保存原始数据消费类型（CONSUME_SAVE_RAW）
+        // 用于解码后的 YUV/RGB 数据 → BufferWriter::openRaw()
+        // ========================================
+        struct SaveRawType {
+            bool enable = false;          ///< 是否启用保存原始数据
+            std::string output_path;      ///< 输出文件路径（如 output.yuv）
+            int max_frames = -1;          ///< 最大保存帧数（-1=全部）
+            SaveRawType() = default;
+        } save_raw;
+        
+        // ========================================
+        // 保存编码数据消费类型（CONSUME_SAVE_ENCODED）
+        // 用于录制未解码的 H.264/H.265 packet → BufferWriter::openEncoded()
+        // ========================================
+        struct SaveEncodedType {
+            bool enable = false;          ///< 是否启用保存编码数据
+            std::string output_path;      ///< 输出文件路径（如 output.mp4）
+            SaveEncodedType() = default;
+        } save_encoded;
+        
+        // ========================================
+        // 比较参数（用于 COMPARE 执行模式）
+        // 注：compare 是执行模式，不是消费类型
+        // ========================================
+        struct CompareType {
+            bool enable_psnr = false;     ///< 是否计算 PSNR（需显式开启）
+            double min_psnr = 30.0;       ///< PSNR 阈值（dB）
+            bool enable_ssim = false;     ///< 是否计算 SSIM（需显式开启）
+            double min_ssim = 0.95;       ///< SSIM 阈值（0.0-1.0）
+            std::string reference_path;   ///< 参考文件路径（可选）
+            CompareType() = default;
+        } compare;
+        
+        // ========================================
+        // 性能验证参数
+        // ========================================
+        struct PerformanceType {
+            bool enable = false;          ///< 是否启用性能验证
+            double target_fps = 30.0;     ///< 目标帧率
+            PerformanceType() = default;
+        } performance;
+        
+        // ========================================
+        // 仅统计消费类型（CONSUME_COUNT）
+        // ========================================
+        struct CountType {
+            bool enable = false;          ///< 是否启用统计
+            CountType() = default;
+        } count;
+        
+        ConsumerTypeConfig() = default;
+        ConsumerTypeConfig(const ConsumerTypeConfig&) = default;
+        ConsumerTypeConfig& operator=(const ConsumerTypeConfig&) = default;
+        ConsumerTypeConfig(ConsumerTypeConfig&&) = default;
+        ConsumerTypeConfig& operator=(ConsumerTypeConfig&&) = default;
+    } consumer_type;
     
     // ========================================
     // 全局资源配置
@@ -818,60 +862,61 @@ public:
     WorkerConfigBuilder& setThreadPoolSize(int size);
     
     // ========================================
-    // 消费者配置（v3.1 新增）
+    // 消费类型配置（v3.2 重构）
     // ========================================
     
     /**
-     * @brief 设置消费者配置
+     * @brief 设置消费类型配置
      */
-    WorkerConfigBuilder& setConsumerConfig(const WorkerConfig::ConsumerConfig& consumer_config);
+    WorkerConfigBuilder& setConsumerTypeConfig(const WorkerConfig::ConsumerTypeConfig& consumer_type_config);
     
     /**
-     * @brief 设置最大处理帧数
+     * @brief 设置最大处理帧数（执行控制）
      * @param frames 最大帧数（-1=无限制）
      */
     WorkerConfigBuilder& setMaxFrames(int frames);
     
     /**
-     * @brief 设置保存帧数
-     * @param frames 保存帧数（0=不保存，-1=全部保存）
-     */
-    WorkerConfigBuilder& setSaveFrames(int frames);
-    
-    /**
-     * @brief 设置输出路径
-     * @param path 输出文件路径
-     */
-    WorkerConfigBuilder& setOutputPath(const std::string& path);
-    
-    /**
-     * @brief 设置目标帧率（用于性能验证）
-     * @param fps 目标帧率（0=不验证）
-     */
-    WorkerConfigBuilder& setTargetFps(double fps);
-    
-    /**
-     * @brief 启用 PSNR 验证
+     * @brief 启用显示消费类型
      * @param enable 是否启用
-     * @param min_psnr PSNR 阈值（单位：dB）
-     * @param reference_path 参考文件路径（可选）
+     * @param device_id Framebuffer 设备 ID
      */
-    WorkerConfigBuilder& enablePsnr(bool enable = true, double min_psnr = 30.0, 
-                                     const std::string& reference_path = "");
+    WorkerConfigBuilder& enableDisplay(bool enable = true, int device_id = 0);
     
     /**
-     * @brief 启用 SSIM 验证
+     * @brief 启用保存原始数据消费类型
      * @param enable 是否启用
-     * @param min_ssim SSIM 阈值（范围：0.0-1.0）
-     * @param reference_path 参考文件路径（可选）
+     * @param output_path 输出文件路径
+     * @param max_frames 最大保存帧数（-1=全部）
      */
-    WorkerConfigBuilder& enableSsim(bool enable = true, double min_ssim = 0.95,
-                                     const std::string& reference_path = "");
+    WorkerConfigBuilder& enableSaveRaw(bool enable = true, 
+                                        const std::string& output_path = "",
+                                        int max_frames = -1);
     
     /**
-     * @brief 设置是否启用显示
+     * @brief 启用保存编码数据消费类型
+     * @param enable 是否启用
+     * @param output_path 输出文件路径
      */
-    WorkerConfigBuilder& setEnableDisplay(bool enable);
+    WorkerConfigBuilder& enableSaveEncoded(bool enable = true,
+                                            const std::string& output_path = "");
+    
+    /**
+     * @brief 启用比较消费类型
+     * @param enable 是否启用
+     * @param min_psnr PSNR 阈值（dB）
+     * @param min_ssim SSIM 阈值（0.0-1.0）
+     */
+    WorkerConfigBuilder& enableCompare(bool enable = true, 
+                                        double min_psnr = 30.0, 
+                                        double min_ssim = 0.95);
+    
+    /**
+     * @brief 启用性能验证
+     * @param enable 是否启用
+     * @param target_fps 目标帧率
+     */
+    WorkerConfigBuilder& enablePerformance(bool enable = true, double target_fps = 30.0);
     
     /**
      * @brief 设置详细日志模式
@@ -1071,6 +1116,112 @@ struct MultiWorkerConfig {
     
     MultiWorkerConfig() = default;
 };
+
+// ============================================================
+// 比较回调相关（v3.2 新增）
+// ============================================================
+
+namespace callbacks {
+
+/**
+ * @brief 比较回调上下文
+ * 
+ * 用于 WorkerSyncCoordinator 的 callback_chain，
+ * 在 MultiWorkerProductionLine 内部执行帧同步比较。
+ */
+struct CompareCallbackContext {
+    // Worker 名称（用于日志和结果区分）
+    std::string worker1_name;
+    std::string worker2_name;
+    
+    // 阈值配置
+    bool enable_psnr = true;
+    double min_psnr = 30.0;
+    bool enable_ssim = true;
+    double min_ssim = 0.95;
+    
+    // 统计计数器（原子，线程安全）
+    std::atomic<int> total_frames{0};
+    std::atomic<int> passed_frames{0};
+    std::atomic<int> failed_frames{0};
+    
+    // 累计值（用于计算平均值）
+    std::atomic<double> psnr_sum{0.0};
+    std::atomic<double> ssim_sum{0.0};
+    
+    // 外部回调（可选，每帧比较完成后调用）
+    std::function<void(int frame_index, double psnr, double ssim, bool passed)> 
+        result_callback;
+    
+    CompareCallbackContext() = default;
+    
+    // 禁止拷贝（因为有 atomic 成员）
+    CompareCallbackContext(const CompareCallbackContext&) = delete;
+    CompareCallbackContext& operator=(const CompareCallbackContext&) = delete;
+    
+    // 获取平均 PSNR
+    double getAveragePsnr() const {
+        int count = total_frames.load();
+        return count > 0 ? psnr_sum.load() / count : 0.0;
+    }
+    
+    // 获取平均 SSIM
+    double getAverageSsim() const {
+        int count = total_frames.load();
+        return count > 0 ? ssim_sum.load() / count : 0.0;
+    }
+    
+    // 获取通过率
+    double getPassRate() const {
+        int count = total_frames.load();
+        return count > 0 ? 100.0 * passed_frames.load() / count : 0.0;
+    }
+};
+
+/**
+ * @brief 创建比较回调 CallbackChainItem
+ * 
+ * @param context 比较上下文（生命周期需由调用者管理）
+ * @return CallbackChainItem
+ * 
+ * 使用示例：
+ * @code
+ * auto compare_ctx = std::make_shared<CompareCallbackContext>();
+ * compare_ctx->min_psnr = 35.0;
+ * compare_ctx->min_ssim = 0.98;
+ * 
+ * // 设置外部回调
+ * compare_ctx->result_callback = [](int frame, double psnr, double ssim, bool passed) {
+ *     printf("Frame %d: PSNR=%.2f, SSIM=%.4f, %s\n", 
+ *            frame, psnr, ssim, passed ? "PASS" : "FAIL");
+ * };
+ * 
+ * // 添加到 connector config
+ * connector_config.callback_chain.push_back(
+ *     createCompareCallback(compare_ctx.get()));
+ * @endcode
+ * 
+ * @note 实际比较逻辑需要在实现文件中完成（需要 BufferComparator）
+ */
+inline CallbackChainItem createCompareCallback(CompareCallbackContext* context) {
+    // 注意：实际的比较回调实现在 BufferConsumerService.cpp 中
+    // 这里只是创建回调框架，避免头文件依赖 BufferComparator
+    
+    FrameSyncCallback callback = [](uint64_t frame_version, 
+                                    const std::map<std::string, Buffer*>& worker_buffers,
+                                    void* ctx) -> bool {
+        // 占位回调，实际实现由 BufferConsumerService 提供
+        // 或者使用者自己实现比较逻辑
+        (void)frame_version;
+        (void)worker_buffers;
+        (void)ctx;
+        return true;
+    };
+    
+    return CallbackChainItem(callback, context, "compare_callback");
+}
+
+} // namespace callbacks
 
 #endif // WORKER_CONFIG_HPP
 

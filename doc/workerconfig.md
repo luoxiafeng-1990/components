@@ -1,7 +1,7 @@
 # WorkerConfig 开发者文档
 
-> **版本**: v2.23  
-> **更新日期**: 2026-01-23  
+> **版本**: v2.24  
+> **更新日期**: 2026-01-29  
 > **目标读者**: 使用 Components 库的开发者
 
 ---
@@ -269,11 +269,101 @@ TacoConfigBuilder()
 | `display` | `DisplayConfig` | 显示设备配置 |
 | `decoder` | `DecoderConfig` | 解码器配置 |
 | `worker_type` | `WorkerType` | Worker 类型（默认：`AUTO`） |
+| `consumer_type` | `ConsumerTypeConfig` | 消费类型配置（v2.24 新增） |
 | `thread_pool_size` | `int` | 全局线程池大小（默认：64，范围：1-128） |
 
 **说明**：
+- ⭐ v2.24 重构：`consumer` 重命名为 `consumer_type`，`ConsumerConfig` 重命名为 `ConsumerTypeConfig`
 - ⭐ v2.22 重构：数据源相关配置统一归属 `DataSourceConfig`
 - `buffer_mode`, `shared_packet_source`, `codec_params`, `time_base` 从 `DecoderConfig` 移至 `DataSourceConfig`
+
+---
+
+### ConsumerTypeConfig（v2.24 新增）
+
+消费类型配置结构体（`WorkerConfig::ConsumerTypeConfig`）。
+
+#### 执行控制
+
+| 变量名 | 类型 | 含义 |
+|--------|------|------|
+| `max_frames` | `int` | 最大处理帧数（-1=无限制） |
+| `max_duration_seconds` | `double` | 最大执行时长（秒，-1=无限制） |
+| `timeout_ms` | `int` | 单次获取 Buffer 超时（毫秒，默认：100） |
+| `max_timeout_count` | `int` | 最大连续超时次数（默认：10） |
+| `verbose` | `bool` | 是否输出详细日志 |
+
+#### 消费类型
+
+##### DisplayType（显示消费类型）
+
+| 变量名 | 类型 | 含义 |
+|--------|------|------|
+| `enable` | `bool` | 是否启用显示（默认：false） |
+| `device_id` | `int` | Framebuffer 设备 ID（默认：0） |
+
+##### SaveRawType（保存原始数据消费类型）
+
+用于保存解码后的 YUV/RGB 数据，调用 `BufferWriter::openRaw()`。
+
+| 变量名 | 类型 | 含义 |
+|--------|------|------|
+| `enable` | `bool` | 是否启用保存原始数据（默认：false） |
+| `output_path` | `std::string` | 输出文件路径（如 output.yuv） |
+| `max_frames` | `int` | 最大保存帧数（-1=全部） |
+
+##### SaveEncodedType（保存编码数据消费类型）
+
+用于保存未解码的 H.264/H.265 packet，调用 `BufferWriter::openEncoded()`。
+
+| 变量名 | 类型 | 含义 |
+|--------|------|------|
+| `enable` | `bool` | 是否启用保存编码数据（默认：false） |
+| `output_path` | `std::string` | 输出文件路径（如 output.mp4） |
+
+##### CompareType（比较消费类型）
+
+| 变量名 | 类型 | 含义 |
+|--------|------|------|
+| `enable` | `bool` | 是否启用比较（默认：false） |
+| `enable_psnr` | `bool` | 是否计算 PSNR（默认：true） |
+| `min_psnr` | `double` | PSNR 阈值（dB，默认：30.0） |
+| `enable_ssim` | `bool` | 是否计算 SSIM（默认：true） |
+| `min_ssim` | `double` | SSIM 阈值（0.0-1.0，默认：0.95） |
+| `reference_path` | `std::string` | 参考文件路径（可选） |
+
+##### PerformanceType（性能验证消费类型）
+
+| 变量名 | 类型 | 含义 |
+|--------|------|------|
+| `enable` | `bool` | 是否启用性能验证（默认：false） |
+| `target_fps` | `double` | 目标帧率（默认：30.0） |
+
+##### CountType（统计消费类型）
+
+| 变量名 | 类型 | 含义 |
+|--------|------|------|
+| `enable` | `bool` | 是否启用统计（默认：false） |
+
+#### 使用示例
+
+```cpp
+// 直接配置
+WorkerConfig config;
+config.consumer_type.max_frames = 100;
+config.consumer_type.display.enable = true;
+config.consumer_type.display.device_id = 0;
+config.consumer_type.save_raw.enable = true;
+config.consumer_type.save_raw.output_path = "/tmp/output.yuv";
+config.consumer_type.save_raw.max_frames = 50;
+
+// 使用 Builder
+auto config = WorkerConfigBuilder()
+    .setMaxFrames(100)
+    .enableDisplay(true, 0)
+    .enableSaveRaw(true, "/tmp/output.yuv", 50)
+    .build();
+```
 
 ---
 
@@ -611,7 +701,7 @@ auto decoder = DecoderConfigBuilder()
 
 Worker 配置构建器（顶层）。
 
-#### 成员函数
+#### 基础配置
 
 | 函数签名 | 返回值 | 说明 |
 |----------|--------|------|
@@ -621,6 +711,19 @@ Worker 配置构建器（顶层）。
 | `setWorkerType(WorkerType type)` | `WorkerConfigBuilder&` | 设置 Worker 类型 |
 | `setThreadPoolSize(int size)` | `WorkerConfigBuilder&` | 设置全局线程池大小 |
 | `build()` | `WorkerConfig` | 构建最终配置 |
+
+#### 消费类型配置（v2.24 新增）
+
+| 函数签名 | 返回值 | 说明 |
+|----------|--------|------|
+| `setConsumerTypeConfig(const ConsumerTypeConfig& config)` | `WorkerConfigBuilder&` | 设置完整消费类型配置 |
+| `setMaxFrames(int frames)` | `WorkerConfigBuilder&` | 设置最大处理帧数 |
+| `enableDisplay(bool enable, int device_id)` | `WorkerConfigBuilder&` | 启用显示消费类型 |
+| `enableSaveRaw(bool enable, const std::string& path, int max_frames)` | `WorkerConfigBuilder&` | 启用保存原始数据消费类型 |
+| `enableSaveEncoded(bool enable, const std::string& path)` | `WorkerConfigBuilder&` | 启用保存编码数据消费类型 |
+| `enableCompare(bool enable, double min_psnr, double min_ssim)` | `WorkerConfigBuilder&` | 启用比较消费类型 |
+| `enablePerformance(bool enable, double target_fps)` | `WorkerConfigBuilder&` | 启用性能验证消费类型 |
+| `setVerbose(bool verbose)` | `WorkerConfigBuilder&` | 设置详细日志模式 |
 
 #### 使用示例
 
@@ -1108,6 +1211,7 @@ int main() {
 
 | 版本 | 日期 | 变更内容 |
 |------|------|----------|
+| v2.24 | 2026-01-29 | 重构 `ConsumerConfig` 为 `ConsumerTypeConfig`，使用嵌套结构体分类消费类型 |
 | v2.23 | 2026-01-23 | 新增帧同步功能（`WorkerSyncCoordinator`、`ConnectorConfig::enable_frame_sync`） |
 | v2.22 | 2026-01-22 | 重构数据源配置，修复 `BufferPacketSource` 资源泄漏和死锁 |
 | v2.21 | 2026-01-21 | 重构 `Connector` 为使用名字而非索引 |

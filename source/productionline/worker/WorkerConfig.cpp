@@ -382,61 +382,60 @@ WorkerConfigBuilder& WorkerConfigBuilder::setThreadPoolSize(int size) {
 }
 
 // ========================================
-// 消费者配置方法实现（v3.1 新增）
+// 消费类型配置方法实现（v3.2 重构）
 // ========================================
 
-WorkerConfigBuilder& WorkerConfigBuilder::setConsumerConfig(const WorkerConfig::ConsumerConfig& consumer_config) {
-    worker_config_.consumer = consumer_config;
+WorkerConfigBuilder& WorkerConfigBuilder::setConsumerTypeConfig(const WorkerConfig::ConsumerTypeConfig& consumer_type_config) {
+    worker_config_.consumer_type = consumer_type_config;
     return *this;
 }
 
 WorkerConfigBuilder& WorkerConfigBuilder::setMaxFrames(int frames) {
-    worker_config_.consumer.max_frames = frames;
+    worker_config_.consumer_type.max_frames = frames;
     return *this;
 }
 
-WorkerConfigBuilder& WorkerConfigBuilder::setSaveFrames(int frames) {
-    worker_config_.consumer.save_frames = frames;
+WorkerConfigBuilder& WorkerConfigBuilder::enableDisplay(bool enable, int device_id) {
+    worker_config_.consumer_type.display.enable = enable;
+    worker_config_.consumer_type.display.device_id = device_id;
     return *this;
 }
 
-WorkerConfigBuilder& WorkerConfigBuilder::setOutputPath(const std::string& path) {
-    worker_config_.consumer.output_path = path;
+WorkerConfigBuilder& WorkerConfigBuilder::enableSaveRaw(bool enable, 
+                                                         const std::string& output_path,
+                                                         int max_frames) {
+    worker_config_.consumer_type.save_raw.enable = enable;
+    worker_config_.consumer_type.save_raw.output_path = output_path;
+    worker_config_.consumer_type.save_raw.max_frames = max_frames;
     return *this;
 }
 
-WorkerConfigBuilder& WorkerConfigBuilder::setTargetFps(double fps) {
-    worker_config_.consumer.target_fps = fps;
+WorkerConfigBuilder& WorkerConfigBuilder::enableSaveEncoded(bool enable,
+                                                             const std::string& output_path) {
+    worker_config_.consumer_type.save_encoded.enable = enable;
+    worker_config_.consumer_type.save_encoded.output_path = output_path;
     return *this;
 }
 
-WorkerConfigBuilder& WorkerConfigBuilder::enablePsnr(bool enable, double min_psnr, 
-                                                      const std::string& reference_path) {
-    worker_config_.consumer.enable_psnr = enable;
-    worker_config_.consumer.min_psnr = min_psnr;
-    if (!reference_path.empty()) {
-        worker_config_.consumer.reference_path = reference_path;
-    }
+WorkerConfigBuilder& WorkerConfigBuilder::enableCompare(bool enable, 
+                                                         double min_psnr, 
+                                                         double min_ssim) {
+    // enable 参数同时控制 PSNR 和 SSIM
+    worker_config_.consumer_type.compare.enable_psnr = enable;
+    worker_config_.consumer_type.compare.enable_ssim = enable;
+    worker_config_.consumer_type.compare.min_psnr = min_psnr;
+    worker_config_.consumer_type.compare.min_ssim = min_ssim;
     return *this;
 }
 
-WorkerConfigBuilder& WorkerConfigBuilder::enableSsim(bool enable, double min_ssim,
-                                                      const std::string& reference_path) {
-    worker_config_.consumer.enable_ssim = enable;
-    worker_config_.consumer.min_ssim = min_ssim;
-    if (!reference_path.empty()) {
-        worker_config_.consumer.reference_path = reference_path;
-    }
-    return *this;
-}
-
-WorkerConfigBuilder& WorkerConfigBuilder::setEnableDisplay(bool enable) {
-    worker_config_.consumer.enable_display = enable;
+WorkerConfigBuilder& WorkerConfigBuilder::enablePerformance(bool enable, double target_fps) {
+    worker_config_.consumer_type.performance.enable = enable;
+    worker_config_.consumer_type.performance.target_fps = target_fps;
     return *this;
 }
 
 WorkerConfigBuilder& WorkerConfigBuilder::setVerbose(bool verbose) {
-    worker_config_.consumer.verbose = verbose;
+    worker_config_.consumer_type.verbose = verbose;
     return *this;
 }
 

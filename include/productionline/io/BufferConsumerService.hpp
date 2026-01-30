@@ -34,8 +34,19 @@
 #include <atomic>
 #include <string>
 #include <chrono>
+#include <functional>
 
 namespace consumer {
+
+/**
+ * @brief 比较结果回调类型
+ * 
+ * @param frame_index 帧索引
+ * @param psnr PSNR 值（dB）
+ * @param ssim SSIM 值（0.0-1.0）
+ * @param passed 是否通过阈值检查
+ */
+using CompareResultCallback = std::function<void(int frame_index, double psnr, double ssim, bool passed)>;
 
 /**
  * @brief 消费结果
@@ -79,6 +90,21 @@ struct ConsumeResult {
     // PARALLEL 模式：每个 Worker 的独立结果
     // ========================================
     std::vector<ConsumeResult> worker_results;
+    
+    // ========================================
+    // 综合结果（用于自动化测试）
+    // ========================================
+    /**
+     * @brief 获取综合测试结果
+     * 
+     * 将 Status（success）和 Quality（compare_passed）做 AND 运算，
+     * 便于自动化测试通过单一关键字判断最终结果。
+     * 
+     * @return true 当且仅当 success=true 且 compare_passed=true
+     */
+    bool getOverallResult() const {
+        return success && compare_passed;
+    }
 };
 
 /**
@@ -112,7 +138,7 @@ public:
      * @param consume_flags 消费类型标志（可叠加，如 CONSUME_DISPLAY | CONSUME_SAVE_RAW）
      * @return 消费结果
      * 
-     * 所有参数（output_path, save_frames, min_psnr 等）从 WorkerConfig::ConsumerConfig 中获取
+     * 所有参数（output_path, max_frames, min_psnr 等）从 WorkerConfig::ConsumerTypeConfig 中获取
      */
     ConsumeResult start(
         const std::vector<WorkerConfig>& configs,
@@ -123,6 +149,21 @@ public:
     // ============================================================
     // 控制接口
     // ============================================================
+    
+    /**
+     * @brief 使用 MultiWorkerProductionLine 启动比较模式
+     * 
+     * @param multi_config MultiWorkerProductionLine 配置（由测试 case 构造）
+     * @param compare_callback 比较结果回调（每帧比较完成后调用，可选）
+     * @return 消费结果
+     * 
+     * @note 比较在 MultiWorkerProductionLine 内部通过 WorkerSyncCoordinator 完成
+     * @note 外部消费策略（显示、保存等）独立于比较，每个 worker 可单独配置
+     */
+    ConsumeResult startMultiWorkerCompare(
+        const MultiWorkerConfig& multi_config,
+        CompareResultCallback compare_callback = nullptr
+    );
     
     /**
      * @brief 请求停止
@@ -213,7 +254,7 @@ private:
     void consumeLoop(
         std::shared_ptr<BufferPool> pool,
         std::shared_ptr<IBufferConsumer> consumer,
-        const WorkerConfig::ConsumerConfig& config,
+        const WorkerConfig::ConsumerTypeConfig& config,
         ConsumeResult& result
     );
     
@@ -223,7 +264,7 @@ private:
     void consumeLoopCompare(
         const std::vector<std::shared_ptr<BufferPool>>& pools,
         std::shared_ptr<IBufferConsumer> consumer,
-        const WorkerConfig::ConsumerConfig& config,
+        const WorkerConfig::ConsumerTypeConfig& config,
         ConsumeResult& result
     );
     

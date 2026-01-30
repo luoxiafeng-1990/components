@@ -19,11 +19,6 @@ namespace test {
 namespace vdec {
 
 // 获取模块级日志实例
-log4cplus::Logger& VdecTestSuite::getLogger() {
-    static log4cplus::Logger logger = log4cplus::Logger::getInstance(
-        LOG4CPLUS_TEXT("components.test.VdecSuite"));
-    return logger;
-}
 
 // ========================================
 // 辅助函数：从 WorkerConfig 构建消费标志
@@ -31,10 +26,10 @@ log4cplus::Logger& VdecTestSuite::getLogger() {
 uint32_t VdecTestSuite::buildConsumeFlags(const WorkerConfig& config) {
     uint32_t flags = consumer::CONSUME_COUNT;  // 默认计数
     
-    if (config.consumer.enable_display) {
+    if (config.consumer_type.display.enable) {
         flags |= consumer::CONSUME_DISPLAY;
     }
-    if (config.consumer.save_frames != 0) {
+    if (config.consumer_type.save_raw.enable) {
         flags |= consumer::CONSUME_SAVE_RAW;
     }
     
@@ -220,23 +215,23 @@ int VdecTestSuite::run(int argc, char* argv[]) {
     // ========================================
     
     // COMPARE 模式：PSNR/SSIM 质量验证
-    if (config.consumer.enable_psnr || config.consumer.enable_ssim) {
+    if (config.consumer_type.compare.enable_psnr || config.consumer_type.compare.enable_ssim) {
         // 创建 HW + SW 配置
         auto hw_config = common::WorkerConfigFactory::createDecode(
             config.data_source.path, params.codec, params.width, params.height);
-        hw_config.consumer = config.consumer;
-        hw_config.consumer.target_fps = params.fps;
+        hw_config.consumer_type = config.consumer_type;
+        hw_config.consumer_type.performance.target_fps = params.fps;
         
         auto sw_config = common::WorkerConfigFactory::createSoftwareDecode(
             config.data_source.path, params.width, params.height);
-        sw_config.consumer.target_fps = params.fps;
+        sw_config.consumer_type.performance.target_fps = params.fps;
         
         // COMPARE 模式也支持叠加其他消费类型（display、save）
         uint32_t compare_flags = 0;
-        if (config.consumer.enable_display) {
+        if (config.consumer_type.display.enable) {
             compare_flags |= consumer::CONSUME_DISPLAY;
         }
-        if (config.consumer.save_frames != 0) {
+        if (config.consumer_type.save_raw.enable) {
             compare_flags |= consumer::CONSUME_SAVE_RAW;
         }
         
@@ -262,8 +257,8 @@ int VdecTestSuite::run(int argc, char* argv[]) {
                 cfg = common::WorkerConfigFactory::createSoftwareDecode(
                     config.data_source.path, params.width, params.height);
             }
-            cfg.consumer = config.consumer;
-            cfg.consumer.target_fps = params.fps;
+            cfg.consumer_type = config.consumer_type;
+            cfg.consumer_type.performance.target_fps = params.fps;
             configs.push_back(cfg);
         }
         
@@ -283,8 +278,8 @@ int VdecTestSuite::run(int argc, char* argv[]) {
         full_config = common::WorkerConfigFactory::createSoftwareDecode(
             config.data_source.path, params.width, params.height);
     }
-    full_config.consumer = config.consumer;
-    full_config.consumer.target_fps = params.fps;
+    full_config.consumer_type = config.consumer_type;
+    full_config.consumer_type.performance.target_fps = params.fps;
     
     uint32_t flags = buildConsumeFlags(full_config);
     auto result = runSingle(full_config, flags, test_name.str());
@@ -381,43 +376,44 @@ bool VdecTestSuite::parseArgs(int argc, char* argv[], WorkerConfig& config, Deco
                 break;
             
             case 'm':
-                config.consumer.max_frames = std::stoi(optarg);
+                config.consumer_type.max_frames = std::stoi(optarg);
                 break;
             
             case 's':
-                config.consumer.save_frames = std::stoi(optarg);
+                config.consumer_type.save_raw.enable = true;
+                config.consumer_type.save_raw.max_frames = std::stoi(optarg);
                 break;
             
             case 'o':
-                config.consumer.output_path = optarg;
+                config.consumer_type.save_raw.output_path = optarg;
                 break;
             
             case 'd':
-                config.consumer.enable_display = true;
+                config.consumer_type.display.enable = true;
                 break;
             
             case 'p':
-                config.consumer.enable_psnr = true;
+                config.consumer_type.compare.enable_psnr = true;
                 break;
             
             case 'S':
-                config.consumer.enable_ssim = true;
+                config.consumer_type.compare.enable_ssim = true;
                 break;
             
             case 'P':
-                config.consumer.min_psnr = std::stod(optarg);
+                config.consumer_type.compare.min_psnr = std::stod(optarg);
                 break;
             
             case 'M':
-                config.consumer.min_ssim = std::stod(optarg);
+                config.consumer_type.compare.min_ssim = std::stod(optarg);
                 break;
             
             case 'e':
-                config.consumer.reference_path = optarg;
+                config.consumer_type.compare.reference_path = optarg;
                 break;
             
             case 'v':
-                config.consumer.verbose = true;
+                config.consumer_type.verbose = true;
                 break;
             
             default:
@@ -471,7 +467,7 @@ int VdecTestSuite::runPredefinedTest(const std::string& test_name, const std::st
     const auto& params = it->second;
     auto config = common::WorkerConfigFactory::createDecode(
         path, params.codec, params.width, params.height);
-    config.consumer.target_fps = params.fps;
+    config.consumer_type.performance.target_fps = params.fps;
     
     auto result = runSingle(config, consumer::CONSUME_COUNT, test_name);
     consumer::BufferConsumerService::printResult(test_name, result);
@@ -596,96 +592,6 @@ void VdecTestSuite::listTests() const {
               << std::endl;
 }
 
-// ========================================
-// 核心测试方法实现（与 ExecuteMode 对齐）
-// ========================================
-
-TestResult VdecTestSuite::runSingle(
-    const WorkerConfig& config,
-    uint32_t flags,
-    const std::string& test_name
-) {
-    auto& logger = getLogger();
-    
-    if (!test_name.empty()) {
-        consumer::BufferConsumerService::printHeader(test_name, config);
-    }
-    
-    LOG4CPLUS_DEBUG_FMT(logger, "runSingle: mode=SINGLE, flags=0x%X", flags);
-    
-    consumer::BufferConsumerService service;
-    return service.start({config}, consumer::ExecuteMode::SINGLE, flags);
-}
-
-TestResult VdecTestSuite::runCompare(
-    const std::vector<WorkerConfig>& configs,
-    uint32_t flags,
-    const std::string& test_name
-) {
-    auto& logger = getLogger();
-    
-    if (!test_name.empty()) {
-        LOG4CPLUS_INFO(logger, "");
-        LOG4CPLUS_INFO(logger, "═══════════════════════════════════════════════════════");
-        LOG4CPLUS_INFO_FMT(logger, "  %s", test_name.c_str());
-        LOG4CPLUS_INFO(logger, "═══════════════════════════════════════════════════════");
-        LOG4CPLUS_INFO_FMT(logger, "  Mode:       ExecuteMode::COMPARE");
-        LOG4CPLUS_INFO_FMT(logger, "  Workers:    %zu", configs.size());
-        LOG4CPLUS_INFO_FMT(logger, "  Flags:      0x%X", flags);
-        if (!configs.empty()) {
-            LOG4CPLUS_INFO_FMT(logger, "  Input:      %s", configs[0].data_source.path.c_str());
-            if (configs[0].consumer.enable_psnr) {
-                LOG4CPLUS_INFO_FMT(logger, "  PSNR:       enabled (min: %.1f dB)", configs[0].consumer.min_psnr);
-            }
-            if (configs[0].consumer.enable_ssim) {
-                LOG4CPLUS_INFO_FMT(logger, "  SSIM:       enabled (min: %.2f)", configs[0].consumer.min_ssim);
-            }
-            // 显示叠加的消费类型
-            if (flags & consumer::CONSUME_DISPLAY) {
-                LOG4CPLUS_INFO(logger, "  Display:    enabled (stacked)");
-            }
-            if (flags & consumer::CONSUME_SAVE_RAW) {
-                LOG4CPLUS_INFO_FMT(logger, "  Save:       enabled to %s (stacked)", 
-                                  configs[0].consumer.output_path.c_str());
-            }
-        }
-        LOG4CPLUS_INFO(logger, "═══════════════════════════════════════════════════════");
-    }
-    
-    LOG4CPLUS_DEBUG_FMT(logger, "runCompare: mode=COMPARE, workers=%zu, flags=0x%X", 
-                        configs.size(), flags);
-    
-    consumer::BufferConsumerService service;
-    return service.start(configs, consumer::ExecuteMode::COMPARE, flags);
-}
-
-TestResult VdecTestSuite::runParallel(
-    const std::vector<WorkerConfig>& configs,
-    uint32_t flags,
-    const std::string& test_name
-) {
-    auto& logger = getLogger();
-    
-    if (!test_name.empty()) {
-        LOG4CPLUS_INFO(logger, "");
-        LOG4CPLUS_INFO(logger, "═══════════════════════════════════════════════════════");
-        LOG4CPLUS_INFO_FMT(logger, "  %s", test_name.c_str());
-        LOG4CPLUS_INFO(logger, "═══════════════════════════════════════════════════════");
-        LOG4CPLUS_INFO_FMT(logger, "  Mode:       ExecuteMode::PARALLEL");
-        LOG4CPLUS_INFO_FMT(logger, "  Workers:    %zu", configs.size());
-        LOG4CPLUS_INFO_FMT(logger, "  Flags:      0x%X", flags);
-        if (!configs.empty()) {
-            LOG4CPLUS_INFO_FMT(logger, "  Input:      %s", configs[0].data_source.path.c_str());
-        }
-        LOG4CPLUS_INFO(logger, "═══════════════════════════════════════════════════════");
-    }
-    
-    LOG4CPLUS_DEBUG_FMT(logger, "runParallel: mode=PARALLEL, workers=%zu, flags=0x%X", 
-                        configs.size(), flags);
-    
-    consumer::BufferConsumerService service;
-    return service.start(configs, consumer::ExecuteMode::PARALLEL, flags);
-}
 
 } // namespace vdec
 } // namespace test

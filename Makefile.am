@@ -65,6 +65,7 @@ COMMON_LIBS = -lpthread -luring -lavformat -lavcodec -lavutil -lswscale -ltacosy
 bin_PROGRAMS = qa_cases
 qa_cases_SOURCES = \
     test_cases/test_module_main.cpp \
+    test_cases/common/ITestModule.cpp \
     test_cases/vdec/VdecTestSuite.cpp \
     test_cases/pp/PPTestSuite.cpp \
     test_cases/record/RecordTestSuite.cpp \

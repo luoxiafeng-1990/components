@@ -79,6 +79,7 @@ public:
 private:
     int device_id_;
     std::unique_ptr<LinuxFramebufferDevice> display_;
+    uint64_t display_pool_id_ = 0;  ///< Display BufferPool ID（用于 memcpy 模式）
     int success_count_ = 0;
     int failed_count_ = 0;
     bool initialized_ = false;

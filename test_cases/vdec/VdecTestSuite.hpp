@@ -93,63 +93,9 @@ public:
     std::vector<std::string> getTestNames() const override;
     
     // ========================================
-    // 核心测试方法（与 ExecuteMode 对齐）
-    // ========================================
-    
-    /**
-     * @brief 单路消费测试（ExecuteMode::SINGLE）
-     * 
-     * @param config 单个 Worker 配置
-     * @param flags 消费类型标志（CONSUME_COUNT | CONSUME_DISPLAY | CONSUME_SAVE_RAW）
-     * @param test_name 测试名称（用于日志输出）
-     * @return 测试结果
-     */
-    static TestResult runSingle(
-        const WorkerConfig& config,
-        uint32_t flags,
-        const std::string& test_name = ""
-    );
-    
-    /**
-     * @brief 对比消费测试（ExecuteMode::COMPARE）
-     * 
-     * 用于 PSNR/SSIM 质量验证，同步比较多个 Worker 的输出
-     * 
-     * @param configs Worker 配置列表（通常是 HW + SW）
-     * @param flags 消费类型标志（可叠加 DISPLAY、SAVE_RAW 等，与 Compare 同时执行）
-     * @param test_name 测试名称（用于日志输出）
-     * @return 测试结果（包含 psnr_average, ssim_average）
-     * 
-     * 示例：
-     *   runCompare(configs, 0);  // 只做 PSNR/SSIM 比较
-     *   runCompare(configs, CONSUME_DISPLAY);  // 比较 + 显示
-     *   runCompare(configs, CONSUME_DISPLAY | CONSUME_SAVE_RAW);  // 比较 + 显示 + 保存
-     */
-    static TestResult runCompare(
-        const std::vector<WorkerConfig>& configs,
-        uint32_t flags = 0,
-        const std::string& test_name = ""
-    );
-    
-    /**
-     * @brief 并行消费测试（ExecuteMode::PARALLEL）
-     * 
-     * 多路并行解码，每个 Worker 独立线程
-     * 
-     * @param configs Worker 配置列表
-     * @param flags 消费类型标志
-     * @param test_name 测试名称（用于日志输出）
-     * @return 测试结果（包含 worker_results）
-     */
-    static TestResult runParallel(
-        const std::vector<WorkerConfig>& configs,
-        uint32_t flags,
-        const std::string& test_name = ""
-    );
-    
-    // ========================================
     // 辅助方法
     // ========================================
+    // 注：runSingle/runCompare/runParallel 已移至基类 ITestModule
     
     /**
      * @brief 获取预定义测试参数
@@ -174,10 +120,6 @@ private:
      */
     int runPredefinedTest(const std::string& test_name, const std::string& path);
     
-    /**
-     * @brief 获取模块级日志实例
-     */
-    static log4cplus::Logger& getLogger();
 };
 
 } // namespace vdec

@@ -4,11 +4,13 @@
  */
 
 #include "productionline/io/BufferConsumerStrategies.hpp"
+#include "buffer/bufferpool/BufferPoolRegistry.hpp"
 
 #include <log4cplus/logger.h>
 #include <log4cplus/loggingmacros.h>
 #include <sstream>
 #include <iomanip>
+#include <cstring>
 
 namespace consumer {
 
@@ -62,6 +64,14 @@ bool DisplayConsumer::initialize(const std::vector<Buffer*>& first_buffers) {
             LOG4CPLUS_ERROR(log4cplus::Logger::getRoot(), "DisplayConsumer: Failed to open framebuffer device");
             return false;
         }
+        
+        // 获取 Display BufferPool ID（用于 memcpy 模式）
+        display_pool_id_ = display_->getBufferPoolId();
+        if (display_pool_id_ == 0) {
+            LOG4CPLUS_WARN(log4cplus::Logger::getRoot(), 
+                "DisplayConsumer: Display BufferPool not available, memcpy mode disabled");
+        }
+        
         initialized_ = true;
         LOG4CPLUS_INFO(log4cplus::Logger::getRoot(), "DisplayConsumer: Initialized successfully");
         return true;
@@ -85,16 +95,79 @@ bool DisplayConsumer::consume(const std::vector<Buffer*>& buffers, int frame_ind
     
     // 智能选择显示方式：
     // 1. 如果 Buffer 有物理地址，优先使用 DMA 零拷贝
-    // 2. 否则使用 memcpy 方式拷贝到 framebuffer
+    // 2. 否则使用 memcpy 方式拷贝到 framebuffer（软件解码支持）
     
     if (buffer->getPhysicalAddress() != 0) {
         // DMA 零拷贝方式（性能最优）
         success = display_->displayBufferByDMA(buffer);
     }
     
-    if (!success) {
-        // 回退到 memcpy 方式（兼容性最好）
-        success = display_->displayBufferByMemcpyToFramebuffer(buffer);
+    if (!success && display_pool_id_ != 0) {
+        // memcpy 方式（软件解码支持）
+        // 获取 Display BufferPool
+        auto pool_weak = BufferPoolRegistry::getInstance().getPool(display_pool_id_);
+        auto pool = pool_weak.lock();
+        if (!pool) {
+            LOG4CPLUS_ERROR(log4cplus::Logger::getRoot(), 
+                "DisplayConsumer: Display BufferPool not found or already destroyed");
+            failed_count_++;
+            return true;
+        }
+        
+        // 从 Display BufferPool 获取空闲的 framebuffer
+        Buffer* display_buffer = pool->acquireFree(true, 100);
+        if (display_buffer == nullptr) {
+            LOG4CPLUS_WARN(log4cplus::Logger::getRoot(), 
+                "DisplayConsumer: Failed to acquire free display buffer, skipping frame");
+            failed_count_++;
+            return true;
+        }
+        
+        // 检查源 buffer 和目标 buffer 的虚拟地址
+        void* src_addr = buffer->getVirtualAddress();
+        void* dst_addr = display_buffer->getVirtualAddress();
+        
+        if (!src_addr) {
+            LOG4CPLUS_ERROR_FMT(log4cplus::Logger::getRoot(), 
+                "DisplayConsumer: Source buffer virtual address is nullptr (buffer #%u)", 
+                buffer->id());
+            pool->releaseFree(display_buffer);
+            failed_count_++;
+            return true;
+        }
+        
+        if (!dst_addr) {
+            LOG4CPLUS_ERROR_FMT(log4cplus::Logger::getRoot(), 
+                "DisplayConsumer: Display buffer virtual address is nullptr (buffer #%u)", 
+                display_buffer->id());
+            pool->releaseFree(display_buffer);
+            failed_count_++;
+            return true;
+        }
+        
+        // 计算安全的拷贝大小
+        size_t copy_size = std::min(buffer->size(), display_buffer->size());
+        if (copy_size == 0) {
+            LOG4CPLUS_WARN(log4cplus::Logger::getRoot(), 
+                "DisplayConsumer: Copy size is 0, skipping frame");
+            pool->releaseFree(display_buffer);
+            failed_count_++;
+            return true;
+        }
+        
+        // 拷贝数据（软件解码的关键步骤）
+        std::memcpy(dst_addr, src_addr, copy_size);
+        
+        // 等待垂直同步并显示
+        display_->waitVerticalSync();
+        if (display_->displayFilledFramebuffer(display_buffer)) {
+            success = true;
+        } else {
+            LOG4CPLUS_WARN(log4cplus::Logger::getRoot(), "DisplayConsumer: Display failed");
+        }
+        
+        // 归还 display buffer
+        pool->releaseFree(display_buffer);
     }
     
     if (success) {

@@ -7,19 +7,21 @@
  * - PP1（通道1）RGB/YUV 格式测试
  * - Multi-PP（双通道）测试
  * - 裁剪和缩放测试
+ * - PSNR/SSIM 质量验证
  * 
  * 架构设计：
  * - 与 BufferConsumerService 的 ExecuteMode 对齐
- * - PP 测试全部使用 ExecuteMode::SINGLE + CONSUME_SAVE_RAW
+ * - 测试方法直接映射到 SINGLE / COMPARE / PARALLEL 模式
  * 
  * 使用示例：
  * @code
  * ./qa_cases pp --format nv12 --channel pp0 --input video.mp4
  * ./qa_cases pp --format argb888 --channel pp1 --input video.mp4
+ * ./qa_cases pp --psnr video.mp4              # COMPARE 模式
  * ./qa_cases pp -h
  * @endcode
  * 
- * @version 4.0 - 重构为 ExecuteMode 风格
+ * @version 4.1 - 重构为 ExecuteMode 风格，与 VdecTestSuite 架构对齐
  */
 
 #ifndef PP_TEST_SUITE_HPP
@@ -122,8 +124,10 @@ struct PPTestParams {
  * 实现 ITestModule 接口，提供完整的后处理测试功能。
  * 
  * 架构设计：
- * - 所有 PP 测试使用 ExecuteMode::SINGLE
- * - 默认消费标志：CONSUME_COUNT | CONSUME_SAVE_RAW
+ * - 所有测试方法与 BufferConsumerService::ExecuteMode 对齐
+ * - runSingle()   → ExecuteMode::SINGLE
+ * - runCompare()  → ExecuteMode::COMPARE (PSNR/SSIM)
+ * - runParallel() → ExecuteMode::PARALLEL (多线程/多Worker)
  */
 class PPTestSuite : public common::ITestModule {
 public:
@@ -143,29 +147,21 @@ public:
     std::vector<std::string> getTestNames() const override;
     
     // ========================================
-    // 核心测试方法（与 ExecuteMode 对齐）
+    // 辅助方法
     // ========================================
-    
-    /**
-     * @brief 单路消费测试（ExecuteMode::SINGLE）
-     * 
-     * PP 测试统一入口，根据 PPTestParams 构建 WorkerConfig
-     * 
-     * @param path 视频文件路径
-     * @param params PP 测试参数
-     * @param flags 消费类型标志（默认 CONSUME_COUNT | CONSUME_SAVE_RAW）
-     * @return 测试结果
-     */
-    static TestResult runSingle(
-        const std::string& path,
-        const PPTestParams& params,
-        uint32_t flags = consumer::CONSUME_COUNT | consumer::CONSUME_SAVE_RAW
-    );
+    // 注：runSingle/runCompare/runParallel 已移至基类 ITestModule
     
     /**
      * @brief 获取预定义测试参数
+     * 
+     * @return 预定义测试名称到参数的映射
      */
     static const std::map<std::string, PPTestParams>& getPredefinedTests();
+    
+    /**
+     * @brief 从 WorkerConfig 构建消费标志
+     */
+    static uint32_t buildConsumeFlags(const WorkerConfig& config);
     
     /**
      * @brief 从 PPTestParams 构建 WorkerConfig
@@ -183,10 +179,6 @@ private:
      */
     int runPredefinedTest(const std::string& test_name, const std::string& path);
     
-    /**
-     * @brief 获取模块级日志实例
-     */
-    static log4cplus::Logger& getLogger();
 };
 
 } // namespace pp

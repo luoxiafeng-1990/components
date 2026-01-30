@@ -132,7 +132,7 @@ bool RecordTestSuite::parseArgs(int argc, char* argv[], WorkerConfig& config,
                 break;
             
             case 'v':
-                config.consumer.verbose = true;
+                config.consumer_type.verbose = true;
                 break;
             
             default:
@@ -256,8 +256,8 @@ TestResult RecordTestSuite::runSingle(
     
     // 构建配置
     auto config = common::WorkerConfigFactory::createRtspRecord(input_source);
-    config.consumer.output_path = output_path;
-    config.consumer.max_duration_seconds = params.duration;
+    config.consumer_type.save_encoded.output_path = output_path;
+    config.consumer_type.max_duration_seconds = params.duration;
     
     // 生成测试名称
     std::ostringstream test_name;

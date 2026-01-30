@@ -280,7 +280,7 @@ bool WriterTestSuite::parseArgs(int argc, char* argv[], WorkerConfig& config,
                 break;
             
             case 'v':
-                config.consumer.verbose = true;
+                config.consumer_type.verbose = true;
                 break;
             
             default:
@@ -434,10 +434,11 @@ TestResult WriterTestSuite::runSingle(
         );
     }
     
-    config.consumer.save_frames = params.save_frames;
-    config.consumer.output_path = output_path.empty() ? 
+    config.consumer_type.save_raw.enable = true;
+    config.consumer_type.save_raw.max_frames = params.save_frames;
+    config.consumer_type.save_raw.output_path = output_path.empty() ? 
         "/tmp/writer_" + params.description + ".raw" : output_path;
-    config.consumer.verbose = true;
+    config.consumer_type.verbose = true;
     
     std::cout << "\n";
     std::cout << "═══════════════════════════════════════════════════════\n";
@@ -445,7 +446,7 @@ TestResult WriterTestSuite::runSingle(
     std::cout << "═══════════════════════════════════════════════════════\n";
     std::cout << "  Mode:    ExecuteMode::SINGLE + CONSUME_SAVE_RAW\n";
     std::cout << "  Input:   " << input_path << "\n";
-    std::cout << "  Output:  " << config.consumer.output_path << "\n";
+    std::cout << "  Output:  " << config.consumer_type.save_raw.output_path << "\n";
     std::cout << "  Format:  " << params.description << "\n";
     std::cout << "  Frames:  " << params.save_frames << "\n";
     std::cout << "═══════════════════════════════════════════════════════\n";

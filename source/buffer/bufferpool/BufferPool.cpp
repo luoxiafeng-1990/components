@@ -190,14 +190,15 @@ Buffer* BufferPool::acquireFilled(bool blocking, int timeout_ms) {
                 }
             }
         }
+        
+        // 阻塞模式：如果因 shutdown 退出且队列为空，返回 nullptr
+        if (!running_ && filled_queue_.empty()) {
+            return nullptr;
+        }
     }
     
-    // 检查是否因为 shutdown 而退出
-    if (!running_) {
-        return nullptr;
-    }
-    
-    // 检查队列是否为空
+    // 非阻塞模式或 shutdown 后仍有 buffer：
+    // 即使已 shutdown，也返回队列中残留的 buffer（用于 drain 阶段）
     if (filled_queue_.empty()) {
         return nullptr;
     }
