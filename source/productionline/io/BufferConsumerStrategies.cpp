@@ -195,14 +195,20 @@ std::string DisplayConsumer::getStats() const {
 }
 
 // ============================================================
-// SaveRawConsumer 实现
+// SaveRawConsumer 实现（支持多通道）
 // ============================================================
 
 SaveRawConsumer::SaveRawConsumer(const std::string& output_path, int max_frames)
-    : output_path_(output_path)
-    , max_frames_(max_frames)
-    , writer_(nullptr)
-    , saved_count_(0)
+    : output_paths_({output_path})
+    , max_frames_per_channel_({max_frames})
+    , initialized_(false)
+{
+}
+
+SaveRawConsumer::SaveRawConsumer(const std::vector<std::string>& output_paths, 
+                                 const std::vector<int>& max_frames_per_channel)
+    : output_paths_(output_paths)
+    , max_frames_per_channel_(max_frames_per_channel)
     , initialized_(false)
 {
 }
@@ -221,70 +227,154 @@ bool SaveRawConsumer::initialize(const std::vector<Buffer*>& first_buffers) {
         return false;
     }
     
-    if (output_path_.empty()) {
+    if (output_paths_.empty() || output_paths_[0].empty()) {
         LOG4CPLUS_ERROR(log4cplus::Logger::getRoot(), "SaveRawConsumer: Output path is empty");
         return false;
     }
     
-    try {
-        // 从首帧 Buffer 获取图像元数据
-        Buffer* first_buffer = first_buffers[0];
-        AVPixelFormat format = first_buffer->getImageFormat();
-        int width = first_buffer->getImageWidth();
-        int height = first_buffer->getImageHeight();
-        
-        writer_ = std::make_unique<productionline::io::BufferWriter>();
-        if (!writer_->openRaw(output_path_.c_str(), format, width, height)) {
-            LOG4CPLUS_ERROR_FMT(log4cplus::Logger::getRoot(), 
-                "SaveRawConsumer: Failed to open output file: %s", output_path_.c_str());
-            return false;
+    // 不在这里创建 Writer，而是延迟到 consume 时根据通道创建
+    initialized_ = true;
+    LOG4CPLUS_INFO_FMT(log4cplus::Logger::getRoot(), 
+        "SaveRawConsumer: Initialized with %zu output path(s)", output_paths_.size());
+    return true;
+}
+
+std::string SaveRawConsumer::getOutputPath(int channel) const {
+    if (output_paths_.empty()) return "";
+    if (channel < 0 || static_cast<size_t>(channel) >= output_paths_.size()) {
+        // 如果通道超出范围，使用第一个路径并添加通道后缀
+        if (output_paths_.size() == 1 && channel > 0) {
+            const std::string& base = output_paths_[0];
+            size_t dot = base.rfind('.');
+            if (dot != std::string::npos) {
+                return base.substr(0, dot) + "_ch" + std::to_string(channel) + base.substr(dot);
+            }
+            return base + "_ch" + std::to_string(channel);
         }
-        initialized_ = true;
-        LOG4CPLUS_INFO_FMT(log4cplus::Logger::getRoot(), 
-            "SaveRawConsumer: Initialized, output: %s", output_path_.c_str());
-        return true;
-    } catch (const std::exception& e) {
-        LOG4CPLUS_ERROR_FMT(log4cplus::Logger::getRoot(), 
-            "SaveRawConsumer: Exception during initialization: %s", e.what());
-        return false;
+        return output_paths_[0];
     }
+    return output_paths_[channel];
+}
+
+int SaveRawConsumer::getMaxFrames(int channel) const {
+    if (max_frames_per_channel_.empty()) return -1;
+    if (channel < 0 || static_cast<size_t>(channel) >= max_frames_per_channel_.size()) {
+        // 如果通道超出范围，使用第一个值
+        return max_frames_per_channel_[0];
+    }
+    return max_frames_per_channel_[channel];
+}
+
+productionline::io::BufferWriter* SaveRawConsumer::getOrCreateWriter(int channel, Buffer* sample_buffer) {
+    // 如果已存在，直接返回
+    auto it = writers_.find(channel);
+    if (it != writers_.end()) {
+        return it->second.get();
+    }
+    
+    // 创建新的 Writer
+    std::string path = getOutputPath(channel);
+    AVPixelFormat format = sample_buffer->getImageFormat();
+    int width = sample_buffer->getImageWidth();
+    int height = sample_buffer->getImageHeight();
+    
+    auto writer = std::make_unique<productionline::io::BufferWriter>();
+    if (!writer->openRaw(path.c_str(), format, width, height)) {
+        LOG4CPLUS_ERROR_FMT(log4cplus::Logger::getRoot(), 
+            "SaveRawConsumer: Failed to open output file for channel %d: %s", 
+            channel, path.c_str());
+        return nullptr;
+    }
+    
+    int max_frames = getMaxFrames(channel);
+    LOG4CPLUS_INFO_FMT(log4cplus::Logger::getRoot(), 
+        "SaveRawConsumer: Created writer for channel %d: %s (max_frames=%d)", 
+        channel, path.c_str(), max_frames);
+    
+    auto* ptr = writer.get();
+    writers_[channel] = std::move(writer);
+    saved_counts_[channel] = 0;
+    return ptr;
 }
 
 bool SaveRawConsumer::consume(const std::vector<Buffer*>& buffers, int frame_index) {
     (void)frame_index;
     
-    if (!initialized_ || !writer_ || buffers.empty() || !buffers[0]) {
-        return true;
-    }
-    
-    // 检查是否达到最大保存帧数
-    if (max_frames_ > 0 && saved_count_ >= max_frames_) {
+    if (!initialized_ || buffers.empty() || !buffers[0]) {
         return true;
     }
     
     Buffer* buffer = buffers[0];
     
-    if (writer_->write(buffer)) {
-        saved_count_++;
+    // 获取 Buffer 的输出通道
+    int channel = buffer->getOutputChannel();
+    if (channel < 0) {
+        channel = 0;  // 默认通道 0
+    }
+    
+    // 检查该通道是否达到最大保存帧数
+    int channel_max_frames = getMaxFrames(channel);
+    if (channel_max_frames > 0) {
+        auto it = saved_counts_.find(channel);
+        int channel_saved = (it != saved_counts_.end()) ? it->second : 0;
+        if (channel_saved >= channel_max_frames) {
+            return true;  // 该通道已达到限制，跳过
+        }
+    }
+    
+    // 获取或创建对应通道的 Writer
+    auto* writer = getOrCreateWriter(channel, buffer);
+    if (!writer) {
+        return true;  // 创建失败，跳过
+    }
+    
+    if (writer->write(buffer)) {
+        saved_counts_[channel]++;
     }
     
     return true;
 }
 
 void SaveRawConsumer::finalize() {
-    if (writer_) {
-        writer_->close();
-        writer_.reset();
+    for (auto& pair : writers_) {
+        if (pair.second) {
+            pair.second->close();
+            LOG4CPLUS_INFO_FMT(log4cplus::Logger::getRoot(), 
+                "SaveRawConsumer: Channel %d finalized, saved %d frames to %s",
+                pair.first, saved_counts_[pair.first], getOutputPath(pair.first).c_str());
+        }
     }
+    writers_.clear();
+    saved_counts_.clear();
     initialized_ = false;
-    LOG4CPLUS_INFO_FMT(log4cplus::Logger::getRoot(), 
-        "SaveRawConsumer: Finalized, saved %d frames to %s", 
-        saved_count_, output_path_.c_str());
+}
+
+int SaveRawConsumer::getSavedCount() const {
+    int total = 0;
+    for (const auto& pair : saved_counts_) {
+        total += pair.second;
+    }
+    return total;
+}
+
+int SaveRawConsumer::getSavedCount(int channel) const {
+    auto it = saved_counts_.find(channel);
+    return it != saved_counts_.end() ? it->second : 0;
 }
 
 std::string SaveRawConsumer::getStats() const {
     std::ostringstream oss;
-    oss << "SaveRawConsumer: " << saved_count_ << " frames saved to " << output_path_;
+    oss << "SaveRawConsumer: " << getSavedCount() << " frames saved";
+    if (writers_.size() > 1) {
+        oss << " (";
+        bool first = true;
+        for (const auto& pair : saved_counts_) {
+            if (!first) oss << ", ";
+            oss << "ch" << pair.first << ":" << pair.second;
+            first = false;
+        }
+        oss << ")";
+    }
     return oss.str();
 }
 
@@ -381,12 +471,14 @@ CompareConsumer::CompareConsumer(
     double min_psnr,
     double min_ssim,
     bool enable_psnr,
-    bool enable_ssim
+    bool enable_ssim,
+    bool verbose
 )
     : min_psnr_(min_psnr)
     , min_ssim_(min_ssim)
     , enable_psnr_(enable_psnr)
     , enable_ssim_(enable_ssim)
+    , verbose_(verbose)
     , comparator_(nullptr)
     , compared_count_(0)
     , psnr_sum_(0.0)
@@ -420,6 +512,7 @@ bool CompareConsumer::initialize(const std::vector<Buffer*>& first_buffers) {
         config.enable_ssim = enable_ssim_;
         config.quick_psnr_threshold = min_psnr_;
         config.ssim_threshold = min_ssim_;
+        config.verbose = verbose_;
         
         if (!comparator_->open(config)) {
             LOG4CPLUS_ERROR(log4cplus::Logger::getRoot(), 

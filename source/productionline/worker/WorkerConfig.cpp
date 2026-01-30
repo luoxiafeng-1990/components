@@ -405,8 +405,8 @@ WorkerConfigBuilder& WorkerConfigBuilder::enableSaveRaw(bool enable,
                                                          const std::string& output_path,
                                                          int max_frames) {
     worker_config_.consumer_type.save_raw.enable = enable;
-    worker_config_.consumer_type.save_raw.output_path = output_path;
-    worker_config_.consumer_type.save_raw.max_frames = max_frames;
+    worker_config_.consumer_type.save_raw.setOutputPath(output_path);
+    worker_config_.consumer_type.save_raw.max_frames_per_channel = {max_frames};
     return *this;
 }
 

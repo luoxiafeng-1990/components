@@ -234,7 +234,8 @@ ConsumeResult BufferConsumerService::startProductionLinesCompare(
             consumer_type_config.compare.min_psnr,
             consumer_type_config.compare.min_ssim,
             consumer_type_config.compare.enable_psnr,
-            consumer_type_config.compare.enable_ssim
+            consumer_type_config.compare.enable_ssim,
+            consumer_type_config.verbose
         );
         
         // 3. 根据 consume_flags 决定是否叠加其他消费类型
@@ -258,11 +259,11 @@ ConsumeResult BufferConsumerService::startProductionLinesCompare(
             }
             if (consume_flags & CONSUME_SAVE_RAW) {
                 multi->addStrategy(std::make_shared<SaveRawConsumer>(
-                    consumer_type_config.save_raw.output_path,
-                    consumer_type_config.save_raw.max_frames
+                    consumer_type_config.save_raw.output_paths,
+                    consumer_type_config.save_raw.max_frames_per_channel
                 ));
                 LOG4CPLUS_DEBUG_FMT(logger_, "COMPARE mode: added SaveRawConsumer to %s", 
-                                   consumer_type_config.save_raw.output_path.c_str());
+                                   consumer_type_config.save_raw.getOutputPath(0).c_str());
             }
             if (consume_flags & CONSUME_SAVE_ENCODED) {
                 multi->addStrategy(std::make_shared<SaveEncodedConsumer>(
@@ -471,8 +472,8 @@ static std::shared_ptr<IBufferConsumer> createConsumerForWorker(
     // 2. 保存原始数据消费者
     if (flags & CONSUME_SAVE_RAW) {
         consumers.push_back(std::make_shared<SaveRawConsumer>(
-            config.save_raw.output_path,
-            config.save_raw.max_frames));
+            config.save_raw.output_paths,
+            config.save_raw.max_frames_per_channel));
     }
     
     // 3. 保存编码数据消费者
@@ -664,17 +665,47 @@ ConsumeResult BufferConsumerService::startMultiWorkerCompare(
         
         running_ = false;
         
-        // 6. 清理消费者
+        // 6. 停止生产线（等待生产者完成所有帧的生产）
+        production_line->stop();
+        
+        // 7. 排空剩余的已填充 Buffer（drain 阶段）
+        // 每个 worker 独立 drain 自己的 BufferPool
+        LOG4CPLUS_DEBUG(logger_, "Draining remaining buffers after production line stopped...");
+        int total_drained = 0;
+        for (auto& ctx : worker_contexts) {
+            int drained_count = 0;
+            Buffer* remaining = nullptr;
+            while ((remaining = ctx.pool->acquireFilled(false, 0)) != nullptr) {
+                // 首帧初始化（如果之前没有消费过）
+                if (ctx.frame_count == 0) {
+                    std::vector<Buffer*> first_buffers = {remaining};
+                    ctx.consumer->initialize(first_buffers);
+                }
+                
+                std::vector<Buffer*> buffers = {remaining};
+                ctx.consumer->consume(buffers, ctx.frame_count++);
+                ctx.pool->releaseFilled(remaining);
+                drained_count++;
+                total_frames++;
+            }
+            if (drained_count > 0) {
+                LOG4CPLUS_DEBUG_FMT(logger_, "  %s: drained %d buffers", 
+                    ctx.worker_name.c_str(), drained_count);
+                total_drained += drained_count;
+            }
+        }
+        if (total_drained > 0) {
+            LOG4CPLUS_DEBUG_FMT(logger_, "Total drained: %d buffers", total_drained);
+        }
+        
+        // 8. 清理消费者
         for (auto& ctx : worker_contexts) {
             if (ctx.frame_count > 0) {
                 ctx.consumer->finalize();
             }
         }
         
-        // 7. 停止
-        production_line->stop();
-        
-        // 8. 填充结果
+        // 9. 填充结果
         result.success = true;
         result.frames_consumed = total_frames;
         
@@ -735,8 +766,8 @@ std::shared_ptr<IBufferConsumer> BufferConsumerService::createConsumerFromFlags(
         }
         if (flags & CONSUME_SAVE_RAW) {
             return std::make_shared<SaveRawConsumer>(
-                config.consumer_type.save_raw.output_path,
-                config.consumer_type.save_raw.max_frames
+                config.consumer_type.save_raw.output_paths,
+                config.consumer_type.save_raw.max_frames_per_channel
             );
         }
         if (flags & CONSUME_SAVE_ENCODED) {
@@ -760,8 +791,8 @@ std::shared_ptr<IBufferConsumer> BufferConsumerService::createConsumerFromFlags(
     }
     if (flags & CONSUME_SAVE_RAW) {
         multi->addStrategy(std::make_shared<SaveRawConsumer>(
-            config.consumer_type.save_raw.output_path,
-            config.consumer_type.save_raw.max_frames
+            config.consumer_type.save_raw.output_paths,
+            config.consumer_type.save_raw.max_frames_per_channel
         ));
     }
     if (flags & CONSUME_SAVE_ENCODED) {
@@ -986,9 +1017,9 @@ void BufferConsumerService::printHeader(const std::string& test_name, const Work
         LOG4CPLUS_INFO(logger, "  Display:         enabled");
     }
     if (config.consumer_type.save_raw.enable) {
-        LOG4CPLUS_INFO_FMT(logger, "  Save Raw:        to %s (max %d frames)", 
-            config.consumer_type.save_raw.output_path.c_str(),
-            config.consumer_type.save_raw.max_frames);
+        LOG4CPLUS_INFO_FMT(logger, "  Save Raw:        to %s (max %d frames/channel)", 
+            config.consumer_type.save_raw.getOutputPath(0).c_str(),
+            config.consumer_type.save_raw.getMaxFrames(0));
     }
     if (config.consumer_type.save_encoded.enable) {
         LOG4CPLUS_INFO_FMT(logger, "  Save Encoded:    to %s", 

@@ -331,12 +331,49 @@ struct WorkerConfig {
         // ========================================
         // 保存原始数据消费类型（CONSUME_SAVE_RAW）
         // 用于解码后的 YUV/RGB 数据 → BufferWriter::openRaw()
+        // 支持多通道输出：output_paths[0] 对应通道 0，output_paths[1] 对应通道 1，以此类推
         // ========================================
         struct SaveRawType {
-            bool enable = false;          ///< 是否启用保存原始数据
-            std::string output_path;      ///< 输出文件路径（如 output.yuv）
-            int max_frames = -1;          ///< 最大保存帧数（-1=全部）
+            bool enable = false;                      ///< 是否启用保存原始数据
+            std::vector<std::string> output_paths;    ///< 输出文件路径列表（按通道顺序）
+            std::vector<int> max_frames_per_channel;  ///< 每个通道的最大保存帧数（-1=全部）
+            
             SaveRawType() = default;
+            
+            /// 获取指定通道的输出路径（兼容单路径和多路径）
+            std::string getOutputPath(int channel = 0) const {
+                if (output_paths.empty()) return "";
+                if (channel < 0 || static_cast<size_t>(channel) >= output_paths.size()) {
+                    // 如果通道超出范围，使用第一个路径并添加通道后缀
+                    if (output_paths.size() == 1 && channel > 0) {
+                        const std::string& base = output_paths[0];
+                        size_t dot = base.rfind('.');
+                        if (dot != std::string::npos) {
+                            return base.substr(0, dot) + "_ch" + std::to_string(channel) + base.substr(dot);
+                        }
+                        return base + "_ch" + std::to_string(channel);
+                    }
+                    return output_paths[0];
+                }
+                return output_paths[channel];
+            }
+            
+            /// 设置单个输出路径（兼容旧代码）
+            void setOutputPath(const std::string& path) {
+                output_paths.clear();
+                output_paths.push_back(path);
+            }
+            
+            /// 获取指定通道的最大帧数（兼容单值和多值）
+            int getMaxFrames(int channel = 0) const {
+                if (max_frames_per_channel.empty()) return -1;
+                if (channel < 0 || static_cast<size_t>(channel) >= max_frames_per_channel.size()) {
+                    // 如果通道超出范围，使用第一个值
+                    return max_frames_per_channel[0];
+                }
+                return max_frames_per_channel[channel];
+            }
+            
         } save_raw;
         
         // ========================================
@@ -358,7 +395,6 @@ struct WorkerConfig {
             double min_psnr = 30.0;       ///< PSNR 阈值（dB）
             bool enable_ssim = false;     ///< 是否计算 SSIM（需显式开启）
             double min_ssim = 0.95;       ///< SSIM 阈值（0.0-1.0）
-            std::string reference_path;   ///< 参考文件路径（可选）
             CompareType() = default;
         } compare;
         

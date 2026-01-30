@@ -61,7 +61,7 @@ consumer::ConsumeResult ITestModule::runCompare(
             }
             if (flags & consumer::CONSUME_SAVE_RAW) {
                 LOG4CPLUS_INFO_FMT(logger, "  Save:       enabled to %s (stacked)", 
-                                  configs[0].consumer_type.save_raw.output_path.c_str());
+                                  configs[0].consumer_type.save_raw.getOutputPath().c_str());
             }
         }
         LOG4CPLUS_INFO(logger, "═══════════════════════════════════════════════════════");

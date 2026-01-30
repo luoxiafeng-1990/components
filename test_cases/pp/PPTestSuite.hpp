@@ -43,15 +43,19 @@ namespace pp {
 using TestResult = consumer::ConsumeResult;
 
 /**
- * @brief PP 测试参数
+ * @brief PP 测试参数（可扩展多通道设计）
+ * 
+ * 设计原则：
+ * - channels: 启用的通道列表，如 [0], [1], [0,1], [0,1,2]
+ * - formats: 每个通道的输出格式，与 channels 一一对应
+ * - 兼容原有 "pp0"/"pp1"/"multi" 字符串格式
  */
 struct PPTestParams {
-    std::string channel;        ///< 通道 (pp0, pp1, multi)
-    OutputFormat format;        ///< 输出格式
-    OutputFormat pp1_format;    ///< PP1 格式（仅 multi 模式）
-    int width;                  ///< 输出宽度
-    int height;                 ///< 输出高度
-    ColorStandard color_std;    ///< 颜色标准
+    std::vector<int> channels;           ///< 启用的通道列表
+    std::vector<OutputFormat> formats;   ///< 每个通道的输出格式
+    int width;                           ///< 输出宽度
+    int height;                          ///< 输出高度
+    ColorStandard color_std;             ///< 颜色标准
     
     // 裁剪参数（可选）
     int crop_x;
@@ -60,20 +64,47 @@ struct PPTestParams {
     int crop_h;
     
     // 解码方式
-    bool use_hardware;          ///< 是否使用硬件解码（默认 true）
+    bool use_hardware;                   ///< 是否使用硬件解码（默认 true）
     
-    // 默认构造 - channel 为空表示未使用预定义测试
+    // ========================================
+    // 辅助方法
+    // ========================================
+    
+    /// 获取兼容的 channel 字符串（用于日志和旧代码兼容）
+    std::string getChannelString() const {
+        if (channels.empty()) return "";
+        if (channels.size() == 1) {
+            return "pp" + std::to_string(channels[0]);
+        }
+        return "multi";
+    }
+    
+    /// 获取指定通道的格式（如果 formats 不够，使用最后一个或默认值）
+    OutputFormat getFormat(size_t index) const {
+        if (formats.empty()) return OutputFormat::YUV_NV12;
+        if (index < formats.size()) return formats[index];
+        return formats.back();  // 不够时使用最后一个
+    }
+    
+    /// 是否为多通道模式
+    bool isMultiChannel() const { return channels.size() > 1; }
+    
+    // ========================================
+    // 构造函数（保持兼容性）
+    // ========================================
+    
+    // 默认构造 - channels 为空表示未使用预定义测试
     PPTestParams()
-        : channel(""), format(OutputFormat::YUV_NV12), pp1_format(OutputFormat::YUV_AUTO),
+        : channels(), formats({OutputFormat::YUV_NV12}),
           width(1920), height(1080), color_std(ColorStandard::BT601),
           crop_x(0), crop_y(0), crop_w(0), crop_h(0), use_hardware(true) {}
     
-    // 单通道构造（4参数）
+    // 单通道构造（4参数）- 兼容 {"pp0", NV12, 1920, 1080}
     PPTestParams(
         const std::string& ch,
         OutputFormat fmt,
         int w, int h
-    ) : channel(ch), format(fmt), pp1_format(OutputFormat::YUV_AUTO),
+    ) : channels(parseChannelString(ch)), formats({fmt}),
         width(w), height(h), color_std(ColorStandard::BT601),
         crop_x(0), crop_y(0), crop_w(0), crop_h(0), use_hardware(true) {}
     
@@ -83,7 +114,7 @@ struct PPTestParams {
         OutputFormat fmt,
         int w, int h,
         ColorStandard std
-    ) : channel(ch), format(fmt), pp1_format(OutputFormat::YUV_AUTO),
+    ) : channels(parseChannelString(ch)), formats({fmt}),
         width(w), height(h), color_std(std),
         crop_x(0), crop_y(0), crop_w(0), crop_h(0), use_hardware(true) {}
     
@@ -94,16 +125,16 @@ struct PPTestParams {
         int w, int h,
         ColorStandard std,
         int cx, int cy, int cw, int ch_
-    ) : channel(ch), format(fmt), pp1_format(OutputFormat::YUV_AUTO),
+    ) : channels(parseChannelString(ch)), formats({fmt}),
         width(w), height(h), color_std(std),
         crop_x(cx), crop_y(cy), crop_w(cw), crop_h(ch_), use_hardware(true) {}
     
-    // Multi-PP 构造（4参数）
+    // Multi-PP 构造（4参数）- 兼容 {NV12, RGB888, 1920, 1080}
     PPTestParams(
         OutputFormat pp0_fmt,
         OutputFormat pp1_fmt,
         int w, int h
-    ) : channel("multi"), format(pp0_fmt), pp1_format(pp1_fmt),
+    ) : channels({0, 1}), formats({pp0_fmt, pp1_fmt}),
         width(w), height(h), color_std(ColorStandard::BT601),
         crop_x(0), crop_y(0), crop_w(0), crop_h(0), use_hardware(true) {}
     
@@ -113,9 +144,19 @@ struct PPTestParams {
         OutputFormat pp1_fmt,
         int w, int h,
         ColorStandard std
-    ) : channel("multi"), format(pp0_fmt), pp1_format(pp1_fmt),
+    ) : channels({0, 1}), formats({pp0_fmt, pp1_fmt}),
         width(w), height(h), color_std(std),
         crop_x(0), crop_y(0), crop_w(0), crop_h(0), use_hardware(true) {}
+    
+private:
+    /// 解析通道字符串（"pp0" → [0], "pp1" → [1], "multi" → [0,1]）
+    static std::vector<int> parseChannelString(const std::string& ch) {
+        if (ch == "pp0" || ch == "0") return {0};
+        if (ch == "pp1" || ch == "1") return {1};
+        if (ch == "multi" || ch == "0,1") return {0, 1};
+        // 默认通道 0
+        return {0};
+    }
 };
 
 /**

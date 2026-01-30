@@ -160,6 +160,9 @@ bool RecordTestSuite::parseArgs(int argc, char* argv[], WorkerConfig& config,
             input_path = arg;
         } else if (output_path.empty()) {
             output_path = arg;
+        } else {
+            std::cerr << "Warning: Extra positional argument ignored: '" << arg 
+                      << "' (input: '" << input_path << "', output: '" << output_path << "')\n";
         }
     }
     

@@ -227,6 +227,7 @@ bool WriterTestSuite::parseArgs(int argc, char* argv[], WorkerConfig& config,
     
     std::string input_path;
     std::string format_str = "nv12";
+    bool format_specified = false;  // 用户是否显式指定了 -f 参数
     bool all_rgb = false;
     bool all_yuv = false;
     
@@ -265,6 +266,7 @@ bool WriterTestSuite::parseArgs(int argc, char* argv[], WorkerConfig& config,
             
             case 'f':
                 format_str = optarg;
+                format_specified = true;
                 break;
             
             case 'n':
@@ -303,6 +305,9 @@ bool WriterTestSuite::parseArgs(int argc, char* argv[], WorkerConfig& config,
         // 否则作为输入路径
         if (input_path.empty()) {
             input_path = arg;
+        } else {
+            std::cerr << "Warning: Extra positional argument ignored: '" << arg 
+                      << "' (input already set to: '" << input_path << "')\n";
         }
     }
     
@@ -311,6 +316,11 @@ bool WriterTestSuite::parseArgs(int argc, char* argv[], WorkerConfig& config,
         params.description = "All 12 RGB formats";
     } else if (all_yuv) {
         params.description = "All 10 YUV formats";
+    }
+    
+    // 如果用户显式指定了 -f 参数，覆盖 params.format
+    if (format_specified) {
+        params.format = TacoConfigBuilder::mapFormatNameToEnum(format_str);
     }
     
     // 检查输入
@@ -435,9 +445,9 @@ TestResult WriterTestSuite::runSingle(
     }
     
     config.consumer_type.save_raw.enable = true;
-    config.consumer_type.save_raw.max_frames = params.save_frames;
-    config.consumer_type.save_raw.output_path = output_path.empty() ? 
-        "/tmp/writer_" + params.description + ".raw" : output_path;
+    config.consumer_type.save_raw.max_frames_per_channel = {params.save_frames};
+    config.consumer_type.save_raw.setOutputPath(output_path.empty() ? 
+        "/tmp/writer_" + params.description + ".raw" : output_path);
     config.consumer_type.verbose = true;
     
     std::cout << "\n";
@@ -446,7 +456,7 @@ TestResult WriterTestSuite::runSingle(
     std::cout << "═══════════════════════════════════════════════════════\n";
     std::cout << "  Mode:    ExecuteMode::SINGLE + CONSUME_SAVE_RAW\n";
     std::cout << "  Input:   " << input_path << "\n";
-    std::cout << "  Output:  " << config.consumer_type.save_raw.output_path << "\n";
+    std::cout << "  Output:  " << config.consumer_type.save_raw.getOutputPath() << "\n";
     std::cout << "  Format:  " << params.description << "\n";
     std::cout << "  Frames:  " << params.save_frames << "\n";
     std::cout << "═══════════════════════════════════════════════════════\n";

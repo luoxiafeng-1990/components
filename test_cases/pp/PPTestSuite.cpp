@@ -18,6 +18,69 @@
 namespace test {
 namespace pp {
 
+// ========================================
+// 辅助函数：解析逗号分隔的列表
+// ========================================
+
+/// 解析逗号分隔的字符串列表
+static std::vector<std::string> parseStringList(const std::string& str) {
+    std::vector<std::string> result;
+    std::stringstream ss(str);
+    std::string item;
+    while (std::getline(ss, item, ',')) {
+        // 去除首尾空格
+        size_t start = item.find_first_not_of(" \t");
+        size_t end = item.find_last_not_of(" \t");
+        if (start != std::string::npos && end != std::string::npos) {
+            result.push_back(item.substr(start, end - start + 1));
+        } else if (!item.empty()) {
+            result.push_back(item);
+        }
+    }
+    return result;
+}
+
+/// 解析通道参数（支持 "pp0", "pp1", "multi", "0", "1", "0,1" 等格式）
+static std::vector<int> parseChannels(const std::string& str) {
+    // 兼容旧格式
+    if (str == "pp0") return {0};
+    if (str == "pp1") return {1};
+    if (str == "multi") return {0, 1};
+    
+    // 新格式：逗号分隔的数字
+    std::vector<int> result;
+    for (const auto& s : parseStringList(str)) {
+        try {
+            result.push_back(std::stoi(s));
+        } catch (...) {
+            // 忽略无效的数字
+        }
+    }
+    return result.empty() ? std::vector<int>{0} : result;  // 默认通道 0
+}
+
+/// 解析格式参数（支持 "nv12", "nv12,rgb888" 等格式）
+static std::vector<OutputFormat> parseFormats(const std::string& str) {
+    std::vector<OutputFormat> result;
+    for (const auto& s : parseStringList(str)) {
+        result.push_back(TacoConfigBuilder::mapFormatNameToEnum(s));
+    }
+    return result.empty() ? std::vector<OutputFormat>{OutputFormat::YUV_NV12} : result;
+}
+
+/// 解析整数列表（支持 "200", "100,200" 等格式）
+static std::vector<int> parseIntList(const std::string& str) {
+    std::vector<int> result;
+    for (const auto& s : parseStringList(str)) {
+        try {
+            result.push_back(std::stoi(s));
+        } catch (...) {
+            // 忽略无效的数字
+        }
+    }
+    return result;
+}
+
 // 获取模块级日志实例
 
 // ========================================
@@ -63,10 +126,13 @@ int PPTestSuite::run(int argc, char* argv[]) {
     }
     
     // 生成测试名称
-    std::string fmt_name(TacoConfigBuilder::mapFormatEnumToName(params.format));
     std::ostringstream test_name;
-    test_name << params.channel << " " << fmt_name 
-              << " (" << params.width << "x" << params.height << ")";
+    test_name << params.getChannelString();
+    for (size_t i = 0; i < params.formats.size(); ++i) {
+        test_name << (i == 0 ? " " : ",") 
+                  << TacoConfigBuilder::mapFormatEnumToName(params.formats[i]);
+    }
+    test_name << " (" << params.width << "x" << params.height << ")";
     
     // ========================================
     // 根据配置字段判断执行模式
@@ -99,7 +165,7 @@ int PPTestSuite::run(int argc, char* argv[]) {
     }
     
     // PARALLEL 模式：多通道并行（如 multi_pp 双通道）
-    if (params.channel == "multi" && params.pp1_format != OutputFormat::YUV_AUTO) {
+    if (params.isMultiChannel()) {
         // Multi-PP 模式暂时使用 SINGLE，后续可扩展为 PARALLEL
         // 因为 Multi-PP 本身就是单生产线多输出，不需要多线程
     }
@@ -139,17 +205,17 @@ bool PPTestSuite::parseArgs(int argc, char* argv[], WorkerConfig& config, PPTest
         {"ssim",       no_argument,       0, 'S'},
         {"min-psnr",   required_argument, 0, 'P'},
         {"min-ssim",   required_argument, 0, 'M'},
-        {"reference",  required_argument, 0, 'e'},
         {"verbose",    no_argument,       0, 'v'},
         {0, 0, 0, 0}
     };
     
     std::string input_path;
     std::string format_str = "nv12";
+    std::string channel_str;        // 通道参数（命令行）
     std::string color_std_str = "bt601";
     
     int opt;
-    while ((opt = getopt_long(argc, argv, "hli:D:f:c:W:H:R:C:s:o:n:dm:pSP:M:e:v",
+    while ((opt = getopt_long(argc, argv, "hli:D:f:c:W:H:R:C:s:o:n:dm:pSP:M:v",
                               long_options, nullptr)) != -1) {
         switch (opt) {
             case 'h':
@@ -180,10 +246,12 @@ bool PPTestSuite::parseArgs(int argc, char* argv[], WorkerConfig& config, PPTest
             
             case 'f':
                 format_str = optarg;
+                params.formats = parseFormats(optarg);
                 break;
             
             case 'c':
-                params.channel = optarg;
+                channel_str = optarg;
+                params.channels = parseChannels(optarg);
                 break;
             
             case 'W':
@@ -229,12 +297,12 @@ bool PPTestSuite::parseArgs(int argc, char* argv[], WorkerConfig& config, PPTest
                 break;
             
             case 'o':
-                config.consumer_type.save_raw.output_path = optarg;
+                config.consumer_type.save_raw.enable = true;  // 指定路径即启用保存
+                config.consumer_type.save_raw.output_paths = parseStringList(optarg);
                 break;
             
             case 'n':
-                config.consumer_type.save_raw.enable = true;
-                config.consumer_type.save_raw.max_frames = std::stoi(optarg);
+                config.consumer_type.save_raw.max_frames_per_channel = parseIntList(optarg);
                 break;
             
             case 'd':
@@ -259,10 +327,6 @@ bool PPTestSuite::parseArgs(int argc, char* argv[], WorkerConfig& config, PPTest
             
             case 'M':
                 config.consumer_type.compare.min_ssim = std::stod(optarg);
-                break;
-            
-            case 'e':
-                config.consumer_type.compare.reference_path = optarg;
                 break;
             
             case 'v':
@@ -292,6 +356,10 @@ bool PPTestSuite::parseArgs(int argc, char* argv[], WorkerConfig& config, PPTest
         
         if (input_path.empty()) {
             input_path = arg;
+        } else {
+            LOG4CPLUS_WARN_FMT(getLogger(), 
+                "Extra positional argument ignored: '%s' (input already set to: '%s')",
+                arg.c_str(), input_path.c_str());
         }
     }
     
@@ -303,13 +371,32 @@ bool PPTestSuite::parseArgs(int argc, char* argv[], WorkerConfig& config, PPTest
     
     config.data_source.path = input_path;
     
-    // 只有当没有使用预定义测试时才解析 format 和 color_std 参数
-    // 预定义测试通过 channel 非空来标识
-    if (params.channel.empty()) {
+    // 只有当没有使用预定义测试时才解析 channel、format 和 color_std 参数
+    // 预定义测试通过 channels 非空来标识
+    if (params.channels.empty()) {
         // 没有使用预定义测试，从命令行参数解析
-        params.channel = "pp0";  // 默认 pp0
-        params.format = TacoConfigBuilder::mapFormatNameToEnum(format_str);
+        if (channel_str.empty()) {
+            params.channels = {0};  // 默认通道 0
+        }
+        if (params.formats.empty()) {
+            params.formats = parseFormats(format_str);
+        }
         params.color_std = TacoConfigBuilder::mapColorStdNameToEnum(color_std_str);
+        
+        // 提示用户使用了默认配置
+        std::string channels_info;
+        for (size_t i = 0; i < params.channels.size(); ++i) {
+            if (i > 0) channels_info += ",";
+            channels_info += std::to_string(params.channels[i]);
+        }
+        std::string formats_info;
+        for (size_t i = 0; i < params.formats.size(); ++i) {
+            if (i > 0) formats_info += ",";
+            formats_info += std::string(TacoConfigBuilder::mapFormatEnumToName(params.formats[i]));
+        }
+        LOG4CPLUS_INFO_FMT(getLogger(), 
+            "Using PP configuration: channels=[%s], formats=[%s] (use -c and -f to customize)",
+            channels_info.c_str(), formats_info.c_str());
     }
     // 如果使用了预定义测试，params 已经被正确设置，不需要覆盖
     
@@ -557,7 +644,7 @@ int PPTestSuite::runPredefinedTest(const std::string& test_name, const std::stri
     // 构建配置
     WorkerConfig config = buildConfig(path, it->second);
     config.consumer_type.save_raw.enable = true;
-    config.consumer_type.save_raw.max_frames = 10;  // 默认保存前10帧验证
+    config.consumer_type.save_raw.max_frames_per_channel = {10};  // 默认保存前10帧验证
     
     uint32_t flags = consumer::CONSUME_COUNT | consumer::CONSUME_SAVE_RAW;
     
@@ -585,21 +672,28 @@ WorkerConfig PPTestSuite::buildConfig(const std::string& path, const PPTestParam
     }
     
     // 硬件解码模式：使用 TACO PP
-    if (params.channel == "pp0") {
+    // 根据 channels 列表决定使用哪种配置
+    if (params.channels.empty() || (params.channels.size() == 1 && params.channels[0] == 0)) {
+        // 单通道 PP0
         config = common::WorkerConfigFactory::createPP0YuvConfig(
-            path, params.format, params.width, params.height, params.color_std);
-    } else if (params.channel == "pp1") {
-        int fmt_val = static_cast<int>(params.format);
+            path, params.getFormat(0), params.width, params.height, params.color_std);
+    } else if (params.channels.size() == 1 && params.channels[0] == 1) {
+        // 单通道 PP1
+        OutputFormat fmt = params.getFormat(0);
+        int fmt_val = static_cast<int>(fmt);
         if (fmt_val >= 1000) {
             config = common::WorkerConfigFactory::createPP1RgbConfig(
-                path, params.format, params.width, params.height, params.color_std);
+                path, fmt, params.width, params.height, params.color_std);
         } else {
             config = common::WorkerConfigFactory::createPP1YuvConfig(
-                path, params.format, params.width, params.height, params.color_std);
+                path, fmt, params.width, params.height, params.color_std);
         }
-    } else if (params.channel == "multi") {
+    } else if (params.isMultiChannel()) {
+        // 多通道模式
+        OutputFormat pp0_fmt = params.getFormat(0);
+        OutputFormat pp1_fmt = params.getFormat(1);
         config = common::WorkerConfigFactory::createMultiPPConfig(
-            path, params.format, params.pp1_format, 
+            path, pp0_fmt, pp1_fmt, 
             params.width, params.height, params.color_std);
     }
     
@@ -641,7 +735,6 @@ void PPTestSuite::printHelp() const {
               << "  -S, --ssim              启用 SSIM 验证 (ExecuteMode::COMPARE)\n"
               << "  -P, --min-psnr <n>      PSNR 阈值 (默认: 30.0 dB)\n"
               << "  -M, --min-ssim <n>      SSIM 阈值 (默认: 0.95)\n"
-              << "  -e, --reference <path>  参考文件路径\n"
               << "  -v, --verbose           详细日志\n"
               << "\n"
               << "ExecuteMode Mapping:\n"

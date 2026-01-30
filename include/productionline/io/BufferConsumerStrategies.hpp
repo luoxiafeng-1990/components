@@ -23,6 +23,7 @@
 #include <atomic>
 #include <string>
 #include <vector>
+#include <map>
 
 namespace consumer {
 
@@ -90,18 +91,29 @@ private:
 // ============================================================
 
 /**
- * @brief 保存原始数据消费者
+ * @brief 保存原始数据消费者（支持多通道）
  * 
  * 将 Buffer 中的原始 YUV/RGB 数据保存到文件。
+ * 支持多通道输出：根据 Buffer::getOutputChannel() 自动分发到对应的 Writer。
+ * 支持每个通道独立的帧数限制。
  */
 class SaveRawConsumer : public IBufferConsumer {
 public:
     /**
-     * @brief 构造函数
+     * @brief 构造函数（单路径，兼容旧代码）
      * @param output_path 输出文件路径
      * @param max_frames 最大保存帧数（-1=全部）
      */
     SaveRawConsumer(const std::string& output_path, int max_frames = -1);
+    
+    /**
+     * @brief 构造函数（多路径，支持多通道）
+     * @param output_paths 输出文件路径列表（按通道顺序）
+     * @param max_frames_per_channel 每个通道的最大保存帧数（-1=全部）
+     */
+    SaveRawConsumer(const std::vector<std::string>& output_paths, 
+                    const std::vector<int>& max_frames_per_channel);
+    
     ~SaveRawConsumer() override;
     
     bool initialize(const std::vector<Buffer*>& first_buffers) override;
@@ -110,16 +122,30 @@ public:
     std::string getStats() const override;
     
     /**
-     * @brief 获取已保存帧数
+     * @brief 获取已保存帧数（所有通道总计）
      */
-    int getSavedCount() const { return saved_count_; }
+    int getSavedCount() const;
+    
+    /**
+     * @brief 获取指定通道的已保存帧数
+     */
+    int getSavedCount(int channel) const;
     
 private:
-    std::string output_path_;
-    int max_frames_;
-    std::unique_ptr<productionline::io::BufferWriter> writer_;
-    int saved_count_ = 0;
+    std::vector<std::string> output_paths_;           ///< 输出路径列表
+    std::vector<int> max_frames_per_channel_;         ///< 每个通道的最大保存帧数
+    std::map<int, std::unique_ptr<productionline::io::BufferWriter>> writers_;  ///< 通道 → Writer
+    std::map<int, int> saved_counts_;                  ///< 通道 → 已保存帧数
     bool initialized_ = false;
+    
+    /// 获取或创建指定通道的 Writer（延迟初始化）
+    productionline::io::BufferWriter* getOrCreateWriter(int channel, Buffer* sample_buffer);
+    
+    /// 获取指定通道的输出路径
+    std::string getOutputPath(int channel) const;
+    
+    /// 获取指定通道的最大帧数
+    int getMaxFrames(int channel) const;
 };
 
 // ============================================================
@@ -178,12 +204,14 @@ public:
      * @param min_ssim 最小 SSIM 阈值（低于此值视为失败）
      * @param enable_psnr 是否启用 PSNR 计算
      * @param enable_ssim 是否启用 SSIM 计算
+     * @param verbose 是否输出详细对比日志
      */
     CompareConsumer(
         double min_psnr = 30.0,
         double min_ssim = 0.95,
         bool enable_psnr = true,
-        bool enable_ssim = true
+        bool enable_ssim = true,
+        bool verbose = true
     );
     ~CompareConsumer() override;
     
@@ -217,6 +245,7 @@ private:
     double min_ssim_;
     bool enable_psnr_;
     bool enable_ssim_;
+    bool verbose_;
     std::unique_ptr<productionline::io::BufferComparator> comparator_;
     int compared_count_ = 0;
     double psnr_sum_ = 0.0;

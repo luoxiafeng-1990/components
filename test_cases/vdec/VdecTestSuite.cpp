@@ -143,27 +143,6 @@ const std::map<std::string, DecodeTestParams>& VdecTestSuite::getPredefinedTests
         {"mp4_mjpeg_720p",      {"mjpeg", 1280, 720, 30.0, ""}},
         {"mp4_mjpeg_1080p",     {"mjpeg", 1920, 1080, 30.0, ""}},
         {"mp4_mjpeg_4k",        {"mjpeg", 3840, 2160, 30.0, ""}},
-        
-        // ════════════════════════════════════════════════════════════════════
-        // ZYW 新增测试 - 解码 + PP 组合测试的便捷入口
-        // 注：完整的 PP 参数配置请使用 qa_cases pp 命令
-        // ════════════════════════════════════════════════════════════════════
-        // H264 解码 + PP 基础组合
-        {"h264_pp0",            {"h264", 1920, 1080, 30.0, "pp0"}},
-        {"h264_pp1",            {"h264", 1920, 1080, 30.0, "pp1"}},
-        {"h264_multi_pp",       {"h264", 1920, 1080, 30.0, "multi_pp"}},
-        {"h264_720p_pp0",       {"h264", 1280, 720, 30.0, "pp0"}},
-        {"h264_720p_pp1",       {"h264", 1280, 720, 30.0, "pp1"}},
-        {"h264_4k_pp0",         {"h264", 3840, 2160, 30.0, "pp0"}},
-        {"h264_4k_pp1",         {"h264", 3840, 2160, 30.0, "pp1"}},
-        // H265 解码 + PP 基础组合
-        {"h265_pp0",            {"h265", 1920, 1080, 30.0, "pp0"}},
-        {"h265_pp1",            {"h265", 1920, 1080, 30.0, "pp1"}},
-        {"h265_multi_pp",       {"h265", 1920, 1080, 30.0, "multi_pp"}},
-        {"h265_720p_pp0",       {"h265", 1280, 720, 30.0, "pp0"}},
-        {"h265_720p_pp1",       {"h265", 1280, 720, 30.0, "pp1"}},
-        {"h265_4k_pp0",         {"h265", 3840, 2160, 30.0, "pp0"}},
-        {"h265_4k_pp1",         {"h265", 3840, 2160, 30.0, "pp1"}},
     };
     return tests;
 }
@@ -310,7 +289,6 @@ bool VdecTestSuite::parseArgs(int argc, char* argv[], WorkerConfig& config, Deco
         {"ssim",       no_argument,       0, 'S'},
         {"min-psnr",   required_argument, 0, 'P'},
         {"min-ssim",   required_argument, 0, 'M'},
-        {"reference",  required_argument, 0, 'e'},
         {"verbose",    no_argument,       0, 'v'},
         {0, 0, 0, 0}
     };
@@ -318,7 +296,7 @@ bool VdecTestSuite::parseArgs(int argc, char* argv[], WorkerConfig& config, Deco
     std::string input_path;
     
     int opt;
-    while ((opt = getopt_long(argc, argv, "hlf:r:c:D:W:H:R:F:m:s:o:dpSP:M:e:v", 
+    while ((opt = getopt_long(argc, argv, "hlf:r:c:D:W:H:R:F:m:s:o:dpSP:M:v", 
                               long_options, nullptr)) != -1) {
         switch (opt) {
             case 'h':
@@ -380,12 +358,12 @@ bool VdecTestSuite::parseArgs(int argc, char* argv[], WorkerConfig& config, Deco
                 break;
             
             case 's':
-                config.consumer_type.save_raw.enable = true;
-                config.consumer_type.save_raw.max_frames = std::stoi(optarg);
+                config.consumer_type.save_raw.max_frames_per_channel = {std::stoi(optarg)};  // 只设置帧数
                 break;
             
             case 'o':
-                config.consumer_type.save_raw.output_path = optarg;
+                config.consumer_type.save_raw.enable = true;  // 指定路径即启用保存
+                config.consumer_type.save_raw.setOutputPath(optarg);
                 break;
             
             case 'd':
@@ -406,10 +384,6 @@ bool VdecTestSuite::parseArgs(int argc, char* argv[], WorkerConfig& config, Deco
             
             case 'M':
                 config.consumer_type.compare.min_ssim = std::stod(optarg);
-                break;
-            
-            case 'e':
-                config.consumer_type.compare.reference_path = optarg;
                 break;
             
             case 'v':
@@ -442,6 +416,10 @@ bool VdecTestSuite::parseArgs(int argc, char* argv[], WorkerConfig& config, Deco
         // 否则作为输入路径
         if (input_path.empty()) {
             input_path = arg;
+        } else {
+            LOG4CPLUS_WARN_FMT(getLogger(), 
+                "Extra positional argument ignored: '%s' (input already set to: '%s')",
+                arg.c_str(), input_path.c_str());
         }
     }
     
@@ -501,7 +479,6 @@ void VdecTestSuite::printHelp() const {
               << "  -S, --ssim              启用 SSIM 验证 (ExecuteMode::COMPARE)\n"
               << "  -P, --min-psnr <n>      PSNR 阈值 (默认: 30.0 dB)\n"
               << "  -M, --min-ssim <n>      SSIM 阈值 (默认: 0.95)\n"
-              << "  -e, --reference <path>  参考文件路径\n"
               << "  -v, --verbose           详细日志\n"
               << "\n"
               << "ExecuteMode Mapping:\n"

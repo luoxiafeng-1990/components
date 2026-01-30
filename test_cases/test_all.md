@@ -374,10 +374,6 @@ sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
     "~/qa_cases vdec --codec h264 --resolution 1920x1080 --psnr --ssim --max-frames 300 --verbose /usr/data/ffmpeg/1920x1080.mp4"
 
-# 使用外部参考文件进行 PSNR 对比（--reference）
-sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "~/qa_cases vdec --codec h264 --resolution 1920x1080 --psnr --reference /tmp/reference.yuv /usr/data/ffmpeg/1920x1080.mp4"
-
 # 单独指定宽高（--width 和 --height）
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
     "~/qa_cases vdec --codec h264 --width 1920 --height 1080 /usr/data/ffmpeg/1920x1080.mp4"
@@ -1083,7 +1079,6 @@ done
 | `-S, --ssim` | 启用 SSIM 验证 |
 | `-P, --min-psnr <n>` | PSNR 阈值 (默认: 30.0 dB) |
 | `-M, --min-ssim <n>` | SSIM 阈值 (默认: 0.95) |
-| `-e, --reference <path>` | 外部参考文件路径 (用于 PSNR/SSIM 对比) |
 | `-v, --verbose` | 详细日志 |
 
 ### A.2 PP 模块参数
