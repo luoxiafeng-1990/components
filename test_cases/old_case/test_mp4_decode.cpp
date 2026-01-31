@@ -343,8 +343,8 @@ bool validate_psnr_streaming(const char *source_video, int width, int height,
   CompareConfig compare_config;
   compare_config.strategy        = CompareConfig::AUTO_LAYERED; // 自动分层验证
   compare_config.format_strategy = CompareConfig::AUTO;         // 格式自适应
-  compare_config.quick_psnr_threshold = min_psnr; // 使用传入的阈值
-  compare_config.quick_warn_threshold =
+  compare_config.min_psnr = min_psnr; // 使用传入的阈值
+  compare_config.warn_psnr =
       min_psnr - 5.0;                             // 警告阈值比通过阈值低5dB
   compare_config.use_perceptual_weighting = true; // 感知加权
   compare_config.verbose                  = true; // 详细日志
@@ -366,8 +366,8 @@ bool validate_psnr_streaming(const char *source_video, int width, int height,
   LOG_INFO("  Strategy: AUTO_LAYERED (fast → deep)");
   LOG_INFO("  Format: AUTO (YUV/RGB adaptive)");
   LOG_INFO_FMT("  PSNR threshold: %.1f dB (pass), %.1f dB (warn)",
-               compare_config.quick_psnr_threshold,
-               compare_config.quick_warn_threshold);
+               compare_config.min_psnr,
+               compare_config.warn_psnr);
 
   // ========================================================================
   // 步骤4：检测格式并创建BufferWriter（可选）
@@ -1642,8 +1642,8 @@ static int test_mp4_decode_single_impl(const char *video_path,
           CompareConfig compare_config;
           compare_config.strategy                 = CompareConfig::AUTO_LAYERED;
           compare_config.format_strategy          = CompareConfig::AUTO;
-          compare_config.quick_psnr_threshold     = 38.0;
-          compare_config.quick_warn_threshold     = 35.0;
+          compare_config.min_psnr     = 38.0;
+          compare_config.warn_psnr     = 35.0;
           compare_config.use_perceptual_weighting = true;
           compare_config.verbose                  = false; // 减少日志输出
           compare_config.save_report = false; // 不保存报告（主流程中）

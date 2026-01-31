@@ -200,19 +200,9 @@ class CompareConsumer : public IBufferConsumer {
 public:
     /**
      * @brief 构造函数
-     * @param min_psnr 最小 PSNR 阈值（低于此值视为失败）
-     * @param min_ssim 最小 SSIM 阈值（低于此值视为失败）
-     * @param enable_psnr 是否启用 PSNR 计算
-     * @param enable_ssim 是否启用 SSIM 计算
-     * @param verbose 是否输出详细对比日志
+     * @param config 比较配置（来自 WorkerConfig::ConsumerTypeConfig::CompareType）
      */
-    CompareConsumer(
-        double min_psnr = 30.0,
-        double min_ssim = 0.95,
-        bool enable_psnr = true,
-        bool enable_ssim = true,
-        bool verbose = true
-    );
+    explicit CompareConsumer(const WorkerConfig::ConsumerTypeConfig::CompareType& config);
     ~CompareConsumer() override;
     
     bool initialize(const std::vector<Buffer*>& first_buffers) override;
@@ -241,11 +231,7 @@ public:
     int getComparedCount() const { return compared_count_; }
     
 private:
-    double min_psnr_;
-    double min_ssim_;
-    bool enable_psnr_;
-    bool enable_ssim_;
-    bool verbose_;
+    WorkerConfig::ConsumerTypeConfig::CompareType config_;  ///< 比较配置
     std::unique_ptr<productionline::io::BufferComparator> comparator_;
     int compared_count_ = 0;
     double psnr_sum_ = 0.0;

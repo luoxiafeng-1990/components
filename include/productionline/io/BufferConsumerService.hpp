@@ -39,16 +39,6 @@
 namespace consumer {
 
 /**
- * @brief 比较结果回调类型
- * 
- * @param frame_index 帧索引
- * @param psnr PSNR 值（dB）
- * @param ssim SSIM 值（0.0-1.0）
- * @param passed 是否通过阈值检查
- */
-using CompareResultCallback = std::function<void(int frame_index, double psnr, double ssim, bool passed)>;
-
-/**
  * @brief 消费结果
  * 
  * 统一的测试结果结构，替代旧的 TestResult。
@@ -154,15 +144,14 @@ public:
      * @brief 使用 MultiWorkerProductionLine 启动比较模式
      * 
      * @param multi_config MultiWorkerProductionLine 配置（由测试 case 构造）
-     * @param compare_callback 比较结果回调（每帧比较完成后调用，可选）
      * @return 消费结果
      * 
      * @note 比较在 MultiWorkerProductionLine 内部通过 WorkerSyncCoordinator 完成
+     * @note 比较结果从 CompareCallbackContext 获取并填充到 ConsumeResult 中
      * @note 外部消费策略（显示、保存等）独立于比较，每个 worker 可单独配置
      */
     ConsumeResult startMultiWorkerCompare(
-        const MultiWorkerConfig& multi_config,
-        CompareResultCallback compare_callback = nullptr
+        const MultiWorkerConfig& multi_config
     );
     
     /**

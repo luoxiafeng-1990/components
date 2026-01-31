@@ -639,6 +639,9 @@ bool FFmpegDecodeWorker::fillBufferMetadataFromFrame(AVFrame* frame_ptr, Buffer*
     // ⭐ 设置图像元数据（格式、宽高、linesize 等）
     buffer->setImageMetadataFromAVFrame(frame_ptr);
     
+    // ⭐ v2.26新增：保存 PTS（用于多通道帧对齐）
+    buffer->setPts(frame_ptr->pts);
+    
     // ⭐ 更新统计计数器
     decoded_frames_++;
     

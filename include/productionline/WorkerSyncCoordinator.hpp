@@ -16,6 +16,81 @@ class Buffer;
 // 这里只需要包含该头文件即可
 #include "productionline/worker/WorkerConfig.hpp"
 
+// ============================================================
+// 比较回调上下文（与 WorkerSyncCoordinator 配套使用）
+// ============================================================
+
+/**
+ * @brief 比较回调上下文
+ * 
+ * 用于 WorkerSyncCoordinator 的 callback_chain，
+ * 在 MultiWorkerProductionLine 内部执行帧同步比较。
+ * 
+ * 使用方式：
+ * @code
+ * auto compare_ctx = std::make_shared<CompareCallbackContext>();
+ * compare_ctx->initFromCompareType(worker_config.consumer_type.compare);
+ * compare_ctx->worker1_name = "hw_decoder";
+ * compare_ctx->worker2_name = "sw_decoder";
+ * 
+ * connector_config.enable_frame_sync = true;
+ * connector_config.callback_chain.push_back(
+ *     WorkerSyncCoordinator::createDefaultCompareCallback(compare_ctx.get()));
+ * @endcode
+ */
+struct CompareCallbackContext {
+    // Worker 名称（用于日志和结果区分）
+    std::string worker1_name;
+    std::string worker2_name;
+    
+    // 比较配置（从 ConsumerTypeConfig.compare 初始化）
+    bool enable_psnr = true;
+    bool enable_ssim = true;
+    double min_psnr = 38.0;
+    double min_ssim = 0.95;
+    bool verbose = false;
+    
+    // 统计计数器（原子，线程安全）
+    std::atomic<int> total_frames{0};
+    std::atomic<int> passed_frames{0};
+    std::atomic<int> failed_frames{0};
+    
+    // 累计值（用于计算平均值）
+    std::atomic<double> psnr_sum{0.0};
+    std::atomic<double> ssim_sum{0.0};
+    
+    // 外部回调（可选，每帧比较完成后调用）
+    std::function<void(int frame_index, double psnr, double ssim, bool passed)> 
+        result_callback;
+    
+    CompareCallbackContext() = default;
+    
+    // 禁止拷贝（因为有 atomic 成员）
+    CompareCallbackContext(const CompareCallbackContext&) = delete;
+    CompareCallbackContext& operator=(const CompareCallbackContext&) = delete;
+    
+    /**
+     * @brief 从 ConsumerTypeConfig::CompareType 初始化配置
+     */
+    void initFromCompareType(const WorkerConfig::ConsumerTypeConfig::CompareType& compare_config);
+    
+    // 获取平均 PSNR
+    double getAveragePsnr() const;
+    
+    // 获取平均 SSIM
+    double getAverageSsim() const;
+    
+    // 获取通过率
+    double getPassRate() const;
+    
+    // 判断是否通过
+    bool isPassed() const;
+};
+
+// ============================================================
+// WorkerSyncCoordinator 类
+// ============================================================
+
 /**
  * @brief Worker 同步协调器
  * 
@@ -87,6 +162,35 @@ public:
      * @brief 检查是否启用了同步（是否有回调）
      */
     bool isEnabled() const { return !callback_chain_.empty(); }
+    
+    // ============================================================
+    // 静态工厂方法：创建默认比较回调
+    // ============================================================
+    
+    /**
+     * @brief 创建默认的比较回调
+     * 
+     * @param context 比较上下文（用于累积统计结果）
+     * @return CallbackChainItem 可添加到 ConnectorConfig.callback_chain
+     * 
+     * 功能：
+     * - 使用 BufferComparator 计算 PSNR/SSIM
+     * - 将结果累积到 CompareCallbackContext 中
+     * - 根据阈值判断是否通过
+     * 
+     * 使用示例：
+     * @code
+     * auto compare_ctx = std::make_shared<CompareCallbackContext>();
+     * compare_ctx->initFromCompareType(worker_config.consumer_type.compare);
+     * 
+     * connector_config.enable_frame_sync = true;
+     * connector_config.callback_chain.push_back(
+     *     WorkerSyncCoordinator::createDefaultCompareCallback(compare_ctx.get()));
+     * @endcode
+     * 
+     * @note context 的生命周期需由调用者管理（推荐使用 shared_ptr）
+     */
+    static CallbackChainItem createDefaultCompareCallback(CompareCallbackContext* context);
     
 private:
     /**

@@ -315,6 +315,22 @@ public:
      */
     int getOutputChannel() const;
     
+    // ========== 帧同步接口 ⭐ v2.26新增 ==========
+    
+    /**
+     * @brief 设置显示时间戳（PTS）
+     * @param pts 显示时间戳（AV_NOPTS_VALUE 表示未设置）
+     * 
+     * @note 用于多通道帧对齐：同一 AVPacket 解码后的所有通道输出具有相同的 PTS
+     */
+    void setPts(int64_t pts) { pts_ = pts; }
+    
+    /**
+     * @brief 获取显示时间戳（PTS）
+     * @return 显示时间戳，AV_NOPTS_VALUE 表示未设置
+     */
+    int64_t getPts() const { return pts_; }
+    
     // ========== 生命周期管理接口 ⭐ v2.19新增 ==========
     
     /**
@@ -385,6 +401,9 @@ private:
     int linesize_[4];                // 各plane的stride（字节）
     size_t plane_offset_[4];         // 各plane相对于virt_addr_的偏移
     int nb_planes_;                  // plane数量（1-4）
+    
+    // ========== 帧同步信息 ⭐ v2.26新增 ==========
+    int64_t pts_;                    // 显示时间戳（用于多通道帧对齐）
     
     // ========== 安全性 ==========
     static constexpr uint32_t MAGIC_NUMBER = 0xBEEFF123;  // 魔数：BEEF + F123

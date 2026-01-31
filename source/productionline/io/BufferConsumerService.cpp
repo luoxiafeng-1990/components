@@ -5,6 +5,7 @@
 
 #include "productionline/io/BufferConsumerService.hpp"
 #include "productionline/MultiWorkerProductionLine.hpp"
+#include "productionline/WorkerSyncCoordinator.hpp"
 #include "common/GlobalThreadPool.hpp"
 #include "buffer/bufferpool/BufferPoolRegistry.hpp"
 
@@ -230,13 +231,7 @@ ConsumeResult BufferConsumerService::startProductionLinesCompare(
         
         // 2. 创建 CompareConsumer（COMPARE 模式核心）
         const auto& consumer_type_config = configs[0].consumer_type;
-        auto compare_consumer = std::make_shared<CompareConsumer>(
-            consumer_type_config.compare.min_psnr,
-            consumer_type_config.compare.min_ssim,
-            consumer_type_config.compare.enable_psnr,
-            consumer_type_config.compare.enable_ssim,
-            consumer_type_config.verbose
-        );
+        auto compare_consumer = std::make_shared<CompareConsumer>(consumer_type_config.compare);
         
         // 3. 根据 consume_flags 决定是否叠加其他消费类型
         std::shared_ptr<IBufferConsumer> consumer;
@@ -507,8 +502,7 @@ static std::shared_ptr<IBufferConsumer> createConsumerForWorker(
 // ============================================================
 
 ConsumeResult BufferConsumerService::startMultiWorkerCompare(
-    const MultiWorkerConfig& multi_config,
-    CompareResultCallback compare_callback)
+    const MultiWorkerConfig& multi_config)
 {
     ConsumeResult result;
     auto start_time = std::chrono::steady_clock::now();
@@ -526,6 +520,24 @@ ConsumeResult BufferConsumerService::startMultiWorkerCompare(
     try {
         // 1. 创建 MultiWorkerProductionLine（配置由测试 case 传入，包含 callback_chain）
         auto production_line = std::make_unique<MultiWorkerProductionLine>(multi_config);
+        
+        // 1.1 查找 CompareCallbackContext（用于获取比较结果）
+        CompareCallbackContext* compare_ctx = nullptr;
+        for (const auto& group_config : multi_config.groups) {
+            for (const auto& conn_cfg : group_config.connector_configs) {
+                if (conn_cfg.enable_frame_sync) {
+                    for (const auto& cb_item : conn_cfg.callback_chain) {
+                        if (cb_item.name == "default_compare_callback" && cb_item.context) {
+                            compare_ctx = static_cast<CompareCallbackContext*>(cb_item.context);
+                            LOG4CPLUS_DEBUG(logger_, "Found CompareCallbackContext in callback_chain");
+                            break;
+                        }
+                    }
+                }
+                if (compare_ctx) break;
+            }
+            if (compare_ctx) break;
+        }
         
         // 2. 获取所有 worker 的 BufferPool
         struct WorkerConsumeContext {
@@ -709,6 +721,14 @@ ConsumeResult BufferConsumerService::startMultiWorkerCompare(
         result.success = true;
         result.frames_consumed = total_frames;
         
+        // 9.1 填充比较结果（如果有）
+        if (compare_ctx) {
+            result.frames_compared = compare_ctx->total_frames.load();
+            result.psnr_average = compare_ctx->getAveragePsnr();
+            result.ssim_average = compare_ctx->getAverageSsim();
+            result.compare_passed = compare_ctx->isPassed();
+        }
+        
         // 打印统计
         LOG4CPLUS_INFO(logger_, "========================================");
         LOG4CPLUS_INFO(logger_, "MultiWorker Compare Complete");
@@ -716,6 +736,12 @@ ConsumeResult BufferConsumerService::startMultiWorkerCompare(
         for (const auto& ctx : worker_contexts) {
             LOG4CPLUS_INFO_FMT(logger_, "  %s: %d frames", 
                 ctx.worker_name.c_str(), ctx.frame_count);
+        }
+        if (compare_ctx) {
+            LOG4CPLUS_INFO_FMT(logger_, "Compare: %d frames, PSNR=%.2f dB, SSIM=%.4f, %s (pass_rate=%.1f%%)",
+                result.frames_compared, result.psnr_average, result.ssim_average,
+                result.compare_passed ? "PASSED" : "FAILED",
+                compare_ctx->getPassRate());
         }
         LOG4CPLUS_INFO(logger_, "========================================");
         

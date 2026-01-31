@@ -24,6 +24,7 @@ Buffer::Buffer(uint32_t id,
     , linesize_{0, 0, 0, 0}
     , plane_offset_{0, 0, 0, 0}
     , nb_planes_(0)
+    , pts_(AV_NOPTS_VALUE)           // ⭐ v2.26新增：初始化 PTS
     , validation_magic_(MAGIC_NUMBER)
 {
 }
@@ -47,6 +48,7 @@ Buffer::Buffer(Buffer&& other) noexcept
     , linesize_{other.linesize_[0], other.linesize_[1], other.linesize_[2], other.linesize_[3]}
     , plane_offset_{other.plane_offset_[0], other.plane_offset_[1], other.plane_offset_[2], other.plane_offset_[3]}
     , nb_planes_(other.nb_planes_)
+    , pts_(other.pts_)                     // ⭐ v2.26新增：移动 PTS
     , validation_magic_(other.validation_magic_)
 {
     // 清空源对象
@@ -56,6 +58,7 @@ Buffer::Buffer(Buffer&& other) noexcept
     other.avframe_ = nullptr;              // ⭐ v2.7新增：清空 AVFrame 指针
     other.avpacket_ = nullptr;             // ⭐ v2.8新增：清空 AVPacket 指针
     other.has_image_metadata_ = false;
+    other.pts_ = AV_NOPTS_VALUE;           // ⭐ v2.26新增：清空 PTS
     other.validation_magic_ = 0;
 }
 
@@ -76,6 +79,7 @@ Buffer& Buffer::operator=(Buffer&& other) noexcept {
         memcpy(linesize_, other.linesize_, sizeof(linesize_));
         memcpy(plane_offset_, other.plane_offset_, sizeof(plane_offset_));
         nb_planes_ = other.nb_planes_;
+        pts_ = other.pts_;                           // ⭐ v2.26新增：移动 PTS
         validation_magic_ = other.validation_magic_;
         
         // 清空源对象
@@ -84,6 +88,7 @@ Buffer& Buffer::operator=(Buffer&& other) noexcept {
         other.size_ = 0;
         other.avframe_ = nullptr;                    // ⭐ v2.7新增：清空 AVFrame 指针
         other.has_image_metadata_ = false;
+        other.pts_ = AV_NOPTS_VALUE;                 // ⭐ v2.26新增：清空 PTS
         other.validation_magic_ = 0;
     }
     return *this;
@@ -196,7 +201,10 @@ void Buffer::freeBuffer() {
     linesize_[3] = 0;
     nb_planes_ = 0;
     
-    // 5. 注意：不修改以下内容：
+    // 5. ⭐ v2.26新增：重置 PTS
+    pts_ = AV_NOPTS_VALUE;
+    
+    // 6. 注意：不修改以下内容：
     //    - avframe_ 指针（结构体还在，只是数据被清空）
     //    - avpacket_ 指针（结构体还在，只是数据被清空）
     //    - id_（buffer ID 不变）

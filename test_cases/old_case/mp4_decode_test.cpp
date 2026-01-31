@@ -378,12 +378,12 @@ static bool load_source_gop_map(
      CompareConfig compare_config;
      compare_config.strategy = CompareConfig::AUTO_LAYERED;  // 自动分层验证
      compare_config.format_strategy = CompareConfig::AUTO;   // 格式自适应
-     compare_config.quick_psnr_threshold = 38.0;             // >= 38dB 通过
-     compare_config.quick_warn_threshold = 35.0;             // 35~38dB 警告
+     compare_config.min_psnr = 38.0;             // >= 38dB 通过
+     compare_config.warn_psnr = 35.0;             // 35~38dB 警告
      compare_config.enable_psnr = true;                       // 启用 PSNR 计算
      compare_config.enable_ssim = true;                      // ⭐ 启用 SSIM 计算
-     compare_config.ssim_threshold = 0.95;                   // ⭐ >= 0.95 认为质量优秀
-     compare_config.ssim_warn_threshold = 0.90;             // ⭐ < 0.90 触发警告
+     compare_config.min_ssim = 0.95;                   // ⭐ >= 0.95 认为质量优秀
+     compare_config.warn_ssim = 0.90;             // ⭐ < 0.90 触发警告
      compare_config.enable_parallel = true;                  // ⭐ 启用并行计算（使用全局线程池）
      compare_config.use_perceptual_weighting = true;         // 感知加权
      compare_config.verbose = true;                          // 详细日志
@@ -408,11 +408,11 @@ static bool load_source_gop_map(
      LOG_INFO("  Strategy: AUTO_LAYERED (fast → deep)");
      LOG_INFO("  Format: AUTO (YUV/RGB adaptive)");
      LOG_INFO_FMT("  PSNR threshold: %.1f dB (pass), %.1f dB (warn)", 
-                  compare_config.quick_psnr_threshold,
-                  compare_config.quick_warn_threshold);
+                  compare_config.min_psnr,
+                  compare_config.warn_psnr);
      LOG_INFO_FMT("  SSIM threshold: %.4f (pass), %.4f (warn)", 
-                  compare_config.ssim_threshold,
-                  compare_config.ssim_warn_threshold);
+                  compare_config.min_ssim,
+                  compare_config.warn_ssim);
      LOG_INFO_FMT("  Parallel computing: %s", 
                   compare_config.enable_parallel ? "Enabled" : "Disabled");
  
@@ -1811,9 +1811,9 @@ static bool load_source_gop_map(
             
             // ⭐ 统计PSNR通过性判定（基于Y平面，主要指标）
             for (double psnr_y : psnr_y_values) {
-                if (psnr_y >= compare_config.quick_psnr_threshold) {
+                if (psnr_y >= compare_config.min_psnr) {
                     psnr_passed_count++;
-                } else if (psnr_y >= compare_config.quick_warn_threshold) {
+                } else if (psnr_y >= compare_config.warn_psnr) {
                     psnr_warned_count++;
                 } else {
                     psnr_failed_count++;
@@ -1877,16 +1877,16 @@ static bool load_source_gop_map(
             LOG_INFO("");
             LOG_INFO("  PSNR Pass/Fail Assessment (based on PSNR-Y threshold):");
             LOG_INFO_FMT("    Passed (PSNR-Y >= %.1f dB): %d ✅ (%.1f%%)",
-                        compare_config.quick_psnr_threshold,
+                        compare_config.min_psnr,
                         psnr_passed_count,
                         100.0 * psnr_passed_count / psnr_y_values.size());
             LOG_INFO_FMT("    Warned (%.1f <= PSNR-Y < %.1f dB): %d ⚠️  (%.1f%%)",
-                        compare_config.quick_warn_threshold,
-                        compare_config.quick_psnr_threshold,
+                        compare_config.warn_psnr,
+                        compare_config.min_psnr,
                         psnr_warned_count,
                         100.0 * psnr_warned_count / psnr_y_values.size());
             LOG_INFO_FMT("    Failed (PSNR-Y < %.1f dB): %d ❌ (%.1f%%)",
-                        compare_config.quick_warn_threshold,
+                        compare_config.warn_psnr,
                         psnr_failed_count,
                         100.0 * psnr_failed_count / psnr_y_values.size());
         }
@@ -1921,9 +1921,9 @@ static bool load_source_gop_map(
          
          // ⭐ 统计SSIM通过性判定（基于Y平面，主要指标）
          for (double ssim_y : ssim_y_values) {
-             if (ssim_y >= compare_config.ssim_threshold) {
+             if (ssim_y >= compare_config.min_ssim) {
                  ssim_passed_count++;
-             } else if (ssim_y >= compare_config.ssim_warn_threshold) {
+             } else if (ssim_y >= compare_config.warn_ssim) {
                  ssim_warned_count++;
              } else {
                  ssim_failed_count++;
@@ -1943,16 +1943,16 @@ static bool load_source_gop_map(
          LOG_INFO("");
          LOG_INFO("  SSIM Pass/Fail Assessment (based on SSIM-Y threshold):");
          LOG_INFO_FMT("    Passed (SSIM-Y >= %.4f): %d ✅ (%.1f%%)",
-                     compare_config.ssim_threshold,
+                     compare_config.min_ssim,
                      ssim_passed_count,
                      100.0 * ssim_passed_count / ssim_y_values.size());
          LOG_INFO_FMT("    Warned (%.4f <= SSIM-Y < %.4f): %d ⚠️  (%.1f%%)",
-                     compare_config.ssim_warn_threshold,
-                     compare_config.ssim_threshold,
+                     compare_config.warn_ssim,
+                     compare_config.min_ssim,
                      ssim_warned_count,
                      100.0 * ssim_warned_count / ssim_y_values.size());
          LOG_INFO_FMT("    Failed (SSIM-Y < %.4f): %d ❌ (%.1f%%)",
-                     compare_config.ssim_warn_threshold,
+                     compare_config.warn_ssim,
                      ssim_failed_count,
                      100.0 * ssim_failed_count / ssim_y_values.size());
      }
@@ -2042,13 +2042,13 @@ static bool load_source_gop_map(
         LOG_INFO("");
         if (ssim_excellent) {
             LOG_INFO_FMT("  SSIM-only Assessment: EXCELLENT (avg SSIM=%.4f, threshold>=%.2f)",
-                         avg_ssim_avg, compare_config.ssim_threshold);
+                         avg_ssim_avg, compare_config.min_ssim);
         } else if (ssim_good) {
             LOG_INFO_FMT("  SSIM-only Assessment: GOOD (avg SSIM=%.4f, threshold>=%.2f)",
-                         avg_ssim_avg, compare_config.ssim_warn_threshold);
+                         avg_ssim_avg, compare_config.warn_ssim);
         } else {
             LOG_INFO_FMT("  SSIM-only Assessment: POOR (avg SSIM=%.4f, threshold<%.2f)",
-                         avg_ssim_avg, compare_config.ssim_warn_threshold);
+                         avg_ssim_avg, compare_config.warn_ssim);
         }
     }
 
@@ -2143,12 +2143,12 @@ static int run_pp0_test_with_format(
     CompareConfig compare_config;
     compare_config.strategy = CompareConfig::AUTO_LAYERED;
     compare_config.format_strategy = CompareConfig::AUTO;
-    compare_config.quick_psnr_threshold = 38.0;
-    compare_config.quick_warn_threshold = 35.0;
+    compare_config.min_psnr = 38.0;
+    compare_config.warn_psnr = 35.0;
     compare_config.enable_psnr = true;
     compare_config.enable_ssim = true;
-    compare_config.ssim_threshold = 0.95;
-    compare_config.ssim_warn_threshold = 0.90;
+    compare_config.min_ssim = 0.95;
+    compare_config.warn_ssim = 0.90;
     compare_config.enable_parallel = true;
     compare_config.use_perceptual_weighting = true;
     compare_config.verbose = true;
@@ -2442,12 +2442,12 @@ static int run_pp1_test_with_format(
     CompareConfig compare_config;
     compare_config.strategy = CompareConfig::AUTO_LAYERED;
     compare_config.format_strategy = CompareConfig::AUTO;
-    compare_config.quick_psnr_threshold = 38.0;
-    compare_config.quick_warn_threshold = 35.0;
+    compare_config.min_psnr = 38.0;
+    compare_config.warn_psnr = 35.0;
     compare_config.enable_psnr = true;
     compare_config.enable_ssim = true;
-    compare_config.ssim_threshold = 0.95;
-    compare_config.ssim_warn_threshold = 0.90;
+    compare_config.min_ssim = 0.95;
+    compare_config.warn_ssim = 0.90;
     compare_config.enable_parallel = true;
     compare_config.use_perceptual_weighting = true;
     compare_config.verbose = true;
@@ -2769,12 +2769,12 @@ static int run_multi_pp_test_with_format(
     CompareConfig compare_config;
     compare_config.strategy = CompareConfig::AUTO_LAYERED;
     compare_config.format_strategy = CompareConfig::AUTO;
-    compare_config.quick_psnr_threshold = 38.0;
-    compare_config.quick_warn_threshold = 35.0;
+    compare_config.min_psnr = 38.0;
+    compare_config.warn_psnr = 35.0;
     compare_config.enable_psnr = true;
     compare_config.enable_ssim = true;
-    compare_config.ssim_threshold = 0.95;
-    compare_config.ssim_warn_threshold = 0.90;
+    compare_config.min_ssim = 0.95;
+    compare_config.warn_ssim = 0.90;
     compare_config.enable_parallel = true;
     compare_config.use_perceptual_weighting = true;
     compare_config.verbose = true;

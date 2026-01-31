@@ -93,11 +93,11 @@ bool BufferComparator::open(const CompareConfig& config) {
                 config_.enable_parallel ? "Enabled (using GlobalThreadPool)" : "Disabled");
         if (config_.enable_psnr) {
             fprintf(report_file_, "PSNR Threshold: Pass >= %.1f dB, Warn >= %.1f dB\n",
-                    config_.quick_psnr_threshold, config_.quick_warn_threshold);
+                    config_.min_psnr, config_.warn_psnr);
         }
         if (config_.enable_ssim) {
             fprintf(report_file_, "SSIM Threshold: Pass >= %.4f, Warn >= %.4f\n",
-                    config_.ssim_threshold, config_.ssim_warn_threshold);
+                    config_.min_ssim, config_.warn_ssim);
         }
         fprintf(report_file_, "═══════════════════════════════════════════════════════\n\n");
         fflush(report_file_);
@@ -523,8 +523,8 @@ FrameCompareResult BufferComparator::compareYUV(
         result.ssim_y = future_ssim.get();
         
         // 两者都要达标
-        quick_pass = (result.psnr_y >= config_.quick_psnr_threshold) && 
-                     (result.ssim_y >= config_.ssim_threshold);
+        quick_pass = (result.psnr_y >= config_.min_psnr) && 
+                     (result.ssim_y >= config_.min_ssim);
     } 
     else {
         // 串行计算（兼容模式或只启用一个指标）
@@ -538,12 +538,12 @@ FrameCompareResult BufferComparator::compareYUV(
         
         // 判定快速通过条件（严格模式：都要满足）
         if (config_.enable_psnr && config_.enable_ssim) {
-            quick_pass = (result.psnr_y >= config_.quick_psnr_threshold) && 
-                         (result.ssim_y >= config_.ssim_threshold);
+            quick_pass = (result.psnr_y >= config_.min_psnr) && 
+                         (result.ssim_y >= config_.min_ssim);
         } else if (config_.enable_psnr) {
-            quick_pass = (result.psnr_y >= config_.quick_psnr_threshold);
+            quick_pass = (result.psnr_y >= config_.min_psnr);
         } else if (config_.enable_ssim) {
-            quick_pass = (result.ssim_y >= config_.ssim_threshold);
+            quick_pass = (result.ssim_y >= config_.min_ssim);
         }
     }
     
@@ -679,12 +679,12 @@ FrameCompareResult BufferComparator::compareYUV(
         
         if (config_.enable_psnr && config_.enable_ssim) {
             // 两者都启用：都要满足警告阈值
-            is_warn = (result.psnr_y >= config_.quick_warn_threshold) && 
-                      (result.ssim_y >= config_.ssim_warn_threshold);
+            is_warn = (result.psnr_y >= config_.warn_psnr) && 
+                      (result.ssim_y >= config_.warn_ssim);
         } else if (config_.enable_psnr) {
-            is_warn = (result.psnr_y >= config_.quick_warn_threshold);
+            is_warn = (result.psnr_y >= config_.warn_psnr);
         } else if (config_.enable_ssim) {
-            is_warn = (result.ssim_y >= config_.ssim_warn_threshold);
+            is_warn = (result.ssim_y >= config_.warn_ssim);
         }
         
         if (is_warn) {
@@ -742,8 +742,8 @@ FrameCompareResult BufferComparator::compareRGB(
         result.ssim_y = future_ssim.get();  // G → Y
         
         // 两者都要达标
-        quick_pass = (result.psnr_y >= config_.quick_psnr_threshold) && 
-                     (result.ssim_y >= config_.ssim_threshold);
+        quick_pass = (result.psnr_y >= config_.min_psnr) && 
+                     (result.ssim_y >= config_.min_ssim);
     }
     else {
         // 串行计算
@@ -759,12 +759,12 @@ FrameCompareResult BufferComparator::compareRGB(
         
         // 判定快速通过条件（严格模式：都要满足）
         if (config_.enable_psnr && config_.enable_ssim) {
-            quick_pass = (result.psnr_y >= config_.quick_psnr_threshold) && 
-                         (result.ssim_y >= config_.ssim_threshold);
+            quick_pass = (result.psnr_y >= config_.min_psnr) && 
+                         (result.ssim_y >= config_.min_ssim);
         } else if (config_.enable_psnr) {
-            quick_pass = (result.psnr_y >= config_.quick_psnr_threshold);
+            quick_pass = (result.psnr_y >= config_.min_psnr);
         } else if (config_.enable_ssim) {
-            quick_pass = (result.ssim_y >= config_.ssim_threshold);
+            quick_pass = (result.ssim_y >= config_.min_ssim);
         }
     }
     
@@ -793,10 +793,10 @@ FrameCompareResult BufferComparator::compareRGB(
                              result.frame_index, result.psnr_y, result.ssim_y);
             } else if (config_.enable_psnr) {
                 LOG_WARN_FMT("  Frame %d: PSNR-G=%.2f dB < %.2f dB, deep validation...",
-                             result.frame_index, result.psnr_y, config_.quick_psnr_threshold);
+                             result.frame_index, result.psnr_y, config_.min_psnr);
             } else {
                 LOG_WARN_FMT("  Frame %d: SSIM-G=%.4f < %.4f, deep validation...",
-                             result.frame_index, result.ssim_y, config_.ssim_threshold);
+                             result.frame_index, result.ssim_y, config_.min_ssim);
             }
         }
         
@@ -942,12 +942,12 @@ FrameCompareResult BufferComparator::compareRGB(
         bool is_warn = false;
         
         if (config_.enable_psnr && config_.enable_ssim) {
-            is_warn = (result.psnr_y >= config_.quick_warn_threshold) && 
-                      (result.ssim_y >= config_.ssim_warn_threshold);
+            is_warn = (result.psnr_y >= config_.warn_psnr) && 
+                      (result.ssim_y >= config_.warn_ssim);
         } else if (config_.enable_psnr) {
-            is_warn = (result.psnr_y >= config_.quick_warn_threshold);
+            is_warn = (result.psnr_y >= config_.warn_psnr);
         } else if (config_.enable_ssim) {
-            is_warn = (result.ssim_y >= config_.ssim_warn_threshold);
+            is_warn = (result.ssim_y >= config_.warn_ssim);
         }
         
         if (is_warn) {

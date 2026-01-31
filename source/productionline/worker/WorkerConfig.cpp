@@ -423,8 +423,8 @@ WorkerConfigBuilder& WorkerConfigBuilder::enableCompare(bool enable,
     // enable 参数同时控制 PSNR 和 SSIM
     worker_config_.consumer_type.compare.enable_psnr = enable;
     worker_config_.consumer_type.compare.enable_ssim = enable;
-    worker_config_.consumer_type.compare.min_psnr = min_psnr;
-    worker_config_.consumer_type.compare.min_ssim = min_ssim;
+    worker_config_.consumer_type.compare.min_psnr = min_psnr;   // 通过阈值
+    worker_config_.consumer_type.compare.min_ssim = min_ssim;   // 通过阈值
     return *this;
 }
 

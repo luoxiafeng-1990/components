@@ -1,6 +1,40 @@
 #include "productionline/WorkerSyncCoordinator.hpp"
+#include "productionline/io/BufferComparator.hpp"
 #include "buffer/bufferpool/Buffer.hpp"
 #include <log4cplus/loggingmacros.h>
+
+// ============================================================
+// CompareCallbackContext 成员方法实现
+// ============================================================
+
+void CompareCallbackContext::initFromCompareType(
+    const WorkerConfig::ConsumerTypeConfig::CompareType& compare_config
+) {
+    enable_psnr = compare_config.enable_psnr;
+    enable_ssim = compare_config.enable_ssim;
+    min_psnr = compare_config.min_psnr;
+    min_ssim = compare_config.min_ssim;
+    verbose = compare_config.verbose;
+}
+
+double CompareCallbackContext::getAveragePsnr() const {
+    int count = total_frames.load();
+    return count > 0 ? psnr_sum.load() / count : 0.0;
+}
+
+double CompareCallbackContext::getAverageSsim() const {
+    int count = total_frames.load();
+    return count > 0 ? ssim_sum.load() / count : 0.0;
+}
+
+double CompareCallbackContext::getPassRate() const {
+    int count = total_frames.load();
+    return count > 0 ? 100.0 * passed_frames.load() / count : 0.0;
+}
+
+bool CompareCallbackContext::isPassed() const {
+    return failed_frames.load() == 0;
+}
 
 WorkerSyncCoordinator::WorkerSyncCoordinator(
     const std::vector<std::string>& worker_names,
@@ -215,4 +249,104 @@ void WorkerSyncCoordinator::cleanupOldFrames(uint64_t current_version) {
             ++it;
         }
     }
+}
+
+// ============================================================
+// 静态工厂方法：创建默认比较回调
+// ============================================================
+
+CallbackChainItem WorkerSyncCoordinator::createDefaultCompareCallback(
+    CompareCallbackContext* context
+) {
+    FrameSyncCallback callback = [](uint64_t frame_version, 
+                                    const std::map<std::string, Buffer*>& worker_buffers,
+                                    void* ctx) -> bool {
+        auto* compare_ctx = static_cast<CompareCallbackContext*>(ctx);
+        if (!compare_ctx) {
+            return true;  // 无上下文，跳过比较
+        }
+        
+        // 需要至少 2 个 Worker 的 Buffer 才能比较
+        if (worker_buffers.size() < 2) {
+            return true;
+        }
+        
+        // 获取前两个 Buffer（参考 vs 测试）
+        auto it = worker_buffers.begin();
+        Buffer* reference_buffer = it->second;
+        ++it;
+        Buffer* test_buffer = it->second;
+        
+        if (!reference_buffer || !test_buffer) {
+            return true;
+        }
+        
+        // 配置 BufferComparator
+        productionline::io::BufferComparator comparator;
+        productionline::io::CompareConfig config;
+        config.enable_psnr = compare_ctx->enable_psnr;
+        config.enable_ssim = compare_ctx->enable_ssim;
+        config.min_psnr = compare_ctx->min_psnr;
+        config.min_ssim = compare_ctx->min_ssim;
+        config.verbose = compare_ctx->verbose;
+        config.save_report = false;
+        
+        if (!comparator.open(config)) {
+            return true;  // 打开失败，不阻塞流程
+        }
+        
+        // 执行比较
+        auto result = comparator.compare(reference_buffer, test_buffer);
+        comparator.close();
+        
+        double psnr = result.psnr_avg;
+        double ssim = result.ssim_avg;
+        
+        // 判断是否通过
+        bool psnr_ok = !compare_ctx->enable_psnr || (psnr >= compare_ctx->min_psnr);
+        bool ssim_ok = !compare_ctx->enable_ssim || (ssim >= compare_ctx->min_ssim);
+        bool passed = psnr_ok && ssim_ok;
+        
+        // 更新统计（原子操作）
+        compare_ctx->total_frames.fetch_add(1);
+        if (passed) {
+            compare_ctx->passed_frames.fetch_add(1);
+        } else {
+            compare_ctx->failed_frames.fetch_add(1);
+        }
+        
+        // 累加 PSNR/SSIM（原子 CAS 操作）
+        double old_psnr = compare_ctx->psnr_sum.load();
+        while (!compare_ctx->psnr_sum.compare_exchange_weak(old_psnr, old_psnr + psnr)) {}
+        
+        double old_ssim = compare_ctx->ssim_sum.load();
+        while (!compare_ctx->ssim_sum.compare_exchange_weak(old_ssim, old_ssim + ssim)) {}
+        
+        // 调用外部回调（如果有）
+        if (compare_ctx->result_callback) {
+            compare_ctx->result_callback(
+                static_cast<int>(frame_version), psnr, ssim, passed);
+        }
+        
+        // 日志（仅失败时或 verbose 模式）
+        if (!passed || compare_ctx->verbose) {
+            auto logger = log4cplus::Logger::getInstance(
+                LOG4CPLUS_TEXT("components.WorkerSyncCoordinator"));
+            if (!passed) {
+                LOG4CPLUS_WARN_FMT(logger, 
+                    "[Frame %llu] Compare FAILED: PSNR=%.2f (min=%.2f), SSIM=%.4f (min=%.4f)",
+                    (unsigned long long)frame_version, 
+                    psnr, compare_ctx->min_psnr,
+                    ssim, compare_ctx->min_ssim);
+            } else {
+                LOG4CPLUS_DEBUG_FMT(logger, 
+                    "[Frame %llu] Compare PASSED: PSNR=%.2f, SSIM=%.4f",
+                    (unsigned long long)frame_version, psnr, ssim);
+            }
+        }
+        
+        return true;  // 比较结果不影响 Buffer 提交
+    };
+    
+    return CallbackChainItem(callback, context, "default_compare_callback");
 }

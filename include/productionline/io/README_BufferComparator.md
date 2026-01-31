@@ -32,9 +32,10 @@ BufferComparator comparator;
 
 // 2. 配置
 CompareConfig config;
+config.enable_psnr = true;                      // 启用 PSNR 计算
 config.strategy = CompareConfig::AUTO_LAYERED;  // 自动分层
 config.format_strategy = CompareConfig::AUTO;   // 格式自适应
-config.quick_psnr_threshold = 38.0;             // >= 38dB 通过
+config.min_psnr = 38.0;                         // >= 38dB 通过
 
 // 3. 打开
 comparator.open(config);
@@ -73,8 +74,15 @@ if (comparator.isPassed()) {
 
 ### CompareConfig 结构体
 
+> **注意**：`CompareConfig` 现在统一定义在 `WorkerConfig::ConsumerTypeConfig::CompareType` 中，
+> `productionline::io::CompareConfig` 是其类型别名。
+
 ```cpp
-struct CompareConfig {
+struct CompareType {  // 或 using CompareConfig = CompareType
+    // ========== 指标开关 ==========
+    bool enable_psnr = false;           // 是否启用 PSNR 计算
+    bool enable_ssim = false;           // 是否启用 SSIM 计算
+    
     // ========== 验证策略 ==========
     Strategy strategy = AUTO_LAYERED;
     // - FAST_ONLY:      仅快速验证（每帧PSNR-Y/G）
@@ -89,12 +97,14 @@ struct CompareConfig {
     // - NATIVE:     原生格式对比（要求两边格式一致）
     
     // ========== 阈值配置 ==========
-    double quick_psnr_threshold = 38.0;  // >= 38dB 快速通过
-    double quick_warn_threshold = 35.0;  // < 35dB 触发深度验证
+    double min_psnr = 38.0;             // >= 38dB 快速通过
+    double warn_psnr = 35.0;            // < 35dB 触发深度验证
+    double min_ssim = 0.95;             // >= 0.95 认为质量优秀
+    double warn_ssim = 0.90;            // < 0.90 触发警告
     
     // ========== 输出选项 ==========
-    bool verbose = true;                 // 详细日志
-    bool save_report = true;             // 保存报告到文件
+    bool verbose = false;               // 详细日志
+    bool save_report = false;           // 保存报告到文件
     std::string report_path = "./decoder_compare_report.txt";
 };
 ```
@@ -296,8 +306,9 @@ PSNR Statistics:
 ```cpp
 // 场景A：CI/CD快速测试（只关心是否通过）
 CompareConfig config;
+config.enable_psnr = true;
 config.strategy = CompareConfig::FAST_ONLY;
-config.quick_psnr_threshold = 40.0;  // 更严格
+config.min_psnr = 40.0;              // 更严格
 config.verbose = false;              // 减少日志
 
 // 场景B：深度调试（每帧都详细分析）

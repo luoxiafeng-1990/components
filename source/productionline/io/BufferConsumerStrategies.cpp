@@ -467,18 +467,8 @@ std::string SaveEncodedConsumer::getStats() const {
 // CompareConsumer 实现
 // ============================================================
 
-CompareConsumer::CompareConsumer(
-    double min_psnr,
-    double min_ssim,
-    bool enable_psnr,
-    bool enable_ssim,
-    bool verbose
-)
-    : min_psnr_(min_psnr)
-    , min_ssim_(min_ssim)
-    , enable_psnr_(enable_psnr)
-    , enable_ssim_(enable_ssim)
-    , verbose_(verbose)
+CompareConsumer::CompareConsumer(const WorkerConfig::ConsumerTypeConfig::CompareType& config)
+    : config_(config)
     , comparator_(nullptr)
     , compared_count_(0)
     , psnr_sum_(0.0)
@@ -506,15 +496,8 @@ bool CompareConsumer::initialize(const std::vector<Buffer*>& first_buffers) {
     try {
         comparator_ = std::make_unique<productionline::io::BufferComparator>();
         
-        // 配置 BufferComparator
-        productionline::io::CompareConfig config;
-        config.enable_psnr = enable_psnr_;
-        config.enable_ssim = enable_ssim_;
-        config.quick_psnr_threshold = min_psnr_;
-        config.ssim_threshold = min_ssim_;
-        config.verbose = verbose_;
-        
-        if (!comparator_->open(config)) {
+        // 直接传递配置给 BufferComparator（配置已统一）
+        if (!comparator_->open(config_)) {
             LOG4CPLUS_ERROR(log4cplus::Logger::getRoot(), 
                 "CompareConsumer: Failed to open comparator");
             return false;
@@ -523,9 +506,9 @@ bool CompareConsumer::initialize(const std::vector<Buffer*>& first_buffers) {
         initialized_ = true;
         LOG4CPLUS_INFO_FMT(log4cplus::Logger::getRoot(), 
             "CompareConsumer: Initialized (PSNR: %s, SSIM: %s, min_psnr: %.1f, min_ssim: %.2f)",
-            enable_psnr_ ? "enabled" : "disabled",
-            enable_ssim_ ? "enabled" : "disabled",
-            min_psnr_, min_ssim_);
+            config_.enable_psnr ? "enabled" : "disabled",
+            config_.enable_ssim ? "enabled" : "disabled",
+            config_.min_psnr, config_.min_ssim);
         return true;
     } catch (const std::exception& e) {
         LOG4CPLUS_ERROR_FMT(log4cplus::Logger::getRoot(), 
@@ -553,26 +536,26 @@ bool CompareConsumer::consume(const std::vector<Buffer*>& buffers, int frame_ind
     double ssim = result.ssim_avg;
     
     // 累加 PSNR
-    if (enable_psnr_) {
+    if (config_.enable_psnr) {
         psnr_sum_ += psnr;
         
-        if (psnr < min_psnr_) {
+        if (psnr < config_.min_psnr) {
             passed_ = false;
             LOG4CPLUS_WARN_FMT(log4cplus::Logger::getRoot(), 
                 "CompareConsumer: Frame %d PSNR %.2f < %.2f (threshold)",
-                frame_index, psnr, min_psnr_);
+                frame_index, psnr, config_.min_psnr);
         }
     }
     
     // 累加 SSIM
-    if (enable_ssim_) {
+    if (config_.enable_ssim) {
         ssim_sum_ += ssim;
         
-        if (ssim < min_ssim_) {
+        if (ssim < config_.min_ssim) {
             passed_ = false;
             LOG4CPLUS_WARN_FMT(log4cplus::Logger::getRoot(), 
                 "CompareConsumer: Frame %d SSIM %.4f < %.4f (threshold)",
-                frame_index, ssim, min_ssim_);
+                frame_index, ssim, config_.min_ssim);
         }
     }
     

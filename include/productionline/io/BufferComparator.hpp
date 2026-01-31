@@ -1,6 +1,7 @@
 #pragma once
 
 #include "buffer/bufferpool/Buffer.hpp"
+#include "productionline/worker/WorkerConfig.hpp"
 #include <string>
 #include <vector>
 #include <atomic>
@@ -19,66 +20,12 @@ namespace productionline {
 namespace io {
 
 /**
- * @brief 对比配置
+ * @brief 对比配置（类型别名）
+ * 
+ * CompareConfig 现在统一定义在 WorkerConfig::ConsumerTypeConfig::CompareType 中，
+ * 此处提供类型别名以保持 API 兼容性。
  */
-struct CompareConfig {
-    // ========== 验证策略 ==========
-    enum Strategy {
-        FAST_ONLY,          // 仅快速验证（每帧PSNR-Y/G）
-        AUTO_LAYERED,       // ⭐ 自动分层（推荐）
-        DEEP_ALWAYS         // 总是深度验证（慢但详细）
-    };
-    
-    Strategy strategy = AUTO_LAYERED;
-    
-    // ========== 格式处理策略 ⭐ 新增 ==========
-    enum FormatStrategy {
-        AUTO,               // 自动检测并选择最优策略（推荐）
-        FORCE_YUV,          // 强制转换到YUV空间对比
-        FORCE_RGB,          // 强制转换到RGB空间对比
-        NATIVE              // 原生格式对比（要求两边格式一致）
-    };
-    
-    FormatStrategy format_strategy = AUTO;
-    
-    // ========== 色彩空间转换配置 ==========
-    enum ColorStandard {
-        BT601,              // 标清：Rec.601（默认）
-        BT709,              // 高清：Rec.709
-        BT2020              // 4K/HDR：Rec.2020
-    };
-    
-    ColorStandard color_std = BT601;
-    
-    // ========== 指标开关 ==========
-    bool enable_psnr = true;               // 是否启用 PSNR 计算
-    bool enable_ssim = true;               // 是否启用 SSIM 计算（计算量约为 PSNR 的 1.5-2 倍）
-    
-    // ========== 并行计算配置 ==========
-    bool enable_parallel = true;           // 是否启用并行计算（使用全局线程池）
-    // 注意：并行计算可提速 40-60%（快速验证）到 2-3 倍（深度验证）
-    //      但会增加线程调度开销，建议在高分辨率视频时启用
-    
-    // ========== 阈值配置 ==========
-    double quick_psnr_threshold = 38.0;    // >= 38dB 快速通过
-    double quick_warn_threshold = 35.0;    // < 35dB 触发深度验证
-    double ssim_threshold = 0.95;          // >= 0.95 认为质量优秀
-    double ssim_warn_threshold = 0.90;     // < 0.90 触发警告
-    int max_pixel_diff = 3;                // 最大差3灰度级
-    float diff_pixel_ratio = 0.05;         // 差异像素<5%
-    
-    // ========== 感知加权 ==========
-    // YUV格式：Y平面权重更高（人眼对亮度敏感）
-    // RGB格式：G通道权重更高（人眼对绿色敏感）
-    bool use_perceptual_weighting = true;
-    
-    // ========== 输出选项 ==========
-    bool verbose = true;                   // 详细日志
-    bool save_report = true;               // 保存报告到文件
-    std::string report_path = "./decoder_compare_report.txt";
-    bool save_failed_frames = false;       // 保存失败帧的差异图（未实现）
-    std::string output_dir = "./validation_output";
-};
+using CompareConfig = WorkerConfig::ConsumerTypeConfig::CompareType;
 
 /**
  * @brief 单帧对比结果
@@ -139,9 +86,11 @@ struct FrameCompareResult {
  * using namespace productionline::io;
  * 
  * BufferComparator comparator;
- * CompareConfig config;
+ * CompareConfig config;  // CompareConfig = WorkerConfig::ConsumerTypeConfig::CompareType
+ * config.enable_psnr = true;
  * config.strategy = CompareConfig::AUTO_LAYERED;
  * config.format_strategy = CompareConfig::AUTO;
+ * config.min_psnr = 38.0;  // >= 38dB 通过
  * 
  * comparator.open(config);
  * 

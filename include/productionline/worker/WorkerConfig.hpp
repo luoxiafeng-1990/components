@@ -387,14 +387,60 @@ struct WorkerConfig {
         } save_encoded;
         
         // ========================================
-        // 比较参数（用于 COMPARE 执行模式）
+        // 比较配置（用于 COMPARE 执行模式）
         // 注：compare 是执行模式，不是消费类型
         // ========================================
         struct CompareType {
-            bool enable_psnr = false;     ///< 是否计算 PSNR（需显式开启）
-            double min_psnr = 30.0;       ///< PSNR 阈值（dB）
-            bool enable_ssim = false;     ///< 是否计算 SSIM（需显式开启）
-            double min_ssim = 0.95;       ///< SSIM 阈值（0.0-1.0）
+            // ========== 指标开关 ==========
+            bool enable_psnr = false;               ///< 是否启用 PSNR 计算（需显式开启）
+            bool enable_ssim = false;               ///< 是否启用 SSIM 计算（需显式开启，计算量约为 PSNR 的 1.5-2 倍）
+            
+            // ========== 验证策略 ==========
+            enum Strategy {
+                FAST_ONLY,          ///< 仅快速验证（每帧 PSNR-Y/G）
+                AUTO_LAYERED,       ///< 自动分层（推荐）
+                DEEP_ALWAYS         ///< 总是深度验证（慢但详细）
+            };
+            Strategy strategy = AUTO_LAYERED;
+            
+            // ========== 格式处理策略 ==========
+            enum FormatStrategy {
+                AUTO,               ///< 自动检测并选择最优策略（推荐）
+                FORCE_YUV,          ///< 强制转换到 YUV 空间对比
+                FORCE_RGB,          ///< 强制转换到 RGB 空间对比
+                NATIVE              ///< 原生格式对比（要求两边格式一致）
+            };
+            FormatStrategy format_strategy = AUTO;
+            
+            // ========== 色彩空间转换配置 ==========
+            enum ColorStandard {
+                BT601,              ///< 标清：Rec.601（默认）
+                BT709,              ///< 高清：Rec.709
+                BT2020              ///< 4K/HDR：Rec.2020
+            };
+            ColorStandard color_std = BT601;
+            
+            // ========== 阈值配置 ==========
+            double min_psnr = 38.0;                 ///< PSNR 通过阈值（>= 此值快速通过）
+            double warn_psnr = 35.0;                ///< PSNR 警告阈值（< 此值触发深度验证）
+            double min_ssim = 0.95;                 ///< SSIM 通过阈值（>= 此值认为质量优秀）
+            double warn_ssim = 0.90;                ///< SSIM 警告阈值（< 此值触发警告）
+            int max_pixel_diff = 3;                 ///< 最大像素差值（灰度级）
+            float diff_pixel_ratio = 0.05f;         ///< 差异像素比例阈值（< 5%）
+            
+            // ========== 并行计算配置 ==========
+            bool enable_parallel = true;            ///< 是否启用并行计算（使用全局线程池）
+            
+            // ========== 感知加权 ==========
+            bool use_perceptual_weighting = true;   ///< 是否使用感知加权（YUV:Y权重高，RGB:G权重高）
+            
+            // ========== 输出选项 ==========
+            bool verbose = false;                   ///< 是否输出详细日志
+            bool save_report = false;               ///< 是否保存报告到文件
+            std::string report_path = "./decoder_compare_report.txt";  ///< 报告文件路径
+            bool save_failed_frames = false;        ///< 是否保存失败帧的差异图
+            std::string output_dir = "./validation_output";  ///< 输出目录
+            
             CompareType() = default;
         } compare;
         
@@ -1152,112 +1198,6 @@ struct MultiWorkerConfig {
     
     MultiWorkerConfig() = default;
 };
-
-// ============================================================
-// 比较回调相关（v3.2 新增）
-// ============================================================
-
-namespace callbacks {
-
-/**
- * @brief 比较回调上下文
- * 
- * 用于 WorkerSyncCoordinator 的 callback_chain，
- * 在 MultiWorkerProductionLine 内部执行帧同步比较。
- */
-struct CompareCallbackContext {
-    // Worker 名称（用于日志和结果区分）
-    std::string worker1_name;
-    std::string worker2_name;
-    
-    // 阈值配置
-    bool enable_psnr = true;
-    double min_psnr = 30.0;
-    bool enable_ssim = true;
-    double min_ssim = 0.95;
-    
-    // 统计计数器（原子，线程安全）
-    std::atomic<int> total_frames{0};
-    std::atomic<int> passed_frames{0};
-    std::atomic<int> failed_frames{0};
-    
-    // 累计值（用于计算平均值）
-    std::atomic<double> psnr_sum{0.0};
-    std::atomic<double> ssim_sum{0.0};
-    
-    // 外部回调（可选，每帧比较完成后调用）
-    std::function<void(int frame_index, double psnr, double ssim, bool passed)> 
-        result_callback;
-    
-    CompareCallbackContext() = default;
-    
-    // 禁止拷贝（因为有 atomic 成员）
-    CompareCallbackContext(const CompareCallbackContext&) = delete;
-    CompareCallbackContext& operator=(const CompareCallbackContext&) = delete;
-    
-    // 获取平均 PSNR
-    double getAveragePsnr() const {
-        int count = total_frames.load();
-        return count > 0 ? psnr_sum.load() / count : 0.0;
-    }
-    
-    // 获取平均 SSIM
-    double getAverageSsim() const {
-        int count = total_frames.load();
-        return count > 0 ? ssim_sum.load() / count : 0.0;
-    }
-    
-    // 获取通过率
-    double getPassRate() const {
-        int count = total_frames.load();
-        return count > 0 ? 100.0 * passed_frames.load() / count : 0.0;
-    }
-};
-
-/**
- * @brief 创建比较回调 CallbackChainItem
- * 
- * @param context 比较上下文（生命周期需由调用者管理）
- * @return CallbackChainItem
- * 
- * 使用示例：
- * @code
- * auto compare_ctx = std::make_shared<CompareCallbackContext>();
- * compare_ctx->min_psnr = 35.0;
- * compare_ctx->min_ssim = 0.98;
- * 
- * // 设置外部回调
- * compare_ctx->result_callback = [](int frame, double psnr, double ssim, bool passed) {
- *     printf("Frame %d: PSNR=%.2f, SSIM=%.4f, %s\n", 
- *            frame, psnr, ssim, passed ? "PASS" : "FAIL");
- * };
- * 
- * // 添加到 connector config
- * connector_config.callback_chain.push_back(
- *     createCompareCallback(compare_ctx.get()));
- * @endcode
- * 
- * @note 实际比较逻辑需要在实现文件中完成（需要 BufferComparator）
- */
-inline CallbackChainItem createCompareCallback(CompareCallbackContext* context) {
-    // 注意：实际的比较回调实现在 BufferConsumerService.cpp 中
-    // 这里只是创建回调框架，避免头文件依赖 BufferComparator
-    
-    FrameSyncCallback callback = [](uint64_t frame_version, 
-                                    const std::map<std::string, Buffer*>& worker_buffers,
-                                    void* ctx) -> bool {
-        // 占位回调，实际实现由 BufferConsumerService 提供
-        // 或者使用者自己实现比较逻辑
-        (void)frame_version;
-        (void)worker_buffers;
-        (void)ctx;
-        return true;
-    };
-    
-    return CallbackChainItem(callback, context, "compare_callback");
-}
-
-} // namespace callbacks
 
 #endif // WORKER_CONFIG_HPP
 
