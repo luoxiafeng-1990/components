@@ -2,7 +2,7 @@
 #define FFMPEG_DECODE_WORKER_HPP
 
 #include "productionline/worker/WorkerBase.hpp"
-#include "productionline/worker/IPacketSource.hpp"
+#include "productionline/worker/IEncodedPacketSource.hpp"
 #include "buffer/bufferpool/Buffer.hpp"
 #include "buffer/bufferpool/BufferPool.hpp"
 #include <string>
@@ -146,7 +146,7 @@ public:
      * 
      * 前置条件：
      * - WorkerConfig 中必须设置 `data_source.buffer_mode = true`
-     * - 构造函数中会创建 `BufferPacketSource`（而不是其他数据源）
+     * - 构造函数中会创建 `EncodedPacketSourceFromBuffer`（而不是其他数据源）
      * 
      * 示例：
      * ```cpp
@@ -231,7 +231,7 @@ private:
     
     // ============ 数据源抽象（v2.12新增）============
     // ⭐ v2.18 修改：从 unique_ptr 改为 shared_ptr（支持共享模式）
-    std::shared_ptr<IPacketSource> packet_source_;  // 数据源抽象（文件/RTSP流/共享Buffer）
+    std::shared_ptr<IEncodedPacketSource> packet_source_;  // 数据源抽象（文件/RTSP流/共享Buffer）
     
     // ============ FFmpeg 资源 ============
     AVCodecContext* codec_ctx_ptr_;

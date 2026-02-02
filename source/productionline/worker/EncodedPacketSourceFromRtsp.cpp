@@ -1,4 +1,4 @@
-#include "productionline/worker/RtspPacketSource.hpp"
+#include "productionline/worker/EncodedPacketSourceFromRtsp.hpp"
 #include "common/Logger.hpp"
 #include <cstring>
 #include <climits>
@@ -12,11 +12,11 @@ extern "C" {
 
 // ============ 静态成员定义 ============
 
-std::atomic<bool> RtspPacketSource::interrupt_requested_(false);
+std::atomic<bool> EncodedPacketSourceFromRtsp::interrupt_requested_(false);
 
 // ============ 构造/析构 ============
 
-RtspPacketSource::RtspPacketSource(const std::string& rtsp_url)
+EncodedPacketSourceFromRtsp::EncodedPacketSourceFromRtsp(const std::string& rtsp_url)
     : rtsp_url_(rtsp_url)
     , format_ctx_ptr_(nullptr)
     , video_stream_index_(-1)
@@ -28,13 +28,13 @@ RtspPacketSource::RtspPacketSource(const std::string& rtsp_url)
     LOG4CPLUS_DEBUG_FMT(logger_, "构造函数: rtsp_url='%s'", rtsp_url_.c_str());
 }
 
-RtspPacketSource::~RtspPacketSource() {
+EncodedPacketSourceFromRtsp::~EncodedPacketSourceFromRtsp() {
     LOG4CPLUS_DEBUG(logger_, "析构函数开始");
     close();
     LOG4CPLUS_DEBUG(logger_, "析构函数体结束");
 }
 
-bool RtspPacketSource::open() {
+bool EncodedPacketSourceFromRtsp::open() {
     LOG4CPLUS_DEBUG_FMT(logger_, "尝试打开 RTSP 流: %s", rtsp_url_.c_str());
     
     // 检查是否已经打开
@@ -106,7 +106,7 @@ bool RtspPacketSource::open() {
     return true;
 }
 
-void RtspPacketSource::close() {
+void EncodedPacketSourceFromRtsp::close() {
     // 使用原子操作检查并重置 is_open_
     bool expected = true;
     if (!is_open_.compare_exchange_strong(expected, false)) {
@@ -128,11 +128,11 @@ void RtspPacketSource::close() {
     LOG4CPLUS_DEBUG(logger_, "RTSP 流已关闭");
 }
 
-bool RtspPacketSource::isOpen() const {
+bool EncodedPacketSourceFromRtsp::isOpen() const {
     return is_open_.load(std::memory_order_acquire);
 }
 
-int RtspPacketSource::readPacket(AVPacket* packet) {
+int EncodedPacketSourceFromRtsp::readEncodedPacket(AVPacket* packet) {
     if (!is_open_.load(std::memory_order_acquire) || !format_ctx_ptr_) {
         LOG4CPLUS_ERROR(logger_, "Cannot read packet: not open");
         return AVERROR(EINVAL);
@@ -192,7 +192,7 @@ int RtspPacketSource::readPacket(AVPacket* packet) {
     }
 }
 
-const AVCodecParameters* RtspPacketSource::getCodecParameters() const {
+const AVCodecParameters* EncodedPacketSourceFromRtsp::getCodecParameters() const {
     if (!is_open_.load(std::memory_order_acquire) || !format_ctx_ptr_) {
         return nullptr;
     }
@@ -204,50 +204,50 @@ const AVCodecParameters* RtspPacketSource::getCodecParameters() const {
     return format_ctx_ptr_->streams[video_stream_index_]->codecpar;
 }
 
-int RtspPacketSource::getVideoStreamIndex() const {
+int EncodedPacketSourceFromRtsp::getVideoStreamIndex() const {
     return video_stream_index_;
 }
 
-int RtspPacketSource::getTotalFrames() const {
+int EncodedPacketSourceFromRtsp::getTotalFrames() const {
     // RTSP 实时流是无限的，返回一个很大的值以适配接口
     return INT_MAX;
 }
 
-long RtspPacketSource::getFileSize() const {
+long EncodedPacketSourceFromRtsp::getFileSize() const {
     // RTSP 流没有文件大小概念
     return -1;
 }
 
-std::string RtspPacketSource::getPath() const {
+std::string EncodedPacketSourceFromRtsp::getPath() const {
     return rtsp_url_;
 }
 
-bool RtspPacketSource::seek(int frame_index) {
+bool EncodedPacketSourceFromRtsp::seek(int frame_index) {
     (void)frame_index;
     LOG4CPLUS_WARN(logger_, "RTSP stream does not support seeking");
     return false;
 }
 
-bool RtspPacketSource::isAtEnd() const {
+bool EncodedPacketSourceFromRtsp::isAtEnd() const {
     return eof_reached_.load(std::memory_order_acquire);
 }
 
-int RtspPacketSource::getSourceWidth() const {
+int EncodedPacketSourceFromRtsp::getSourceWidth() const {
     const AVCodecParameters* params = getCodecParameters();
     return params ? params->width : 0;
 }
 
-int RtspPacketSource::getSourceHeight() const {
+int EncodedPacketSourceFromRtsp::getSourceHeight() const {
     const AVCodecParameters* params = getCodecParameters();
     return params ? params->height : 0;
 }
 
-AVPixelFormat RtspPacketSource::getSourcePixelFormat() const {
+AVPixelFormat EncodedPacketSourceFromRtsp::getSourcePixelFormat() const {
     const AVCodecParameters* params = getCodecParameters();
     return params ? static_cast<AVPixelFormat>(params->format) : AV_PIX_FMT_NONE;
 }
 
-bool RtspPacketSource::findVideoStream() {
+bool EncodedPacketSourceFromRtsp::findVideoStream() {
     if (!format_ctx_ptr_) {
         LOG4CPLUS_ERROR(logger_, "format_ctx_ptr_ is nullptr");
         return false;
@@ -269,7 +269,7 @@ bool RtspPacketSource::findVideoStream() {
 
 // ============ 中断控制实现 ============
 
-int RtspPacketSource::interrupt_callback(void* ctx) {
+int EncodedPacketSourceFromRtsp::interrupt_callback(void* ctx) {
     (void)ctx;  // 暂时不使用上下文参数
     
     // FFmpeg 会定期调用此函数检查是否需要中断
@@ -288,7 +288,7 @@ int RtspPacketSource::interrupt_callback(void* ctx) {
     return should_interrupt ? 1 : 0;
 }
 
-void RtspPacketSource::requestInterrupt() {
+void EncodedPacketSourceFromRtsp::requestInterrupt() {
     bool was_interrupted = interrupt_requested_.exchange(true, std::memory_order_release);
     if (!was_interrupted) {
         auto logger = log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.DataSource.Rtsp"));
@@ -296,47 +296,47 @@ void RtspPacketSource::requestInterrupt() {
     }
 }
 
-void RtspPacketSource::clearInterrupt() {
+void EncodedPacketSourceFromRtsp::clearInterrupt() {
     interrupt_requested_.store(false, std::memory_order_release);
     auto logger = log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.DataSource.Rtsp"));
     LOG4CPLUS_DEBUG(logger, "✅ 中断标志已清除");
 }
 
-IDataSourceNavigator::SourceType RtspPacketSource::getDataSourceType() const {
+IDataSourceNavigator::SourceType EncodedPacketSourceFromRtsp::getDataSourceType() const {
     return SourceType::NETWORK_SOURCE;
 }
 
-bool RtspPacketSource::open(const char* path) {
+bool EncodedPacketSourceFromRtsp::open(const char* path) {
     (void)path;
     LOG4CPLUS_WARN(logger_, "RTSP source does not support open(path), use open() with pre-configured URL");
     return false;
 }
 
-bool RtspPacketSource::seekToBegin() {
+bool EncodedPacketSourceFromRtsp::seekToBegin() {
     LOG4CPLUS_WARN(logger_, "RTSP stream does not support seekToBegin");
     return false;
 }
 
-bool RtspPacketSource::seekToEnd() {
+bool EncodedPacketSourceFromRtsp::seekToEnd() {
     LOG4CPLUS_WARN(logger_, "RTSP stream does not support seekToEnd");
     return false;
 }
 
-bool RtspPacketSource::skip(int frame_count) {
+bool EncodedPacketSourceFromRtsp::skip(int frame_count) {
     (void)frame_count;
     LOG4CPLUS_WARN(logger_, "RTSP stream does not support skip");
     return false;
 }
 
-int RtspPacketSource::getCurrentFrameIndex() const {
+int EncodedPacketSourceFromRtsp::getCurrentFrameIndex() const {
     return current_frame_index_.load(std::memory_order_acquire);
 }
 
-size_t RtspPacketSource::getFrameSize() const {
+size_t EncodedPacketSourceFromRtsp::getFrameSize() const {
     // RTSP 实时流无法估算帧大小
     return 0;
 }
 
-bool RtspPacketSource::hasMoreFrames() const {
+bool EncodedPacketSourceFromRtsp::hasMoreFrames() const {
     return !isAtEnd();
 }

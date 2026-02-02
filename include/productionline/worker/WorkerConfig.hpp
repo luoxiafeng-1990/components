@@ -16,7 +16,7 @@ extern "C" {
 }
 
 // 前向声明（避免循环依赖）
-class IPacketSource;
+class IEncodedPacketSource;
 class Buffer;
 
 // ⭐ v2.23 新增：帧同步回调类型（前向声明）
@@ -175,14 +175,14 @@ struct WorkerConfig {
         // ⭐ v2.22 共享的 Packet 数据源（从 DecoderConfig 移动）
         // 
         // 使用场景：
-        // - 普通模式：nullptr（Worker 自己创建独立的 BufferPacketSource）
+        // - 普通模式：nullptr（Worker 自己创建独立的 EncodedPacketSourceFromBuffer）
         // - 共享模式：MultiWorkerProductionLine 创建唯一实例并传入
         // 
         // 优点：
         // - Worker 仍然根据 config 创建 datasource（符合原始设计）
         // - 不需要修改 Worker 接口（不需要 setPacketSource）
-        // - 使用基类指针 IPacketSource，支持多态
-        std::shared_ptr<class IPacketSource> shared_packet_source = nullptr;
+        // - 使用基类指针 IEncodedPacketSource，支持多态
+        std::shared_ptr<class IEncodedPacketSource> shared_packet_source = nullptr;
         
         DataSourceConfig() = default;
         DataSourceConfig(const DataSourceConfig&) = default;
@@ -440,6 +440,11 @@ struct WorkerConfig {
             std::string report_path = "./decoder_compare_report.txt";  ///< 报告文件路径
             bool save_failed_frames = false;        ///< 是否保存失败帧的差异图
             std::string output_dir = "./validation_output";  ///< 输出目录
+            
+            // ========== ⭐ v2.27 新增：通道比较配置 ==========
+            bool enable_channel_compare = false;    ///< 是否启用通道间比较（作为消费类型）
+            int reference_channel = 0;              ///< 参考通道号
+            int compare_channel = 1;                ///< 比较通道号
             
             CompareType() = default;
         } compare;
@@ -1100,34 +1105,34 @@ public:
     const std::vector<std::string>& getProducerNames() const;
     const std::vector<std::string>& getConsumerNames() const;
     
-    // ⭐ v2.18 新增：设置共享的 PacketSource（按生产者名称）
+    // ⭐ v2.18 新增：设置共享的 EncodedPacketSource（按生产者名称）
     /**
-     * @brief 为指定生产者设置共享的 PacketSource
+     * @brief 为指定生产者设置共享的 EncodedPacketSource
      * @param producer_name 生产者名称
-     * @param source 共享的 PacketSource 实例
+     * @param source 共享的 EncodedPacketSource 实例
      * 
      * 功能：
      * - Connector 持有共享实例，防止被销毁
      * - 每个生产者都有自己独立的共享数据源
      * - 支持多个生产者，每个生产者对应一个共享数据源
      */
-    void setSharedSource(const std::string& producer_name, std::shared_ptr<class IPacketSource> source);
+    void setSharedSource(const std::string& producer_name, std::shared_ptr<class IEncodedPacketSource> source);
     
     /**
-     * @brief 获取指定生产者的共享 PacketSource
+     * @brief 获取指定生产者的共享 EncodedPacketSource
      * @param producer_name 生产者名称
      * @return 共享实例（如果没有则返回 nullptr）
      */
-    std::shared_ptr<class IPacketSource> getSharedSource(const std::string& producer_name) const;
+    std::shared_ptr<class IEncodedPacketSource> getSharedSource(const std::string& producer_name) const;
 
 private:
     Mode mode_;
     std::vector<std::string> producer_names_;
     std::vector<std::string> consumer_names_;
     
-    // ⭐ v2.18 新增：共享的 PacketSource（按生产者名称索引）
+    // ⭐ v2.18 新增：共享的 EncodedPacketSource（按生产者名称索引）
     // 每个生产者都有自己独立的共享数据源
-    std::map<std::string, std::shared_ptr<class IPacketSource>> shared_sources_;
+    std::map<std::string, std::shared_ptr<class IEncodedPacketSource>> shared_sources_;
 };
 
 /**

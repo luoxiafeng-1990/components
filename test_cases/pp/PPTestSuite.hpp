@@ -15,9 +15,10 @@
  * 
  * 使用示例：
  * @code
- * ./qa_cases pp --format nv12 --channel pp0 --input video.mp4
- * ./qa_cases pp --format argb888 --channel pp1 --input video.mp4
- * ./qa_cases pp --psnr video.mp4              # COMPARE 模式
+ * ./qa_cases pp --format nv12 --channel 0 --input video.mp4
+ * ./qa_cases pp --format argb888 --channel 1 --input video.mp4
+ * ./qa_cases pp --psnr video.mp4              # HW vs SW 比较
+ * ./qa_cases pp --channel 0,1 --psnr video.mp4  # 通道比较 (v2.27)
  * ./qa_cases pp -h
  * @endcode
  * 
@@ -33,6 +34,7 @@
 
 #include <string>
 #include <vector>
+#include <sstream>
 #include <map>
 #include <log4cplus/logger.h>
 
@@ -48,7 +50,7 @@ using TestResult = consumer::ConsumeResult;
  * 设计原则：
  * - channels: 启用的通道列表，如 [0], [1], [0,1], [0,1,2]
  * - formats: 每个通道的输出格式，与 channels 一一对应
- * - 兼容原有 "pp0"/"pp1"/"multi" 字符串格式
+ * - v2.27: 通道使用数字格式（如 "0", "1", "0,1"）
  */
 struct PPTestParams {
     std::vector<int> channels;           ///< 启用的通道列表
@@ -70,13 +72,15 @@ struct PPTestParams {
     // 辅助方法
     // ========================================
     
-    /// 获取兼容的 channel 字符串（用于日志和旧代码兼容）
+    /// 获取 channel 字符串（用于日志）
     std::string getChannelString() const {
-        if (channels.empty()) return "";
-        if (channels.size() == 1) {
-            return "pp" + std::to_string(channels[0]);
+        if (channels.empty()) return "0";
+        std::string result;
+        for (size_t i = 0; i < channels.size(); ++i) {
+            if (i > 0) result += ",";
+            result += std::to_string(channels[i]);
         }
-        return "multi";
+        return result;
     }
     
     /// 获取指定通道的格式（如果 formats 不够，使用最后一个或默认值）
@@ -149,13 +153,18 @@ struct PPTestParams {
         crop_x(0), crop_y(0), crop_w(0), crop_h(0), use_hardware(true) {}
     
 private:
-    /// 解析通道字符串（"pp0" → [0], "pp1" → [1], "multi" → [0,1]）
+    /// 解析通道字符串（"0" → [0], "1" → [1], "0,1" → [0,1]）
+    /// v2.27: 移除旧格式 "pp0", "pp1", "multi"
     static std::vector<int> parseChannelString(const std::string& ch) {
-        if (ch == "pp0" || ch == "0") return {0};
-        if (ch == "pp1" || ch == "1") return {1};
-        if (ch == "multi" || ch == "0,1") return {0, 1};
-        // 默认通道 0
-        return {0};
+        std::vector<int> result;
+        std::stringstream ss(ch);
+        std::string item;
+        while (std::getline(ss, item, ',')) {
+            try {
+                result.push_back(std::stoi(item));
+            } catch (...) {}
+        }
+        return result.empty() ? std::vector<int>{0} : result;
     }
 };
 

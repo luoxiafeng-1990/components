@@ -1,48 +1,43 @@
-#ifndef FILE_PACKET_SOURCE_HPP
-#define FILE_PACKET_SOURCE_HPP
+#ifndef ENCODED_PACKET_SOURCE_FROM_FILE_HPP
+#define ENCODED_PACKET_SOURCE_FROM_FILE_HPP
 
-#include "productionline/worker/IPacketSource.hpp"
+#include "productionline/worker/IEncodedPacketSource.hpp"
 #include <log4cplus/logger.h>
 #include <log4cplus/loggingmacros.h>
 #include <string>
-#include <log4cplus/logger.h>
-#include <log4cplus/loggingmacros.h>
 #include <memory>
-#include <log4cplus/logger.h>
-#include <log4cplus/loggingmacros.h>
 #include <atomic>
-#include <log4cplus/logger.h>
-#include <log4cplus/loggingmacros.h>
 
 // FFmpeg 前向声明
 struct AVFormatContext;
 struct AVCodecParameters;
 
 /**
- * @brief FilePacketSource - 文件数据源实现
+ * @brief EncodedPacketSourceFromFile - 从文件读取编码数据的数据源实现
  * 
- * 功能：从本地文件读取 AVPacket
+ * 功能：从本地文件读取编码后的 AVPacket（H.264/H.265等）
  * 
  * 使用场景：
  * - 传统文件解码模式
- * - 从 MP4、AVI、MKV 等文件读取
+ * - 从 MP4、AVI、MKV 等容器文件读取编码数据
+ * - 从裸流文件（.h264/.h265）读取编码数据
  */
-class FilePacketSource : public IPacketSource {
+class EncodedPacketSourceFromFile : public IEncodedPacketSource {
 public:
     /**
      * @brief 构造函数
      * @param file_path 文件路径
      */
-    explicit FilePacketSource(const std::string& file_path);
+    explicit EncodedPacketSourceFromFile(const std::string& file_path);
     
     /**
      * @brief 析构函数
      */
-    ~FilePacketSource() override;
+    ~EncodedPacketSourceFromFile() override;
     
     // 禁止拷贝
-    FilePacketSource(const FilePacketSource&) = delete;
-    FilePacketSource& operator=(const FilePacketSource&) = delete;
+    EncodedPacketSourceFromFile(const EncodedPacketSourceFromFile&) = delete;
+    EncodedPacketSourceFromFile& operator=(const EncodedPacketSourceFromFile&) = delete;
     
     // ============ IDataSourceNavigator 接口实现 ============
     
@@ -74,16 +69,17 @@ public:
     const AVCodecParameters* getCodecParameters() const override;
     SourceType getDataSourceType() const override;
     
-    // ============ IPacketSource 特有方法 ============
-    int readPacket(AVPacket* packet) override;
+    // ============ IEncodedPacketSource 特有方法 ============
+    int readEncodedPacket(AVPacket* packet) override;
     int getVideoStreamIndex() const override;
+
 private:
     std::string file_path_;              // 文件路径
     AVFormatContext* format_ctx_ptr_;   // FFmpeg 格式上下文
     int video_stream_index_;            // 视频流索引
     int total_frames_;                  // 总帧数（估算）
     int current_frame_index_;           // 当前帧索引
-    std::atomic<bool> is_open_;         // 🎯 原子变量，保证线程安全的状态检查
+    std::atomic<bool> is_open_;         // 原子变量，保证线程安全的状态检查
     bool eof_reached_;                  // 是否到达文件末尾
     
     /**
@@ -102,5 +98,4 @@ private:
     log4cplus::Logger logger_;
 };
 
-#endif // FILE_PACKET_SOURCE_HPP
-
+#endif // ENCODED_PACKET_SOURCE_FROM_FILE_HPP

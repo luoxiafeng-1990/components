@@ -1,12 +1,21 @@
-# BufferPacketSource 共享模式重大 Bug 修复报告 (v2.22)
+# EncodedPacketSourceFromBuffer 共享模式重大 Bug 修复报告 (v2.22)
+
+> **⚠️ 命名更新说明 (v2.27)**  
+> 本文档记录的是 v2.22 版本的修复内容。在 v2.27 版本中，相关类和方法已重命名：
+> - `BufferPacketSource` → `EncodedPacketSourceFromBuffer`
+> - `acquirePacket()` → `acquireEncodedPacket()`
+> - `commitPacket()` → `commitEncodedPacket()`
+> - `cancelPacket()` → `cancelEncodedPacket()`
+> 
+> 下文保留原始类名以保持历史记录的准确性。
 
 ## 📋 概述
 
-本文档记录了 v2.22 版本中对 `BufferPacketSource` 共享模式（ONE_TO_MANY）的重大架构重构，解决了多个严重的并发问题，包括资源泄漏、死锁和重复处理等。
+本文档记录了 v2.22 版本中对 `EncodedPacketSourceFromBuffer`（原 `BufferPacketSource`）共享模式（ONE_TO_MANY）的重大架构重构，解决了多个严重的并发问题，包括资源泄漏、死锁和重复处理等。
 
 **修复日期**: 2026-01-22  
 **版本**: v2.22  
-**影响范围**: BufferPacketSource 共享模式、FfmpegDecodeRtspWorker Buffer 模式
+**影响范围**: EncodedPacketSourceFromBuffer 共享模式、FfmpegDecodeRtspWorker Buffer 模式
 
 ---
 

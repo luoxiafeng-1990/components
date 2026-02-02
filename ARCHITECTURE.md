@@ -19,7 +19,102 @@
 
 ## 版本历史
 
-### v2.24（当前版本）- 消费类型配置重构与 MultiWorker 比较模式
+### v2.28（当前版本）- 编码数据源接口重命名与 CompareConfig 统一
+
+**发布日期：** 2026-02-02
+
+**主要变更：**
+
+- ✅ **编码数据源接口重命名**：优化接口命名，明确数据源处理的是编码后的数据
+  - `IPacketSource` → `IEncodedPacketSource`
+  - `FilePacketSource` → `EncodedPacketSourceFromFile`
+  - `RtspPacketSource` → `EncodedPacketSourceFromRtsp`
+  - `BufferPacketSource` → `EncodedPacketSourceFromBuffer`
+  - 文件名同步更新（如 `IEncodedPacketSource.hpp`、`EncodedPacketSourceFromFile.hpp/.cpp` 等）
+
+- ✅ **方法重命名**：
+  - `readPacket()` → `readEncodedPacket()`
+  - `acquirePacket()` → `acquireEncodedPacket()`
+  - `commitPacket()` → `commitEncodedPacket()`
+  - `cancelPacket()` → `cancelEncodedPacket()`
+
+- ✅ **CompareConfig 统一**：将 `CompareConfig` 统一到 `WorkerConfig::ConsumerTypeConfig::CompareType`
+  - 重构 `CompareCallbackContext` 到 `WorkerSyncCoordinator.hpp`
+  - `WorkerSyncCoordinator` 新增 `createDefaultCompareCallback()` 工厂方法
+  - `BufferConsumerService.startMultiWorkerCompare()` 简化接口
+  - 配置字段命名规范化 (`min_psnr`, `min_ssim`, `warn_psnr`, `warn_ssim`)
+
+- ✅ **Buffer PTS 支持**：Buffer 类新增 PTS 接口支持多通道帧对齐
+
+**设计原则：**
+- **命名清晰**：接口名明确表示数据源类型（编码后的 AVPacket）
+- **语义准确**：`Encoded` 前缀与 FFmpeg 术语保持一致
+- **扩展预留**：为未来的 `IRawDataSource`（原始数据源）接口预留空间
+
+**命名对照表：**
+| 旧名称 | 新名称 | 说明 |
+|--------|--------|------|
+| `IPacketSource` | `IEncodedPacketSource` | 编码数据源抽象接口 |
+| `FilePacketSource` | `EncodedPacketSourceFromFile` | 文件编码数据源 |
+| `RtspPacketSource` | `EncodedPacketSourceFromRtsp` | RTSP 流编码数据源 |
+| `BufferPacketSource` | `EncodedPacketSourceFromBuffer` | Buffer 池编码数据源 |
+| `readPacket()` | `readEncodedPacket()` | 读取编码 packet |
+| `acquirePacket()` | `acquireEncodedPacket()` | 获取共享模式编码 packet |
+| `commitPacket()` | `commitEncodedPacket()` | 提交共享模式编码 packet |
+| `cancelPacket()` | `cancelEncodedPacket()` | 取消共享模式编码 packet |
+
+---
+
+### v2.26 - 多通道扩展支持与参数审计修复
+
+**发布日期：** 2026-01-30
+
+**主要变更：**
+
+- ✅ **多通道配置支持**：重构 `PPTestParams`/`SaveRawType` 支持多通道配置
+  - 新增 `channels`、`formats`、`output_paths` 字段
+  - 命令行参数支持逗号分隔：`-c 0,1 -f nv12,rgb888 -o ch0.yuv,ch1.rgb -n 100,200`
+  - `SaveRawConsumer` 支持按通道独立保存和帧数限制
+
+- ✅ **参数审计修复**：
+  - 修复 `--verbose` 参数链断裂问题
+  - 移除无效的 `--reference` 参数
+  - 修复 `LOG4CPLUS` 宏参数错误 (`WARN/INFO` → `WARN_FMT/INFO_FMT`)
+
+- ✅ **测试用例清理**：删除 `VdecTestSuite` 中 14 个无效的 PP 组合测试
+
+**设计原则：**
+- **通道独立性**：每个通道可以有独立的格式、输出路径和帧数限制
+- **配置灵活性**：支持单通道和多通道的统一配置方式
+
+---
+
+### v2.25 - ConsumerTypeConfig 架构重构与 MultiWorker 比较模式
+
+**发布日期：** 2026-01-30
+
+**主要变更：**
+
+- ✅ **ConsumerTypeConfig 重构**：重构 `ConsumerConfig` → `ConsumerTypeConfig`
+  - 使用嵌套结构体分类消费类型
+  - 新增 `DisplayType`/`SaveRawType`/`SaveEncodedType`/`CompareType`/`PerformanceType`/`CountType` 子结构
+  - 支持多种消费类型叠加（如同时显示+保存）
+
+- ✅ **MultiWorker 比较模式**：新增 `startMultiWorkerCompare()` 函数
+  - 支持 `MultiWorkerProductionLine` 比较
+  - 新增 `callbacks::CompareCallbackContext` 比较回调机制
+
+- ✅ **WorkerConfigBuilder 更新**：
+  - 新增 `enableDisplay()`、`enableSaveRaw()`、`enableCompare()` 等便捷方法
+  - 优化 BufferPool shutdown 后的 drain 阶段
+
+- ✅ **测试框架优化**：
+  - `ITestModule` 新增 `runSingle`/`runCompare`/`runParallel` 公共方法
+  - `PPTestSuite` 重构为 `ExecuteMode` 风格
+
+---
+
+### v2.24 - 消费类型配置重构与 MultiWorker 比较模式
 
 **发布日期：** 2026-01-29
 
@@ -161,10 +256,10 @@ service.startMultiWorkerCompare(multi_config, compare_callback);
 **发布日期：** 2026-01-22
 
 **主要变更：**
-- ✅ **共享模式三态控制**：BufferPacketSource 引入 `acquire/commit/cancel` 三态 API（带 `worker_id`）
-  - `acquirePacket()`：阻塞等待新 buffer，版本号防止重复获取
-  - `commitPacket()`：成功解码后提交，递减订阅计数并驱动 Fetch 释放
-  - `cancelPacket()`：失败时取消，允许重试当前 buffer
+- ✅ **共享模式三态控制**：EncodedPacketSourceFromBuffer 引入 `acquire/commit/cancel` 三态 API（带 `worker_id`）
+  - `acquireEncodedPacket()`：阻塞等待新 buffer，版本号防止重复获取
+  - `commitEncodedPacket()`：成功解码后提交，递减订阅计数并驱动 Fetch 释放
+  - `cancelEncodedPacket()`：失败时取消，允许重试当前 buffer
   - 移除 `PacketGuard`（RAII 不再适配成功/失败分支）
 - ✅ **共享模式状态追踪**：新增 `current_buffer_version_` + `worker_states_`，保证多消费者一致性
 - ✅ **数据源配置归一**：`buffer_mode/codec_params/time_base/shared_packet_source` 迁移至 `data_source`
@@ -224,7 +319,7 @@ service.startMultiWorkerCompare(multi_config, compare_callback);
 **发布日期：** 2025-01-14
 
 **主要变更：**
-- ✅ **BufferPacketSource 共享模式**：支持 ONE_TO_MANY 发布-订阅模式
+- ✅ **EncodedPacketSourceFromBuffer 共享模式**：支持 ONE_TO_MANY 发布-订阅模式
   - 新增共享模式构造函数，接受 `subscriber_count` 参数
   - 实现订阅者同步机制：所有消费者处理同一个 packet
   - 使用互斥锁和条件变量确保线程安全
@@ -262,9 +357,9 @@ service.startMultiWorkerCompare(multi_config, compare_callback);
 
 **使用示例：**
 ```cpp
-// 示例1：创建共享模式 BufferPacketSource
+// 示例1：创建共享模式 EncodedPacketSourceFromBuffer
 size_t consumer_count = 3;  // 3个消费者
-auto shared_source = std::make_shared<BufferPacketSource>(
+auto shared_source = std::make_shared<EncodedPacketSourceFromBuffer>(
     codec_params, 
     consumer_count  // 共享模式
 );
@@ -309,7 +404,7 @@ if (readAndSendPacket(packet)) {
 - **多消费者共享**：多个 Worker 需要处理同一帧数据
 
 **向后兼容：**
-- BufferPacketSource 保留原有单参数构造函数（普通模式）
+- EncodedPacketSourceFromBuffer 保留原有单参数构造函数（普通模式）
 - Connector 原有接口不变，共享模式为可选功能
 - 硬件检测工具为新增功能，不影响现有逻辑
 
@@ -319,10 +414,10 @@ if (readAndSendPacket(packet)) {
 **发布日期：** 2025-01
 
 **主要变更：**
-- ✅ **输入源信息查询接口**：`IPacketSource` 新增 `getSourceWidth()`、`getSourceHeight()`、`getSourcePixelFormat()` 方法
+- ✅ **输入源信息查询接口**：`IEncodedPacketSource` 新增 `getSourceWidth()`、`getSourceHeight()`、`getSourcePixelFormat()` 方法
   - 查询输入数据源（文件/流）的原始分辨率和像素格式
   - 区别于解码器输出格式（可能经过缩放/格式转换）
-  - 所有 PacketSource 实现类（FilePacketSource、RtspPacketSource、BufferPacketSource）实现此接口
+  - 所有 PacketSource 实现类（EncodedPacketSourceFromFile、EncodedPacketSourceFromRtsp、EncodedPacketSourceFromBuffer）实现此接口
   - WorkerBase 和 BufferFillingWorkerFacade 提供转发方法
 - ✅ **三级优先级动态适配机制**：自动适配输入源分辨率和格式
   - Priority 1（最高）：`taco_config.chX_scale_width/height` - 用户显式配置
@@ -600,9 +695,9 @@ packet->dts -= first_dts_offset_;
   - 配置结构：`ConnectorConfig { Connector::Mode mode; std::vector<std::string> producer_ids; std::vector<std::string> consumer_ids; }`  
   - 运行时内部计算 `consumer_index -> producer_index` 映射，**仅负责路由，不负责数据**
   - **v2.19 新增**：支持共享 PacketSource 实例管理（`setSharedSource()` / `getSharedSource()`）
-    - 在 ONE_TO_MANY 模式下，Connector 持有共享的 BufferPacketSource 实例
+    - 在 ONE_TO_MANY 模式下，Connector 持有共享的 EncodedPacketSourceFromBuffer 实例
     - 防止共享实例被过早销毁，确保生命周期正确管理
-    - 新增成员：`std::shared_ptr<IPacketSource> shared_source_`
+    - 新增成员：`std::shared_ptr<IEncodedPacketSource> shared_source_`
 - ✅ **共享全局线程池**：所有组、所有消费者共用一份线程池  
   - 使用 `GlobalThreadPool` 单例包装 `BS::thread_pool`  
   - 线程池大小通过 `MultiWorkerConfig::thread_pool_size` 进行初始化配置  
@@ -744,7 +839,7 @@ auto consumer_pool = registry.getBufferPool(consumer_pool_id);
 ```
 
 ```cpp
-// 示例4：v2.19 共享模式配置（ONE_TO_MANY 使用共享 BufferPacketSource）
+// 示例4：v2.19 共享模式配置（ONE_TO_MANY 使用共享 EncodedPacketSourceFromBuffer）
 // 场景：一路输入，多路不同格式输出（YUV + RGB），所有消费者处理同一帧
 MultiWorkerProductionLine::WorkerGroup group("shared_mode_test");
 {
@@ -776,7 +871,7 @@ MultiWorkerProductionLine::WorkerGroup group("shared_mode_test");
 
 // MultiWorkerProductionLine 内部逻辑（自动处理）：
 // 1. 检测到 ONE_TO_MANY 且 consumer_count > 1
-// 2. 创建共享模式 BufferPacketSource(codec_params, 2)
+// 2. 创建共享模式 EncodedPacketSourceFromBuffer(codec_params, 2)
 // 3. 所有消费者共享同一个实例（通过 shared_ptr）
 // 4. Connector 持有共享实例，防止被销毁（connector.setSharedSource(shared_source)）
 // 5. 运行时所有消费者同步读取同一个 packet
@@ -827,17 +922,17 @@ MultiWorkerProductionLine
 
 ---
 
-### v2.14 - BufferPacketSource 零拷贝直连架构
+### v2.14 - EncodedPacketSourceFromBuffer 零拷贝直连架构
 **发布日期：** 2025-01
 
 **主要变更：**
-- ✅ **BufferPacketSource 重新设计**：普通模式移除中间缓存，直接关联 BufferPool
+- ✅ **EncodedPacketSourceFromBuffer 重新设计**：普通模式移除中间缓存，直接关联 BufferPool
   - 删除：`use_pool_mode_`（兼容模式标志）
   - 删除：`setCurrentBuffer()` / `clearCurrentBuffer()` 方法
   - 普通模式不再依赖 `current_buffer_`；共享模式下 `current_buffer_` 仅用于同步与生命周期管理
   - 新增：`std::weak_ptr<BufferPool> source_pool_`（直接关联）
   - 新增：`setSourceBufferPool(std::weak_ptr<BufferPool> pool_weak)` 方法
-- ✅ **真正的零拷贝数据流**：`readPacket()` 直接从 BufferPool 获取，立即释放
+- ✅ **真正的零拷贝数据流**：`readEncodedPacket()` 直接从 BufferPool 获取，立即释放
   - 获取：`Buffer* buffer = pool->acquireFilled(true, 100);`
   - 使用：`copyPacket(packet, buffer->getAVPacket());`
   - 释放：`pool->releaseFilled(buffer);`（立即释放，避免积压）
@@ -848,18 +943,18 @@ MultiWorkerProductionLine
 
 **v2.19 新增 - 共享模式（发布-订阅）：**
 - ✅ **共享模式构造函数**：支持多消费者共享同一个 packet
-  - 新增：`BufferPacketSource(codec_params, subscriber_count)` 构造函数
+  - 新增：`EncodedPacketSourceFromBuffer(codec_params, subscriber_count)` 构造函数
   - 新增成员：`is_shared_mode_`、`total_subscribers_`、`remaining_subscribers_`、`current_buffer_`
   - 新增同步机制：`std::mutex mutex_`、`std::condition_variable cv_subscribers_`、`cv_fetch_`
 - ✅ **订阅者同步机制**：确保所有消费者处理同一帧
-  - 工作流程：消费者 `acquirePacket(worker_id)` → 解码成功 `commitPacket(worker_id)` / 失败 `cancelPacket(worker_id)` → 所有订阅者提交后 Fetch 释放 Buffer
+  - 工作流程：消费者 `acquireEncodedPacket(worker_id)` → 解码成功 `commitEncodedPacket(worker_id)` / 失败 `cancelEncodedPacket(worker_id)` → 所有订阅者提交后 Fetch 释放 Buffer
   - ⭐ v2.22：增加 `current_buffer_version_` 与 `worker_states_`，避免重复消费
   - 线程安全：使用互斥锁和条件变量保护共享状态
   - 防止数据竞争：确保 packet 在所有订阅者提交前不被释放
 
 **设计原则：**
 - **真正零拷贝**：消除所有中间拷贝环节
-- **职责清晰**：BufferPacketSource 自主管理数据获取
+- **职责清晰**：EncodedPacketSourceFromBuffer 自主管理数据获取
 - **资源高效**：buffer 使用后立即释放，避免积压
 - **架构简化**：删除兼容模式，代码更清晰
 - **共享语义明确**（v2.19）：shared_ptr 表达共享所有权，支持多消费者场景
@@ -876,23 +971,23 @@ MultiWorkerProductionLine
 **使用示例：**
 ```cpp
 // v2.14 零拷贝架构 - 普通模式（单消费者）
-// 1. 创建 BufferPacketSource（消费者数据源）
-auto buffer_source = std::make_unique<BufferPacketSource>(codec_params);
+// 1. 创建 EncodedPacketSourceFromBuffer（消费者数据源）
+auto buffer_source = std::make_unique<EncodedPacketSourceFromBuffer>(codec_params);
 
 // 2. 关联生产者的 BufferPool
 buffer_source->setSourceBufferPool(producer_buffer_pool_weak);
 
-// 3. BufferPacketSource 内部自动处理获取和释放
-int ret = buffer_source->readPacket(packet);
+// 3. EncodedPacketSourceFromBuffer 内部自动处理获取和释放
+int ret = buffer_source->readEncodedPacket(packet);
 // 内部逻辑：
 // - acquireFilled() 获取 buffer
 // - copyPacket() 拷贝数据
 // - releaseFilled() 立即释放 ⭐ 关键改进
 
 // v2.19 共享模式 - 多消费者共享同一个 packet（ONE_TO_MANY）
-// 1. 创建共享模式 BufferPacketSource（指定订阅者数量）
+// 1. 创建共享模式 EncodedPacketSourceFromBuffer（指定订阅者数量）
 size_t consumer_count = 3;  // 3个消费者
-auto shared_source = std::make_shared<BufferPacketSource>(
+auto shared_source = std::make_shared<EncodedPacketSourceFromBuffer>(
     codec_params, 
     consumer_count  // ⭐ 共享模式构造
 );
@@ -910,13 +1005,13 @@ FfmpegDecodeRtspWorker worker2(consumer_cfg);  // 消费者2
 FfmpegDecodeRtspWorker worker3(consumer_cfg);  // 消费者3
 
 // 4. 共享模式工作流程（自动同步）
-// - 消费者1/2/3 调用 acquirePacket(this) → 等待新 buffer
-// - 解码成功：commitPacket(this)；解码失败：cancelPacket(this)（允许重试）
+// - 消费者1/2/3 调用 acquireEncodedPacket(this) → 等待新 buffer
+// - 解码成功：commitEncodedPacket(this)；解码失败：cancelEncodedPacket(this)（允许重试）
 // - 所有订阅者 commit 完成后，Fetch 释放 Buffer
 
 // ❌ v2.13 旧方式（已废弃）
 // buffer_source->setCurrentBuffer(buffer);  // 需要外部设置
-// buffer_source->readPacket(packet);
+// buffer_source->readEncodedPacket(packet);
 // buffer_source->clearCurrentBuffer();      // 需要外部清理
 ```
 
@@ -935,13 +1030,13 @@ FfmpegDecodeRtspWorker worker3(consumer_cfg);  // 消费者3
 **职责变化**：
 ```
 v2.13 旧架构：
-MultiWorkerProductionLine → 获取 buffer → 设置到 BufferPacketSource → Consumer 读取 → 清理
+MultiWorkerProductionLine → 获取 buffer → 设置到 EncodedPacketSourceFromBuffer → Consumer 读取 → 清理
 
 v2.14 新架构（普通模式）：
-MultiWorkerProductionLine → 触发 Consumer → BufferPacketSource 自主获取/释放 → Consumer 读取
+MultiWorkerProductionLine → 触发 Consumer → EncodedPacketSourceFromBuffer 自主获取/释放 → Consumer 读取
 
 v2.19 新架构（共享模式）：
-MultiWorkerProductionLine → 触发所有 Consumers → BufferPacketSource 同步等待 → 所有消费者到齐 → 
+MultiWorkerProductionLine → 触发所有 Consumers → EncodedPacketSourceFromBuffer 同步等待 → 所有消费者到齐 → 
 获取 Buffer → 所有 Consumers 读取同一 packet → 最后完成者释放 Buffer
 ```
 
@@ -1009,9 +1104,9 @@ double bpp = worker.getBytesPerPixel();
 **发布日期：** 2024-12
 
 **主要变更：**
-- ✅ **数据源抽象接口**：引入 `IPacketSource` 接口，支持策略模式，实现数据源与 Worker 的解耦
-- ✅ **文件数据源实现**：`FilePacketSource` 管理 `AVFormatContext` 和文件相关状态（视频流索引、总帧数、EOF 状态等）
-- ✅ **Buffer 数据源实现**：`BufferPacketSource` 用于 MultiWorkerProductionLine 场景，从 BufferPool 获取 AVPacket
+- ✅ **数据源抽象接口**：引入 `IEncodedPacketSource` 接口，支持策略模式，实现数据源与 Worker 的解耦
+- ✅ **文件数据源实现**：`EncodedPacketSourceFromFile` 管理 `AVFormatContext` 和文件相关状态（视频流索引、总帧数、EOF 状态等）
+- ✅ **Buffer 数据源实现**：`EncodedPacketSourceFromBuffer` 用于 MultiWorkerProductionLine 场景，从 BufferPool 获取 AVPacket
 - ✅ **Worker 重构**：`FfmpegDecodeVideoFileWorker` 使用数据源抽象，移除冗余状态变量
   - 移除：`format_ctx_ptr_`、`file_path_`、`width_`、`height_`、`total_frames_`、`video_stream_index_`、`is_open_`、`eof_reached_`
   - 所有状态统一由数据源管理，避免状态不一致
@@ -1024,20 +1119,20 @@ double bpp = worker.getBytesPerPixel();
   - 支持多个 Worker 共享同一个 PacketSource 实例
   - 修改类：`FfmpegDecodeRtspWorker`、`FfmpegDecodeVideoFileWorker`
   - 独占场景仍使用 `std::make_unique`，共享场景使用 `std::make_shared`
-- ✅ **BufferPacketSource 共享模式**：支持多消费者订阅同一数据源
-  - 新增共享模式构造函数：`BufferPacketSource(codec_params, subscriber_count)`
+- ✅ **EncodedPacketSourceFromBuffer 共享模式**：支持多消费者订阅同一数据源
+  - 新增共享模式构造函数：`EncodedPacketSourceFromBuffer(codec_params, subscriber_count)`
   - 实现发布-订阅同步机制，确保所有消费者处理同一帧
   - 详见 v2.14 章节补充说明
 
 **设计原则：**
 - **单一职责**：Worker 专注解码逻辑，数据源负责数据访问和元数据管理
-- **依赖倒置**：Worker 依赖 `IPacketSource` 接口，不依赖具体实现
+- **依赖倒置**：Worker 依赖 `IEncodedPacketSource` 接口，不依赖具体实现
 - **易于扩展**：新增数据源类型（如网络流）无需修改 Worker 代码
 - **状态一致**：单一数据源管理状态，避免冗余和不同步
 
 **数据源职责边界（重要）：**
 
-`IPacketSource` 数据源**仅负责数据读取和元数据管理**，职责明确限定为：
+`IEncodedPacketSource` 数据源**仅负责数据读取和元数据管理**，职责明确限定为：
 
 ✅ **数据源应该做的**：
 - **打开/关闭数据源**：管理文件、网络流、Buffer 等数据源的生命周期
@@ -1069,7 +1164,7 @@ double bpp = worker.getBytesPerPixel();
 auto config = WorkerConfigBuilder()
     .setFileConfig(FileConfigBuilder().setFilePath("video.mp4").build())
     .build();
-// Worker 内部创建 FilePacketSource
+// Worker 内部创建 EncodedPacketSourceFromFile
 
 // Buffer 模式（MultiWorkerProductionLine，v2.22 配置归一）
 WorkerConfig::DataSourceConfig ds_cfg;
@@ -1079,7 +1174,7 @@ ds_cfg.codec_params = record_codec_params;
 auto config = WorkerConfigBuilder()
     .setDataSourceConfig(ds_cfg)
     .build();
-// Worker 内部创建 BufferPacketSource
+// Worker 内部创建 EncodedPacketSourceFromBuffer
 ```
 
 ### v2.11 - 编解码器类型检测
@@ -1377,10 +1472,10 @@ if (auto pool = pool_weak.lock()) {
 - 文档明确：通过接口名称明确表达职责
 
 **注意**：
-- Worker在实现`open()`时，需要同时处理数据源打开逻辑和BufferPool创建逻辑（v2.12：数据源通过 `IPacketSource` 接口管理）
+- Worker在实现`open()`时，需要同时处理数据源打开逻辑和BufferPool创建逻辑（v2.12：数据源通过 `IEncodedPacketSource` 接口管理）
 - 文件操作方法与Buffer填充操作分离，但都在WorkerBase中定义
 - 所有Worker实现类（`FfmpegDecodeVideoFileWorker`, `FfmpegDecodeRtspWorker`, `FfmpegRecordRtspWorker`）都继承`WorkerBase`基类
-- **v2.12新增**：`FfmpegDecodeVideoFileWorker` 使用数据源抽象（`IPacketSource`），支持文件模式和 Buffer 模式
+- **v2.12新增**：`FfmpegDecodeVideoFileWorker` 使用数据源抽象（`IEncodedPacketSource`），支持文件模式和 Buffer 模式
 
 ### 5. BufferAllocator（分配器）
 
@@ -1416,7 +1511,7 @@ if (auto pool = pool_weak.lock()) {
 │  2. 通过 WorkerBase::fillBuffer() 填充Buffer                  │
 │  3. 通过 IVideoFileNavigator::open() 打开视频源               │
 │  4. 通过 BufferPoolRegistry::getPool(pool_id) 获取Pool临时访问 │
-│  5. Worker 使用 IPacketSource 接口访问数据源（v2.12新增）     │
+│  5. Worker 使用 IEncodedPacketSource 接口访问数据源（v2.12新增）     │
 └───────────────────────┬───────────────────────────────────────┘
                         │
                         │ 使用基类（不依赖具体实现）
@@ -1435,7 +1530,7 @@ if (auto pool = pool_weak.lock()) {
         ┌───────────────┼───────────────┼───────────────┐
         │               │               │               │
 ┌───────▼──────┐   Worker实现类    Allocator实现类  Allocator实现类
-│IPacketSource │   (具体实现)      (具体实现)      (具体实现)
+│IEncodedPacketSource │   (具体实现)      (具体实现)      (具体实现)
 │ (数据源接口) │   (如FfmpegDecodeVideoFileWorker使用数据源)
 │              │
 │ 策略模式     │
@@ -1444,7 +1539,7 @@ if (auto pool = pool_weak.lock()) {
         │
 ┌───────┼───────┐
 │       │       │
-FilePacketSource BufferPacketSource (未来可扩展网络流等)
+EncodedPacketSourceFromFile EncodedPacketSourceFromBuffer (未来可扩展网络流等)
 (文件数据源)    (Buffer数据源)
 ```
         │               │               │               │
@@ -1638,17 +1733,17 @@ Worker内部解码循环（适用于RTSP流等）：
 **设计意图**：将不同数据源的访问方式封装成独立的策略类，使 Worker 可以支持多种数据源。
 
 **实现方式**：
-- **策略接口**：`IPacketSource` 定义统一的数据源操作接口（纯虚函数）
+- **策略接口**：`IEncodedPacketSource` 定义统一的数据源操作接口（纯虚函数）
 - **具体策略**：
-  - `FilePacketSource`：文件数据源策略（管理 `AVFormatContext`、文件路径、视频流索引等）
-  - `BufferPacketSource`：Buffer 数据源策略（从 BufferPool 获取 AVPacket，用于 MultiWorkerProductionLine）
+  - `EncodedPacketSourceFromFile`：文件数据源策略（管理 `AVFormatContext`、文件路径、视频流索引等）
+  - `EncodedPacketSourceFromBuffer`：Buffer 数据源策略（从 BufferPool 获取 AVPacket，用于 MultiWorkerProductionLine）
   - 未来可扩展：网络流数据源策略等
 - **应用位置**：`FfmpegDecodeVideoFileWorker` 使用数据源抽象，支持文件模式和 Buffer 模式
 
 **优势**：
-- 可扩展：新增数据源类型只需实现 `IPacketSource` 接口
+- 可扩展：新增数据源类型只需实现 `IEncodedPacketSource` 接口
 - 可替换：不同数据源可以互相替换，无需修改 Worker 代码
-- 解耦合：Worker 依赖 `IPacketSource` 接口，不依赖具体数据源实现
+- 解耦合：Worker 依赖 `IEncodedPacketSource` 接口，不依赖具体数据源实现
 - 状态管理：单一数据源管理状态，避免 Worker 和数据源状态不一致
 
 ### 2. 工厂模式（Factory Pattern）
@@ -2532,7 +2627,7 @@ struct WorkerConfig {
         bool buffer_mode = false;              // 数据源模式（false=文件数据源，true=Buffer数据源）
         const AVCodecParameters* codec_params = nullptr;  // Buffer模式的编解码器参数
         AVRational time_base = {0, 1};         // 时间基准
-        std::shared_ptr<IPacketSource> shared_packet_source = nullptr;  // 共享的 Packet 数据源
+        std::shared_ptr<IEncodedPacketSource> shared_packet_source = nullptr;  // 共享的编码数据源
     } data_source;
     
     struct DecoderConfig {
@@ -2685,7 +2780,7 @@ auto consumer_config = WorkerConfigBuilder()
     )
     .build();
 
-// Worker 内部会创建 BufferPacketSource，从 BufferPool 获取 AVPacket
+// Worker 内部会创建 EncodedPacketSourceFromBuffer，从 BufferPool 获取 AVPacket
 ```
 
 ---
@@ -3031,7 +3126,7 @@ void listAllDecoders() {
    bool readAndSendPacket(AVPacket* packet_ptr);
    ```
    **功能**：
-   - 从 `packet_source_` 读取编码数据（`packet_source_->readPacket(packet)`）
+   - 从 `packet_source_` 读取编码数据（`packet_source_->readEncodedPacket(packet)`）
    - 处理错误情况（读取失败、EOF、损坏的 packet）
    - 过滤非视频流的 packet（仅文件模式，`packet->stream_index != video_stream_index`）
    - 调用 `avcodec_send_packet()` 发送到解码器
@@ -3070,7 +3165,7 @@ void listAllDecoders() {
 // v2.18 之前：重复的解码逻辑（约100行）
 bool FfmpegDecodeRtspWorker::fillBuffer(...) {
     // 读取 packet（20行代码）
-    int ret = packet_source_->readPacket(packet);
+    int ret = packet_source_->readEncodedPacket(packet);
     if (ret < 0) { /* 错误处理 */ }
     
     // 发送到解码器（10行代码）
@@ -3873,7 +3968,7 @@ if (!packet_source_->open()) {
 const AVCodecParameters* codecpar = packet_source_->getCodecParameters();
 
 // ⭐ v2.11新增：检查编解码器类型是否匹配（仅文件模式）
-if (auto* file_source = dynamic_cast<FilePacketSource*>(packet_source_.get())) {
+if (auto* file_source = dynamic_cast<EncodedPacketSourceFromFile*>(packet_source_.get())) {
     checkCodecMismatch(codecpar->codec_id, decoder_name_);
 }
 

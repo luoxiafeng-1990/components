@@ -564,11 +564,11 @@ bool Connector::containsConsumer(const std::string& consumer_name) const {
     return false;
 }
 
-void Connector::setSharedSource(const std::string& producer_name, std::shared_ptr<class IPacketSource> source) {
+void Connector::setSharedSource(const std::string& producer_name, std::shared_ptr<class IEncodedPacketSource> source) {
     shared_sources_[producer_name] = source;
 }
 
-std::shared_ptr<class IPacketSource> Connector::getSharedSource(const std::string& producer_name) const {
+std::shared_ptr<class IEncodedPacketSource> Connector::getSharedSource(const std::string& producer_name) const {
     auto it = shared_sources_.find(producer_name);
     if (it != shared_sources_.end()) {
         return it->second;

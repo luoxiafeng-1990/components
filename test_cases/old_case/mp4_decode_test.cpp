@@ -52,7 +52,7 @@
 #include "productionline/worker/FfmpegPacketRecorderWorker.hpp"
 #include "productionline/worker/FFmpegDecodeWorker.hpp"
 #include "productionline/worker/WorkerBase.hpp"
-#include "productionline/worker/RtspPacketSource.hpp"  // ⭐ 添加：用于 RTSP 中断处理
+#include "productionline/worker/EncodedPacketSourceFromRtsp.hpp"  // ⭐ 添加：用于 RTSP 中断处理
  #include "productionline/io/BufferWriter.hpp"
  #include "productionline/io/BufferComparator.hpp"
 #include "buffer/bufferpool/BufferPool.hpp"
@@ -259,7 +259,7 @@ static void signal_handler(int signum) {
             g_rtsp_interrupted = true;
             
             // 请求 FFmpeg 中断所有 RTSP 流操作
-            RtspPacketSource::requestInterrupt();
+            EncodedPacketSourceFromRtsp::requestInterrupt();
         } else {
             // 第二次 Ctrl+C：强制退出
             LOG_INFO("\n🛑 强制退出...");
@@ -3814,7 +3814,7 @@ static int record_rtsp_stream_to_mp4(
     
     g_running = true;
     g_rtsp_interrupted = false;
-    RtspPacketSource::clearInterrupt();
+    EncodedPacketSourceFromRtsp::clearInterrupt();
     
     // 生成临时 MP4 文件路径
     std::ostringstream oss;
@@ -4039,7 +4039,7 @@ static int record_rtsp_stream_to_mp4(
     // 这会触发FFmpeg的中断回调，强制退出阻塞的网络操作
     LOG_INFO("[Phase 1] Force interrupting RTSP connection...");
     g_rtsp_interrupted = true;
-    RtspPacketSource::requestInterrupt();
+    EncodedPacketSourceFromRtsp::requestInterrupt();
     
     // 等待一小段时间，让中断信号生效
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
@@ -4063,7 +4063,7 @@ static int record_rtsp_stream_to_mp4(
         if (recorder.isRunning()) {
             LOG_ERROR("[Phase 1] Recorder still running after 2 seconds, forcing stop...");
             // 再次强制中断
-            RtspPacketSource::requestInterrupt();
+            EncodedPacketSourceFromRtsp::requestInterrupt();
         }
     }
     
@@ -4141,7 +4141,7 @@ static int record_rtsp_stream_to_mp4(
         }
         
         // 再次强制中断RTSP连接
-        RtspPacketSource::requestInterrupt();
+        EncodedPacketSourceFromRtsp::requestInterrupt();
         
         // 再等待一小段时间
         std::this_thread::sleep_for(std::chrono::milliseconds(200));
@@ -4173,7 +4173,7 @@ static int record_rtsp_stream_to_mp4(
     
     // 清除中断标志，为后续操作做准备
     g_rtsp_interrupted = false;
-    RtspPacketSource::clearInterrupt();
+    EncodedPacketSourceFromRtsp::clearInterrupt();
     
     // ⭐ 关键策略调整：不再强制等待线程退出
     // FFmpeg的内部线程（网络IO、muxer等）可能无法在录制阶段完全清理

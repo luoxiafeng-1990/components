@@ -1,6 +1,6 @@
 #include "productionline/MultiWorkerProductionLine.hpp"
 #include "productionline/worker/FfmpegPacketRecorderWorker.hpp"
-#include "productionline/worker/BufferPacketSource.hpp"
+#include "productionline/worker/EncodedPacketSourceFromBuffer.hpp"
 #include "buffer/bufferpool/BufferPoolRegistry.hpp"
 #include "common/Logger.hpp"
 #include "common/GlobalThreadPool.hpp"
@@ -456,8 +456,8 @@ bool MultiWorkerProductionLine::createConnectorsForGroup(WorkerGroupRuntime* gro
                     break;
             }
             
-            // 创建共享 BufferPacketSource
-            auto shared_source = std::make_shared<BufferPacketSource>(codec_params, subscriber_count);
+            // 创建共享 EncodedPacketSourceFromBuffer
+            auto shared_source = std::make_shared<EncodedPacketSourceFromBuffer>(codec_params, subscriber_count);
             
             // 设置源 BufferPool
             shared_source->setSourceBufferPool(producer_info->buffer_pool_weak);
@@ -466,7 +466,7 @@ bool MultiWorkerProductionLine::createConnectorsForGroup(WorkerGroupRuntime* gro
             connector->setSharedSource(producer_name, shared_source);
             
             LOG4CPLUS_INFO(logger_, "     ⭐ 为生产者 '" << producer_name 
-                           << "' 创建共享 BufferPacketSource (" << subscriber_count << " 个订阅者)");
+                           << "' 创建共享 EncodedPacketSourceFromBuffer (" << subscriber_count << " 个订阅者)");
         }
         
         group->connectors.push_back(std::move(connector));
@@ -530,9 +530,9 @@ bool MultiWorkerProductionLine::createConsumersForGroup(WorkerGroupRuntime* grou
             // ⭐ 使用共享数据源（所有模式都支持）
             consumer_config.data_source.shared_packet_source = shared_source;
             LOG4CPLUS_INFO(logger_, "       ✅ 使用生产者 '" << producer_name 
-                           << "' 的共享 BufferPacketSource");
+                           << "' 的共享 EncodedPacketSourceFromBuffer");
         } else {
-            // ⭐ 如果没有共享数据源，则使用 codec_params 创建独立 BufferPacketSource
+            // ⭐ 如果没有共享数据源，则使用 codec_params 创建独立 EncodedPacketSourceFromBuffer
             // 通过映射直接查找 ProducerInfo
             auto it = group->producer_info_mapped_by_name.find(producer_name);
             if (it == group->producer_info_mapped_by_name.end()) {
@@ -859,14 +859,14 @@ void MultiWorkerProductionLine::workerThreadFunc(
                 if (it != group->connector_coordinators.end()) {
                     // 该 Connector 启用了帧同步
                     
-                    // 获取帧版本号（从 BufferPacketSource）
+                    // 获取帧版本号（从 EncodedPacketSourceFromBuffer）
                     // 注意：这里需要从 Connector 获取对应的 shared_source
                     std::string producer_name = owner_connector->getProducerNameForConsumer(consumer_name);
                     auto shared_source_base = owner_connector->getSharedSource(producer_name);
                     
                     if (shared_source_base) {
-                        // 转换为 BufferPacketSource（共享模式下一定是这个类型）
-                        auto shared_source = std::dynamic_pointer_cast<BufferPacketSource>(shared_source_base);
+                        // 转换为 EncodedPacketSourceFromBuffer（共享模式下一定是这个类型）
+                        auto shared_source = std::dynamic_pointer_cast<EncodedPacketSourceFromBuffer>(shared_source_base);
                         
                         if (shared_source) {
                             uint64_t frame_version = shared_source->getCurrentBufferVersion();
@@ -880,7 +880,7 @@ void MultiWorkerProductionLine::workerThreadFunc(
                             }
                         } else {
                             LOG4CPLUS_ERROR(logger_, "[Worker '" << consumer_name 
-                                            << "'] shared_source 不是 BufferPacketSource 类型");
+                                            << "'] shared_source 不是 EncodedPacketSourceFromBuffer 类型");
                         }
                     }
                 }

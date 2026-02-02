@@ -7,8 +7,9 @@
  * - DisplayConsumer: 显示输出（Framebuffer）
  * - SaveRawConsumer: 保存原始 YUV/RGB
  * - SaveEncodedConsumer: 保存编码流
- * - CompareConsumer: PSNR/SSIM 对比
  * - MultiConsumer: 多策略组合
+ * 
+ * 注：PSNR/SSIM 比较功能已迁移至 WorkerSyncCoordinator::createDefaultCompareCallback
  */
 
 #ifndef BUFFER_CONSUMER_STRATEGIES_HPP
@@ -17,6 +18,8 @@
 #include "productionline/io/IBufferConsumer.hpp"
 #include "productionline/io/BufferWriter.hpp"
 #include "productionline/io/BufferComparator.hpp"
+#include "productionline/worker/WorkerConfig.hpp"
+#include "buffer/bufferpool/BufferPool.hpp"
 #include "display/LinuxFramebufferDevice.hpp"
 
 #include <memory>
@@ -187,53 +190,76 @@ private:
 };
 
 // ============================================================
-// CompareConsumer - PSNR/SSIM 对比
+// ChannelCompareConsumer - 通道比较（v2.27）
 // ============================================================
 
 /**
- * @brief 对比消费者（PSNR/SSIM）
+ * @brief 通道比较消费者（v2.27 新增）
  * 
- * 对比两个 Buffer 的图像质量，计算 PSNR 和 SSIM。
- * 用于 COMPARE 模式，验证硬件解码器输出质量。
+ * 主动从 BufferPool 获取 buffer，比较指定两个通道的输出。
+ * 假设多通道输出是交替的（同一 PTS 的两个通道连续输出）。
+ * 
+ * 使用场景：PP 模块多通道输出比较（如 pp0 vs pp1）
+ * 
+ * 注意：此消费者使用主动获取模式，需要调用 run() 方法启动消费循环，
+ * 而不是被动等待 consume() 调用。
  */
-class CompareConsumer : public IBufferConsumer {
+class ChannelCompareConsumer : public IBufferConsumer {
 public:
     /**
      * @brief 构造函数
-     * @param config 比较配置（来自 WorkerConfig::ConsumerTypeConfig::CompareType）
+     * @param pool BufferPool 指针（主动获取模式）
+     * @param config 比较配置
      */
-    explicit CompareConsumer(const WorkerConfig::ConsumerTypeConfig::CompareType& config);
-    ~CompareConsumer() override;
+    ChannelCompareConsumer(
+        std::shared_ptr<BufferPool> pool,
+        const WorkerConfig::ConsumerTypeConfig::CompareType& config
+    );
+    ~ChannelCompareConsumer() override;
     
     bool initialize(const std::vector<Buffer*>& first_buffers) override;
+    
+    /// 被动消费接口（不使用，保留兼容）
     bool consume(const std::vector<Buffer*>& buffers, int frame_index) override;
+    
+    /**
+     * @brief 主动消费循环（核心方法）
+     * @param max_frames 最大比较帧数（-1 = 无限制）
+     */
+    void run(int max_frames = -1);
+    
+    /**
+     * @brief 停止消费循环
+     */
+    void stop();
+    
     void finalize() override;
     std::string getStats() const override;
     
-    /**
-     * @brief 获取平均 PSNR
-     */
+    /// 获取平均 PSNR
     double getAveragePsnr() const;
     
-    /**
-     * @brief 获取平均 SSIM
-     */
+    /// 获取平均 SSIM
     double getAverageSsim() const;
     
-    /**
-     * @brief 是否通过验证
-     */
-    bool isPassed() const;
+    /// 是否通过验证
+    bool isPassed() const { return passed_; }
     
-    /**
-     * @brief 获取对比帧数
-     */
+    /// 获取已比较帧数
     int getComparedCount() const { return compared_count_; }
     
+    /// 获取 PTS 不匹配次数
+    int getMismatchCount() const { return mismatch_count_; }
+    
 private:
-    WorkerConfig::ConsumerTypeConfig::CompareType config_;  ///< 比较配置
+    std::shared_ptr<BufferPool> pool_;
+    WorkerConfig::ConsumerTypeConfig::CompareType config_;
     std::unique_ptr<productionline::io::BufferComparator> comparator_;
+    
+    std::atomic<bool> running_{false};
+    
     int compared_count_ = 0;
+    int mismatch_count_ = 0;
     double psnr_sum_ = 0.0;
     double ssim_sum_ = 0.0;
     bool passed_ = true;

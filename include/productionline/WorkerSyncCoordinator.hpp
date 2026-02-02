@@ -101,7 +101,7 @@ struct CompareCallbackContext {
  * 
  * 设计原则：
  * - 单一职责：只负责 Worker 间的同步协调
- * - 与 BufferPacketSource 解耦：通过 frame_version 关联
+ * - 与 EncodedPacketSourceFromBuffer 解耦：通过 frame_version 关联
  * - 可选配置：无回调时零开销
  * 
  * 使用场景：
@@ -133,7 +133,7 @@ public:
      * @brief Worker 到达同步点
      * 
      * @param worker_name Worker 名称
-     * @param frame_version 帧版本号（来自 BufferPacketSource）
+     * @param frame_version 帧版本号（来自 EncodedPacketSourceFromBuffer）
      * @param buffer 解码后的 Buffer
      * @return true=允许提交, false=拒绝提交
      * 

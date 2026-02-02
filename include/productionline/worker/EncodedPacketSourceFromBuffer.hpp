@@ -1,7 +1,7 @@
-#ifndef BUFFER_PACKET_SOURCE_HPP
-#define BUFFER_PACKET_SOURCE_HPP
+#ifndef ENCODED_PACKET_SOURCE_FROM_BUFFER_HPP
+#define ENCODED_PACKET_SOURCE_FROM_BUFFER_HPP
 
-#include "productionline/worker/IPacketSource.hpp"
+#include "productionline/worker/IEncodedPacketSource.hpp"
 #include "buffer/bufferpool/Buffer.hpp"
 #include <memory>
 #include <string>
@@ -16,25 +16,25 @@
 struct AVCodecParameters;
 struct AVPacket;
 class BufferPool;
-class BufferPacketSource;  // BufferPacketSource 前向声明
+class EncodedPacketSourceFromBuffer;  // 前向声明
 
 // ⭐ v2.22 修改：移除 PacketGuard RAII 包装器
 // 原因：新的三状态 API（acquire/commit/cancel）提供了更精确的控制
 // Worker 需要根据解码结果决定是 commit 还是 cancel，RAII 模式不再适用
 
 /**
- * @brief BufferPacketSource - Buffer 数据源实现
+ * @brief EncodedPacketSourceFromBuffer - 从 Buffer 读取编码数据的数据源实现
  * 
  * 功能：直接从 BufferPool 获取 filled Buffer（已由 Record Worker 填充）
  * 
  * 使用场景：
  * - MultiWorkerProductionLine 场景
- * - 从 Record Worker 的 BufferPool 直接获取 packet
+ * - 从 Record Worker 的 BufferPool 直接获取编码后的 packet
  * 
  * 工作流程（v2.13 重构后）：
  * 1. Record Worker 读取 RTSP 流，填充 AVPacket 到 BufferPool
- * 2. BufferPacketSource 关联 Record Worker 的 BufferPool
- * 3. readPacket() 时：acquireFilled() → 复制 AVPacket → releaseFilled()
+ * 2. EncodedPacketSourceFromBuffer 关联 Record Worker 的 BufferPool
+ * 3. readEncodedPacket() 时：acquireFilled() → 复制 AVPacket → releaseFilled()
  * 4. 传递给解码器进行解码
  * 
  * 优势：
@@ -47,22 +47,22 @@ class BufferPacketSource;  // BufferPacketSource 前向声明
  * 功能：在 ONE_TO_MANY 模式下，确保所有消费者处理同一个 packet
  * 
  * 工作流程：
- * 1. MultiWorkerProductionLine 创建唯一的 BufferPacketSource 实例（共享模式）
+ * 1. MultiWorkerProductionLine 创建唯一的 EncodedPacketSourceFromBuffer 实例（共享模式）
  * 2. 所有消费者 Worker 持有同一个实例（shared_ptr）
- * 3. 每个 Worker 调用 readPacket() 时：
+ * 3. 每个 Worker 调用 readEncodedPacket() 时：
  *    - 增加请求计数器
  *    - 等待所有订阅者都请求
  *    - Publisher 获取新 Buffer，所有订阅者读取同一个 packet
  *    - 所有订阅者完成后，Publisher 释放 Buffer
  * 4. 确保所有消费者处理的是同一个 packet（真正的共享）
  */
-class BufferPacketSource : public IPacketSource {
+class EncodedPacketSourceFromBuffer : public IEncodedPacketSource {
 public:
     /**
      * @brief 构造函数（普通模式）
      * @param codec_params 编解码器参数（从 Record Worker 获取）
      */
-    explicit BufferPacketSource(const AVCodecParameters* codec_params);
+    explicit EncodedPacketSourceFromBuffer(const AVCodecParameters* codec_params);
     
     /**
      * @brief 构造函数（共享模式 - 用于 MultiWorker ONE_TO_MANY）
@@ -76,16 +76,16 @@ public:
      * - subscriber_count 必须 > 1（否则使用普通模式）
      * - 此实例会被所有消费者 Worker 共享（通过 shared_ptr）
      */
-    explicit BufferPacketSource(const AVCodecParameters* codec_params, size_t subscriber_count);
+    explicit EncodedPacketSourceFromBuffer(const AVCodecParameters* codec_params, size_t subscriber_count);
     
     /**
      * @brief 析构函数
      */
-    ~BufferPacketSource() override;
+    ~EncodedPacketSourceFromBuffer() override;
     
     // 禁止拷贝
-    BufferPacketSource(const BufferPacketSource&) = delete;
-    BufferPacketSource& operator=(const BufferPacketSource&) = delete;
+    EncodedPacketSourceFromBuffer(const EncodedPacketSourceFromBuffer&) = delete;
+    EncodedPacketSourceFromBuffer& operator=(const EncodedPacketSourceFromBuffer&) = delete;
     
     // ============ IDataSourceNavigator 接口实现 ============
     
@@ -122,19 +122,20 @@ public:
     const AVCodecParameters* getCodecParameters() const override;
     SourceType getDataSourceType() const override;
     
-    // ============ IPacketSource 特有方法 ============
-    int readPacket(AVPacket* packet) override;
+    // ============ IEncodedPacketSource 特有方法 ============
+    int readEncodedPacket(AVPacket* packet) override;
     int getVideoStreamIndex() const override;
+
     /**
      * @brief 设置数据源 BufferPool（v2.13 新增）
      * @param pool_weak Record Worker 的 BufferPool（weak_ptr）
      * 
-     * 说明：BufferPacketSource 会直接从这个 BufferPool 的 filled queue 获取数据
+     * 说明：EncodedPacketSourceFromBuffer 会直接从这个 BufferPool 的 filled queue 获取数据
      */
     void setSourceBufferPool(std::weak_ptr<BufferPool> pool_weak);
     
     /**
-     * @brief 获取 AVPacket 指针（共享模式，v3.0 新架构）
+     * @brief 获取编码后的 AVPacket 指针（共享模式，v3.0 新架构）
      * @param worker_id Worker 的唯一标识（通常是 this 指针）
      * @return AVPacket* 指针（零拷贝），nullptr=EOF 或已获取过当前版本
      * 
@@ -142,7 +143,7 @@ public:
      * - 只在共享模式下使用
      * - 阻塞等待直到有新 buffer 或 EOF
      * - 防止同一个 Worker 重复获取同一个 buffer（通过版本号机制）
-     * - 不递减 remaining_subscribers_（由 commitPacket 负责）
+     * - 不递减 remaining_subscribers_（由 commitEncodedPacket 负责）
      * 
      * 返回值：
      * - 非空：成功获取 packet 指针
@@ -150,17 +151,17 @@ public:
      * 
      * 使用方式：
      * ```cpp
-     * AVPacket* packet = ps->acquirePacket(this);
+     * AVPacket* packet = ps->acquireEncodedPacket(this);
      * if (!packet) {
      *     return false;  // EOF 或等待新 buffer
      * }
      * // 使用 packet...
      * ```
      */
-    AVPacket* acquirePacket(void* worker_id);
+    AVPacket* acquireEncodedPacket(void* worker_id);
     
     /**
-     * @brief 提交释放 AVPacket（共享模式，v3.0 新架构）
+     * @brief 提交释放编码后的 AVPacket（共享模式，v3.0 新架构）
      * @param worker_id Worker 的唯一标识
      * @return true=成功提交, false=失败（状态不对）
      * 
@@ -173,11 +174,11 @@ public:
      * 使用方式：
      * ```cpp
      * if (decoded_at_least_one_frame) {
-     *     ps->commitPacket(this);
+     *     ps->commitEncodedPacket(this);
      * }
      * ```
      */
-    bool commitPacket(void* worker_id);
+    bool commitEncodedPacket(void* worker_id);
     
     /**
      * @brief 取消当前获取（共享模式，v2.22 新架构）
@@ -191,12 +192,12 @@ public:
      * 使用方式：
      * ```cpp
      * if (send_packet_failed) {
-     *     ps->cancelPacket(this);
+     *     ps->cancelEncodedPacket(this);
      *     return false;  // 重试
      * }
      * ```
      */
-    void cancelPacket(void* worker_id);
+    void cancelEncodedPacket(void* worker_id);
     
     /**
      * @brief 获取当前 buffer 版本号（v2.23 新增）
@@ -214,7 +215,7 @@ private:
     // ========== 通用成员（普通模式和共享模式都使用）==========
     const AVCodecParameters* codec_params_;     // 编解码器参数（从 Record Worker 获取）
     std::weak_ptr<BufferPool> source_pool_;     // ⭐ v2.13：关联的 BufferPool（从 Record Worker）
-    std::atomic<bool> is_open_;                 // 🎯 原子变量，保证线程安全的状态检查
+    std::atomic<bool> is_open_;                 // 原子变量，保证线程安全的状态检查
     std::atomic<int> current_frame_index_;      // 当前帧索引（已读取的帧数）
     
     // ========== 共享模式成员（v2.18 新增，v3.0 扩展）==========
@@ -262,5 +263,4 @@ private:
     log4cplus::Logger logger_;
 };
 
-#endif // BUFFER_PACKET_SOURCE_HPP
-
+#endif // ENCODED_PACKET_SOURCE_FROM_BUFFER_HPP

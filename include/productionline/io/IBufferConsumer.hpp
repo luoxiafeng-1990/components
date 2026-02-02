@@ -7,15 +7,16 @@
  * 职责：
  * - 定义 Buffer 消费的统一接口
  * - 支持单 Buffer 消费（SINGLE 模式）
- * - 支持多 Buffer 消费（COMPARE 模式）
+ * - 支持多 Buffer 消费（COMPARE/PARALLEL 模式）
  * 
  * 使用场景：
  * - CountConsumer: 仅统计帧数
  * - DisplayConsumer: 显示输出
  * - SaveRawConsumer: 保存原始 YUV/RGB
  * - SaveEncodedConsumer: 保存编码流
- * - CompareConsumer: PSNR/SSIM 对比
  * - MultiConsumer: 多策略组合（消费类型叠加）
+ * 
+ * 注：PSNR/SSIM 比较功能已迁移至 WorkerSyncCoordinator::createDefaultCompareCallback
  */
 
 #ifndef IBUFFER_CONSUMER_HPP
@@ -40,6 +41,7 @@ enum ConsumeTypeFlags : uint32_t {
     CONSUME_DISPLAY      = 1 << 1,    ///< 显示输出（0x02）
     CONSUME_SAVE_RAW     = 1 << 2,    ///< 保存原始 YUV/RGB（0x04）
     CONSUME_SAVE_ENCODED = 1 << 3,    ///< 保存编码流（0x08）
+    CONSUME_CHANNEL_COMPARE = 1 << 4, ///< ⭐ v2.27：通道比较（0x10）
 };
 
 /**

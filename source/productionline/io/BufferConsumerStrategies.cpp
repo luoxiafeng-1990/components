@@ -464,13 +464,18 @@ std::string SaveEncodedConsumer::getStats() const {
 }
 
 // ============================================================
-// CompareConsumer 实现
+// ChannelCompareConsumer 实现（v2.27）
 // ============================================================
 
-CompareConsumer::CompareConsumer(const WorkerConfig::ConsumerTypeConfig::CompareType& config)
-    : config_(config)
+ChannelCompareConsumer::ChannelCompareConsumer(
+    std::shared_ptr<BufferPool> pool,
+    const WorkerConfig::ConsumerTypeConfig::CompareType& config)
+    : pool_(pool)
+    , config_(config)
     , comparator_(nullptr)
+    , running_(false)
     , compared_count_(0)
+    , mismatch_count_(0)
     , psnr_sum_(0.0)
     , ssim_sum_(0.0)
     , passed_(true)
@@ -478,93 +483,151 @@ CompareConsumer::CompareConsumer(const WorkerConfig::ConsumerTypeConfig::Compare
 {
 }
 
-CompareConsumer::~CompareConsumer() {
+ChannelCompareConsumer::~ChannelCompareConsumer() {
+    stop();
     finalize();
 }
 
-bool CompareConsumer::initialize(const std::vector<Buffer*>& first_buffers) {
-    if (initialized_) {
-        return true;
-    }
+bool ChannelCompareConsumer::initialize(const std::vector<Buffer*>& first_buffers) {
+    (void)first_buffers;
     
-    if (first_buffers.size() < 2) {
-        LOG4CPLUS_ERROR(log4cplus::Logger::getRoot(), 
-            "CompareConsumer: Need at least 2 buffers for comparison");
-        return false;
-    }
+    if (initialized_) return true;
     
     try {
         comparator_ = std::make_unique<productionline::io::BufferComparator>();
         
-        // 直接传递配置给 BufferComparator（配置已统一）
-        if (!comparator_->open(config_)) {
+        productionline::io::CompareConfig cmp_config;
+        cmp_config.enable_psnr = config_.enable_psnr;
+        cmp_config.enable_ssim = config_.enable_ssim;
+        cmp_config.min_psnr = config_.min_psnr;
+        cmp_config.min_ssim = config_.min_ssim;
+        cmp_config.verbose = config_.verbose;
+        
+        if (!comparator_->open(cmp_config)) {
             LOG4CPLUS_ERROR(log4cplus::Logger::getRoot(), 
-                "CompareConsumer: Failed to open comparator");
+                "ChannelCompareConsumer: Failed to open comparator");
             return false;
         }
         
         initialized_ = true;
         LOG4CPLUS_INFO_FMT(log4cplus::Logger::getRoot(), 
-            "CompareConsumer: Initialized (PSNR: %s, SSIM: %s, min_psnr: %.1f, min_ssim: %.2f)",
+            "ChannelCompareConsumer: Initialized (ref_ch=%d, cmp_ch=%d, PSNR=%s, SSIM=%s)",
+            config_.reference_channel, config_.compare_channel,
             config_.enable_psnr ? "enabled" : "disabled",
-            config_.enable_ssim ? "enabled" : "disabled",
-            config_.min_psnr, config_.min_ssim);
+            config_.enable_ssim ? "enabled" : "disabled");
         return true;
     } catch (const std::exception& e) {
         LOG4CPLUS_ERROR_FMT(log4cplus::Logger::getRoot(), 
-            "CompareConsumer: Exception during initialization: %s", e.what());
+            "ChannelCompareConsumer: Exception: %s", e.what());
         return false;
     }
 }
 
-bool CompareConsumer::consume(const std::vector<Buffer*>& buffers, int frame_index) {
-    if (!initialized_ || !comparator_ || buffers.size() < 2) {
-        return true;
-    }
-    
-    Buffer* buffer1 = buffers[0];
-    Buffer* buffer2 = buffers[1];
-    
-    if (!buffer1 || !buffer2) {
-        return true;
-    }
-    
-    // 使用 compare() 方法获取完整对比结果
-    auto result = comparator_->compare(buffer1, buffer2);
-    
-    double psnr = result.psnr_avg;
-    double ssim = result.ssim_avg;
-    
-    // 累加 PSNR
-    if (config_.enable_psnr) {
-        psnr_sum_ += psnr;
-        
-        if (psnr < config_.min_psnr) {
-            passed_ = false;
-            LOG4CPLUS_WARN_FMT(log4cplus::Logger::getRoot(), 
-                "CompareConsumer: Frame %d PSNR %.2f < %.2f (threshold)",
-                frame_index, psnr, config_.min_psnr);
-        }
-    }
-    
-    // 累加 SSIM
-    if (config_.enable_ssim) {
-        ssim_sum_ += ssim;
-        
-        if (ssim < config_.min_ssim) {
-            passed_ = false;
-            LOG4CPLUS_WARN_FMT(log4cplus::Logger::getRoot(), 
-                "CompareConsumer: Frame %d SSIM %.4f < %.4f (threshold)",
-                frame_index, ssim, config_.min_ssim);
-        }
-    }
-    
-    compared_count_++;
-    
-    return true;
+bool ChannelCompareConsumer::consume(const std::vector<Buffer*>& buffers, int frame_index) {
+    (void)buffers;
+    (void)frame_index;
+    return true;  // 被动模式不使用
 }
 
-void CompareConsumer::finalize() {
+void ChannelCompareConsumer::run(int max_frames) {
+    if (!initialized_ && !initialize({})) {
+        LOG4CPLUS_ERROR(log4cplus::Logger::getRoot(), 
+            "ChannelCompareConsumer: Failed to initialize");
+        return;
+    }
+    
+    running_ = true;
+    
+    Buffer* cached_buffer = nullptr;
+    int64_t cached_pts = AV_NOPTS_VALUE;
+    
+    while (running_) {
+        Buffer* buffer = pool_->acquireFilled();
+        if (!buffer) {
+            break;  // pool 关闭或无数据
+        }
+        
+        int64_t pts = buffer->getPts();
+        int channel = buffer->getOutputChannel();
+        
+        // 只关心指定的两个通道
+        if (channel != config_.reference_channel && channel != config_.compare_channel) {
+            pool_->releaseFilled(buffer);
+            continue;
+        }
+        
+        if (cached_buffer == nullptr) {
+            // 第一个 buffer，缓存（不释放）
+            cached_buffer = buffer;
+            cached_pts = pts;
+        } else {
+            // 第二个 buffer
+            if (pts == cached_pts) {
+                // PTS 匹配，执行比较
+                auto result = comparator_->compare(cached_buffer, buffer);
+                
+                double psnr = result.psnr_avg;
+                double ssim = result.ssim_avg;
+                
+                compared_count_++;
+                psnr_sum_ += psnr;
+                ssim_sum_ += ssim;
+                
+                bool psnr_ok = !config_.enable_psnr || (psnr >= config_.min_psnr);
+                bool ssim_ok = !config_.enable_ssim || (ssim >= config_.min_ssim);
+                
+                if (!psnr_ok || !ssim_ok) {
+                    passed_ = false;
+                    LOG4CPLUS_WARN_FMT(log4cplus::Logger::getRoot(), 
+                        "ChannelCompare[%d]: PTS=%lld FAILED - PSNR=%.2f, SSIM=%.4f",
+                        compared_count_, (long long)pts, psnr, ssim);
+                } else if (config_.verbose) {
+                    LOG4CPLUS_DEBUG_FMT(log4cplus::Logger::getRoot(), 
+                        "ChannelCompare[%d]: PTS=%lld PASSED - PSNR=%.2f, SSIM=%.4f",
+                        compared_count_, (long long)pts, psnr, ssim);
+                }
+                
+                // 释放两个 buffer
+                pool_->releaseFilled(cached_buffer);
+                pool_->releaseFilled(buffer);
+                cached_buffer = nullptr;
+                
+            } else {
+                // PTS 不匹配，记录异常
+                mismatch_count_++;
+                LOG4CPLUS_WARN_FMT(log4cplus::Logger::getRoot(), 
+                    "ChannelCompare: PTS mismatch! cached=%lld (ch=%d), new=%lld (ch=%d)",
+                    (long long)cached_pts, cached_buffer->getOutputChannel(),
+                    (long long)pts, channel);
+                
+                // 释放旧的，缓存新的
+                pool_->releaseFilled(cached_buffer);
+                cached_buffer = buffer;
+                cached_pts = pts;
+            }
+        }
+        
+        // 检查是否达到最大帧数
+        if (max_frames > 0 && compared_count_ >= max_frames) {
+            break;
+        }
+    }
+    
+    // 释放可能剩余的缓存 buffer
+    if (cached_buffer) {
+        pool_->releaseFilled(cached_buffer);
+        LOG4CPLUS_WARN(log4cplus::Logger::getRoot(), 
+            "ChannelCompare: Unpaired buffer at exit");
+    }
+    
+    running_ = false;
+}
+
+void ChannelCompareConsumer::stop() {
+    running_ = false;
+}
+
+void ChannelCompareConsumer::finalize() {
     if (comparator_) {
         comparator_->close();
         comparator_.reset();
@@ -572,29 +635,28 @@ void CompareConsumer::finalize() {
     initialized_ = false;
     
     LOG4CPLUS_INFO_FMT(log4cplus::Logger::getRoot(), 
-        "CompareConsumer: Finalized, compared %d frames, avg PSNR: %.2f, avg SSIM: %.4f, passed: %s",
-        compared_count_, getAveragePsnr(), getAverageSsim(), passed_ ? "YES" : "NO");
+        "ChannelCompareConsumer: compared=%d, mismatch=%d, avg_psnr=%.2f, avg_ssim=%.4f, %s",
+        compared_count_, mismatch_count_, 
+        getAveragePsnr(), getAverageSsim(), 
+        passed_ ? "PASSED" : "FAILED");
 }
 
-std::string CompareConsumer::getStats() const {
+std::string ChannelCompareConsumer::getStats() const {
     std::ostringstream oss;
-    oss << "CompareConsumer: " << compared_count_ << " frames compared"
-        << ", avg PSNR: " << std::fixed << std::setprecision(2) << getAveragePsnr()
-        << ", avg SSIM: " << std::fixed << std::setprecision(4) << getAverageSsim()
-        << ", passed: " << (passed_ ? "YES" : "NO");
+    oss << "ChannelCompare: " << compared_count_ << " compared"
+        << ", " << mismatch_count_ << " mismatch"
+        << ", PSNR=" << std::fixed << std::setprecision(2) << getAveragePsnr()
+        << ", SSIM=" << std::fixed << std::setprecision(4) << getAverageSsim()
+        << ", " << (passed_ ? "PASSED" : "FAILED");
     return oss.str();
 }
 
-double CompareConsumer::getAveragePsnr() const {
+double ChannelCompareConsumer::getAveragePsnr() const {
     return compared_count_ > 0 ? psnr_sum_ / compared_count_ : 0.0;
 }
 
-double CompareConsumer::getAverageSsim() const {
+double ChannelCompareConsumer::getAverageSsim() const {
     return compared_count_ > 0 ? ssim_sum_ / compared_count_ : 0.0;
-}
-
-bool CompareConsumer::isPassed() const {
-    return passed_;
 }
 
 // ============================================================

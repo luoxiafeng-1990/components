@@ -1,4 +1,4 @@
-#include "productionline/worker/BufferPacketSource.hpp"
+#include "productionline/worker/EncodedPacketSourceFromBuffer.hpp"
 #include "buffer/bufferpool/BufferPool.hpp"
 #include "common/Logger.hpp"
 #include "common/GlobalThreadPool.hpp"
@@ -17,13 +17,13 @@ extern "C" {
 // 新的三状态 API（acquire/commit/cancel）提供了更精确的控制
 
 // ============================================================
-// BufferPacketSource 实现
+// EncodedPacketSourceFromBuffer 实现
 // ============================================================
 
-BufferPacketSource::BufferPacketSource(const AVCodecParameters* codec_params)
+EncodedPacketSourceFromBuffer::EncodedPacketSourceFromBuffer(const AVCodecParameters* codec_params)
     : codec_params_(codec_params)
     , source_pool_()
-    , is_open_(false)  // 🎯 原子变量初始化
+    , is_open_(false)  // 原子变量初始化
     , current_frame_index_(0)  // 当前帧索引初始化
     , is_shared_mode_(false)  // ⭐ v2.18：普通模式
     , total_subscribers_(0)
@@ -35,7 +35,7 @@ BufferPacketSource::BufferPacketSource(const AVCodecParameters* codec_params)
     , cv_task_exit_()
     , is_running_(false)
     , fetch_task_running_(false)
-    , logger_(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.BufferPacketSource")))
+    , logger_(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.EncodedPacketSourceFromBuffer")))
 {
     if (!codec_params_) {
         LOG4CPLUS_WARN(logger_, "codec_params is nullptr");
@@ -43,7 +43,7 @@ BufferPacketSource::BufferPacketSource(const AVCodecParameters* codec_params)
     LOG4CPLUS_DEBUG(logger_, "构造函数（v2.13：Pool 模式）");
 }
 
-BufferPacketSource::BufferPacketSource(const AVCodecParameters* codec_params, size_t subscriber_count)
+EncodedPacketSourceFromBuffer::EncodedPacketSourceFromBuffer(const AVCodecParameters* codec_params, size_t subscriber_count)
     : codec_params_(codec_params)
     , source_pool_()
     , is_open_(false)
@@ -58,7 +58,7 @@ BufferPacketSource::BufferPacketSource(const AVCodecParameters* codec_params, si
     , cv_task_exit_()
     , is_running_(false)
     , fetch_task_running_(false)
-    , logger_(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.BufferPacketSource")))
+    , logger_(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.EncodedPacketSourceFromBuffer")))
 {
     if (!codec_params_) {
         LOG4CPLUS_WARN(logger_, "codec_params is nullptr");
@@ -69,7 +69,7 @@ BufferPacketSource::BufferPacketSource(const AVCodecParameters* codec_params, si
     LOG4CPLUS_INFO_FMT(logger_, "⭐ v2.18 共享模式（RAII）：创建发布者，订阅者数量=%zu", subscriber_count);
 }
 
-BufferPacketSource::~BufferPacketSource() {
+EncodedPacketSourceFromBuffer::~EncodedPacketSourceFromBuffer() {
     LOG4CPLUS_DEBUG(logger_, "析构函数开始");
     
     // close() 已经处理了所有清理工作（包括等待 Fetch 任务退出）
@@ -87,7 +87,7 @@ BufferPacketSource::~BufferPacketSource() {
     LOG4CPLUS_DEBUG(logger_, "析构函数结束");
 }
 
-bool BufferPacketSource::open() {
+bool EncodedPacketSourceFromBuffer::open() {
     if (is_open_.load(std::memory_order_acquire)) {
         return true;  // 已经打开
     }
@@ -127,14 +127,14 @@ bool BufferPacketSource::open() {
         }
     }
     
-    is_open_.store(true, std::memory_order_release);  // 🎯 原子操作设置状态
+    is_open_.store(true, std::memory_order_release);  // 原子操作设置状态
     LOG4CPLUS_DEBUG(logger_, "Opened (Buffer mode)");
     
     return true;
 }
 
-void BufferPacketSource::close() {
-    // 🎯 原子检查并设置：如果 is_open_ 是 true，则设置为 false
+void EncodedPacketSourceFromBuffer::close() {
+    // 原子检查并设置：如果 is_open_ 是 true，则设置为 false
     bool expected = true;
     if (!is_open_.compare_exchange_strong(expected, false,
                                          std::memory_order_acq_rel,
@@ -198,17 +198,17 @@ void BufferPacketSource::close() {
     }
 }
 
-bool BufferPacketSource::isOpen() const {
-    return is_open_.load(std::memory_order_acquire);  // 🎯 原子操作读取状态
+bool EncodedPacketSourceFromBuffer::isOpen() const {
+    return is_open_.load(std::memory_order_acquire);  // 原子操作读取状态
 }
 
-void BufferPacketSource::fetchTaskFunc() {
+void EncodedPacketSourceFromBuffer::fetchTaskFunc() {
     LOG4CPLUS_INFO(logger_, "Fetch 任务启动（全局线程池，RAII 模式）");
     
     // RAII 保证任务退出时通知 close()
     struct TaskExitGuard {
-        BufferPacketSource* self;
-        TaskExitGuard(BufferPacketSource* s) : self(s) {}
+        EncodedPacketSourceFromBuffer* self;
+        TaskExitGuard(EncodedPacketSourceFromBuffer* s) : self(s) {}
         ~TaskExitGuard() {
             // 任务即将退出，设置标志并通知
             self->fetch_task_running_.store(false, std::memory_order_release);
@@ -305,7 +305,7 @@ void BufferPacketSource::fetchTaskFunc() {
     LOG4CPLUS_INFO(logger_, "Fetch 任务循环结束");
 }
 
-int BufferPacketSource::readPacket(AVPacket* packet) {
+int EncodedPacketSourceFromBuffer::readEncodedPacket(AVPacket* packet) {
     if (!is_open_.load(std::memory_order_acquire) || !packet) {
         return AVERROR(EINVAL);
     }
@@ -395,37 +395,37 @@ int BufferPacketSource::readPacket(AVPacket* packet) {
     return 0;  // 成功
 }
 
-const AVCodecParameters* BufferPacketSource::getCodecParameters() const {
+const AVCodecParameters* EncodedPacketSourceFromBuffer::getCodecParameters() const {
     return codec_params_;
 }
 
-int BufferPacketSource::getVideoStreamIndex() const {
+int EncodedPacketSourceFromBuffer::getVideoStreamIndex() const {
     // Buffer 模式下，没有流索引的概念，返回 0（表示第一个/唯一的流）
     return 0;
 }
 
-int BufferPacketSource::getTotalFrames() const {
+int EncodedPacketSourceFromBuffer::getTotalFrames() const {
     // Buffer 模式下，无法知道总帧数（流式数据）
     return -1;
 }
 
-long BufferPacketSource::getFileSize() const {
+long EncodedPacketSourceFromBuffer::getFileSize() const {
     // Buffer 模式下，没有文件大小概念
     return -1;
 }
 
-std::string BufferPacketSource::getPath() const {
+std::string EncodedPacketSourceFromBuffer::getPath() const {
     // Buffer 模式下，没有文件路径概念
     return "BufferPool";
 }
 
-bool BufferPacketSource::seek(int frame_index) {
+bool EncodedPacketSourceFromBuffer::seek(int frame_index) {
     // Buffer 模式：流式数据，不支持 seek
     LOG4CPLUS_WARN(logger_, "Seek not supported in Buffer mode (streaming data)");
     return false;
 }
 
-bool BufferPacketSource::isAtEnd() const {
+bool EncodedPacketSourceFromBuffer::isAtEnd() const {
     // Buffer 模式的 EOF 状态：检查 Pool 是否还有数据
     if (!is_open_.load(std::memory_order_acquire)) {
         return true;  // 未打开，视为 EOF
@@ -445,29 +445,29 @@ bool BufferPacketSource::isAtEnd() const {
     return false;
 }
 
-int BufferPacketSource::getSourceWidth() const {
+int EncodedPacketSourceFromBuffer::getSourceWidth() const {
     const AVCodecParameters* params = getCodecParameters();
     return params ? params->width : 0;
 }
 
-int BufferPacketSource::getSourceHeight() const {
+int EncodedPacketSourceFromBuffer::getSourceHeight() const {
     const AVCodecParameters* params = getCodecParameters();
     return params ? params->height : 0;
 }
 
-AVPixelFormat BufferPacketSource::getSourcePixelFormat() const {
+AVPixelFormat EncodedPacketSourceFromBuffer::getSourcePixelFormat() const {
     const AVCodecParameters* params = getCodecParameters();
     return params ? static_cast<AVPixelFormat>(params->format) : AV_PIX_FMT_NONE;
 }
 
-void BufferPacketSource::setSourceBufferPool(std::weak_ptr<BufferPool> pool_weak) {
+void EncodedPacketSourceFromBuffer::setSourceBufferPool(std::weak_ptr<BufferPool> pool_weak) {
     source_pool_ = pool_weak;
     LOG4CPLUS_DEBUG(logger_, "⭐ v2.13：已设置源 BufferPool");
 }
 
-AVPacket* BufferPacketSource::acquirePacket(void* worker_id) {
+AVPacket* EncodedPacketSourceFromBuffer::acquireEncodedPacket(void* worker_id) {
     if (!is_shared_mode_) {
-        LOG4CPLUS_ERROR(logger_, "acquirePacket() only supported in shared mode");
+        LOG4CPLUS_ERROR(logger_, "acquireEncodedPacket() only supported in shared mode");
         return nullptr;
     }
     
@@ -481,12 +481,12 @@ AVPacket* BufferPacketSource::acquirePacket(void* worker_id) {
     
     // 检查 EOF
     if (!is_running_.load(std::memory_order_acquire) && !current_buffer_) {
-        LOG4CPLUS_DEBUG_FMT(logger_, "[Worker %p] acquirePacket: EOF", worker_id);
+        LOG4CPLUS_DEBUG_FMT(logger_, "[Worker %p] acquireEncodedPacket: EOF", worker_id);
         return nullptr;  // EOF：已停止且无可用数据
     }
     
     if (!current_buffer_) {
-        LOG4CPLUS_WARN_FMT(logger_, "[Worker %p] acquirePacket: Unexpected - no buffer", worker_id);
+        LOG4CPLUS_WARN_FMT(logger_, "[Worker %p] acquireEncodedPacket: Unexpected - no buffer", worker_id);
         return nullptr;
     }
     
@@ -501,7 +501,7 @@ AVPacket* BufferPacketSource::acquirePacket(void* worker_id) {
     if (state.acquired_version == current_version) {
         // ❌ 已处理过当前版本（无论是否已 commit），不能重复获取
         // LOG4CPLUS_DEBUG_FMT(logger_, 
-        //     "[Worker %p] acquirePacket: Already processed version %llu (has_acquired=%d, has_committed=%d)", 
+        //     "[Worker %p] acquireEncodedPacket: Already processed version %llu (has_acquired=%d, has_committed=%d)", 
         //     worker_id, (unsigned long long)current_version, 
         //     state.has_acquired, state.has_committed);
         return nullptr;
@@ -515,9 +515,9 @@ AVPacket* BufferPacketSource::acquirePacket(void* worker_id) {
     return current_buffer_->getAVPacket();
 }
 
-bool BufferPacketSource::commitPacket(void* worker_id) {
+bool EncodedPacketSourceFromBuffer::commitEncodedPacket(void* worker_id) {
     if (!is_shared_mode_) {
-        LOG4CPLUS_WARN(logger_, "commitPacket() only supported in shared mode");
+        LOG4CPLUS_WARN(logger_, "commitEncodedPacket() only supported in shared mode");
         return false;
     }
     
@@ -526,7 +526,7 @@ bool BufferPacketSource::commitPacket(void* worker_id) {
     // 1. 检查 Worker 是否存在
     auto it = worker_states_.find(worker_id);
     if (it == worker_states_.end()) {
-        LOG4CPLUS_WARN_FMT(logger_, "[Worker %p] commitPacket: Worker not found", worker_id);
+        LOG4CPLUS_WARN_FMT(logger_, "[Worker %p] commitEncodedPacket: Worker not found", worker_id);
         return false;
     }
     
@@ -535,13 +535,13 @@ bool BufferPacketSource::commitPacket(void* worker_id) {
     
     // 2. 检查状态
     if (!state.has_acquired) {
-        LOG4CPLUS_WARN_FMT(logger_, "[Worker %p] commitPacket: Not acquired", worker_id);
+        LOG4CPLUS_WARN_FMT(logger_, "[Worker %p] commitEncodedPacket: Not acquired", worker_id);
         return false;
     }
     
     if (state.acquired_version != current_version) {
         LOG4CPLUS_WARN_FMT(logger_, 
-            "[Worker %p] commitPacket: Version mismatch (acquired=%llu, current=%llu)", 
+            "[Worker %p] commitEncodedPacket: Version mismatch (acquired=%llu, current=%llu)", 
             worker_id, 
             (unsigned long long)state.acquired_version,
             (unsigned long long)current_version);
@@ -551,7 +551,7 @@ bool BufferPacketSource::commitPacket(void* worker_id) {
     // ⭐ v2.22 新增：检查是否已 commit（防止重复 commit）
     if (state.has_committed) {
         LOG4CPLUS_WARN_FMT(logger_, 
-            "[Worker %p] commitPacket: Already committed version %llu", 
+            "[Worker %p] commitEncodedPacket: Already committed version %llu", 
             worker_id, (unsigned long long)current_version);
         return false;
     }
@@ -573,7 +573,7 @@ bool BufferPacketSource::commitPacket(void* worker_id) {
     return true;
 }
 
-void BufferPacketSource::cancelPacket(void* worker_id) {
+void EncodedPacketSourceFromBuffer::cancelEncodedPacket(void* worker_id) {
     if (!is_shared_mode_) {
         return;
     }
@@ -589,7 +589,7 @@ void BufferPacketSource::cancelPacket(void* worker_id) {
     uint64_t current_version = current_buffer_version_.load(std::memory_order_acquire);
     
     LOG4CPLUS_DEBUG_FMT(logger_, 
-        "[Worker %p] cancelPacket: version=%llu", 
+        "[Worker %p] cancelEncodedPacket: version=%llu", 
         worker_id, (unsigned long long)current_version);
     
     // 重置获取状态（允许重新 acquire）
@@ -597,7 +597,7 @@ void BufferPacketSource::cancelPacket(void* worker_id) {
     state.has_acquired = false;
 }
 
-int BufferPacketSource::copyPacket(AVPacket* dst_packet, const AVPacket* src_packet) {
+int EncodedPacketSourceFromBuffer::copyPacket(AVPacket* dst_packet, const AVPacket* src_packet) {
     if (!dst_packet || !src_packet) {
         return AVERROR(EINVAL);
     }
@@ -644,41 +644,41 @@ int BufferPacketSource::copyPacket(AVPacket* dst_packet, const AVPacket* src_pac
     return 0;
 }
 
-IDataSourceNavigator::SourceType BufferPacketSource::getDataSourceType() const {
+IDataSourceNavigator::SourceType EncodedPacketSourceFromBuffer::getDataSourceType() const {
     return SourceType::BUFFER_SOURCE;
 }
 
-bool BufferPacketSource::open(const char* path) {
+bool EncodedPacketSourceFromBuffer::open(const char* path) {
     (void)path;
     LOG4CPLUS_WARN(logger_, "Buffer source does not support open(path), use open()");
     return false;
 }
 
-bool BufferPacketSource::seekToBegin() {
+bool EncodedPacketSourceFromBuffer::seekToBegin() {
     LOG4CPLUS_WARN(logger_, "Buffer source does not support seekToBegin (streaming data)");
     return false;
 }
 
-bool BufferPacketSource::seekToEnd() {
+bool EncodedPacketSourceFromBuffer::seekToEnd() {
     LOG4CPLUS_WARN(logger_, "Buffer source does not support seekToEnd (streaming data)");
     return false;
 }
 
-bool BufferPacketSource::skip(int frame_count) {
+bool EncodedPacketSourceFromBuffer::skip(int frame_count) {
     (void)frame_count;
     LOG4CPLUS_WARN(logger_, "Buffer source does not support skip (streaming data)");
     return false;
 }
 
-int BufferPacketSource::getCurrentFrameIndex() const {
+int EncodedPacketSourceFromBuffer::getCurrentFrameIndex() const {
     return current_frame_index_.load(std::memory_order_acquire);
 }
 
-size_t BufferPacketSource::getFrameSize() const {
+size_t EncodedPacketSourceFromBuffer::getFrameSize() const {
     // Buffer 模式无法估算帧大小
     return 0;
 }
 
-bool BufferPacketSource::hasMoreFrames() const {
+bool EncodedPacketSourceFromBuffer::hasMoreFrames() const {
     return !isAtEnd();
 }

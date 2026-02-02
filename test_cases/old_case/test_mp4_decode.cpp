@@ -72,7 +72,7 @@
 #include "productionline/MultiWorkerProductionLine.hpp"
 #include "productionline/worker/WorkerConfig.hpp"
 #include "productionline/worker/WorkerBase.hpp"
-#include "productionline/worker/RtspPacketSource.hpp"
+#include "productionline/worker/EncodedPacketSourceFromRtsp.hpp"
 #include "productionline/io/BufferWriter.hpp"
 #include "productionline/io/BufferComparator.hpp"
 #include "buffer/bufferpool/BufferPool.hpp"
@@ -130,7 +130,7 @@ bool validate_psnr_streaming(const char *source_video, int width, int height,
   if (is_rtsp) {
     LOG_INFO("📡 Detected RTSP stream for PSNR validation");
     g_rtsp_interrupted = false;
-    RtspPacketSource::clearInterrupt();
+    EncodedPacketSourceFromRtsp::clearInterrupt();
   }
 
   LOG_INFO("");
@@ -959,7 +959,7 @@ static int test_rtsp_decode_single_impl(const char *rtsp_url,
   // ========== RTSP流初始化 ==========
   LOG_INFO("📡 Detected RTSP stream source");
   g_rtsp_interrupted = false;
-  RtspPacketSource::clearInterrupt();
+  EncodedPacketSourceFromRtsp::clearInterrupt();
 
   // ========== 第1步：初始化显示设备（必须在配置WorkerConfig之前）==========
   // ⭐ 参考 test.cpp：先初始化显示设备，然后使用实际分辨率配置WorkerConfig
@@ -2468,7 +2468,7 @@ static void signal_handler(int sig) {
   g_running = false;
   if (sig == SIGINT || sig == SIGTERM) {
     g_rtsp_interrupted = true;
-    RtspPacketSource::requestInterrupt();
+    EncodedPacketSourceFromRtsp::requestInterrupt();
     LOG_INFO("\n⚠️  收到中断信号，正在停止...");
   }
 }
@@ -2484,7 +2484,7 @@ int main(int argc, char *argv[]) {
   signal(SIGINT, signal_handler);
   signal(SIGTERM, signal_handler);
   g_rtsp_interrupted = false;
-  RtspPacketSource::clearInterrupt();
+  EncodedPacketSourceFromRtsp::clearInterrupt();
 
   // 使用测试框架主函数
   TEST_MAIN(argc, argv);

@@ -110,7 +110,7 @@ public:
     }
     
     /**
-     * v2.13新增：设置 BufferPacketSource 的源 BufferPool（用于 Buffer 模式）
+     * v2.13新增：设置 EncodedPacketSourceFromBuffer 的源 BufferPool（用于 Buffer 模式）
      * @param pool_weak Record Worker 的 BufferPool（weak_ptr）
      * @return 成功返回 true，如果底层 Worker 不支持，返回 false
      * 

@@ -25,12 +25,12 @@ struct AVCodecParameters;
  * 
  * 设计模式：接口分离原则（ISP - Interface Segregation Principle）
  * - 将所有数据源操作功能从Worker中分离
- * - Worker继承此接口，实现时转发给内部的PacketSource（策略模式）
+ * - Worker继承此接口，实现时转发给内部的EncodedPacketSource（策略模式）
  * - 通过继承IDataSourceNavigator，明确表达Worker的数据源操作职责
  * 
  * 继承关系：
- * - IPacketSource 继承此接口，添加底层特有方法（readPacket、getVideoStreamIndex）
- * - Worker 继承此接口，转发给内部的 IPacketSource
+ * - IEncodedPacketSource 继承此接口，添加底层特有方法（readEncodedPacket、getVideoStreamIndex）
+ * - Worker 继承此接口，转发给内部的 IEncodedPacketSource
  * 
  * 适用范围：
  * - 视频数据源（本地文件、RTSP流、共享Buffer等）

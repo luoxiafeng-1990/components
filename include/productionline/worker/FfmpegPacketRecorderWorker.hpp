@@ -1,7 +1,7 @@
 #pragma once
 
 #include "productionline/worker/WorkerBase.hpp"
-#include "productionline/worker/IPacketSource.hpp"
+#include "productionline/worker/IEncodedPacketSource.hpp"
 #include <string>
 #include <atomic>
 #include <mutex>
@@ -138,11 +138,11 @@ private:
      * @param path 数据源路径（RTSP URL、文件路径等）
      * @return 数据源指针，失败返回 nullptr
      */
-    std::unique_ptr<IPacketSource> createPacketSource(const std::string& path);
+    std::unique_ptr<IEncodedPacketSource> createPacketSource(const std::string& path);
 
 private:
     // ============ v2.13 数据源抽象（支持自动选择） ============
-    std::unique_ptr<IPacketSource> packet_source_;  // 数据源（RTSP/文件/Buffer）
+    std::unique_ptr<IEncodedPacketSource> packet_source_;  // 数据源（RTSP/文件/Buffer）
     
     // 状态
     std::atomic<bool> is_open_;

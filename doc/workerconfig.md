@@ -1,7 +1,7 @@
 # WorkerConfig 开发者文档
 
-> **版本**: v2.24  
-> **更新日期**: 2026-01-29  
+> **版本**: v2.28  
+> **更新日期**: 2026-02-02  
 > **目标读者**: 使用 Components 库的开发者
 
 ---
@@ -380,7 +380,7 @@ auto config = WorkerConfigBuilder()
 | `buffer_mode` | `bool` | 数据源模式（true=从Buffer获取packet, false=从文件读取） |
 | `codec_params` | `const AVCodecParameters*` | Buffer模式下的编解码器参数（从Record Worker获取） |
 | `time_base` | `AVRational` | 时间基准（从Record Worker获取，用于同步） |
-| `shared_packet_source` | `std::shared_ptr<IPacketSource>` | 共享的 Packet 数据源（共享模式使用） |
+| `shared_packet_source` | `std::shared_ptr<IEncodedPacketSource>` | 共享的编码数据源（共享模式使用） |
 
 **建议值**（`buffer_count`）：
 - RTSP 流解码：4-8
@@ -388,7 +388,7 @@ auto config = WorkerConfigBuilder()
 - Packet 录制：64
 
 **使用场景**（`shared_packet_source`）：
-- 普通模式：`nullptr`（Worker 自己创建独立的 BufferPacketSource）
+- 普通模式：`nullptr`（Worker 自己创建独立的 EncodedPacketSourceFromBuffer）
 - 共享模式：`MultiWorkerProductionLine` 创建唯一实例并传入
 
 ---
@@ -832,8 +832,8 @@ consumer.worker_config = WorkerConfigBuilder()
 | `getMode()` | `Mode` | 获取连接器模式 |
 | `getProducerNames()` | `const std::vector<std::string>&` | 获取生产者名称列表 |
 | `getConsumerNames()` | `const std::vector<std::string>&` | 获取消费者名称列表 |
-| `setSharedSource(const std::string& producer_name, std::shared_ptr<IPacketSource> source)` | `void` | 为指定生产者设置共享的 PacketSource |
-| `getSharedSource(const std::string& producer_name)` | `std::shared_ptr<IPacketSource>` | 获取指定生产者的共享 PacketSource |
+| `setSharedSource(const std::string& producer_name, std::shared_ptr<IEncodedPacketSource> source)` | `void` | 为指定生产者设置共享的编码数据源 |
+| `getSharedSource(const std::string& producer_name)` | `std::shared_ptr<IEncodedPacketSource>` | 获取指定生产者的共享编码数据源 |
 
 #### 使用示例
 
@@ -1211,9 +1211,13 @@ int main() {
 
 | 版本 | 日期 | 变更内容 |
 |------|------|----------|
+| v2.28 | 2026-02-02 | 编码数据源接口重命名（`IEncodedPacketSource`）、CompareConfig 统一、通道比较模式 |
+| v2.27 | 2026-01-31 | CompareConfig 统一到 WorkerConfig、Buffer PTS 支持 |
+| v2.26 | 2026-01-30 | 多通道扩展支持（channels/formats/output_paths）、参数审计修复 |
+| v2.25 | 2026-01-30 | `ConsumerTypeConfig` 架构重构、MultiWorker 比较模式、测试框架优化 |
 | v2.24 | 2026-01-29 | 重构 `ConsumerConfig` 为 `ConsumerTypeConfig`，使用嵌套结构体分类消费类型 |
 | v2.23 | 2026-01-23 | 新增帧同步功能（`WorkerSyncCoordinator`、`ConnectorConfig::enable_frame_sync`） |
-| v2.22 | 2026-01-22 | 重构数据源配置，修复 `BufferPacketSource` 资源泄漏和死锁 |
+| v2.22 | 2026-01-22 | 重构数据源配置，修复 `EncodedPacketSourceFromBuffer` 资源泄漏和死锁 |
 | v2.21 | 2026-01-21 | 重构 `Connector` 为使用名字而非索引 |
 | v2.20 | 2026-01-20 | 配置结构从 `MultiWorkerProductionLine` 移动到 `WorkerConfig.hpp` |
 | v2.18 | 2026-01-18 | 引入共享模式（ONE_TO_MANY） |

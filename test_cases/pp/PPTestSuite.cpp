@@ -8,6 +8,9 @@
 #include "PPTestSuite.hpp"
 #include "../common/WorkerConfigFactory.hpp"
 #include "productionline/io/BufferConsumerService.hpp"
+#include "productionline/io/BufferConsumerStrategies.hpp"
+#include "productionline/VideoProductionLine.hpp"
+#include "buffer/bufferpool/BufferPoolRegistry.hpp"
 
 #include <iostream>
 #include <getopt.h>
@@ -40,14 +43,9 @@ static std::vector<std::string> parseStringList(const std::string& str) {
     return result;
 }
 
-/// 解析通道参数（支持 "pp0", "pp1", "multi", "0", "1", "0,1" 等格式）
+/// 解析通道参数（支持 "0", "1", "0,1" 等格式）
+/// v2.27: 移除旧格式 "pp0", "pp1", "multi"，统一使用数字格式
 static std::vector<int> parseChannels(const std::string& str) {
-    // 兼容旧格式
-    if (str == "pp0") return {0};
-    if (str == "pp1") return {1};
-    if (str == "multi") return {0, 1};
-    
-    // 新格式：逗号分隔的数字
     std::vector<int> result;
     for (const auto& s : parseStringList(str)) {
         try {
@@ -140,6 +138,64 @@ int PPTestSuite::run(int argc, char* argv[]) {
     
     // COMPARE 模式：PSNR/SSIM 质量验证
     if (config.consumer_type.compare.enable_psnr || config.consumer_type.compare.enable_ssim) {
+        
+        // ⭐ v2.27: 多通道 + PSNR/SSIM → 通道比较模式（pp0 vs pp1）
+        if (params.channels.size() >= 2) {
+            LOG4CPLUS_INFO_FMT(getLogger(), 
+                "Channel Compare Mode: ch%d vs ch%d", 
+                params.channels[0], params.channels[1]);
+            
+            // 构建多通道配置
+            WorkerConfig full_config = buildConfig(config.data_source.path, params);
+            full_config.consumer_type = config.consumer_type;
+            
+            // 设置通道比较参数
+            full_config.consumer_type.compare.enable_channel_compare = true;
+            full_config.consumer_type.compare.reference_channel = params.channels[0];
+            full_config.consumer_type.compare.compare_channel = params.channels[1];
+            
+            // 启动生产线
+            VideoProductionLine producer;
+            if (!producer.start(full_config)) {
+                LOG4CPLUS_ERROR(getLogger(), "Failed to start production line");
+                return 1;
+            }
+            
+            // 获取 BufferPool
+            auto pool_id = producer.getWorkingBufferPoolId();
+            auto pool = BufferPoolRegistry::getInstance().getPool(pool_id).lock();
+            if (!pool) {
+                LOG4CPLUS_ERROR(getLogger(), "Failed to get BufferPool");
+                producer.stop();
+                return 1;
+            }
+            
+            // 创建通道比较消费者
+            auto consumer = std::make_shared<consumer::ChannelCompareConsumer>(
+                pool, full_config.consumer_type.compare);
+            
+            // 运行比较
+            int max_frames = full_config.consumer_type.max_frames;
+            consumer->run(max_frames);
+            
+            // 停止生产线
+            producer.stop();
+            
+            // 输出结果
+            LOG4CPLUS_INFO_FMT(getLogger(), "Channel Compare Result: %s", 
+                consumer->getStats().c_str());
+            
+            std::cout << "\n" << test_name.str() << " (CHANNEL_COMPARE): "
+                      << (consumer->isPassed() ? "PASSED" : "FAILED") << "\n"
+                      << "  Compared: " << consumer->getComparedCount() << " frames\n"
+                      << "  Avg PSNR: " << consumer->getAveragePsnr() << " dB\n"
+                      << "  Avg SSIM: " << consumer->getAverageSsim() << "\n"
+                      << "  Mismatch: " << consumer->getMismatchCount() << "\n";
+            
+            return consumer->isPassed() ? 0 : 1;
+        }
+        
+        // 单通道 + PSNR/SSIM → HW vs SW 比较模式
         // 构建 HW PP 配置
         auto hw_config = buildConfig(config.data_source.path, params);
         hw_config.consumer_type = config.consumer_type;
@@ -162,12 +218,6 @@ int PPTestSuite::run(int argc, char* argv[]) {
                                   test_name.str() + " (COMPARE)");
         consumer::BufferConsumerService::printResult(test_name.str(), result);
         return result.success ? 0 : 1;
-    }
-    
-    // PARALLEL 模式：多通道并行（如 multi_pp 双通道）
-    if (params.isMultiChannel()) {
-        // Multi-PP 模式暂时使用 SINGLE，后续可扩展为 PARALLEL
-        // 因为 Multi-PP 本身就是单生产线多输出，不需要多线程
     }
     
     // SINGLE 模式：默认单路消费
@@ -410,115 +460,115 @@ const std::map<std::string, PPTestParams>& PPTestSuite::getPredefinedTests() {
         // 注：YUV400 系列使用相同的底层格式，只是语义不同
         // ════════════════════════════════════════════════════════════════════
         // YUV400 系列 (灰度 10-bit)
-        {"pp0_yuv400_p010",       {"pp0", OutputFormat::YUV_P010, 1920, 1080, ColorStandard::BT2020}},
-        {"pp0_yuv400_i010",       {"pp0", OutputFormat::YUV_P010, 1920, 1080, ColorStandard::BT2020}},
-        {"pp0_yuv400_l010",       {"pp0", OutputFormat::YUV_P010, 1920, 1080, ColorStandard::BT2020}},
-        {"pp0_yuv400_pack10",     {"pp0", OutputFormat::YUV_P010, 1920, 1080, ColorStandard::BT2020}},
+        {"pp0_yuv400_p010",       {"0", OutputFormat::YUV_P010, 1920, 1080, ColorStandard::BT2020}},
+        {"pp0_yuv400_i010",       {"0", OutputFormat::YUV_P010, 1920, 1080, ColorStandard::BT2020}},
+        {"pp0_yuv400_l010",       {"0", OutputFormat::YUV_P010, 1920, 1080, ColorStandard::BT2020}},
+        {"pp0_yuv400_pack10",     {"0", OutputFormat::YUV_P010, 1920, 1080, ColorStandard::BT2020}},
         // YUV400 8-bit (灰度 8-bit)
-        {"pp0_yuv400_8bit",       {"pp0", OutputFormat::YUV_NV12, 1920, 1080, ColorStandard::BT601}},
+        {"pp0_yuv400_8bit",       {"0", OutputFormat::YUV_NV12, 1920, 1080, ColorStandard::BT601}},
         // YUV420 NV12 10-bit 系列
-        {"pp0_yuv420_nv12_p010",  {"pp0", OutputFormat::YUV_P010, 1920, 1080, ColorStandard::BT2020}},
-        {"pp0_yuv420_nv12_i010",  {"pp0", OutputFormat::YUV_P010, 1920, 1080, ColorStandard::BT2020}},
-        {"pp0_yuv420_nv12_l010",  {"pp0", OutputFormat::YUV_P010, 1920, 1080, ColorStandard::BT2020}},
-        {"pp0_yuv420_nv12_pack10",{"pp0", OutputFormat::YUV_P010, 1920, 1080, ColorStandard::BT2020}},
+        {"pp0_yuv420_nv12_p010",  {"0", OutputFormat::YUV_P010, 1920, 1080, ColorStandard::BT2020}},
+        {"pp0_yuv420_nv12_i010",  {"0", OutputFormat::YUV_P010, 1920, 1080, ColorStandard::BT2020}},
+        {"pp0_yuv420_nv12_l010",  {"0", OutputFormat::YUV_P010, 1920, 1080, ColorStandard::BT2020}},
+        {"pp0_yuv420_nv12_pack10",{"0", OutputFormat::YUV_P010, 1920, 1080, ColorStandard::BT2020}},
         // YUV420 8-bit NV12
-        {"pp0_yuv420_8bit_nv12",  {"pp0", OutputFormat::YUV_NV12, 1920, 1080, ColorStandard::BT601}},
+        {"pp0_yuv420_8bit_nv12",  {"0", OutputFormat::YUV_NV12, 1920, 1080, ColorStandard::BT601}},
         // YUV420 NV21 10-bit 系列
-        {"pp0_yuv420_nv21_p010_tiled", {"pp0", OutputFormat::YUV_P010, 1920, 1080, ColorStandard::BT2020}},
-        {"pp0_yuv420_nv21_i011",  {"pp0", OutputFormat::YUV_P010, 1920, 1080, ColorStandard::BT2020}},
-        {"pp0_yuv420_nv21_l010",  {"pp0", OutputFormat::YUV_P010, 1920, 1080, ColorStandard::BT2020}},
+        {"pp0_yuv420_nv21_p010_tiled", {"0", OutputFormat::YUV_P010, 1920, 1080, ColorStandard::BT2020}},
+        {"pp0_yuv420_nv21_i011",  {"0", OutputFormat::YUV_P010, 1920, 1080, ColorStandard::BT2020}},
+        {"pp0_yuv420_nv21_l010",  {"0", OutputFormat::YUV_P010, 1920, 1080, ColorStandard::BT2020}},
         // YUV420 P010
-        {"pp0_yuv420_p010",       {"pp0", OutputFormat::YUV_P010, 1920, 1080, ColorStandard::BT2020}},
+        {"pp0_yuv420_p010",       {"0", OutputFormat::YUV_P010, 1920, 1080, ColorStandard::BT2020}},
         // YUV420 8-bit NV21
-        {"pp0_yuv420_8bit_nv21",  {"pp0", OutputFormat::YUV_NV21, 1920, 1080, ColorStandard::BT601}},
+        {"pp0_yuv420_8bit_nv21",  {"0", OutputFormat::YUV_NV21, 1920, 1080, ColorStandard::BT601}},
         
         // 便捷别名（兼容旧测试名）
-        {"pp0_nv12",              {"pp0", OutputFormat::YUV_NV12, 1920, 1080}},
-        {"pp0_nv21",              {"pp0", OutputFormat::YUV_NV21, 1920, 1080}},
-        {"pp0_i420",              {"pp0", OutputFormat::YUV_I420, 1920, 1080}},
-        {"pp0_yv12",              {"pp0", OutputFormat::YUV_YV12, 1920, 1080}},
-        {"pp0_p010",              {"pp0", OutputFormat::YUV_P010, 1920, 1080}},
-        {"pp0_nv16",              {"pp0", OutputFormat::YUV_NV16, 1920, 1080}},
-        {"pp0_nv61",              {"pp0", OutputFormat::YUV_NV61, 1920, 1080}},
-        {"pp0_i422",              {"pp0", OutputFormat::YUV_I422, 1920, 1080}},
-        {"pp0_nv24",              {"pp0", OutputFormat::YUV_NV24, 1920, 1080}},
-        {"pp0_i444",              {"pp0", OutputFormat::YUV_I444, 1920, 1080}},
+        {"pp0_nv12",              {"0", OutputFormat::YUV_NV12, 1920, 1080}},
+        {"pp0_nv21",              {"0", OutputFormat::YUV_NV21, 1920, 1080}},
+        {"pp0_i420",              {"0", OutputFormat::YUV_I420, 1920, 1080}},
+        {"pp0_yv12",              {"0", OutputFormat::YUV_YV12, 1920, 1080}},
+        {"pp0_p010",              {"0", OutputFormat::YUV_P010, 1920, 1080}},
+        {"pp0_nv16",              {"0", OutputFormat::YUV_NV16, 1920, 1080}},
+        {"pp0_nv61",              {"0", OutputFormat::YUV_NV61, 1920, 1080}},
+        {"pp0_i422",              {"0", OutputFormat::YUV_I422, 1920, 1080}},
+        {"pp0_nv24",              {"0", OutputFormat::YUV_NV24, 1920, 1080}},
+        {"pp0_i444",              {"0", OutputFormat::YUV_I444, 1920, 1080}},
         
         // ════════════════════════════════════════════════════════════════════
         // PP1 RGB 格式（18 种，对应 lfl 分支 test_decode.cpp 定义）
         // ════════════════════════════════════════════════════════════════════
         // RGB 10-bit 系列（使用 16-bit 格式实现）
-        {"pp1_argb2101010",       {"pp1", OutputFormat::RGB_ARGB888, 1920, 1080, ColorStandard::BT601}},
-        {"pp1_abgr2101010",       {"pp1", OutputFormat::RGB_ABGR888, 1920, 1080, ColorStandard::BT601}},
-        {"pp1_bgra2101010",       {"pp1", OutputFormat::RGB_BGRA888, 1920, 1080, ColorStandard::BT601}},
-        {"pp1_rgba2101010",       {"pp1", OutputFormat::RGB_RGBA888, 1920, 1080, ColorStandard::BT601}},
+        {"pp1_argb2101010",       {"1", OutputFormat::RGB_ARGB888, 1920, 1080, ColorStandard::BT601}},
+        {"pp1_abgr2101010",       {"1", OutputFormat::RGB_ABGR888, 1920, 1080, ColorStandard::BT601}},
+        {"pp1_bgra2101010",       {"1", OutputFormat::RGB_BGRA888, 1920, 1080, ColorStandard::BT601}},
+        {"pp1_rgba2101010",       {"1", OutputFormat::RGB_RGBA888, 1920, 1080, ColorStandard::BT601}},
         // RGB 8-bit 系列 - packed
-        {"pp1_abgr8888",          {"pp1", OutputFormat::RGB_ABGR888, 1920, 1080, ColorStandard::BT601}},
-        {"pp1_argb8888",          {"pp1", OutputFormat::RGB_ARGB888, 1920, 1080, ColorStandard::BT601}},
-        {"pp1_bgr888",            {"pp1", OutputFormat::RGB_BGR888, 1920, 1080, ColorStandard::BT601}},
-        {"pp1_bgra8888",          {"pp1", OutputFormat::RGB_BGRA888, 1920, 1080, ColorStandard::BT601}},
-        {"pp1_bgrx8888",          {"pp1", OutputFormat::RGB_BGRX888, 1920, 1080, ColorStandard::BT601}},
-        {"pp1_rgb888",            {"pp1", OutputFormat::RGB_RGB888, 1920, 1080, ColorStandard::BT601}},
-        {"pp1_rgba8888",          {"pp1", OutputFormat::RGB_RGBA888, 1920, 1080, ColorStandard::BT601}},
-        {"pp1_rgbx8888",          {"pp1", OutputFormat::RGB_RGBX888, 1920, 1080, ColorStandard::BT601}},
-        {"pp1_xrgb8888",          {"pp1", OutputFormat::RGB_XRGB888, 1920, 1080, ColorStandard::BT601}},
-        {"pp1_xbgr8888",          {"pp1", OutputFormat::RGB_XBGR888, 1920, 1080, ColorStandard::BT601}},
+        {"pp1_abgr8888",          {"1", OutputFormat::RGB_ABGR888, 1920, 1080, ColorStandard::BT601}},
+        {"pp1_argb8888",          {"1", OutputFormat::RGB_ARGB888, 1920, 1080, ColorStandard::BT601}},
+        {"pp1_bgr888",            {"1", OutputFormat::RGB_BGR888, 1920, 1080, ColorStandard::BT601}},
+        {"pp1_bgra8888",          {"1", OutputFormat::RGB_BGRA888, 1920, 1080, ColorStandard::BT601}},
+        {"pp1_bgrx8888",          {"1", OutputFormat::RGB_BGRX888, 1920, 1080, ColorStandard::BT601}},
+        {"pp1_rgb888",            {"1", OutputFormat::RGB_RGB888, 1920, 1080, ColorStandard::BT601}},
+        {"pp1_rgba8888",          {"1", OutputFormat::RGB_RGBA888, 1920, 1080, ColorStandard::BT601}},
+        {"pp1_rgbx8888",          {"1", OutputFormat::RGB_RGBX888, 1920, 1080, ColorStandard::BT601}},
+        {"pp1_xrgb8888",          {"1", OutputFormat::RGB_XRGB888, 1920, 1080, ColorStandard::BT601}},
+        {"pp1_xbgr8888",          {"1", OutputFormat::RGB_XBGR888, 1920, 1080, ColorStandard::BT601}},
         // RGB 8-bit 系列 - planar
-        {"pp1_rgb888_planar",     {"pp1", OutputFormat::RGB_RGB888_PLANAR, 1920, 1080, ColorStandard::BT601}},
-        {"pp1_bgr888_planar",     {"pp1", OutputFormat::RGB_BGR888_PLANAR, 1920, 1080, ColorStandard::BT601}},
+        {"pp1_rgb888_planar",     {"1", OutputFormat::RGB_RGB888_PLANAR, 1920, 1080, ColorStandard::BT601}},
+        {"pp1_bgr888_planar",     {"1", OutputFormat::RGB_BGR888_PLANAR, 1920, 1080, ColorStandard::BT601}},
         // RGB 16-bit 系列
-        {"pp1_rgb161616",         {"pp1", OutputFormat::RGB_R16G16B16, 1920, 1080, ColorStandard::BT601}},
-        {"pp1_bgr161616",         {"pp1", OutputFormat::RGB_B16G16R16, 1920, 1080, ColorStandard::BT601}},
-        {"pp1_rgb161616_planar",  {"pp1", OutputFormat::RGB_GBRP, 1920, 1080, ColorStandard::BT601}},
+        {"pp1_rgb161616",         {"1", OutputFormat::RGB_R16G16B16, 1920, 1080, ColorStandard::BT601}},
+        {"pp1_bgr161616",         {"1", OutputFormat::RGB_B16G16R16, 1920, 1080, ColorStandard::BT601}},
+        {"pp1_rgb161616_planar",  {"1", OutputFormat::RGB_GBRP, 1920, 1080, ColorStandard::BT601}},
         
         // 便捷别名（兼容旧测试名）
-        {"pp1_argb888",           {"pp1", OutputFormat::RGB_ARGB888, 1920, 1080}},
-        {"pp1_abgr888",           {"pp1", OutputFormat::RGB_ABGR888, 1920, 1080}},
-        {"pp1_rgba888",           {"pp1", OutputFormat::RGB_RGBA888, 1920, 1080}},
-        {"pp1_bgra888",           {"pp1", OutputFormat::RGB_BGRA888, 1920, 1080}},
-        {"pp1_r16g16b16",         {"pp1", OutputFormat::RGB_R16G16B16, 1920, 1080}},
-        {"pp1_b16g16r16",         {"pp1", OutputFormat::RGB_B16G16R16, 1920, 1080}},
-        {"pp1_gbrp",              {"pp1", OutputFormat::RGB_GBRP, 1920, 1080}},
+        {"pp1_argb888",           {"1", OutputFormat::RGB_ARGB888, 1920, 1080}},
+        {"pp1_abgr888",           {"1", OutputFormat::RGB_ABGR888, 1920, 1080}},
+        {"pp1_rgba888",           {"1", OutputFormat::RGB_RGBA888, 1920, 1080}},
+        {"pp1_bgra888",           {"1", OutputFormat::RGB_BGRA888, 1920, 1080}},
+        {"pp1_r16g16b16",         {"1", OutputFormat::RGB_R16G16B16, 1920, 1080}},
+        {"pp1_b16g16r16",         {"1", OutputFormat::RGB_B16G16R16, 1920, 1080}},
+        {"pp1_gbrp",              {"1", OutputFormat::RGB_GBRP, 1920, 1080}},
         
         // ════════════════════════════════════════════════════════════════════
         // PP1 YUV 格式（16 种，对应 lfl 分支 test_decode.cpp 定义）
         // ════════════════════════════════════════════════════════════════════
         // YUV400 系列 (灰度 10-bit)
-        {"pp1_yuv400_p010",       {"pp1", OutputFormat::YUV_P010, 1920, 1080, ColorStandard::BT2020}},
-        {"pp1_yuv400_i010",       {"pp1", OutputFormat::YUV_P010, 1920, 1080, ColorStandard::BT2020}},
-        {"pp1_yuv400_l010",       {"pp1", OutputFormat::YUV_P010, 1920, 1080, ColorStandard::BT2020}},
-        {"pp1_yuv400_pack10",     {"pp1", OutputFormat::YUV_P010, 1920, 1080, ColorStandard::BT2020}},
+        {"pp1_yuv400_p010",       {"1", OutputFormat::YUV_P010, 1920, 1080, ColorStandard::BT2020}},
+        {"pp1_yuv400_i010",       {"1", OutputFormat::YUV_P010, 1920, 1080, ColorStandard::BT2020}},
+        {"pp1_yuv400_l010",       {"1", OutputFormat::YUV_P010, 1920, 1080, ColorStandard::BT2020}},
+        {"pp1_yuv400_pack10",     {"1", OutputFormat::YUV_P010, 1920, 1080, ColorStandard::BT2020}},
         // YUV400 8-bit (灰度 8-bit)
-        {"pp1_yuv400_8bit",       {"pp1", OutputFormat::YUV_NV12, 1920, 1080, ColorStandard::BT601}},
+        {"pp1_yuv400_8bit",       {"1", OutputFormat::YUV_NV12, 1920, 1080, ColorStandard::BT601}},
         // YUV420 NV12 10-bit 系列
-        {"pp1_yuv420_nv12_p010",  {"pp1", OutputFormat::YUV_P010, 1920, 1080, ColorStandard::BT2020}},
-        {"pp1_yuv420_nv12_i010",  {"pp1", OutputFormat::YUV_P010, 1920, 1080, ColorStandard::BT2020}},
-        {"pp1_yuv420_nv12_l010",  {"pp1", OutputFormat::YUV_P010, 1920, 1080, ColorStandard::BT2020}},
-        {"pp1_yuv420_nv12_pack10",{"pp1", OutputFormat::YUV_P010, 1920, 1080, ColorStandard::BT2020}},
+        {"pp1_yuv420_nv12_p010",  {"1", OutputFormat::YUV_P010, 1920, 1080, ColorStandard::BT2020}},
+        {"pp1_yuv420_nv12_i010",  {"1", OutputFormat::YUV_P010, 1920, 1080, ColorStandard::BT2020}},
+        {"pp1_yuv420_nv12_l010",  {"1", OutputFormat::YUV_P010, 1920, 1080, ColorStandard::BT2020}},
+        {"pp1_yuv420_nv12_pack10",{"1", OutputFormat::YUV_P010, 1920, 1080, ColorStandard::BT2020}},
         // YUV420 8-bit NV12
-        {"pp1_yuv420_8bit_nv12",  {"pp1", OutputFormat::YUV_NV12, 1920, 1080, ColorStandard::BT601}},
+        {"pp1_yuv420_8bit_nv12",  {"1", OutputFormat::YUV_NV12, 1920, 1080, ColorStandard::BT601}},
         // YUV420 NV21 10-bit 系列
-        {"pp1_yuv420_nv21_p010_tiled", {"pp1", OutputFormat::YUV_P010, 1920, 1080, ColorStandard::BT2020}},
-        {"pp1_yuv420_nv21_i011",  {"pp1", OutputFormat::YUV_P010, 1920, 1080, ColorStandard::BT2020}},
-        {"pp1_yuv420_nv21_l010",  {"pp1", OutputFormat::YUV_P010, 1920, 1080, ColorStandard::BT2020}},
+        {"pp1_yuv420_nv21_p010_tiled", {"1", OutputFormat::YUV_P010, 1920, 1080, ColorStandard::BT2020}},
+        {"pp1_yuv420_nv21_i011",  {"1", OutputFormat::YUV_P010, 1920, 1080, ColorStandard::BT2020}},
+        {"pp1_yuv420_nv21_l010",  {"1", OutputFormat::YUV_P010, 1920, 1080, ColorStandard::BT2020}},
         // YUV420 P010
-        {"pp1_yuv420_p010",       {"pp1", OutputFormat::YUV_P010, 1920, 1080, ColorStandard::BT2020}},
+        {"pp1_yuv420_p010",       {"1", OutputFormat::YUV_P010, 1920, 1080, ColorStandard::BT2020}},
         // YUV420 8-bit NV21
-        {"pp1_yuv420_8bit_nv21",  {"pp1", OutputFormat::YUV_NV21, 1920, 1080, ColorStandard::BT601}},
+        {"pp1_yuv420_8bit_nv21",  {"1", OutputFormat::YUV_NV21, 1920, 1080, ColorStandard::BT601}},
         // YUV420 NV21 P010（第16种，PP1比PP0多一种）
-        {"pp1_yuv420_nv21_p010",  {"pp1", OutputFormat::YUV_P010, 1920, 1080, ColorStandard::BT2020}},
+        {"pp1_yuv420_nv21_p010",  {"1", OutputFormat::YUV_P010, 1920, 1080, ColorStandard::BT2020}},
         
         // 便捷别名（兼容旧测试名）
-        {"pp1_nv12",              {"pp1", OutputFormat::YUV_NV12, 1920, 1080}},
-        {"pp1_nv21",              {"pp1", OutputFormat::YUV_NV21, 1920, 1080}},
-        {"pp1_i420",              {"pp1", OutputFormat::YUV_I420, 1920, 1080}},
-        {"pp1_yv12",              {"pp1", OutputFormat::YUV_YV12, 1920, 1080}},
-        {"pp1_p010",              {"pp1", OutputFormat::YUV_P010, 1920, 1080}},
-        {"pp1_nv16",              {"pp1", OutputFormat::YUV_NV16, 1920, 1080}},
-        {"pp1_nv61",              {"pp1", OutputFormat::YUV_NV61, 1920, 1080}},
-        {"pp1_i422",              {"pp1", OutputFormat::YUV_I422, 1920, 1080}},
-        {"pp1_nv24",              {"pp1", OutputFormat::YUV_NV24, 1920, 1080}},
-        {"pp1_i444",              {"pp1", OutputFormat::YUV_I444, 1920, 1080}},
+        {"pp1_nv12",              {"1", OutputFormat::YUV_NV12, 1920, 1080}},
+        {"pp1_nv21",              {"1", OutputFormat::YUV_NV21, 1920, 1080}},
+        {"pp1_i420",              {"1", OutputFormat::YUV_I420, 1920, 1080}},
+        {"pp1_yv12",              {"1", OutputFormat::YUV_YV12, 1920, 1080}},
+        {"pp1_p010",              {"1", OutputFormat::YUV_P010, 1920, 1080}},
+        {"pp1_nv16",              {"1", OutputFormat::YUV_NV16, 1920, 1080}},
+        {"pp1_nv61",              {"1", OutputFormat::YUV_NV61, 1920, 1080}},
+        {"pp1_i422",              {"1", OutputFormat::YUV_I422, 1920, 1080}},
+        {"pp1_nv24",              {"1", OutputFormat::YUV_NV24, 1920, 1080}},
+        {"pp1_i444",              {"1", OutputFormat::YUV_I444, 1920, 1080}},
         
         // ========================================
         // Multi-PP 测试（10 个，对应原始 test_pp.cpp）
@@ -549,19 +599,19 @@ const std::map<std::string, PPTestParams>& PPTestSuite::getPredefinedTests() {
         // ========================================
         // Crop 测试（4 个）
         // Crop1: PP0 crop 4096x2160 -> 1920x1080
-        {"multi_pp_crop1",  {"pp0", OutputFormat::YUV_NV12, 1920, 1080, ColorStandard::BT709, 0, 0, 4096, 2160}},
+        {"multi_pp_crop1",  {"0", OutputFormat::YUV_NV12, 1920, 1080, ColorStandard::BT709, 0, 0, 4096, 2160}},
         // Crop2: PP0 crop 32768x32768 -> 1280x720
-        {"multi_pp_crop2",  {"pp0", OutputFormat::YUV_NV12, 1280, 720, ColorStandard::BT709, 0, 0, 32768, 32768}},
+        {"multi_pp_crop2",  {"0", OutputFormat::YUV_NV12, 1280, 720, ColorStandard::BT709, 0, 0, 32768, 32768}},
         // Crop3: PP1 crop 4096x2160 -> 1920x1080
-        {"multi_pp_crop3",  {"pp1", OutputFormat::YUV_NV12, 1920, 1080, ColorStandard::BT709, 0, 0, 4096, 2160}},
+        {"multi_pp_crop3",  {"1", OutputFormat::YUV_NV12, 1920, 1080, ColorStandard::BT709, 0, 0, 4096, 2160}},
         // Crop4: PP1 crop 32768x32768 -> 1280x720
-        {"multi_pp_crop4",  {"pp1", OutputFormat::YUV_NV12, 1280, 720, ColorStandard::BT709, 0, 0, 32768, 32768}},
+        {"multi_pp_crop4",  {"1", OutputFormat::YUV_NV12, 1280, 720, ColorStandard::BT709, 0, 0, 32768, 32768}},
         
         // Scale 测试（4 个）
         // Scale1: PP0 down-scale 32768x32768 -> 256x256
-        {"multi_pp_scale1", {"pp0", OutputFormat::YUV_NV12, 256, 256, ColorStandard::BT709}},
+        {"multi_pp_scale1", {"0", OutputFormat::YUV_NV12, 256, 256, ColorStandard::BT709}},
         // Scale2: PP1 down-scale 4096x2160 -> 128x128
-        {"multi_pp_scale2", {"pp1", OutputFormat::YUV_NV12, 128, 128, ColorStandard::BT709}},
+        {"multi_pp_scale2", {"1", OutputFormat::YUV_NV12, 128, 128, ColorStandard::BT709}},
         // Scale3: PP0+PP1 双通道 down-scale 32768x32768 -> 256x256
         {"multi_pp_scale3", {OutputFormat::YUV_NV12, OutputFormat::YUV_NV12, 256, 256, ColorStandard::BT709}},
         // Scale4: PP0+PP1 双通道 down-scale 4096x2160 -> 128x128
@@ -571,14 +621,14 @@ const std::map<std::string, PPTestParams>& PPTestSuite::getPredefinedTests() {
         // ZYW 新增测试 - PP Crop 测试（带分辨率）
         // ════════════════════════════════════════════════════════════════════
         // PP0 Crop
-        {"pp0_720p_crop",           {"pp0", OutputFormat::YUV_NV12, 1280, 720, ColorStandard::BT709, 0, 0, 1280, 720}},
-        {"pp0_1080p_crop",          {"pp0", OutputFormat::YUV_NV12, 1920, 1080, ColorStandard::BT709, 0, 0, 1920, 1080}},
+        {"pp0_720p_crop",           {"0", OutputFormat::YUV_NV12, 1280, 720, ColorStandard::BT709, 0, 0, 1280, 720}},
+        {"pp0_1080p_crop",          {"0", OutputFormat::YUV_NV12, 1920, 1080, ColorStandard::BT709, 0, 0, 1920, 1080}},
         // PP1 RGB Crop
-        {"pp1_720p_rgb_crop",       {"pp1", OutputFormat::RGB_RGB888, 1280, 720, ColorStandard::BT709, 0, 0, 1280, 720}},
-        {"pp1_1080p_rgb_crop",      {"pp1", OutputFormat::RGB_RGB888, 1920, 1080, ColorStandard::BT709, 0, 0, 1920, 1080}},
+        {"pp1_720p_rgb_crop",       {"1", OutputFormat::RGB_RGB888, 1280, 720, ColorStandard::BT709, 0, 0, 1280, 720}},
+        {"pp1_1080p_rgb_crop",      {"1", OutputFormat::RGB_RGB888, 1920, 1080, ColorStandard::BT709, 0, 0, 1920, 1080}},
         // PP1 YUV Crop
-        {"pp1_720p_yuv_crop",       {"pp1", OutputFormat::YUV_NV12, 1280, 720, ColorStandard::BT709, 0, 0, 1280, 720}},
-        {"pp1_1080p_yuv_crop",      {"pp1", OutputFormat::YUV_NV12, 1920, 1080, ColorStandard::BT709, 0, 0, 1920, 1080}},
+        {"pp1_720p_yuv_crop",       {"1", OutputFormat::YUV_NV12, 1280, 720, ColorStandard::BT709, 0, 0, 1280, 720}},
+        {"pp1_1080p_yuv_crop",      {"1", OutputFormat::YUV_NV12, 1920, 1080, ColorStandard::BT709, 0, 0, 1920, 1080}},
         
         // ════════════════════════════════════════════════════════════════════
         // ZYW 新增测试 - Multi-PP 扩展测试
@@ -591,44 +641,44 @@ const std::map<std::string, PPTestParams>& PPTestSuite::getPredefinedTests() {
         // ════════════════════════════════════════════════════════════════════
         // ZYW 新增测试 - PP0 带分辨率的格式测试
         // ════════════════════════════════════════════════════════════════════
-        {"pp0_720p_nv12",           {"pp0", OutputFormat::YUV_NV12, 1280, 720}},
-        {"pp0_720p_p010",           {"pp0", OutputFormat::YUV_P010, 1280, 720}},
-        {"pp0_1080p_nv21",          {"pp0", OutputFormat::YUV_NV21, 1920, 1080}},
-        {"pp0_4k_nv12",             {"pp0", OutputFormat::YUV_NV12, 3840, 2160}},
+        {"pp0_720p_nv12",           {"0", OutputFormat::YUV_NV12, 1280, 720}},
+        {"pp0_720p_p010",           {"0", OutputFormat::YUV_P010, 1280, 720}},
+        {"pp0_1080p_nv21",          {"0", OutputFormat::YUV_NV21, 1920, 1080}},
+        {"pp0_4k_nv12",             {"0", OutputFormat::YUV_NV12, 3840, 2160}},
         
         // ════════════════════════════════════════════════════════════════════
         // ZYW 新增测试 - PP1 带分辨率的格式测试
         // ════════════════════════════════════════════════════════════════════
-        {"pp1_720p_argb8888",       {"pp1", OutputFormat::RGB_ARGB888, 1280, 720}},
-        {"pp1_4k_argb8888",         {"pp1", OutputFormat::RGB_ARGB888, 3840, 2160}},
-        {"pp1_720p_rgb888",         {"pp1", OutputFormat::RGB_RGB888, 1280, 720}},
-        {"pp1_1080p_argb8888",      {"pp1", OutputFormat::RGB_ARGB888, 1920, 1080}},
+        {"pp1_720p_argb8888",       {"1", OutputFormat::RGB_ARGB888, 1280, 720}},
+        {"pp1_4k_argb8888",         {"1", OutputFormat::RGB_ARGB888, 3840, 2160}},
+        {"pp1_720p_rgb888",         {"1", OutputFormat::RGB_RGB888, 1280, 720}},
+        {"pp1_1080p_argb8888",      {"1", OutputFormat::RGB_ARGB888, 1920, 1080}},
         
         // ════════════════════════════════════════════════════════════════════
         // ZYW 新增测试 - Crop 带输出分辨率
         // ════════════════════════════════════════════════════════════════════
-        {"crop_720p_1024x576",      {"pp0", OutputFormat::YUV_NV12, 1024, 576, ColorStandard::BT709, 0, 0, 1280, 720}},
-        {"crop_1080p_1600x900",     {"pp0", OutputFormat::YUV_NV12, 1600, 900, ColorStandard::BT709, 0, 0, 1920, 1080}},
+        {"crop_720p_1024x576",      {"0", OutputFormat::YUV_NV12, 1024, 576, ColorStandard::BT709, 0, 0, 1280, 720}},
+        {"crop_1080p_1600x900",     {"0", OutputFormat::YUV_NV12, 1600, 900, ColorStandard::BT709, 0, 0, 1920, 1080}},
         
         // ════════════════════════════════════════════════════════════════════
         // ZYW 新增测试 - Scale 带输出分辨率
         // ════════════════════════════════════════════════════════════════════
-        {"scale_720p_512x288",      {"pp0", OutputFormat::YUV_NV12, 512, 288, ColorStandard::BT709}},
-        {"scale_1080p_800x450",     {"pp0", OutputFormat::YUV_NV12, 800, 450, ColorStandard::BT709}},
+        {"scale_720p_512x288",      {"0", OutputFormat::YUV_NV12, 512, 288, ColorStandard::BT709}},
+        {"scale_1080p_800x450",     {"0", OutputFormat::YUV_NV12, 800, 450, ColorStandard::BT709}},
         
         // ════════════════════════════════════════════════════════════════════
         // ZYW 新增测试 - H265 PP0/PP1 格式测试
         // ════════════════════════════════════════════════════════════════════
-        {"pp0_h265_720p_nv12",      {"pp0", OutputFormat::YUV_NV12, 1280, 720}},
-        {"pp0_h265_1080p_p010",     {"pp0", OutputFormat::YUV_P010, 1920, 1080}},
-        {"pp0_h265_4k_nv12",        {"pp0", OutputFormat::YUV_NV12, 3840, 2160}},
-        {"pp1_h265_720p_rgb888",    {"pp1", OutputFormat::RGB_RGB888, 1280, 720}},
-        {"pp1_h265_1080p_argb8888", {"pp1", OutputFormat::RGB_ARGB888, 1920, 1080}},
+        {"pp0_h265_720p_nv12",      {"0", OutputFormat::YUV_NV12, 1280, 720}},
+        {"pp0_h265_1080p_p010",     {"0", OutputFormat::YUV_P010, 1920, 1080}},
+        {"pp0_h265_4k_nv12",        {"0", OutputFormat::YUV_NV12, 3840, 2160}},
+        {"pp1_h265_720p_rgb888",    {"1", OutputFormat::RGB_RGB888, 1280, 720}},
+        {"pp1_h265_1080p_argb8888", {"1", OutputFormat::RGB_ARGB888, 1920, 1080}},
         
         // ════════════════════════════════════════════════════════════════════
         // ZYW 新增测试 - H265 Crop+Scale
         // ════════════════════════════════════════════════════════════════════
-        {"h265_1080p_crop_scale",   {"pp0", OutputFormat::YUV_NV12, 960, 540, ColorStandard::BT709, 0, 0, 1920, 1080}},
+        {"h265_1080p_crop_scale",   {"0", OutputFormat::YUV_NV12, 960, 540, ColorStandard::BT709, 0, 0, 1920, 1080}},
     };
     return tests;
 }
@@ -720,8 +770,8 @@ void PPTestSuite::printHelp() const {
               << "  -l, --list              列出所有预定义测试\n"
               << "  -i, --input <path>      输入视频路径\n"
               << "  -D, --decoder <type>    解码方式 (hw|hardware|sw|software，默认: hw)\n"
-              << "  -f, --format <fmt>      输出格式 (nv12|argb888|...)\n"
-              << "  -c, --channel <ch>      通道选择 (pp0|pp1|multi)\n"
+              << "  -f, --format <fmt>      输出格式 (nv12|argb888|...), 多通道用逗号分隔\n"
+              << "  -c, --channel <ch>      通道选择 (0|1|0,1), 多通道用逗号分隔\n"
               << "  -W, --width <n>         输出宽度\n"
               << "  -H, --height <n>        输出高度\n"
               << "  -R, --resolution <WxH>  分辨率 (如 1920x1080)\n"
@@ -738,9 +788,9 @@ void PPTestSuite::printHelp() const {
               << "  -v, --verbose           详细日志\n"
               << "\n"
               << "ExecuteMode Mapping:\n"
-              << "  SINGLE   - 默认单路 PP 处理，支持 --decoder hw/sw\n"
-              << "  COMPARE  - --psnr/--ssim 启用时，HW PP vs SW 对比\n"
-              << "  PARALLEL - 多通道并行（预留）\n"
+              << "  SINGLE          - 默认单路 PP 处理\n"
+              << "  COMPARE (HW/SW) - 单通道 + --psnr/--ssim 时，HW PP vs SW 对比\n"
+              << "  COMPARE (CH)    - 多通道 + --psnr/--ssim 时，通道间对比 (如 ch0 vs ch1)\n"
               << "\n"
               << "Supported formats:\n"
               << "  PP0 (YUV):  nv12, nv21, i420, yv12, p010, nv16, nv61, i422, nv24, i444\n"
@@ -750,12 +800,14 @@ void PPTestSuite::printHelp() const {
               << "  PP1 (YUV):  同 PP0\n"
               << "\n"
               << "Examples:\n"
-              << "  qa_cases pp video.mp4                           # SINGLE\n"
-              << "  qa_cases pp --display video.mp4                 # SINGLE + DISPLAY\n"
-              << "  qa_cases pp --psnr video.mp4                    # COMPARE (HW PP vs SW)\n"
-              << "  qa_cases pp --format nv12 --channel pp0 video.mp4\n"
-              << "  qa_cases pp --format argb888 --channel pp1 video.mp4\n"
-              << "  qa_cases pp pp1_argb888 video.mp4\n"
+              << "  qa_cases pp video.mp4                                      # SINGLE (ch0)\n"
+              << "  qa_cases pp --channel 0 --format nv12 video.mp4            # SINGLE ch0\n"
+              << "  qa_cases pp --channel 1 --format argb888 video.mp4         # SINGLE ch1\n"
+              << "  qa_cases pp --display video.mp4                            # SINGLE + DISPLAY\n"
+              << "  qa_cases pp --psnr video.mp4                               # HW vs SW 比较\n"
+              << "  qa_cases pp --channel 0,1 --psnr video.mp4                 # 通道比较 ch0 vs ch1\n"
+              << "  qa_cases pp --channel 0,1 --format nv12,argb888 --psnr video.mp4\n"
+              << "  qa_cases pp pp1_argb888 video.mp4                          # 预定义测试\n"
               << "  qa_cases pp --crop 0,0,1280,720 --resolution 1280x720 video.mp4\n"
               << std::endl;
 }

@@ -354,7 +354,7 @@ public:
      * @note 子类实现示例：
      * @code
      * bool setSourceBufferPool(std::weak_ptr<BufferPool> pool_weak) override {
-     *     auto* buffer_source = dynamic_cast<BufferPacketSource*>(packet_source_.get());
+     *     auto* buffer_source = dynamic_cast<EncodedPacketSourceFromBuffer*>(packet_source_.get());
      *     if (!buffer_source) {
      *         return false;
      *     }

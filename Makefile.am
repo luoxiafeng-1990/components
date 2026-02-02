@@ -12,9 +12,9 @@ libcomponents_la_SOURCES = \
     source/productionline/worker/WorkerConfig.cpp \
     source/productionline/worker/FFmpegDecodeWorker.cpp \
     source/productionline/worker/FfmpegPacketRecorderWorker.cpp \
-    source/productionline/worker/FilePacketSource.cpp \
-    source/productionline/worker/BufferPacketSource.cpp \
-    source/productionline/worker/RtspPacketSource.cpp \
+    source/productionline/worker/EncodedPacketSourceFromFile.cpp \
+    source/productionline/worker/EncodedPacketSourceFromBuffer.cpp \
+    source/productionline/worker/EncodedPacketSourceFromRtsp.cpp \
     source/monitor/PerformanceMonitor.cpp \
     source/common/Timer.cpp \
     source/common/GlobalThreadPool.cpp \

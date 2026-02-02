@@ -29,7 +29,7 @@
 #include "productionline/worker/BufferFillingWorkerFacade.hpp"
 #include "productionline/worker/WorkerConfig.hpp"
 #include "productionline/worker/FfmpegPacketRecorderWorker.hpp"
-#include "productionline/worker/RtspPacketSource.hpp"
+#include "productionline/worker/EncodedPacketSourceFromRtsp.hpp"
 #include "buffer/bufferpool/BufferPool.hpp"
 #include "buffer/bufferpool/BufferPoolRegistry.hpp"
 #include "productionline/VideoProductionLine.hpp"
@@ -80,7 +80,7 @@ static void signal_handler(int signum) {
             g_rtsp_interrupted = true;
             
             // 请求 FFmpeg 中断所有 RTSP 流操作
-            RtspPacketSource::requestInterrupt();
+            EncodedPacketSourceFromRtsp::requestInterrupt();
         } else {
             // 第二次 Ctrl+C：强制退出
             LOG4CPLUS_INFO(test_logger, "\n🛑 强制退出...");
@@ -103,7 +103,7 @@ static int test_play_rtsp_stream(const char* rtsp_url) {
     signal(SIGINT, signal_handler);
     g_running = true;
     g_rtsp_interrupted = false;
-    RtspPacketSource::clearInterrupt();
+    EncodedPacketSourceFromRtsp::clearInterrupt();
     LOG4CPLUS_DEBUG(test_logger, "[Test] ✅ 已注册 Ctrl+C 信号处理器");
     
     LOG4CPLUS_INFO(test_logger, "Zero-Copy Workflow:");
@@ -319,7 +319,7 @@ static int test_rtsp_record_stream(const char* rtsp_url) {
     signal(SIGINT, signal_handler);
     g_running = true;
     g_rtsp_interrupted = false;
-    RtspPacketSource::clearInterrupt();
+    EncodedPacketSourceFromRtsp::clearInterrupt();
     LOG4CPLUS_DEBUG(test_logger, "[Test] ✅ 已注册 Ctrl+C 信号处理器");
     
     // 从环境变量获取输出路径，如果没有则使用默认值
@@ -518,14 +518,14 @@ static int test_rtsp_record_stream(const char* rtsp_url) {
  * 
  * 架构：
  * - 生产者：FfmpegPacketRecorderWorker（读取编码包 → Buffer）
- * - 数据源：FilePacketSource（本地文件）
+ * - 数据源：EncodedPacketSourceFromFile（本地文件）
  * - 消费者：BufferWriter（Buffer → MP4文件，自动封装容器）
  * 
  * 功能：
  * - 从本地视频文件读取编码流（不解码，remux方式）
  * - 重新封装为 MP4 格式（包含完整元数据）
  * - 支持通过环境变量 FILE_OUTPUT_FILE 指定输出路径
- * - 验证 FilePacketSource 数据源的正常工作
+ * - 验证 EncodedPacketSourceFromFile 数据源的正常工作
  * 
  * 使用场景：
  * - 视频格式转换（AVI → MP4, MKV → MP4, FLV → MP4 等）
@@ -2196,7 +2196,7 @@ static int test_rtsp_record_all_formats(const char* rtsp_url) {
     signal(SIGINT, signal_handler);
     g_running = true;
     g_rtsp_interrupted = false;
-    RtspPacketSource::clearInterrupt();
+    EncodedPacketSourceFromRtsp::clearInterrupt();
     
     LOG4CPLUS_INFO_FMT(test_logger, "RTSP URL: %s\n", rtsp_url);
     
@@ -2268,7 +2268,7 @@ static int test_rtsp_record_all_formats(const char* rtsp_url) {
         // 重置中断标志
         g_running = true;
         g_rtsp_interrupted = false;
-        RtspPacketSource::clearInterrupt();
+        EncodedPacketSourceFromRtsp::clearInterrupt();
         
         // 创建 VideoProductionLine
         VideoProductionLine producer(false, 1, false);
@@ -2474,7 +2474,7 @@ static int test_multi_worker(const char* video_source) {
     signal(SIGINT, signal_handler);
     g_running = true;
     g_rtsp_interrupted = false;
-    RtspPacketSource::clearInterrupt();
+    EncodedPacketSourceFromRtsp::clearInterrupt();
     LOG4CPLUS_DEBUG(test_logger, "[Test] ✅ 已注册 Ctrl+C 信号处理器");
     
     // ⭐ 支持文件和RTSP（FfmpegPacketRecorderWorker会自动判断）
@@ -3102,7 +3102,7 @@ void configureModuleLoggers() {
     auto buffer_pool = log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.BufferPool"));
     buffer_pool.setLogLevel(log4cplus::DEBUG_LOG_LEVEL);
     
-    auto bps = log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.BufferPacketSource"));
+    auto bps = log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.EncodedPacketSourceFromBuffer"));
     bps.setLogLevel(log4cplus::DEBUG_LOG_LEVEL);
     
     auto writer = log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.BufferWriter"));

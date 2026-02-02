@@ -1,27 +1,21 @@
-#ifndef RTSP_PACKET_SOURCE_HPP
-#define RTSP_PACKET_SOURCE_HPP
+#ifndef ENCODED_PACKET_SOURCE_FROM_RTSP_HPP
+#define ENCODED_PACKET_SOURCE_FROM_RTSP_HPP
 
-#include "productionline/worker/IPacketSource.hpp"
+#include "productionline/worker/IEncodedPacketSource.hpp"
 #include <log4cplus/logger.h>
 #include <log4cplus/loggingmacros.h>
 #include <string>
-#include <log4cplus/logger.h>
-#include <log4cplus/loggingmacros.h>
 #include <memory>
-#include <log4cplus/logger.h>
-#include <log4cplus/loggingmacros.h>
 #include <atomic>
-#include <log4cplus/logger.h>
-#include <log4cplus/loggingmacros.h>
 
 // FFmpeg 前向声明
 struct AVFormatContext;
 struct AVCodecParameters;
 
 /**
- * @brief RtspPacketSource - RTSP 流数据源实现
+ * @brief EncodedPacketSourceFromRtsp - 从 RTSP 流读取编码数据的数据源实现
  * 
- * 功能：从 RTSP 流读取 AVPacket
+ * 功能：从 RTSP 流读取编码后的 AVPacket（H.264/H.265等）
  * 
  * 使用场景：
  * - RTSP 实时流解码
@@ -34,22 +28,22 @@ struct AVCodecParameters;
  * - 需要保持连接
  * - 自动处理超时和重连
  */
-class RtspPacketSource : public IPacketSource {
+class EncodedPacketSourceFromRtsp : public IEncodedPacketSource {
 public:
     /**
      * @brief 构造函数
      * @param rtsp_url RTSP 流地址
      */
-    explicit RtspPacketSource(const std::string& rtsp_url);
+    explicit EncodedPacketSourceFromRtsp(const std::string& rtsp_url);
     
     /**
      * @brief 析构函数
      */
-    ~RtspPacketSource() override;
+    ~EncodedPacketSourceFromRtsp() override;
     
     // 禁止拷贝
-    RtspPacketSource(const RtspPacketSource&) = delete;
-    RtspPacketSource& operator=(const RtspPacketSource&) = delete;
+    EncodedPacketSourceFromRtsp(const EncodedPacketSourceFromRtsp&) = delete;
+    EncodedPacketSourceFromRtsp& operator=(const EncodedPacketSourceFromRtsp&) = delete;
     
     // ============ IDataSourceNavigator 接口实现 ============
     
@@ -81,9 +75,10 @@ public:
     const AVCodecParameters* getCodecParameters() const override;
     SourceType getDataSourceType() const override;
     
-    // ============ IPacketSource 特有方法 ============
-    int readPacket(AVPacket* packet) override;
+    // ============ IEncodedPacketSource 特有方法 ============
+    int readEncodedPacket(AVPacket* packet) override;
     int getVideoStreamIndex() const override;
+
     // ============ 中断控制接口 ============
     
     /**
@@ -103,7 +98,7 @@ private:
     // ============ 中断机制（静态，所有实例共享） ============
     
     /**
-     * @brief 中断标志（静态成员，所有 RtspPacketSource 实例共享）
+     * @brief 中断标志（静态成员，所有 EncodedPacketSourceFromRtsp 实例共享）
      * 
      * 当设置为 true 时，所有正在进行的 RTSP 流读取操作都会被中断。
      * 这是响应 Ctrl+C 的核心机制。
@@ -126,7 +121,7 @@ private:
     AVFormatContext* format_ctx_ptr_;   // FFmpeg 格式上下文
     int video_stream_index_;            // 视频流索引
     std::atomic<int> current_frame_index_;  // 当前帧索引（已读取的帧数）
-    std::atomic<bool> is_open_;         // 🎯 原子变量，保证线程安全的状态检查
+    std::atomic<bool> is_open_;         // 原子变量，保证线程安全的状态检查
     std::atomic<bool> connected_;       // 连接状态
     std::atomic<bool> eof_reached_;     // 是否到达流末尾
     
@@ -146,4 +141,4 @@ private:
     log4cplus::Logger logger_;
 };
 
-#endif // RTSP_PACKET_SOURCE_HPP
+#endif // ENCODED_PACKET_SOURCE_FROM_RTSP_HPP

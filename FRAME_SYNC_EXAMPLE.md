@@ -435,7 +435,7 @@ conn2_cfg.callback_chain = {
 ## 版本历史
 
 - **v2.23**: 引入 `WorkerSyncCoordinator` 和回调链机制
-- **v2.22**: 修复 `BufferPacketSource` 资源泄漏和死锁
+- **v2.22**: 修复 `EncodedPacketSourceFromBuffer` 资源泄漏和死锁
 - **v2.18**: 引入共享模式（ONE_TO_MANY）
 
 ---

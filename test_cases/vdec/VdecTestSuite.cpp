@@ -290,13 +290,14 @@ bool VdecTestSuite::parseArgs(int argc, char* argv[], WorkerConfig& config, Deco
         {"min-psnr",   required_argument, 0, 'P'},
         {"min-ssim",   required_argument, 0, 'M'},
         {"verbose",    no_argument,       0, 'v'},
+        {"threads",    required_argument, 0, 't'},  // 并发路数（PARALLEL 模式）
         {0, 0, 0, 0}
     };
     
     std::string input_path;
     
     int opt;
-    while ((opt = getopt_long(argc, argv, "hlf:r:c:D:W:H:R:F:m:s:o:dpSP:M:v", 
+    while ((opt = getopt_long(argc, argv, "hlf:r:c:D:W:H:R:F:m:s:o:dpSP:M:vt:", 
                               long_options, nullptr)) != -1) {
         switch (opt) {
             case 'h':
@@ -390,6 +391,18 @@ bool VdecTestSuite::parseArgs(int argc, char* argv[], WorkerConfig& config, Deco
                 config.consumer_type.verbose = true;
                 break;
             
+            case 't': {
+                int thread_count = std::stoi(optarg);
+                if (thread_count < 1) {
+                    LOG4CPLUS_ERROR_FMT(getLogger(), 
+                        "Invalid thread count '%s', must be >= 1", optarg);
+                    return false;
+                }
+                // 设置 profile 为 parallel_N 格式，触发 PARALLEL 模式
+                params.profile = "parallel_" + std::to_string(thread_count);
+                break;
+            }
+            
             default:
                 printHelp();
                 return false;
@@ -480,17 +493,20 @@ void VdecTestSuite::printHelp() const {
               << "  -P, --min-psnr <n>      PSNR 阈值 (默认: 30.0 dB)\n"
               << "  -M, --min-ssim <n>      SSIM 阈值 (默认: 0.95)\n"
               << "  -v, --verbose           详细日志\n"
+              << "  -t, --threads <n>       并发路数 (启用 PARALLEL 模式，可任意指定)\n"
               << "\n"
               << "ExecuteMode Mapping:\n"
               << "  SINGLE   - 默认单路解码，支持 --decoder hw/sw\n"
               << "  COMPARE  - --psnr/--ssim 启用时，HW vs SW 对比\n"
-              << "  PARALLEL - multi_worker/multithread_N 测试，支持 --decoder hw/sw\n"
+              << "  PARALLEL - --threads N 或预定义 multithread_N，支持 --decoder hw/sw\n"
               << "\n"
               << "Examples:\n"
               << "  qa_cases vdec video.mp4                           # SINGLE\n"
               << "  qa_cases vdec --display video.mp4                 # SINGLE + DISPLAY\n"
               << "  qa_cases vdec --psnr video.mp4                    # COMPARE (HW vs SW)\n"
-              << "  qa_cases vdec multithread_4 video.mp4             # PARALLEL x4\n"
+              << "  qa_cases vdec --threads 16 video.mp4              # PARALLEL x16 (自定义路数)\n"
+              << "  qa_cases vdec --threads 32 --decoder sw video.mp4 # PARALLEL x32 软解\n"
+              << "  qa_cases vdec multithread_4 video.mp4             # PARALLEL x4 (预定义)\n"
               << std::endl;
 }
 

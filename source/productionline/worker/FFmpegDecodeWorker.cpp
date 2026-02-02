@@ -1,7 +1,7 @@
 #include "productionline/worker/FFmpegDecodeWorker.hpp"
-#include "productionline/worker/RtspPacketSource.hpp"
-#include "productionline/worker/BufferPacketSource.hpp"
-#include "productionline/worker/FilePacketSource.hpp"
+#include "productionline/worker/EncodedPacketSourceFromRtsp.hpp"
+#include "productionline/worker/EncodedPacketSourceFromBuffer.hpp"
+#include "productionline/worker/EncodedPacketSourceFromFile.hpp"
 #include "common/Logger.hpp"
 #include "buffer/bufferpool/BufferPool.hpp"
 #include "buffer/NormalAllocator.hpp"
@@ -45,18 +45,18 @@ FFmpegDecodeWorker::FFmpegDecodeWorker(const WorkerConfig& config)
     // ⭐ v2.22 重构：数据源配置从 decoder 移至 datasource
     // ⭐ v2.23 优化：自动识别数据源类型（RTSP/文件）
     if (config.data_source.buffer_mode) {
-        // Buffer 数据源模式：从 BufferPacketSource 获取 packet
+        // Buffer 数据源模式：从 EncodedPacketSourceFromBuffer 获取 packet
         
         // ⭐ v2.19 新增：检查是否使用共享实例（MultiWorker 共享模式）
         if (config.data_source.shared_packet_source) {
             // ✅ 共享模式：使用 config 中的共享实例（ONE_TO_MANY 零拷贝）
             packet_source_ = config.data_source.shared_packet_source;
-            LOG4CPLUS_INFO(logger_, "⭐ v2.22 使用共享 PacketSource（MultiWorker 共享模式）");
+            LOG4CPLUS_INFO(logger_, "⭐ v2.22 使用共享 EncodedPacketSource（MultiWorker 共享模式）");
         } else {
-            // ✅ 普通模式：创建独立的 BufferPacketSource 实例（ONE_TO_ONE）
+            // ✅ 普通模式：创建独立的 EncodedPacketSourceFromBuffer 实例（ONE_TO_ONE）
             if (config.data_source.codec_params) {
-                packet_source_ = std::make_shared<BufferPacketSource>(config.data_source.codec_params);
-                LOG4CPLUS_DEBUG(logger_, "Created BufferPacketSource (v2.20: 需要调用 setSourceBufferPool 关联源 Pool)");
+                packet_source_ = std::make_shared<EncodedPacketSourceFromBuffer>(config.data_source.codec_params);
+                LOG4CPLUS_DEBUG(logger_, "Created EncodedPacketSourceFromBuffer (v2.20: 需要调用 setSourceBufferPool 关联源 Pool)");
             } else {
                 LOG4CPLUS_WARN(logger_, "buffer_mode=true but codec_params is nullptr");
             }
@@ -68,12 +68,12 @@ FFmpegDecodeWorker::FFmpegDecodeWorker(const WorkerConfig& config)
             LOG4CPLUS_WARN(logger_, "data_source.path is empty, cannot create packet source");
         } else if (path.rfind("rtsp://", 0) == 0 || path.rfind("rtsps://", 0) == 0) {
             // RTSP 流：以 rtsp:// 或 rtsps:// 开头
-            packet_source_ = std::make_shared<RtspPacketSource>(path);
-            LOG4CPLUS_DEBUG_FMT(logger_, "Created RtspPacketSource for '%s'", path.c_str());
+            packet_source_ = std::make_shared<EncodedPacketSourceFromRtsp>(path);
+            LOG4CPLUS_DEBUG_FMT(logger_, "Created EncodedPacketSourceFromRtsp for '%s'", path.c_str());
         } else {
             // 文件：其他路径视为本地文件
-            packet_source_ = std::make_shared<FilePacketSource>(path);
-            LOG4CPLUS_DEBUG_FMT(logger_, "Created FilePacketSource for '%s'", path.c_str());
+            packet_source_ = std::make_shared<EncodedPacketSourceFromFile>(path);
+            LOG4CPLUS_DEBUG_FMT(logger_, "Created EncodedPacketSourceFromFile for '%s'", path.c_str());
         }
     }
 }
@@ -128,7 +128,7 @@ bool FFmpegDecodeWorker::open() {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
     
     // 如果已经打开，先关闭
-    if (packet_source_ && packet_source_->isOpen() && packet_source_->getDataSourceType() != IPacketSource::SourceType::BUFFER_SOURCE) {
+    if (packet_source_ && packet_source_->isOpen() && packet_source_->getDataSourceType() != IEncodedPacketSource::SourceType::BUFFER_SOURCE) {
         LOG4CPLUS_WARN(logger_, "[Worker] ⚠️  Stream already open, closing previous stream");
         close();
     }
@@ -150,7 +150,7 @@ bool FFmpegDecodeWorker::open() {
         LOG4CPLUS_INFO(logger_, "");
         LOG4CPLUS_INFO_FMT(logger_, "📡 Opening video source: %s", worker_config_.data_source.path.c_str());
     } else {
-        LOG4CPLUS_INFO(logger_, "[Worker] 📦 Opening BufferPacketSource (Buffer mode)");
+        LOG4CPLUS_INFO(logger_, "[Worker] 📦 Opening EncodedPacketSourceFromBuffer (Buffer mode)");
     }
     
     // 1. 打开数据源
@@ -247,7 +247,7 @@ bool FFmpegDecodeWorker::open() {
     
     // 9. 详细日志输出
     const char* mode_str = is_buffer_mode ? "Buffer mode" : 
-        (packet_source_->getDataSourceType() == IPacketSource::SourceType::NETWORK_SOURCE ? "RTSP stream" : "File");
+        (packet_source_->getDataSourceType() == IEncodedPacketSource::SourceType::NETWORK_SOURCE ? "RTSP stream" : "File");
     LOG4CPLUS_DEBUG_FMT(logger_, "[Worker] FFmpegDecodeWorker (%s): Opened", mode_str);
     if (!is_buffer_mode) {
         LOG4CPLUS_DEBUG_FMT(logger_, "[Worker]    Source: %s", worker_config_.data_source.path.c_str());
@@ -262,11 +262,11 @@ bool FFmpegDecodeWorker::open() {
     return true;
 }
 
-// ============ v2.13 BufferPacketSource 配置 ============
+// ============ v2.13 EncodedPacketSourceFromBuffer 配置 ============
 
 bool FFmpegDecodeWorker::setSourceBufferPool(std::weak_ptr<BufferPool> pool_weak) {
-    // 检查是否是 BufferPacketSource
-    auto* buffer_source = dynamic_cast<BufferPacketSource*>(packet_source_.get());
+    // 检查是否是 EncodedPacketSourceFromBuffer
+    auto* buffer_source = dynamic_cast<EncodedPacketSourceFromBuffer*>(packet_source_.get());
     if (!buffer_source) {
         LOG4CPLUS_WARN(logger_, "setSourceBufferPool 失败：不是 Buffer 模式");
         return false;
@@ -293,11 +293,11 @@ void FFmpegDecodeWorker::close() {
         
         // ⭐ v2.22 新增：清理未提交的 packet（Buffer 模式）
         if (worker_config_.data_source.buffer_mode && packet_acquired_) {
-            auto ps = std::dynamic_pointer_cast<BufferPacketSource>(packet_source_);
+            auto ps = std::dynamic_pointer_cast<EncodedPacketSourceFromBuffer>(packet_source_);
             if (ps) {
                 // 强制提交（避免订阅者计数永久占用）
                 LOG4CPLUS_DEBUG(logger_, "[Worker] Cleaning up pending packet on close");
-                ps->commitPacket(this);
+                ps->commitEncodedPacket(this);
             }
             packet_acquired_ = false;
             current_packet_ptr_ = nullptr;
@@ -353,14 +353,14 @@ bool FFmpegDecodeWorker::seek(int frame_index) {
     }
     
     // 2. 委托给数据源实现 seek（多态调用）
-    //    - FilePacketSource: 实现真正的 seek
-    //    - RtspPacketSource: 返回 false（不支持）
-    //    - BufferPacketSource: 返回 false（不支持）
+    //    - EncodedPacketSourceFromFile: 实现真正的 seek
+    //    - EncodedPacketSourceFromRtsp: 返回 false（不支持）
+    //    - EncodedPacketSourceFromBuffer: 返回 false（不支持）
     if (!packet_source_->seek(frame_index)) {
         // 根据数据源类型返回适当的日志
-        if (packet_source_->getDataSourceType() == IPacketSource::SourceType::NETWORK_SOURCE) {
+        if (packet_source_->getDataSourceType() == IEncodedPacketSource::SourceType::NETWORK_SOURCE) {
             LOG4CPLUS_WARN(logger_, "[Worker] RTSP stream does not support seeking");
-        } else if (packet_source_->getDataSourceType() == IPacketSource::SourceType::BUFFER_SOURCE) {
+        } else if (packet_source_->getDataSourceType() == IEncodedPacketSource::SourceType::BUFFER_SOURCE) {
             LOG4CPLUS_WARN(logger_, "[Worker] Buffer source does not support seeking");
         } else {
             LOG4CPLUS_ERROR(logger_, "[Worker] Seek failed or not supported by packet source");
@@ -659,15 +659,15 @@ bool FFmpegDecodeWorker::fillBufferMetadataFromFrame(AVFrame* frame_ptr, Buffer*
  */
 bool FFmpegDecodeWorker::readAndSendPacket(AVPacket* packet_ptr) {
     if (worker_config_.data_source.buffer_mode) {
-        auto ps = std::dynamic_pointer_cast<BufferPacketSource>(packet_source_);
+        auto ps = std::dynamic_pointer_cast<EncodedPacketSourceFromBuffer>(packet_source_);
         if (!ps) {
-            LOG4CPLUS_ERROR(logger_, "[Worker] ERROR: Failed to cast to BufferPacketSource");
+            LOG4CPLUS_ERROR(logger_, "[Worker] ERROR: Failed to cast to EncodedPacketSourceFromBuffer");
             return false;
         }
         
         // ⭐ v2.22 新增：只在未获取时才尝试获取
         if (!packet_acquired_) {
-            current_packet_ptr_ = ps->acquirePacket(this);  // ✅ 传递 this 指针
+            current_packet_ptr_ = ps->acquireEncodedPacket(this);  // ✅ 传递 this 指针
             
             if (!current_packet_ptr_) {
                 // EOF 或 已获取过当前版本（需要等待新 buffer）
@@ -683,7 +683,7 @@ bool FFmpegDecodeWorker::readAndSendPacket(AVPacket* packet_ptr) {
         if (ret < 0 && ret != AVERROR(EAGAIN)) {
             // ❌ 发送失败，取消当前获取
             LOG4CPLUS_ERROR_FMT(logger_, "[Worker] ERROR: avcodec_send_packet failed: %d", ret);
-            ps->cancelPacket(this);
+            ps->cancelEncodedPacket(this);
             packet_acquired_ = false;
             current_packet_ptr_ = nullptr;
             return false;
@@ -702,7 +702,7 @@ bool FFmpegDecodeWorker::readAndSendPacket(AVPacket* packet_ptr) {
     
     while (true) {
         // 使用数据源抽象读取 packet
-        read_ret = packet_source_->readPacket(packet_ptr);
+        read_ret = packet_source_->readEncodedPacket(packet_ptr);
         
         if (read_ret < 0) {
             if (read_ret == AVERROR_EOF) {
@@ -728,7 +728,7 @@ bool FFmpegDecodeWorker::readAndSendPacket(AVPacket* packet_ptr) {
                 // 其他错误（非 EOF，非损坏帧）：记录错误并返回
                 char err_buf[AV_ERROR_MAX_STRING_SIZE];
                 av_strerror(read_ret, err_buf, sizeof(err_buf));
-                LOG4CPLUS_ERROR_FMT(logger_, "[Worker] ERROR: readPacket failed: %d (%s)", read_ret, err_buf);
+                LOG4CPLUS_ERROR_FMT(logger_, "[Worker] ERROR: readEncodedPacket failed: %d (%s)", read_ret, err_buf);
                 av_packet_unref(packet_ptr);
                 return false;
             }
@@ -739,7 +739,7 @@ bool FFmpegDecodeWorker::readAndSendPacket(AVPacket* packet_ptr) {
     }
     
     // ⭐ 视频流索引检查（仅文件模式需要）
-    if (auto* file_source = dynamic_cast<FilePacketSource*>(packet_source_.get())) {
+    if (auto* file_source = dynamic_cast<EncodedPacketSourceFromFile*>(packet_source_.get())) {
         (void)file_source;  // 仅用于类型检查
         if (packet_ptr->stream_index != packet_source_->getVideoStreamIndex()) {
             // 不是视频流的 packet 需要释放，然后继续读取下一个
@@ -835,9 +835,9 @@ bool FFmpegDecodeWorker::fillBuffer(int frame_index, Buffer* buffer) {
         
         if (worker_config_.data_source.buffer_mode) {
             // ⭐ v2.22 新增：Buffer 模式 - 取消获取（下次重试）
-            auto ps = std::dynamic_pointer_cast<BufferPacketSource>(packet_source_);
+            auto ps = std::dynamic_pointer_cast<EncodedPacketSourceFromBuffer>(packet_source_);
             if (ps) {
-                ps->cancelPacket(this);
+                ps->cancelEncodedPacket(this);
             }
             packet_acquired_ = false;
             current_packet_ptr_ = nullptr;
@@ -847,10 +847,10 @@ bool FFmpegDecodeWorker::fillBuffer(int frame_index, Buffer* buffer) {
     
     // ========== 步骤6: 成功解码，提交（释放）==========
     if (worker_config_.data_source.buffer_mode && packet_acquired_) {
-        auto ps = std::dynamic_pointer_cast<BufferPacketSource>(packet_source_);
+        auto ps = std::dynamic_pointer_cast<EncodedPacketSourceFromBuffer>(packet_source_);
         if (ps) {
             // ⭐ v2.22 新增：成功处理，提交释放
-            ps->commitPacket(this);
+            ps->commitEncodedPacket(this);
         }
         
         // 重置状态

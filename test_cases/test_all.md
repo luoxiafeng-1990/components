@@ -27,7 +27,7 @@
 | 缩放（Scale）测试（4种配置） | 4 | ✅ 已覆盖 |
 | RTSP 流测试（H.264/H.265/MJPEG） | 9 | ✅ 已覆盖 |
 | 软件解码测试 | 2 | ✅ 已覆盖 |
-| 多 Worker/多线程测试 | 5 | ✅ 已覆盖 |
+| 多 Worker/多线程测试（支持 --threads N 自定义路数） | 5+ | ✅ 已覆盖 |
 | PSNR/SSIM 质量验证测试 | 16 | ✅ 已覆盖 |
 | Record 录制测试 | 12 | ✅ 已覆盖 |
 | Writer 格式输出测试 | 22 | ✅ 已覆盖 |
@@ -255,9 +255,39 @@ sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
     "~/qa_cases vdec --codec mjpeg --resolution 32768x18432 --psnr --ssim --display --rtsp rtsp://192.168.1.100/mjpeg_ultrahd"
 ```
 
-### 2.6 多 Worker / 多线程测试
+### 2.6 多 Worker / 多线程测试（PARALLEL 模式）
+
+> **提示**: 使用 `--threads N` 参数可以指定任意并发路数，不再局限于预定义的 2/4/8 路。
 
 ```bash
+# ========================================
+# 方式一：使用 --threads 参数（推荐，可指定任意并发路数）
+# ========================================
+
+# 16 路并发解码
+sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
+    "~/qa_cases vdec --threads 16 /usr/data/ffmpeg/1920x1080.mp4"
+
+# 32 路并发解码
+sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
+    "~/qa_cases vdec --threads 32 /usr/data/ffmpeg/1920x1080.mp4"
+
+# 64 路并发解码
+sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
+    "~/qa_cases vdec --threads 64 /usr/data/ffmpeg/1920x1080.mp4"
+
+# 32 路软解并发
+sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
+    "~/qa_cases vdec --threads 32 --decoder sw /usr/data/ffmpeg/1920x1080.mp4"
+
+# 16 路并发 + 显示
+sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
+    "~/qa_cases vdec --threads 16 --display /usr/data/ffmpeg/1920x1080.mp4"
+
+# ========================================
+# 方式二：使用预定义测试名称（向后兼容）
+# ========================================
+
 # 多 Worker 测试 - HW+SW 同时解码 1080p
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
     "~/qa_cases vdec multi_worker --psnr --ssim --display /usr/data/ffmpeg/1920x1080.mp4"
@@ -266,18 +296,23 @@ sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
     "~/qa_cases vdec multi_worker_4k --psnr --ssim --display /usr/data/ffmpeg/3840x2160.mp4"
 
-# 2 线程解码
+# 2 线程解码（预定义）
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
     "~/qa_cases vdec multithread_2 --psnr --ssim --display /usr/data/ffmpeg/1920x1080.mp4"
 
-# 4 线程解码
+# 4 线程解码（预定义）
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
     "~/qa_cases vdec multithread_4 --psnr --ssim --display /usr/data/ffmpeg/1920x1080.mp4"
 
-# 8 线程解码
+# 8 线程解码（预定义）
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
     "~/qa_cases vdec multithread_8 --psnr --ssim --display /usr/data/ffmpeg/1920x1080.mp4"
 ```
+
+**并发限制说明**:
+- 默认线程池大小：64
+- 最大线程池大小：128
+- 当并发路数超过线程池大小时，任务会排队执行
 
 ### 2.7 带参数的解码测试
 
@@ -749,11 +784,11 @@ sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
 ```bash
 # 手动指定裁剪区域 (x,y,w,h)
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "~/qa_cases pp --channel pp0 --format nv12 --crop 0,0,1920,1080 --resolution 1920x1080 --psnr --ssim --display /usr/data/ffmpeg/3840x2160.mp4"
+    "~/qa_cases pp --channel 0 --format nv12 --crop 0,0,1920,1080 --resolution 1920x1080 --psnr --ssim --display /usr/data/ffmpeg/3840x2160.mp4"
 
 # 裁剪 + 缩放组合
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "~/qa_cases pp --channel pp1 --format argb888 --crop 100,100,1720,880 --resolution 1280x720 --psnr --ssim --display /usr/data/ffmpeg/1920x1080.mp4"
+    "~/qa_cases pp --channel 1 --format argb888 --crop 100,100,1720,880 --resolution 1280x720 --psnr --ssim --display /usr/data/ffmpeg/1920x1080.mp4"
 ```
 
 ### 3.6 PP 带参数测试
@@ -781,23 +816,23 @@ sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
 
 # PP 指定颜色标准 BT709（--color-std）
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "~/qa_cases pp --channel pp1 --format argb888 --color-std bt709 /usr/data/ffmpeg/1920x1080.mp4"
+    "~/qa_cases pp --channel 1 --format argb888 --color-std bt709 /usr/data/ffmpeg/1920x1080.mp4"
 
 # PP 指定颜色标准 BT2020
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "~/qa_cases pp --channel pp1 --format argb888 --color-std bt2020 /usr/data/ffmpeg/1920x1080.mp4"
+    "~/qa_cases pp --channel 1 --format argb888 --color-std bt2020 /usr/data/ffmpeg/1920x1080.mp4"
 
 # PP 单独指定宽高（--width 和 --height）
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "~/qa_cases pp --channel pp1 --format argb888 --width 1920 --height 1080 /usr/data/ffmpeg/1920x1080.mp4"
+    "~/qa_cases pp --channel 1 --format argb888 --width 1920 --height 1080 /usr/data/ffmpeg/1920x1080.mp4"
 
 # PP 手动指定裁剪区域（--crop x,y,w,h）
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "~/qa_cases pp --channel pp1 --format argb888 --crop 100,100,800,600 /usr/data/ffmpeg/1920x1080.mp4"
+    "~/qa_cases pp --channel 1 --format argb888 --crop 100,100,800,600 /usr/data/ffmpeg/1920x1080.mp4"
 
 # PP 手动指定输入文件（--input）
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "~/qa_cases pp --input /usr/data/ffmpeg/1920x1080.mp4 --channel pp1 --format argb888"
+    "~/qa_cases pp --input /usr/data/ffmpeg/1920x1080.mp4 --channel 1 --format argb888"
 ```
 
 ---
@@ -1067,6 +1102,7 @@ done
 | `-f, --file <path>` | 输入视频文件路径 |
 | `-r, --rtsp <url>` | RTSP URL |
 | `-c, --codec <name>` | 编解码器 (h264/h265/mjpeg/software) |
+| `-D, --decoder <type>` | 解码方式 (hw/hardware/sw/software，默认: hw) |
 | `-W, --width <n>` | 视频宽度 |
 | `-H, --height <n>` | 视频高度 |
 | `-R, --resolution <WxH>` | 分辨率 (等同于 -W 和 -H 组合) |
@@ -1080,6 +1116,14 @@ done
 | `-P, --min-psnr <n>` | PSNR 阈值 (默认: 30.0 dB) |
 | `-M, --min-ssim <n>` | SSIM 阈值 (默认: 0.95) |
 | `-v, --verbose` | 详细日志 |
+| `-t, --threads <n>` | **并发路数（启用 PARALLEL 模式，可任意指定 1-128）** |
+
+**ExecuteMode 映射**:
+| 模式 | 触发条件 | 说明 |
+|------|---------|------|
+| SINGLE | 默认 | 单路解码 |
+| COMPARE | `--psnr` 或 `--ssim` | HW vs SW 质量对比 |
+| PARALLEL | `--threads N` 或预定义 multithread_N | 多路并发解码 |
 
 ### A.2 PP 模块参数
 
@@ -1089,7 +1133,7 @@ done
 | `-l, --list` | 列出所有预定义测试 |
 | `-i, --input <path>` | 输入视频路径 |
 | `-f, --format <fmt>` | 输出格式 (nv12/argb888/...) |
-| `-c, --channel <ch>` | 通道选择 (pp0/pp1/multi) |
+| `-c, --channel <ch>` | 通道选择 (0/1/0,1) |
 | `-W, --width <n>` | 输出宽度 |
 | `-H, --height <n>` | 输出高度 |
 | `-R, --resolution <WxH>` | 分辨率 (等同于 -W 和 -H 组合) |

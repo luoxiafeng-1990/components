@@ -1,6 +1,6 @@
 #include "productionline/worker/FfmpegPacketRecorderWorker.hpp"
-#include "productionline/worker/RtspPacketSource.hpp"
-#include "productionline/worker/FilePacketSource.hpp"
+#include "productionline/worker/EncodedPacketSourceFromRtsp.hpp"
+#include "productionline/worker/EncodedPacketSourceFromFile.hpp"
 #include "common/Logger.hpp"
 #include "buffer/bufferpool/BufferPool.hpp"
 #include "buffer/bufferpool/BufferPoolRegistry.hpp"
@@ -295,7 +295,7 @@ bool FfmpegPacketRecorderWorker::fillBuffer(int frame_index, Buffer* buffer) {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
     
     // 2. ============ v2.13：通过数据源读取 AVPacket ============
-    int ret = packet_source_->readPacket(packet);
+    int ret = packet_source_->readEncodedPacket(packet);
     
     if (ret < 0) {
         if (ret == AVERROR_EOF) {
@@ -304,7 +304,7 @@ bool FfmpegPacketRecorderWorker::fillBuffer(int frame_index, Buffer* buffer) {
         } else {
             char err_buf[128];
             av_strerror(ret, err_buf, sizeof(err_buf));
-            LOG4CPLUS_ERROR_FMT(logger_, "ERROR: packet_source_->readPacket() failed: %d (%s)", ret, err_buf);
+            LOG4CPLUS_ERROR_FMT(logger_, "ERROR: packet_source_->readEncodedPacket() failed: %d (%s)", ret, err_buf);
             return false;
         }
     }
@@ -332,26 +332,26 @@ bool FfmpegPacketRecorderWorker::fillBuffer(int frame_index, Buffer* buffer) {
 
 // ============ v2.13：数据源自动选择逻辑 ============
 
-std::unique_ptr<IPacketSource> FfmpegPacketRecorderWorker::createPacketSource(const std::string& path) {
+std::unique_ptr<IEncodedPacketSource> FfmpegPacketRecorderWorker::createPacketSource(const std::string& path) {
     // 根据 URL/路径前缀判断数据源类型
     if (path.find("rtsp://") == 0 || path.find("rtsps://") == 0) {
         LOG4CPLUS_INFO(logger_, "📡 Detected RTSP stream source");
-        return std::make_unique<RtspPacketSource>(path);
+        return std::make_unique<EncodedPacketSourceFromRtsp>(path);
     } 
     else if (path.find("rtmp://") == 0 || path.find("rtmps://") == 0) {
         LOG4CPLUS_INFO(logger_, "📡 Detected RTMP stream source");
-        // 未来扩展：return std::make_unique<RtmpPacketSource>(path);
+        // 未来扩展：return std::make_unique<EncodedPacketSourceFromRtmp>(path);
         LOG4CPLUS_ERROR(logger_, "❌ RTMP protocol not supported yet");
         return nullptr;
     }
     else if (path.find("http://") == 0 || path.find("https://") == 0) {
         LOG4CPLUS_INFO(logger_, "🌐 Detected HTTP/HTTPS stream source (e.g., HLS)");
-        // HTTP 流可以用 FilePacketSource 处理（FFmpeg 原生支持）
-        return std::make_unique<FilePacketSource>(path);
+        // HTTP 流可以用 EncodedPacketSourceFromFile 处理（FFmpeg 原生支持）
+        return std::make_unique<EncodedPacketSourceFromFile>(path);
     }
     else {
         LOG4CPLUS_INFO(logger_, "📁 Detected local file source");
-        return std::make_unique<FilePacketSource>(path);
+        return std::make_unique<EncodedPacketSourceFromFile>(path);
     }
 }
 
@@ -391,7 +391,7 @@ AVRational FfmpegPacketRecorderWorker::getTimeBase() const {
     
     // 从数据源获取编解码器参数，进而获取时间基
     // 注意：需要从 AVStream 获取，这里简化处理返回默认值
-    return {1, 25};  // 默认25fps（TODO: 如需精确时间基，需要扩展 IPacketSource 接口）
+    return {1, 25};  // 默认25fps（TODO: 如需精确时间基，需要扩展 IEncodedPacketSource 接口）
 }
 
 AVPixelFormat FfmpegPacketRecorderWorker::getSourcePixelFormat() const {
