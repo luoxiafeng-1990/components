@@ -90,6 +90,43 @@ enum class BufferPoolType {
 };
 
 /**
+ * @brief fillBuffer 返回结果枚举
+ * 
+ * 用于帧同步场景，区分不同的 fillBuffer 返回状态
+ * 
+ * v2.29 新增：支持帧同步的错误处理
+ * v2.30 修改：细分错误类型，新增 EAGAIN
+ * v2.31 修改：细分 ACQUIRE_FAILED 为 ACQUIRE_AGAIN/ACQUIRE_EOF/ACQUIRE_ERROR
+ */
+enum class FillBufferResult {
+    SUCCESS,           // 解码成功，有输出帧
+    NEED_MORE_DATA,    // 数据源暂时没有新数据（非视频流 packet 等）
+    DECODER_EAGAIN,    // 解码器收到了 packet，但还不能输出帧（B 帧重排序、解码器缓冲）
+    ACQUIRE_AGAIN,     // ⭐ v2.31：已处理当前版本，需等待新 buffer（可重试）
+    ACQUIRE_EOF,       // ⭐ v2.31：数据流正常结束（应退出）
+    ACQUIRE_ERROR,     // ⭐ v2.31：获取 packet 时发生错误（配置错误等）
+    SEND_ERROR,        // avcodec_send_packet() 失败
+    FAILURE            // 其他错误（参数错误、IO 错误、损坏帧过多等）
+};
+
+/**
+ * @brief FillBufferResult 转字符串（调试用）
+ */
+inline const char* fillBufferResultToString(FillBufferResult result) {
+    switch (result) {
+        case FillBufferResult::SUCCESS:        return "SUCCESS";
+        case FillBufferResult::NEED_MORE_DATA: return "NEED_MORE_DATA";
+        case FillBufferResult::DECODER_EAGAIN: return "DECODER_EAGAIN";
+        case FillBufferResult::ACQUIRE_AGAIN:  return "ACQUIRE_AGAIN";   // ⭐ v2.31
+        case FillBufferResult::ACQUIRE_EOF:    return "ACQUIRE_EOF";     // ⭐ v2.31
+        case FillBufferResult::ACQUIRE_ERROR:  return "ACQUIRE_ERROR";   // ⭐ v2.31
+        case FillBufferResult::SEND_ERROR:     return "SEND_ERROR";
+        case FillBufferResult::FAILURE:        return "FAILURE";
+        default:                               return "UNKNOWN";
+    }
+}
+
+/**
  * @brief BufferPoolType 转字符串（调试用）
  */
 inline const char* bufferPoolTypeToString(BufferPoolType type) {
@@ -211,6 +248,18 @@ public:
      * @return 成功返回 true
      */
     virtual bool fillBuffer(int frame_index, Buffer* buffer) = 0;
+    
+    /**
+     * @brief 获取最后一次 fillBuffer 的结果状态
+     * 
+     * v2.30 新增：用于帧同步场景
+     * 在 fillBuffer 返回 false 时，调用此方法获取具体的失败原因
+     * 
+     * @return FillBufferResult 枚举值
+     */
+    FillBufferResult getLastFillResult() const {
+        return last_fill_result_;
+    }
     
     /**
      * @brief 从AVFrame元数据中提取硬件解码器的物理内存地址
@@ -706,6 +755,25 @@ protected:
     
     // 日志器
     log4cplus::Logger logger_;
+    
+    /**
+     * @brief 最后一次 fillBuffer 的结果状态
+     * 
+     * v2.30 新增：用于帧同步场景
+     * 子类在 fillBuffer 实现中调用 setLastFillResult() 设置结果
+     */
+    FillBufferResult last_fill_result_ = FillBufferResult::SUCCESS;
+    
+    /**
+     * @brief 设置最后一次 fillBuffer 的结果状态
+     * 
+     * v2.30 新增：供子类在 fillBuffer 实现中调用
+     * 
+     * @param result 结果状态
+     */
+    void setLastFillResult(FillBufferResult result) {
+        last_fill_result_ = result;
+    }
 };
 
 #endif // WORKER_BASE_HPP

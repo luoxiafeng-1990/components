@@ -36,6 +36,40 @@ bool CompareCallbackContext::isPassed() const {
     return failed_frames.load() == 0;
 }
 
+CompareCallbackContext::~CompareCallbackContext() {
+    closeComparator();
+}
+
+bool CompareCallbackContext::openComparator() {
+    // 如果已经打开，直接返回
+    if (comparator_opened_ && comparator_) {
+        return true;
+    }
+    
+    // 创建 comparator
+    comparator_ = std::make_unique<productionline::io::BufferComparator>();
+    
+    // 配置
+    productionline::io::CompareConfig config;
+    config.enable_psnr = enable_psnr;
+    config.enable_ssim = enable_ssim;
+    config.min_psnr = min_psnr;
+    config.min_ssim = min_ssim;
+    config.verbose = verbose;
+    config.save_report = false;
+    
+    // 打开
+    comparator_opened_ = comparator_->open(config);
+    return comparator_opened_;
+}
+
+void CompareCallbackContext::closeComparator() {
+    if (comparator_ && comparator_opened_) {
+        comparator_->close();
+        comparator_opened_ = false;
+    }
+}
+
 WorkerSyncCoordinator::WorkerSyncCoordinator(
     const std::vector<std::string>& worker_names,
     const CallbackChain& callback_chain
@@ -77,7 +111,8 @@ WorkerSyncCoordinator::~WorkerSyncCoordinator() {
 bool WorkerSyncCoordinator::arrive(
     const std::string& worker_name, 
     uint64_t frame_version, 
-    Buffer* buffer
+    Buffer* buffer,
+    FillBufferResult result
 ) {
     // ⭐ 快速路径：如果没有配置回调，直接返回（零开销）
     if (callback_chain_.empty()) {
@@ -98,39 +133,92 @@ bool WorkerSyncCoordinator::arrive(
         return false;
     }
     
-    // 记录 Worker 的 Buffer
+    // 记录 Worker 的 Buffer 和结果状态
     sync.worker_buffers[worker_name] = buffer;
+    sync.worker_results[worker_name] = result;
     sync.arrived_count++;
     
     LOG4CPLUS_DEBUG_FMT(logger_, 
-        "[Frame %llu] Worker '%s' 到达同步点 (%zu/%zu)", 
+        "[Frame %llu] Worker '%s' 到达同步点 (%zu/%zu), 状态: %s", 
         (unsigned long long)frame_version, 
         worker_name.c_str(),
         sync.arrived_count, 
-        total_workers_);
+        total_workers_,
+        fillBufferResultToString(result));
     
     // 检查是否所有 Worker 都到达
     if (sync.arrived_count == total_workers_) {
-        // ✅ 所有 Worker 都到达，执行回调链
+        // ✅ 所有 Worker 都到达，分析状态并决定处理方式
         LOG4CPLUS_DEBUG_FMT(logger_, 
-            "[Frame %llu] 所有 Worker 就绪，执行回调链 (%zu 个回调)", 
-            (unsigned long long)frame_version,
-            callback_chain_.size());
+            "[Frame %llu] 所有 Worker 就绪，分析状态...", 
+            (unsigned long long)frame_version);
         
-        bool result = executeCallbackChain(frame_version, sync.worker_buffers);
+        // 统计各状态的数量
+        int success_count = 0;
+        int eagain_count = 0;
+        int error_count = 0;
         
-        sync.should_submit = result;
-        sync.callback_executed = true;
-        
-        if (result) {
-            LOG4CPLUS_DEBUG_FMT(logger_, 
-                "[Frame %llu] 回调链执行成功，允许提交", 
-                (unsigned long long)frame_version);
-        } else {
-            LOG4CPLUS_WARN_FMT(logger_, 
-                "[Frame %llu] 回调链执行失败，拒绝提交", 
-                (unsigned long long)frame_version);
+        for (const auto& [name, res] : sync.worker_results) {
+            switch (res) {
+                case FillBufferResult::SUCCESS:        success_count++; break;
+                case FillBufferResult::NEED_MORE_DATA: eagain_count++;  break;
+                case FillBufferResult::DECODER_EAGAIN: eagain_count++;  break;
+                case FillBufferResult::ACQUIRE_AGAIN:  eagain_count++;  break;  // ⭐ v2.31: 等待新 buffer
+                case FillBufferResult::ACQUIRE_EOF:    error_count++;   break;  // ⭐ v2.31: EOF 视为需要停止
+                case FillBufferResult::ACQUIRE_ERROR:  error_count++;   break;  // ⭐ v2.31: 获取错误
+                case FillBufferResult::SEND_ERROR:     error_count++;   break;  // v2.30: 发送失败是错误
+                case FillBufferResult::FAILURE:        error_count++;   break;
+            }
         }
+        
+        // 根据状态组合决定处理方式
+        if (success_count == static_cast<int>(total_workers_)) {
+            // 场景 1：都成功 → 执行回调对比
+            LOG4CPLUS_DEBUG_FMT(logger_, 
+                "[Frame %llu] 所有 Worker 成功，执行回调链 (%zu 个回调)", 
+                (unsigned long long)frame_version,
+                callback_chain_.size());
+            
+            bool callback_result = executeCallbackChain(frame_version, sync.worker_buffers);
+            sync.should_submit = callback_result;
+            
+            if (callback_result) {
+                LOG4CPLUS_DEBUG_FMT(logger_, 
+                    "[Frame %llu] 回调链执行成功，允许提交", 
+                    (unsigned long long)frame_version);
+            } else {
+                LOG4CPLUS_WARN_FMT(logger_, 
+                    "[Frame %llu] 回调链执行失败，拒绝提交", 
+                    (unsigned long long)frame_version);
+            }
+        }
+        else if (eagain_count == static_cast<int>(total_workers_)) {
+            // 场景 2a：都 EAGAIN → 跳过回调，继续下一帧
+            LOG4CPLUS_DEBUG_FMT(logger_, 
+                "[Frame %llu] 所有 Worker 返回 EAGAIN，跳过当前帧", 
+                (unsigned long long)frame_version);
+            sync.should_submit = false;
+        }
+        else if (success_count > 0 && eagain_count > 0) {
+            // 场景 3a：一个成功 + 一个 EAGAIN → ❌ 报错！不应该发生
+            LOG4CPLUS_ERROR_FMT(logger_, 
+                "[Frame %llu] ❌ EAGAIN 不一致！%d 个成功，%d 个 EAGAIN。"
+                "无法进行帧同步对比，请检查解码器配置！", 
+                (unsigned long long)frame_version,
+                success_count, eagain_count);
+            sync.should_submit = false;
+            // TODO: 可以设置标志通知外部切换比较模式
+        }
+        else {
+            // 场景 2b/3b：有 ERROR（无论是否有成功）→ 跳过回调，继续下一帧
+            LOG4CPLUS_DEBUG_FMT(logger_, 
+                "[Frame %llu] 有 Worker 返回错误 (成功:%d, EAGAIN:%d, ERROR:%d)，跳过当前帧", 
+                (unsigned long long)frame_version,
+                success_count, eagain_count, error_count);
+            sync.should_submit = false;
+        }
+        
+        sync.callback_executed = true;
         
         // 唤醒所有等待的 Worker
         cv_.notify_all();
@@ -138,7 +226,7 @@ bool WorkerSyncCoordinator::arrive(
         // 清理旧版本数据（保留最近 10 帧）
         cleanupOldFrames(frame_version);
         
-        return result;
+        return sync.should_submit;
         
     } else {
         // ⏳ 等待其他 Worker 到达
@@ -281,23 +369,16 @@ CallbackChainItem WorkerSyncCoordinator::createDefaultCompareCallback(
             return true;
         }
         
-        // 配置 BufferComparator
-        productionline::io::BufferComparator comparator;
-        productionline::io::CompareConfig config;
-        config.enable_psnr = compare_ctx->enable_psnr;
-        config.enable_ssim = compare_ctx->enable_ssim;
-        config.min_psnr = compare_ctx->min_psnr;
-        config.min_ssim = compare_ctx->min_ssim;
-        config.verbose = compare_ctx->verbose;
-        config.save_report = false;
-        
-        if (!comparator.open(config)) {
-            return true;  // 打开失败，不阻塞流程
+        // ⭐ v2.28 优化：使用已打开的 comparator，避免每帧重复创建
+        // 如果 comparator 未打开，尝试打开（懒初始化）
+        if (!compare_ctx->comparator_opened_) {
+            if (!compare_ctx->openComparator()) {
+                return true;  // 打开失败，不阻塞流程
+            }
         }
         
-        // 执行比较
-        auto result = comparator.compare(reference_buffer, test_buffer);
-        comparator.close();
+        // 执行比较（直接使用已打开的 comparator）
+        auto result = compare_ctx->comparator_->compare(reference_buffer, test_buffer);
         
         double psnr = result.psnr_avg;
         double ssim = result.ssim_avg;

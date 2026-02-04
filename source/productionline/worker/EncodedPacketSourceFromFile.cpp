@@ -9,7 +9,7 @@ extern "C" {
 #include <libavutil/error.h>
 }
 
-EncodedPacketSourceFromFile::EncodedPacketSourceFromFile(const std::string& file_path)
+EncodedPacketSourceFromFile::EncodedPacketSourceFromFile(const std::string& file_path, int max_frames)
     : file_path_(file_path)
     , format_ctx_ptr_(nullptr)
     , video_stream_index_(-1)
@@ -17,8 +17,10 @@ EncodedPacketSourceFromFile::EncodedPacketSourceFromFile(const std::string& file
     , current_frame_index_(0)  // 当前帧索引初始化
     , is_open_(false)  // 原子变量初始化
     , eof_reached_(false)
+    , max_frames_(max_frames)  // v2.23 新增：帧数限制
+    , frames_read_(0)          // v2.23 新增：已读取帧数计数
     , logger_(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.DataSource.File"))){
-    LOG4CPLUS_DEBUG_FMT(logger_, "构造函数: file_path='%s'", file_path_.c_str());
+    LOG4CPLUS_DEBUG_FMT(logger_, "构造函数: file_path='%s', max_frames=%d", file_path_.c_str(), max_frames_);
 }
 
 EncodedPacketSourceFromFile::~EncodedPacketSourceFromFile() {
@@ -108,6 +110,13 @@ int EncodedPacketSourceFromFile::readEncodedPacket(AVPacket* packet) {
         return AVERROR(EINVAL);
     }
     
+    // v2.23 新增：检查是否达到最大帧数限制
+    if (max_frames_ > 0 && frames_read_ >= max_frames_) {
+        LOG4CPLUS_DEBUG_FMT(logger_, "Reached max frames limit: %d", max_frames_);
+        eof_reached_ = true;
+        return AVERROR_EOF;  // 返回 EOF
+    }
+    
     // 从文件读取 packet
     int ret = av_read_frame(format_ctx_ptr_, packet);
     
@@ -131,12 +140,20 @@ int EncodedPacketSourceFromFile::readEncodedPacket(AVPacket* packet) {
         const int MAX_NON_VIDEO_PACKETS = 100;  // 最大跳过非视频包数量
         int skipped = 0;
         while (skipped < MAX_NON_VIDEO_PACKETS) {
+            // v2.23 新增：循环内也检查帧数限制
+            if (max_frames_ > 0 && frames_read_ >= max_frames_) {
+                LOG4CPLUS_DEBUG_FMT(logger_, "Reached max frames limit in loop: %d", max_frames_);
+                eof_reached_ = true;
+                return AVERROR_EOF;
+            }
+            
             int ret = av_read_frame(format_ctx_ptr_, packet);
             if (ret < 0) {
                 return ret;  // EOF 或错误
             }
             if (packet->stream_index == video_stream_index_) {
                 current_frame_index_++;  // 更新当前帧索引
+                frames_read_++;          // v2.23 新增：更新已读取帧数
                 return 0;  // 找到视频流
             }
             av_packet_unref(packet);
@@ -148,6 +165,7 @@ int EncodedPacketSourceFromFile::readEncodedPacket(AVPacket* packet) {
     }
     
     current_frame_index_++;  // 更新当前帧索引
+    frames_read_++;          // v2.23 新增：更新已读取帧数
     return 0;  // 成功
 }
 
@@ -164,6 +182,10 @@ int EncodedPacketSourceFromFile::getVideoStreamIndex() const {
 }
 
 int EncodedPacketSourceFromFile::getTotalFrames() const {
+    // v2.23 新增：如果设置了 max_frames 限制，返回较小值
+    if (max_frames_ > 0 && (total_frames_ < 0 || max_frames_ < total_frames_)) {
+        return max_frames_;
+    }
     return total_frames_;
 }
 

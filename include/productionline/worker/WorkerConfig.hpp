@@ -52,7 +52,8 @@ using CallbackChain = std::vector<CallbackChainItem>;
 enum class WorkerType {
     AUTO,                   // 自动检测（默认）
     FFMPEG_DECODE,          // FFmpeg 解码 Worker（统一处理文件和 RTSP 流）
-    FFMPEG_PACKET_RECORDER  // FFmpeg Packet 录制器（支持 RTSP/文件/HTTP 等多种数据源）
+    FFMPEG_PACKET_RECORDER, // FFmpeg Packet 录制器（支持 RTSP/文件/HTTP 等多种数据源）
+    FFMPEG_ENCODE           // ⭐ v2.29 新增：FFmpeg 编码 Worker（H.264/H.265/JPEG 编码）
 };
 
 /**
@@ -184,6 +185,24 @@ struct WorkerConfig {
         // - 使用基类指针 IEncodedPacketSource，支持多态
         std::shared_ptr<class IEncodedPacketSource> shared_packet_source = nullptr;
         
+        // ========================================
+        // 帧数限制（v2.23 新增）
+        // ========================================
+        int max_frames = -1;              ///< 最大读取帧数（-1=无限制）
+        
+        // ========================================
+        // 延迟提交模式（v2.24 新增）
+        // ========================================
+        /**
+         * @brief 是否延迟提交 Packet
+         * 
+         * - false（默认）：fillBuffer() 内部调用 commitEncodedPacket()
+         * - true：fillBuffer() 不调用 commit，由外部（MultiWorkerProductionLine）在帧同步后调用
+         * 
+         * 使用场景：启用 WorkerSyncCoordinator 帧同步时，需要延迟 commit
+         */
+        bool deferred_commit = false;
+        
         DataSourceConfig() = default;
         DataSourceConfig(const DataSourceConfig&) = default;
         DataSourceConfig& operator=(const DataSourceConfig&) = default;
@@ -285,6 +304,99 @@ struct WorkerConfig {
         DecoderConfig(DecoderConfig&&) = default;
         DecoderConfig& operator=(DecoderConfig&&) = default;
     } decoder;
+    
+    // ========================================
+    // 编码器配置（v2.29 新增）
+    // ========================================
+    /**
+     * @brief 编码器配置
+     * 
+     * 用于配置 Worker 的编码器（H.264/H.265/JPEG 编码器）参数。
+     * 
+     * 支持的编码器：
+     * - h264_taco: TACO H.264 硬件编码器
+     * - hevc_taco: TACO H.265/HEVC 硬件编码器
+     * - jpeg_taco: TACO JPEG 硬件编码器
+     * - libx264: 软件 H.264 编码器
+     * - libx265: 软件 H.265 编码器
+     * - mjpeg: 软件 MJPEG 编码器
+     */
+    struct EncoderConfig {
+        // ========================================
+        // 通用编码器参数
+        // ========================================
+        std::optional<std::string> name;           ///< 编码器名称（std::nullopt=自动选择）
+        bool enable_hardware = true;               ///< 启用硬件编码
+        
+        // ========================================
+        // 编码参数
+        // ========================================
+        int64_t bit_rate = 4000000;               ///< 目标码率（bps，默认 4Mbps）
+        int gop_size = 30;                        ///< GOP 大小（I 帧间隔，默认 30）
+        int max_b_frames = 0;                     ///< 最大 B 帧数量（默认 0，TACO 不支持 B 帧）
+        int framerate_num = 30;                   ///< 帧率分子（默认 30）
+        int framerate_den = 1;                    ///< 帧率分母（默认 1）
+        
+        // ========================================
+        // 输入格式配置
+        // ========================================
+        /**
+         * @brief 输入像素格式
+         * 
+         * 支持的格式：
+         * - AV_PIX_FMT_NV12 (23): NV12 (YUV420 semi-planar, UV interleaved)
+         * - AV_PIX_FMT_NV21 (24): NV21 (YUV420 semi-planar, VU interleaved)
+         * - AV_PIX_FMT_YUV420P (0): YUV420P (planar)
+         * - AV_PIX_FMT_YUVJ420P (12): YUVJ420P (JPEG full range)
+         */
+        int input_pix_fmt = 23;  // 默认 AV_PIX_FMT_NV12 = 23
+        
+        // ========================================
+        // 码率控制
+        // ========================================
+        /**
+         * @brief 码率控制模式
+         * 
+         * 值：
+         * - 0: CBR (固定码率)
+         * - 1: VBR (可变码率，推荐)
+         * - 2: CQP (固定 QP)
+         */
+        int rc_mode = 1;  // 默认 VBR
+        
+        // ========================================
+        // TACO 编码器特定配置
+        // ========================================
+        struct TacoEncoderConfig {
+            int profile = 0;                       ///< 编码 profile（0=自动）
+            int level = 0;                         ///< 编码 level（0=自动）
+            
+            TacoEncoderConfig() = default;
+            TacoEncoderConfig(const TacoEncoderConfig&) = default;
+            TacoEncoderConfig& operator=(const TacoEncoderConfig&) = default;
+            TacoEncoderConfig(TacoEncoderConfig&&) = default;
+            TacoEncoderConfig& operator=(TacoEncoderConfig&&) = default;
+        } taco;
+        
+        // ========================================
+        // JPEG 编码器配置
+        // ========================================
+        struct JpegConfig {
+            int quality = 80;                      ///< JPEG 质量（1-100，默认 80）
+            
+            JpegConfig() = default;
+            JpegConfig(const JpegConfig&) = default;
+            JpegConfig& operator=(const JpegConfig&) = default;
+            JpegConfig(JpegConfig&&) = default;
+            JpegConfig& operator=(JpegConfig&&) = default;
+        } jpeg;
+        
+        EncoderConfig() = default;
+        EncoderConfig(const EncoderConfig&) = default;
+        EncoderConfig& operator=(const EncoderConfig&) = default;
+        EncoderConfig(EncoderConfig&&) = default;
+        EncoderConfig& operator=(EncoderConfig&&) = default;
+    } encoder;
     
     // ========================================
     // Worker 类型
@@ -529,6 +641,14 @@ public:
      * - Packet 录制：64
      */
     DataSourceConfigBuilder& setBufferCount(int count);
+    
+    /**
+     * @brief 设置最大帧数限制
+     * @param max_frames 最大读取帧数（-1=无限制）
+     * 
+     * 数据源读取到此帧数后将返回 EOF，停止生产
+     */
+    DataSourceConfigBuilder& setMaxFrames(int max_frames);
     
     WorkerConfig::DataSourceConfig build() const;
     

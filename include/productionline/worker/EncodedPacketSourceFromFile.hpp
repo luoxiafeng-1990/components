@@ -27,8 +27,9 @@ public:
     /**
      * @brief 构造函数
      * @param file_path 文件路径
+     * @param max_frames 最大读取帧数（-1=无限制）
      */
-    explicit EncodedPacketSourceFromFile(const std::string& file_path);
+    explicit EncodedPacketSourceFromFile(const std::string& file_path, int max_frames = -1);
     
     /**
      * @brief 析构函数
@@ -81,6 +82,12 @@ private:
     int current_frame_index_;           // 当前帧索引
     std::atomic<bool> is_open_;         // 原子变量，保证线程安全的状态检查
     bool eof_reached_;                  // 是否到达文件末尾
+    
+    // ========================================
+    // 帧数限制（v2.23 新增）
+    // ========================================
+    int max_frames_;                     // 最大读取帧数（-1=无限制）
+    int frames_read_;                    // 已读取帧数计数
     
     /**
      * @brief 查找视频流

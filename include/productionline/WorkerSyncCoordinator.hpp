@@ -7,6 +7,7 @@
 #include <vector>
 #include <mutex>
 #include <condition_variable>
+#include <memory>
 #include <log4cplus/logger.h>
 
 // 前向声明
@@ -15,6 +16,8 @@ class Buffer;
 // ⭐ 注意：FrameSyncCallback 和 CallbackChainItem 的定义在 WorkerConfig.hpp 中
 // 这里只需要包含该头文件即可
 #include "productionline/worker/WorkerConfig.hpp"
+#include "productionline/worker/WorkerBase.hpp"  // for FillBufferResult
+#include "productionline/io/BufferComparator.hpp"
 
 // ============================================================
 // 比较回调上下文（与 WorkerSyncCoordinator 配套使用）
@@ -63,9 +66,16 @@ struct CompareCallbackContext {
     std::function<void(int frame_index, double psnr, double ssim, bool passed)> 
         result_callback;
     
+    // ⭐ v2.28 优化：BufferComparator 作为成员，避免每帧重复创建
+    std::unique_ptr<productionline::io::BufferComparator> comparator_;
+    bool comparator_opened_ = false;
+    
     CompareCallbackContext() = default;
     
-    // 禁止拷贝（因为有 atomic 成员）
+    // 析构函数：关闭 comparator
+    ~CompareCallbackContext();
+    
+    // 禁止拷贝（因为有 atomic 成员和 unique_ptr）
     CompareCallbackContext(const CompareCallbackContext&) = delete;
     CompareCallbackContext& operator=(const CompareCallbackContext&) = delete;
     
@@ -73,6 +83,24 @@ struct CompareCallbackContext {
      * @brief 从 ConsumerTypeConfig::CompareType 初始化配置
      */
     void initFromCompareType(const WorkerConfig::ConsumerTypeConfig::CompareType& compare_config);
+    
+    /**
+     * @brief 打开 BufferComparator
+     * 
+     * 应在 initFromCompareType() 之后调用。
+     * 只会在首次调用时创建和打开，后续调用直接返回 true。
+     * 
+     * @return true 打开成功
+     * @return false 打开失败
+     */
+    bool openComparator();
+    
+    /**
+     * @brief 关闭 BufferComparator
+     * 
+     * 通常不需要手动调用，析构函数会自动调用。
+     */
+    void closeComparator();
     
     // 获取平均 PSNR
     double getAveragePsnr() const;
@@ -134,7 +162,8 @@ public:
      * 
      * @param worker_name Worker 名称
      * @param frame_version 帧版本号（来自 EncodedPacketSourceFromBuffer）
-     * @param buffer 解码后的 Buffer
+     * @param buffer 解码后的 Buffer（失败时为 nullptr）
+     * @param result fillBuffer 的返回结果（SUCCESS/EAGAIN/ERROR）
      * @return true=允许提交, false=拒绝提交
      * 
      * 行为：
@@ -144,9 +173,17 @@ public:
      * - 按顺序执行回调链，任何回调返回 false 则终止链
      * - 回调执行完毕后，所有 Worker 被唤醒
      * 
+     * v2.29 新增场景处理：
+     * - 都成功：执行回调对比
+     * - 都 EAGAIN：跳过回调，继续下一帧
+     * - 都 ERROR：跳过回调，继续下一帧
+     * - 一个成功 + 一个 EAGAIN：报错！不应该发生
+     * - 一个成功 + 一个 ERROR：跳过回调，继续下一帧
+     * 
      * 线程安全：是
      */
-    bool arrive(const std::string& worker_name, uint64_t frame_version, Buffer* buffer);
+    bool arrive(const std::string& worker_name, uint64_t frame_version, 
+                Buffer* buffer, FillBufferResult result);
     
     /**
      * @brief 获取参与同步的 Worker 数量
@@ -197,10 +234,11 @@ private:
      * @brief 单帧同步数据
      */
     struct FrameSync {
-        std::map<std::string, Buffer*> worker_buffers;  // worker_name -> Buffer*
-        size_t arrived_count = 0;                       // 已到达的 Worker 数量
-        bool callback_executed = false;                 // 回调是否已执行
-        bool should_submit = true;                      // 是否允许提交
+        std::map<std::string, Buffer*> worker_buffers;           // worker_name -> Buffer*
+        std::map<std::string, FillBufferResult> worker_results;  // worker_name -> FillBufferResult
+        size_t arrived_count = 0;                                // 已到达的 Worker 数量
+        bool callback_executed = false;                          // 回调是否已执行
+        bool should_submit = true;                               // 是否允许提交
     };
     
     /**
