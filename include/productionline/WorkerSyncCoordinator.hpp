@@ -16,7 +16,7 @@ class Buffer;
 // ⭐ 注意：FrameSyncCallback 和 CallbackChainItem 的定义在 WorkerConfig.hpp 中
 // 这里只需要包含该头文件即可
 #include "productionline/worker/WorkerConfig.hpp"
-#include "productionline/worker/WorkerBase.hpp"  // for FillBufferResult
+#include "productionline/worker/WorkerBase.hpp"  // for FillStatus, FillResult
 #include "productionline/io/BufferComparator.hpp"
 
 // ============================================================
@@ -181,9 +181,11 @@ public:
      * - 一个成功 + 一个 ERROR：跳过回调，继续下一帧
      * 
      * 线程安全：是
+     * 
+     * v2.33 变更：参数类型从 FillBufferResult 改为 FillStatus
      */
     bool arrive(const std::string& worker_name, uint64_t frame_version, 
-                Buffer* buffer, FillBufferResult result);
+                Buffer* buffer, FillStatus status);
     
     /**
      * @brief 获取参与同步的 Worker 数量
@@ -232,13 +234,15 @@ public:
 private:
     /**
      * @brief 单帧同步数据
+     * 
+     * v2.33 变更：worker_results 类型从 FillBufferResult 改为 FillStatus
      */
     struct FrameSync {
-        std::map<std::string, Buffer*> worker_buffers;           // worker_name -> Buffer*
-        std::map<std::string, FillBufferResult> worker_results;  // worker_name -> FillBufferResult
-        size_t arrived_count = 0;                                // 已到达的 Worker 数量
-        bool callback_executed = false;                          // 回调是否已执行
-        bool should_submit = true;                               // 是否允许提交
+        std::map<std::string, Buffer*> worker_buffers;      // worker_name -> Buffer*
+        std::map<std::string, FillStatus> worker_results;   // worker_name -> FillStatus
+        size_t arrived_count = 0;                           // 已到达的 Worker 数量
+        bool callback_executed = false;                     // 回调是否已执行
+        bool should_submit = true;                          // 是否允许提交
     };
     
     /**

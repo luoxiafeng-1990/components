@@ -19,7 +19,109 @@
 
 ## 版本历史
 
-### v2.31（当前版本）- FFmpeg 编码 Worker 与 PacketAcquireResult 状态管理
+### v2.33（当前版本）- FillResult 类型安全重构
+
+**发布日期：** 2026-02-04
+
+**主要变更：**
+
+- ✅ **FillResult 类型安全**：重构 `fillBuffer()` 返回类型
+  - 新增 `FillStatus` 枚举：状态值设计（成功=0，可重试=正值，终止=-1，错误=负值）
+  - 新增 `FillResult` 类：封装 `FillStatus`，提供丰富的查询方法
+  - 所有 Worker 的 `fillBuffer()` 返回类型从 `bool` 改为 `FillResult`
+
+- ✅ **FillStatus 枚举设计**：
+  - 成功：`Success` (0)
+  - 可重试：`NonVideoPacket` (1)、`CodecEagain` (2)、`DataPending` (3)
+  - 终止：`EndOfStream` (-1)
+  - 错误：`AcquireError` (-10)、`CodecError` (-11)、`InvalidParam` (-12)、`NotOpen` (-13)、`AllocFailed` (-14)、`InternalError` (-15)
+
+- ✅ **FillResult 便捷方法**：
+  - `ok()`：是否成功
+  - `isEof()`：是否到达 EOF
+  - `shouldRetry()`：是否需要重试（正值状态）
+  - `isTerminal()`：是否是终止状态（EOF 或错误）
+  - `isError()`：是否是错误
+  - `statusString()`：获取状态描述
+
+- ✅ **WorkerSyncCoordinator 更新**：
+  - `arrive()` 参数类型从 `FillBufferResult` 改为 `FillStatus`
+  - `FrameSync::worker_results` 类型相应更新
+
+- ✅ **MultiWorkerProductionLine 优化**：
+  - `performFrameSync()` 参数类型更新为 `FillStatus`
+  - 简化 fillBuffer 失败后的状态处理逻辑
+
+- ✅ **VideoProductionLine 重构**：
+  - 使用新的 `FillResult` 类型处理 fillBuffer 结果
+  - 更清晰的分支处理：成功 / EOF / 可重试 / 错误
+
+**FillResult 使用示例：**
+```cpp
+FillResult result = worker->fillBuffer(index, buffer);
+
+if (result.ok()) {
+    // ✅ 成功，处理 buffer
+} else if (result.shouldRetry()) {
+    // ⏳ 需要重试（NonVideoPacket / CodecEagain / DataPending）
+    continue;
+} else if (result.isEof()) {
+    // 📍 正常结束
+    break;
+} else {
+    // ❌ 错误
+    LOG_ERROR("Fill failed: %s", result.statusString());
+}
+```
+
+**设计原则：**
+- **类型安全**：`FillResult` 替代 `bool`，编译期捕获遗漏的状态处理
+- **语义清晰**：状态值设计使得 `shouldRetry()` 等方法可以用简单的数值比较实现
+- **统一风格**：与 `PacketAcquireResult` 保持一致的 API 风格
+
+---
+
+### v2.32 - IEncodedPacketSource 接口统一
+
+**发布日期：** 2026-02-04
+
+**主要变更：**
+
+- ✅ **接口类型移动**：`AcquireStatus` 和 `PacketAcquireResult` 从 `EncodedPacketSourceFromBuffer.hpp` 移至 `IEncodedPacketSource.hpp`
+  - 原因：这些类型是接口方法的返回值，所有子类都在使用
+
+- ✅ **接口方法统一**：删除 `readEncodedPacket()`，统一使用 `acquireEncodedPacket()`
+  - 新签名：`PacketAcquireResult acquireEncodedPacket(AVPacket* out_packet, void* worker_id = nullptr)`
+  - File/RTSP 模式：往 `out_packet` 填充数据（零拷贝），`result.packet()` 返回 `out_packet`
+  - Buffer 共享模式：忽略 `out_packet`，`result.packet()` 返回借用指针
+
+- ✅ **新增接口方法**：`commitEncodedPacket()` 和 `cancelEncodedPacket()` 提升为接口方法
+  - 共享模式（Buffer）：递减订阅者计数 / 重置 Worker 状态
+  - 非共享模式（File/RTSP）：提供默认空实现
+
+- ✅ **EncodedPacketSourceFromRtsp 增强**：
+  - 构造函数新增 `max_frames` 参数：`EncodedPacketSourceFromRtsp(const std::string& rtsp_url, int max_frames = -1)`
+  - 支持 RTSP 流的帧数限制
+
+- ✅ **FFmpegDecodeWorker 统一**：
+  - `readAndSendPacket()` 重构，统一使用 `acquireEncodedPacket()` 接口
+  - 简化 Buffer 模式与 File/RTSP 模式的代码路径
+
+**接口统一设计：**
+| 模式 | `out_packet` 参数 | `result.packet()` 返回值 | `commit/cancel` |
+|------|-------------------|--------------------------|-----------------|
+| File | 必须提供 | 返回 `out_packet` | 默认空实现 |
+| RTSP | 必须提供 | 返回 `out_packet` | 默认空实现 |
+| Buffer 共享 | 忽略 | 返回借用指针 | 必须调用 |
+
+**设计原则：**
+- **零拷贝**：File/RTSP 模式直接填充调用者的 `AVPacket`
+- **统一接口**：所有数据源使用相同的获取/提交/取消接口
+- **向后兼容**：非共享模式的 `commit/cancel` 有默认实现
+
+---
+
+### v2.31 - FFmpeg 编码 Worker 与 PacketAcquireResult 状态管理
 
 **发布日期：** 2026-02-04
 

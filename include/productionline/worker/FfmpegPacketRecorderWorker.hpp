@@ -81,7 +81,8 @@ public:
     virtual bool isAtEnd() const override;
     
     // ============ WorkerBase 接口实现 ============
-    virtual bool fillBuffer(int frame_index, Buffer* buffer) override;
+    // v2.33 变更：返回类型从 bool 改为 FillResult
+    virtual FillResult fillBuffer(int frame_index, Buffer* buffer) override;
     
     /**
      * @brief 获取 Worker 类型名称

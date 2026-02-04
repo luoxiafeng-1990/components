@@ -818,7 +818,7 @@ bool MultiWorkerProductionLine::performFrameSync(
     const std::string& consumer_name,
     WorkerGroupRuntime::ConsumerInfo* consumer_info,
     Buffer* buffer,
-    FillBufferResult result
+    FillStatus status
 ) {
     Connector* owner_connector = group->getConnectorForConsumer(consumer_name);
     if (!owner_connector) {
@@ -845,20 +845,21 @@ bool MultiWorkerProductionLine::performFrameSync(
                         << "'] shared_source 不是 EncodedPacketSourceFromBuffer 类型");
         return true;  // 类型错误，默认允许提交
     }
-    // 如果 fillBuffer 返回 DECODER_EAGAIN，则直接提交 packet
-    if (result == FillBufferResult::DECODER_EAGAIN) {
+    // 如果 fillBuffer 返回 CodecEagain，则直接提交 packet
+    if (status == FillStatus::CodecEagain) {
         shared_source->commitEncodedPacket(consumer_info->worker->getWorkerBase());
         return true;
     }
 
-    if(result == FillBufferResult::NEED_MORE_DATA) { 
+    if (status == FillStatus::NonVideoPacket || status == FillStatus::DataPending) { 
         return true;
     }
     // 获取当前帧版本号
     uint64_t frame_version = shared_source->getCurrentBufferVersion();
     
     // ⭐ v2.29 修改：到达同步点，传递 fillBuffer 的结果状态
-    bool sync_result = it->second->arrive(consumer_name, frame_version, buffer, result);
+    // v2.33 变更：使用 FillStatus
+    bool sync_result = it->second->arrive(consumer_name, frame_version, buffer, status);
     
     // 帧同步完成后，调用 commit 释放 packet
     // 所有 Worker 一起 commit，确保 fetchTaskFunc 不会提前被唤醒
@@ -919,14 +920,16 @@ void MultiWorkerProductionLine::workerThreadFunc(
                         
         buffer_wait_count = 0;
         
-        bool fill_success = consumer_info->worker->fillBuffer(0, buffer);
+        // v2.33 变更：fillBuffer 返回 FillResult
+        FillResult fill_result = consumer_info->worker->fillBuffer(0, buffer);
         
-        if (fill_success) {
+        if (fill_result.ok()) {
             // ✅ 解码成功
             
             // ⭐ v2.29 修改：帧同步逻辑，传递 SUCCESS 状态
+            // v2.33 变更：使用 FillStatus
             bool should_submit = performFrameSync(group, consumer_name, consumer_info, 
-                                                  buffer, FillBufferResult::SUCCESS);
+                                                  buffer, FillStatus::Success);
             
             // 根据同步结果决定是否提交
             if (should_submit) {
@@ -943,32 +946,25 @@ void MultiWorkerProductionLine::workerThreadFunc(
             // ❌ 失败：释放 buffer
             pool_sptr->releaseFree(buffer);
             
-            // ⭐ v2.30 修改：获取实际的失败原因
-            // ⭐ v2.31 修改：细分 ACQUIRE 状态处理
-            FillBufferResult fill_result = consumer_info->worker->getWorkerBase()->getLastFillResult();
-            
-            // 处理 ACQUIRE 相关状态
-            if (fill_result == FillBufferResult::ACQUIRE_AGAIN) {
-                // 需要等待新 buffer，继续循环
+            // v2.33 变更：直接使用 FillResult 判断状态
+            if (fill_result.shouldRetry()) {
+                // ⏳ 可重试状态（DataPending / CodecEagain / NonVideoPacket）
+                performFrameSync(group, consumer_name, consumer_info, nullptr, 
+                                fill_result.status());
                 continue;
             }
-            if (fill_result == FillBufferResult::ACQUIRE_EOF) {
-                // EOF：数据源已结束，退出线程
+            
+            if (fill_result.isEof()) {
+                // 📍 EOF：数据源已结束，退出线程
                 LOG4CPLUS_INFO(logger_, "[Worker '" << consumer_name 
-                               << "'] 检测到数据源 EOF (ACQUIRE_EOF)，正常退出");
-                break;
-            }
-            if (fill_result == FillBufferResult::ACQUIRE_ERROR) {
-                // 获取错误（配置问题等），记录并退出
-                LOG4CPLUS_ERROR(logger_, "[Worker '" << consumer_name 
-                               << "'] 获取 packet 时发生错误 (ACQUIRE_ERROR)");
+                               << "'] 检测到数据源 EOF，正常退出");
                 break;
             }
             
-            performFrameSync(group, consumer_name, consumer_info, nullptr, fill_result);
-            if (fill_result == FillBufferResult::DECODER_EAGAIN) {
-                continue;
-            }
+            // ❌ 错误状态
+            performFrameSync(group, consumer_name, consumer_info, nullptr, 
+                            fill_result.status());
+            
             // 检查原因
             if (consumer_info->worker->isAtEnd()) {
                 // EOF：数据源已结束

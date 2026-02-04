@@ -305,95 +305,7 @@ void EncodedPacketSourceFromBuffer::fetchTaskFunc() {
     LOG4CPLUS_INFO(logger_, "Fetch 任务循环结束");
 }
 
-int EncodedPacketSourceFromBuffer::readEncodedPacket(AVPacket* packet) {
-    if (!is_open_.load(std::memory_order_acquire) || !packet) {
-        return AVERROR(EINVAL);
-    }
-    
-    auto pool = source_pool_.lock();
-    if (!pool) {
-        LOG4CPLUS_ERROR(logger_, "Source BufferPool已销毁");
-        return AVERROR_EOF;
-    }
-    
-    // ========== v2.18：共享模式（订阅者）==========
-    if (is_shared_mode_) {
-        std::unique_lock<std::mutex> lock(mutex_);
-        LOG4CPLUS_DEBUG(logger_, "readEncodedPacket: wait for new buffer");
-        // 1. 等待新 Buffer 可用
-        cv_subscribers_.wait(lock, [this]() {
-            return current_buffer_ != nullptr || 
-                   !is_running_.load(std::memory_order_acquire);
-        });
-        LOG4CPLUS_DEBUG(logger_, "readEncodedPacket: wait for new buffer done");
-        // 检查是否被关闭
-        if (!is_running_.load(std::memory_order_acquire)) {
-            return AVERROR_EOF;
-        }
-        // 检查 Buffer 是否有效
-        if (!current_buffer_) {
-            return AVERROR(EAGAIN);
-        }
-        
-        // 2. 复制 packet 数据
-        AVPacket* src_packet = current_buffer_->getAVPacket();
-        int ret = copyPacket(packet, src_packet);
-        
-        if (ret < 0) {
-            char err_buf[AV_ERROR_MAX_STRING_SIZE];
-            av_strerror(ret, err_buf, sizeof(err_buf));
-            LOG4CPLUS_ERROR_FMT(logger_, "Failed to copy packet: %s", err_buf);
-        }
-        // 3. 标记自己已完成
-        size_t remaining = remaining_subscribers_.fetch_sub(1, std::memory_order_acq_rel) - 1;
-        
-        // LOG4CPLUS_DEBUG_FMT(logger_, "订阅者完成，剩余: %zu", remaining);
-        
-        // 4. 如果是最后一个完成的订阅者，唤醒 Fetch 任务
-        if (remaining == 0) {
-            // LOG4CPLUS_DEBUG(logger_, "⭐ 所有订阅者已完成，通知 Fetch 任务");
-            cv_fetch_.notify_one();
-        }
-        
-        if (ret == 0) {
-            current_frame_index_.fetch_add(1, std::memory_order_relaxed);  // 更新当前帧索引
-        }
-        return ret;
-    }
-    
-    // ========== v2.13：普通模式 - 直接从 BufferPool 获取数据 ==========
-    
-    // 1. 从 filled queue 获取 Buffer（带超时，避免死锁）
-    Buffer* filled_buffer = pool->acquireFilled(true, 100);  // 100ms 超时
-    if (!filled_buffer) {
-        // 超时或 Pool 关闭
-        return AVERROR(EAGAIN);  // 返回 EAGAIN 表示暂时无数据，可以重试
-    }
-    
-    // 2. 从 Buffer 获取 AVPacket
-    AVPacket* src_packet = filled_buffer->getAVPacket();
-    if (!src_packet || src_packet->data == nullptr || src_packet->size == 0) {
-        LOG4CPLUS_WARN(logger_, "Buffer 中的 AVPacket 无效");
-        pool->releaseFilled(filled_buffer);  // 释放 Buffer
-        return AVERROR_EOF;
-    }
-    
-    // 3. 复制 packet 数据（使用 av_packet_ref，零拷贝）
-    int ret = copyPacket(packet, src_packet);
-    
-    // 4. ⭐ 立即释放 Buffer 回 filled queue（已完成复制）
-    pool->releaseFilled(filled_buffer);
-    
-    if (ret < 0) {
-        char err_buf[AV_ERROR_MAX_STRING_SIZE];
-        av_strerror(ret, err_buf, sizeof(err_buf));
-        LOG4CPLUS_ERROR_FMT(logger_, "Failed to copy packet: %s", err_buf);
-        return ret;
-    }
-    
-    current_frame_index_.fetch_add(1, std::memory_order_relaxed);  // 更新当前帧索引
-    return 0;  // 成功
-}
+// v2.32 删除：readEncodedPacket 已被 acquireEncodedPacket 统一接口替代
 
 const AVCodecParameters* EncodedPacketSourceFromBuffer::getCodecParameters() const {
     return codec_params_;
@@ -465,7 +377,9 @@ void EncodedPacketSourceFromBuffer::setSourceBufferPool(std::weak_ptr<BufferPool
     LOG4CPLUS_DEBUG(logger_, "⭐ v2.13：已设置源 BufferPool");
 }
 
-PacketAcquireResult EncodedPacketSourceFromBuffer::acquireEncodedPacket(void* worker_id) {
+PacketAcquireResult EncodedPacketSourceFromBuffer::acquireEncodedPacket(AVPacket* out_packet, void* worker_id) {
+    (void)out_packet;  // Buffer 共享模式忽略 out_packet，返回借用指针
+    
     using Result = PacketAcquireResult;
     
     if (!is_shared_mode_) {

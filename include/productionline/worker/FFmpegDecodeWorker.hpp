@@ -91,7 +91,8 @@ public:
     // ============ WorkerBase 接口实现 ============
     
     // Buffer填充功能（原IBufferFillingWorker的方法）
-    bool fillBuffer(int frame_index, Buffer* buffer) override;
+    // v2.33 变更：返回类型从 bool 改为 FillResult
+    FillResult fillBuffer(int frame_index, Buffer* buffer) override;
     const char* getWorkerType() const override {
         return "FFmpegDecodeWorker";
     }
@@ -283,8 +284,10 @@ private:
      * - 处理错误情况
      * - 调用 avcodec_send_packet 发送到解码器
      * - 释放 packet 引用
+     * 
+     * v2.33 变更：返回类型从 bool 改为 FillResult
      */
-    bool readAndSendPacket(AVPacket* packet_ptr);
+    FillResult readAndSendPacket(AVPacket* packet_ptr);
     
     /**
      * @brief 从 AVFrame 填充 Buffer 的元数据

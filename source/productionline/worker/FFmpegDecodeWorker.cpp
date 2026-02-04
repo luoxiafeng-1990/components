@@ -63,13 +63,15 @@ FFmpegDecodeWorker::FFmpegDecodeWorker(const WorkerConfig& config)
         }
     } else {
         // ⭐ v2.23 优化：根据路径自动识别数据源类型
+        // ⭐ v2.32 修改：RTSP 也传递 max_frames
         const std::string& path = config.data_source.path;
         if (path.empty()) {
             LOG4CPLUS_WARN(logger_, "data_source.path is empty, cannot create packet source");
         } else if (path.rfind("rtsp://", 0) == 0 || path.rfind("rtsps://", 0) == 0) {
             // RTSP 流：以 rtsp:// 或 rtsps:// 开头
-            packet_source_ = std::make_shared<EncodedPacketSourceFromRtsp>(path);
-            LOG4CPLUS_DEBUG_FMT(logger_, "Created EncodedPacketSourceFromRtsp for '%s'", path.c_str());
+            packet_source_ = std::make_shared<EncodedPacketSourceFromRtsp>(path, config.data_source.max_frames);
+            LOG4CPLUS_DEBUG_FMT(logger_, "Created EncodedPacketSourceFromRtsp for '%s' (max_frames=%d)", 
+                               path.c_str(), config.data_source.max_frames);
         } else {
             // 文件：其他路径视为本地文件
             packet_source_ = std::make_shared<EncodedPacketSourceFromFile>(path, config.data_source.max_frames);
@@ -292,14 +294,11 @@ void FFmpegDecodeWorker::close() {
         LOG4CPLUS_INFO(logger_, "");
         LOG4CPLUS_INFO(logger_, "🛑 Closing video source...");
         
-        // ⭐ v2.22 新增：清理未提交的 packet（Buffer 模式）
-        if (worker_config_.data_source.buffer_mode && packet_acquired_) {
-            auto ps = std::dynamic_pointer_cast<EncodedPacketSourceFromBuffer>(packet_source_);
-            if (ps) {
-                // 强制提交（避免订阅者计数永久占用）
-                LOG4CPLUS_DEBUG(logger_, "[Worker] Cleaning up pending packet on close");
-                ps->commitEncodedPacket(this);
-            }
+        // ⭐ v2.32 修改：清理未提交的 packet（统一接口）
+        if (packet_acquired_) {
+            // 强制提交（避免订阅者计数永久占用）
+            LOG4CPLUS_DEBUG(logger_, "[Worker] Cleaning up pending packet on close");
+            packet_source_->commitEncodedPacket(this);
             packet_acquired_ = false;
             current_packet_ptr_ = nullptr;
         }
@@ -651,161 +650,97 @@ bool FFmpegDecodeWorker::fillBufferMetadataFromFrame(AVFrame* frame_ptr, Buffer*
 
 /**
  * @brief 从数据源读取 packet 并发送到解码器
- * @param packet_ptr AVPacket 指针（RTSP/文件模式使用）
- * @return true 成功发送 packet 到解码器，false 失败或 EOF
+ * @param packet_ptr AVPacket 指针（File/RTSP 模式使用）
+ * @return FillResult 结果对象
  * 
- * ⭐ v2.22 修改：
- *   - Buffer 模式的逻辑已移至 fillBuffer() 中
- *   - 此函数仅用于 RTSP/文件模式
+ * v2.32 重构：统一使用 acquireEncodedPacket 接口
+ * - Buffer 共享模式：忽略 packet_ptr，返回借用指针
+ * - File/RTSP 模式：往 packet_ptr 填充数据（零拷贝）
+ * 
+ * v2.33 变更：返回类型从 bool 改为 FillResult
  */
-bool FFmpegDecodeWorker::readAndSendPacket(AVPacket* packet_ptr) {
-    if (worker_config_.data_source.buffer_mode) {
-        auto ps = std::dynamic_pointer_cast<EncodedPacketSourceFromBuffer>(packet_source_);
-        if (!ps) {
-            LOG4CPLUS_ERROR(logger_, "[Worker] ERROR: Failed to cast to EncodedPacketSourceFromBuffer");
-            setLastFillResult(FillBufferResult::FAILURE);
-            return false;
-        }
+FillResult FFmpegDecodeWorker::readAndSendPacket(AVPacket* packet_ptr) {
+    // ⭐ v2.32 统一接口：所有模式都使用 acquireEncodedPacket
+    // - File/RTSP 模式：传入 packet_ptr，数据填充到里面
+    // - Buffer 共享模式：传入 nullptr（或 packet_ptr 会被忽略），返回借用指针
+    
+    if (!packet_acquired_) {
+        auto acquire_result = packet_source_->acquireEncodedPacket(packet_ptr, this);
         
-        // ⭐ v2.22 新增：只在未获取时才尝试获取
-        // ⭐ v2.31 修改：使用 PacketAcquireResult 处理不同状态
-        if (!packet_acquired_) {
-            auto acquire_result = ps->acquireEncodedPacket(this);  // ✅ 传递 this 指针
+        if (acquire_result.ok()) {
+            // ✅ 成功获取
+            current_packet_ptr_ = acquire_result.packet();
+            packet_acquired_ = true;
             
-            if (acquire_result.ok()) {
-                // ✅ 成功获取
-                current_packet_ptr_ = acquire_result.packet();
-                packet_acquired_ = true;
-                
-            } else if (acquire_result.isEof()) {
-                // 📍 EOF：数据流正常结束
-                LOG4CPLUS_DEBUG(logger_, "[Worker] acquireEncodedPacket: EOF reached");
-                setLastFillResult(FillBufferResult::ACQUIRE_EOF);
-                return false;
-                
-            } else if (acquire_result.shouldRetry()) {
-                // ⏳ AGAIN：已处理当前版本，等待新数据
-                LOG4CPLUS_DEBUG(logger_, "[Worker] acquireEncodedPacket: Waiting for new buffer");
-                setLastFillResult(FillBufferResult::ACQUIRE_AGAIN);
-                return false;
-                
-            } else {
-                // ❌ 错误：配置问题或其他异常
-                LOG4CPLUS_ERROR_FMT(logger_, "[Worker] acquireEncodedPacket failed: %s", 
-                                   acquire_result.statusString());
-                setLastFillResult(FillBufferResult::ACQUIRE_ERROR);
-                return false;
-            }
-        }
-        
-        // ========== 步骤3: 发送到解码器 ==========
-        int ret = avcodec_send_packet(codec_ctx_ptr_, current_packet_ptr_);
-        
-        if (ret < 0 && ret != AVERROR(EAGAIN)) {
-            // ❌ 发送失败
-            LOG4CPLUS_ERROR_FMT(logger_, "[Worker] ERROR: avcodec_send_packet failed: %d", ret);
+        } else if (acquire_result.isEof()) {
+            // 📍 EOF：数据流正常结束
+            LOG4CPLUS_DEBUG(logger_, "[Worker] acquireEncodedPacket: EOF reached");
+            setLastFillStatus(FillStatus::EndOfStream);
+            return FillResult::endOfStream();
             
-            // ⭐ v2.29 修改：deferred_commit 模式下不调用 cancel
-            // 由外部 performFrameSync 统一处理 commit
-            if (!worker_config_.data_source.deferred_commit) {
-                ps->cancelEncodedPacket(this);
+        } else if (acquire_result.shouldRetry()) {
+            // ⏳ AGAIN：需要重试
+            // - Buffer 共享模式：已处理当前版本，等待新数据（DataPending）
+            // - File/RTSP 模式：读到非视频流 packet，需要继续读取（NonVideoPacket）
+            if (acquire_result.status() == AcquireStatus::Again) {
+                setLastFillStatus(FillStatus::DataPending);
+                return FillResult::dataPending();
             }
-            packet_acquired_ = false;
-            current_packet_ptr_ = nullptr;
-            setLastFillResult(FillBufferResult::SEND_ERROR);
-            return false;
-        }
-
-        return true;
-    }
-    
-    // ========== 文件/RTSP 模式：使用 readPacket ==========
-    // ⭐ 损坏帧重试机制
-    const int AVERROR_INVALIDDATA_VALUE = -1094995529;  // AVERROR(0x41444e49)
-    const int MAX_CORRUPTED_RETRIES = 10;  // 最大重试次数，避免无限循环
-    
-    int corrupted_retries = 0;
-    int read_ret;
-    
-    while (true) {
-        // 使用数据源抽象读取 packet
-        read_ret = packet_source_->readEncodedPacket(packet_ptr);
-        
-        if (read_ret < 0) {
-            if (read_ret == AVERROR_EOF) {
-                LOG4CPLUS_DEBUG(logger_, "🔄 EOF reached");
-                av_packet_unref(packet_ptr);
-                setLastFillResult(FillBufferResult::FAILURE);
-                return false;
-            } else if (read_ret == AVERROR_INVALIDDATA_VALUE) {
-                // 🔧 遇到损坏帧时，在内部循环跳过，继续读取下一个 packet
-                corrupted_retries++;
-                if (corrupted_retries <= MAX_CORRUPTED_RETRIES) {
-                    LOG4CPLUS_WARN_FMT(logger_, "[Worker] WARNING: Corrupted packet detected (attempt %d/%d), skipping...", 
-                           corrupted_retries, MAX_CORRUPTED_RETRIES);
-                    av_packet_unref(packet_ptr);
-                    // 继续循环，尝试读取下一个 packet
-                    continue;
-                } else {
-                    // 连续多次都是损坏帧，可能文件确实损坏严重，返回失败
-                    LOG4CPLUS_ERROR_FMT(logger_, "[Worker] ERROR: Too many corrupted packets (%d), giving up", corrupted_retries);
-                    av_packet_unref(packet_ptr);
-                    setLastFillResult(FillBufferResult::FAILURE);
-                    return false;
-                }
-            } else {
-                // 其他错误（非 EOF，非损坏帧）：记录错误并返回
-                char err_buf[AV_ERROR_MAX_STRING_SIZE];
-                av_strerror(read_ret, err_buf, sizeof(err_buf));
-                LOG4CPLUS_ERROR_FMT(logger_, "[Worker] ERROR: readEncodedPacket failed: %d (%s)", read_ret, err_buf);
-                av_packet_unref(packet_ptr);
-                setLastFillResult(FillBufferResult::FAILURE);
-                return false;
-            }
+            setLastFillStatus(FillStatus::NonVideoPacket);
+            return FillResult::nonVideoPacket();
+            
         } else {
-            // 成功读取到 packet，退出循环
-            break;
+            // ❌ 错误：配置问题或其他异常
+            LOG4CPLUS_ERROR_FMT(logger_, "[Worker] acquireEncodedPacket failed: %s", 
+                               acquire_result.statusString());
+            setLastFillStatus(FillStatus::AcquireError);
+            return FillResult::acquireError();
         }
     }
     
-    // ⭐ 视频流索引检查（仅文件模式需要）
-    if (auto* file_source = dynamic_cast<EncodedPacketSourceFromFile*>(packet_source_.get())) {
-        (void)file_source;  // 仅用于类型检查
-        if (packet_ptr->stream_index != packet_source_->getVideoStreamIndex()) {
-            // 不是视频流的 packet 需要释放，然后继续读取下一个
-            av_packet_unref(packet_ptr);
-            setLastFillResult(FillBufferResult::NEED_MORE_DATA);
-            return false;  // 让调用者再次调用以读取下一个 packet
-        }
-    }
-    // RTSP/Buffer 模式：packet 已经是视频流，不需要检查
+    // ========== 发送到解码器 ==========
+    int ret = avcodec_send_packet(codec_ctx_ptr_, current_packet_ptr_);
     
-    // 发送 packet 到解码器
-    int ret = avcodec_send_packet(codec_ctx_ptr_, packet_ptr);
-    
-    if (ret < 0) {
+    if (ret < 0 && ret != AVERROR(EAGAIN)) {
+        // ❌ 发送失败
         char err_buf[AV_ERROR_MAX_STRING_SIZE];
         av_strerror(ret, err_buf, sizeof(err_buf));
         LOG4CPLUS_ERROR_FMT(logger_, "[Worker] ERROR: avcodec_send_packet failed: %d (%s)", ret, err_buf);
-        setLastFillResult(FillBufferResult::SEND_ERROR);
-        return false;
+        
+        // v2.32 统一：调用接口的 cancel 方法
+        // - Buffer 共享模式：重置 Worker 状态，允许重试
+        // - File/RTSP 模式：默认空实现，无需操作
+        if (!worker_config_.data_source.deferred_commit) {
+            packet_source_->cancelEncodedPacket(this);
+        }
+        packet_acquired_ = false;
+        current_packet_ptr_ = nullptr;
+        setLastFillStatus(FillStatus::CodecError);
+        return FillResult::codecError();
     }
-    
-    return true;
+
+    return FillResult::success();
 }
 
-bool FFmpegDecodeWorker::fillBuffer(int frame_index, Buffer* buffer) {
+/**
+ * @brief 填充 Buffer（解码一帧）
+ * 
+ * v2.33 变更：返回类型从 bool 改为 FillResult
+ */
+FillResult FFmpegDecodeWorker::fillBuffer(int frame_index, Buffer* buffer) {
+    (void)frame_index;  // 未使用
+    
     // ========== 参数校验 ==========
     if (!buffer) {
         LOG4CPLUS_ERROR(logger_, "[Worker] ERROR: buffer is nullptr");
-        setLastFillResult(FillBufferResult::FAILURE);
-        return false;
+        setLastFillStatus(FillStatus::InvalidParam);
+        return FillResult::invalidParam();
     }
     
-    if (!packet_source_->isOpen()) {
+    if (!packet_source_ || !packet_source_->isOpen()) {
         LOG4CPLUS_ERROR(logger_, "[Worker] ERROR: Worker is not open");
-        setLastFillResult(FillBufferResult::FAILURE);
-        return false;
+        setLastFillStatus(FillStatus::NotOpen);
+        return FillResult::notOpen();
     }
     
     std::lock_guard<std::recursive_mutex> lock(mutex_);
@@ -813,21 +748,15 @@ bool FFmpegDecodeWorker::fillBuffer(int frame_index, Buffer* buffer) {
     AVFrame* frame_ptr = buffer->getAVFrame();
     if (!frame_ptr) {
         LOG4CPLUS_ERROR(logger_, "[Worker] ERROR: buffer->getAVFrame() is nullptr");
-        setLastFillResult(FillBufferResult::FAILURE);
-        return false;
+        setLastFillStatus(FillStatus::InvalidParam);
+        return FillResult::invalidParam();
     }
     
     AVPacket* packet_ptr = buffer->getAVPacket();
     if (!packet_ptr) {
         LOG4CPLUS_ERROR(logger_, "[Worker] ERROR: buffer->getAVPacket() is nullptr");
-        setLastFillResult(FillBufferResult::FAILURE);
-        return false;
-    }
-    
-    if (!packet_source_) {
-        LOG4CPLUS_ERROR(logger_, "[Worker] ERROR: packet_source_ is nullptr");
-        setLastFillResult(FillBufferResult::FAILURE);
-        return false;
+        setLastFillStatus(FillStatus::InvalidParam);
+        return FillResult::invalidParam();
     }
     
     // ========== 步骤1: 检查缓存队列 ==========
@@ -838,16 +767,19 @@ bool FFmpegDecodeWorker::fillBuffer(int frame_index, Buffer* buffer) {
         av_frame_move_ref(frame_ptr, cached_frame);
         av_frame_free(&cached_frame);
         
-        setLastFillResult(FillBufferResult::SUCCESS);
-        return fillBufferMetadataFromFrame(frame_ptr, buffer);
+        fillBufferMetadataFromFrame(frame_ptr, buffer);
+        setLastFillStatus(FillStatus::Success);
+        return FillResult::success();
     }
     
-    if (!readAndSendPacket(packet_ptr)) {
-        // readAndSendPacket() 已经设置了 lastFillResult_，直接返回
-        return false;
+    // ========== 步骤2: 读取并发送 packet ==========
+    FillResult send_result = readAndSendPacket(packet_ptr);
+    if (!send_result.ok()) {
+        // readAndSendPacket() 已经设置了 lastFillStatus_，直接返回
+        return send_result;
     }
    
-    // ========== 步骤2: 循环读取所有解码的帧到缓存 ==========
+    // ========== 步骤3: 循环读取所有解码的帧到缓存 ==========
     bool decoded_at_least_one = false;
     
     while (true) {
@@ -868,35 +800,29 @@ bool FFmpegDecodeWorker::fillBuffer(int frame_index, Buffer* buffer) {
         cached_frames_.push_back(temp_frame);
     }
     
-    // ========== 步骤5: 检查是否成功解码 ==========
+    // ========== 步骤4: 检查是否成功解码 ==========
     if (!decoded_at_least_one) {
         // ❌ 没有解码出帧（EAGAIN：解码器需要更多输入才能输出）
         
-        if (worker_config_.data_source.buffer_mode) {
-            // ⭐ v2.29 修改：deferred_commit 模式下不调用 cancel
-            // 由外部 performFrameSync 统一处理 commit
-            if (!worker_config_.data_source.deferred_commit) {
-                auto ps = std::dynamic_pointer_cast<EncodedPacketSourceFromBuffer>(packet_source_);
-                if (ps) {
-                    ps->cancelEncodedPacket(this);
-                }
-            }
-            packet_acquired_ = false;
-            current_packet_ptr_ = nullptr;
-            setLastFillResult(FillBufferResult::DECODER_EAGAIN);  // v2.30: 解码器 EAGAIN
-            return false;
+        // v2.32 统一：调用接口的 cancel 方法
+        // - Buffer 共享模式：重置 Worker 状态，允许重试
+        // - File/RTSP 模式：默认空实现，无需操作
+        if (!worker_config_.data_source.deferred_commit) {
+            packet_source_->cancelEncodedPacket(this);
         }
+        packet_acquired_ = false;
+        current_packet_ptr_ = nullptr;
+        setLastFillStatus(FillStatus::CodecEagain);
+        return FillResult::codecEagain();
     }
     
-    // ========== 步骤6: 成功解码，提交（释放）==========
-    // ⭐ v2.24 修改：如果启用了 deferred_commit，不在这里调用 commit，由外部负责
-    if (worker_config_.data_source.buffer_mode && packet_acquired_) {
+    // ========== 步骤5: 成功解码，提交（释放）==========
+    // v2.32 统一：调用接口的 commit 方法
+    // - Buffer 共享模式：递减订阅者计数，最后一个订阅者触发 Buffer 释放
+    // - File/RTSP 模式：默认返回 true，无需操作
+    if (packet_acquired_) {
         if (!worker_config_.data_source.deferred_commit) {
-        auto ps = std::dynamic_pointer_cast<EncodedPacketSourceFromBuffer>(packet_source_);
-        if (ps) {
-                // 普通模式：立即提交释放
-                ps->commitEncodedPacket(this);
-            }
+            packet_source_->commitEncodedPacket(this);
         }
         
         // 重置状态
@@ -904,10 +830,10 @@ bool FFmpegDecodeWorker::fillBuffer(int frame_index, Buffer* buffer) {
         current_packet_ptr_ = nullptr;
     }
     
-    // ========== 步骤7: 从缓存取第一帧填充 buffer ==========
+    // ========== 步骤6: 从缓存取第一帧填充 buffer ==========
     if (cached_frames_.empty()) {
-        setLastFillResult(FillBufferResult::FAILURE);  // 不应该到这里，逻辑错误
-        return false;
+        setLastFillStatus(FillStatus::InternalError);  // 不应该到这里，逻辑错误
+        return FillResult::internalError();
     }
     
     AVFrame* first_frame = cached_frames_.front();
@@ -916,8 +842,9 @@ bool FFmpegDecodeWorker::fillBuffer(int frame_index, Buffer* buffer) {
     av_frame_move_ref(frame_ptr, first_frame);
     av_frame_free(&first_frame);
     
-    setLastFillResult(FillBufferResult::SUCCESS);
-    return fillBufferMetadataFromFrame(frame_ptr, buffer);
+    fillBufferMetadataFromFrame(frame_ptr, buffer);
+    setLastFillStatus(FillStatus::Success);
+    return FillResult::success();
 }
 
 // ============================================================================

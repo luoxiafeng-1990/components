@@ -112,7 +112,7 @@ bool WorkerSyncCoordinator::arrive(
     const std::string& worker_name, 
     uint64_t frame_version, 
     Buffer* buffer,
-    FillBufferResult result
+    FillStatus status
 ) {
     // ⭐ 快速路径：如果没有配置回调，直接返回（零开销）
     if (callback_chain_.empty()) {
@@ -135,7 +135,7 @@ bool WorkerSyncCoordinator::arrive(
     
     // 记录 Worker 的 Buffer 和结果状态
     sync.worker_buffers[worker_name] = buffer;
-    sync.worker_results[worker_name] = result;
+    sync.worker_results[worker_name] = status;
     sync.arrived_count++;
     
     LOG4CPLUS_DEBUG_FMT(logger_, 
@@ -144,7 +144,7 @@ bool WorkerSyncCoordinator::arrive(
         worker_name.c_str(),
         sync.arrived_count, 
         total_workers_,
-        fillBufferResultToString(result));
+        fillStatusToString(status));
     
     // 检查是否所有 Worker 都到达
     if (sync.arrived_count == total_workers_) {
@@ -154,20 +154,20 @@ bool WorkerSyncCoordinator::arrive(
             (unsigned long long)frame_version);
         
         // 统计各状态的数量
+        // v2.33 变更：使用 FillStatus 判断
         int success_count = 0;
         int eagain_count = 0;
         int error_count = 0;
         
-        for (const auto& [name, res] : sync.worker_results) {
-            switch (res) {
-                case FillBufferResult::SUCCESS:        success_count++; break;
-                case FillBufferResult::NEED_MORE_DATA: eagain_count++;  break;
-                case FillBufferResult::DECODER_EAGAIN: eagain_count++;  break;
-                case FillBufferResult::ACQUIRE_AGAIN:  eagain_count++;  break;  // ⭐ v2.31: 等待新 buffer
-                case FillBufferResult::ACQUIRE_EOF:    error_count++;   break;  // ⭐ v2.31: EOF 视为需要停止
-                case FillBufferResult::ACQUIRE_ERROR:  error_count++;   break;  // ⭐ v2.31: 获取错误
-                case FillBufferResult::SEND_ERROR:     error_count++;   break;  // v2.30: 发送失败是错误
-                case FillBufferResult::FAILURE:        error_count++;   break;
+        for (const auto& [name, s] : sync.worker_results) {
+            if (s == FillStatus::Success) {
+                success_count++;
+            } else if (static_cast<int>(s) > 0) {
+                // 正值都是可重试状态（NonVideoPacket, CodecEagain, DataPending）
+                eagain_count++;
+            } else {
+                // 负值都是终止/错误状态（EndOfStream, 各种 Error）
+                error_count++;
             }
         }
         

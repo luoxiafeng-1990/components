@@ -22,147 +22,8 @@ class EncodedPacketSourceFromBuffer;  // 前向声明
 // 原因：新的三状态 API（acquire/commit/cancel）提供了更精确的控制
 // Worker 需要根据解码结果决定是 commit 还是 cancel，RAII 模式不再适用
 
-// ============================================================
-// PacketAcquireResult - Packet 获取结果（v2.31 新增）
-// ============================================================
-
-/**
- * @brief Packet 获取结果状态
- * 
- * v2.31 新增：用于 acquireEncodedPacket 的返回值
- */
-enum class AcquireStatus : int {
-    Success = 0,           ///< 成功获取
-    Eof = -1,              ///< 数据流结束（正常）
-    Again = -2,            ///< 已处理当前版本，需等待新数据
-    InvalidMode = -3,      ///< 非共享模式
-    NoData = -4,           ///< 无可用数据
-    Stopped = -5           ///< 已停止
-};
-
-/**
- * @brief 获取状态的字符串描述
- */
-inline const char* acquireStatusToString(AcquireStatus status) {
-    switch (status) {
-        case AcquireStatus::Success:     return "Success";
-        case AcquireStatus::Eof:         return "EOF";
-        case AcquireStatus::Again:       return "Again";
-        case AcquireStatus::InvalidMode: return "InvalidMode";
-        case AcquireStatus::NoData:      return "NoData";
-        case AcquireStatus::Stopped:     return "Stopped";
-        default:                         return "Unknown";
-    }
-}
-
-/**
- * @brief Packet 获取结果（借用语义）
- * 
- * v2.31 新增：封装状态和借用的 AVPacket 指针
- * 
- * 设计原则（参考 Google StatusOr + Rust Result）：
- * - 明确的成功/失败状态
- * - 只有成功时才能访问 packet
- * - 零拷贝，零额外分配
- * - 借用语义：不负责 packet 生命周期
- * 
- * 使用示例：
- * @code
- * auto result = ps->acquireEncodedPacket(this);
- * 
- * if (result.ok()) {
- *     AVPacket* pkt = result.packet();
- *     // 或使用箭头运算符
- *     int64_t pts = result->pts;
- * } else if (result.isEof()) {
- *     // 正常结束
- * } else if (result.shouldRetry()) {
- *     // 等待新数据
- * }
- * @endcode
- */
-class PacketAcquireResult {
-public:
-    // ===== 工厂方法 =====
-    
-    /// 成功结果
-    static PacketAcquireResult success(AVPacket* packet) {
-        return PacketAcquireResult(AcquireStatus::Success, packet);
-    }
-    
-    /// EOF 结果
-    static PacketAcquireResult eof() {
-        return PacketAcquireResult(AcquireStatus::Eof, nullptr);
-    }
-    
-    /// 需要重试
-    static PacketAcquireResult again() {
-        return PacketAcquireResult(AcquireStatus::Again, nullptr);
-    }
-    
-    /// 失败结果
-    static PacketAcquireResult failure(AcquireStatus status) {
-        return PacketAcquireResult(status, nullptr);
-    }
-    
-    // ===== 状态查询 =====
-    
-    /// 获取状态
-    AcquireStatus status() const noexcept { return status_; }
-    
-    /// 是否成功
-    bool ok() const noexcept { return status_ == AcquireStatus::Success; }
-    
-    /// 是否到达 EOF（正常结束）
-    bool isEof() const noexcept { return status_ == AcquireStatus::Eof; }
-    
-    /// 是否需要重试（等待新数据）
-    bool shouldRetry() const noexcept { return status_ == AcquireStatus::Again; }
-    
-    /// 是否是错误（非 Success 且非 EOF 且非 Again）
-    bool isError() const noexcept {
-        return status_ != AcquireStatus::Success && 
-               status_ != AcquireStatus::Eof &&
-               status_ != AcquireStatus::Again;
-    }
-    
-    /// 隐式 bool 转换（方便条件判断）
-    explicit operator bool() const noexcept { return ok(); }
-    
-    // ===== 数据访问 =====
-    
-    /**
-     * @brief 获取 AVPacket 指针
-     * 
-     * @warning 仅当 ok() 为 true 时有效！
-     * @note 返回的是借用指针，不要 av_packet_free
-     */
-    AVPacket* packet() const noexcept { return packet_; }
-    
-    /**
-     * @brief 箭头运算符（便捷访问 AVPacket 成员）
-     * 
-     * @code
-     * if (result.ok()) {
-     *     int64_t pts = result->pts;
-     *     int size = result->size;
-     * }
-     * @endcode
-     */
-    AVPacket* operator->() const noexcept { return packet_; }
-    
-    /**
-     * @brief 获取状态描述
-     */
-    const char* statusString() const noexcept { return acquireStatusToString(status_); }
-
-private:
-    PacketAcquireResult(AcquireStatus status, AVPacket* packet)
-        : status_(status), packet_(packet) {}
-    
-    AcquireStatus status_;
-    AVPacket* packet_;  // 借用指针，不负责生命周期
-};
+// ⭐ v2.32 修改：AcquireStatus、PacketAcquireResult 已移至 IEncodedPacketSource.hpp
+// 因为这些类型是接口方法的返回值，所有子类都在使用
 
 /**
  * @brief EncodedPacketSourceFromBuffer - 从 Buffer 读取编码数据的数据源实现
@@ -264,8 +125,7 @@ public:
     const AVCodecParameters* getCodecParameters() const override;
     SourceType getDataSourceType() const override;
     
-    // ============ IEncodedPacketSource 特有方法 ============
-    int readEncodedPacket(AVPacket* packet) override;
+    // ============ IEncodedPacketSource 特有方法（v2.32 统一接口）============
     int getVideoStreamIndex() const override;
 
     /**
@@ -277,17 +137,16 @@ public:
     void setSourceBufferPool(std::weak_ptr<BufferPool> pool_weak);
     
     /**
-     * @brief 获取编码后的 AVPacket（共享模式，v3.0 新架构）
+     * @brief 获取编码后的 AVPacket（v2.32 统一接口）
+     * @param out_packet 输出的 packet（Buffer 共享模式忽略此参数，返回借用指针）
      * @param worker_id Worker 的唯一标识（通常是 this 指针）
      * @return PacketAcquireResult 结果对象
      * 
      * 说明：
-     * - 只在共享模式下使用
+     * - Buffer 共享模式：忽略 out_packet，返回 current_buffer_ 的借用指针
      * - 阻塞等待直到有新 buffer 或 EOF
      * - 防止同一个 Worker 重复获取同一个 buffer（通过版本号机制）
      * - 不递减 remaining_subscribers_（由 commitEncodedPacket 负责）
-     * 
-     * v2.31 修改：返回类型从 AVPacket* 改为 PacketAcquireResult
      * 
      * 返回值状态：
      * - Success：成功获取，可通过 packet() 获取指针
@@ -295,60 +154,33 @@ public:
      * - Again：已处理当前版本，需等待新 buffer
      * - InvalidMode：非共享模式
      * - NoData：无可用数据（异常）
-     * 
-     * 使用方式：
-     * ```cpp
-     * auto result = ps->acquireEncodedPacket(this);
-     * if (result.ok()) {
-     *     AVPacket* pkt = result.packet();
-     *     // 或使用箭头运算符: result->pts
-     * } else if (result.isEof()) {
-     *     // 正常结束
-     * } else if (result.shouldRetry()) {
-     *     // 等待新数据
-     * }
-     * ```
      */
-    PacketAcquireResult acquireEncodedPacket(void* worker_id);
+    PacketAcquireResult acquireEncodedPacket(AVPacket* out_packet, void* worker_id = nullptr) override;
     
     /**
-     * @brief 提交释放编码后的 AVPacket（共享模式，v3.0 新架构）
+     * @brief 提交释放编码后的 AVPacket（v2.32 统一接口）
      * @param worker_id Worker 的唯一标识
      * @return true=成功提交, false=失败（状态不对）
      * 
      * 说明：
-     * - 只有成功处理（解码出至少一帧）后才调用
-     * - 递减 remaining_subscribers_
-     * - 如果是最后一个订阅者，唤醒 Fetch 任务
-     * - 重置 Worker 状态，允许获取下一个 buffer
+     * - 共享模式：递减 remaining_subscribers_，最后一个订阅者触发 Buffer 释放
+     * - 普通模式：返回 false
      * 
-     * 使用方式：
-     * ```cpp
-     * if (decoded_at_least_one_frame) {
-     *     ps->commitEncodedPacket(this);
-     * }
-     * ```
+     * v2.32 修改：提升为 IEncodedPacketSource 接口方法
      */
-    bool commitEncodedPacket(void* worker_id);
+    bool commitEncodedPacket(void* worker_id) override;
     
     /**
-     * @brief 取消当前获取（共享模式，v2.22 新架构）
+     * @brief 取消当前获取（v2.32 统一接口）
      * @param worker_id Worker 的唯一标识
      * 
      * 说明：
-     * - 失败时调用（如 send_packet 失败、receive_frame 失败）
-     * - 不递减 remaining_subscribers_（保持订阅者计数不变）
-     * - 重置 Worker 状态，允许重新获取当前 buffer（重试）
+     * - 共享模式：重置 Worker 状态，允许重新获取当前 buffer（重试）
+     * - 普通模式：空操作
      * 
-     * 使用方式：
-     * ```cpp
-     * if (send_packet_failed) {
-     *     ps->cancelEncodedPacket(this);
-     *     return false;  // 重试
-     * }
-     * ```
+     * v2.32 修改：提升为 IEncodedPacketSource 接口方法
      */
-    void cancelEncodedPacket(void* worker_id);
+    void cancelEncodedPacket(void* worker_id) override;
     
     /**
      * @brief 获取当前 buffer 版本号（v2.23 新增）

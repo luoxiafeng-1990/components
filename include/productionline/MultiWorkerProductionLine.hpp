@@ -396,14 +396,16 @@ private:
      * @param consumer_name 消费者名称
      * @param consumer_info 消费者信息
      * @param buffer 解码后的 Buffer（失败时传 nullptr）
-     * @param result fillBuffer 的返回结果（SUCCESS/EAGAIN/ERROR）
+     * @param status fillBuffer 的返回状态
      * @return true=允许提交, false=拒绝提交（未启用帧同步时始终返回 true）
+     * 
+     * v2.33 变更：参数类型从 FillBufferResult 改为 FillStatus
      */
     bool performFrameSync(const std::shared_ptr<WorkerGroupRuntime>& group,
                          const std::string& consumer_name,
                          WorkerGroupRuntime::ConsumerInfo* consumer_info,
                          Buffer* buffer,
-                         FillBufferResult result);
+                         FillStatus status);
     
     /**
      * @brief 设置错误信息并触发回调

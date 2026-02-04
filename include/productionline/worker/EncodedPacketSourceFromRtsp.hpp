@@ -1,7 +1,7 @@
 #ifndef ENCODED_PACKET_SOURCE_FROM_RTSP_HPP
 #define ENCODED_PACKET_SOURCE_FROM_RTSP_HPP
 
-#include "productionline/worker/IEncodedPacketSource.hpp"
+#include "productionline/worker/IEncodedPacketSource.hpp"  // 包含 PacketAcquireResult
 #include <log4cplus/logger.h>
 #include <log4cplus/loggingmacros.h>
 #include <string>
@@ -11,6 +11,7 @@
 // FFmpeg 前向声明
 struct AVFormatContext;
 struct AVCodecParameters;
+struct AVPacket;
 
 /**
  * @brief EncodedPacketSourceFromRtsp - 从 RTSP 流读取编码数据的数据源实现
@@ -23,18 +24,23 @@ struct AVCodecParameters;
  * - 网络视频监控
  * 
  * 特性：
- * - 实时流（无总帧数概念）
+ * - 实时流（无总帧数概念，除非设置 max_frames）
  * - 不支持 seek 操作
  * - 需要保持连接
  * - 自动处理超时和重连
+ * 
+ * v2.32 重构：
+ * - 新增 max_frames 参数，支持帧数限制
+ * - 删除 readEncodedPacket，改用 acquireEncodedPacket 统一接口
  */
 class EncodedPacketSourceFromRtsp : public IEncodedPacketSource {
 public:
     /**
      * @brief 构造函数
      * @param rtsp_url RTSP 流地址
+     * @param max_frames 最大读取帧数（-1=无限制）
      */
-    explicit EncodedPacketSourceFromRtsp(const std::string& rtsp_url);
+    explicit EncodedPacketSourceFromRtsp(const std::string& rtsp_url, int max_frames = -1);
     
     /**
      * @brief 析构函数
@@ -75,9 +81,19 @@ public:
     const AVCodecParameters* getCodecParameters() const override;
     SourceType getDataSourceType() const override;
     
-    // ============ IEncodedPacketSource 特有方法 ============
-    int readEncodedPacket(AVPacket* packet) override;
+    // ============ IEncodedPacketSource 特有方法（v2.32 统一接口）============
+    
+    /**
+     * @brief 获取编码后的 packet（v2.32 统一接口）
+     * @param out_packet 输出的 packet（必须提供，数据填充到此）
+     * @param worker_id Worker 标识（RTSP 模式不使用，忽略）
+     * @return PacketAcquireResult 结果对象，result.packet() 返回 out_packet
+     */
+    PacketAcquireResult acquireEncodedPacket(AVPacket* out_packet, void* worker_id = nullptr) override;
+    
     int getVideoStreamIndex() const override;
+    
+    // commit/cancel 使用接口默认实现（RTSP 模式不需要）
 
     // ============ 中断控制接口 ============
     
@@ -124,6 +140,12 @@ private:
     std::atomic<bool> is_open_;         // 原子变量，保证线程安全的状态检查
     std::atomic<bool> connected_;       // 连接状态
     std::atomic<bool> eof_reached_;     // 是否到达流末尾
+    
+    // ========================================
+    // 帧数限制（v2.32 新增）
+    // ========================================
+    int max_frames_;                     // 最大读取帧数（-1=无限制）
+    int frames_read_;                    // 已读取帧数计数
     
     /**
      * @brief 查找视频流

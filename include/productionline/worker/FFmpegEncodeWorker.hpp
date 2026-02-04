@@ -76,9 +76,11 @@ public:
      * 
      * @param frame_index 帧索引（未使用，兼容接口）
      * @param buffer 输出 Buffer（存储编码后的 AVPacket）
-     * @return true 成功，false 失败或 EOF
+     * @return FillResult 结果对象
+     * 
+     * v2.33 变更：返回类型从 bool 改为 FillResult
      */
-    bool fillBuffer(int frame_index, Buffer* buffer) override;
+    FillResult fillBuffer(int frame_index, Buffer* buffer) override;
     
     /**
      * @brief 获取 Worker 类型名称
@@ -172,9 +174,11 @@ private:
     /**
      * @brief 读取并发送帧到编码器
      * @param temp_frame 临时帧（用于从 frame_source_ 读取）
-     * @return true 成功发送，false 失败或 EOF
+     * @return FillResult 结果对象
+     * 
+     * v2.33 变更：返回类型从 bool 改为 FillResult
      */
-    bool readAndSendFrame(AVFrame* temp_frame);
+    FillResult readAndSendFrame(AVFrame* temp_frame);
     
     // ==================== 成员变量 ====================
     

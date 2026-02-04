@@ -85,9 +85,11 @@ public:
      * 填充Buffer（核心功能）
      * @param frame_index 帧索引
      * @param buffer 输出 Buffer
-     * @return 成功返回 true
+     * @return FillResult 结果对象
+     * 
+     * v2.33 变更：返回类型从 bool 改为 FillResult
      */
-    bool fillBuffer(int frame_index, Buffer* buffer);
+    FillResult fillBuffer(int frame_index, Buffer* buffer);
     
     /**
      * 获取输出 BufferPool ID

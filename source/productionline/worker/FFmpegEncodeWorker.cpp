@@ -530,9 +530,14 @@ bool FFmpegEncodeWorker::configureTacoEncoder() {
     return true;
 }
 
-bool FFmpegEncodeWorker::readAndSendFrame(AVFrame* temp_frame) {
+/**
+ * @brief 读取并发送帧到编码器
+ * 
+ * v2.33 变更：返回类型从 bool 改为 FillResult
+ */
+FillResult FFmpegEncodeWorker::readAndSendFrame(AVFrame* temp_frame) {
     if (!frame_source_ || !temp_frame) {
-        return false;
+        return FillResult::notOpen();
     }
     
     // 从帧数据源读取一帧
@@ -540,12 +545,15 @@ bool FFmpegEncodeWorker::readAndSendFrame(AVFrame* temp_frame) {
     if (ret < 0) {
         if (ret == AVERROR_EOF) {
             LOG4CPLUS_DEBUG(logger_, "[EncodeWorker] 🔄 EOF 到达");
-        } else if (ret != AVERROR(EAGAIN)) {
+            return FillResult::endOfStream();
+        } else if (ret == AVERROR(EAGAIN)) {
+            return FillResult::codecEagain();
+        } else {
             char err_buf[AV_ERROR_MAX_STRING_SIZE];
             av_strerror(ret, err_buf, sizeof(err_buf));
             LOG4CPLUS_ERROR_FMT(logger_, "[EncodeWorker] 读取帧失败: %s", err_buf);
+            return FillResult::acquireError();
         }
-        return false;
     }
     
     // 设置 PTS
@@ -554,15 +562,17 @@ bool FFmpegEncodeWorker::readAndSendFrame(AVFrame* temp_frame) {
     // 发送帧到编码器
     ret = avcodec_send_frame(codec_ctx_ptr_, temp_frame);
     if (ret < 0) {
-        if (ret != AVERROR(EAGAIN)) {
+        if (ret == AVERROR(EAGAIN)) {
+            return FillResult::codecEagain();
+        } else {
             char err_buf[AV_ERROR_MAX_STRING_SIZE];
             av_strerror(ret, err_buf, sizeof(err_buf));
             LOG4CPLUS_ERROR_FMT(logger_, "[EncodeWorker] avcodec_send_frame 失败: %s", err_buf);
+            return FillResult::codecError();
         }
-        return false;
     }
     
-    return true;
+    return FillResult::success();
 }
 
 bool FFmpegEncodeWorker::fillBufferMetadataFromPacket(AVPacket* packet, Buffer* buffer) {
@@ -584,18 +594,25 @@ bool FFmpegEncodeWorker::fillBufferMetadataFromPacket(AVPacket* packet, Buffer* 
 
 // ============ 核心功能：fillBuffer ============
 
-bool FFmpegEncodeWorker::fillBuffer(int frame_index, Buffer* buffer) {
+/**
+ * @brief 填充 Buffer（编码一帧）
+ * 
+ * v2.33 变更：返回类型从 bool 改为 FillResult
+ */
+FillResult FFmpegEncodeWorker::fillBuffer(int frame_index, Buffer* buffer) {
     (void)frame_index;
     
     // 参数校验
     if (!buffer) {
         LOG4CPLUS_ERROR(logger_, "[EncodeWorker] buffer 为空");
-        return false;
+        setLastFillStatus(FillStatus::InvalidParam);
+        return FillResult::invalidParam();
     }
     
     if (!isOpen()) {
         LOG4CPLUS_ERROR(logger_, "[EncodeWorker] Worker 未打开");
-        return false;
+        setLastFillStatus(FillStatus::NotOpen);
+        return FillResult::notOpen();
     }
     
     std::lock_guard<std::recursive_mutex> lock(mutex_);
@@ -603,7 +620,8 @@ bool FFmpegEncodeWorker::fillBuffer(int frame_index, Buffer* buffer) {
     AVPacket* packet = buffer->getAVPacket();
     if (!packet) {
         LOG4CPLUS_ERROR(logger_, "[EncodeWorker] buffer->getAVPacket() 为空");
-        return false;
+        setLastFillStatus(FillStatus::InvalidParam);
+        return FillResult::invalidParam();
     }
     
     // 步骤1：检查缓存队列是否有数据
@@ -614,21 +632,25 @@ bool FFmpegEncodeWorker::fillBuffer(int frame_index, Buffer* buffer) {
         av_packet_move_ref(packet, cached_pkt);
         av_packet_free(&cached_pkt);
         
-        return fillBufferMetadataFromPacket(packet, buffer);
+        fillBufferMetadataFromPacket(packet, buffer);
+        setLastFillStatus(FillStatus::Success);
+        return FillResult::success();
     }
     
     // 步骤2：读取并发送帧到编码器
     AVFrame* temp_frame = av_frame_alloc();
     if (!temp_frame) {
         LOG4CPLUS_ERROR(logger_, "[EncodeWorker] 分配临时帧失败");
-        return false;
+        setLastFillStatus(FillStatus::AllocFailed);
+        return FillResult::allocFailed();
     }
     
-    bool sent = readAndSendFrame(temp_frame);
+    FillResult send_result = readAndSendFrame(temp_frame);
     av_frame_free(&temp_frame);
     
-    if (!sent) {
-        return false;
+    if (!send_result.ok()) {
+        setLastFillStatus(send_result.status());
+        return send_result;
     }
     
     // 步骤3：接收所有编码后的 packet
@@ -660,15 +682,19 @@ bool FFmpegEncodeWorker::fillBuffer(int frame_index, Buffer* buffer) {
         av_packet_move_ref(packet, first_pkt);
         av_packet_free(&first_pkt);
         
-        return fillBufferMetadataFromPacket(packet, buffer);
+        fillBufferMetadataFromPacket(packet, buffer);
+        setLastFillStatus(FillStatus::Success);
+        return FillResult::success();
     }
     
     // 没有编码出任何 packet（可能需要更多输入帧）
     if (!received_at_least_one) {
         // 这不是错误，有些编码器需要多帧才能输出一个 packet（如 B 帧场景）
         dropped_frames_++;
-        return false;
+        setLastFillStatus(FillStatus::CodecEagain);
+        return FillResult::codecEagain();
     }
     
-    return false;
+    setLastFillStatus(FillStatus::InternalError);
+    return FillResult::internalError();
 }

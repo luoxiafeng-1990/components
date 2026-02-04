@@ -324,10 +324,12 @@ void VideoProductionLine::producerThreadFunc(int thread_id) {
         if (monitor_) {
             monitor_->beginTiming("fill_buffer");
         }
-        bool fill_success = worker_facade_sptr_->fillBuffer(thread_produced, buffer);
+        
+        // v2.33 变更：fillBuffer 返回 FillResult
+        FillResult fill_result = worker_facade_sptr_->fillBuffer(thread_produced, buffer);
         
         // 5. 🎯 统一的处理：提交或归还
-        if (fill_success) {
+        if (fill_result.ok()) {
             // ✅ 填充成功：提交到 filled 队列（供消费者使用）
             pool_sptr->submitFilled(buffer);
             produced_frames_.fetch_add(1);
@@ -336,48 +338,60 @@ void VideoProductionLine::producerThreadFunc(int thread_id) {
             if (monitor_) {
                 monitor_->endTiming("fill_buffer");
             }
-        } else {
-            // ⚠️ 填充失败：检查 Worker 是否到达 EOF
-            if (worker_facade_sptr_->isAtEnd()) {
-                // Worker 到达 EOF
-                if (loop_) {
-                    // 🔧 修复：循环模式下，当 Worker 到达 EOF 时，重置 Worker
-                    // 这确保循环播放时 Worker 能够从文件开头重新开始读取
-                    LOG4CPLUS_DEBUG_FMT(logger_, "[Thread #%d] Worker reached EOF in loop mode, resetting to begin (frame_index=%d)", 
-                                  thread_id, thread_produced);
-                    if (worker_facade_sptr_->seekToBegin()) {
-                        // 重置成功：归还 buffer，重置失败计数，继续下一次循环
-                        // 注意：不增加 skipped_frames，因为这是正常的循环重置操作
-                        pool_sptr->releaseFree(buffer);
-                        consecutive_failures = 0;
-                    } else {
-                        LOG4CPLUS_ERROR_FMT(logger_, "[Thread #%d] Failed to reset Worker to begin", thread_id);
-                        // 重置失败，按正常失败处理
-                        pool_sptr->releaseFree(buffer);
-                        skipped_frames_.fetch_add(1);
-                        thread_skipped++;
-                        consecutive_failures++;
-                    }
-                } else {
-                    // 🔧 修复：非循环模式下，Worker 到达 EOF 时应该停止循环
-                    LOG4CPLUS_DEBUG_FMT(logger_, "[Thread #%d] Worker reached EOF in non-loop mode, stopping producer thread", 
-                                  thread_id);
+        } else if (fill_result.isEof() || worker_facade_sptr_->isAtEnd()) {
+            // ⚠️ EOF：检查是否循环模式
+            if (loop_) {
+                // 🔧 修复：循环模式下，当 Worker 到达 EOF 时，重置 Worker
+                // 这确保循环播放时 Worker 能够从文件开头重新开始读取
+                LOG4CPLUS_DEBUG_FMT(logger_, "[Thread #%d] Worker reached EOF in loop mode, resetting to begin (frame_index=%d)", 
+                              thread_id, thread_produced);
+                if (worker_facade_sptr_->seekToBegin()) {
+                    // 重置成功：归还 buffer，重置失败计数，继续下一次循环
+                    // 注意：不增加 skipped_frames，因为这是正常的循环重置操作
                     pool_sptr->releaseFree(buffer);
-                    // 停止循环，退出生产者线程
-                    break;
+                    consecutive_failures = 0;
+                } else {
+                    LOG4CPLUS_ERROR_FMT(logger_, "[Thread #%d] Failed to reset Worker to begin", thread_id);
+                    // 重置失败，按正常失败处理
+                    pool_sptr->releaseFree(buffer);
+                    skipped_frames_.fetch_add(1);
+                    thread_skipped++;
+                    consecutive_failures++;
                 }
             } else {
-                // 非 EOF 情况：正常处理失败（可能是损坏帧等其他错误）
+                // 🔧 修复：非循环模式下，Worker 到达 EOF 时应该停止循环
+                LOG4CPLUS_DEBUG_FMT(logger_, "[Thread #%d] Worker reached EOF in non-loop mode, stopping producer thread", 
+                              thread_id);
                 pool_sptr->releaseFree(buffer);
-                skipped_frames_.fetch_add(1);
-                thread_skipped++;
-                // 🎯 累加连续失败次数（PerformanceMonitor的Timer会每2秒自动打印统计）
-                consecutive_failures++;
-                if (consecutive_failures > kMaxConsecutiveFailures) {
-                    LOG4CPLUS_ERROR_FMT(logger_, "[Thread #%d] Failed to fill buffer %d times in a row, stopping producer thread", 
-                                  thread_id, kMaxConsecutiveFailures);
-                    break;
+                if (monitor_) {
+                    monitor_->endTiming("fill_buffer");
                 }
+                // 停止循环，退出生产者线程
+                break;
+            }
+            if (monitor_) {
+                monitor_->endTiming("fill_buffer");
+            }
+        } else if (fill_result.shouldRetry()) {
+            // ⏳ 可重试状态：释放 buffer，继续循环（不累计失败次数）
+            pool_sptr->releaseFree(buffer);
+            if (monitor_) {
+                monitor_->endTiming("fill_buffer");
+            }
+        } else {
+            // ❌ 真正的错误：累计失败次数
+            pool_sptr->releaseFree(buffer);
+            skipped_frames_.fetch_add(1);
+            thread_skipped++;
+            // 🎯 累加连续失败次数（PerformanceMonitor的Timer会每2秒自动打印统计）
+            consecutive_failures++;
+            if (consecutive_failures > kMaxConsecutiveFailures) {
+                LOG4CPLUS_ERROR_FMT(logger_, "[Thread #%d] Failed to fill buffer %d times in a row, stopping producer thread", 
+                              thread_id, kMaxConsecutiveFailures);
+                if (monitor_) {
+                    monitor_->endTiming("fill_buffer");
+                }
+                break;
             }
             if (monitor_) {
                 monitor_->endTiming("fill_buffer");
