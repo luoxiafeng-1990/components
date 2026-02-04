@@ -19,7 +19,87 @@
 
 ## 版本历史
 
-### v2.28（当前版本）- 编码数据源接口重命名与 CompareConfig 统一
+### v2.31（当前版本）- FFmpeg 编码 Worker 与 PacketAcquireResult 状态管理
+
+**发布日期：** 2026-02-04
+
+**主要变更：**
+
+- ✅ **FFmpegEncodeWorker 新增**：支持 H.264/H.265/JPEG 编码的 Worker 实现
+  - 支持编码器：`h264_taco`、`hevc_taco`、`jpeg_taco`（硬件）、`libx264`、`libx265`、`mjpeg`（软件）
+  - 新增 `WorkerType::FFMPEG_ENCODE` 类型
+  - 新增 `WorkerConfig::EncoderConfig` 配置结构（码率、GOP、B帧、帧率等）
+
+- ✅ **IRawFrameSource 接口层次**：引入原始帧数据源接口（与 `IEncodedPacketSource` 对称）
+  - `IRawFrameSource`：原始帧数据源抽象接口（继承 `IDataSourceNavigator`）
+  - `RawFrameSourceFromFile`：从 YUV/RGB 文件读取原始帧
+  - `RawFrameSourceFromBuffer`：从 BufferPool 获取已解码帧（Pipeline：解码→编码）
+
+- ✅ **PacketAcquireResult 类型安全**：`acquireEncodedPacket()` 返回类型重构
+  - 返回类型从 `AVPacket*` 改为 `PacketAcquireResult`（类似 Google StatusOr / Rust Result）
+  - 新增 `AcquireStatus` 枚举：`Success`、`Eof`、`Again`、`InvalidMode`、`NoData`、`Stopped`
+  - 提供便捷方法：`ok()`、`isEof()`、`shouldRetry()`、`isError()`、`packet()`、`operator->()`
+
+- ✅ **FillBufferResult 细分**：支持更精确的错误状态
+  - 新增状态：`ACQUIRE_AGAIN`（需等待新 buffer）、`ACQUIRE_EOF`（数据流结束）、`ACQUIRE_ERROR`（获取错误）
+  - `WorkerBase` 新增 `getLastFillResult()` 方法获取最后一次 fillBuffer 的详细状态
+
+- ✅ **WorkerSyncCoordinator 增强**：帧同步支持多场景处理
+  - `arrive()` 方法新增 `FillBufferResult` 参数
+  - 支持场景：都成功（执行对比）、都 EAGAIN（跳过）、都 ERROR（跳过）、混合状态（报错/跳过）
+  - `CompareCallbackContext` 新增 `BufferComparator` 成员，避免每帧重复创建
+
+- ✅ **DataSourceConfig 增强**：
+  - 新增 `max_frames` 帧数限制（-1=无限制）
+  - 新增 `deferred_commit` 延迟提交模式（帧同步场景使用）
+
+- ✅ **MultiWorkerProductionLine 优化**：
+  - 新增 `performFrameSync()` 私有方法，封装帧同步逻辑
+  - 支持根据 `FillBufferResult` 状态决定提交行为
+
+**数据源接口对称设计：**
+| 接口类型 | 数据形式 | 用途 | 实现类 |
+|----------|----------|------|--------|
+| `IEncodedPacketSource` | 编码后的 AVPacket | 解码器输入 | `EncodedPacketSourceFromFile/Buffer/Rtsp` |
+| `IRawFrameSource` | 原始的 AVFrame | 编码器输入 | `RawFrameSourceFromFile/Buffer` |
+
+**PacketAcquireResult 使用示例：**
+```cpp
+auto result = ps->acquireEncodedPacket(this);
+
+if (result.ok()) {
+    AVPacket* pkt = result.packet();
+    int64_t pts = result->pts;  // 箭头运算符访问
+} else if (result.isEof()) {
+    // 正常结束
+} else if (result.shouldRetry()) {
+    // 等待新数据
+} else {
+    // 错误处理
+    LOG_ERROR("获取失败: %s", result.statusString());
+}
+```
+
+**FillBufferResult 状态转换：**
+```
+acquireEncodedPacket() 返回值 → FillBufferResult 映射：
+- Success     → SUCCESS（解码成功后）
+- Eof         → ACQUIRE_EOF
+- Again       → ACQUIRE_AGAIN
+- InvalidMode → ACQUIRE_ERROR
+- NoData      → ACQUIRE_ERROR
+- Stopped     → ACQUIRE_EOF
+```
+
+**设计原则：**
+- **类型安全**：使用结果类型替代裸指针，编译期捕获错误
+- **语义清晰**：状态枚举明确表达各种情况
+- **对称设计**：`IRawFrameSource` 与 `IEncodedPacketSource` 形成对称的数据源层次
+- **错误可追溯**：`FillBufferResult` 细分状态便于调试和日志记录
+
+---
+
+### v2.28 - 编码数据源接口重命名与 CompareConfig 统一
 
 **发布日期：** 2026-02-02
 
@@ -1728,23 +1808,45 @@ Worker内部解码循环（适用于RTSP流等）：
 - 可替换：不同Worker可以互相替换
 - 解耦合：ProductionLine依赖WorkerBase基类，不依赖具体实现
 
-**应用位置2**：数据源抽象（v2.12新增）
+**应用位置2**：数据源抽象（v2.12新增，v2.31扩展）
 
 **设计意图**：将不同数据源的访问方式封装成独立的策略类，使 Worker 可以支持多种数据源。
 
 **实现方式**：
-- **策略接口**：`IEncodedPacketSource` 定义统一的数据源操作接口（纯虚函数）
+- **编码数据源接口**：`IEncodedPacketSource` 定义统一的编码数据源操作接口（纯虚函数）
 - **具体策略**：
   - `EncodedPacketSourceFromFile`：文件数据源策略（管理 `AVFormatContext`、文件路径、视频流索引等）
   - `EncodedPacketSourceFromBuffer`：Buffer 数据源策略（从 BufferPool 获取 AVPacket，用于 MultiWorkerProductionLine）
-  - 未来可扩展：网络流数据源策略等
-- **应用位置**：`FfmpegDecodeVideoFileWorker` 使用数据源抽象，支持文件模式和 Buffer 模式
+  - `EncodedPacketSourceFromRtsp`：RTSP 流数据源策略
+- **应用位置**：`FFmpegDecodeWorker` 使用数据源抽象，支持文件模式和 Buffer 模式
+
+**⭐ v2.31 新增 - 原始帧数据源接口**：
+- **原始帧数据源接口**：`IRawFrameSource` 定义统一的原始帧数据源操作接口（继承 `IDataSourceNavigator`）
+- **具体策略**：
+  - `RawFrameSourceFromFile`：从 YUV/RGB 文件读取原始帧
+  - `RawFrameSourceFromBuffer`：从 BufferPool 获取已解码帧（Pipeline：解码→编码）
+- **应用位置**：`FFmpegEncodeWorker` 使用原始帧数据源，支持文件模式和 Buffer 模式
+
+**数据源接口对称设计图**：
+```
+                    IDataSourceNavigator
+                           │
+           ┌───────────────┴───────────────┐
+           ▼                               ▼
+    IEncodedPacketSource            IRawFrameSource
+    (编码数据: AVPacket)            (原始帧: AVFrame)
+           │                               │
+    ┌──────┼──────┐               ┌────────┼────────┐
+    ▼      ▼      ▼               ▼                 ▼
+  FromFile FromBuffer FromRtsp  FromFile        FromBuffer
+```
 
 **优势**：
-- 可扩展：新增数据源类型只需实现 `IEncodedPacketSource` 接口
+- 可扩展：新增数据源类型只需实现对应接口
 - 可替换：不同数据源可以互相替换，无需修改 Worker 代码
-- 解耦合：Worker 依赖 `IEncodedPacketSource` 接口，不依赖具体数据源实现
+- 解耦合：Worker 依赖接口，不依赖具体数据源实现
 - 状态管理：单一数据源管理状态，避免 Worker 和数据源状态不一致
+- **对称设计**：`IEncodedPacketSource` 和 `IRawFrameSource` 形成对称的数据源层次
 
 ### 2. 工厂模式（Factory Pattern）
 
@@ -1972,10 +2074,10 @@ public:
 class BufferFillingWorkerFactory {
 public:
     enum class WorkerType {
-        AUTO,              // 自动检测
-        FFMPEG_DECODE        // FFmpegDecodeWorker
-        FFMPEG_RECORD_RTSP,// FfmpegRecordRtspWorker
-          // (removed - merged into FFMPEG_DECODE)
+        AUTO,                   // 自动检测
+        FFMPEG_DECODE,          // FFmpegDecodeWorker（解码 Worker）
+        FFMPEG_PACKET_RECORDER, // FfmpegPacketRecorderWorker（录制 Worker）
+        FFMPEG_ENCODE           // ⭐ v2.31 新增：FFmpegEncodeWorker（编码 Worker）
         // MMAP_RAW 和 IOURING_RAW 已删除（未实现）
     };
     
@@ -4489,8 +4591,10 @@ auto config = WorkerConfigBuilder().setDecoderName(decoder).build();
 
 | 场景 | Worker类型 | Worker内部使用的Allocator | 理由 |
 |------|-----------|-------------------------|------|
-| 编码视频文件 | `FFMPEG_DECODE` | NormalAllocator（Worker自动选择） | 支持多种编码格式，硬件加速 |
-| RTSP流 | `FFMPEG_DECODE` | AVFrameAllocator（Worker自动选择） | 实时流处理，零拷贝模式 |
+| 解码视频文件 | `FFMPEG_DECODE` | NormalAllocator（Worker自动选择） | 支持多种编码格式，硬件加速 |
+| RTSP流解码 | `FFMPEG_DECODE` | AVFrameAllocator（Worker自动选择） | 实时流处理，零拷贝模式 |
+| RTSP流录制 | `FFMPEG_PACKET_RECORDER` | NormalAllocator | 录制编码数据包 |
+| 编码原始帧 | `FFMPEG_ENCODE` ⭐v2.31 | NormalAllocator（Worker自动选择） | 将 YUV/RGB 编码为视频 |
 | Raw视频文件 | ~~`MMAP_RAW`~~ / ~~`IOURING_RAW`~~ | _（未实现）_ | _计划中的功能_ |
 
 ### 2. BufferPool创建策略
@@ -5058,9 +5162,10 @@ feat(buffer): 新增AVFrame管理功能
 ### Q4: 如何选择合适的Worker类型？
 
 **A**:
-- **编码视频文件**：`FFMPEG_DECODE`（支持 H.264/H.265 等，自动检测格式）
+- **解码视频文件**：`FFMPEG_DECODE`（支持 H.264/H.265 等，自动检测格式）
 - **RTSP 流（解码）**：`FFMPEG_DECODE`（实时解码 RTSP 流）
-- **RTSP 流（录制）**：`FFMPEG_RECORD_RTSP`（录制 RTSP 流）
+- **RTSP 流（录制）**：`FFMPEG_PACKET_RECORDER`（录制 RTSP 流）
+- **编码原始帧**：`FFMPEG_ENCODE`（⭐ v2.31 新增，将 YUV/RGB 编码为 H.264/H.265/JPEG）
 - **自动选择**：`AUTO`（工厂会自动检测最优类型）
 - ~~**Raw 视频文件**~~：_（`MMAP_RAW` 和 `IOURING_RAW` 未实现）_
 
