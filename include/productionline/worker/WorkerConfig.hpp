@@ -25,7 +25,7 @@ using FrameSyncCallback = std::function<bool(
     uint64_t frame_version,
     const std::map<std::string, Buffer*>& worker_buffers,
     void* context
-);
+)>;
 
 // ⭐ v2.23 新增：回调链项
 struct CallbackChainItem {

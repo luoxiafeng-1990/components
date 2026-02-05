@@ -213,7 +213,6 @@ bool OpencvWorker::open() {
     return true;
 }
 
-/*
 bool OpencvWorker::setSourceBufferPool(std::weak_ptr<BufferPool> pool_weak) {
     // 检查是否是 EncodedPacketSourceFromBuffer
     auto* buffer_source = dynamic_cast<EncodedPacketSourceFromBuffer*>(packet_source_.get());
@@ -228,7 +227,6 @@ bool OpencvWorker::setSourceBufferPool(std::weak_ptr<BufferPool> pool_weak) {
     
     return true;
 }
-*/
 
 void OpencvWorker::close() {
     // ⚠️ 注意：打开状态由数据源管理
