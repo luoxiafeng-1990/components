@@ -232,12 +232,10 @@ void EncodedPacketSourceFromBuffer::fetchTaskFunc() {
         {
             std::unique_lock<std::mutex> lock(mutex_);
             cv_fetch_.wait(lock, [this]() {
-                // ✅ 等待所有订阅者完成（remaining_subscribers_ == 0）
-                // 或者 Pool 已停止 或者 任务已停止
-                auto pool = source_pool_.lock();  // 重新获取 pool
-                return remaining_subscribers_.load(std::memory_order_acquire) == 0 ||
-                       !is_running_.load(std::memory_order_acquire) ||
-                       (pool && !pool->isRunning());  // Pool 已停止
+                // ⭐ v2.32 修复：始终等待 remaining_subscribers == 0
+                // 无论是正常 EOF 还是外部停止，都必须等待 Worker 处理完当前 buffer
+                // 这样才能安全地释放 current_buffer_
+                return remaining_subscribers_.load(std::memory_order_acquire) == 0;
             });
         }
         
@@ -255,19 +253,38 @@ void EncodedPacketSourceFromBuffer::fetchTaskFunc() {
             pool->releaseFilled(buffer_to_release);
         }
         
+        // ⭐ v2.32 新增：步骤2 完成后检查是否需要退出
+        // 此时 current_buffer_ 已经安全释放，可以退出
+        if (!is_running_.load(std::memory_order_acquire)) {
+            LOG4CPLUS_DEBUG(logger_, "Fetch 任务：收到外部停止信号，安全退出");
+            cv_subscribers_.notify_all();
+            break;
+        }
+        
         // ========== 步骤3：获取新 Buffer ==========
-        Buffer* new_buffer = pool->acquireFilled(true, 100);  // 100ms 超时
+        // ⭐ v2.32 修复：Pool shutdown 后继续获取剩余 buffer
+        // - Pool 运行中：使用阻塞模式 + 100ms 超时
+        // - Pool 已 shutdown：使用非阻塞模式，持续获取直到队列为空
+        bool pool_running = pool->isRunning();
+        Buffer* new_buffer = pool->acquireFilled(pool_running, pool_running ? 100 : 0);
         
         if (!new_buffer) {
             // 超时或没有数据
-            if (!is_running_.load(std::memory_order_acquire) || !pool->isRunning()) {
-                LOG4CPLUS_DEBUG(logger_, "Fetch 任务：收到停止信号");
-                is_running_.store(false, std::memory_order_release);
-                // 唤醒所有等待的订阅者，让它们检测到 EOF
+            if (!is_running_.load(std::memory_order_acquire)) {
+                LOG4CPLUS_DEBUG(logger_, "Fetch 任务：收到外部停止信号");
                 cv_subscribers_.notify_all();
-                break;  // 停止信号
+                break;
             }
-            // Pool 还在运行，继续等待
+            
+            if (!pool_running) {
+                // ⭐ Pool 已 shutdown 且非阻塞获取返回 nullptr，说明队列真的为空了
+                LOG4CPLUS_DEBUG(logger_, "Fetch 任务：数据源 EOF（BufferPool 已排空）");
+                is_running_.store(false, std::memory_order_release);
+                cv_subscribers_.notify_all();
+                break;
+            }
+            
+            // Pool 还在运行，超时，继续等待
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
             continue;
         }
