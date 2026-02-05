@@ -25,7 +25,7 @@ using FrameSyncCallback = std::function<bool(
     uint64_t frame_version,
     const std::map<std::string, Buffer*>& worker_buffers,
     void* context
-)>;
+);
 
 // ⭐ v2.23 新增：回调链项
 struct CallbackChainItem {
@@ -52,7 +52,8 @@ using CallbackChain = std::vector<CallbackChainItem>;
 enum class WorkerType {
     AUTO,                   // 自动检测（默认）
     FFMPEG_DECODE,          // FFmpeg 解码 Worker（统一处理文件和 RTSP 流）
-    FFMPEG_PACKET_RECORDER  // FFmpeg Packet 录制器（支持 RTSP/文件/HTTP 等多种数据源）
+    FFMPEG_PACKET_RECORDER,  // FFmpeg Packet 录制器（支持 RTSP/文件/HTTP 等多种数据源）
+    OPENCV
 };
 
 /**
