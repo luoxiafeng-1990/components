@@ -48,6 +48,7 @@ public:
         AUTO,           // 自动选择（默认使用 NormalAllocator）
         NORMAL,         // NormalAllocator（普通内存分配）
         AVFRAME,        // AVFrameAllocator（FFmpeg AVFrame包装）
+        MAT,
         FRAMEBUFFER     // FramebufferAllocator（Framebuffer内存包装）
     };
     

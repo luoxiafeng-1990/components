@@ -25,6 +25,7 @@ libcomponents_la_SOURCES = \
     source/buffer/NormalAllocator.cpp \
     source/buffer/FramebufferAllocator.cpp \
     source/buffer/AVFrameAllocator.cpp \
+    source/buffer/MatAllocator.cpp \
     source/buffer/bufferpool/BufferPool.cpp \
     source/buffer/bufferpool/BufferPoolRegistry.cpp \
     source/productionline/VideoProductionLine.cpp \
@@ -45,8 +46,9 @@ libcomponents_la_SOURCES = \
 # 1. Buildroot 会自动编译 log4cplus（已在 components.mk 中声明依赖）
 # 2. log4cplus 库位置：$(STAGING_DIR)/usr/lib/liblog4cplus-2.0.so.3.4.7
 # 3. 运行时需要目标系统有 log4cplus 动态库（Buildroot 会自动安装到 TARGET_DIR）
-COMMON_LIBS = -lpthread -luring -lavformat -lavcodec -lavutil -lswscale -ltacosys -llog4cplus
-
+COMMON_LIBS = -lpthread -luring -lavformat -lavcodec -lavutil -lswscale -ltacosys -llog4cplus $(OPENCV_LIBS)
+OPENCV_LIBS = -ltacocv -lvx -lhwdec_jpeg -ltaco_ppvdec -lCLC -lOpenVX -lOpenVXU -lOpenCL -lSPIRV_viv -lCLC -lVSC -lGAL -lovxlib -lArchModelSw -lNNArchPerf -ldl \
+        -lopencv_imgcodecs -lopencv_videoio -lopencv_core -lopencv_imgproc -lenc24 -lyuv -ljpeg
 # display_test 主程序（已废弃，原 test_cases/dec/ 目录已重命名为 old_case/）
 # display_test_SOURCES = test_cases/dec/test.cpp
 # display_test_CPPFLAGS = -I$(top_srcdir)/test_cases $(AM_CPPFLAGS)
@@ -75,7 +77,8 @@ qa_cases_CPPFLAGS = -I$(top_srcdir)/test_cases $(AM_CPPFLAGS)
 qa_cases_LDFLAGS = 
 
 # ========== 编译选项 ==========
-AM_CPPFLAGS = -I$(top_srcdir)/include
+AM_CPPFLAGS = -I$(top_srcdir)/include $(COMMON_INCLUDE)
+COMMON_INCLUDE = -I$(STAGING_DIR)/usr/include/opencv4
 
 if DEBUG
 AM_CXXFLAGS = -g -O0 -Wall -std=c++17
