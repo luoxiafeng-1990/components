@@ -507,6 +507,23 @@ bool MultiWorkerProductionLine::createConsumersForGroup(WorkerGroupRuntime* grou
         // 4.3.1 查找该消费者所属的 Connector（使用查询方法）
         Connector* owner_connector = group->getConnectorForConsumer(ccfg.consumer_name);
         
+        // ⭐ v2.24 新增：如果 Connector 启用了帧同步，设置 deferred_commit = true
+        if (owner_connector) {
+            // 查找对应的 ConnectorConfig
+            for (const auto& conn_cfg : group_config.connector_configs) {
+                bool is_consumer_in_connector = std::find(
+                    conn_cfg.consumer_names.begin(), 
+                    conn_cfg.consumer_names.end(), 
+                    ccfg.consumer_name) != conn_cfg.consumer_names.end();
+                    
+                if (is_consumer_in_connector && conn_cfg.enable_frame_sync) {
+                    consumer_config.data_source.deferred_commit = true;
+                    LOG4CPLUS_DEBUG(logger_, "       ⭐ 启用 deferred_commit（帧同步模式）");
+                    break;
+                }
+            }
+        }
+        
         if (!owner_connector) {
             setError("Consumer '" + ccfg.consumer_name + "' is not connected to any Connector");
             groups_.clear();
@@ -796,6 +813,66 @@ void MultiWorkerProductionLine::groupThreadFunc(const std::shared_ptr<WorkerGrou
     LOG4CPLUS_INFO(logger_, "[Group '" << group->group_id << "'] 所有 Worker 任务已提交");
 }
 
+bool MultiWorkerProductionLine::performFrameSync(
+    const std::shared_ptr<WorkerGroupRuntime>& group,
+    const std::string& consumer_name,
+    WorkerGroupRuntime::ConsumerInfo* consumer_info,
+    Buffer* buffer,
+    FillStatus status
+) {
+    Connector* owner_connector = group->getConnectorForConsumer(consumer_name);
+    if (!owner_connector) {
+        return true;  // 没有 Connector，默认允许提交
+    }
+    
+    size_t conn_idx = group->getConnectorIndex(owner_connector);
+    auto it = group->connector_coordinators.find(conn_idx);
+    
+    if (it == group->connector_coordinators.end()) {
+        return true;  // 未启用帧同步，默认允许提交
+    }
+    
+    // ========== 以下代码只在帧同步模式下执行 ==========
+    // 注意：帧同步模式下，deferred_commit 已在 createConsumersForGroup 中被设置为 true
+    // 因此 Worker 内部不会调用 commitEncodedPacket，由此处负责调用
+    
+    std::string producer_name = owner_connector->getProducerNameForConsumer(consumer_name);
+    auto shared_source = std::dynamic_pointer_cast<EncodedPacketSourceFromBuffer>(
+        owner_connector->getSharedSource(producer_name));
+    
+    if (!shared_source) {
+        LOG4CPLUS_ERROR(logger_, "[Worker '" << consumer_name 
+                        << "'] shared_source 不是 EncodedPacketSourceFromBuffer 类型");
+        return true;  // 类型错误，默认允许提交
+    }
+    // 如果 fillBuffer 返回 CodecEagain，则直接提交 packet
+    if (status == FillStatus::CodecEagain) {
+        shared_source->commitEncodedPacket(consumer_info->worker->getWorkerBase());
+        return true;
+    }
+
+    if (status == FillStatus::NonVideoPacket || status == FillStatus::DataPending) { 
+        return true;
+    }
+    // 获取当前帧版本号
+    uint64_t frame_version = shared_source->getCurrentBufferVersion();
+    
+    // ⭐ v2.29 修改：到达同步点，传递 fillBuffer 的结果状态
+    // v2.33 变更：使用 FillStatus
+    bool sync_result = it->second->arrive(consumer_name, frame_version, buffer, status);
+    
+    // 帧同步完成后，调用 commit 释放 packet
+    // 所有 Worker 一起 commit，确保 fetchTaskFunc 不会提前被唤醒
+    shared_source->commitEncodedPacket(consumer_info->worker->getWorkerBase());
+    
+    if (!sync_result && buffer != nullptr) {
+        LOG4CPLUS_WARN(logger_, "[Worker '" << consumer_name 
+                       << "'] 同步协调器拒绝提交 Frame " << frame_version);
+    }
+    
+    return sync_result;
+}
+
 void MultiWorkerProductionLine::workerThreadFunc(
     const std::shared_ptr<WorkerGroupRuntime>& group,
     WorkerGroupRuntime::ConsumerInfo* consumer_info,
@@ -827,7 +904,7 @@ void MultiWorkerProductionLine::workerThreadFunc(
         Buffer* buffer = nullptr;
         while (group->is_running.load() && running_.load() && buffer == nullptr) {
             buffer = pool_sptr->acquireFree(true, 100);  // 100ms 超时
-            if (buffer == nullptr && group->is_running.load() && running_.load()) {
+            if (buffer == nullptr) {
                 buffer_wait_count++;
                 // 每100次等待才打印一次日志
                 if (buffer_wait_count % 100 == 0) {
@@ -843,48 +920,16 @@ void MultiWorkerProductionLine::workerThreadFunc(
                         
         buffer_wait_count = 0;
         
-        bool fill_success = consumer_info->worker->fillBuffer(0, buffer);
+        // v2.33 变更：fillBuffer 返回 FillResult
+        FillResult fill_result = consumer_info->worker->fillBuffer(0, buffer);
         
-        if (fill_success) {
+        if (fill_result.ok()) {
             // ✅ 解码成功
             
-            bool should_submit = true;
-            
-            // ⭐ v2.23 新增：帧同步协调（如果启用）
-            Connector* owner_connector = group->getConnectorForConsumer(consumer_name);
-            if (owner_connector) {
-                size_t conn_idx = group->getConnectorIndex(owner_connector);
-                auto it = group->connector_coordinators.find(conn_idx);
-                
-                if (it != group->connector_coordinators.end()) {
-                    // 该 Connector 启用了帧同步
-                    
-                    // 获取帧版本号（从 EncodedPacketSourceFromBuffer）
-                    // 注意：这里需要从 Connector 获取对应的 shared_source
-                    std::string producer_name = owner_connector->getProducerNameForConsumer(consumer_name);
-                    auto shared_source_base = owner_connector->getSharedSource(producer_name);
-                    
-                    if (shared_source_base) {
-                        // 转换为 EncodedPacketSourceFromBuffer（共享模式下一定是这个类型）
-                        auto shared_source = std::dynamic_pointer_cast<EncodedPacketSourceFromBuffer>(shared_source_base);
-                        
-                        if (shared_source) {
-                            uint64_t frame_version = shared_source->getCurrentBufferVersion();
-                            
-                            // 到达同步点（阻塞等待 + 执行回调链）
-                            should_submit = it->second->arrive(consumer_name, frame_version, buffer);
-                            
-                            if (!should_submit) {
-                                LOG4CPLUS_WARN(logger_, "[Worker '" << consumer_name 
-                                               << "'] 同步协调器拒绝提交 Frame " << frame_version);
-                            }
-                        } else {
-                            LOG4CPLUS_ERROR(logger_, "[Worker '" << consumer_name 
-                                            << "'] shared_source 不是 EncodedPacketSourceFromBuffer 类型");
-                        }
-                    }
-                }
-            }
+            // ⭐ v2.29 修改：帧同步逻辑，传递 SUCCESS 状态
+            // v2.33 变更：使用 FillStatus
+            bool should_submit = performFrameSync(group, consumer_name, consumer_info, 
+                                                  buffer, FillStatus::Success);
             
             // 根据同步结果决定是否提交
             if (should_submit) {
@@ -900,6 +945,25 @@ void MultiWorkerProductionLine::workerThreadFunc(
         } else {
             // ❌ 失败：释放 buffer
             pool_sptr->releaseFree(buffer);
+            
+            // v2.33 变更：直接使用 FillResult 判断状态
+            if (fill_result.shouldRetry()) {
+                // ⏳ 可重试状态（DataPending / CodecEagain / NonVideoPacket）
+                performFrameSync(group, consumer_name, consumer_info, nullptr, 
+                                fill_result.status());
+                continue;
+            }
+            
+            if (fill_result.isEof()) {
+                // 📍 EOF：数据源已结束，退出线程
+                LOG4CPLUS_INFO(logger_, "[Worker '" << consumer_name 
+                               << "'] 检测到数据源 EOF，正常退出");
+                break;
+            }
+            
+            // ❌ 错误状态
+            performFrameSync(group, consumer_name, consumer_info, nullptr, 
+                            fill_result.status());
             
             // 检查原因
             if (consumer_info->worker->isAtEnd()) {

@@ -3,6 +3,7 @@
 #include "productionline/worker/FFmpegDecodeWorker.hpp"
 #include "productionline/worker/FfmpegPacketRecorderWorker.hpp"
 #include "productionline/worker/OpencvWorker.hpp"
+#include "productionline/worker/FFmpegEncodeWorker.hpp"  // ⭐ v2.29 新增
 #include <stdlib.h>
 #include <string.h>
 
@@ -46,6 +47,7 @@ const char* BufferFillingWorkerFactory::typeToString(WorkerType type) {
         case WorkerType::FFMPEG_DECODE:         return "FFMPEG_DECODE";
         case WorkerType::FFMPEG_PACKET_RECORDER: return "FFMPEG_PACKET_RECORDER";
         case WorkerType::OPENCV:                return "OPENCV";
+        case WorkerType::FFMPEG_ENCODE:         return "FFMPEG_ENCODE";  // ⭐ v2.29 新增
         default:                                return "UNKNOWN";
     }
 }
@@ -71,6 +73,9 @@ std::unique_ptr<WorkerBase> BufferFillingWorkerFactory::createByType(WorkerType 
         case WorkerType::OPENCV:
             return std::make_unique<OpencvWorker>(config);
             
+        case WorkerType::FFMPEG_ENCODE:  // ⭐ v2.29 新增
+            return std::make_unique<FFmpegEncodeWorker>(config);
+            
         case WorkerType::AUTO:
         default:
             return autoDetect(config);
@@ -89,6 +94,9 @@ BufferFillingWorkerFactory::WorkerType BufferFillingWorkerFactory::getTypeFromEn
         return WorkerType::FFMPEG_DECODE;
     } else if (strcmp(env, "packet_recorder") == 0 || strcmp(env, "ffmpeg_packet_recorder") == 0) {
         return WorkerType::FFMPEG_PACKET_RECORDER;
+    } else if (strcmp(env, "encode") == 0 || strcmp(env, "ffmpeg_encode") == 0 ||
+               strcmp(env, "encoder") == 0) {  // ⭐ v2.29 新增
+        return WorkerType::FFMPEG_ENCODE;
     }
     
     return WorkerType::AUTO;

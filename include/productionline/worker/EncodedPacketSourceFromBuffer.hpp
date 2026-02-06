@@ -22,6 +22,9 @@ class EncodedPacketSourceFromBuffer;  // 前向声明
 // 原因：新的三状态 API（acquire/commit/cancel）提供了更精确的控制
 // Worker 需要根据解码结果决定是 commit 还是 cancel，RAII 模式不再适用
 
+// ⭐ v2.32 修改：AcquireStatus、PacketAcquireResult 已移至 IEncodedPacketSource.hpp
+// 因为这些类型是接口方法的返回值，所有子类都在使用
+
 /**
  * @brief EncodedPacketSourceFromBuffer - 从 Buffer 读取编码数据的数据源实现
  * 
@@ -122,8 +125,7 @@ public:
     const AVCodecParameters* getCodecParameters() const override;
     SourceType getDataSourceType() const override;
     
-    // ============ IEncodedPacketSource 特有方法 ============
-    int readEncodedPacket(AVPacket* packet) override;
+    // ============ IEncodedPacketSource 特有方法（v2.32 统一接口）============
     int getVideoStreamIndex() const override;
 
     /**
@@ -135,69 +137,50 @@ public:
     void setSourceBufferPool(std::weak_ptr<BufferPool> pool_weak);
     
     /**
-     * @brief 获取编码后的 AVPacket 指针（共享模式，v3.0 新架构）
+     * @brief 获取编码后的 AVPacket（v2.32 统一接口）
+     * @param out_packet 输出的 packet（Buffer 共享模式忽略此参数，返回借用指针）
      * @param worker_id Worker 的唯一标识（通常是 this 指针）
-     * @return AVPacket* 指针（零拷贝），nullptr=EOF 或已获取过当前版本
+     * @return PacketAcquireResult 结果对象
      * 
      * 说明：
-     * - 只在共享模式下使用
+     * - Buffer 共享模式：忽略 out_packet，返回 current_buffer_ 的借用指针
      * - 阻塞等待直到有新 buffer 或 EOF
      * - 防止同一个 Worker 重复获取同一个 buffer（通过版本号机制）
      * - 不递减 remaining_subscribers_（由 commitEncodedPacket 负责）
      * 
-     * 返回值：
-     * - 非空：成功获取 packet 指针
-     * - nullptr：EOF 或已获取过当前版本（需要等待新 buffer）
-     * 
-     * 使用方式：
-     * ```cpp
-     * AVPacket* packet = ps->acquireEncodedPacket(this);
-     * if (!packet) {
-     *     return false;  // EOF 或等待新 buffer
-     * }
-     * // 使用 packet...
-     * ```
+     * 返回值状态：
+     * - Success：成功获取，可通过 packet() 获取指针
+     * - Eof：数据流正常结束
+     * - Again：已处理当前版本，需等待新 buffer
+     * - InvalidMode：非共享模式
+     * - NoData：无可用数据（异常）
      */
-    AVPacket* acquireEncodedPacket(void* worker_id);
+    PacketAcquireResult acquireEncodedPacket(AVPacket* out_packet, void* worker_id = nullptr) override;
     
     /**
-     * @brief 提交释放编码后的 AVPacket（共享模式，v3.0 新架构）
+     * @brief 提交释放编码后的 AVPacket（v2.32 统一接口）
      * @param worker_id Worker 的唯一标识
      * @return true=成功提交, false=失败（状态不对）
      * 
      * 说明：
-     * - 只有成功处理（解码出至少一帧）后才调用
-     * - 递减 remaining_subscribers_
-     * - 如果是最后一个订阅者，唤醒 Fetch 任务
-     * - 重置 Worker 状态，允许获取下一个 buffer
+     * - 共享模式：递减 remaining_subscribers_，最后一个订阅者触发 Buffer 释放
+     * - 普通模式：返回 false
      * 
-     * 使用方式：
-     * ```cpp
-     * if (decoded_at_least_one_frame) {
-     *     ps->commitEncodedPacket(this);
-     * }
-     * ```
+     * v2.32 修改：提升为 IEncodedPacketSource 接口方法
      */
-    bool commitEncodedPacket(void* worker_id);
+    bool commitEncodedPacket(void* worker_id) override;
     
     /**
-     * @brief 取消当前获取（共享模式，v2.22 新架构）
+     * @brief 取消当前获取（v2.32 统一接口）
      * @param worker_id Worker 的唯一标识
      * 
      * 说明：
-     * - 失败时调用（如 send_packet 失败、receive_frame 失败）
-     * - 不递减 remaining_subscribers_（保持订阅者计数不变）
-     * - 重置 Worker 状态，允许重新获取当前 buffer（重试）
+     * - 共享模式：重置 Worker 状态，允许重新获取当前 buffer（重试）
+     * - 普通模式：空操作
      * 
-     * 使用方式：
-     * ```cpp
-     * if (send_packet_failed) {
-     *     ps->cancelEncodedPacket(this);
-     *     return false;  // 重试
-     * }
-     * ```
+     * v2.32 修改：提升为 IEncodedPacketSource 接口方法
      */
-    void cancelEncodedPacket(void* worker_id);
+    void cancelEncodedPacket(void* worker_id) override;
     
     /**
      * @brief 获取当前 buffer 版本号（v2.23 新增）
@@ -211,6 +194,7 @@ public:
         return current_buffer_version_.load(std::memory_order_acquire);
     }
     
+   
 private:
     // ========== 通用成员（普通模式和共享模式都使用）==========
     const AVCodecParameters* codec_params_;     // 编解码器参数（从 Record Worker 获取）

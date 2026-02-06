@@ -384,6 +384,30 @@ private:
                          const std::string& consumer_name);
     
     /**
+     * @brief 执行帧同步（如果启用）
+     * 
+     * ⭐ v2.27 新增：将帧同步逻辑封装到独立函数，避免代码重复
+     * ⭐ v2.29 修改：添加 FillBufferResult 参数，支持区分 SUCCESS/EAGAIN/ERROR
+     * 
+     * 注意：帧同步模式下，deferred_commit 已在 createConsumersForGroup 中被设置为 true
+     * 因此 Worker 内部不会调用 commitEncodedPacket，由此函数负责调用
+     * 
+     * @param group WorkerGroup 运行时
+     * @param consumer_name 消费者名称
+     * @param consumer_info 消费者信息
+     * @param buffer 解码后的 Buffer（失败时传 nullptr）
+     * @param status fillBuffer 的返回状态
+     * @return true=允许提交, false=拒绝提交（未启用帧同步时始终返回 true）
+     * 
+     * v2.33 变更：参数类型从 FillBufferResult 改为 FillStatus
+     */
+    bool performFrameSync(const std::shared_ptr<WorkerGroupRuntime>& group,
+                         const std::string& consumer_name,
+                         WorkerGroupRuntime::ConsumerInfo* consumer_info,
+                         Buffer* buffer,
+                         FillStatus status);
+    
+    /**
      * @brief 设置错误信息并触发回调
      */
     void setError(const std::string& error_msg) const;

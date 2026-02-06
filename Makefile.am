@@ -12,10 +12,13 @@ libcomponents_la_SOURCES = \
     source/productionline/worker/WorkerConfig.cpp \
     source/productionline/worker/FFmpegDecodeWorker.cpp \
     source/productionline/worker/FfmpegPacketRecorderWorker.cpp \
+    source/productionline/worker/FFmpegEncodeWorker.cpp \
     source/productionline/worker/EncodedPacketSourceFromFile.cpp \
     source/productionline/worker/EncodedPacketSourceFromBuffer.cpp \
     source/productionline/worker/EncodedPacketSourceFromRtsp.cpp \
     source/productionline/worker/OpencvWorker.cpp \
+    source/productionline/worker/RawFrameSourceFromFile.cpp \
+    source/productionline/worker/RawFrameSourceFromBuffer.cpp \
     source/monitor/PerformanceMonitor.cpp \
     source/common/Timer.cpp \
     source/common/GlobalThreadPool.cpp \

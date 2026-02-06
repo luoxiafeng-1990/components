@@ -32,7 +32,7 @@ public:
     OpencvWorker(const OpencvWorker&) = delete;
     OpencvWorker& operator=(const OpencvWorker&) = delete;
     
-    bool fillBuffer(int frame_index, Buffer* buffer) override;
+    FillResult fillBuffer(int frame_index, Buffer* buffer) override;
     const char* getWorkerType() const override {
         return "OpencvWorker";
     }
@@ -152,7 +152,7 @@ private:
 
     bool configureSpecialDecoder();
 
-    bool readAndSendPacket(AVPacket* packet_ptr);
+    FillResult readAndSendPacket(AVPacket* packet_ptr);
 
     bool fillBufferMetadataFromFrame(AVFrame* frame_ptr, Buffer* buffer, cv::Mat* mat = nullptr);
 

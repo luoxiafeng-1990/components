@@ -66,6 +66,7 @@ buildMultiWorkerConfigForCompare(
                 .setPath(configs[0].data_source.path)
                 .setBufferCount(configs[0].data_source.buffer_count > 0 
                     ? configs[0].data_source.buffer_count : 32)
+                .setMaxFrames(configs[0].data_source.max_frames)  // v2.23 新增：传递帧数限制
                 .build()
         )
         .setWorkerType(WorkerType::FFMPEG_PACKET_RECORDER)
@@ -462,7 +463,16 @@ ConsumeResult BufferConsumerService::startMultiWorkerCompare(
         // 1. 创建 MultiWorkerProductionLine（配置由测试 case 传入，包含 callback_chain）
         auto production_line = std::make_unique<MultiWorkerProductionLine>(multi_config);
         
-        // 1.1 查找 CompareCallbackContext（用于获取比较结果）
+        // 1.1 启动 MultiWorkerProductionLine（初始化 Worker 和 BufferPool）
+        if (!production_line->start()) {
+            result.success = false;
+            result.error_message = "Failed to start MultiWorkerProductionLine: " + production_line->getLastError();
+            LOG4CPLUS_ERROR_FMT(logger_, "Failed to start MultiWorkerProductionLine: %s", 
+                               production_line->getLastError().c_str());
+            return result;
+        }
+        
+        // 1.2 查找 CompareCallbackContext（用于获取比较结果）
         CompareCallbackContext* compare_ctx = nullptr;
         for (const auto& group_config : multi_config.groups) {
             for (const auto& conn_cfg : group_config.connector_configs) {
@@ -550,18 +560,14 @@ ConsumeResult BufferConsumerService::startMultiWorkerCompare(
             return result;
         }
         
-        // 4. 启动 ProductionLine
-        if (!production_line->start()) {
-            result.success = false;
-            result.error_message = "Failed to start MultiWorkerProductionLine";
-            return result;
-        }
+        // 4. MultiWorkerProductionLine 已在上面启动（步骤 1.1）
+        // 不需要再次调用 start()
         
         // 5. 消费循环 - 轮询所有 worker 的 BufferPool
         // 使用第一个 group 第一个 consumer 的配置作为默认
         const auto& first_config = multi_config.groups[0].consumer_configs[0].worker_config.consumer_type;
         int max_frames = first_config.max_frames;
-        int timeout_ms = first_config.timeout_ms;
+        int timeout_ms = 5000;  // 固定 5s，确保有足够时间等待 Worker 处理（如 compare 回调）
         int max_timeout_count = first_config.max_timeout_count;
         
         int total_frames = 0;
@@ -580,7 +586,7 @@ ConsumeResult BufferConsumerService::startMultiWorkerCompare(
             
             // 轮询每个 worker 的 BufferPool
             for (auto& ctx : worker_contexts) {
-                Buffer* buffer = ctx.pool->acquireFilled(false, timeout_ms);
+                Buffer* buffer = ctx.pool->acquireFilled(true, timeout_ms);
                 if (buffer) {
                     // 首帧初始化
                     if (ctx.frame_count == 0) {

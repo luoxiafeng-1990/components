@@ -272,40 +272,56 @@ bool FfmpegPacketRecorderWorker::isAtEnd() const {
 
 // ============ WorkerBase 接口实现 ============
 
-bool FfmpegPacketRecorderWorker::fillBuffer(int frame_index, Buffer* buffer) {
+/**
+ * @brief 填充 Buffer（录制一个 packet）
+ * 
+ * v2.33 变更：返回类型从 bool 改为 FillResult
+ */
+FillResult FfmpegPacketRecorderWorker::fillBuffer(int frame_index, Buffer* buffer) {
     (void)frame_index;
     
     if (!buffer) {
         LOG4CPLUS_ERROR(logger_, "ERROR: buffer is nullptr");
-        return false;
+        setLastFillStatus(FillStatus::InvalidParam);
+        return FillResult::invalidParam();
     }
     
     if (!is_open_ || !packet_source_) {
         LOG4CPLUS_ERROR(logger_, "ERROR: Worker is not open or packet source is null");
-        return false;
+        setLastFillStatus(FillStatus::NotOpen);
+        return FillResult::notOpen();
     }
     
     // 1. ⭐ 从 Buffer 获取预分配的 AVPacket（AVFrameAllocator 已经分配）
     AVPacket* packet = buffer->getAVPacket();
     if (!packet) {
         LOG4CPLUS_ERROR(logger_, "ERROR: Buffer has no AVPacket (AVFrameAllocator not used?)");
-        return false;
+        setLastFillStatus(FillStatus::InvalidParam);
+        return FillResult::invalidParam();
     }
     
     std::lock_guard<std::recursive_mutex> lock(mutex_);
     
-    // 2. ============ v2.13：通过数据源读取 AVPacket ============
-    int ret = packet_source_->readEncodedPacket(packet);
+    // 2. ============ v2.32：通过数据源获取 AVPacket（统一接口，零拷贝）============
+    // 传入 Buffer 的 AVPacket，数据直接填充到里面
+    auto acquire_result = packet_source_->acquireEncodedPacket(packet, nullptr);
     
-    if (ret < 0) {
-        if (ret == AVERROR_EOF) {
+    if (acquire_result.shouldRetry()) {
+        // 读到非视频流 packet，需要继续读取
+        setLastFillStatus(FillStatus::NonVideoPacket);
+        return FillResult::nonVideoPacket();
+    }
+    
+    if (!acquire_result.ok()) {
+        if (acquire_result.isEof()) {
             LOG4CPLUS_DEBUG(logger_, "🔄 EOF reached (via packet source)");
-            return false;
+            setLastFillStatus(FillStatus::EndOfStream);
+            return FillResult::endOfStream();
         } else {
-            char err_buf[128];
-            av_strerror(ret, err_buf, sizeof(err_buf));
-            LOG4CPLUS_ERROR_FMT(logger_, "ERROR: packet_source_->readEncodedPacket() failed: %d (%s)", ret, err_buf);
-            return false;
+            LOG4CPLUS_ERROR_FMT(logger_, "ERROR: packet_source_->acquireEncodedPacket() failed: %s", 
+                               acquire_result.statusString());
+            setLastFillStatus(FillStatus::AcquireError);
+            return FillResult::acquireError();
         }
     }
     
@@ -313,11 +329,11 @@ bool FfmpegPacketRecorderWorker::fillBuffer(int frame_index, Buffer* buffer) {
     int video_stream_index = packet_source_->getVideoStreamIndex();
     if (packet->stream_index != video_stream_index) {
         av_packet_unref(packet);  // 清空非视频流的数据
-        return false;  // 不是视频流，让调用者继续读取
+        setLastFillStatus(FillStatus::NonVideoPacket);
+        return FillResult::nonVideoPacket();  // 不是视频流，让调用者继续读取
     }
     
-    // 4. ⭐ 更新 Buffer 的地址指向 AVPacket 的数据（零拷贝）
-    //    注意：packet->data 是 FFmpeg 内部管理的内存，Buffer 只是引用
+    // 4. ⭐ 更新 Buffer 的地址指向 AVPacket 的数据（零拷贝，数据已直接填充到 packet）
     buffer->setVirtualAddress(packet->data);
     buffer->setUsedSize(packet->size);
     
@@ -327,7 +343,8 @@ bool FfmpegPacketRecorderWorker::fillBuffer(int frame_index, Buffer* buffer) {
     // 记录包信息（用于调试）
     packet_count_++;
     
-    return true;
+    setLastFillStatus(FillStatus::Success);
+    return FillResult::success();
 }
 
 // ============ v2.13：数据源自动选择逻辑 ============
@@ -335,8 +352,9 @@ bool FfmpegPacketRecorderWorker::fillBuffer(int frame_index, Buffer* buffer) {
 std::unique_ptr<IEncodedPacketSource> FfmpegPacketRecorderWorker::createPacketSource(const std::string& path) {
     // 根据 URL/路径前缀判断数据源类型
     if (path.find("rtsp://") == 0 || path.find("rtsps://") == 0) {
-        LOG4CPLUS_INFO(logger_, "📡 Detected RTSP stream source");
-        return std::make_unique<EncodedPacketSourceFromRtsp>(path);
+        LOG4CPLUS_INFO_FMT(logger_, "📡 Detected RTSP stream source (max_frames=%d)", worker_config_.data_source.max_frames);
+        // v2.32：RTSP 也支持 max_frames 限制
+        return std::make_unique<EncodedPacketSourceFromRtsp>(path, worker_config_.data_source.max_frames);
     } 
     else if (path.find("rtmp://") == 0 || path.find("rtmps://") == 0) {
         LOG4CPLUS_INFO(logger_, "📡 Detected RTMP stream source");
@@ -345,13 +363,13 @@ std::unique_ptr<IEncodedPacketSource> FfmpegPacketRecorderWorker::createPacketSo
         return nullptr;
     }
     else if (path.find("http://") == 0 || path.find("https://") == 0) {
-        LOG4CPLUS_INFO(logger_, "🌐 Detected HTTP/HTTPS stream source (e.g., HLS)");
+        LOG4CPLUS_INFO_FMT(logger_, "🌐 Detected HTTP/HTTPS stream source (max_frames=%d)", worker_config_.data_source.max_frames);
         // HTTP 流可以用 EncodedPacketSourceFromFile 处理（FFmpeg 原生支持）
-        return std::make_unique<EncodedPacketSourceFromFile>(path);
+        return std::make_unique<EncodedPacketSourceFromFile>(path, worker_config_.data_source.max_frames);
     }
     else {
-        LOG4CPLUS_INFO(logger_, "📁 Detected local file source");
-        return std::make_unique<EncodedPacketSourceFromFile>(path);
+        LOG4CPLUS_INFO_FMT(logger_, "📁 Detected local file source (max_frames=%d)", worker_config_.data_source.max_frames);
+        return std::make_unique<EncodedPacketSourceFromFile>(path, worker_config_.data_source.max_frames);
     }
 }
 

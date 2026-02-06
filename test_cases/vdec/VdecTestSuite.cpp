@@ -200,10 +200,12 @@ int VdecTestSuite::run(int argc, char* argv[]) {
             config.data_source.path, params.codec, params.width, params.height);
         hw_config.consumer_type = config.consumer_type;
         hw_config.consumer_type.performance.target_fps = params.fps;
+        hw_config.data_source.max_frames = config.data_source.max_frames;  // v2.23: 传递帧数限制
         
         auto sw_config = common::WorkerConfigFactory::createSoftwareDecode(
             config.data_source.path, params.width, params.height);
         sw_config.consumer_type.performance.target_fps = params.fps;
+        sw_config.data_source.max_frames = config.data_source.max_frames;  // v2.23: 传递帧数限制
         
         // COMPARE 模式也支持叠加其他消费类型（display、save）
         uint32_t compare_flags = 0;
@@ -238,6 +240,7 @@ int VdecTestSuite::run(int argc, char* argv[]) {
             }
             cfg.consumer_type = config.consumer_type;
             cfg.consumer_type.performance.target_fps = params.fps;
+            cfg.data_source.max_frames = config.data_source.max_frames;  // v2.23: 传递帧数限制
             configs.push_back(cfg);
         }
         
@@ -259,6 +262,7 @@ int VdecTestSuite::run(int argc, char* argv[]) {
     }
     full_config.consumer_type = config.consumer_type;
     full_config.consumer_type.performance.target_fps = params.fps;
+    full_config.data_source.max_frames = config.data_source.max_frames;  // v2.23: 传递帧数限制
     
     uint32_t flags = buildConsumeFlags(full_config);
     auto result = runSingle(full_config, flags, test_name.str());
@@ -355,7 +359,8 @@ bool VdecTestSuite::parseArgs(int argc, char* argv[], WorkerConfig& config, Deco
                 break;
             
             case 'm':
-                config.consumer_type.max_frames = std::stoi(optarg);
+                // v2.23：从数据源层面限制帧数，而不是消费层面
+                config.data_source.max_frames = std::stoi(optarg);
                 break;
             
             case 's':
@@ -442,6 +447,15 @@ bool VdecTestSuite::parseArgs(int argc, char* argv[], WorkerConfig& config, Deco
         return false;
     }
     
+    // 验证：如果指定了 -s 保存帧数，必须同时指定 -o 输出路径
+    if (!config.consumer_type.save_raw.max_frames_per_channel.empty() && 
+        config.consumer_type.save_raw.max_frames_per_channel[0] != 0 &&
+        !config.consumer_type.save_raw.enable) {
+        std::cerr << "Error: -s/--save requires -o/--output to specify output file path\n" << std::endl;
+        std::cerr << "Example: qa_cases vdec -s 100 -o /tmp/output.yuv video.mp4\n" << std::endl;
+        return false;
+    }
+    
     config.data_source.path = input_path;
     
     return true;
@@ -485,8 +499,8 @@ void VdecTestSuite::printHelp() const {
               << "  -R, --resolution <WxH>  分辨率 (如 1920x1080)\n"
               << "  -F, --fps <n>           目标帧率\n"
               << "  -m, --max-frames <n>    最大帧数 (-1=无限制)\n"
-              << "  -s, --save <n>          保存帧数 (0=不保存, -1=全部)\n"
-              << "  -o, --output <path>     输出文件路径\n"
+              << "  -s, --save <n>          保存帧数 (0=不保存, -1=全部)，需配合 -o 使用\n"
+              << "  -o, --output <path>     输出文件路径，启用保存功能\n"
               << "  -d, --display           启用显示输出 (CONSUME_DISPLAY)\n"
               << "  -p, --psnr              启用 PSNR 验证 (ExecuteMode::COMPARE)\n"
               << "  -S, --ssim              启用 SSIM 验证 (ExecuteMode::COMPARE)\n"
@@ -503,6 +517,7 @@ void VdecTestSuite::printHelp() const {
               << "Examples:\n"
               << "  qa_cases vdec video.mp4                           # SINGLE\n"
               << "  qa_cases vdec --display video.mp4                 # SINGLE + DISPLAY\n"
+              << "  qa_cases vdec -s 100 -o /tmp/out.yuv video.mp4    # SINGLE + SAVE 100帧\n"
               << "  qa_cases vdec --psnr video.mp4                    # COMPARE (HW vs SW)\n"
               << "  qa_cases vdec --threads 16 video.mp4              # PARALLEL x16 (自定义路数)\n"
               << "  qa_cases vdec --threads 32 --decoder sw video.mp4 # PARALLEL x32 软解\n"

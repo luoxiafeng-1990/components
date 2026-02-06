@@ -29,6 +29,11 @@ DataSourceConfigBuilder& DataSourceConfigBuilder::setBufferCount(int count) {
     return *this;
 }
 
+DataSourceConfigBuilder& DataSourceConfigBuilder::setMaxFrames(int max_frames) {
+    data_source_config_.max_frames = max_frames;
+    return *this;
+}
+
 WorkerConfig::DataSourceConfig DataSourceConfigBuilder::build() const {
     return data_source_config_;
 }

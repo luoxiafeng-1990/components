@@ -593,129 +593,78 @@ bool OpencvWorker::fillBufferMetadataFromFrame(AVFrame* frame_ptr, Buffer* buffe
     return true;
 }
 
-bool OpencvWorker::readAndSendPacket(AVPacket* packet_ptr) {
-    if (worker_config_.data_source.buffer_mode) {
-        auto ps = std::dynamic_pointer_cast<EncodedPacketSourceFromBuffer>(packet_source_);
-        if (!ps) {
-            LOG4CPLUS_ERROR(logger_, "[Worker] ERROR: Failed to cast to EncodedPacketSourceFromBuffer");
-            return false;
-        }
-        
-        // ⭐ v2.22 新增：只在未获取时才尝试获取
-        if (!packet_acquired_) {
-            current_packet_ptr_ = ps->acquireEncodedPacket(this);  // ✅ 传递 this 指针
-            
-            if (!current_packet_ptr_) {
-                // EOF 或 已获取过当前版本（需要等待新 buffer）
-                return false;
-            }
-            
-            packet_acquired_ = true;
-        }
-        
-        // ========== 步骤3: 发送到解码器 ==========
-        int ret = avcodec_send_packet(codec_ctx_ptr_, current_packet_ptr_);
-        
-        if (ret < 0 && ret != AVERROR(EAGAIN)) {
-            // ❌ 发送失败，取消当前获取
-            LOG4CPLUS_ERROR_FMT(logger_, "[Worker] ERROR: avcodec_send_packet failed: %d", ret);
-            ps->cancelEncodedPacket(this);
-            packet_acquired_ = false;
-            current_packet_ptr_ = nullptr;
-            return false;
-        }
+FillResult OpencvWorker::readAndSendPacket(AVPacket* packet_ptr) {
+    // ⭐ v2.32 统一接口：所有模式都使用 acquireEncodedPacket
+    if (!packet_acquired_) {
+        auto acquire_result = packet_source_->acquireEncodedPacket(packet_ptr, this);
 
-        return true;
-    }
-    
-    // ========== 文件/RTSP 模式：使用 readPacket ==========
-    // ⭐ 损坏帧重试机制
-    const int AVERROR_INVALIDDATA_VALUE = -1094995529;  // AVERROR(0x41444e49)
-    const int MAX_CORRUPTED_RETRIES = 10;  // 最大重试次数，避免无限循环
-    
-    int corrupted_retries = 0;
-    int read_ret;
-    
-    while (true) {
-        // 使用数据源抽象读取 packet
-        read_ret = packet_source_->readEncodedPacket(packet_ptr);
-        
-        if (read_ret < 0) {
-            if (read_ret == AVERROR_EOF) {
-                LOG4CPLUS_DEBUG(logger_, "🔄 EOF reached");
-                av_packet_unref(packet_ptr);
-                return false;
-            } else if (read_ret == AVERROR_INVALIDDATA_VALUE) {
-                // 🔧 遇到损坏帧时，在内部循环跳过，继续读取下一个 packet
-                corrupted_retries++;
-                if (corrupted_retries <= MAX_CORRUPTED_RETRIES) {
-                    LOG4CPLUS_WARN_FMT(logger_, "[Worker] WARNING: Corrupted packet detected (attempt %d/%d), skipping...", 
-                           corrupted_retries, MAX_CORRUPTED_RETRIES);
-                    av_packet_unref(packet_ptr);
-                    // 继续循环，尝试读取下一个 packet
-                    continue;
-                } else {
-                    // 连续多次都是损坏帧，可能文件确实损坏严重，返回失败
-                    LOG4CPLUS_ERROR_FMT(logger_, "[Worker] ERROR: Too many corrupted packets (%d), giving up", corrupted_retries);
-                    av_packet_unref(packet_ptr);
-                    return false;
-                }
-            } else {
-                // 其他错误（非 EOF，非损坏帧）：记录错误并返回
-                char err_buf[AV_ERROR_MAX_STRING_SIZE];
-                av_strerror(read_ret, err_buf, sizeof(err_buf));
-                LOG4CPLUS_ERROR_FMT(logger_, "[Worker] ERROR: readEncodedPacket failed: %d (%s)", read_ret, err_buf);
-                av_packet_unref(packet_ptr);
-                return false;
+        if (acquire_result.ok()) {
+            // ✅ 成功获取
+            current_packet_ptr_ = acquire_result.packet();
+            packet_acquired_ = true;
+
+        } else if (acquire_result.isEof()) {
+            // 📍 EOF：数据流正常结束
+            LOG4CPLUS_DEBUG(logger_, "[Worker] acquireEncodedPacket: EOF reached");
+            setLastFillStatus(FillStatus::EndOfStream);
+            return FillResult::endOfStream();
+
+        } else if (acquire_result.shouldRetry()) {
+            // ⏳ AGAIN：需要重试
+            if (acquire_result.status() == AcquireStatus::Again) {
+                setLastFillStatus(FillStatus::DataPending);
+                return FillResult::dataPending();
             }
+            setLastFillStatus(FillStatus::NonVideoPacket);
+            return FillResult::nonVideoPacket();
+
         } else {
-            // 成功读取到 packet，退出循环
-            break;
+            // ❌ 错误
+            LOG4CPLUS_ERROR_FMT(logger_, "[Worker] acquireEncodedPacket failed: %s",
+                               acquire_result.statusString());
+            setLastFillStatus(FillStatus::AcquireError);
+            return FillResult::acquireError();
         }
     }
-    
-    // ⭐ 视频流索引检查（仅文件模式需要）
-    if (auto* file_source = dynamic_cast<EncodedPacketSourceFromFile*>(packet_source_.get())) {
-        (void)file_source;  // 仅用于类型检查
-        if (packet_ptr->stream_index != packet_source_->getVideoStreamIndex()) {
-            // 不是视频流的 packet 需要释放，然后继续读取下一个
-            av_packet_unref(packet_ptr);
-            return false;  // 让调用者再次调用以读取下一个 packet
-        }
-    }
-    // RTSP/Buffer 模式：packet 已经是视频流，不需要检查
-    
-    // 发送 packet 到解码器
-    int ret = avcodec_send_packet(codec_ctx_ptr_, packet_ptr);
-    
-    if (ret < 0) {
+
+    // ========== 发送到解码器 ==========
+    int ret = avcodec_send_packet(codec_ctx_ptr_, current_packet_ptr_);
+
+    if (ret < 0 && ret != AVERROR(EAGAIN)) {
+        // ❌ 发送失败
         char err_buf[AV_ERROR_MAX_STRING_SIZE];
         av_strerror(ret, err_buf, sizeof(err_buf));
         LOG4CPLUS_ERROR_FMT(logger_, "[Worker] ERROR: avcodec_send_packet failed: %d (%s)", ret, err_buf);
-        return false;
+
+        if (!worker_config_.data_source.deferred_commit) {
+            packet_source_->cancelEncodedPacket(this);
+        }
+        packet_acquired_ = false;
+        current_packet_ptr_ = nullptr;
+        setLastFillStatus(FillStatus::CodecError);
+        return FillResult::codecError();
     }
-    
-    return true;
+
+    return FillResult::success();
 }
 
-bool OpencvWorker::fillBuffer(int frame_index, Buffer* buffer) {
+FillResult OpencvWorker::fillBuffer(int frame_index, Buffer* buffer) {
+    (void)frame_index;  // 未使用
+
     // ========== 参数校验 ==========
     if (!buffer) {
         LOG4CPLUS_ERROR(logger_, "[Worker] ERROR: buffer is nullptr");
-        return false;
+        setLastFillStatus(FillStatus::InvalidParam);
+        return FillResult::invalidParam();
     }
 
-    if (!packet_source_->isOpen()) {
+    if (!packet_source_ || !packet_source_->isOpen()) {
         LOG4CPLUS_ERROR(logger_, "[Worker] ERROR: Worker is not open");
-        return false;
+        setLastFillStatus(FillStatus::NotOpen);
+        return FillResult::notOpen();
     }
 
     std::lock_guard<std::recursive_mutex> lock(mutex_);
-
-    if (!packet_source_) {
-        LOG4CPLUS_ERROR(logger_, "[Worker] ERROR: packet_source_ is nullptr");
-        return false;
-    }
 
     AVPacket* packet_ptr = buffer->getAVPacket();
     if (!packet_ptr) {
@@ -734,72 +683,75 @@ bool OpencvWorker::fillBuffer(int frame_index, Buffer* buffer) {
         if (!mat) {
             LOG4CPLUS_ERROR(logger_, "[Worker] Failed to convert cached AVFrame to Mat");
             av_frame_free(&cached_frame);
-            return false;
+            setLastFillStatus(FillStatus::InternalError);
+            return FillResult::internalError();
         }
 
         // 使用fillBufferMetadataFromFrame统一设置所有元数据
-        bool result = fillBufferMetadataFromFrame(cached_frame, buffer, mat);
+        fillBufferMetadataFromFrame(cached_frame, buffer, mat);
 
         // 释放AVFrame
         av_frame_free(&cached_frame);
 
-        return result;
+        setLastFillStatus(FillStatus::Success);
+        return FillResult::success();
     }
-    
-    if (!readAndSendPacket(packet_ptr)) {
-        return false;
+
+    // ========== 步骤2: 读取并发送 packet ==========
+    FillResult send_result = readAndSendPacket(packet_ptr);
+    if (!send_result.ok()) {
+        // readAndSendPacket() 已经设置了 lastFillStatus_，直接返回
+        return send_result;
     }
-   
-    // ========== 步骤2: 循环读取所有解码的帧到缓存 ==========
+
+    // ========== 步骤3: 循环读取所有解码的帧到缓存 ==========
     bool decoded_at_least_one = false;
-    
+
     while (true) {
         AVFrame* temp_frame = av_frame_alloc();
         if (!temp_frame) {
             break;
         }
-        
+
         int ret = avcodec_receive_frame(codec_ctx_ptr_, temp_frame);
-        
+
         if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF || ret < 0) {
             av_frame_free(&temp_frame);
             break;
         }
-        
+
         // ✅ 成功解码一帧
         decoded_at_least_one = true;
         cached_frames_.push_back(temp_frame);
     }
-    
-    // ========== 步骤5: 检查是否成功解码 ==========
+
+    // ========== 步骤4: 检查是否成功解码 ==========
     if (!decoded_at_least_one) {
-        if (worker_config_.data_source.buffer_mode) {
-            auto ps = std::dynamic_pointer_cast<EncodedPacketSourceFromBuffer>(packet_source_);
-            if (ps) {
-                ps->cancelEncodedPacket(this);
-            }
-            packet_acquired_ = false;
-            current_packet_ptr_ = nullptr;
-            return false;
+        // ❌ 没有解码出帧（EAGAIN：解码器需要更多输入才能输出）
+        if (!worker_config_.data_source.deferred_commit) {
+            packet_source_->cancelEncodedPacket(this);
         }
+        packet_acquired_ = false;
+        current_packet_ptr_ = nullptr;
+        setLastFillStatus(FillStatus::CodecEagain);
+        return FillResult::codecEagain();
     }
-    
-    // ========== 步骤6: 成功解码，提交（释放）==========
-    if (worker_config_.data_source.buffer_mode && packet_acquired_) {
-        auto ps = std::dynamic_pointer_cast<EncodedPacketSourceFromBuffer>(packet_source_);
-        if (ps) {
-            // ⭐ v2.22 新增：成功处理，提交释放
-            ps->commitEncodedPacket(this);
+
+    // ========== 步骤5: 成功解码，提交（释放）==========
+    if (packet_acquired_) {
+        if (!worker_config_.data_source.deferred_commit) {
+            packet_source_->commitEncodedPacket(this);
         }
-        
+
         // 重置状态
         packet_acquired_ = false;
         current_packet_ptr_ = nullptr;
     }
-    
-    // ========== 步骤7: 从缓存取第一帧填充 buffer ==========
+
+    // ========== 步骤6: 从缓存取第一帧填充 buffer ==========
     if (cached_frames_.empty()) {
-        return false;  // 不应该到这里
+        setLastFillStatus(FillStatus::InternalError);  // 不应该到这里，逻辑错误
+        return FillResult::internalError();
     }
 
     AVFrame* first_frame = cached_frames_.front();
@@ -810,16 +762,18 @@ bool OpencvWorker::fillBuffer(int frame_index, Buffer* buffer) {
     if (!mat) {
         LOG4CPLUS_ERROR(logger_, "[Worker] Failed to convert AVFrame to Mat");
         av_frame_free(&first_frame);
-        return false;
+        setLastFillStatus(FillStatus::InternalError);
+        return FillResult::internalError();
     }
 
     // 使用fillBufferMetadataFromFrame统一设置所有元数据
-    bool result = fillBufferMetadataFromFrame(first_frame, buffer, mat);
+    fillBufferMetadataFromFrame(first_frame, buffer, mat);
 
     // 释放AVFrame
     av_frame_free(&first_frame);
 
-    return result;
+    setLastFillStatus(FillStatus::Success);
+    return FillResult::success();
 }
 
 cv::Mat* OpencvWorker::convertAVFrameToMat(AVFrame* avframe) {

@@ -232,12 +232,10 @@ void EncodedPacketSourceFromBuffer::fetchTaskFunc() {
         {
             std::unique_lock<std::mutex> lock(mutex_);
             cv_fetch_.wait(lock, [this]() {
-                // ✅ 等待所有订阅者完成（remaining_subscribers_ == 0）
-                // 或者 Pool 已停止 或者 任务已停止
-                auto pool = source_pool_.lock();  // 重新获取 pool
-                return remaining_subscribers_.load(std::memory_order_acquire) == 0 ||
-                       !is_running_.load(std::memory_order_acquire) ||
-                       (pool && !pool->isRunning());  // Pool 已停止
+                // ⭐ v2.32 修复：始终等待 remaining_subscribers == 0
+                // 无论是正常 EOF 还是外部停止，都必须等待 Worker 处理完当前 buffer
+                // 这样才能安全地释放 current_buffer_
+                return remaining_subscribers_.load(std::memory_order_acquire) == 0;
             });
         }
         
@@ -255,19 +253,38 @@ void EncodedPacketSourceFromBuffer::fetchTaskFunc() {
             pool->releaseFilled(buffer_to_release);
         }
         
+        // ⭐ v2.32 新增：步骤2 完成后检查是否需要退出
+        // 此时 current_buffer_ 已经安全释放，可以退出
+        if (!is_running_.load(std::memory_order_acquire)) {
+            LOG4CPLUS_DEBUG(logger_, "Fetch 任务：收到外部停止信号，安全退出");
+            cv_subscribers_.notify_all();
+            break;
+        }
+        
         // ========== 步骤3：获取新 Buffer ==========
-        Buffer* new_buffer = pool->acquireFilled(true, 100);  // 100ms 超时
+        // ⭐ v2.32 修复：Pool shutdown 后继续获取剩余 buffer
+        // - Pool 运行中：使用阻塞模式 + 100ms 超时
+        // - Pool 已 shutdown：使用非阻塞模式，持续获取直到队列为空
+        bool pool_running = pool->isRunning();
+        Buffer* new_buffer = pool->acquireFilled(pool_running, pool_running ? 100 : 0);
         
         if (!new_buffer) {
             // 超时或没有数据
-            if (!is_running_.load(std::memory_order_acquire) || !pool->isRunning()) {
-                LOG4CPLUS_DEBUG(logger_, "Fetch 任务：收到停止信号");
-                is_running_.store(false, std::memory_order_release);
-                // 唤醒所有等待的订阅者，让它们检测到 EOF
+            if (!is_running_.load(std::memory_order_acquire)) {
+                LOG4CPLUS_DEBUG(logger_, "Fetch 任务：收到外部停止信号");
                 cv_subscribers_.notify_all();
-                break;  // 停止信号
+                break;
             }
-            // Pool 还在运行，继续等待
+            
+            if (!pool_running) {
+                // ⭐ Pool 已 shutdown 且非阻塞获取返回 nullptr，说明队列真的为空了
+                LOG4CPLUS_DEBUG(logger_, "Fetch 任务：数据源 EOF（BufferPool 已排空）");
+                is_running_.store(false, std::memory_order_release);
+                cv_subscribers_.notify_all();
+                break;
+            }
+            
+            // Pool 还在运行，超时，继续等待
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
             continue;
         }
@@ -305,95 +322,7 @@ void EncodedPacketSourceFromBuffer::fetchTaskFunc() {
     LOG4CPLUS_INFO(logger_, "Fetch 任务循环结束");
 }
 
-int EncodedPacketSourceFromBuffer::readEncodedPacket(AVPacket* packet) {
-    if (!is_open_.load(std::memory_order_acquire) || !packet) {
-        return AVERROR(EINVAL);
-    }
-    
-    auto pool = source_pool_.lock();
-    if (!pool) {
-        LOG4CPLUS_ERROR(logger_, "Source BufferPool已销毁");
-        return AVERROR_EOF;
-    }
-    
-    // ========== v2.18：共享模式（订阅者）==========
-    if (is_shared_mode_) {
-        std::unique_lock<std::mutex> lock(mutex_);
-        
-        // 1. 等待新 Buffer 可用
-        cv_subscribers_.wait(lock, [this]() {
-            return current_buffer_ != nullptr || 
-                   !is_running_.load(std::memory_order_acquire);
-        });
-        
-        // 检查是否被关闭
-        if (!is_running_.load(std::memory_order_acquire)) {
-            return AVERROR_EOF;
-        }
-        // 检查 Buffer 是否有效
-        if (!current_buffer_) {
-            return AVERROR(EAGAIN);
-        }
-        
-        // 2. 复制 packet 数据
-        AVPacket* src_packet = current_buffer_->getAVPacket();
-        int ret = copyPacket(packet, src_packet);
-        
-        if (ret < 0) {
-            char err_buf[AV_ERROR_MAX_STRING_SIZE];
-            av_strerror(ret, err_buf, sizeof(err_buf));
-            LOG4CPLUS_ERROR_FMT(logger_, "Failed to copy packet: %s", err_buf);
-        }
-        // 3. 标记自己已完成
-        size_t remaining = remaining_subscribers_.fetch_sub(1, std::memory_order_acq_rel) - 1;
-        
-        // LOG4CPLUS_DEBUG_FMT(logger_, "订阅者完成，剩余: %zu", remaining);
-        
-        // 4. 如果是最后一个完成的订阅者，唤醒 Fetch 任务
-        if (remaining == 0) {
-            // LOG4CPLUS_DEBUG(logger_, "⭐ 所有订阅者已完成，通知 Fetch 任务");
-            cv_fetch_.notify_one();
-        }
-        
-        if (ret == 0) {
-            current_frame_index_.fetch_add(1, std::memory_order_relaxed);  // 更新当前帧索引
-        }
-        return ret;
-    }
-    
-    // ========== v2.13：普通模式 - 直接从 BufferPool 获取数据 ==========
-    
-    // 1. 从 filled queue 获取 Buffer（带超时，避免死锁）
-    Buffer* filled_buffer = pool->acquireFilled(true, 100);  // 100ms 超时
-    if (!filled_buffer) {
-        // 超时或 Pool 关闭
-        return AVERROR(EAGAIN);  // 返回 EAGAIN 表示暂时无数据，可以重试
-    }
-    
-    // 2. 从 Buffer 获取 AVPacket
-    AVPacket* src_packet = filled_buffer->getAVPacket();
-    if (!src_packet || src_packet->data == nullptr || src_packet->size == 0) {
-        LOG4CPLUS_WARN(logger_, "Buffer 中的 AVPacket 无效");
-        pool->releaseFilled(filled_buffer);  // 释放 Buffer
-        return AVERROR_EOF;
-    }
-    
-    // 3. 复制 packet 数据（使用 av_packet_ref，零拷贝）
-    int ret = copyPacket(packet, src_packet);
-    
-    // 4. ⭐ 立即释放 Buffer 回 filled queue（已完成复制）
-    pool->releaseFilled(filled_buffer);
-    
-    if (ret < 0) {
-        char err_buf[AV_ERROR_MAX_STRING_SIZE];
-        av_strerror(ret, err_buf, sizeof(err_buf));
-        LOG4CPLUS_ERROR_FMT(logger_, "Failed to copy packet: %s", err_buf);
-        return ret;
-    }
-    
-    current_frame_index_.fetch_add(1, std::memory_order_relaxed);  // 更新当前帧索引
-    return 0;  // 成功
-}
+// v2.32 删除：readEncodedPacket 已被 acquireEncodedPacket 统一接口替代
 
 const AVCodecParameters* EncodedPacketSourceFromBuffer::getCodecParameters() const {
     return codec_params_;
@@ -465,14 +394,17 @@ void EncodedPacketSourceFromBuffer::setSourceBufferPool(std::weak_ptr<BufferPool
     LOG4CPLUS_DEBUG(logger_, "⭐ v2.13：已设置源 BufferPool");
 }
 
-AVPacket* EncodedPacketSourceFromBuffer::acquireEncodedPacket(void* worker_id) {
+PacketAcquireResult EncodedPacketSourceFromBuffer::acquireEncodedPacket(AVPacket* out_packet, void* worker_id) {
+    (void)out_packet;  // Buffer 共享模式忽略 out_packet，返回借用指针
+    
+    using Result = PacketAcquireResult;
+    
     if (!is_shared_mode_) {
         LOG4CPLUS_ERROR(logger_, "acquireEncodedPacket() only supported in shared mode");
-        return nullptr;
+        return Result::failure(AcquireStatus::InvalidMode);
     }
     
     std::unique_lock<std::mutex> lock(mutex_);
-    
     // ⭐ v2.22 修改：阻塞等待新 buffer 或 EOF
     cv_subscribers_.wait(lock, [this]() {
         return current_buffer_ != nullptr || 
@@ -482,12 +414,12 @@ AVPacket* EncodedPacketSourceFromBuffer::acquireEncodedPacket(void* worker_id) {
     // 检查 EOF
     if (!is_running_.load(std::memory_order_acquire) && !current_buffer_) {
         LOG4CPLUS_DEBUG_FMT(logger_, "[Worker %p] acquireEncodedPacket: EOF", worker_id);
-        return nullptr;  // EOF：已停止且无可用数据
+        return Result::eof();  // EOF：已停止且无可用数据
     }
     
     if (!current_buffer_) {
         LOG4CPLUS_WARN_FMT(logger_, "[Worker %p] acquireEncodedPacket: Unexpected - no buffer", worker_id);
-        return nullptr;
+        return Result::failure(AcquireStatus::NoData);
     }
     
     uint64_t current_version = current_buffer_version_.load(std::memory_order_acquire);
@@ -500,19 +432,18 @@ AVPacket* EncodedPacketSourceFromBuffer::acquireEncodedPacket(void* worker_id) {
     // 因为 commit 后 has_acquired 会被重置，但 acquired_version 保持
     if (state.acquired_version == current_version) {
         // ❌ 已处理过当前版本（无论是否已 commit），不能重复获取
-        // LOG4CPLUS_DEBUG_FMT(logger_, 
-        //     "[Worker %p] acquireEncodedPacket: Already processed version %llu (has_acquired=%d, has_committed=%d)", 
-        //     worker_id, (unsigned long long)current_version, 
-        //     state.has_acquired, state.has_committed);
-        return nullptr;
+        LOG4CPLUS_DEBUG_FMT(logger_, 
+            "[Worker %p] acquireEncodedPacket: Already processed version %llu (has_acquired=%d, has_committed=%d)", 
+            worker_id, (unsigned long long)current_version, 
+            state.has_acquired, state.has_committed);
+        return Result::again();  // ⭐ v2.31：返回 Again 状态
     }
     
     // ✅ 新版本或首次获取，可以获取
     state.acquired_version = current_version;
     state.has_acquired = true;
     state.has_committed = false;  // 重置 commit 标志
-    
-    return current_buffer_->getAVPacket();
+    return Result::success(current_buffer_->getAVPacket());
 }
 
 bool EncodedPacketSourceFromBuffer::commitEncodedPacket(void* worker_id) {
@@ -562,11 +493,12 @@ bool EncodedPacketSourceFromBuffer::commitEncodedPacket(void* worker_id) {
     
     // 3. 递减订阅者计数
     size_t remaining = remaining_subscribers_.fetch_sub(1, std::memory_order_acq_rel) - 1;
-    
+    LOG4CPLUS_DEBUG_FMT(logger_, "commitEncodedPacket: remaining=%zu", remaining);
     // 4. 如果所有订阅者都完成，唤醒 Fetch 任务
     if (remaining == 0) {
         // ⭐ v2.22 修复：不在这里清空 current_buffer_！
         // current_buffer_ 的清空和释放由 fetchTaskFunc() 负责
+        LOG4CPLUS_DEBUG(logger_, "commitEncodedPacket: notify_one");
         cv_fetch_.notify_one();
     }
     

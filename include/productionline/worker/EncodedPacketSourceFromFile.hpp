@@ -1,7 +1,7 @@
 #ifndef ENCODED_PACKET_SOURCE_FROM_FILE_HPP
 #define ENCODED_PACKET_SOURCE_FROM_FILE_HPP
 
-#include "productionline/worker/IEncodedPacketSource.hpp"
+#include "productionline/worker/IEncodedPacketSource.hpp"  // 包含 PacketAcquireResult
 #include <log4cplus/logger.h>
 #include <log4cplus/loggingmacros.h>
 #include <string>
@@ -21,14 +21,19 @@ struct AVCodecParameters;
  * - 传统文件解码模式
  * - 从 MP4、AVI、MKV 等容器文件读取编码数据
  * - 从裸流文件（.h264/.h265）读取编码数据
+ * 
+ * v2.32 重构：
+ * - 统一接口名：acquireEncodedPacket（替代 readEncodedPacket）
+ * - 零拷贝设计：直接往调用者提供的 out_packet 填充数据
  */
 class EncodedPacketSourceFromFile : public IEncodedPacketSource {
 public:
     /**
      * @brief 构造函数
      * @param file_path 文件路径
+     * @param max_frames 最大读取帧数（-1=无限制）
      */
-    explicit EncodedPacketSourceFromFile(const std::string& file_path);
+    explicit EncodedPacketSourceFromFile(const std::string& file_path, int max_frames = -1);
     
     /**
      * @brief 析构函数
@@ -69,9 +74,19 @@ public:
     const AVCodecParameters* getCodecParameters() const override;
     SourceType getDataSourceType() const override;
     
-    // ============ IEncodedPacketSource 特有方法 ============
-    int readEncodedPacket(AVPacket* packet) override;
+    // ============ IEncodedPacketSource 特有方法（v2.32 统一接口）============
+    
+    /**
+     * @brief 获取编码后的 packet（v2.32 统一接口）
+     * @param out_packet 输出的 packet（必须提供，数据填充到此）
+     * @param worker_id Worker 标识（File 模式不使用，忽略）
+     * @return PacketAcquireResult 结果对象，result.packet() 返回 out_packet
+     */
+    PacketAcquireResult acquireEncodedPacket(AVPacket* out_packet, void* worker_id = nullptr) override;
+    
     int getVideoStreamIndex() const override;
+    
+    // commit/cancel 使用接口默认实现（File 模式不需要）
 
 private:
     std::string file_path_;              // 文件路径
@@ -81,6 +96,12 @@ private:
     int current_frame_index_;           // 当前帧索引
     std::atomic<bool> is_open_;         // 原子变量，保证线程安全的状态检查
     bool eof_reached_;                  // 是否到达文件末尾
+    
+    // ========================================
+    // 帧数限制（v2.23 新增）
+    // ========================================
+    int max_frames_;                     // 最大读取帧数（-1=无限制）
+    int frames_read_;                    // 已读取帧数计数
     
     /**
      * @brief 查找视频流

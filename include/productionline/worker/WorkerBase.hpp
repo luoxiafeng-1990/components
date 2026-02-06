@@ -89,6 +89,194 @@ enum class BufferPoolType {
     CUSTOM_3                   // 自定义类型 3
 };
 
+// ============================================================
+// FillStatus - Buffer 填充结果状态（v2.33 新增）
+// ============================================================
+
+/**
+ * @brief Buffer 填充结果状态
+ * 
+ * v2.33 新增：统一所有 Worker 的 fillBuffer 返回状态
+ * 
+ * 状态值设计：
+ * - 成功：0
+ * - 可重试：正值 1-99
+ * - 终止：-1
+ * - 错误：负值 -10 以下
+ */
+enum class FillStatus : int {
+    // ===== ✅ 成功 =====
+    Success = 0,           ///< 成功填充
+    
+    // ===== ⏳ 可重试（调用者应继续循环）=====
+    NonVideoPacket = 1,    ///< 遇到非视频流 packet，需继续读取
+    CodecEagain = 2,       ///< 编解码器需要更多输入才能输出（B帧重排序等）
+    DataPending = 3,       ///< Buffer 共享模式，等待新数据
+    
+    // ===== 📍 终止（调用者应退出循环）=====
+    EndOfStream = -1,      ///< 数据流正常结束
+    
+    // ===== ❌ 错误 =====
+    AcquireError = -10,    ///< 获取 packet/frame 失败
+    CodecError = -11,      ///< 编解码器操作失败（send/receive）
+    InvalidParam = -12,    ///< 参数无效（空指针等）
+    NotOpen = -13,         ///< Worker 未打开/未初始化
+    AllocFailed = -14,     ///< 资源分配失败
+    InternalError = -15    ///< 内部逻辑错误（不应到达的代码路径）
+};
+
+/**
+ * @brief 获取 FillStatus 的字符串描述
+ */
+inline const char* fillStatusToString(FillStatus status) {
+    switch (status) {
+        case FillStatus::Success:        return "Success";
+        case FillStatus::NonVideoPacket: return "NonVideoPacket";
+        case FillStatus::CodecEagain:    return "CodecEagain";
+        case FillStatus::DataPending:    return "DataPending";
+        case FillStatus::EndOfStream:    return "EndOfStream";
+        case FillStatus::AcquireError:   return "AcquireError";
+        case FillStatus::CodecError:     return "CodecError";
+        case FillStatus::InvalidParam:   return "InvalidParam";
+        case FillStatus::NotOpen:        return "NotOpen";
+        case FillStatus::AllocFailed:    return "AllocFailed";
+        case FillStatus::InternalError:  return "InternalError";
+        default:                         return "Unknown";
+    }
+}
+
+// ============================================================
+// FillResult - Buffer 填充结果类（v2.33 新增）
+// ============================================================
+
+/**
+ * @brief Buffer 填充结果
+ * 
+ * v2.33 新增：封装 FillStatus，提供丰富的查询方法
+ * 
+ * 设计原则（与 PacketAcquireResult 保持一致）：
+ * - 工厂方法创建，语义清晰
+ * - 分类查询方法
+ * - 零开销抽象
+ * 
+ * 使用示例：
+ * @code
+ * FillResult result = worker->fillBuffer(index, buffer);
+ * 
+ * if (result.ok()) {
+ *     // ✅ 成功，处理 buffer
+ * } else if (result.shouldRetry()) {
+ *     // ⏳ 需要重试
+ *     continue;
+ * } else if (result.isEof()) {
+ *     // 📍 正常结束
+ *     break;
+ * } else {
+ *     // ❌ 错误
+ *     LOG_ERROR("Fill failed: %s", result.statusString());
+ * }
+ * @endcode
+ */
+class FillResult {
+public:
+    // ===== 工厂方法 =====
+    
+    /// 成功
+    static FillResult success() {
+        return FillResult(FillStatus::Success);
+    }
+    
+    /// 非视频流 packet，需继续读取
+    static FillResult nonVideoPacket() {
+        return FillResult(FillStatus::NonVideoPacket);
+    }
+    
+    /// 编解码器需要更多输入
+    static FillResult codecEagain() {
+        return FillResult(FillStatus::CodecEagain);
+    }
+    
+    /// Buffer 共享模式等待数据
+    static FillResult dataPending() {
+        return FillResult(FillStatus::DataPending);
+    }
+    
+    /// 数据流结束
+    static FillResult endOfStream() {
+        return FillResult(FillStatus::EndOfStream);
+    }
+    
+    /// 获取 packet/frame 失败
+    static FillResult acquireError() {
+        return FillResult(FillStatus::AcquireError);
+    }
+    
+    /// 编解码器错误
+    static FillResult codecError() {
+        return FillResult(FillStatus::CodecError);
+    }
+    
+    /// 参数无效
+    static FillResult invalidParam() {
+        return FillResult(FillStatus::InvalidParam);
+    }
+    
+    /// 未打开
+    static FillResult notOpen() {
+        return FillResult(FillStatus::NotOpen);
+    }
+    
+    /// 资源分配失败
+    static FillResult allocFailed() {
+        return FillResult(FillStatus::AllocFailed);
+    }
+    
+    /// 内部错误
+    static FillResult internalError() {
+        return FillResult(FillStatus::InternalError);
+    }
+    
+    // ===== 状态查询 =====
+    
+    /// 获取状态
+    FillStatus status() const noexcept { return status_; }
+    
+    /// 是否成功
+    bool ok() const noexcept { return status_ == FillStatus::Success; }
+    
+    /// 是否到达 EOF（正常结束）
+    bool isEof() const noexcept { return status_ == FillStatus::EndOfStream; }
+    
+    /// 是否需要重试（可继续尝试）
+    bool shouldRetry() const noexcept {
+        // 正值都是可重试状态
+        return static_cast<int>(status_) > 0;
+    }
+    
+    /// 是否是终止状态（EOF 或错误，应停止循环）
+    bool isTerminal() const noexcept {
+        return isEof() || isError();
+    }
+    
+    /// 是否是错误（负值且非 EOF）
+    bool isError() const noexcept {
+        return static_cast<int>(status_) < -1;
+    }
+    
+    /// 隐式 bool 转换（方便条件判断）
+    explicit operator bool() const noexcept { return ok(); }
+    
+    /// 获取状态描述
+    const char* statusString() const noexcept {
+        return fillStatusToString(status_);
+    }
+
+private:
+    explicit FillResult(FillStatus status) : status_(status) {}
+    
+    FillStatus status_;
+};
+
 /**
  * @brief BufferPoolType 转字符串（调试用）
  */
@@ -208,9 +396,22 @@ public:
      * 
      * @param frame_index 帧索引
      * @param buffer 输出 Buffer（从 BufferPool 获取）
-     * @return 成功返回 true
+     * @return FillResult 结果对象
+     * 
+     * v2.33 变更：返回类型从 bool 改为 FillResult
      */
-    virtual bool fillBuffer(int frame_index, Buffer* buffer) = 0;
+    virtual FillResult fillBuffer(int frame_index, Buffer* buffer) = 0;
+    
+    /**
+     * @brief 获取最后一次 fillBuffer 的结果状态
+     * 
+     * v2.33 新增：返回 FillStatus 枚举
+     * 
+     * @return FillStatus 枚举值
+     */
+    FillStatus getLastFillStatus() const {
+        return last_fill_status_;
+    }
     
     /**
      * @brief 从AVFrame元数据中提取硬件解码器的物理内存地址
@@ -706,6 +907,24 @@ protected:
     
     // 日志器
     log4cplus::Logger logger_;
+    
+    /**
+     * @brief 最后一次 fillBuffer 的结果状态
+     * 
+     * v2.33 新增：使用新的 FillStatus 枚举
+     */
+    FillStatus last_fill_status_ = FillStatus::Success;
+    
+    /**
+     * @brief 设置最后一次 fillBuffer 的结果状态
+     * 
+     * v2.33 新增：供子类在 fillBuffer 实现中调用
+     * 
+     * @param status 结果状态
+     */
+    void setLastFillStatus(FillStatus status) {
+        last_fill_status_ = status;
+    }
 };
 
 #endif // WORKER_BASE_HPP

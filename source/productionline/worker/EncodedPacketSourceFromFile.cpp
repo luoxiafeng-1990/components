@@ -9,7 +9,7 @@ extern "C" {
 #include <libavutil/error.h>
 }
 
-EncodedPacketSourceFromFile::EncodedPacketSourceFromFile(const std::string& file_path)
+EncodedPacketSourceFromFile::EncodedPacketSourceFromFile(const std::string& file_path, int max_frames)
     : file_path_(file_path)
     , format_ctx_ptr_(nullptr)
     , video_stream_index_(-1)
@@ -17,8 +17,10 @@ EncodedPacketSourceFromFile::EncodedPacketSourceFromFile(const std::string& file
     , current_frame_index_(0)  // 当前帧索引初始化
     , is_open_(false)  // 原子变量初始化
     , eof_reached_(false)
+    , max_frames_(max_frames)  // v2.23 新增：帧数限制
+    , frames_read_(0)          // v2.23 新增：已读取帧数计数
     , logger_(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.DataSource.File"))){
-    LOG4CPLUS_DEBUG_FMT(logger_, "构造函数: file_path='%s'", file_path_.c_str());
+    LOG4CPLUS_DEBUG_FMT(logger_, "构造函数: file_path='%s', max_frames=%d", file_path_.c_str(), max_frames_);
 }
 
 EncodedPacketSourceFromFile::~EncodedPacketSourceFromFile() {
@@ -71,6 +73,8 @@ bool EncodedPacketSourceFromFile::open() {
     is_open_.store(true, std::memory_order_release);  // 原子操作设置状态
     eof_reached_ = false;  // 重置 EOF 状态
     current_frame_index_ = 0;  // 重置当前帧索引
+    frames_read_ = 0;  // v2.32：重置已读取帧数
+    
     LOG4CPLUS_DEBUG_FMT(logger_, "Opened file '%s', video stream index: %d, total frames: %d",
                  file_path_.c_str(), video_stream_index_, total_frames_);
     
@@ -103,52 +107,47 @@ bool EncodedPacketSourceFromFile::isOpen() const {
     return is_open_.load(std::memory_order_acquire);  // 原子操作读取状态
 }
 
-int EncodedPacketSourceFromFile::readEncodedPacket(AVPacket* packet) {
-    if (!is_open_.load(std::memory_order_acquire) || !format_ctx_ptr_ || !packet) {
-        return AVERROR(EINVAL);
+PacketAcquireResult EncodedPacketSourceFromFile::acquireEncodedPacket(AVPacket* out_packet, void* worker_id) {
+    (void)worker_id;  // File 模式不需要 worker_id
+    
+    using Result = PacketAcquireResult;
+    
+    if (!is_open_.load(std::memory_order_acquire) || !format_ctx_ptr_ || !out_packet) {
+        return Result::failure(AcquireStatus::InvalidMode);
     }
     
-    // 从文件读取 packet
-    int ret = av_read_frame(format_ctx_ptr_, packet);
+    // v2.23 新增：检查是否达到最大帧数限制
+    if (max_frames_ > 0 && frames_read_ >= max_frames_) {
+        LOG4CPLUS_DEBUG_FMT(logger_, "Reached max frames limit: %d", max_frames_);
+        eof_reached_ = true;
+        return Result::eof();
+    }
+    
+    // 从文件读取 packet 到调用者提供的 out_packet（零拷贝）
+    int ret = av_read_frame(format_ctx_ptr_, out_packet);
     
     if (ret < 0) {
         if (ret == AVERROR_EOF) {
             LOG4CPLUS_DEBUG(logger_, "EOF reached");
-            eof_reached_ = true;  // 设置 EOF 状态
+            eof_reached_ = true;
         } else {
             char err_buf[AV_ERROR_MAX_STRING_SIZE];
             av_strerror(ret, err_buf, sizeof(err_buf));
             LOG4CPLUS_WARN_FMT(logger_, "av_read_frame failed: %s", err_buf);
         }
-        return ret;
+        return Result::eof();
     }
     
     // 检查是否是视频流
-    if (packet->stream_index != video_stream_index_) {
-        // 不是视频流，释放并继续读取下一个（循环直到找到视频流或EOF）
-        av_packet_unref(packet);
-        // 使用循环而不是递归，避免栈溢出
-        const int MAX_NON_VIDEO_PACKETS = 100;  // 最大跳过非视频包数量
-        int skipped = 0;
-        while (skipped < MAX_NON_VIDEO_PACKETS) {
-            int ret = av_read_frame(format_ctx_ptr_, packet);
-            if (ret < 0) {
-                return ret;  // EOF 或错误
-            }
-            if (packet->stream_index == video_stream_index_) {
-                current_frame_index_++;  // 更新当前帧索引
-                return 0;  // 找到视频流
-            }
-            av_packet_unref(packet);
-            skipped++;
-        }
-        // 跳过了太多非视频包，可能有问题
-        LOG4CPLUS_WARN(logger_, "Skipped too many non-video packets");
-        return AVERROR(EINVAL);
+    if (out_packet->stream_index != video_stream_index_) {
+        // 不是视频流，释放并返回 Again 让调用者重试
+        av_packet_unref(out_packet);
+        return Result::again();  // 让调用者继续调用
     }
     
-    current_frame_index_++;  // 更新当前帧索引
-    return 0;  // 成功
+    current_frame_index_++;
+    frames_read_++;
+    return Result::success(out_packet);  // 返回填充后的 out_packet
 }
 
 const AVCodecParameters* EncodedPacketSourceFromFile::getCodecParameters() const {
@@ -164,6 +163,10 @@ int EncodedPacketSourceFromFile::getVideoStreamIndex() const {
 }
 
 int EncodedPacketSourceFromFile::getTotalFrames() const {
+    // v2.23 新增：如果设置了 max_frames 限制，返回较小值
+    if (max_frames_ > 0 && (total_frames_ < 0 || max_frames_ < total_frames_)) {
+        return max_frames_;
+    }
     return total_frames_;
 }
 

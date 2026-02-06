@@ -16,7 +16,7 @@ std::atomic<bool> EncodedPacketSourceFromRtsp::interrupt_requested_(false);
 
 // ============ 构造/析构 ============
 
-EncodedPacketSourceFromRtsp::EncodedPacketSourceFromRtsp(const std::string& rtsp_url)
+EncodedPacketSourceFromRtsp::EncodedPacketSourceFromRtsp(const std::string& rtsp_url, int max_frames)
     : rtsp_url_(rtsp_url)
     , format_ctx_ptr_(nullptr)
     , video_stream_index_(-1)
@@ -24,8 +24,10 @@ EncodedPacketSourceFromRtsp::EncodedPacketSourceFromRtsp(const std::string& rtsp
     , is_open_(false)
     , connected_(false)
     , eof_reached_(false)
+    , max_frames_(max_frames)   // v2.32 新增：帧数限制
+    , frames_read_(0)           // v2.32 新增：已读取帧数计数
     , logger_(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.DataSource.Rtsp"))){
-    LOG4CPLUS_DEBUG_FMT(logger_, "构造函数: rtsp_url='%s'", rtsp_url_.c_str());
+    LOG4CPLUS_DEBUG_FMT(logger_, "构造函数: rtsp_url='%s', max_frames=%d", rtsp_url_.c_str(), max_frames_);
 }
 
 EncodedPacketSourceFromRtsp::~EncodedPacketSourceFromRtsp() {
@@ -99,9 +101,10 @@ bool EncodedPacketSourceFromRtsp::open() {
     connected_.store(true, std::memory_order_release);
     eof_reached_.store(false, std::memory_order_release);
     current_frame_index_.store(0, std::memory_order_release);  // 重置当前帧索引
+    frames_read_ = 0;  // v2.32：重置已读取帧数
     
-    LOG4CPLUS_DEBUG_FMT(logger_, "Opened RTSP stream '%s', video stream index: %d", 
-                  rtsp_url_.c_str(), video_stream_index_);
+    LOG4CPLUS_DEBUG_FMT(logger_, "Opened RTSP stream '%s', video stream index: %d, max_frames: %d", 
+                  rtsp_url_.c_str(), video_stream_index_, max_frames_);
     
     return true;
 }
@@ -132,64 +135,65 @@ bool EncodedPacketSourceFromRtsp::isOpen() const {
     return is_open_.load(std::memory_order_acquire);
 }
 
-int EncodedPacketSourceFromRtsp::readEncodedPacket(AVPacket* packet) {
-    if (!is_open_.load(std::memory_order_acquire) || !format_ctx_ptr_) {
-        LOG4CPLUS_ERROR(logger_, "Cannot read packet: not open");
-        return AVERROR(EINVAL);
+PacketAcquireResult EncodedPacketSourceFromRtsp::acquireEncodedPacket(AVPacket* out_packet, void* worker_id) {
+    (void)worker_id;  // RTSP 模式不需要 worker_id
+    
+    using Result = PacketAcquireResult;
+    
+    if (!is_open_.load(std::memory_order_acquire) || !format_ctx_ptr_ || !out_packet) {
+        LOG4CPLUS_ERROR(logger_, "Cannot acquire packet: not open or out_packet is nullptr");
+        return Result::failure(AcquireStatus::InvalidMode);
     }
     
-    if (!packet) {
-        LOG4CPLUS_ERROR(logger_, "Cannot read packet: packet is nullptr");
-        return AVERROR(EINVAL);
+    // v2.32 新增：检查是否达到最大帧数限制
+    if (max_frames_ > 0 && frames_read_ >= max_frames_) {
+        LOG4CPLUS_DEBUG_FMT(logger_, "Reached max frames limit: %d", max_frames_);
+        eof_reached_.store(true, std::memory_order_release);
+        return Result::eof();
     }
     
-    // 循环读取，直到获取到视频流的 packet 或遇到错误/EOF
+    // 从 RTSP 流读取 packet 到调用者提供的 out_packet（零拷贝）
+    // 循环处理损坏的 packet
     const int AVERROR_INVALIDDATA_VALUE = -1094995529;  // AVERROR(0x41444e49)
     const int MAX_CORRUPTED_RETRIES = 10;  // 最大重试次数
-    
     int corrupted_retries = 0;
     
-    while (true) {
-        int ret = av_read_frame(format_ctx_ptr_, packet);
-        
-        if (ret < 0) {
-            if (ret == AVERROR_EOF) {
-                LOG4CPLUS_DEBUG(logger_, "EOF reached");
-                eof_reached_.store(true, std::memory_order_release);
-                return AVERROR_EOF;
-            } else if (ret == AVERROR_INVALIDDATA_VALUE) {
-                // 损坏的 packet，重试
-                corrupted_retries++;
-                if (corrupted_retries <= MAX_CORRUPTED_RETRIES) {
-                    LOG4CPLUS_WARN_FMT(logger_, "Corrupted packet detected (attempt %d/%d), skipping...", 
-                                 corrupted_retries, MAX_CORRUPTED_RETRIES);
-                    av_packet_unref(packet);
-                    continue;  // 继续读取下一个 packet
-                } else {
-                    LOG4CPLUS_ERROR_FMT(logger_, "Too many corrupted packets (%d), giving up", 
-                                  corrupted_retries);
-                    return ret;
-                }
-            } else {
-                // 其他错误
-                char errbuf[AV_ERROR_MAX_STRING_SIZE];
-                av_strerror(ret, errbuf, sizeof(errbuf));
-                LOG4CPLUS_ERROR_FMT(logger_, "av_read_frame failed: %d (%s)", ret, errbuf);
-                return ret;
-            }
-        }
-        
-        // 检查是否是视频流
-        if (packet->stream_index == video_stream_index_) {
-            // 成功读取到视频流的 packet
-            current_frame_index_.fetch_add(1, std::memory_order_relaxed);  // 更新当前帧索引
-            return 0;
-        } else {
-            // 不是视频流，释放并继续读取
-            av_packet_unref(packet);
-            continue;
-        }
+    int ret = av_read_frame(format_ctx_ptr_, out_packet);
+    
+    while (ret == AVERROR_INVALIDDATA_VALUE && corrupted_retries < MAX_CORRUPTED_RETRIES) {
+        // 损坏的 packet，重试
+        corrupted_retries++;
+        LOG4CPLUS_WARN_FMT(logger_, "Corrupted packet detected (attempt %d/%d), skipping...", 
+                     corrupted_retries, MAX_CORRUPTED_RETRIES);
+        av_packet_unref(out_packet);
+        ret = av_read_frame(format_ctx_ptr_, out_packet);
     }
+    
+    if (ret < 0) {
+        if (ret == AVERROR_EOF) {
+            LOG4CPLUS_DEBUG(logger_, "EOF reached");
+            eof_reached_.store(true, std::memory_order_release);
+        } else if (ret == AVERROR_INVALIDDATA_VALUE) {
+            LOG4CPLUS_ERROR_FMT(logger_, "Too many corrupted packets (%d), giving up", corrupted_retries);
+        } else {
+            char errbuf[AV_ERROR_MAX_STRING_SIZE];
+            av_strerror(ret, errbuf, sizeof(errbuf));
+            LOG4CPLUS_ERROR_FMT(logger_, "av_read_frame failed: %d (%s)", ret, errbuf);
+        }
+        return Result::eof();
+    }
+    
+    // 检查是否是视频流
+    if (out_packet->stream_index != video_stream_index_) {
+        // 不是视频流，释放并返回 Again 让调用者重试
+        av_packet_unref(out_packet);
+        return Result::again();
+    }
+    
+    // 成功读取到视频流的 packet
+    current_frame_index_.fetch_add(1, std::memory_order_relaxed);
+    frames_read_++;
+    return Result::success(out_packet);  // 返回填充后的 out_packet
 }
 
 const AVCodecParameters* EncodedPacketSourceFromRtsp::getCodecParameters() const {

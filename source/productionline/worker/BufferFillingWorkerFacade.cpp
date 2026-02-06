@@ -70,10 +70,13 @@ bool BufferFillingWorkerFacade::isOpen() const {
 
 // ============ 核心功能：填充Buffer ============
 
-bool BufferFillingWorkerFacade::fillBuffer(int frame_index, Buffer* buffer) {
+/**
+ * v2.33 变更：返回类型从 bool 改为 FillResult
+ */
+FillResult BufferFillingWorkerFacade::fillBuffer(int frame_index, Buffer* buffer) {
     if (!worker_base_uptr_) {
         LOG4CPLUS_ERROR(logger_, "[Worker] ERROR: Worker not initialized");
-        return false;
+        return FillResult::notOpen();
     }
     return worker_base_uptr_->fillBuffer(frame_index, buffer);
 }
