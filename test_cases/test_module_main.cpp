@@ -19,6 +19,7 @@
 #include "pp/PPTestSuite.hpp"
 #include "record/RecordTestSuite.hpp"
 #include "writer/WriterTestSuite.hpp"
+#include "opencv/OpencvTestSuite.hpp"
 #include "common/Logger.hpp"
 
 #include <iostream>
@@ -50,6 +51,8 @@ static void registerModules() {
     
     // 注册 Writer 模块（BufferWriter 格式测试）
     registry.registerModule(std::make_shared<test::writer::WriterTestSuite>());
+
+    registry.registerModule(std::make_shared<test::opencv::OpencvTestSuite>());
     
     // TODO: 注册更多模块
     // registry.registerModule(std::make_shared<test::venc::VencTestSuite>());
