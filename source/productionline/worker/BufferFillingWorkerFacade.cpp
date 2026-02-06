@@ -9,6 +9,7 @@ BufferFillingWorkerFacade::BufferFillingWorkerFacade(const WorkerConfig& config)
     , logger_(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Worker.Facade")))
 {
     if (!worker_base_uptr_) {
+        LOG4CPLUS_DEBUG(logger_, "Factory create worker according to config");
         worker_base_uptr_ = BufferFillingWorkerFactory::create(config_);
     }
 }
@@ -38,7 +39,7 @@ bool BufferFillingWorkerFacade::open() {
     }
     
     if (!worker_base_uptr_) {
-        LOG4CPLUS_ERROR(logger_, "[Worker] ERROR: Failed to create worker");
+        LOG4CPLUS_ERROR(logger_, " ERROR: Failed to create worker");
         return false;
     }
     
@@ -54,7 +55,7 @@ void BufferFillingWorkerFacade::close() {
 }
 bool BufferFillingWorkerFacade::setSourceBufferPool(std::weak_ptr<BufferPool> pool_weak) {
     if (!worker_base_uptr_) {
-        LOG4CPLUS_ERROR(logger_, "[Worker] ERROR: Worker not initialized");
+        LOG4CPLUS_ERROR(logger_, " ERROR: Worker not initialized");
         return false;
     }
     
@@ -75,7 +76,7 @@ bool BufferFillingWorkerFacade::isOpen() const {
  */
 FillResult BufferFillingWorkerFacade::fillBuffer(int frame_index, Buffer* buffer) {
     if (!worker_base_uptr_) {
-        LOG4CPLUS_ERROR(logger_, "[Worker] ERROR: Worker not initialized");
+        LOG4CPLUS_ERROR(logger_, " ERROR: Worker not initialized");
         return FillResult::notOpen();
     }
     return worker_base_uptr_->fillBuffer(frame_index, buffer);
@@ -85,7 +86,7 @@ FillResult BufferFillingWorkerFacade::fillBuffer(int frame_index, Buffer* buffer
 
 bool BufferFillingWorkerFacade::seek(int frame_index) {
     if (!worker_base_uptr_) {
-        LOG4CPLUS_ERROR(logger_, "[Worker] ERROR: Worker not initialized");
+        LOG4CPLUS_ERROR(logger_, " ERROR: Worker not initialized");
         return false;
     }
     return worker_base_uptr_->seek(frame_index);
@@ -93,7 +94,7 @@ bool BufferFillingWorkerFacade::seek(int frame_index) {
 
 bool BufferFillingWorkerFacade::seekToBegin() {
     if (!worker_base_uptr_) {
-        LOG4CPLUS_ERROR(logger_, "[Worker] ERROR: Worker not initialized");
+        LOG4CPLUS_ERROR(logger_, " ERROR: Worker not initialized");
         return false;
     }
     return worker_base_uptr_->seekToBegin();
@@ -101,7 +102,7 @@ bool BufferFillingWorkerFacade::seekToBegin() {
 
 bool BufferFillingWorkerFacade::seekToEnd() {
     if (!worker_base_uptr_) {
-        LOG4CPLUS_ERROR(logger_, "[Worker] ERROR: Worker not initialized");
+        LOG4CPLUS_ERROR(logger_, " ERROR: Worker not initialized");
         return false;
     }
     return worker_base_uptr_->seekToEnd();
@@ -109,7 +110,7 @@ bool BufferFillingWorkerFacade::seekToEnd() {
 
 bool BufferFillingWorkerFacade::skip(int frame_count) {
     if (!worker_base_uptr_) {
-        LOG4CPLUS_ERROR(logger_, "[Worker] ERROR: Worker not initialized");
+        LOG4CPLUS_ERROR(logger_, " ERROR: Worker not initialized");
         return false;
     }
     return worker_base_uptr_->skip(frame_count);

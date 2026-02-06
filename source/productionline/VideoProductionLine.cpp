@@ -31,7 +31,7 @@ VideoProductionLine::VideoProductionLine(bool loop, int thread_count, bool enabl
     , start_time_()
     , monitor_(nullptr)
     , log_prefix_("")
-    , logger_(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.VideoLine")))
+    , logger_(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.VideoProductionLine")))
 {
     // 打印生命周期开始
     LOG4CPLUS_INFO(logger_, "创建: loop=" << (loop_ ? "true" : "false") 
@@ -84,8 +84,6 @@ bool VideoProductionLine::start(const WorkerConfig& worker_config) {
     
     // ⭐ 初始化全局线程池（从配置读取）
     initializeGlobalThreadPool(worker_config.thread_pool_size);
-    
-    LOG4CPLUS_INFO(logger_, "BufferFillingWorkerFacade: " << worker_config.data_source.path);
     
     // 创建共享的 BufferFillingWorkerFacade 对象（v2.2：只传入完整配置）
     worker_facade_sptr_ = std::make_shared<BufferFillingWorkerFacade>(worker_config);

@@ -228,6 +228,34 @@ int VdecTestSuite::run(int argc, char* argv[]) {
             thread_count = std::stoi(params.profile.substr(9));
         }
         
+        // 为每个线程生成独立的输出路径（每个线程的 Buffer.getOutputChannel() 均回退为 0，
+        // 因此每个 config 仅设置一条路径，避免多线程写入同一文件）
+        std::vector<std::string> all_paths;
+        if (config.consumer_type.save_raw.enable) {
+            const auto& paths = config.consumer_type.save_raw.output_paths;
+            if (paths.size() == 1) {
+                const std::string& first = paths[0];
+                size_t dot_pos = first.find('.');
+                if (dot_pos == std::string::npos) {
+                    // 前缀模式：file -> file1.yuv, file2.yuv, ...
+                    for (int i = 0; i < thread_count; i++) {
+                        all_paths.push_back(first + std::to_string(i + 1) + ".yuv");
+                    }
+                } else {
+                    // 单文件名模式：file.yuv -> file_1.yuv, file_2.yuv, ...
+                    size_t last_dot = first.rfind('.');
+                    std::string base = first.substr(0, last_dot);
+                    std::string ext = first.substr(last_dot);
+                    for (int i = 0; i < thread_count; i++) {
+                        all_paths.push_back(base + "_" + std::to_string(i + 1) + ext);
+                    }
+                }
+            } else {
+                // 逗号分隔模式：用户已指定多个路径
+                all_paths = paths;
+            }
+        }
+        
         std::vector<WorkerConfig> configs;
         for (int i = 0; i < thread_count; i++) {
             WorkerConfig cfg;
@@ -241,7 +269,21 @@ int VdecTestSuite::run(int argc, char* argv[]) {
             cfg.consumer_type = config.consumer_type;
             cfg.consumer_type.performance.target_fps = params.fps;
             cfg.data_source.max_frames = config.data_source.max_frames;  // v2.23: 传递帧数限制
+            // 每个线程仅设置属于自己的那一条输出路径
+            if (config.consumer_type.save_raw.enable && !all_paths.empty()) {
+                std::string thread_path = (static_cast<size_t>(i) < all_paths.size())
+                    ? all_paths[i]
+                    : all_paths[0];
+                cfg.consumer_type.save_raw.output_paths = {thread_path};
+            }
             configs.push_back(cfg);
+        }
+        
+        // 调试：确认每个 worker 的 save 路径
+        for (size_t idx = 0; idx < configs.size(); idx++) {
+            LOG4CPLUS_DEBUG_FMT(getLogger(), "PARALLEL config[%zu] save_raw.output_paths[0]=%s",
+                idx, configs[idx].consumer_type.save_raw.output_paths.empty()
+                    ? "(none)" : configs[idx].consumer_type.save_raw.getOutputPath(0).c_str());
         }
         
         uint32_t parallel_flags = buildConsumeFlags(config);

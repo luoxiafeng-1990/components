@@ -311,10 +311,14 @@ ConsumeResult BufferConsumerService::startProductionLinesParallel(
         // 获取线程池引用
         auto& thread_pool = thread_pool_ ? *thread_pool_ : GlobalThreadPool::getInstance().getThreadPool();
         
-        // 为每个 config 提交任务到线程池
-        for (const auto& config : configs) {
-            auto future = thread_pool.submit_task([this, config, consume_flags]() {
-                return startProductionLine(config, consume_flags);
+        // 为每个 config 提交任务到线程池（显式复制 config，确保每个任务获得独立副本）
+        for (size_t idx = 0; idx < configs.size(); idx++) {
+            WorkerConfig cfg_copy = configs[idx];
+            LOG4CPLUS_DEBUG_FMT(logger_, "PARALLEL worker[%zu] save_raw.output_paths[0]=%s",
+                idx, cfg_copy.consumer_type.save_raw.output_paths.empty()
+                    ? "(none)" : cfg_copy.consumer_type.save_raw.getOutputPath(0).c_str());
+            auto future = thread_pool.submit_task([this, cfg_copy, consume_flags]() {
+                return startProductionLine(cfg_copy, consume_flags);
             });
             futures.push_back(std::move(future));
         }

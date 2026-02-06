@@ -483,6 +483,66 @@ service.startMultiWorkerCompare(multi_config, compare_callback);
 - **配置驱动**：通过配置文件控制日志级别，提高灵活性
 - **类型安全**：每个类持有独立 logger，避免全局状态
 - **初始化安全**：确保所有 logger 在构造函数中正确初始化
+- **模块独立控制**：每个模块拥有独立的 logger 实例，便于单独控制日志输出
+
+**核心设计：每个模块独立 Logger + 构造函数初始化**
+
+**设计理念：**
+- **目的**：为每个模块提供独立的日志控制能力，便于调试和问题定位
+- **实现方式**：每个类在构造函数初始化列表中初始化自己的 `logger_` 成员变量
+- **命名规范**：使用层次化命名，如 `components.Worker.Decode`、`components.BufferPool` 等
+
+**已实现该设计的模块清单：**
+
+| 模块类别 | 模块名称 | Logger 名称 | 初始化位置 |
+|---------|---------|------------|-----------|
+| Worker 基类 | `WorkerBase` | `components.Worker` | 构造函数初始化列表 |
+| Worker 实现 | `FFmpegDecodeWorker` | `components.Worker.Decode` | 构造函数初始化列表 |
+| Worker 实现 | `FFmpegEncodeWorker` | `components.Worker.Encode` | 构造函数初始化列表 |
+| Worker 实现 | `FfmpegPacketRecorderWorker` | `components.Worker.Recorder` | 构造函数初始化列表 |
+| Worker 门面 | `BufferFillingWorkerFacade` | `components.Worker.Facade` | 构造函数初始化列表 |
+| Worker 工厂 | `BufferFillingWorkerFactory` | `components.BufferFillingWorkerFactory` | 静态成员初始化（特殊） |
+| 数据源 | `EncodedPacketSourceFromFile` | `components.DataSource.File` | 构造函数初始化列表 |
+| 数据源 | `EncodedPacketSourceFromRtsp` | `components.DataSource.Rtsp` | 构造函数初始化列表 |
+| 数据源 | `EncodedPacketSourceFromBuffer` | `components.EncodedPacketSourceFromBuffer` | 构造函数初始化列表 |
+| 数据源 | `RawFrameSourceFromFile` | `components.RawFrameSource.File` | 构造函数初始化列表 |
+| 数据源 | `RawFrameSourceFromBuffer` | `components.RawFrameSource.Buffer` | 构造函数初始化列表 |
+| 生产流水线 | `VideoProductionLine` | `components.VideoProductionLine` | 构造函数初始化列表 |
+| 生产流水线 | `MultiWorkerProductionLine` | `components.MultiWorker` | 构造函数初始化列表 |
+| 协调器 | `WorkerSyncCoordinator` | `components.WorkerSyncCoordinator` | 构造函数初始化列表 |
+| Buffer 管理 | `BufferPool` | `components.BufferPool` | 构造函数初始化列表 |
+| Buffer 管理 | `BufferPoolRegistry` | `components.BufferPool.Registry` | 构造函数初始化列表 |
+| 分配器 | `AVFrameAllocator` | `components.Allocator.AVFrame` | 构造函数初始化列表 |
+| 分配器 | `FramebufferAllocator` | `components.Allocator.Framebuffer` | 构造函数初始化列表 |
+| 分配器 | `NormalAllocator` | `components.Allocator.Normal` | 构造函数初始化列表 |
+| I/O 服务 | `BufferConsumerService` | `consumer.BufferConsumerService` | 构造函数初始化列表 |
+| I/O 服务 | `BufferWriter` | `components.BufferWriter` | 构造函数初始化列表 |
+| 监控 | `PerformanceMonitor` | `components.Monitor.Performance` | 构造函数初始化列表 |
+| 显示 | `LinuxFramebufferDevice` | `components.Display.Framebuffer` | 构造函数初始化列表 |
+
+**代码示例：**
+
+```cpp
+// ✅ 正确的实现方式：在构造函数初始化列表中初始化 logger
+class FFmpegDecodeWorker : public WorkerBase {
+private:
+    log4cplus::Logger logger_;  // 每个模块独立的 logger 成员变量
+
+public:
+    FFmpegDecodeWorker(const WorkerConfig& config)
+        : WorkerBase(BufferAllocatorFactory::AllocatorType::AVFRAME, config)
+        , logger_(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Worker.Decode")))  // 🎯 构造函数初始化
+    {
+        LOG4CPLUS_DEBUG(logger_, "FFmpegDecodeWorker created");
+    }
+};
+```
+
+**设计优势：**
+- **独立控制**：每个模块的日志可以单独配置，互不影响
+- **层次化管理**：通过配置文件可以统一控制某个层次的所有模块（如 `components.Worker=DEBUG`）
+- **调试友好**：在调试特定模块时，可以只启用该模块的详细日志
+- **性能优化**：可以针对性地关闭不相关模块的日志，减少日志输出开销
 
 **架构优势：**
 - **动态调试**：运行时调整日志级别，无需重新编译
@@ -1509,6 +1569,7 @@ uint64_t pool_id = worker->getOutputBufferPoolId(BufferPoolType::DECODE_VIDEO_PR
 - ✅ **接口隔离**：接口定义清晰，职责单一
 - ✅ **开闭原则**：对扩展开放，对修改关闭（新增实现无需修改接口）
 - ✅ **单一职责**：每个层次职责明确，接口层定义契约，基类层提供公共功能，实现层提供具体逻辑
+- ✅ **模块化日志**：每个模块拥有独立的 logger 实例，在构造函数中初始化，便于单独控制日志输出（详见 [v2.21 日志系统重构](#v221---日志系统重构与关键-bug-修复)）
 
 ---
 
@@ -3796,7 +3857,7 @@ bool FfmpegDecodeVideoFileWorker::fillBuffer(int frame_index, Buffer* buffer) {
     // ⭐ v2.7改进：从 Buffer 获取关联的 AVFrame*
     AVFrame* frame_ptr = buffer->getAVFrame();
     if (!frame_ptr) {
-        LOG_ERROR_FMT("[Worker] ERROR: buffer->getAVFrame() is nullptr");
+        LOG_ERROR_FMT(" ERROR: buffer->getAVFrame() is nullptr");
         return false;
     }
     
@@ -3807,7 +3868,7 @@ bool FfmpegDecodeVideoFileWorker::fillBuffer(int frame_index, Buffer* buffer) {
         // ⭐ v2.9新增：硬件解码器提取物理地址
         if (!decoder_name_.empty() && use_hardware_decoder_) {
             if (!extractHardwareAddressFromMetadata(frame_ptr, buffer)) {
-                LOG_ERROR_FMT("[Worker] Hardware decoder '%s': Failed to extract physical address", 
+                LOG_ERROR_FMT(" Hardware decoder '%s': Failed to extract physical address", 
                              decoder_name_.c_str());
                 return false;
             }
@@ -3841,7 +3902,7 @@ bool FfmpegDecodeVideoFileWorker::initializeDecoder() {
              strstr(codec->name, "nvdec") || strstr(codec->name, "nvenc") ||
              strstr(codec->name, "videotoolbox") || strstr(codec->name, "mediacodec"))) {
             
-            LOG_WARN_FMT("[Worker] ⚠️ WARNING: FFmpeg auto-selected hardware decoder '%s', "
+            LOG_WARN_FMT(" ⚠️ WARNING: FFmpeg auto-selected hardware decoder '%s', "
                         "but user requested software decoding!", codec->name);
             
             // 遍历所有解码器，找到第一个匹配 codec_id 的纯软件解码器
@@ -3861,7 +3922,7 @@ bool FfmpegDecodeVideoFileWorker::initializeDecoder() {
                     !strstr(sw_codec->name, "videotoolbox") &&
                     !strstr(sw_codec->name, "mediacodec")) {
                     codec = sw_codec;
-                    LOG_INFO_FMT("[Worker] ✅ Found software decoder: %s", codec->name);
+                    LOG_INFO_FMT(" ✅ Found software decoder: %s", codec->name);
                     break;
                 }
             }
