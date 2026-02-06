@@ -1,4 +1,4 @@
-  #ifndef WORKER_BASE_HPP
+#ifndef WORKER_BASE_HPP
 #define WORKER_BASE_HPP
 
 #include "productionline/worker/IDataSourceNavigator.hpp"

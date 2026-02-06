@@ -3,8 +3,8 @@
 
 // ========== 构造函数 ==========
 
-Buffer::Buffer(uint32_t id, 
-               void* virt_addr, 
+Buffer::Buffer(uint32_t id,
+               void* virt_addr,
                uint64_t phys_addr,
                size_t size,
                Ownership ownership)
@@ -17,6 +17,7 @@ Buffer::Buffer(uint32_t id,
     , state_(State::IDLE)
     , avframe_(nullptr)              // ⭐ v2.7新增：初始化 AVFrame 指针
     , avpacket_(nullptr)             // ⭐ v2.8新增：初始化 AVPacket 指针
+    , mat_(nullptr)                  // ⭐ 新增：初始化 Mat 指针
     , has_image_metadata_(false)
     , width_(0)
     , height_(0)
@@ -41,6 +42,7 @@ Buffer::Buffer(Buffer&& other) noexcept
     , state_(other.state_.load())           // 从 atomic 读取
     , avframe_(other.avframe_)              // ⭐ v2.7新增：移动 AVFrame 指针
     , avpacket_(other.avpacket_)            // ⭐ v2.8新增：移动 AVPacket 指针
+    , mat_(other.mat_)                      // ⭐ 新增：移动 Mat 指针
     , has_image_metadata_(other.has_image_metadata_)
     , width_(other.width_)
     , height_(other.height_)
@@ -57,6 +59,7 @@ Buffer::Buffer(Buffer&& other) noexcept
     other.size_ = 0;
     other.avframe_ = nullptr;              // ⭐ v2.7新增：清空 AVFrame 指针
     other.avpacket_ = nullptr;             // ⭐ v2.8新增：清空 AVPacket 指针
+    other.mat_ = nullptr;                  // ⭐ 新增：清空 Mat 指针
     other.has_image_metadata_ = false;
     other.pts_ = AV_NOPTS_VALUE;           // ⭐ v2.26新增：清空 PTS
     other.validation_magic_ = 0;
@@ -72,6 +75,8 @@ Buffer& Buffer::operator=(Buffer&& other) noexcept {
         ownership_ = other.ownership_;
         state_.store(other.state_.load());           // atomic 赋值
         avframe_ = other.avframe_;                   // ⭐ v2.7新增：移动 AVFrame 指针
+        avpacket_ = other.avpacket_;                 // ⭐ v2.8新增：移动 AVPacket 指针
+        mat_ = other.mat_;                           // ⭐ 新增：移动 Mat 指针
         has_image_metadata_ = other.has_image_metadata_;
         width_ = other.width_;
         height_ = other.height_;
@@ -81,12 +86,14 @@ Buffer& Buffer::operator=(Buffer&& other) noexcept {
         nb_planes_ = other.nb_planes_;
         pts_ = other.pts_;                           // ⭐ v2.26新增：移动 PTS
         validation_magic_ = other.validation_magic_;
-        
+
         // 清空源对象
         other.virt_addr_ = nullptr;
         other.phys_addr_ = 0;
         other.size_ = 0;
         other.avframe_ = nullptr;                    // ⭐ v2.7新增：清空 AVFrame 指针
+        other.avpacket_ = nullptr;                   // ⭐ v2.8新增：清空 AVPacket 指针
+        other.mat_ = nullptr;                        // ⭐ 新增：清空 Mat 指针
         other.has_image_metadata_ = false;
         other.pts_ = AV_NOPTS_VALUE;                 // ⭐ v2.26新增：清空 PTS
         other.validation_magic_ = 0;
@@ -176,7 +183,7 @@ void Buffer::freeBuffer() {
     if (avframe_) {
         av_frame_unref(avframe_);
     }
-    
+
     // 2. 清空 AVPacket 的引用计数（清空数据，但不释放结构体）
     // av_packet_unref() 会：
     //   - 清空 packet->data
@@ -185,11 +192,18 @@ void Buffer::freeBuffer() {
     if (avpacket_) {
         av_packet_unref(avpacket_);
     }
-    
+
+    // 2.5. ⭐ 新增：清理 Mat 对象
+    // 释放由 convertAVFrameToMat 创建的 Mat 对象
+    if (mat_) {
+        delete mat_;
+        mat_ = nullptr;
+    }
+
     // 3. 重置虚拟地址（因为 AVFrame 的数据已被清空）
     // virt_addr_ 之前指向 frame->data[0]，现在 frame->data[0] 已被清空，所以重置为 nullptr
     virt_addr_ = nullptr;
-    
+
     // 4. 清空图像元数据
     has_image_metadata_ = false;
     width_ = 0;
@@ -200,10 +214,10 @@ void Buffer::freeBuffer() {
     linesize_[2] = 0;
     linesize_[3] = 0;
     nb_planes_ = 0;
-    
+
     // 5. ⭐ v2.26新增：重置 PTS
     pts_ = AV_NOPTS_VALUE;
-    
+
     // 6. 注意：不修改以下内容：
     //    - avframe_ 指针（结构体还在，只是数据被清空）
     //    - avpacket_ 指针（结构体还在，只是数据被清空）

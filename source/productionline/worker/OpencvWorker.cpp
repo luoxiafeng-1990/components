@@ -338,8 +338,7 @@ bool OpencvWorker::seekToEnd() {
     return false;
 }
 
-bool OpencvWorker::skip(int frame_count) {
-    LOG4CPLUS_WARN(logger_, "[Worker] Warning: skip is not supported for streaming sources");
+bool OpencvWorker::skip(int frame_count){
     return false;
 }
 
@@ -406,10 +405,6 @@ double OpencvWorker::getOutputBytesPerPixel(int channel) const {
     
     return 0.0;  // 其他通道不支持
 }
-
-// ============================================================================
-// TACO 辅助函数（多通道支持）
-// ============================================================================
 
 double OpencvWorker::getTacoChannelBytesPerPixel(int channel) const {
     int64_t value = 0;
@@ -524,7 +519,6 @@ IDataSourceNavigator::SourceType OpencvWorker::getDataSourceType() const {
 }
 
 bool OpencvWorker::hasMoreFrames() const {
-    // ⭐ v2.12修改：从数据源获取 EOF 状态
     if (!packet_source_) {
         return false;
     }
@@ -532,7 +526,6 @@ bool OpencvWorker::hasMoreFrames() const {
 }
 
 bool OpencvWorker::isAtEnd() const {
-    // ⭐ v2.12修改：从数据源获取 EOF 状态
     if (!packet_source_) {
         return true;
     }
@@ -540,24 +533,13 @@ bool OpencvWorker::isAtEnd() const {
 }
 
 bool OpencvWorker::isConnected() const {
-    // 连接状态从数据源判断
     if (!packet_source_) {
         return false;
     }
     return packet_source_->isOpen();
 }
 
-// ============================================================================
-// 核心功能：填充Buffer
-// ============================================================================
-
-/**
- * @brief 从 AVFrame 填充 Buffer 的元数据
- * @param frame_ptr AVFrame 指针（必须已填充数据）
- * @param buffer Buffer 指针（用于存储元数据）
- * @return true 成功设置元数据，false 失败
- */
-bool OpencvWorker::fillBufferMetadataFromFrame(AVFrame* frame_ptr, Buffer* buffer) {
+bool OpencvWorker::fillBufferMetadataFromFrame(AVFrame* frame_ptr, Buffer* buffer, cv::Mat* mat) {
     // ⭐ 硬件解码器：提取物理内存地址
     if (!decoder_name_.empty() && use_hardware_decoder_) {
         if (!extractHardwareAddressFromMetadata(frame_ptr, buffer)) {
@@ -566,46 +548,51 @@ bool OpencvWorker::fillBufferMetadataFromFrame(AVFrame* frame_ptr, Buffer* buffe
             // ⚠️ 容错处理，打印日志但继续执行
         }
     }
-    
-    // ⭐ 设置虚拟地址
-    buffer->setVirtualAddress(frame_ptr->data[0]);
-    
-    // ⭐ 计算并设置帧大小
-    int actual_frame_size = av_image_get_buffer_size(
-        (AVPixelFormat)frame_ptr->format,
-        frame_ptr->width,
-        frame_ptr->height,
-        1  // alignment
-    );
-    
-    if (actual_frame_size > 0) {
-        buffer->setSize(actual_frame_size);
-        LOG_TRACE_FMT("[Worker] Updated buffer size to actual frame size: %d bytes", actual_frame_size);
+
+    // ⭐ 根据是否使用Mat选择不同的处理方式
+    if (mat) {
+        // ========== Mat模式：存储Mat并设置Mat的大小 ==========
+        buffer->setMat(mat);
+
+        // 计算并设置Mat的大小
+        size_t mat_size = mat->total() * mat->elemSize();
+        buffer->setSize(mat_size);
+
+        // 可选：设置虚拟地址为Mat的data指针（用于某些需要data指针的场景）
+        buffer->setVirtualAddress(mat->data);
     } else {
-        LOG4CPLUS_ERROR_FMT(logger_, "[Worker] Failed to get frame buffer size: %d", actual_frame_size);
+        // ========== AVFrame模式：使用原来的逻辑 ==========
+        // 设置虚拟地址
+        buffer->setVirtualAddress(frame_ptr->data[0]);
+
+        // 计算并设置帧大小
+        int actual_frame_size = av_image_get_buffer_size(
+            (AVPixelFormat)frame_ptr->format,
+            frame_ptr->width,
+            frame_ptr->height,
+            1  // alignment
+        );
+
+        if (actual_frame_size > 0) {
+            buffer->setSize(actual_frame_size);
+            LOG_TRACE_FMT("[Worker] Updated buffer size to actual frame size: %d bytes", actual_frame_size);
+        } else {
+            LOG4CPLUS_ERROR_FMT(logger_, "[Worker] Failed to get frame buffer size: %d", actual_frame_size);
+        }
     }
-    
+
     // ⭐ 设置图像元数据（格式、宽高、linesize 等）
     buffer->setImageMetadataFromAVFrame(frame_ptr);
-    
+
     // ⭐ v2.26新增：保存 PTS（用于多通道帧对齐）
     buffer->setPts(frame_ptr->pts);
-    
+
     // ⭐ 更新统计计数器
     decoded_frames_++;
-    
+
     return true;
 }
 
-/**
- * @brief 从数据源读取 packet 并发送到解码器
- * @param packet_ptr AVPacket 指针（RTSP/文件模式使用）
- * @return true 成功发送 packet 到解码器，false 失败或 EOF
- * 
- * ⭐ v2.22 修改：
- *   - Buffer 模式的逻辑已移至 fillBuffer() 中
- *   - 此函数仅用于 RTSP/文件模式
- */
 bool OpencvWorker::readAndSendPacket(AVPacket* packet_ptr) {
     if (worker_config_.data_source.buffer_mode) {
         auto ps = std::dynamic_pointer_cast<EncodedPacketSourceFromBuffer>(packet_source_);
@@ -717,40 +704,46 @@ bool OpencvWorker::fillBuffer(int frame_index, Buffer* buffer) {
         LOG4CPLUS_ERROR(logger_, "[Worker] ERROR: buffer is nullptr");
         return false;
     }
-    
+
     if (!packet_source_->isOpen()) {
         LOG4CPLUS_ERROR(logger_, "[Worker] ERROR: Worker is not open");
         return false;
     }
-    
+
     std::lock_guard<std::recursive_mutex> lock(mutex_);
-    
-    AVFrame* frame_ptr = buffer->getAVFrame();
-    if (!frame_ptr) {
-        LOG4CPLUS_ERROR(logger_, "[Worker] ERROR: buffer->getAVFrame() is nullptr");
-        return false;
-    }
-    
-    AVPacket* packet_ptr = buffer->getAVPacket();
-    if (!packet_ptr) {
-        LOG4CPLUS_ERROR(logger_, "[Worker] ERROR: buffer->getAVPacket() is nullptr");
-        return false;
-    }
-    
+
     if (!packet_source_) {
         LOG4CPLUS_ERROR(logger_, "[Worker] ERROR: packet_source_ is nullptr");
         return false;
     }
-    
+
+    AVPacket* packet_ptr = buffer->getAVPacket();
+    if (!packet_ptr) {
+        LOG4CPLUS_ERROR(logger_, "[Worker] ERROR: buffer->getAVPacket() is nullptr");
+        setLastFillStatus(FillStatus::InvalidParam);
+        return FillResult::invalidParam();
+    }
+
     // ========== 步骤1: 检查缓存队列 ==========
     if (!cached_frames_.empty()) {
         AVFrame* cached_frame = cached_frames_.front();
         cached_frames_.erase(cached_frames_.begin());
-        
-        av_frame_move_ref(frame_ptr, cached_frame);
+
+        // 转换AVFrame到Mat
+        cv::Mat* mat = convertAVFrameToMat(cached_frame);
+        if (!mat) {
+            LOG4CPLUS_ERROR(logger_, "[Worker] Failed to convert cached AVFrame to Mat");
+            av_frame_free(&cached_frame);
+            return false;
+        }
+
+        // 使用fillBufferMetadataFromFrame统一设置所有元数据
+        bool result = fillBufferMetadataFromFrame(cached_frame, buffer, mat);
+
+        // 释放AVFrame
         av_frame_free(&cached_frame);
-        
-        return fillBufferMetadataFromFrame(frame_ptr, buffer);
+
+        return result;
     }
     
     if (!readAndSendPacket(packet_ptr)) {
@@ -780,10 +773,7 @@ bool OpencvWorker::fillBuffer(int frame_index, Buffer* buffer) {
     
     // ========== 步骤5: 检查是否成功解码 ==========
     if (!decoded_at_least_one) {
-        // ❌ 没有解码出帧
-        
         if (worker_config_.data_source.buffer_mode) {
-            // ⭐ v2.22 新增：Buffer 模式 - 取消获取（下次重试）
             auto ps = std::dynamic_pointer_cast<EncodedPacketSourceFromBuffer>(packet_source_);
             if (ps) {
                 ps->cancelEncodedPacket(this);
@@ -811,21 +801,72 @@ bool OpencvWorker::fillBuffer(int frame_index, Buffer* buffer) {
     if (cached_frames_.empty()) {
         return false;  // 不应该到这里
     }
-    
+
     AVFrame* first_frame = cached_frames_.front();
     cached_frames_.erase(cached_frames_.begin());
-    
-    av_frame_move_ref(frame_ptr, first_frame);
+
+    // 转换AVFrame到Mat
+    cv::Mat* mat = convertAVFrameToMat(first_frame);
+    if (!mat) {
+        LOG4CPLUS_ERROR(logger_, "[Worker] Failed to convert AVFrame to Mat");
+        av_frame_free(&first_frame);
+        return false;
+    }
+
+    // 使用fillBufferMetadataFromFrame统一设置所有元数据
+    bool result = fillBufferMetadataFromFrame(first_frame, buffer, mat);
+
+    // 释放AVFrame
     av_frame_free(&first_frame);
-    
-    return fillBufferMetadataFromFrame(frame_ptr, buffer);
+
+    return result;
 }
 
-// ============================================================================
-// 提供原材料（BufferPool）
-// ============================================================================
+cv::Mat* OpencvWorker::convertAVFrameToMat(AVFrame* avframe) {
+    if (!avframe || !avframe->data[0] ||
+        avframe->width <= 0 || avframe->height <= 0) {
+        return nullptr;
+    }
 
-// ============ 特有接口 ============
+    int width = avframe->width;
+    int height = avframe->height;
+    AVPixelFormat fmt = static_cast<AVPixelFormat>(avframe->format);
+
+    switch (fmt){
+        case AV_PIX_FMT_RGB24: {
+            // 创建堆上的Mat对象并拷贝数据
+            cv::Mat temp(height, width, CV_8UC3, avframe->data[0], avframe->linesize[0]);
+            return new cv::Mat(temp.clone());
+        }
+        case AV_PIX_FMT_NV12: {
+            // NV12格式的特殊Mat
+            // 总高度 = Y平面高度 + UV平面高度
+            int total_height = height + height / 2;
+            cv::Mat* nv12_mat = new cv::Mat(total_height, width, CV_8UC1);
+
+            // 复制Y平面
+            int y_size = width * height;
+            cv::Mat y_plane(height, width, CV_8UC1, nv12_mat->data, width);
+            cv::Mat av_y(height, width, CV_8UC1, avframe->data[0], avframe->linesize[0]);
+            av_y.copyTo(y_plane);
+
+            // 复制UV平面（NV12是UV交错）
+            int uv_size = width * height / 2;
+            cv::Mat uv_plane(height / 2, width, CV_8UC1,
+                            nv12_mat->data + y_size, width);
+            cv::Mat av_uv(height / 2, width, CV_8UC1,
+                        avframe->data[1], avframe->linesize[1]);
+            av_uv.copyTo(uv_plane);
+
+            return nv12_mat;
+        }
+        default:
+            LOG4CPLUS_ERROR_FMT(logger_, "[Worker] Unsupported pixel format: %d. Supported: RGB24, NV12", fmt);
+            return nullptr;
+    }
+
+    return nullptr;
+}
 
 const AVCodecParameters* OpencvWorker::getCodecParameters() const {
     if (!packet_source_) {
@@ -1113,18 +1154,7 @@ bool OpencvWorker::configureSpecialDecoder() {
     return true;
 }
 
-// ============================================================================
-// 硬件解码器元数据提取（重写基类虚函数）
-// ============================================================================
-
 bool OpencvWorker::extractHardwareAddressFromMetadata(AVFrame* frame, Buffer* buffer) {
-    // ⭐ 职责：从 AVFrame 中提取硬件解码器的物理内存地址
-    // 
-    // 设计原则：
-    // 1. 此函数只在 decoder_name_ 非空 && use_hardware_decoder_==true 时被调用
-    // 2. 不同硬件解码器有不同的提取方式
-    // 3. 提取失败返回 false，调用者会报错并终止解码
-    
     if (!frame || !buffer) {
         LOG4CPLUS_ERROR(logger_, "[Worker] extractHardwareAddressFromMetadata: Invalid parameters");
         return false;
@@ -1157,25 +1187,6 @@ bool OpencvWorker::extractHardwareAddressFromMetadata(AVFrame* frame, Buffer* bu
         LOG4CPLUS_ERROR(logger_, "[Worker] TACO: AVFrame->metadata is missing or no 'pool_blk_id' entry");
         return false;
     }
-    
-    // ========== 其他硬件解码器（扩展点）==========
-    // 
-    // 示例：NVIDIA CUDA 解码器
-    // if (decoder_name_ == "h264_cuvid") {
-    //     // CUDA 特定逻辑：从 AVFrame 的 data[0] 获取设备内存指针
-    //     // CUdeviceptr cuda_ptr = (CUdeviceptr)frame->data[0];
-    //     // buffer->setPhysicalAddress((uint64_t)cuda_ptr);
-    //     // return true;
-    // }
-    //
-    // 示例：Intel QSV 解码器
-    // if (decoder_name_ == "h264_qsv") {
-    //     // QSV 特定逻辑：从 AVFrame 的 data[3] 获取 mfxFrameSurface1*
-    //     // mfxFrameSurface1* surface = (mfxFrameSurface1*)frame->data[3];
-    //     // buffer->setPhysicalAddress((uint64_t)surface->Data.MemId);
-    //     // return true;
-    // }
-    
     // ⭐ v2.18 改进：软件解码器不需要物理地址
     if (decoder_name_.empty() || !use_hardware_decoder_) {
         // 软件解码器，不需要物理地址

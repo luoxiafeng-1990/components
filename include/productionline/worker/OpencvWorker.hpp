@@ -39,8 +39,8 @@ public:
     
     bool open() override;
     bool open(const char* path) override;
-    void close() override;
     bool isOpen() const override;
+    void close() override;
     bool seek(int frame_index) override;
     bool seekToBegin() override;
     bool seekToEnd() override;
@@ -112,47 +112,49 @@ public:
      */
     void printStats() const;
 
+    cv::Mat* convertAVFrameToMat(AVFrame* avframe);
+
 private:
     // ============ Logger ============
     log4cplus::Logger logger_;
-    
+
     // ============ 数据源抽象（v2.12新增）============
     // ⭐ v2.18 修改：从 unique_ptr 改为 shared_ptr（支持共享模式）
     std::shared_ptr<IEncodedPacketSource> packet_source_;  // 数据源抽象（文件/RTSP流/共享Buffer）
-    
+
     // ============ FFmpeg 资源 ============
     AVCodecContext* codec_ctx_ptr_;
-    
+
     // ============ 输出参数（运行时状态）============
     int output_width_;                 // 输出宽度（运行时状态，可能与config不同）
     int output_height_;                // 输出高度（运行时状态，可能与config不同）
-    
+
     // ============ 解码器配置（v2.2新增）============
     bool use_hardware_decoder_;        // 是否使用硬件解码器（从WorkerConfig获取）
     std::string decoder_name_;         // 指定解码器名称（如 "h264_taco"），空字符串表示自动选择
     struct AVDictionary* codec_options_ptr_;  // 解码器选项（用于 h264_taco 配置）
-    
+
     // ============ 统计信息 ============
     std::atomic<int> decoded_frames_;
     std::atomic<int> dropped_frames_;
-    
+
     // ============ 线程安全 ============
     mutable std::recursive_mutex mutex_;  // 使用递归锁避免死锁
-    
+
     // ============ 帧缓存（用于多通道解码）============
     std::vector<AVFrame*> cached_frames_;  // 缓存解码后的帧（用于处理双通道等场景）
-    
+
     // ============ v3.0 新增：Packet 状态管理（用于 Buffer 模式共享）============
     AVPacket* current_packet_ptr_;         // 当前持有的 packet 指针（Buffer 模式下使用）
     bool packet_acquired_;                 // 是否已获取 packet（Buffer 模式下使用）
-    
+
     bool initializeDecoder(const AVCodecParameters* codec_params);
-    
+
     bool configureSpecialDecoder();
-    
+
     bool readAndSendPacket(AVPacket* packet_ptr);
-    
-    bool fillBufferMetadataFromFrame(AVFrame* frame_ptr, Buffer* buffer);
+
+    bool fillBufferMetadataFromFrame(AVFrame* frame_ptr, Buffer* buffer, cv::Mat* mat = nullptr);
 
     virtual bool extractHardwareAddressFromMetadata(struct AVFrame* frame, Buffer* buffer) override;
     
