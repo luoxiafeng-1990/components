@@ -25,7 +25,7 @@ extern "C" {
 // 构造函数（v3.0：统一的 FFmpeg 解码 Worker，支持文件/RTSP/Buffer 模式）
 OpencvWorker::OpencvWorker(const WorkerConfig& config)
     : WorkerBase(BufferAllocatorFactory::AllocatorType::MAT, config)  // 传递 config 给父类
-    , logger_(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Worker.Decode")))
+    , logger_(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Worker.Opencv")))
     , packet_source_(nullptr)  // ⚠️ 数据源将在下面根据配置创建
     , codec_ctx_ptr_(nullptr)
     , output_width_(config.display.width)      // 🎯 从配置读取输出宽度
@@ -38,7 +38,7 @@ OpencvWorker::OpencvWorker(const WorkerConfig& config)
     , current_packet_ptr_(nullptr)
     , packet_acquired_(false)
 {
-    LOG4CPLUS_DEBUG(logger_, "[Worker] OpencvWorker created with config");
+    LOG4CPLUS_DEBUG(logger_, "OpencvWorker created with config");
     
     if (config.data_source.buffer_mode) {
         if (config.data_source.shared_packet_source) {
@@ -102,12 +102,12 @@ bool OpencvWorker::open() {
     
     // 如果已经打开，先关闭
     if (packet_source_ && packet_source_->isOpen() && packet_source_->getDataSourceType() != IEncodedPacketSource::SourceType::BUFFER_SOURCE) {
-        LOG4CPLUS_WARN(logger_, "[Worker] ⚠️  Stream already open, closing previous stream");
+        LOG4CPLUS_WARN(logger_, "⚠️  Stream already open, closing previous stream");
         close();
     }
     
     if (!packet_source_) {
-        LOG4CPLUS_ERROR(logger_, "[Worker] Cannot open: packet source is nullptr. Worker must be created with WorkerConfig");
+        LOG4CPLUS_ERROR(logger_, "Cannot open: packet source is nullptr. Worker must be created with WorkerConfig");
         return false;
     }
     
@@ -121,19 +121,19 @@ bool OpencvWorker::open() {
         LOG4CPLUS_INFO(logger_, "");
         LOG4CPLUS_INFO_FMT(logger_, "📡 Opening video source: %s", worker_config_.data_source.path.c_str());
     } else {
-        LOG4CPLUS_INFO(logger_, "[Worker] 📦 Opening EncodedPacketSourceFromBuffer (Buffer mode)");
+        LOG4CPLUS_INFO(logger_, "📦 Opening EncodedPacketSourceFromBuffer (Buffer mode)");
     }
     
     // 1. 打开数据源
     if (!packet_source_->open()) {
-        LOG4CPLUS_ERROR(logger_, "[Worker] Failed to open packet source");
+        LOG4CPLUS_ERROR(logger_, "Failed to open packet source");
         return false;
     }
     
     // 2. 从数据源获取编解码器参数
     const AVCodecParameters* codecpar = packet_source_->getCodecParameters();
     if (!codecpar) {
-        LOG4CPLUS_ERROR(logger_, "[Worker] Failed to get codec parameters from packet source");
+        LOG4CPLUS_ERROR(logger_, "Failed to get codec parameters from packet source");
         packet_source_->close();
         return false;
     }
@@ -146,12 +146,12 @@ bool OpencvWorker::open() {
         // 配置未设置，使用原始分辨率或默认值
         output_width_ = getSourceWidth() > 0 ? getSourceWidth() : 1920;
         output_height_ = getSourceHeight() > 0 ? getSourceHeight() : 1080;
-        LOG4CPLUS_DEBUG_FMT(logger_, "[Worker] Output resolution not set in config, using: %dx%d", 
+        LOG4CPLUS_DEBUG_FMT(logger_, "Output resolution not set in config, using: %dx%d", 
                       output_width_, output_height_);
     } else {        
         output_width_ = width;
         output_height_ = height;
-        LOG4CPLUS_DEBUG_FMT(logger_, "[Worker] Output resolution from config: %dx%d", output_width_, output_height_);
+        LOG4CPLUS_DEBUG_FMT(logger_, "Output resolution from config: %dx%d", output_width_, output_height_);
     }
     
     // 5. 初始化解码器
@@ -176,14 +176,14 @@ bool OpencvWorker::open() {
     );
     
     if (pool_id == 0) {
-        LOG4CPLUS_ERROR(logger_, "[Worker] Failed to create BufferPool via Allocator");
+        LOG4CPLUS_ERROR(logger_, "Failed to create BufferPool via Allocator");
         packet_source_->close();
         return false;
     }
     
     // 7. ✅ v2.18 修复：统一注册 BufferPool（Buffer 和 RTSP 模式都需要）
     if (!registerBufferPool(BufferPoolType::DECODE_VIDEO_PRIMARY, pool_id)) {
-        LOG4CPLUS_ERROR(logger_, "[Worker] Failed to register BufferPool");
+        LOG4CPLUS_ERROR(logger_, "Failed to register BufferPool");
         packet_source_->close();
         return false;
     }
@@ -199,14 +199,14 @@ bool OpencvWorker::open() {
     // 9. 详细日志输出
     const char* mode_str = is_buffer_mode ? "Buffer mode" : 
         (packet_source_->getDataSourceType() == IEncodedPacketSource::SourceType::NETWORK_SOURCE ? "RTSP stream" : "File");
-    LOG4CPLUS_DEBUG_FMT(logger_, "[Worker] OpencvWorker (%s): Opened", mode_str);
+    LOG4CPLUS_DEBUG_FMT(logger_, "OpencvWorker (%s): Opened", mode_str);
     if (!is_buffer_mode) {
-        LOG4CPLUS_DEBUG_FMT(logger_, "[Worker]    Source: %s", worker_config_.data_source.path.c_str());
+        LOG4CPLUS_DEBUG_FMT(logger_, "   Source: %s", worker_config_.data_source.path.c_str());
     }
-    LOG4CPLUS_DEBUG_FMT(logger_, "[Worker]    Output resolution: %dx%d (%.1f bytes/pixel)", 
+    LOG4CPLUS_DEBUG_FMT(logger_, "   Output resolution: %dx%d (%.1f bytes/pixel)", 
                   output_width_, output_height_, getOutputBytesPerPixel());
-    LOG4CPLUS_DEBUG_FMT(logger_, "[Worker]    Codec: %s", codec_ctx_ptr_->codec->name);
-    LOG4CPLUS_DEBUG_FMT(logger_, "[Worker]    BufferPool: '%s' (ID: %lu, %d buffers)", 
+    LOG4CPLUS_DEBUG_FMT(logger_, "   Codec: %s", codec_ctx_ptr_->codec->name);
+    LOG4CPLUS_DEBUG_FMT(logger_, "   BufferPool: '%s' (ID: %lu, %d buffers)", 
                   actual_pool_name.c_str(), pool_id, 
                   worker_config_.data_source.buffer_count);
     
@@ -245,7 +245,7 @@ void OpencvWorker::close() {
             auto ps = std::dynamic_pointer_cast<EncodedPacketSourceFromBuffer>(packet_source_);
             if (ps) {
                 // 强制提交（避免订阅者计数永久占用）
-                LOG4CPLUS_DEBUG(logger_, "[Worker] Cleaning up pending packet on close");
+                LOG4CPLUS_DEBUG(logger_, "Cleaning up pending packet on close");
                 ps->commitEncodedPacket(this);
             }
             packet_acquired_ = false;
@@ -273,7 +273,7 @@ void OpencvWorker::close() {
         clearAllBufferPools();
     }
     
-    LOG4CPLUS_DEBUG(logger_, "[Worker] Video source closed");
+    LOG4CPLUS_DEBUG(logger_, "Video source closed");
     LOG4CPLUS_INFO_FMT(logger_, "   Decoded frames: %d", decoded_frames_.load());
     LOG4CPLUS_INFO_FMT(logger_, "   Dropped frames: %d", dropped_frames_.load());
 }
@@ -292,12 +292,12 @@ bool OpencvWorker::seek(int frame_index) {
     
     // 1. 参数校验
     if (!packet_source_) {
-        LOG4CPLUS_ERROR(logger_, "[Worker] Cannot seek: packet source is nullptr");
+        LOG4CPLUS_ERROR(logger_, "Cannot seek: packet source is nullptr");
         return false;
     }
     
     if (!packet_source_->isOpen()) {
-        LOG4CPLUS_ERROR(logger_, "[Worker] Cannot seek: worker is not open");
+        LOG4CPLUS_ERROR(logger_, "Cannot seek: worker is not open");
         return false;
     }
     
@@ -308,11 +308,11 @@ bool OpencvWorker::seek(int frame_index) {
     if (!packet_source_->seek(frame_index)) {
         // 根据数据源类型返回适当的日志
         if (packet_source_->getDataSourceType() == IEncodedPacketSource::SourceType::NETWORK_SOURCE) {
-            LOG4CPLUS_WARN(logger_, "[Worker] RTSP stream does not support seeking");
+            LOG4CPLUS_WARN(logger_, "RTSP stream does not support seeking");
         } else if (packet_source_->getDataSourceType() == IEncodedPacketSource::SourceType::BUFFER_SOURCE) {
-            LOG4CPLUS_WARN(logger_, "[Worker] Buffer source does not support seeking");
+            LOG4CPLUS_WARN(logger_, "Buffer source does not support seeking");
         } else {
-            LOG4CPLUS_ERROR(logger_, "[Worker] Seek failed or not supported by packet source");
+            LOG4CPLUS_ERROR(logger_, "Seek failed or not supported by packet source");
         }
         return false;
     }
@@ -324,7 +324,7 @@ bool OpencvWorker::seek(int frame_index) {
     
     // ⚠️ 注意：EOF 状态由数据源的 seek() 自动重置，不需要手动重置
     
-    LOG4CPLUS_DEBUG_FMT(logger_, "[Worker] Successfully seeked to frame %d", frame_index);
+    LOG4CPLUS_DEBUG_FMT(logger_, "Successfully seeked to frame %d", frame_index);
     return true;
 }
 
@@ -334,7 +334,7 @@ bool OpencvWorker::seekToBegin() {
 }
 
 bool OpencvWorker::seekToEnd() {
-    LOG4CPLUS_WARN(logger_, "[Worker] Warning: seekToEnd is not supported");
+    LOG4CPLUS_WARN(logger_, "Warning: seekToEnd is not supported");
     return false;
 }
 
@@ -543,7 +543,7 @@ bool OpencvWorker::fillBufferMetadataFromFrame(AVFrame* frame_ptr, Buffer* buffe
     // ⭐ 硬件解码器：提取物理内存地址
     if (!decoder_name_.empty() && use_hardware_decoder_) {
         if (!extractHardwareAddressFromMetadata(frame_ptr, buffer)) {
-            LOG4CPLUS_ERROR_FMT(logger_, "[Worker] Hardware decoder '%s': Failed to extract physical address",
+            LOG4CPLUS_ERROR_FMT(logger_, "Hardware decoder '%s': Failed to extract physical address",
                          decoder_name_.c_str());
             // ⚠️ 容错处理，打印日志但继续执行
         }
@@ -575,9 +575,9 @@ bool OpencvWorker::fillBufferMetadataFromFrame(AVFrame* frame_ptr, Buffer* buffe
 
         if (actual_frame_size > 0) {
             buffer->setSize(actual_frame_size);
-            LOG_TRACE_FMT("[Worker] Updated buffer size to actual frame size: %d bytes", actual_frame_size);
+            LOG_TRACE_FMT("Updated buffer size to actual frame size: %d bytes", actual_frame_size);
         } else {
-            LOG4CPLUS_ERROR_FMT(logger_, "[Worker] Failed to get frame buffer size: %d", actual_frame_size);
+            LOG4CPLUS_ERROR_FMT(logger_, "Failed to get frame buffer size: %d", actual_frame_size);
         }
     }
 
@@ -605,7 +605,7 @@ FillResult OpencvWorker::readAndSendPacket(AVPacket* packet_ptr) {
 
         } else if (acquire_result.isEof()) {
             // 📍 EOF：数据流正常结束
-            LOG4CPLUS_DEBUG(logger_, "[Worker] acquireEncodedPacket: EOF reached");
+            LOG4CPLUS_DEBUG(logger_, "acquireEncodedPacket: EOF reached");
             setLastFillStatus(FillStatus::EndOfStream);
             return FillResult::endOfStream();
 
@@ -620,7 +620,7 @@ FillResult OpencvWorker::readAndSendPacket(AVPacket* packet_ptr) {
 
         } else {
             // ❌ 错误
-            LOG4CPLUS_ERROR_FMT(logger_, "[Worker] acquireEncodedPacket failed: %s",
+            LOG4CPLUS_ERROR_FMT(logger_, "acquireEncodedPacket failed: %s",
                                acquire_result.statusString());
             setLastFillStatus(FillStatus::AcquireError);
             return FillResult::acquireError();
@@ -634,7 +634,7 @@ FillResult OpencvWorker::readAndSendPacket(AVPacket* packet_ptr) {
         // ❌ 发送失败
         char err_buf[AV_ERROR_MAX_STRING_SIZE];
         av_strerror(ret, err_buf, sizeof(err_buf));
-        LOG4CPLUS_ERROR_FMT(logger_, "[Worker] ERROR: avcodec_send_packet failed: %d (%s)", ret, err_buf);
+        LOG4CPLUS_ERROR_FMT(logger_, "ERROR: avcodec_send_packet failed: %d (%s)", ret, err_buf);
 
         if (!worker_config_.data_source.deferred_commit) {
             packet_source_->cancelEncodedPacket(this);
@@ -653,13 +653,13 @@ FillResult OpencvWorker::fillBuffer(int frame_index, Buffer* buffer) {
 
     // ========== 参数校验 ==========
     if (!buffer) {
-        LOG4CPLUS_ERROR(logger_, "[Worker] ERROR: buffer is nullptr");
+        LOG4CPLUS_ERROR(logger_, "ERROR: buffer is nullptr");
         setLastFillStatus(FillStatus::InvalidParam);
         return FillResult::invalidParam();
     }
 
     if (!packet_source_ || !packet_source_->isOpen()) {
-        LOG4CPLUS_ERROR(logger_, "[Worker] ERROR: Worker is not open");
+        LOG4CPLUS_ERROR(logger_, "ERROR: Worker is not open");
         setLastFillStatus(FillStatus::NotOpen);
         return FillResult::notOpen();
     }
@@ -668,7 +668,7 @@ FillResult OpencvWorker::fillBuffer(int frame_index, Buffer* buffer) {
 
     AVPacket* packet_ptr = buffer->getAVPacket();
     if (!packet_ptr) {
-        LOG4CPLUS_ERROR(logger_, "[Worker] ERROR: buffer->getAVPacket() is nullptr");
+        LOG4CPLUS_ERROR(logger_, "ERROR: buffer->getAVPacket() is nullptr");
         setLastFillStatus(FillStatus::InvalidParam);
         return FillResult::invalidParam();
     }
@@ -679,9 +679,11 @@ FillResult OpencvWorker::fillBuffer(int frame_index, Buffer* buffer) {
         cached_frames_.erase(cached_frames_.begin());
 
         // 转换AVFrame到Mat
-        cv::Mat* mat = convertAVFrameToMat(cached_frame);
-        if (!mat) {
-            LOG4CPLUS_ERROR(logger_, "[Worker] Failed to convert cached AVFrame to Mat");
+        //cv::Mat* mat = convertAVFrameToMat(cached_frame);
+        cv::Mat* mat = new cv::Mat(cached_frame);
+        if (mat->empty()) {
+            LOG4CPLUS_ERROR(logger_, "Failed to convert cached AVFrame to Mat");
+            delete mat;
             av_frame_free(&cached_frame);
             setLastFillStatus(FillStatus::InternalError);
             return FillResult::internalError();
@@ -690,8 +692,7 @@ FillResult OpencvWorker::fillBuffer(int frame_index, Buffer* buffer) {
         // 使用fillBufferMetadataFromFrame统一设置所有元数据
         fillBufferMetadataFromFrame(cached_frame, buffer, mat);
 
-        // 释放AVFrame
-        av_frame_free(&cached_frame);
+        buffer->setAVFrame(cached_frame);
 
         setLastFillStatus(FillStatus::Success);
         return FillResult::success();
@@ -748,19 +749,14 @@ FillResult OpencvWorker::fillBuffer(int frame_index, Buffer* buffer) {
         current_packet_ptr_ = nullptr;
     }
 
-    // ========== 步骤6: 从缓存取第一帧填充 buffer ==========
-    if (cached_frames_.empty()) {
-        setLastFillStatus(FillStatus::InternalError);  // 不应该到这里，逻辑错误
-        return FillResult::internalError();
-    }
-
     AVFrame* first_frame = cached_frames_.front();
     cached_frames_.erase(cached_frames_.begin());
 
-    // 转换AVFrame到Mat
-    cv::Mat* mat = convertAVFrameToMat(first_frame);
-    if (!mat) {
-        LOG4CPLUS_ERROR(logger_, "[Worker] Failed to convert AVFrame to Mat");
+    // 转换AVFrame到Mat，这是tacosdk自定义的接口
+    cv::Mat* mat = new cv::Mat(first_frame);
+    if (mat->empty()) {
+        LOG4CPLUS_ERROR(logger_, "Failed to convert AVFrame to Mat");
+        delete mat;
         av_frame_free(&first_frame);
         setLastFillStatus(FillStatus::InternalError);
         return FillResult::internalError();
@@ -769,8 +765,7 @@ FillResult OpencvWorker::fillBuffer(int frame_index, Buffer* buffer) {
     // 使用fillBufferMetadataFromFrame统一设置所有元数据
     fillBufferMetadataFromFrame(first_frame, buffer, mat);
 
-    // 释放AVFrame
-    av_frame_free(&first_frame);
+    buffer->setAVFrame(first_frame);
 
     setLastFillStatus(FillStatus::Success);
     return FillResult::success();
@@ -793,29 +788,31 @@ cv::Mat* OpencvWorker::convertAVFrameToMat(AVFrame* avframe) {
             return new cv::Mat(temp.clone());
         }
         case AV_PIX_FMT_NV12: {
-            // NV12格式的特殊Mat
-            // 总高度 = Y平面高度 + UV平面高度
+            // NV12格式：先构建完整的NV12 Mat，然后转换为BGR
             int total_height = height + height / 2;
-            cv::Mat* nv12_mat = new cv::Mat(total_height, width, CV_8UC1);
+            cv::Mat nv12_mat(total_height, width, CV_8UC1);
 
             // 复制Y平面
             int y_size = width * height;
-            cv::Mat y_plane(height, width, CV_8UC1, nv12_mat->data, width);
+            cv::Mat y_plane(height, width, CV_8UC1, nv12_mat.data, width);
             cv::Mat av_y(height, width, CV_8UC1, avframe->data[0], avframe->linesize[0]);
             av_y.copyTo(y_plane);
 
             // 复制UV平面（NV12是UV交错）
-            int uv_size = width * height / 2;
             cv::Mat uv_plane(height / 2, width, CV_8UC1,
-                            nv12_mat->data + y_size, width);
+                            nv12_mat.data + y_size, width);
             cv::Mat av_uv(height / 2, width, CV_8UC1,
                         avframe->data[1], avframe->linesize[1]);
             av_uv.copyTo(uv_plane);
 
-            return nv12_mat;
+            // 转换NV12到BGR
+            cv::Mat* result_mat = new cv::Mat();
+            cv::cvtColor(nv12_mat, *result_mat, cv::COLOR_YUV2BGR_NV12);
+
+            return result_mat;
         }
         default:
-            LOG4CPLUS_ERROR_FMT(logger_, "[Worker] Unsupported pixel format: %d. Supported: RGB24, NV12", fmt);
+            LOG4CPLUS_ERROR_FMT(logger_, "Unsupported pixel format: %d. Supported: RGB24, NV12", fmt);
             return nullptr;
     }
 
@@ -854,30 +851,30 @@ const char* OpencvWorker::getCodecName() const {
 
 void OpencvWorker::printStats() const {
     LOG4CPLUS_INFO(logger_, "");
-    LOG4CPLUS_INFO(logger_, "[Worker] 📊 Statistics:");
+    LOG4CPLUS_INFO(logger_, "📊 Statistics:");
     
     // 1. 通用信息
     std::string path = packet_source_ ? packet_source_->getPath() : std::string();
-    LOG4CPLUS_INFO_FMT(logger_, "[Worker]    Source: %s", path.empty() ? "(Buffer Mode)" : path.c_str());
-    LOG4CPLUS_INFO_FMT(logger_, "[Worker]    Codec: %s", getCodecName());
-    LOG4CPLUS_INFO_FMT(logger_, "[Worker]    Resolution: %dx%d → %dx%d", getSourceWidth(), getSourceHeight(), output_width_, output_height_);
-    LOG4CPLUS_INFO_FMT(logger_, "[Worker]    Decoded frames: %d", decoded_frames_.load());
+    LOG4CPLUS_INFO_FMT(logger_, "   Source: %s", path.empty() ? "(Buffer Mode)" : path.c_str());
+    LOG4CPLUS_INFO_FMT(logger_, "   Codec: %s", getCodecName());
+    LOG4CPLUS_INFO_FMT(logger_, "   Resolution: %dx%d → %dx%d", getSourceWidth(), getSourceHeight(), output_width_, output_height_);
+    LOG4CPLUS_INFO_FMT(logger_, "   Decoded frames: %d", decoded_frames_.load());
     
     // 2. 根据数据源类型显示特定信息
     SourceType type = getDataSourceType();
     if (type == SourceType::FILE_SOURCE) {
-        LOG4CPLUS_INFO_FMT(logger_, "[Worker]    Total frames: %d", packet_source_ ? packet_source_->getTotalFrames() : -1);
-        LOG4CPLUS_INFO_FMT(logger_, "[Worker]    EOF: %s", packet_source_ && packet_source_->isAtEnd() ? "YES" : "NO");
+        LOG4CPLUS_INFO_FMT(logger_, "   Total frames: %d", packet_source_ ? packet_source_->getTotalFrames() : -1);
+        LOG4CPLUS_INFO_FMT(logger_, "   EOF: %s", packet_source_ && packet_source_->isAtEnd() ? "YES" : "NO");
     } else if (type == SourceType::NETWORK_SOURCE) {
-        LOG4CPLUS_INFO_FMT(logger_, "[Worker]    Connected: %s", isConnected() ? "Yes" : "No");
-        LOG4CPLUS_INFO_FMT(logger_, "[Worker]    Dropped frames: %d", dropped_frames_.load());
+        LOG4CPLUS_INFO_FMT(logger_, "   Connected: %s", isConnected() ? "Yes" : "No");
+        LOG4CPLUS_INFO_FMT(logger_, "   Dropped frames: %d", dropped_frames_.load());
     } else if (type == SourceType::BUFFER_SOURCE) {
-        LOG4CPLUS_INFO_FMT(logger_, "[Worker]    Dropped frames: %d", dropped_frames_.load());
+        LOG4CPLUS_INFO_FMT(logger_, "   Dropped frames: %d", dropped_frames_.load());
     }
     
     // 3. BufferPool 信息（通用）
     uint64_t pool_id = getOutputBufferPoolId(BufferPoolType::DECODE_VIDEO_PRIMARY);
-    LOG4CPLUS_INFO_FMT(logger_, "[Worker]    BufferPool ID: %lu", pool_id);
+    LOG4CPLUS_INFO_FMT(logger_, "   BufferPool ID: %lu", pool_id);
 }
 
 // ============ 内部实现 ============
@@ -885,7 +882,7 @@ void OpencvWorker::printStats() const {
 bool OpencvWorker::initializeDecoder(const AVCodecParameters* codec_params) {
     // ⭐ v2.12修改：codec_params 必须提供（从 packet_source_ 获取）
     if (!codec_params) {
-        LOG4CPLUS_ERROR(logger_, "[Worker] Cannot initialize decoder: codec_params is nullptr");
+        LOG4CPLUS_ERROR(logger_, "Cannot initialize decoder: codec_params is nullptr");
         return false;
     }
     const AVCodecParameters* codecpar = codec_params;
@@ -897,9 +894,9 @@ bool OpencvWorker::initializeDecoder(const AVCodecParameters* codec_params) {
         // ⭐ 用户指定了解码器名称（如 "h264_taco"）
         codec = avcodec_find_decoder_by_name(decoder_name_.c_str());
         if (!codec) {
-            LOG4CPLUS_WARN_FMT(logger_, "[Worker] ⚠️ Warning: Specified decoder '%s' not found", decoder_name_.c_str());
+            LOG4CPLUS_WARN_FMT(logger_, "⚠️ Warning: Specified decoder '%s' not found", decoder_name_.c_str());
         } else {
-            LOG4CPLUS_DEBUG_FMT(logger_, "[Worker] Using specified decoder: %s", decoder_name_.c_str());
+            LOG4CPLUS_DEBUG_FMT(logger_, "Using specified decoder: %s", decoder_name_.c_str());
             
             // ⭐ v2.18 配置冲突检测：用户要求软件解码，但指定了硬件解码器
             if (!use_hardware_decoder_ && isHardwareDecoder(codec)) {
@@ -921,26 +918,26 @@ bool OpencvWorker::initializeDecoder(const AVCodecParameters* codec_params) {
     if (!codec) {
         if (!use_hardware_decoder_) {
             // ⭐ v2.18 用户要求软件解码：查找纯软件解码器
-            LOG4CPLUS_INFO(logger_, "[Worker] Searching for pure software decoder...");
+            LOG4CPLUS_INFO(logger_, "Searching for pure software decoder...");
             codec = findPureSoftwareDecoder(codecpar->codec_id);
             if (!codec) {
-                LOG4CPLUS_ERROR(logger_, "[Worker] No pure software decoder available for this codec!");
+                LOG4CPLUS_ERROR(logger_, "No pure software decoder available for this codec!");
                 return false;
             }
-            LOG4CPLUS_INFO_FMT(logger_, "[Worker] ✅ Using software decoder: %s", codec->name);
+            LOG4CPLUS_INFO_FMT(logger_, "✅ Using software decoder: %s", codec->name);
         } else {
             // 硬件解码或自动选择：使用 FFmpeg 默认行为
             codec = avcodec_find_decoder(codecpar->codec_id);
             if (!codec) {
-                LOG4CPLUS_ERROR(logger_, "[Worker] Decoder not found for codec");
+                LOG4CPLUS_ERROR(logger_, "Decoder not found for codec");
                 return false;
             }
             
             // 日志：显示选择的解码器类型
             if (isHardwareDecoder(codec)) {
-                LOG4CPLUS_INFO_FMT(logger_, "[Worker] Auto-selected hardware decoder: %s", codec->name);
+                LOG4CPLUS_INFO_FMT(logger_, "Auto-selected hardware decoder: %s", codec->name);
             } else {
-                LOG4CPLUS_INFO_FMT(logger_, "[Worker] Auto-selected software decoder: %s", codec->name);
+                LOG4CPLUS_INFO_FMT(logger_, "Auto-selected software decoder: %s", codec->name);
             }
         }
     }
@@ -948,7 +945,7 @@ bool OpencvWorker::initializeDecoder(const AVCodecParameters* codec_params) {
     // 2. 分配解码器上下文
     codec_ctx_ptr_ = avcodec_alloc_context3(codec);
     if (!codec_ctx_ptr_) {
-        LOG4CPLUS_ERROR(logger_, "[Worker] Failed to allocate codec context");
+        LOG4CPLUS_ERROR(logger_, "Failed to allocate codec context");
         return false;
     }
     
@@ -957,7 +954,7 @@ bool OpencvWorker::initializeDecoder(const AVCodecParameters* codec_params) {
     if (ret < 0) {
         char err_buf[AV_ERROR_MAX_STRING_SIZE];
         av_strerror(ret, err_buf, sizeof(err_buf));
-        LOG4CPLUS_ERROR_FMT(logger_, "[Worker] Failed to copy codec parameters (FFmpeg: %s)", err_buf);
+        LOG4CPLUS_ERROR_FMT(logger_, "Failed to copy codec parameters (FFmpeg: %s)", err_buf);
         avcodec_free_context(&codec_ctx_ptr_);
         codec_ctx_ptr_ = nullptr;
         return false;
@@ -966,7 +963,7 @@ bool OpencvWorker::initializeDecoder(const AVCodecParameters* codec_params) {
     // 4. 配置特殊解码器（如 h264_taco）
     if (decoder_name_ == "h264_taco") {
         if (!configureSpecialDecoder()) {
-            LOG4CPLUS_ERROR(logger_, "[Worker] ERROR: Failed to configure special decoder options");
+            LOG4CPLUS_ERROR(logger_, "ERROR: Failed to configure special decoder options");
             avcodec_free_context(&codec_ctx_ptr_);
             codec_ctx_ptr_ = nullptr;
             return false;
@@ -978,13 +975,13 @@ bool OpencvWorker::initializeDecoder(const AVCodecParameters* codec_params) {
     if (ret < 0) {
         char err_buf[AV_ERROR_MAX_STRING_SIZE];
         av_strerror(ret, err_buf, sizeof(err_buf));
-        LOG4CPLUS_ERROR_FMT(logger_, "[Worker] Failed to open codec (FFmpeg: %s)", err_buf);
+        LOG4CPLUS_ERROR_FMT(logger_, "Failed to open codec (FFmpeg: %s)", err_buf);
         avcodec_free_context(&codec_ctx_ptr_);
         codec_ctx_ptr_ = nullptr;
         return false;
     }
     
-    LOG4CPLUS_DEBUG(logger_, "[Worker] Initialized decoder");
+    LOG4CPLUS_DEBUG(logger_, "Initialized decoder");
     LOG4CPLUS_INFO_FMT(logger_, "   Codec: %s", codec_ctx_ptr_->codec->name);
     LOG4CPLUS_INFO_FMT(logger_, "   Stream resolution: %dx%d", codec_ctx_ptr_->width, codec_ctx_ptr_->height);
     LOG4CPLUS_INFO_FMT(logger_, "   Output resolution: %dx%d", output_width_, output_height_);
@@ -995,32 +992,32 @@ bool OpencvWorker::initializeDecoder(const AVCodecParameters* codec_params) {
 bool OpencvWorker::configureSpecialDecoder() {
     // 配置 h264_taco 解码器（从 worker_config_ 读取配置）
     if (!codec_ctx_ptr_->priv_data) {
-        LOG4CPLUS_WARN_FMT(logger_, "[Worker]  Warning: codec_ctx->priv_data is NULL, cannot set options");
+        LOG4CPLUS_WARN_FMT(logger_, " Warning: codec_ctx->priv_data is NULL, cannot set options");
         return false;
     }
     
     // 🎯 从 worker_config_ 获取 taco 配置（非 const，可能需要修改）
     auto& taco = worker_config_.decoder.taco;
     
-    LOG4CPLUS_DEBUG_FMT(logger_, "[Worker] Configuring h264_taco decoder options from config...");
+    LOG4CPLUS_DEBUG_FMT(logger_, "Configuring h264_taco decoder options from config...");
     
     int ret;
     
     // 禁用重排序（从 config 读取）
     ret = av_opt_set_int(codec_ctx_ptr_->priv_data, "reorder_disable", 
                          taco.reorder_disable ? 1 : 0, 0);
-    LOG4CPLUS_DEBUG_FMT(logger_, "[Worker]    reorder_disable=%d: %s", taco.reorder_disable ? 1 : 0, 
+    LOG4CPLUS_DEBUG_FMT(logger_, "   reorder_disable=%d: %s", taco.reorder_disable ? 1 : 0, 
            ret < 0 ? "FAILED" : "OK");
     
     // 启用通道（从 config 读取）
     ret = av_opt_set_int(codec_ctx_ptr_->priv_data, "ch0_enable", 
                          taco.ch0_enable ? 1 : 0, 0);
-    LOG4CPLUS_DEBUG_FMT(logger_, "[Worker]    ch0_enable=%d: %s", taco.ch0_enable ? 1 : 0, 
+    LOG4CPLUS_DEBUG_FMT(logger_, "   ch0_enable=%d: %s", taco.ch0_enable ? 1 : 0, 
            ret < 0 ? "FAILED" : "OK");
     
     ret = av_opt_set_int(codec_ctx_ptr_->priv_data, "ch1_enable", 
                          taco.ch1_enable ? 1 : 0, 0);
-    LOG4CPLUS_DEBUG_FMT(logger_, "[Worker]    ch1_enable=%d: %s", taco.ch1_enable ? 1 : 0, 
+    LOG4CPLUS_DEBUG_FMT(logger_, "   ch1_enable=%d: %s", taco.ch1_enable ? 1 : 0, 
            ret < 0 ? "FAILED" : "OK");
     
     // ========== 通道0配置 ==========
@@ -1031,7 +1028,7 @@ bool OpencvWorker::configureSpecialDecoder() {
         av_opt_set_int(codec_ctx_ptr_->priv_data, "ch0_crop_y", taco.ch0_crop_y, 0);
         av_opt_set_int(codec_ctx_ptr_->priv_data, "ch0_crop_width", taco.ch0_crop_width, 0);
         av_opt_set_int(codec_ctx_ptr_->priv_data, "ch0_crop_height", taco.ch0_crop_height, 0);
-        LOG4CPLUS_DEBUG_FMT(logger_, "[Worker]    ch0_crop: (%d, %d, %d, %d)", 
+        LOG4CPLUS_DEBUG_FMT(logger_, "   ch0_crop: (%d, %d, %d, %d)", 
                taco.ch0_crop_x, taco.ch0_crop_y, 
                taco.ch0_crop_width, taco.ch0_crop_height);
     }
@@ -1040,7 +1037,7 @@ bool OpencvWorker::configureSpecialDecoder() {
     if (taco.ch0_scale_width > 0 && taco.ch0_scale_height > 0) {
         av_opt_set_int(codec_ctx_ptr_->priv_data, "ch0_scale_width", taco.ch0_scale_width, 0);
         av_opt_set_int(codec_ctx_ptr_->priv_data, "ch0_scale_height", taco.ch0_scale_height, 0);
-        LOG4CPLUS_DEBUG_FMT(logger_, "[Worker]    ch0_scale: (%d, %d)", taco.ch0_scale_width, taco.ch0_scale_height);
+        LOG4CPLUS_DEBUG_FMT(logger_, "   ch0_scale: (%d, %d)", taco.ch0_scale_width, taco.ch0_scale_height);
     }
     
     // ========== 通道1配置 ==========
@@ -1051,7 +1048,7 @@ bool OpencvWorker::configureSpecialDecoder() {
         av_opt_set_int(codec_ctx_ptr_->priv_data, "ch1_crop_y", taco.ch1_crop_y, 0);
         av_opt_set_int(codec_ctx_ptr_->priv_data, "ch1_crop_width", taco.ch1_crop_width, 0);
         av_opt_set_int(codec_ctx_ptr_->priv_data, "ch1_crop_height", taco.ch1_crop_height, 0);
-        LOG4CPLUS_DEBUG_FMT(logger_, "[Worker]    ch1_crop: (%d, %d, %d, %d)", 
+        LOG4CPLUS_DEBUG_FMT(logger_, "   ch1_crop: (%d, %d, %d, %d)", 
                taco.ch1_crop_x, taco.ch1_crop_y, 
                taco.ch1_crop_width, taco.ch1_crop_height);
     }
@@ -1079,21 +1076,21 @@ bool OpencvWorker::configureSpecialDecoder() {
             // 配置有效，设置缩放参数
             av_opt_set_int(codec_ctx_ptr_->priv_data, "ch1_scale_width", taco.ch1_scale_width, 0);
             av_opt_set_int(codec_ctx_ptr_->priv_data, "ch1_scale_height", taco.ch1_scale_height, 0);
-            LOG4CPLUS_DEBUG_FMT(logger_, "[Worker]    ch1_scale: (%d, %d)", taco.ch1_scale_width, taco.ch1_scale_height);
+            LOG4CPLUS_DEBUG_FMT(logger_, "   ch1_scale: (%d, %d)", taco.ch1_scale_width, taco.ch1_scale_height);
         }
     }
     
     // 配置通道1 RGB（从 config 读取）
     ret = av_opt_set_int(codec_ctx_ptr_->priv_data, "ch1_rgb", 
                          taco.ch1_rgb ? 1 : 0, 0);
-    LOG4CPLUS_DEBUG_FMT(logger_, "[Worker]    ch1_rgb=%d: %s", taco.ch1_rgb ? 1 : 0, 
+    LOG4CPLUS_DEBUG_FMT(logger_, "   ch1_rgb=%d: %s", taco.ch1_rgb ? 1 : 0, 
            ret < 0 ? "FAILED" : "OK");
     
     // ⭐ v2.17: 设置 RGB 格式（使用整型枚举）
     if (taco.ch1_rgb && taco.ch1_rgb_format > 0) {
         ret = av_opt_set_int(codec_ctx_ptr_->priv_data, "ch1_rgb_format", 
                              taco.ch1_rgb_format, 0);
-        LOG4CPLUS_DEBUG_FMT(logger_, "[Worker]    ch1_rgb_format=%d: %s", taco.ch1_rgb_format, 
+        LOG4CPLUS_DEBUG_FMT(logger_, "   ch1_rgb_format=%d: %s", taco.ch1_rgb_format, 
                ret < 0 ? "FAILED" : "OK");
     }
     
@@ -1101,7 +1098,7 @@ bool OpencvWorker::configureSpecialDecoder() {
     if (taco.ch1_rgb && taco.ch1_rgb_std > 0) {
         ret = av_opt_set_int(codec_ctx_ptr_->priv_data, "ch1_rgb_std", 
                              taco.ch1_rgb_std, 0);
-        LOG4CPLUS_DEBUG_FMT(logger_, "[Worker]    ch1_rgb_std=%d: %s", taco.ch1_rgb_std, 
+        LOG4CPLUS_DEBUG_FMT(logger_, "   ch1_rgb_std=%d: %s", taco.ch1_rgb_std, 
                ret < 0 ? "FAILED" : "OK");
     }
     
@@ -1110,7 +1107,7 @@ bool OpencvWorker::configureSpecialDecoder() {
 
 bool OpencvWorker::extractHardwareAddressFromMetadata(AVFrame* frame, Buffer* buffer) {
     if (!frame || !buffer) {
-        LOG4CPLUS_ERROR(logger_, "[Worker] extractHardwareAddressFromMetadata: Invalid parameters");
+        LOG4CPLUS_ERROR(logger_, "extractHardwareAddressFromMetadata: Invalid parameters");
         return false;
     }
     
@@ -1122,7 +1119,7 @@ bool OpencvWorker::extractHardwareAddressFromMetadata(AVFrame* frame, Buffer* bu
         if (frame->metadata) {
             AVDictionaryEntry* entry = av_dict_get(frame->metadata, "pool_blk_id", NULL, 0);
             if (entry) {
-                blk_id = (uint32_t)atoi(entry->value);
+                blk_id = (uint32_t)std::stoi(entry->value);
                 phys_addr = taco_sys_handle2_phys_addr(blk_id);
                 
                 if (phys_addr != 0) {
@@ -1131,25 +1128,25 @@ bool OpencvWorker::extractHardwareAddressFromMetadata(AVFrame* frame, Buffer* bu
                     return true;
                 } else {
                     // ❌ blk_id 有效，但转换失败
-                    LOG4CPLUS_ERROR_FMT(logger_, "[Worker] TACO: Failed to convert blk_id=%u to physical address", blk_id);
+                    LOG4CPLUS_ERROR_FMT(logger_, "TACO: Failed to convert blk_id=%u to physical address", blk_id);
                     return false;
                 }
             }
         }
         
         // ❌ TACO 解码器但没有 metadata（异常情况）
-        LOG4CPLUS_ERROR(logger_, "[Worker] TACO: AVFrame->metadata is missing or no 'pool_blk_id' entry");
+        LOG4CPLUS_ERROR(logger_, "TACO: AVFrame->metadata is missing or no 'pool_blk_id' entry");
         return false;
     }
     // ⭐ v2.18 改进：软件解码器不需要物理地址
     if (decoder_name_.empty() || !use_hardware_decoder_) {
         // 软件解码器，不需要物理地址
-        LOG4CPLUS_DEBUG(logger_, "[Worker] Software decoder: No hardware address needed");
+        LOG4CPLUS_DEBUG(logger_, "Software decoder: No hardware address needed");
         return true;  // ✅ 软件解码器返回 true（不是错误）
     }
     
     // 未识别的硬件解码器
-    LOG4CPLUS_ERROR_FMT(logger_, "[Worker] Unknown hardware decoder '%s', cannot extract physical address", 
+    LOG4CPLUS_ERROR_FMT(logger_, "Unknown hardware decoder '%s', cannot extract physical address", 
                  decoder_name_.c_str());
     return false;
 }

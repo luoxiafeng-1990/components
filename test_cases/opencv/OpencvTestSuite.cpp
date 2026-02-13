@@ -10,6 +10,11 @@
 
 #include "opencv2/opencv.hpp"
 #include "opencv2/core/tacv.hpp"
+#include "productionline/worker/WorkerConfig.hpp"
+#include "productionline/worker/WorkerConfig.hpp"
+#include "productionline/VideoProductionLine.hpp"
+#include "buffer/bufferpool/BufferPoolRegistry.hpp"
+#include "buffer/bufferpool/Buffer.hpp"
 
 namespace test {
 namespace opencv {
@@ -43,9 +48,126 @@ std::vector<std::string> OpencvTestSuite::getTestNames() const {
     return names;
 }
 
-// ========================================
-// ITestModule 接口实现
-// ========================================
+bool test_opencv() {
+    bool g_running = true;
+    bool g_rtsp_interrupted = false;
+    
+    // 配置：只保存第一帧
+    const int target_width = 480;
+    const int target_height = 360;
+    const std::string output_filename = "./first_resized_frame.jpg";
+    bool frame_saved = false;        // 标记是否已保存第一帧
+    
+    WorkerConfig::DataSourceConfig g_data_source_config = DataSourceConfigBuilder()
+                                    .setPath("input.mp4")
+                                    .setBufferCount(16)
+                                    .build();
+    
+    TacoConfigBuilder taco_config_builder = TacoConfigBuilder()
+                                    .setReorderDisable(true)
+                                    .setChannels(false, false);
+    
+    WorkerConfig::DecoderConfig::TacoConfig g_taco_config = taco_config_builder.build();
+    WorkerConfig::DecoderConfig g_hw_decoder_config = DecoderConfigBuilder()
+                                    .useTaco("h264", g_taco_config)
+                                    .build();
+    
+    WorkerConfig g_hw_worker_config = WorkerConfigBuilder()
+                                    .setDataSourceConfig(g_data_source_config)
+                                    .setDecoderConfig(g_hw_decoder_config)
+                                    .setWorkerType(WorkerType::OPENCV)
+                                    .build();
+
+    VideoProductionLine hw_producer = VideoProductionLine(false, 1, false);
+    bool hw_result = hw_producer.start(g_hw_worker_config);
+    if (!hw_result) {
+        hw_producer.stop(); 
+        return false;
+    }
+
+    uint64_t hw_pool_id = hw_producer.getWorkingBufferPoolId();
+    if (hw_pool_id == 0) {
+        hw_producer.stop(); 
+        return false;
+    }
+    
+    auto hw_pool = BufferPoolRegistry::getInstance().getPool(hw_pool_id).lock();
+    if (!hw_pool) {
+        hw_producer.stop(); 
+        return false;
+    }
+
+    bool result_passed = true;
+    int frame_processed = 0;
+
+    // 只需要处理到保存第一帧
+    while (g_running && !frame_saved) {
+        Buffer* hw_buf = hw_pool->acquireFilled(true, 100);
+        if (hw_buf == nullptr) {
+            std::cout << "获取Buffer失败或超时" << std::endl;
+            break;
+        }
+        
+        cv::Mat* hw_mat = hw_buf->getMat();
+        if (hw_mat == nullptr || hw_mat->empty()) {
+            std::cout << "获取到的Mat为空" << std::endl;
+            hw_pool->releaseFilled(hw_buf);
+            continue;
+        }
+        
+        frame_processed++;
+        std::cout << "获取到第 " << frame_processed << " 帧" << std::endl;
+        std::cout << "原始尺寸: " << hw_mat->cols << "x" << hw_mat->rows 
+                  << ", 通道数: " << hw_mat->channels() << std::endl;
+        
+        // 处理第一帧
+        if (frame_processed == 1) {
+            // 直接调整尺寸，不做颜色转换（OpencvWorker已经输出BGR格式）
+            cv::Mat resized_frame;
+            cv::resize(*hw_mat, resized_frame,
+                      cv::Size(target_width, target_height),
+                      0, 0, cv::INTER_LINEAR);
+
+            std::cout << "调整尺寸: " << hw_mat->cols << "x" << hw_mat->rows
+                      << " -> " << resized_frame.cols << "x" << resized_frame.rows << std::endl;
+            
+            // 3. 保存到本地
+            std::vector<int> compression_params;
+            compression_params.push_back(cv::IMWRITE_JPEG_QUALITY);
+            compression_params.push_back(95);  // JPEG质量 95%
+            
+            bool save_success = cv::imwrite(output_filename, resized_frame, compression_params);
+            
+            if (save_success) {
+                std::cout << "✓ 成功保存第一帧到: " << output_filename << std::endl;
+                std::cout << "  保存尺寸: " << resized_frame.cols << "x" << resized_frame.rows << std::endl;
+                frame_saved = true;
+            } else {
+                std::cout << "✗ 保存失败: " << output_filename << std::endl;
+                result_passed = false;
+            }
+        }
+        
+        hw_pool->releaseFilled(hw_buf);
+        
+        // 保存成功后立即退出循环
+        if (frame_saved) {
+            break;
+        }
+    }
+    
+    hw_producer.stop();
+    
+    // 输出总结
+    std::cout << "\n===== 处理完成 =====" << std::endl;
+    std::cout << "处理帧数: " << frame_processed << std::endl;
+    std::cout << "第一帧保存: " << (frame_saved ? "成功" : "失败") << std::endl;
+    if (frame_saved) {
+        std::cout << "输出文件: " << output_filename << std::endl;
+    }
+    
+    return result_passed && frame_saved;
+}
 
 int OpencvTestSuite::run(int argc, char* argv[]) {
     WorkerConfig config;
@@ -74,7 +196,7 @@ int OpencvTestSuite::run(int argc, char* argv[]) {
                   << " " << static_cast<int>(params.fps) << "fps)";
     }
     
-    return 0;
+    return test_opencv() ? 0:1;
 }
 
 bool OpencvTestSuite::parseArgs(int argc, char* argv[], WorkerConfig& config, OpencvTestParams& params) {

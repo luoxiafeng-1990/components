@@ -131,11 +131,24 @@ void MatAllocator::deallocateBuffer(Buffer* buffer) {
     
     // 1. ⭐ v2.7改进：直接从 Buffer 获取 Mat 指针
     cv::Mat* mat = buffer->getMat();
+
+    // 2. 释放 AVFrame（如果存在）
+    AVFrame* avframe = buffer->getAVFrame();
+    if (avframe) {
+        av_frame_free(&avframe);
+        buffer->setAVFrame(nullptr);
+    }
     
-    // 2. 释放 Mat
+    // 3. 释放 Mat
     if (mat) {
         delete mat;
-        buffer->setMat(nullptr);  // 清空 Buffer 的 Mat 引用
+        buffer->setMat(nullptr);
+    }
+
+    AVPacket* packet_ptr = buffer->getAVPacket();
+    if (packet_ptr){
+        delete packet_ptr;
+        buffer->setAVPacket(nullptr);
     }
     
     // 4. 删除 Buffer 对象
@@ -188,6 +201,15 @@ uint64_t MatAllocator::allocatePoolWithBuffers(
         
         // 4.4 ⭐ v2.7新增：设置 Buffer 关联的 Mat 指针
         buffer->setMat(mat_ptr);
+
+        AVPacket* packet_ptr = av_packet_alloc();
+        if (!packet_ptr) {
+            LOG4CPLUS_ERROR_FMT(logger_, "ERROR: Failed to allocate AVPacket for buffer #%u", buffer_id);
+            delete mat_ptr;
+            delete buffer;
+            return 0;
+        }
+        buffer->setAVPacket(packet_ptr);
         
         // 4.4.2 ⭐ 关键修复：注册 Buffer 所有权（用于 destroyPool 时识别）
         {

@@ -26,9 +26,9 @@ struct OpencvTestParams {
     
     OpencvTestParams(
         const std::string& c = "h264",
-        int w = 1920, int h = 1080,
+        int w = 1920,
+        int h = 1080,
         double f = 30.0,
-        const std::string& p = "main",
         bool hw = true
     ) : codec(c), width(w), height(h), fps(f), use_hardware(hw) {}
     
@@ -46,7 +46,7 @@ public:
     // ========================================
     
     std::string getName() const override { return "opencv"; }
-    std::string getDescription() const override { return "视频解码测试"; }
+    std::string getDescription() const override { return "Opencv测试"; }
     
     int run(int argc, char* argv[]) override;
     void printHelp() const override;
