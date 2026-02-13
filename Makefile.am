@@ -76,7 +76,8 @@ qa_cases_SOURCES = \
     test_cases/pp/PPTestSuite.cpp \
     test_cases/record/RecordTestSuite.cpp \
     test_cases/writer/WriterTestSuite.cpp \
-    test_cases/opencv/OpencvTestSuite.cpp
+    test_cases/opencv/OpencvTestSuite.cpp \
+    test_cases/taopencv/TaOpencvTestSuite.cpp
 qa_cases_LDADD = libcomponents.la $(COMMON_LIBS)
 qa_cases_CPPFLAGS = -I$(top_srcdir)/test_cases $(AM_CPPFLAGS)
 qa_cases_LDFLAGS = 

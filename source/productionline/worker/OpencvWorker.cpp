@@ -753,6 +753,7 @@ FillResult OpencvWorker::fillBuffer(int frame_index, Buffer* buffer) {
     cached_frames_.erase(cached_frames_.begin());
 
     // 转换AVFrame到Mat，这是tacosdk自定义的接口
+    // 注意avframe和mat之间是零拷贝的，底层内存是共享的，所以当av_frame_free(avframe)时mat数据会被销毁
     cv::Mat* mat = new cv::Mat(first_frame);
     if (mat->empty()) {
         LOG4CPLUS_ERROR(logger_, "Failed to convert AVFrame to Mat");

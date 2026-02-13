@@ -20,6 +20,7 @@
 #include "record/RecordTestSuite.hpp"
 #include "writer/WriterTestSuite.hpp"
 #include "opencv/OpencvTestSuite.hpp"
+#include "taopencv/TaOpencvTestSuite.hpp"
 #include "common/Logger.hpp"
 
 #include <iostream>
@@ -53,6 +54,8 @@ static void registerModules() {
     registry.registerModule(std::make_shared<test::writer::WriterTestSuite>());
 
     registry.registerModule(std::make_shared<test::opencv::OpencvTestSuite>());
+
+    registry.registerModule(std::make_shared<test::taopencv::TaOpencvTestSuite>());
     
     // TODO: 注册更多模块
     // registry.registerModule(std::make_shared<test::venc::VencTestSuite>());
