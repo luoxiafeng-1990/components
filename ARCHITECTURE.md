@@ -32,7 +32,7 @@
 
 - ✅ **FillStatus 枚举设计**：
   - 成功：`Success` (0)
-  - 可重试：`NonVideoPacket` (1)、`CodecEagain` (2)、`DataPending` (3)
+  - 可重试：`NonVideoPacket` (1)、`CodecEagain` (2)、`PacketAlreadyProcessed` (3)
   - 终止：`EndOfStream` (-1)
   - 错误：`AcquireError` (-10)、`CodecError` (-11)、`InvalidParam` (-12)、`NotOpen` (-13)、`AllocFailed` (-14)、`InternalError` (-15)
 
@@ -63,7 +63,7 @@ FillResult result = worker->fillBuffer(index, buffer);
 if (result.ok()) {
     // ✅ 成功，处理 buffer
 } else if (result.shouldRetry()) {
-    // ⏳ 需要重试（NonVideoPacket / CodecEagain / DataPending）
+    // ⏳ 需要重试（NonVideoPacket / CodecEagain / PacketAlreadyProcessed）
     continue;
 } else if (result.isEof()) {
     // 📍 正常结束
@@ -139,12 +139,12 @@ if (result.ok()) {
 
 - ✅ **PacketAcquireResult 类型安全**：`acquireEncodedPacket()` 返回类型重构
   - 返回类型从 `AVPacket*` 改为 `PacketAcquireResult`（类似 Google StatusOr / Rust Result）
-  - 新增 `AcquireStatus` 枚举：`Success`、`Eof`、`Again`、`InvalidMode`、`NoData`、`Stopped`
-  - 提供便捷方法：`ok()`、`isEof()`、`shouldRetry()`、`isError()`、`packet()`、`operator->()`
+  - 新增 `AcquireStatus` 枚举：`Success`、`Eof`、`PacketAlreadyProcessed`、`InvalidMode`、`NoData`
+  - 提供便捷方法：`ok()`、`isEof()`、`isPacketAlreadyProcessed()`、`isError()`、`packet()`、`operator->()`
 
 - ✅ **FillBufferResult 细分**：支持更精确的错误状态
   - 新增状态：`ACQUIRE_AGAIN`（需等待新 buffer）、`ACQUIRE_EOF`（数据流结束）、`ACQUIRE_ERROR`（获取错误）
-  - `WorkerBase` 新增 `getLastFillResult()` 方法获取最后一次 fillBuffer 的详细状态
+  - `fillBuffer()` 返回 `FillResult` 已包含完整状态，无需额外的状态查询方法
 
 - ✅ **WorkerSyncCoordinator 增强**：帧同步支持多场景处理
   - `arrive()` 方法新增 `FillBufferResult` 参数
@@ -174,8 +174,8 @@ if (result.ok()) {
     int64_t pts = result->pts;  // 箭头运算符访问
 } else if (result.isEof()) {
     // 正常结束
-} else if (result.shouldRetry()) {
-    // 等待新数据
+} else if (result.isPacketAlreadyProcessed()) {
+    // 当前 packet 已处理过
 } else {
     // 错误处理
     LOG_ERROR("获取失败: %s", result.statusString());
@@ -187,10 +187,9 @@ if (result.ok()) {
 acquireEncodedPacket() 返回值 → FillBufferResult 映射：
 - Success     → SUCCESS（解码成功后）
 - Eof         → ACQUIRE_EOF
-- Again       → ACQUIRE_AGAIN
+- PacketAlreadyProcessed → ACQUIRE_AGAIN
 - InvalidMode → ACQUIRE_ERROR
 - NoData      → ACQUIRE_ERROR
-- Stopped     → ACQUIRE_EOF
 ```
 
 **设计原则：**

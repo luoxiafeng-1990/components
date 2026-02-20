@@ -163,7 +163,7 @@ bool WorkerSyncCoordinator::arrive(
             if (s == FillStatus::Success) {
                 success_count++;
             } else if (static_cast<int>(s) > 0) {
-                // 正值都是可重试状态（NonVideoPacket, CodecEagain, DataPending）
+                // 正值都是可重试状态（NonVideoPacket, CodecEagain, PacketAlreadyProcessed）
                 eagain_count++;
             } else {
                 // 负值都是终止/错误状态（EndOfStream, 各种 Error）

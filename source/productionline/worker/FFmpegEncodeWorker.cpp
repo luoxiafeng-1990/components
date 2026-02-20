@@ -605,13 +605,11 @@ FillResult FFmpegEncodeWorker::fillBuffer(int frame_index, Buffer* buffer) {
     // 参数校验
     if (!buffer) {
         LOG4CPLUS_ERROR(logger_, "[EncodeWorker] buffer 为空");
-        setLastFillStatus(FillStatus::InvalidParam);
         return FillResult::invalidParam();
     }
     
     if (!isOpen()) {
         LOG4CPLUS_ERROR(logger_, "[EncodeWorker] Worker 未打开");
-        setLastFillStatus(FillStatus::NotOpen);
         return FillResult::notOpen();
     }
     
@@ -620,7 +618,6 @@ FillResult FFmpegEncodeWorker::fillBuffer(int frame_index, Buffer* buffer) {
     AVPacket* packet = buffer->getAVPacket();
     if (!packet) {
         LOG4CPLUS_ERROR(logger_, "[EncodeWorker] buffer->getAVPacket() 为空");
-        setLastFillStatus(FillStatus::InvalidParam);
         return FillResult::invalidParam();
     }
     
@@ -633,7 +630,6 @@ FillResult FFmpegEncodeWorker::fillBuffer(int frame_index, Buffer* buffer) {
         av_packet_free(&cached_pkt);
         
         fillBufferMetadataFromPacket(packet, buffer);
-        setLastFillStatus(FillStatus::Success);
         return FillResult::success();
     }
     
@@ -641,7 +637,6 @@ FillResult FFmpegEncodeWorker::fillBuffer(int frame_index, Buffer* buffer) {
     AVFrame* temp_frame = av_frame_alloc();
     if (!temp_frame) {
         LOG4CPLUS_ERROR(logger_, "[EncodeWorker] 分配临时帧失败");
-        setLastFillStatus(FillStatus::AllocFailed);
         return FillResult::allocFailed();
     }
     
@@ -649,7 +644,6 @@ FillResult FFmpegEncodeWorker::fillBuffer(int frame_index, Buffer* buffer) {
     av_frame_free(&temp_frame);
     
     if (!send_result.ok()) {
-        setLastFillStatus(send_result.status());
         return send_result;
     }
     
@@ -683,7 +677,6 @@ FillResult FFmpegEncodeWorker::fillBuffer(int frame_index, Buffer* buffer) {
         av_packet_free(&first_pkt);
         
         fillBufferMetadataFromPacket(packet, buffer);
-        setLastFillStatus(FillStatus::Success);
         return FillResult::success();
     }
     
@@ -691,10 +684,8 @@ FillResult FFmpegEncodeWorker::fillBuffer(int frame_index, Buffer* buffer) {
     if (!received_at_least_one) {
         // 这不是错误，有些编码器需要多帧才能输出一个 packet（如 B 帧场景）
         dropped_frames_++;
-        setLastFillStatus(FillStatus::CodecEagain);
         return FillResult::codecEagain();
     }
     
-    setLastFillStatus(FillStatus::InternalError);
     return FillResult::internalError();
 }

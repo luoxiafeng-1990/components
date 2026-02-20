@@ -845,13 +845,13 @@ bool MultiWorkerProductionLine::performFrameSync(
                         << "'] shared_source 不是 EncodedPacketSourceFromBuffer 类型");
         return true;  // 类型错误，默认允许提交
     }
-    // 如果 fillBuffer 返回 CodecEagain，则直接提交 packet
-    if (status == FillStatus::CodecEagain) {
-        shared_source->commitEncodedPacket(consumer_info->worker->getWorkerBase());
-        return true;
-    }
+    // v2.34 修复：CodecEagain 不再跳过同步点
+    // 原因：如果一个 Worker 返回 CodecEagain 时直接 commit 而不进入同步点，
+    // 另一个 Worker 可能已经在同步点等待（如 CodecError），导致死锁。
+    // 修复：让 CodecEagain 和其他状态一样走正常的同步流程（arrive + commit），
+    // WorkerSyncCoordinator::arrive() 已能正确处理 EAGAIN + ERROR 的混合场景。
 
-    if (status == FillStatus::NonVideoPacket || status == FillStatus::DataPending) { 
+    if (status == FillStatus::NonVideoPacket || status == FillStatus::PacketAlreadyProcessed) { 
         return true;
     }
     // 获取当前帧版本号
@@ -922,7 +922,7 @@ void MultiWorkerProductionLine::workerThreadFunc(
         
         // v2.33 变更：fillBuffer 返回 FillResult
         FillResult fill_result = consumer_info->worker->fillBuffer(0, buffer);
-        
+            
         if (fill_result.ok()) {
             // ✅ 解码成功
             
@@ -948,7 +948,7 @@ void MultiWorkerProductionLine::workerThreadFunc(
             
             // v2.33 变更：直接使用 FillResult 判断状态
             if (fill_result.shouldRetry()) {
-                // ⏳ 可重试状态（DataPending / CodecEagain / NonVideoPacket）
+                // ⏳ 可重试状态（PacketAlreadyProcessed / CodecEagain / NonVideoPacket）
                 performFrameSync(group, consumer_name, consumer_info, nullptr, 
                                 fill_result.status());
                 continue;

@@ -436,7 +436,7 @@ PacketAcquireResult EncodedPacketSourceFromBuffer::acquireEncodedPacket(AVPacket
             "[Worker %p] acquireEncodedPacket: Already processed version %llu (has_acquired=%d, has_committed=%d)", 
             worker_id, (unsigned long long)current_version, 
             state.has_acquired, state.has_committed);
-        return Result::again();  // ⭐ v2.31：返回 Again 状态
+        return Result::packetAlreadyProcessed();  // ⭐ v2.31：当前 packet 已处理过
     }
     
     // ✅ 新版本或首次获取，可以获取

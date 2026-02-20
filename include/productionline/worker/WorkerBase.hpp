@@ -111,18 +111,19 @@ enum class FillStatus : int {
     // ===== ⏳ 可重试（调用者应继续循环）=====
     NonVideoPacket = 1,    ///< 遇到非视频流 packet，需继续读取
     CodecEagain = 2,       ///< 编解码器需要更多输入才能输出（B帧重排序等）
-    DataPending = 3,       ///< Buffer 共享模式，等待新数据
+    PacketAlreadyProcessed = 3, ///< 当前 packet 已被处理过（Buffer 共享模式已获取过当前版本 / File/RTSP 非视频流已跳过）
     
     // ===== 📍 终止（调用者应退出循环）=====
     EndOfStream = -1,      ///< 数据流正常结束
     
     // ===== ❌ 错误 =====
     AcquireError = -10,    ///< 获取 packet/frame 失败
-    CodecError = -11,      ///< 编解码器操作失败（send/receive）
+    CodecError = -11,      ///< 编解码器操作失败（decode/receive）
     InvalidParam = -12,    ///< 参数无效（空指针等）
     NotOpen = -13,         ///< Worker 未打开/未初始化
     AllocFailed = -14,     ///< 资源分配失败
-    InternalError = -15    ///< 内部逻辑错误（不应到达的代码路径）
+    InternalError = -15,   ///< 内部逻辑错误（不应到达的代码路径）
+    SendPacketFailed = -16 ///< 发送 packet 到解码器失败（EAGAIN 重试耗尽等）
 };
 
 /**
@@ -133,15 +134,16 @@ inline const char* fillStatusToString(FillStatus status) {
         case FillStatus::Success:        return "Success";
         case FillStatus::NonVideoPacket: return "NonVideoPacket";
         case FillStatus::CodecEagain:    return "CodecEagain";
-        case FillStatus::DataPending:    return "DataPending";
+        case FillStatus::PacketAlreadyProcessed: return "PacketAlreadyProcessed";
         case FillStatus::EndOfStream:    return "EndOfStream";
         case FillStatus::AcquireError:   return "AcquireError";
         case FillStatus::CodecError:     return "CodecError";
         case FillStatus::InvalidParam:   return "InvalidParam";
         case FillStatus::NotOpen:        return "NotOpen";
-        case FillStatus::AllocFailed:    return "AllocFailed";
-        case FillStatus::InternalError:  return "InternalError";
-        default:                         return "Unknown";
+        case FillStatus::AllocFailed:       return "AllocFailed";
+        case FillStatus::InternalError:     return "InternalError";
+        case FillStatus::SendPacketFailed:  return "SendPacketFailed";
+        default:                            return "Unknown";
     }
 }
 
@@ -196,9 +198,9 @@ public:
         return FillResult(FillStatus::CodecEagain);
     }
     
-    /// Buffer 共享模式等待数据
-    static FillResult dataPending() {
-        return FillResult(FillStatus::DataPending);
+    /// 当前 packet 已被处理过
+    static FillResult packetAlreadyProcessed() {
+        return FillResult(FillStatus::PacketAlreadyProcessed);
     }
     
     /// 数据流结束
@@ -234,6 +236,11 @@ public:
     /// 内部错误
     static FillResult internalError() {
         return FillResult(FillStatus::InternalError);
+    }
+    
+    /// 发送 packet 到解码器失败
+    static FillResult sendPacketFailed() {
+        return FillResult(FillStatus::SendPacketFailed);
     }
     
     // ===== 状态查询 =====
@@ -401,17 +408,6 @@ public:
      * v2.33 变更：返回类型从 bool 改为 FillResult
      */
     virtual FillResult fillBuffer(int frame_index, Buffer* buffer) = 0;
-    
-    /**
-     * @brief 获取最后一次 fillBuffer 的结果状态
-     * 
-     * v2.33 新增：返回 FillStatus 枚举
-     * 
-     * @return FillStatus 枚举值
-     */
-    FillStatus getLastFillStatus() const {
-        return last_fill_status_;
-    }
     
     /**
      * @brief 从AVFrame元数据中提取硬件解码器的物理内存地址
@@ -908,23 +904,6 @@ protected:
     // 日志器
     log4cplus::Logger logger_;
     
-    /**
-     * @brief 最后一次 fillBuffer 的结果状态
-     * 
-     * v2.33 新增：使用新的 FillStatus 枚举
-     */
-    FillStatus last_fill_status_ = FillStatus::Success;
-    
-    /**
-     * @brief 设置最后一次 fillBuffer 的结果状态
-     * 
-     * v2.33 新增：供子类在 fillBuffer 实现中调用
-     * 
-     * @param status 结果状态
-     */
-    void setLastFillStatus(FillStatus status) {
-        last_fill_status_ = status;
-    }
 };
 
 #endif // WORKER_BASE_HPP

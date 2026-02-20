@@ -19,10 +19,9 @@ struct AVPacket;
 enum class AcquireStatus : int {
     Success = 0,           ///< 成功获取
     Eof = -1,              ///< 数据流结束（正常）
-    Again = -2,            ///< 已处理当前版本，需等待新数据 / 非视频流需重试
+    PacketAlreadyProcessed = -2, ///< 当前 packet 已被处理过（已获取过当前版本或非视频流已跳过）
     InvalidMode = -3,      ///< 非共享模式
-    NoData = -4,           ///< 无可用数据
-    Stopped = -5           ///< 已停止
+    NoData = -4            ///< 无可用数据
 };
 
 /**
@@ -32,10 +31,9 @@ inline const char* acquireStatusToString(AcquireStatus status) {
     switch (status) {
         case AcquireStatus::Success:     return "Success";
         case AcquireStatus::Eof:         return "EOF";
-        case AcquireStatus::Again:       return "Again";
+        case AcquireStatus::PacketAlreadyProcessed: return "PacketAlreadyProcessed";
         case AcquireStatus::InvalidMode: return "InvalidMode";
         case AcquireStatus::NoData:      return "NoData";
-        case AcquireStatus::Stopped:     return "Stopped";
         default:                         return "Unknown";
     }
 }
@@ -63,8 +61,8 @@ inline const char* acquireStatusToString(AcquireStatus status) {
  *     AVPacket* pkt = result.packet();
  * } else if (result.isEof()) {
  *     // 正常结束
- * } else if (result.shouldRetry()) {
- *     // 需要重试（非视频流或等待新数据）
+ * } else if (result.isPacketAlreadyProcessed()) {
+ *     // 当前 packet 已处理过（非视频流已跳过或已获取过当前版本）
  * }
  * @endcode
  */
@@ -82,9 +80,9 @@ public:
         return PacketAcquireResult(AcquireStatus::Eof, nullptr);
     }
     
-    /// 需要重试
-    static PacketAcquireResult again() {
-        return PacketAcquireResult(AcquireStatus::Again, nullptr);
+    /// 当前 packet 已处理过
+    static PacketAcquireResult packetAlreadyProcessed() {
+        return PacketAcquireResult(AcquireStatus::PacketAlreadyProcessed, nullptr);
     }
     
     /// 失败结果
@@ -103,14 +101,14 @@ public:
     /// 是否到达 EOF（正常结束）
     bool isEof() const noexcept { return status_ == AcquireStatus::Eof; }
     
-    /// 是否需要重试（等待新数据或非视频流）
-    bool shouldRetry() const noexcept { return status_ == AcquireStatus::Again; }
+    /// 当前 packet 是否已被处理过（已获取过当前版本或非视频流已跳过）
+    bool isPacketAlreadyProcessed() const noexcept { return status_ == AcquireStatus::PacketAlreadyProcessed; }
     
-    /// 是否是错误（非 Success 且非 EOF 且非 Again）
+    /// 是否是错误（非 Success 且非 EOF 且非 PacketAlreadyProcessed）
     bool isError() const noexcept {
         return status_ != AcquireStatus::Success && 
                status_ != AcquireStatus::Eof &&
-               status_ != AcquireStatus::Again;
+               status_ != AcquireStatus::PacketAlreadyProcessed;
     }
     
     /// 隐式 bool 转换（方便条件判断）
@@ -204,7 +202,7 @@ public:
      * 返回值状态：
      * - Success：成功获取
      * - Eof：数据流正常结束
-     * - Again：需要等待新数据（Buffer 共享模式特有）
+     * - PacketAlreadyProcessed：当前 packet 已被处理过
      * - 其他状态：各种错误
      */
     virtual PacketAcquireResult acquireEncodedPacket(AVPacket* out_packet, void* worker_id = nullptr) = 0;

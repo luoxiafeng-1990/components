@@ -140,9 +140,9 @@ PacketAcquireResult EncodedPacketSourceFromFile::acquireEncodedPacket(AVPacket* 
     
     // 检查是否是视频流
     if (out_packet->stream_index != video_stream_index_) {
-        // 不是视频流，释放并返回 Again 让调用者重试
+        // 不是视频流，释放并返回 PacketAlreadyProcessed 让调用者跳过
         av_packet_unref(out_packet);
-        return Result::again();  // 让调用者继续调用
+        return Result::packetAlreadyProcessed();  // 非视频流 packet 已跳过
     }
     
     current_frame_index_++;
