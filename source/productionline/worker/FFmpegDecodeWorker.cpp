@@ -667,29 +667,17 @@ FillResult FFmpegDecodeWorker::readAndSendPacket(AVPacket* packet_ptr) {
     if (!packet_acquired_) {
         auto acquire_result = packet_source_->acquireEncodedPacket(packet_ptr, this);
         
-        switch (acquire_result.status()) {
-            case AcquireStatus::Success:
-                // ✅ 成功获取
-                current_packet_ptr_ = acquire_result.packet();
-                packet_acquired_ = true;
-                break;
-                
-            case AcquireStatus::Eof:
-                // 📍 EOF：数据流正常结束
-                LOG4CPLUS_DEBUG(logger_, " acquireEncodedPacket: EOF reached");
-                return FillResult::endOfStream();
-                
-            case AcquireStatus::PacketAlreadyProcessed:
-                // ⏳ 当前 packet 已被处理过（Buffer 共享模式已获取过当前版本 / File/RTSP 非视频流已跳过）
-                return FillResult::packetAlreadyProcessed();
-                
-            case AcquireStatus::InvalidMode:
-            case AcquireStatus::NoData:
-                // ❌ 错误：配置问题或其他异常
-                LOG4CPLUS_ERROR_FMT(logger_, " acquireEncodedPacket failed: %s", 
-                                   acquire_result.statusString());
-                return FillResult::acquireError();
+        if (!acquire_result.ok()) {
+            // v2.34 重构：直接透传给 FillResult，不再逐一解析
+            if (acquire_result.isError()) {
+                LOG4CPLUS_WARN_FMT(logger_, " acquireEncodedPacket: %s",
+                                  acquire_result.statusString());
+            }
+            return FillResult::fromAcquire(acquire_result);
         }
+        
+        current_packet_ptr_ = acquire_result.packet();
+        packet_acquired_ = true;
     }
     
     // ========== 发送到解码器 ==========
@@ -723,45 +711,28 @@ FillResult FFmpegDecodeWorker::readAndSendPacket(AVPacket* packet_ptr) {
             LOG4CPLUS_ERROR_FMT(logger_, 
                 " avcodec_send_packet: still EAGAIN after %d retries, "
                 "returning sendPacketFailed to caller", kMaxRetries);
-            return FillResult::sendPacketFailed();
+            return FillResult::fromCodec(CodecSendResult::sendFailed());
         }
-        // ret 已变为其他错误码，fall through 到下方 switch 统一处理
+        // ret 已变为其他错误码，fall through 到下方映射
     }
     
-    switch (ret) {
-        case 0:
-            // ✅ packet 已被解码器消费
-            return FillResult::success();
-            
-        case AVERROR_EOF:
-            // 📍 解码器已 flush，正常结束
-            return FillResult::endOfStream();
-            
-        case AVERROR(EINVAL): {
-            // ❌ 编解码器状态错误（未正确打开、需要先 flush 等配置问题）
-            char err_buf[AV_ERROR_MAX_STRING_SIZE];
-            av_strerror(ret, err_buf, sizeof(err_buf));
-            LOG4CPLUS_ERROR_FMT(logger_, 
-                " ERROR: avcodec_send_packet: codec state invalid (EINVAL): %s", err_buf);
-            return FillResult::codecError();
-        }
-        
-        case AVERROR(ENOMEM): {
-            // ❌ 内存分配失败
-            LOG4CPLUS_ERROR(logger_, 
-                " ERROR: avcodec_send_packet: memory allocation failed (ENOMEM)");
-            return FillResult::allocFailed();
-        }
-        
-        default: {
-            // ❌ 码流损坏等解码错误（无法进一步细分）
-            char err_buf[AV_ERROR_MAX_STRING_SIZE];
-            av_strerror(ret, err_buf, sizeof(err_buf));
-            LOG4CPLUS_ERROR_FMT(logger_, 
-                " ERROR: avcodec_send_packet: decode error: %d (%s)", ret, err_buf);
-            return FillResult::codecError();
-        }
+    // v2.35 重构：与 Acquire 层保持一致，直接使用工厂方法映射
+    if (ret == 0) {
+        return FillResult::success();
     }
+    
+    // 错误码映射（与 PacketAcquireResult 在 acquireEncodedPacket 中的风格一致）
+    using Result = CodecSendResult;
+    if (ret == AVERROR_EOF)     return FillResult::fromCodec(Result::eof());
+    if (ret == AVERROR(EINVAL)) return FillResult::fromCodec(Result::invalidState());
+    if (ret == AVERROR(ENOMEM)) return FillResult::fromCodec(Result::allocFailed());
+    
+    // 其他未识别错误
+    char err_buf[AV_ERROR_MAX_STRING_SIZE];
+    av_strerror(ret, err_buf, sizeof(err_buf));
+    LOG4CPLUS_ERROR_FMT(logger_, 
+        " ERROR: avcodec_send_packet: decode error (ret=%d, %s)", ret, err_buf);
+    return FillResult::fromCodec(Result::decodeError());
 }
 
 /**
@@ -817,28 +788,57 @@ FillResult FFmpegDecodeWorker::fillBuffer(int frame_index, Buffer* buffer) {
    
     // ========== 步骤3: 循环读取所有解码的帧到缓存 ==========
     bool decoded_at_least_one = false;
+    CodecSendResult receive_result = CodecSendResult::success();
     
     while (true) {
         AVFrame* temp_frame = av_frame_alloc();
         if (!temp_frame) {
+            receive_result = CodecSendResult::allocFailed();
             break;
         }
         
         int ret = avcodec_receive_frame(codec_ctx_ptr_, temp_frame);
         
-        if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF || ret < 0) {
-            av_frame_free(&temp_frame);
-            break;
+        if (ret == 0) {
+            // ✅ 成功解码一帧
+            decoded_at_least_one = true;
+            cached_frames_.push_back(temp_frame);
+            continue;
         }
         
-        // ✅ 成功解码一帧
-        decoded_at_least_one = true;
-        cached_frames_.push_back(temp_frame);
+        // 失败：释放临时帧，映射错误码
+        av_frame_free(&temp_frame);
+        
+        if (ret == AVERROR(EAGAIN)) {
+            receive_result = CodecSendResult::eagain();
+        } else if (ret == AVERROR_EOF) {
+            // 解码器缓存帧耗尽，等同于需要更多输入（不是文件 EOF）
+            receive_result = CodecSendResult::eagain();
+        } else if (ret == AVERROR(EINVAL)) {
+            // codec 未正确打开或类型不匹配（编程错误）
+            LOG4CPLUS_ERROR(logger_, 
+                " ERROR: avcodec_receive_frame: EINVAL - codec not opened or is an encoder");
+            receive_result = CodecSendResult::invalidState();
+        } else if (ret == AVERROR_INPUT_CHANGED) {
+            // 解码参数在帧间发生变化（需要 AV_CODEC_FLAG_DROPCHANGED）
+            LOG4CPLUS_WARN(logger_, 
+                " WARN: avcodec_receive_frame: input parameters changed between frames");
+            receive_result = CodecSendResult::receiveError();
+        } else {
+            char err_buf[AV_ERROR_MAX_STRING_SIZE];
+            av_strerror(ret, err_buf, sizeof(err_buf));
+            LOG4CPLUS_ERROR_FMT(logger_, 
+                " ERROR: avcodec_receive_frame: unknown error (ret=%d, %s)", ret, err_buf);
+            receive_result = CodecSendResult::receiveError();
+        }
+        break;
     }
     
     // ========== 步骤4: 检查是否成功解码 ==========
     if (!decoded_at_least_one) {
-        // ❌ 没有解码出帧（EAGAIN：解码器需要更多输入才能输出）
+        // 根据 receive_result 的真实原因返回：
+        // - eagain: 正常，解码器需要更多输入
+        // - receiveError/allocFailed: 真正的错误
         
         // v2.32 统一：调用接口的 cancel 方法
         // - Buffer 共享模式：重置 Worker 状态，允许重试
@@ -848,7 +848,7 @@ FillResult FFmpegDecodeWorker::fillBuffer(int frame_index, Buffer* buffer) {
         }
         packet_acquired_ = false;
         current_packet_ptr_ = nullptr;
-        return FillResult::codecEagain();
+        return FillResult::fromCodec(receive_result);
     }
     
     // ========== 步骤5: 成功解码，提交（释放）==========

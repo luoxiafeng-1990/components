@@ -303,20 +303,13 @@ FillResult FfmpegPacketRecorderWorker::fillBuffer(int frame_index, Buffer* buffe
     // 传入 Buffer 的 AVPacket，数据直接填充到里面
     auto acquire_result = packet_source_->acquireEncodedPacket(packet, nullptr);
     
-    if (acquire_result.isPacketAlreadyProcessed()) {
-        // 读到非视频流 packet，已跳过，需要继续读取
-        return FillResult::nonVideoPacket();
-    }
-    
     if (!acquire_result.ok()) {
-        if (acquire_result.isEof()) {
-            LOG4CPLUS_DEBUG(logger_, "🔄 EOF reached (via packet source)");
-            return FillResult::endOfStream();
-        } else {
-            LOG4CPLUS_ERROR_FMT(logger_, "ERROR: packet_source_->acquireEncodedPacket() failed: %s", 
-                               acquire_result.statusString());
-            return FillResult::acquireError();
+        // v2.34 重构：直接透传给 FillResult
+        if (acquire_result.isError()) {
+            LOG4CPLUS_WARN_FMT(logger_, "acquireEncodedPacket: %s",
+                              acquire_result.statusString());
         }
+        return FillResult::fromAcquire(acquire_result);
     }
     
     // 3. 检查是否是视频流（数据源已过滤，但保险起见再检查一次）

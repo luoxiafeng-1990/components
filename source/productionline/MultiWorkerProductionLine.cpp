@@ -818,7 +818,7 @@ bool MultiWorkerProductionLine::performFrameSync(
     const std::string& consumer_name,
     WorkerGroupRuntime::ConsumerInfo* consumer_info,
     Buffer* buffer,
-    FillStatus status
+    const FillResult& result
 ) {
     Connector* owner_connector = group->getConnectorForConsumer(consumer_name);
     if (!owner_connector) {
@@ -851,15 +851,17 @@ bool MultiWorkerProductionLine::performFrameSync(
     // 修复：让 CodecEagain 和其他状态一样走正常的同步流程（arrive + commit），
     // WorkerSyncCoordinator::arrive() 已能正确处理 EAGAIN + ERROR 的混合场景。
 
-    if (status == FillStatus::NonVideoPacket || status == FillStatus::PacketAlreadyProcessed) { 
+    if (result.shouldContinue() && result.isAcquireError() && 
+        (result.acquireCause() == AcquireStatus::PacketAlreadyProcessed ||
+         result.acquireCause() == AcquireStatus::NonVideoPacket)) { 
         return true;
     }
     // 获取当前帧版本号
     uint64_t frame_version = shared_source->getCurrentBufferVersion();
     
     // ⭐ v2.29 修改：到达同步点，传递 fillBuffer 的结果状态
-    // v2.33 变更：使用 FillStatus
-    bool sync_result = it->second->arrive(consumer_name, frame_version, buffer, status);
+    // v2.34 变更：使用 FillResult
+    bool sync_result = it->second->arrive(consumer_name, frame_version, buffer, result);
     
     // 帧同步完成后，调用 commit 释放 packet
     // 所有 Worker 一起 commit，确保 fetchTaskFunc 不会提前被唤醒
@@ -927,9 +929,9 @@ void MultiWorkerProductionLine::workerThreadFunc(
             // ✅ 解码成功
             
             // ⭐ v2.29 修改：帧同步逻辑，传递 SUCCESS 状态
-            // v2.33 变更：使用 FillStatus
+            // v2.34 变更：使用 FillResult
             bool should_submit = performFrameSync(group, consumer_name, consumer_info, 
-                                                  buffer, FillStatus::Success);
+                                                  buffer, fill_result);
             
             // 根据同步结果决定是否提交
             if (should_submit) {
@@ -947,10 +949,18 @@ void MultiWorkerProductionLine::workerThreadFunc(
             pool_sptr->releaseFree(buffer);
             
             // v2.33 变更：直接使用 FillResult 判断状态
-            if (fill_result.shouldRetry()) {
-                // ⏳ 可重试状态（PacketAlreadyProcessed / CodecEagain / NonVideoPacket）
+            // v2.34 重构：拆分 shouldRetry 为 shouldContinue + shouldRetry
+            if (fill_result.shouldContinue()) {
+                // ⏭ 跳过当前 packet，获取下一个（PacketAlreadyProcessed / NonVideoPacket / InvalidData）
                 performFrameSync(group, consumer_name, consumer_info, nullptr, 
-                                fill_result.status());
+                                fill_result);
+                continue;
+            }
+            
+            if (fill_result.shouldRetry()) {
+                // 🔄 重试当前操作（Again / TimedOut / CodecEagain）
+                performFrameSync(group, consumer_name, consumer_info, nullptr, 
+                                fill_result);
                 continue;
             }
             
@@ -963,7 +973,7 @@ void MultiWorkerProductionLine::workerThreadFunc(
             
             // ❌ 错误状态
             performFrameSync(group, consumer_name, consumer_info, nullptr, 
-                            fill_result.status());
+                            fill_result);
             
             // 检查原因
             if (consumer_info->worker->isAtEnd()) {

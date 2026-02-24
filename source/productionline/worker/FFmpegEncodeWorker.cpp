@@ -224,11 +224,36 @@ void FFmpegEncodeWorker::close() {
         
         // 刷新编码器（获取剩余的 packet）
         if (codec_ctx_ptr_) {
-            avcodec_send_frame(codec_ctx_ptr_, nullptr);  // 发送 flush 信号
+            int flush_ret = avcodec_send_frame(codec_ctx_ptr_, nullptr);  // 发送 flush 信号
+            if (flush_ret < 0 && flush_ret != AVERROR_EOF) {
+                // AVERROR_EOF 表示已经在 draining 模式（重复 flush），可忽略
+                char err_buf[AV_ERROR_MAX_STRING_SIZE];
+                av_strerror(flush_ret, err_buf, sizeof(err_buf));
+                LOG4CPLUS_WARN_FMT(logger_, 
+                    "[EncodeWorker] close: avcodec_send_frame(nullptr) failed (ret=%d, %s)", 
+                    flush_ret, err_buf);
+            }
             
             AVPacket* flush_pkt = av_packet_alloc();
-            while (flush_pkt && avcodec_receive_packet(codec_ctx_ptr_, flush_pkt) == 0) {
-                av_packet_unref(flush_pkt);
+            if (flush_pkt) {
+                while (true) {
+                    int recv_ret = avcodec_receive_packet(codec_ctx_ptr_, flush_pkt);
+                    if (recv_ret == 0) {
+                        av_packet_unref(flush_pkt);
+                        continue;
+                    }
+                    // EAGAIN / EOF 是正常退出
+                    if (recv_ret == AVERROR(EAGAIN) || recv_ret == AVERROR_EOF) {
+                        break;
+                    }
+                    // 其他错误：记录日志后退出
+                    char err_buf[AV_ERROR_MAX_STRING_SIZE];
+                    av_strerror(recv_ret, err_buf, sizeof(err_buf));
+                    LOG4CPLUS_WARN_FMT(logger_, 
+                        "[EncodeWorker] close: avcodec_receive_packet failed (ret=%d, %s)", 
+                        recv_ret, err_buf);
+                    break;
+                }
             }
             av_packet_free(&flush_pkt);
         }
@@ -540,39 +565,46 @@ FillResult FFmpegEncodeWorker::readAndSendFrame(AVFrame* temp_frame) {
         return FillResult::notOpen();
     }
     
-    // 从帧数据源读取一帧
+    // 从帧数据源读取一帧（Acquire 层）
     int ret = frame_source_->readRawFrame(temp_frame);
     if (ret < 0) {
         if (ret == AVERROR_EOF) {
             LOG4CPLUS_DEBUG(logger_, "[EncodeWorker] 🔄 EOF 到达");
-            return FillResult::endOfStream();
+            return FillResult::fromAcquire(PacketAcquireResult::eof());
         } else if (ret == AVERROR(EAGAIN)) {
-            return FillResult::codecEagain();
+            // readRawFrame 是数据源层 API，EAGAIN 归 Acquire 层
+            return FillResult::fromAcquire(PacketAcquireResult::again());
         } else {
             char err_buf[AV_ERROR_MAX_STRING_SIZE];
             av_strerror(ret, err_buf, sizeof(err_buf));
             LOG4CPLUS_ERROR_FMT(logger_, "[EncodeWorker] 读取帧失败: %s", err_buf);
-            return FillResult::acquireError();
+            return FillResult::fromAcquire(PacketAcquireResult::unknownError());
         }
     }
     
     // 设置 PTS
     temp_frame->pts = encoded_frames_.load();
     
-    // 发送帧到编码器
+    // 发送帧到编码器（Codec 层）
+    using Result = CodecSendResult;
     ret = avcodec_send_frame(codec_ctx_ptr_, temp_frame);
-    if (ret < 0) {
-        if (ret == AVERROR(EAGAIN)) {
-            return FillResult::codecEagain();
-        } else {
-            char err_buf[AV_ERROR_MAX_STRING_SIZE];
-            av_strerror(ret, err_buf, sizeof(err_buf));
-            LOG4CPLUS_ERROR_FMT(logger_, "[EncodeWorker] avcodec_send_frame 失败: %s", err_buf);
-            return FillResult::codecError();
-        }
+    
+    if (ret == 0) {
+        return FillResult::success();
     }
     
-    return FillResult::success();
+    // 错误码映射
+    if (ret == AVERROR_EOF)     return FillResult::fromCodec(Result::eof());
+    if (ret == AVERROR(EAGAIN)) return FillResult::fromCodec(Result::eagain());
+    if (ret == AVERROR(EINVAL)) return FillResult::fromCodec(Result::invalidState());
+    if (ret == AVERROR(ENOMEM)) return FillResult::fromCodec(Result::allocFailed());
+    
+    // 其他未识别错误
+    char err_buf[AV_ERROR_MAX_STRING_SIZE];
+    av_strerror(ret, err_buf, sizeof(err_buf));
+    LOG4CPLUS_ERROR_FMT(logger_, "[EncodeWorker] avcodec_send_frame: encode error (ret=%d, %s)", 
+        ret, err_buf);
+    return FillResult::fromCodec(Result::encodeError());
 }
 
 bool FFmpegEncodeWorker::fillBufferMetadataFromPacket(AVPacket* packet, Buffer* buffer) {
@@ -637,7 +669,7 @@ FillResult FFmpegEncodeWorker::fillBuffer(int frame_index, Buffer* buffer) {
     AVFrame* temp_frame = av_frame_alloc();
     if (!temp_frame) {
         LOG4CPLUS_ERROR(logger_, "[EncodeWorker] 分配临时帧失败");
-        return FillResult::allocFailed();
+        return FillResult::fromCodec(CodecSendResult::allocFailed());
     }
     
     FillResult send_result = readAndSendFrame(temp_frame);
@@ -649,23 +681,47 @@ FillResult FFmpegEncodeWorker::fillBuffer(int frame_index, Buffer* buffer) {
     
     // 步骤3：接收所有编码后的 packet
     bool received_at_least_one = false;
+    CodecSendResult receive_result = CodecSendResult::success();
     
     while (true) {
         AVPacket* temp_pkt = av_packet_alloc();
         if (!temp_pkt) {
+            receive_result = CodecSendResult::allocFailed();
             break;
         }
         
         int ret = avcodec_receive_packet(codec_ctx_ptr_, temp_pkt);
         
-        if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF || ret < 0) {
-            av_packet_free(&temp_pkt);
-            break;
+        if (ret == 0) {
+            // ✅ 成功接收到一个 packet
+            received_at_least_one = true;
+            cached_packets_.push_back(temp_pkt);
+            continue;
         }
         
-        // 成功接收到一个 packet
-        received_at_least_one = true;
-        cached_packets_.push_back(temp_pkt);
+        // 失败：释放临时 packet，映射错误码
+        av_packet_free(&temp_pkt);
+        
+        if (ret == AVERROR(EAGAIN)) {
+            // 正常：编码器需要更多输入帧
+            receive_result = CodecSendResult::eagain();
+        } else if (ret == AVERROR_EOF) {
+            // 编码器 flush 完成，等同于需要更多输入
+            receive_result = CodecSendResult::eagain();
+        } else if (ret == AVERROR(EINVAL)) {
+            // codec 未打开或类型不匹配（编程错误）
+            LOG4CPLUS_ERROR(logger_, 
+                "[EncodeWorker] avcodec_receive_packet: EINVAL - codec not opened or is a decoder");
+            receive_result = CodecSendResult::invalidState();
+        } else {
+            // 其他未识别错误
+            char err_buf[AV_ERROR_MAX_STRING_SIZE];
+            av_strerror(ret, err_buf, sizeof(err_buf));
+            LOG4CPLUS_ERROR_FMT(logger_, 
+                "[EncodeWorker] avcodec_receive_packet: unknown error (ret=%d, %s)", ret, err_buf);
+            receive_result = CodecSendResult::encodeError();
+        }
+        break;
     }
     
     // 步骤4：从缓存取第一个 packet 填充 buffer
@@ -682,9 +738,13 @@ FillResult FFmpegEncodeWorker::fillBuffer(int frame_index, Buffer* buffer) {
     
     // 没有编码出任何 packet（可能需要更多输入帧）
     if (!received_at_least_one) {
-        // 这不是错误，有些编码器需要多帧才能输出一个 packet（如 B 帧场景）
-        dropped_frames_++;
-        return FillResult::codecEagain();
+        // 根据 receive_result 的真实原因返回：
+        // - eagain: 正常，编码器需要更多输入帧（如 B 帧场景）
+        // - invalidState/encodeError/allocFailed: 真正的错误
+        if (receive_result.isEagain()) {
+            dropped_frames_++;
+        }
+        return FillResult::fromCodec(receive_result);
     }
     
     return FillResult::internalError();

@@ -183,9 +183,10 @@ public:
      * 线程安全：是
      * 
      * v2.33 变更：参数类型从 FillBufferResult 改为 FillStatus
+     * v2.34 变更：参数类型从 FillStatus 改为 FillResult
      */
     bool arrive(const std::string& worker_name, uint64_t frame_version, 
-                Buffer* buffer, FillStatus status);
+                Buffer* buffer, const FillResult& result);
     
     /**
      * @brief 获取参与同步的 Worker 数量
@@ -236,10 +237,11 @@ private:
      * @brief 单帧同步数据
      * 
      * v2.33 变更：worker_results 类型从 FillBufferResult 改为 FillStatus
+     * v2.34 变更：worker_results 类型从 FillStatus 改为 FillResult
      */
     struct FrameSync {
         std::map<std::string, Buffer*> worker_buffers;      // worker_name -> Buffer*
-        std::map<std::string, FillStatus> worker_results;   // worker_name -> FillStatus
+        std::map<std::string, FillResult> worker_results;   // worker_name -> FillResult
         size_t arrived_count = 0;                           // 已到达的 Worker 数量
         bool callback_executed = false;                     // 回调是否已执行
         bool should_submit = true;                          // 是否允许提交

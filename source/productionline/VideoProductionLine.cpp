@@ -370,8 +370,10 @@ void VideoProductionLine::producerThreadFunc(int thread_id) {
             if (monitor_) {
                 monitor_->endTiming("fill_buffer");
             }
-        } else if (fill_result.shouldRetry()) {
-            // ⏳ 可重试状态：释放 buffer，继续循环（不累计失败次数）
+        } else if (fill_result.shouldContinue() || fill_result.shouldRetry()) {
+            // ⏭ shouldContinue: 跳过当前 packet，获取下一个（PacketAlreadyProcessed / NonVideoPacket / InvalidData）
+            // 🔄 shouldRetry: 重试当前操作（Again / TimedOut / CodecEagain）
+            // 两者都释放 buffer，继续循环（不累计失败次数）
             pool_sptr->releaseFree(buffer);
             if (monitor_) {
                 monitor_->endTiming("fill_buffer");

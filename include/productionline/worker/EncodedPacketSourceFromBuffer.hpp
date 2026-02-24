@@ -153,7 +153,7 @@ public:
      * - Eof：数据流正常结束
      * - PacketAlreadyProcessed：已处理当前版本，需等待新 buffer
      * - InvalidMode：非共享模式
-     * - NoData：无可用数据（异常）
+     * - InternalError：内部逻辑异常（不应到达的代码路径）
      */
     PacketAcquireResult acquireEncodedPacket(AVPacket* out_packet, void* worker_id = nullptr) override;
     

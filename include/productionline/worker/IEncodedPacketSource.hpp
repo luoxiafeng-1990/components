@@ -15,13 +15,25 @@ struct AVPacket;
  * 
  * v2.31 新增：用于 acquireEncodedPacket 的返回值
  * v2.32 移动：从 EncodedPacketSourceFromBuffer.hpp 移至接口文件
+ * v2.34 新增：av_read_frame 错误码细分（InvalidData ~ UnknownError）
  */
 enum class AcquireStatus : int {
-    Success = 0,           ///< 成功获取
-    Eof = -1,              ///< 数据流结束（正常）
-    PacketAlreadyProcessed = -2, ///< 当前 packet 已被处理过（已获取过当前版本或非视频流已跳过）
-    InvalidMode = -3,      ///< 非共享模式
-    NoData = -4            ///< 无可用数据
+    // ===== 业务状态 =====
+    Success = 0,                    ///< 成功获取
+    Eof = -1,                       ///< 数据流正常结束（对应 AVERROR_EOF）
+    PacketAlreadyProcessed = -2,    ///< 当前 packet 已被处理过（Buffer 共享模式已获取过当前版本）
+    InvalidMode = -3,               ///< 非共享模式 / 参数错误
+    InternalError = -4,             ///< 内部逻辑异常（不应到达的代码路径）
+    
+    // ===== v2.34 新增：av_read_frame FFmpeg 错误码映射 =====
+    InvalidData = -5,               ///< 数据损坏（对应 AVERROR_INVALIDDATA）
+    IoError = -6,                   ///< IO 错误 / 网络断连（对应 AVERROR(EIO)）
+    TimedOut = -7,                  ///< 网络超时（对应 AVERROR(ETIMEDOUT)）
+    OutOfMemory = -8,               ///< 内存不足（对应 AVERROR(ENOMEM)）
+    Interrupted = -9,               ///< 请求退出（对应 AVERROR_EXIT）
+    Again = -10,                    ///< 暂时无数据可用（对应 AVERROR(EAGAIN)）
+    NonVideoPacket = -11,           ///< 读到非视频流 packet（音频/字幕等），已跳过
+    UnknownError = -99              ///< 未识别的 FFmpeg 错误码
 };
 
 /**
@@ -29,12 +41,20 @@ enum class AcquireStatus : int {
  */
 inline const char* acquireStatusToString(AcquireStatus status) {
     switch (status) {
-        case AcquireStatus::Success:     return "Success";
-        case AcquireStatus::Eof:         return "EOF";
+        case AcquireStatus::Success:                return "Success";
+        case AcquireStatus::Eof:                    return "EOF (AVERROR_EOF)";
         case AcquireStatus::PacketAlreadyProcessed: return "PacketAlreadyProcessed";
-        case AcquireStatus::InvalidMode: return "InvalidMode";
-        case AcquireStatus::NoData:      return "NoData";
-        default:                         return "Unknown";
+        case AcquireStatus::InvalidMode:            return "InvalidMode";
+        case AcquireStatus::InternalError:          return "InternalError";
+        case AcquireStatus::InvalidData:            return "InvalidData (AVERROR_INVALIDDATA)";
+        case AcquireStatus::IoError:                return "IoError (AVERROR(EIO))";
+        case AcquireStatus::TimedOut:               return "TimedOut (AVERROR(ETIMEDOUT))";
+        case AcquireStatus::OutOfMemory:            return "OutOfMemory (AVERROR(ENOMEM))";
+        case AcquireStatus::Interrupted:            return "Interrupted (AVERROR_EXIT)";
+        case AcquireStatus::Again:                  return "Again (AVERROR(EAGAIN))";
+        case AcquireStatus::NonVideoPacket:          return "NonVideoPacket";
+        case AcquireStatus::UnknownError:           return "UnknownError";
+        default:                                    return "Unknown";
     }
 }
 
@@ -47,6 +67,7 @@ inline const char* acquireStatusToString(AcquireStatus status) {
  * 
  * v2.31 新增：封装状态和 AVPacket 指针
  * v2.32 移动：从 EncodedPacketSourceFromBuffer.hpp 移至接口文件
+ * v2.34 新增：FFmpeg 错误码对应的工厂方法和查询方法
  * 
  * 设计原则（参考 Google StatusOr + Rust Result）：
  * - 明确的成功/失败状态
@@ -85,9 +106,56 @@ public:
         return PacketAcquireResult(AcquireStatus::PacketAlreadyProcessed, nullptr);
     }
     
-    /// 失败结果
-    static PacketAcquireResult failure(AcquireStatus status) {
-        return PacketAcquireResult(status, nullptr);
+    /// 非共享模式 / 参数错误 / 未打开
+    static PacketAcquireResult invalidMode() {
+        return PacketAcquireResult(AcquireStatus::InvalidMode, nullptr);
+    }
+    
+    /// 内部逻辑异常（不应到达的代码路径）
+    static PacketAcquireResult internalError() {
+        return PacketAcquireResult(AcquireStatus::InternalError, nullptr);
+    }
+    
+    // ===== v2.34 新增：FFmpeg 错误码对应的工厂方法 =====
+    
+    /// 数据损坏（AVERROR_INVALIDDATA）
+    static PacketAcquireResult invalidData() {
+        return PacketAcquireResult(AcquireStatus::InvalidData, nullptr);
+    }
+    
+    /// IO 错误 / 网络断连（AVERROR(EIO)）
+    static PacketAcquireResult ioError() {
+        return PacketAcquireResult(AcquireStatus::IoError, nullptr);
+    }
+    
+    /// 网络超时（AVERROR(ETIMEDOUT)）
+    static PacketAcquireResult timedOut() {
+        return PacketAcquireResult(AcquireStatus::TimedOut, nullptr);
+    }
+    
+    /// 内存不足（AVERROR(ENOMEM)）
+    static PacketAcquireResult outOfMemory() {
+        return PacketAcquireResult(AcquireStatus::OutOfMemory, nullptr);
+    }
+    
+    /// 请求退出（AVERROR_EXIT）
+    static PacketAcquireResult interrupted() {
+        return PacketAcquireResult(AcquireStatus::Interrupted, nullptr);
+    }
+    
+    /// 暂时无数据可用（AVERROR(EAGAIN)）
+    static PacketAcquireResult again() {
+        return PacketAcquireResult(AcquireStatus::Again, nullptr);
+    }
+    
+    /// 未识别的 FFmpeg 错误码
+    static PacketAcquireResult unknownError() {
+        return PacketAcquireResult(AcquireStatus::UnknownError, nullptr);
+    }
+    
+    /// 读到非视频流 packet（音频/字幕等），已跳过
+    static PacketAcquireResult nonVideoPacket() {
+        return PacketAcquireResult(AcquireStatus::NonVideoPacket, nullptr);
     }
     
     // ===== 状态查询 =====
@@ -109,6 +177,46 @@ public:
         return status_ != AcquireStatus::Success && 
                status_ != AcquireStatus::Eof &&
                status_ != AcquireStatus::PacketAlreadyProcessed;
+    }
+    
+    // ===== v2.34 新增：FFmpeg 错误码对应的查询方法 =====
+    
+    /// 是否数据损坏（AVERROR_INVALIDDATA）
+    bool isInvalidData() const noexcept { return status_ == AcquireStatus::InvalidData; }
+    
+    /// 是否 IO 错误 / 网络断连（AVERROR(EIO)）
+    bool isIoError() const noexcept { return status_ == AcquireStatus::IoError; }
+    
+    /// 是否网络超时（AVERROR(ETIMEDOUT)）
+    bool isTimedOut() const noexcept { return status_ == AcquireStatus::TimedOut; }
+    
+    /// 是否内存不足（AVERROR(ENOMEM)）
+    bool isOutOfMemory() const noexcept { return status_ == AcquireStatus::OutOfMemory; }
+    
+    /// 是否请求退出（AVERROR_EXIT）
+    bool isInterrupted() const noexcept { return status_ == AcquireStatus::Interrupted; }
+    
+    /// 是否暂时无数据可用（AVERROR(EAGAIN)）
+    bool isAgain() const noexcept { return status_ == AcquireStatus::Again; }
+    
+    /// 是否未识别的错误
+    bool isUnknownError() const noexcept { return status_ == AcquireStatus::UnknownError; }
+    
+    /// 是否非视频流 packet
+    bool isNonVideoPacket() const noexcept { return status_ == AcquireStatus::NonVideoPacket; }
+    
+    /// 是否可重试（Again / TimedOut — 重试当前读取操作）
+    bool isRetryable() const noexcept {
+        return status_ == AcquireStatus::Again ||
+               status_ == AcquireStatus::TimedOut;
+    }
+    
+    /// 是否应该 continue（跳过当前 packet，获取下一个）
+    /// InvalidData: 数据损坏，跳过即可
+    /// （注意：PacketAlreadyProcessed / NonVideoPacket 不在此处判断，
+    ///  它们在 FillResult::shouldContinue() 中统一处理）
+    bool shouldContinue() const noexcept {
+        return status_ == AcquireStatus::InvalidData;
     }
     
     /// 隐式 bool 转换（方便条件判断）
