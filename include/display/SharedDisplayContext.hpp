@@ -9,6 +9,7 @@
 #include "productionline/worker/WorkerConfig.hpp"
 
 #include <shared_mutex>
+#include <condition_variable>
 #include <mutex>
 #include <thread>
 #include <atomic>
@@ -167,10 +168,21 @@ private:
         int  channel_id;
         int  x, y, w, h;
         bool active;
+        bool written_this_round = false;
     };
     std::vector<ChannelInfo> channels_;
     std::mutex channel_mgmt_mutex_;
     int next_channel_id_ = 0;
+
+    // === 通道写入节流（条件变量）===
+    std::mutex round_mutex_;
+    std::condition_variable round_cv_;
+
+    // === PP 硬件调用序列化 ===
+    std::mutex pp_mutex_;
+
+    // === display_buf_ 读写保护 ===
+    std::mutex display_mutex_;
 
     // === 线程 ===
     std::thread timer_thread_;

@@ -65,6 +65,8 @@ SharedDisplayContext::SharedDisplayContext(const TacoVOConfig& config)
     , display_buf_(nullptr)
     , logger_(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Display.SharedContext")))
 {
+    int max_ch = config_.max_channels > 0 ? config_.max_channels : 64;
+    channels_.reserve(max_ch);
 }
 
 SharedDisplayContext::~SharedDisplayContext() {
@@ -429,19 +431,13 @@ void SharedDisplayContext::unregisterChannel(int channel_id) {
 }
 
 // ============================================================
-// 通道写入（多通道并发安全）
+// 通道写入（条件变量节流：每通道每轮只写一次）
 // ============================================================
 
 bool SharedDisplayContext::channelWrite(int channel_id, Buffer* decoded) {
     if (!decoded) return false;
 
-    std::shared_lock<std::shared_mutex> lock(rw_mutex_);
-
-    if (render_buf_ == nullptr) {
-        return false;
-    }
-
-    // 查找通道布局
+    // 查找通道
     ChannelInfo* ch_info = nullptr;
     {
         std::lock_guard<std::mutex> mgmt_lock(channel_mgmt_mutex_);
@@ -458,6 +454,22 @@ bool SharedDisplayContext::channelWrite(int channel_id, Buffer* decoded) {
         return false;
     }
 
+    // 条件变量等待：如果本轮已经写过，阻塞直到定时器重置标记
+    {
+        std::unique_lock<std::mutex> round_lock(round_mutex_);
+        round_cv_.wait(round_lock, [&]() {
+            return !ch_info->written_this_round || !running_;
+        });
+        if (!running_) return false;
+    }
+
+    // 获取 shared_lock 保护 render_buf_（防止定时器 swap 期间写入）
+    std::shared_lock<std::shared_mutex> lock(rw_mutex_);
+
+    if (render_buf_ == nullptr) {
+        return false;
+    }
+
     int src_width  = decoded->getImageWidth();
     int src_height = decoded->getImageHeight();
 
@@ -468,9 +480,28 @@ bool SharedDisplayContext::channelWrite(int channel_id, Buffer* decoded) {
         return false;
     }
 
+    AVFrame* avf = decoded->getAVFrame();
+    if (!avf->data[0]) {
+        LOG4CPLUS_WARN_FMT(logger_,
+            "Channel %d: AVFrame data[0] is NULL, skipping", channel_id);
+        return false;
+    }
+
+    LOG4CPLUS_DEBUG_FMT(logger_,
+        "Channel %d: ppResize src=%dx%d dst=(%d,%d,%d,%d) render_buf=%p",
+        channel_id, src_width, src_height,
+        ch_info->x, ch_info->y, ch_info->w, ch_info->h,
+        (void*)render_buf_);
+
     ppResize(decoded, render_buf_,
              ch_info->x, ch_info->y, ch_info->w, ch_info->h,
              src_width, src_height, 0, 0, nullptr);
+
+    // 标记本轮已写入
+    {
+        std::lock_guard<std::mutex> round_lock(round_mutex_);
+        ch_info->written_this_round = true;
+    }
 
     return true;
 }
@@ -489,16 +520,12 @@ void SharedDisplayContext::ppResize(
     (void)src_format;
     (void)src_linesize;
 
-    // 仿照 taco-vo send_chn_frame 的方式：
-    // 使用 ta_cv_image_create(0,0,0,0,...) 从 AVFrame 自动推断格式
-
     AVFrame* avframe_in = src->getAVFrame();
     if (!avframe_in) {
         LOG4CPLUS_WARN(logger_, "ppResize: decoded buffer has no AVFrame");
         return;
     }
 
-    // 构建输出用的 ta_avframe_t：指向 render_buf_ 的对应区域
     int bytes_per_pixel = bits_per_pixel_ / 8;
     int out_format = TA_AV_PIX_FMT_NONE;
     if (bits_per_pixel_ == 32) {
@@ -509,29 +536,79 @@ void SharedDisplayContext::ppResize(
         out_format = TA_AV_PIX_FMT_NV12;
     }
 
+    // === 构建输入 ta_avframe_t（不强制转换 AVFrame*，避免结构体偏移差异）===
+    ta_avframe_t in_avframe;
+    memset(&in_avframe, 0, sizeof(in_avframe));
+    in_avframe.width  = avframe_in->width;
+    in_avframe.height = avframe_in->height;
+    in_avframe.format = avframe_in->format;
+    for (int i = 0; i < TA_AV_NUM_DATA_POINTERS; ++i) {
+        in_avframe.data[i]     = avframe_in->data[i];
+        in_avframe.linesize[i] = avframe_in->linesize[i];
+    }
+    // 从 FFmpeg AVFrame 复制 metadata 指针（AVDictionary 与 TA_AVDictionary 布局一致）
+    in_avframe.metadata = reinterpret_cast<TA_AVDictionary*>(avframe_in->metadata);
+
+    // === 构建输出 ta_avframe_t（仿照 taco-vo：data[0] 指向 DMA 基地址）===
+    TA_AVDictionaryEntry local_out_entry = dict_entry_;
+    TA_AVDictionary local_out_dict;
+    local_out_dict.count = 1;
+    local_out_dict.elems = &local_out_entry;
+
     ta_avframe_t out_avframe;
     memset(&out_avframe, 0, sizeof(out_avframe));
     out_avframe.width  = screen_width_;
     out_avframe.height = screen_height_;
     out_avframe.format = out_format;
-    out_avframe.metadata = &dict_;
+    out_avframe.metadata = &local_out_dict;
+    out_avframe.data[0] = static_cast<uint8_t*>(dma_mem_.virt_addr);
 
-    uint8_t* dst_virt_base = static_cast<uint8_t*>(dst->getVirtualAddress());
+    // 计算当前 render buffer 相对 DMA 基地址的页偏移
+    // 必须用 phys_addr 计算，因为 freeBuffer() 会将 virt_addr_ 清零
+    size_t page_offset = dst->getPhysicalAddress() - dma_mem_.phys_addr;
+
+    // === resize 参数（y_offset 加入页偏移，与 taco-vo send_chn_frame 一致）===
+    ta_cv_resize_t resize_params = {};
+    resize_params.in_width  = src_width;
+    resize_params.in_height = src_height;
+    resize_params.out_width = dst_w;
+    resize_params.out_height = dst_h;
+    resize_params.start_x = 0;
+    resize_params.start_y = 0;
+
+    ta_cv_resize_image_t resize_attr = {};
+    resize_attr.resize_img_attr = &resize_params;
+    resize_attr.interpolation = 1;
+
     if (out_format == TA_AV_PIX_FMT_NV12) {
-        out_avframe.data[0] = dst_virt_base;
-        out_avframe.data[1] = dst_virt_base + screen_width_ * screen_height_;
-        out_avframe.linesize[0] = screen_width_;
-        out_avframe.linesize[1] = screen_width_;
+        resize_attr.y_offset = dst_y * screen_width_ + dst_x + page_offset;
+        resize_attr.u_offset = screen_width_ * (screen_height_ - dst_y)
+                             + (screen_width_ / 2) * dst_y;
+        resize_attr.y_stride = screen_width_;
+        resize_attr.u_stride = screen_width_;
+    } else if (out_format == TA_AV_PIX_FMT_RGB24) {
+        resize_attr.y_offset = (dst_y * screen_width_ + dst_x) * 3 + page_offset;
+        resize_attr.u_offset = 0;
+        resize_attr.y_stride = screen_width_ * 3;
+        resize_attr.u_stride = screen_width_ * 3;
     } else {
-        out_avframe.data[0] = dst_virt_base;
-        out_avframe.linesize[0] = screen_width_ * bytes_per_pixel;
+        resize_attr.y_offset = (dst_y * screen_width_ + dst_x) * 4 + page_offset;
+        resize_attr.u_offset = 0;
+        resize_attr.y_stride = screen_width_ * 4;
+        resize_attr.u_stride = screen_width_ * 4;
     }
+
+    int in_format = avframe_in->format;
+    bool both_nv12 = (in_format == TA_AV_PIX_FMT_NV12 && out_format == TA_AV_PIX_FMT_NV12);
+
+    // PP 硬件调用序列化
+    std::lock_guard<std::mutex> pp_lock(pp_mutex_);
 
     ta_image_t image_in = {};
     ta_image_t image_out = {};
 
     tacv_status_t ret = ta_cv_image_create(0, 0, (ta_image_format_ext_t)0,
-        (ta_image_data_format_ext_t)0, &image_in, (ta_avframe_t*)avframe_in);
+        (ta_image_data_format_ext_t)0, &image_in, &in_avframe);
     if (ret != 0) {
         LOG4CPLUS_WARN_FMT(logger_, "ppResize: ta_cv_image_create(input) failed: %d", ret);
         return;
@@ -545,43 +622,6 @@ void SharedDisplayContext::ppResize(
         return;
     }
 
-    // 设置 resize 参数
-    ta_cv_resize_t resize_params = {};
-    resize_params.in_width  = src_width;
-    resize_params.in_height = src_height;
-    resize_params.out_width = dst_w;
-    resize_params.out_height = dst_h;
-    resize_params.start_x = 0;
-    resize_params.start_y = 0;
-
-    ta_cv_resize_image_t resize_attr = {};
-    resize_attr.resize_img_attr = &resize_params;
-    resize_attr.interpolation = 1;
-
-    // 计算输出区域的 offset（仿照 taco-vo send_chn_frame）
-    if (out_format == TA_AV_PIX_FMT_NV12) {
-        resize_attr.y_offset = dst_y * screen_width_ + dst_x;
-        resize_attr.u_offset = screen_width_ * (screen_height_ - dst_y)
-                             + (screen_width_ / 2) * dst_y;
-        resize_attr.y_stride = screen_width_;
-        resize_attr.u_stride = screen_width_;
-    } else if (out_format == TA_AV_PIX_FMT_RGB24) {
-        resize_attr.y_offset = (dst_y * screen_width_ + dst_x) * 3;
-        resize_attr.u_offset = 0;
-        resize_attr.y_stride = screen_width_ * 3;
-        resize_attr.u_stride = screen_width_ * 3;
-    } else {
-        // ARGB (32bpp)
-        resize_attr.y_offset = (dst_y * screen_width_ + dst_x) * 4;
-        resize_attr.u_offset = 0;
-        resize_attr.y_stride = screen_width_ * 4;
-        resize_attr.u_stride = screen_width_ * 4;
-    }
-
-    // 根据输入/输出格式选择正确的处理函数
-    int in_format = avframe_in->format;
-    bool both_nv12 = (in_format == TA_AV_PIX_FMT_NV12 && out_format == TA_AV_PIX_FMT_NV12);
-
     if (both_nv12) {
         ret = ta_cv_image_resize(&resize_attr, image_in, image_out);
         if (ret != 0) {
@@ -589,7 +629,6 @@ void SharedDisplayContext::ppResize(
                 "ppResize: ta_cv_image_resize failed: ret=%d", ret);
         }
     } else {
-        // NV12→RGB/ARGB 等需要 CSC
         ta_cv_rect_t crop_rect = {};
         crop_rect.crop_w = src_width;
         crop_rect.crop_h = src_height;
@@ -609,6 +648,28 @@ void SharedDisplayContext::ppResize(
 }
 
 void SharedDisplayContext::ppCopy(Buffer* src, Buffer* dst) {
+    if (!src || !dst) {
+        LOG4CPLUS_ERROR_FMT(logger_, "ppCopy: null buffer src=%p dst=%p",
+            (void*)src, (void*)dst);
+        return;
+    }
+
+    // 通过物理地址计算虚拟地址（freeBuffer() 会清除 virt_addr_ 但保留 phys_addr_）
+    uint8_t* dma_base = static_cast<uint8_t*>(dma_mem_.virt_addr);
+    size_t src_offset = src->getPhysicalAddress() - dma_mem_.phys_addr;
+    size_t dst_offset = dst->getPhysicalAddress() - dma_mem_.phys_addr;
+
+    if (src_offset >= dma_mem_.total_size || dst_offset >= dma_mem_.total_size) {
+        LOG4CPLUS_ERROR_FMT(logger_,
+            "ppCopy: buffer outside DMA range src_off=%zu dst_off=%zu total=%zu",
+            src_offset, dst_offset, dma_mem_.total_size);
+        return;
+    }
+
+    LOG4CPLUS_DEBUG_FMT(logger_,
+        "ppCopy: src_buf=%p(off=%zu) dst_buf=%p(off=%zu) size=%zu",
+        (void*)src, src_offset, (void*)dst, dst_offset, buffer_size_);
+
     int bytes_per_pixel = bits_per_pixel_ / 8;
     int out_format = TA_AV_PIX_FMT_NONE;
     if (bits_per_pixel_ == 32) {
@@ -619,61 +680,35 @@ void SharedDisplayContext::ppCopy(Buffer* src, Buffer* dst) {
         out_format = TA_AV_PIX_FMT_NV12;
     }
 
+    // ppCopy：data[0] 指向各自页的虚拟地址（通过 phys 偏移计算，绕过 freeBuffer() 清除问题）
+    uint8_t* src_virt = dma_base + src_offset;
+    uint8_t* dst_virt = dma_base + dst_offset;
+
+    TA_AVDictionaryEntry local_entry = dict_entry_;
+    TA_AVDictionary local_dict;
+    local_dict.count = 1;
+    local_dict.elems = &local_entry;
+
+    TA_AVDictionaryEntry local_entry2 = dict_entry_;
+    TA_AVDictionary local_dict2;
+    local_dict2.count = 1;
+    local_dict2.elems = &local_entry2;
+
     ta_avframe_t src_avframe;
     memset(&src_avframe, 0, sizeof(src_avframe));
     src_avframe.width  = screen_width_;
     src_avframe.height = screen_height_;
     src_avframe.format = out_format;
-    src_avframe.metadata = &dict_;
+    src_avframe.metadata = &local_dict;
+    src_avframe.data[0] = src_virt;
 
     ta_avframe_t dst_avframe;
     memset(&dst_avframe, 0, sizeof(dst_avframe));
     dst_avframe.width  = screen_width_;
     dst_avframe.height = screen_height_;
     dst_avframe.format = out_format;
-    dst_avframe.metadata = &dict_;
-
-    uint8_t* src_virt = static_cast<uint8_t*>(src->getVirtualAddress());
-    uint8_t* dst_virt = static_cast<uint8_t*>(dst->getVirtualAddress());
-
-    if (out_format == TA_AV_PIX_FMT_NV12) {
-        src_avframe.data[0] = src_virt;
-        src_avframe.data[1] = src_virt + screen_width_ * screen_height_;
-        src_avframe.linesize[0] = screen_width_;
-        src_avframe.linesize[1] = screen_width_;
-
-        dst_avframe.data[0] = dst_virt;
-        dst_avframe.data[1] = dst_virt + screen_width_ * screen_height_;
-        dst_avframe.linesize[0] = screen_width_;
-        dst_avframe.linesize[1] = screen_width_;
-    } else {
-        int stride = screen_width_ * bytes_per_pixel;
-        src_avframe.data[0] = src_virt;
-        src_avframe.linesize[0] = stride;
-
-        dst_avframe.data[0] = dst_virt;
-        dst_avframe.linesize[0] = stride;
-    }
-
-    ta_image_t image_in = {};
-    ta_image_t image_out = {};
-
-    tacv_status_t ret = ta_cv_image_create(0, 0, (ta_image_format_ext_t)0,
-        (ta_image_data_format_ext_t)0, &image_in, &src_avframe);
-    if (ret != 0) {
-        LOG4CPLUS_WARN_FMT(logger_, "ppCopy: ta_cv_image_create(input) failed: %d", ret);
-        memcpy(dst->getVirtualAddress(), src->getVirtualAddress(), buffer_size_);
-        return;
-    }
-
-    ret = ta_cv_image_create(0, 0, (ta_image_format_ext_t)0,
-        (ta_image_data_format_ext_t)0, &image_out, &dst_avframe);
-    if (ret != 0) {
-        LOG4CPLUS_WARN_FMT(logger_, "ppCopy: ta_cv_image_create(output) failed: %d", ret);
-        ta_cv_image_destroy(&image_in);
-        memcpy(dst->getVirtualAddress(), src->getVirtualAddress(), buffer_size_);
-        return;
-    }
+    dst_avframe.metadata = &local_dict2;
+    dst_avframe.data[0] = dst_virt;
 
     ta_cv_resize_t resize_params = {};
     resize_params.in_width  = screen_width_;
@@ -688,6 +723,8 @@ void SharedDisplayContext::ppCopy(Buffer* src, Buffer* dst) {
     resize_attr.interpolation = 1;
 
     if (out_format == TA_AV_PIX_FMT_NV12) {
+        // u_offset 相对于 y_offset（即 Y 写入位置），需要跳过 Y 平面到达 UV 平面
+        resize_attr.u_offset = screen_width_ * screen_height_;
         resize_attr.y_stride = screen_width_;
         resize_attr.u_stride = screen_width_;
     } else {
@@ -695,10 +732,33 @@ void SharedDisplayContext::ppCopy(Buffer* src, Buffer* dst) {
         resize_attr.u_stride = screen_width_ * bytes_per_pixel;
     }
 
+    // PP 硬件调用序列化
+    std::lock_guard<std::mutex> pp_lock(pp_mutex_);
+
+    ta_image_t image_in = {};
+    ta_image_t image_out = {};
+
+    tacv_status_t ret = ta_cv_image_create(0, 0, (ta_image_format_ext_t)0,
+        (ta_image_data_format_ext_t)0, &image_in, &src_avframe);
+    if (ret != 0) {
+        LOG4CPLUS_WARN_FMT(logger_, "ppCopy: ta_cv_image_create(input) failed: %d", ret);
+        memcpy(dst_virt, src_virt, buffer_size_);
+        return;
+    }
+
+    ret = ta_cv_image_create(0, 0, (ta_image_format_ext_t)0,
+        (ta_image_data_format_ext_t)0, &image_out, &dst_avframe);
+    if (ret != 0) {
+        LOG4CPLUS_WARN_FMT(logger_, "ppCopy: ta_cv_image_create(output) failed: %d", ret);
+        ta_cv_image_destroy(&image_in);
+        memcpy(dst_virt, src_virt, buffer_size_);
+        return;
+    }
+
     ret = ta_cv_image_resize(&resize_attr, image_in, image_out);
     if (ret != 0) {
         LOG4CPLUS_WARN_FMT(logger_, "ppCopy: ta_cv_image_resize failed: ret=%d, fallback to memcpy", ret);
-        memcpy(dst->getVirtualAddress(), src->getVirtualAddress(), buffer_size_);
+        memcpy(dst_virt, src_virt, buffer_size_);
     }
 
     ta_cv_image_destroy(&image_in);
@@ -742,8 +802,10 @@ bool SharedDisplayContext::startThreads() {
 void SharedDisplayContext::stopThreads() {
     running_ = false;
 
+    // 唤醒所有阻塞在条件变量上的通道线程
+    round_cv_.notify_all();
+
     if (timer_fd_ >= 0) {
-        // 停止定时器
         struct itimerspec ts = {};
         timerfd_settime(timer_fd_, 0, &ts, nullptr);
     }
@@ -791,18 +853,25 @@ void SharedDisplayContext::timerThreadFunc() {
             old_render = render_buf_;
             render_buf_ = nullptr;
         }
-        // 独占锁立即释放，通道看到 nullptr 会返回 false
 
         if (!old_render) {
             continue;
         }
 
-        // Step 2: 尝试获取空闲 buffer（无锁状态）
+        // Step 2: 尝试获取空闲 buffer
         Buffer* new_render = pool->acquireFree(false, 0);
         if (!new_render) {
-            // 没有空闲 buffer，恢复旧的，跳过本轮
             std::unique_lock<std::shared_mutex> lock(rw_mutex_);
             render_buf_ = old_render;
+            // 即使没拿到新 buffer，也要重置标记唤醒通道，
+            // 否则通道会永远阻塞
+            {
+                std::lock_guard<std::mutex> round_lock(round_mutex_);
+                for (auto& ch : channels_) {
+                    ch.written_this_round = false;
+                }
+            }
+            round_cv_.notify_all();
             continue;
         }
 
@@ -810,10 +879,21 @@ void SharedDisplayContext::timerThreadFunc() {
         pool->submitFilled(old_render);
 
         // Step 4: PP 硬件拷贝陈旧区域（display_buf_ → new_render）
-        if (display_buf_) {
-            ppCopy(display_buf_, new_render);
-        } else {
-            memset(new_render->getVirtualAddress(), 0, buffer_size_);
+        // 在 display_mutex_ 保护下快照 display_buf_，
+        // 防止 displayThreadFunc 在 ppCopy 期间释放该 buffer
+        {
+            std::lock_guard<std::mutex> dlock(display_mutex_);
+            if (display_buf_) {
+                LOG4CPLUS_DEBUG_FMT(logger_,
+                    "Timer: ppCopy display_buf_=%p → new_render=%p",
+                    (void*)display_buf_, (void*)new_render);
+                ppCopy(display_buf_, new_render);
+            } else {
+                LOG4CPLUS_DEBUG(logger_, "Timer: no display_buf_, memset new_render");
+                uint8_t* nr_virt = static_cast<uint8_t*>(dma_mem_.virt_addr)
+                    + (new_render->getPhysicalAddress() - dma_mem_.phys_addr);
+                memset(nr_virt, 0, buffer_size_);
+            }
         }
 
         // Step 5: 设置新的渲染目标
@@ -821,6 +901,15 @@ void SharedDisplayContext::timerThreadFunc() {
             std::unique_lock<std::shared_mutex> lock(rw_mutex_);
             render_buf_ = new_render;
         }
+
+        // Step 6: 重置所有通道的写入标记，唤醒等待的通道线程
+        {
+            std::lock_guard<std::mutex> round_lock(round_mutex_);
+            for (auto& ch : channels_) {
+                ch.written_this_round = false;
+            }
+        }
+        round_cv_.notify_all();
     }
 
     LOG4CPLUS_DEBUG(logger_, "Timer thread exited");
@@ -863,9 +952,14 @@ void SharedDisplayContext::displayThreadFunc() {
         int zero = 0;
         ioctl(fd_, FBIO_WAITFORVSYNC, &zero);
 
-        // 释放上一帧的 display_buf_ 回 FREE 队列
-        Buffer* old_display = display_buf_;
-        display_buf_ = buf;
+        // 在 display_mutex_ 保护下切换 display_buf_，
+        // 防止 timerThreadFunc 在 ppCopy 期间读到过时指针
+        Buffer* old_display = nullptr;
+        {
+            std::lock_guard<std::mutex> dlock(display_mutex_);
+            old_display = display_buf_;
+            display_buf_ = buf;
+        }
 
         if (old_display) {
             pool->releaseFilled(old_display);
