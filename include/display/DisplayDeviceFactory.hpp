@@ -14,7 +14,8 @@
  *
  * 当前支持：
  * - FRAMEBUFFER: LinuxFramebufferDevice
- * - TACO_VO:     TacoVODisplayDevice
+ * - TACO_VO:     TacoVODisplayDevice（旧 taco-vo 实现）
+ * - SHARED_FB:   SharedFramebufferDevice（SharedDisplayContext + BufferPool 多通道）
  */
 class DisplayDeviceFactory {
 public:

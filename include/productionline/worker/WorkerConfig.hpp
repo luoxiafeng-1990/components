@@ -440,7 +440,8 @@ struct WorkerConfig {
 
             enum DisplayMode {
                 FRAMEBUFFER = 0,          ///< Linux Framebuffer 直接显示（默认，现有行为）
-                TACO_VO = 1               ///< taco-vo 视频输出管道（支持多通道 + 硬件 CSC/Resize）
+                TACO_VO = 1,              ///< taco-vo 视频输出管道（旧实现，支持多通道 + 硬件 CSC/Resize）
+                SHARED_FB = 2             ///< 共享 Framebuffer（SharedDisplayContext + BufferPool 多通道显示）
             };
             DisplayMode mode = FRAMEBUFFER;
 

@@ -97,6 +97,16 @@ public:
      * @return 统计信息字符串
      */
     virtual std::string getStats() const { return ""; }
+
+    /**
+     * @brief 询问消费者是否需要保留当前 buffer（而非归还到 pool）
+     *
+     * 用于显示消费者在 channelWrite 失败时（如定时器正在切换 buffer），
+     * 通知 consumeLoop 保留该帧以便下一周期重试，避免帧丢失。
+     *
+     * @return true 需要保留（不要 releaseFilled），false 正常归还
+     */
+    virtual bool shouldRetainBuffer() const { return false; }
 };
 
 } // namespace consumer

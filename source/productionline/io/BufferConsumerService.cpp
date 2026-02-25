@@ -789,31 +789,35 @@ void BufferConsumerService::consumeLoop(
     int frame_index = 0;
     int timeout_count = 0;
     bool initialized = false;
+    Buffer* held_buffer = nullptr;
     
     LOG4CPLUS_DEBUG(logger_, "Starting consume loop");
     
     while (!stop_requested_) {
-        // 检查最大帧数限制
         if (config.max_frames > 0 && frame_index >= config.max_frames) {
             LOG4CPLUS_DEBUG_FMT(logger_, "Reached max frames: %d", config.max_frames);
             break;
         }
         
-        // 获取填充的 Buffer
-        Buffer* buffer = pool->acquireFilled(true, config.timeout_ms);
-        
-        if (!buffer) {
-            timeout_count++;
-            if (timeout_count >= config.max_timeout_count) {
-                LOG4CPLUS_DEBUG_FMT(logger_, "Max timeout count reached: %d", timeout_count);
-                break;
+        Buffer* buffer = nullptr;
+
+        if (held_buffer) {
+            buffer = held_buffer;
+            held_buffer = nullptr;
+        } else {
+            buffer = pool->acquireFilled(true, config.timeout_ms);
+            if (!buffer) {
+                timeout_count++;
+                if (timeout_count >= config.max_timeout_count) {
+                    LOG4CPLUS_DEBUG_FMT(logger_, "Max timeout count reached: %d", timeout_count);
+                    break;
+                }
+                continue;
             }
-            continue;
         }
         
         timeout_count = 0;
         
-        // 首帧初始化
         if (!initialized) {
             std::vector<Buffer*> first_buffers = {buffer};
             if (!consumer->initialize(first_buffers)) {
@@ -824,15 +828,16 @@ void BufferConsumerService::consumeLoop(
             initialized = true;
         }
         
-        // 消费 Buffer
         std::vector<Buffer*> buffers = {buffer};
         bool continue_consume = consumer->consume(buffers, frame_index);
         
-        // 归还 Buffer
-        pool->releaseFilled(buffer);
-        
-        frame_index++;
-        result.frames_consumed++;
+        if (consumer->shouldRetainBuffer()) {
+            held_buffer = buffer;
+        } else {
+            pool->releaseFilled(buffer);
+            frame_index++;
+            result.frames_consumed++;
+        }
         
         if (!continue_consume) {
             LOG4CPLUS_DEBUG(logger_, "Consumer requested stop");
@@ -840,7 +845,11 @@ void BufferConsumerService::consumeLoop(
         }
     }
     
-    // 注意：drain 和 finalize 由调用者负责（在 producer.stop() 之后执行）
+    if (held_buffer) {
+        pool->releaseFilled(held_buffer);
+        held_buffer = nullptr;
+    }
+    
     LOG4CPLUS_DEBUG_FMT(logger_, "Consume loop finished, %d frames consumed", result.frames_consumed);
 }
 

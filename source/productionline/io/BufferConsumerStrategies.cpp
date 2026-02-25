@@ -69,7 +69,8 @@ bool DisplayConsumer::initialize(const std::vector<Buffer*>& first_buffers) {
         initialized_ = true;
         LOG4CPLUS_INFO_FMT(log4cplus::Logger::getRoot(), 
             "DisplayConsumer: Initialized (mode=%s)",
-            config_.mode == DisplayType::TACO_VO ? "TACO_VO" : "FRAMEBUFFER");
+            config_.mode == DisplayType::TACO_VO ? "TACO_VO" :
+            config_.mode == DisplayType::SHARED_FB ? "SHARED_FB" : "FRAMEBUFFER");
         return true;
     } catch (const std::exception& e) {
         LOG4CPLUS_ERROR_FMT(log4cplus::Logger::getRoot(), 
@@ -83,10 +84,12 @@ bool DisplayConsumer::consume(const std::vector<Buffer*>& buffers, int frame_ind
     
     if (!initialized_ || !display_ || buffers.empty() || !buffers[0]) {
         failed_count_++;
+        last_consume_failed_ = true;
         return true;
     }
     
     bool success = display_->displayBuffer(buffers[0]);
+    last_consume_failed_ = !success;
     
     if (success) {
         success_count_++;
@@ -95,6 +98,10 @@ bool DisplayConsumer::consume(const std::vector<Buffer*>& buffers, int frame_ind
     }
     
     return true;
+}
+
+bool DisplayConsumer::shouldRetainBuffer() const {
+    return last_consume_failed_;
 }
 
 void DisplayConsumer::finalize() {

@@ -138,7 +138,10 @@ bool LinuxFramebufferDevice::initialize(int device_index) {
     unsigned char* base = (unsigned char*)framebuffer_base_ptr_;
     for (int i = 0; i < buffer_count_; i++) {
         void* virt_addr = (void*)(base + buffer_size_ * i);
-        uint64_t phys_addr = 0;  // TODO: 获取实际物理地址
+        uint64_t phys_addr = 0;
+        // 物理地址在通用 Linux FB 下不可用
+        // 对于 TACO 平台使用 SharedDisplayContext 的 DMA 内存方案
+        // 此处保留为 0，使用 memcpy 路径显示
         
         Buffer* buffer = allocator_facade_->injectExternalBufferToPool(
             buffer_pool_id_,  // v2.0: 第一个参数是 pool_id

@@ -82,6 +82,7 @@ public:
     bool consume(const std::vector<Buffer*>& buffers, int frame_index) override;
     void finalize() override;
     std::string getStats() const override;
+    bool shouldRetainBuffer() const override;
     
 private:
     DisplayType config_;
@@ -89,6 +90,7 @@ private:
     int success_count_ = 0;
     int failed_count_ = 0;
     bool initialized_ = false;
+    bool last_consume_failed_ = false;
 };
 
 // ============================================================

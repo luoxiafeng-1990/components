@@ -8,6 +8,8 @@ libcomponents_la_SOURCES = \
     source/display/LinuxFramebufferDevice.cpp \
     source/display/TacoVOContext.cpp \
     source/display/TacoVODisplayDevice.cpp \
+    source/display/SharedDisplayContext.cpp \
+    source/display/SharedFramebufferDevice.cpp \
     source/display/DisplayDeviceFactory.cpp \
     source/productionline/worker/WorkerBase.cpp \
     source/productionline/worker/BufferFillingWorkerFacade.cpp \
