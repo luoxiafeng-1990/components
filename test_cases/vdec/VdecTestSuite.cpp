@@ -331,6 +331,7 @@ bool VdecTestSuite::parseArgs(int argc, char* argv[], WorkerConfig& config, Deco
         {"save",       required_argument, 0, 's'},
         {"output",     required_argument, 0, 'o'},
         {"display",    no_argument,       0, 'd'},
+        {"display-mode", required_argument, 0, 'X'},
         {"psnr",       no_argument,       0, 'p'},
         {"ssim",       no_argument,       0, 'S'},
         {"min-psnr",   required_argument, 0, 'P'},
@@ -343,7 +344,7 @@ bool VdecTestSuite::parseArgs(int argc, char* argv[], WorkerConfig& config, Deco
     std::string input_path;
     
     int opt;
-    while ((opt = getopt_long(argc, argv, "hlf:r:c:D:W:H:R:F:m:s:o:dpSP:M:vt:", 
+    while ((opt = getopt_long(argc, argv, "hlf:r:c:D:W:H:R:F:m:s:o:dpSP:M:vt:X:", 
                               long_options, nullptr)) != -1) {
         switch (opt) {
             case 'h':
@@ -417,7 +418,23 @@ bool VdecTestSuite::parseArgs(int argc, char* argv[], WorkerConfig& config, Deco
             case 'd':
                 config.consumer_type.display.enable = true;
                 break;
-            
+
+            case 'X': {
+                std::string mode_str = optarg;
+                if (mode_str == "vo" || mode_str == "taco-vo") {
+                    config.consumer_type.display.mode =
+                        WorkerConfig::ConsumerTypeConfig::DisplayType::TACO_VO;
+                } else if (mode_str == "fb" || mode_str == "framebuffer") {
+                    config.consumer_type.display.mode =
+                        WorkerConfig::ConsumerTypeConfig::DisplayType::FRAMEBUFFER;
+                } else {
+                    LOG4CPLUS_ERROR_FMT(getLogger(),
+                        "Invalid display mode '%s', use 'vo' or 'fb'", optarg);
+                    return false;
+                }
+                break;
+            }
+
             case 'p':
                 config.consumer_type.compare.enable_psnr = true;
                 break;
@@ -544,6 +561,7 @@ void VdecTestSuite::printHelp() const {
               << "  -s, --save <n>          保存帧数 (0=不保存, -1=全部)，需配合 -o 使用\n"
               << "  -o, --output <path>     输出文件路径，启用保存功能\n"
               << "  -d, --display           启用显示输出 (CONSUME_DISPLAY)\n"
+              << "  --display-mode <mode>   显示模式: fb(framebuffer, 默认), vo(taco-vo 多通道)\n"
               << "  -p, --psnr              启用 PSNR 验证 (ExecuteMode::COMPARE)\n"
               << "  -S, --ssim              启用 SSIM 验证 (ExecuteMode::COMPARE)\n"
               << "  -P, --min-psnr <n>      PSNR 阈值 (默认: 30.0 dB)\n"
@@ -558,7 +576,8 @@ void VdecTestSuite::printHelp() const {
               << "\n"
               << "Examples:\n"
               << "  qa_cases vdec video.mp4                           # SINGLE\n"
-              << "  qa_cases vdec --display video.mp4                 # SINGLE + DISPLAY\n"
+              << "  qa_cases vdec --display video.mp4                 # SINGLE + DISPLAY (framebuffer)\n"
+              << "  qa_cases vdec --display --display-mode vo -t 9 video.mp4  # 9路 taco-vo 显示\n"
               << "  qa_cases vdec -s 100 -o /tmp/out.yuv video.mp4    # SINGLE + SAVE 100帧\n"
               << "  qa_cases vdec --psnr video.mp4                    # COMPARE (HW vs SW)\n"
               << "  qa_cases vdec --threads 16 video.mp4              # PARALLEL x16 (自定义路数)\n"

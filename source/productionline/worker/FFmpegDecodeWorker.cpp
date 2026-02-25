@@ -668,11 +668,6 @@ FillResult FFmpegDecodeWorker::readAndSendPacket(AVPacket* packet_ptr) {
         auto acquire_result = packet_source_->acquireEncodedPacket(packet_ptr, this);
         
         if (!acquire_result.ok()) {
-            // v2.34 重构：直接透传给 FillResult，不再逐一解析
-            if (acquire_result.isError()) {
-                LOG4CPLUS_WARN_FMT(logger_, " acquireEncodedPacket: %s",
-                                  acquire_result.statusString());
-            }
             return FillResult::fromAcquire(acquire_result);
         }
         

@@ -267,9 +267,9 @@ public:
     /// 是否成功
     bool ok() const noexcept { return status_ == CodecStatus::Success; }
     
-    /// 是否 EOF
-    bool isEof() const noexcept { return status_ == CodecStatus::Eof; }
-    
+    /// codec flush pipeline 已清空（avcodec_send_packet/frame 返回 AVERROR_EOF）
+    bool isEoFlush() const noexcept { return status_ == CodecStatus::Eof; }
+
     /// 是否 EAGAIN
     bool isEagain() const noexcept { return status_ == CodecStatus::Eagain; }
     
@@ -278,7 +278,7 @@ public:
     
     /// 是否终止错误
     bool isTerminal() const noexcept {
-        return !ok() && !isEof() && !isEagain();
+        return !ok() && !isEoFlush() && !isEagain();
     }
     
     /// 获取状态码
@@ -300,31 +300,30 @@ private:
 // ============================================================
 
 /**
- * @brief Buffer 填充结果（v2.33 新增，v2.34 重构为三层错误查询）
+ * @brief Buffer 填充结果（v2.33 新增，v2.34 重构为三层错误查询，v2.36 新增消费者决策接口）
  * 
  * v2.34 设计变更：错误来源分层 + 各层携带自己的 cause
+ * v2.36 设计变更：新增消费者决策接口（ConsumerAction / toAction() / shouldTerminate() / shouldBypassFrameSync()）
  * 
- * 使用示例：
+ * 推荐消费方式（v2.36）：
  * @code
  * FillResult result = worker->fillBuffer(index, buffer);
  * 
- * // 第一层：成功还是失败
- * if (result.ok()) {
- *     // ✅ 成功
- * } else if (result.isError()) {
- *     // 第二层：哪个模块的错误
- *     if (result.isAcquireError()) {
- *         // 第三层：具体错误类型
- *         switch (result.acquireCause()) {
- *             case AcquireStatus::Eof: break;
- *             case AcquireStatus::TimedOut: break;
- *             ...
- *         }
- *     } else if (result.isCodecError()) {
- *         switch (result.codecCause()) { ... }
- *     } else if (result.isWorkerError()) {
- *         switch (result.workerCause()) { ... }
- *     }
+ * switch (result.toAction()) {
+ *     case FillResult::ConsumerAction::kSubmit:
+ *         // ✅ 提交 buffer
+ *         break;
+ *     case FillResult::ConsumerAction::kSkip:
+ *         // ⏭ 跳过当前 packet（PacketAlreadyProcessed / NonVideoPacket / InvalidData）
+ *         break;
+ *     case FillResult::ConsumerAction::kRetry:
+ *         // 🔄 重试当前操作（Again / TimedOut / CodecEagain）
+ *         break;
+     *     case FillResult::ConsumerAction::kTerminate:
+ *         // 正常结束：codec flush 完 or 数据源到头
+ *         // 真正错误：result.source() + result.statusString()
+ *         if (result.isEoFlush() || worker->isAtEnd()) { ... }
+ *         break;
  * }
  * @endcode
  */
@@ -396,13 +395,32 @@ public:
     explicit operator bool() const noexcept { return ok(); }
     
     // ===== 错误分类查询方法（v2.34 重构：拆分 shouldRetry 为 shouldContinue + shouldRetry）=====
-    
-    /// 是否到达 EOF（正常结束，不是真正的错误）
-    /// v2.35 变更：同时支持 Acquire 层 EOF 和 Codec 层 flush EOF
-    bool isEof() const noexcept {
-        if (isAcquireError() && acquire_cause_ == AcquireStatus::Eof) return true;
-        if (isCodecError() && codec_cause_ == CodecStatus::Eof) return true;
-        return false;
+
+    /**
+     * @brief Codec 内部 flush pipeline 已清空（v2.36 重命名，语义收窄）
+     * 
+     * 仅检查 Codec 层 EOF（avcodec_send_packet/frame 返回 AVERROR_EOF），
+     * 表示解码器/编码器的内部 pipeline 已完全 flush 清空。
+     * 
+     * @note 不代表数据源到达文件末尾。数据源是否结束请查询 worker->isAtEnd()。
+     *       v2.35 旧名：isEof()，原来同时覆盖 AcquireStatus::Eof，已拆分。
+     */
+    bool isEoFlush() const noexcept {
+        return isCodecError() && codec_cause_ == CodecStatus::Eof;
+    }
+
+    /**
+     * @brief 数据获取层报告数据源已耗尽（AcquireStatus::Eof）
+     * 
+     * 表示 packet 获取层（文件/流/buffer）在本次 fillBuffer() 中明确报告"无更多数据"。
+     * 此时 worker->isAtEnd() 通常也同时为 true（两者来自同一代码路径），
+     * 但 isAtEnd() 是权威来源，消费者应优先使用 isAtEnd()。
+     * 
+     * @note 设计用途：在 WorkerSyncCoordinator 等无法访问 worker 对象的场景中，
+     *       通过 FillResult 本身区分"干净退出"与"真正错误"。
+     */
+    bool isAcquireEof() const noexcept {
+        return isAcquireError() && acquire_cause_ == AcquireStatus::Eof;
     }
     
     /// 是否应该 continue（跳过当前 packet，获取下一个）
@@ -433,10 +451,89 @@ public:
         return false;
     }
     
-    /// 是否是终止状态（不可恢复的异常错误）
-    /// 定义：排除法 — 既不能 continue、也不能 retry、也不是 EOF 的错误
+    /**
+     * @brief 是否是不可恢复的异常错误（排除法）
+     * 
+     * 定义：既不能 continue、也不能 retry、也不是 codec flush EOF、也不是 data source EOF
+     * 这类错误才应计入连续失败计数。
+     */
     bool isTerminal() const noexcept {
-        return isError() && !shouldContinue() && !shouldRetry() && !isEof();
+        return isError() && !shouldContinue() && !shouldRetry() && !isEoFlush() && !isAcquireEof();
+    }
+    
+    // ===== v2.36 消费者决策接口 =====
+    
+    /**
+     * @brief 消费者行动指令枚举
+     * 
+     * 将所有 FillResult 状态映射为消费者循环中的四种互斥行动。
+     * 配合 toAction() 使用，让 switch 语句穷举所有 case，
+     * 避免 if-else if 链遗漏分支（编译器会警告缺失的 case）。
+     * 
+     * 注：shouldContinue() / shouldRetry() / shouldTerminate() 仍可单独使用，
+     * toAction() 是在此基础上提供的 switch 聚合入口。
+     */
+    enum class ConsumerAction {
+        kSubmit,    ///< ok()：填充成功，提交 buffer
+        kSkip,      ///< shouldContinue()：跳过当前 packet，获取下一个
+        kRetry,     ///< shouldRetry()：重试当前操作
+        kTerminate, ///< shouldTerminate()：终止循环（配合 isAtEnd()/isEoFlush() 区分正常结束与错误中止）
+    };
+    
+    /**
+     * @brief 将 FillResult 映射为消费者行动指令
+     * 
+     * 聚合 shouldContinue() / shouldRetry() / shouldTerminate()，
+     * 供消费者 switch 语句使用，保证四路互斥完备。
+     * 
+     * 使用示例：
+     * @code
+     * switch (result.toAction()) {
+     *     case FillResult::ConsumerAction::kSubmit:    // 提交 buffer
+     *     case FillResult::ConsumerAction::kSkip:      // continue
+     *     case FillResult::ConsumerAction::kRetry:     // continue（重试）
+     *     case FillResult::ConsumerAction::kTerminate: // break（配合 isAtEnd()/isEoFlush() 区分结束与错误）
+     * }
+     * @endcode
+     */
+    ConsumerAction toAction() const noexcept {
+        if (ok())             return ConsumerAction::kSubmit;
+        if (shouldContinue()) return ConsumerAction::kSkip;
+        if (shouldRetry())    return ConsumerAction::kRetry;
+        return                       ConsumerAction::kTerminate;
+    }
+    
+    /**
+     * @brief 是否应该终止循环（break）
+     * 
+     * 覆盖所有非 ok/skip/retry 的情况：
+     *   - isAcquireEof()：数据获取层报告数据源耗尽
+     *   - isEoFlush()：codec flush pipeline 清空
+     *   - isTerminal()：不可恢复的真正错误
+     * 
+     * 与 shouldContinue() / shouldRetry() 合并后，四路互斥完备（恒为 true）。
+     * 消费者通过 worker->isAtEnd() 或 isEoFlush() 区分"正常结束"与"异常中止"。
+     */
+    bool shouldTerminate() const noexcept {
+        return !ok() && !shouldContinue() && !shouldRetry();
+    }
+    
+    /**
+     * @brief 是否完全绕过帧同步点（不进入 arrive()，不调用 commit）
+     * 
+     * 适用于：packet 未被实际消费、帧版本号未推进的情况。
+     * 此时两路 Worker 均会同时得到相同状态，无需进入同步协调器。
+     * 
+     * 当前适用状态：PacketAlreadyProcessed / NonVideoPacket
+     * 
+     * @note 与 shouldContinue() 的区别：InvalidData 属于 shouldContinue()
+     *       但帧版本已推进，仍需进入同步点；而 PacketAlreadyProcessed /
+     *       NonVideoPacket 帧版本未推进，直接绕过。
+     */
+    bool shouldBypassFrameSync() const noexcept {
+        if (!isAcquireError()) return false;
+        return acquire_cause_ == AcquireStatus::PacketAlreadyProcessed ||
+               acquire_cause_ == AcquireStatus::NonVideoPacket;
     }
     
     // ===== 第二层查询：哪个模块的错误 =====

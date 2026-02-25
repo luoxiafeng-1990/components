@@ -155,8 +155,10 @@ bool WorkerSyncCoordinator::arrive(
         
         // 统计各状态的数量
         // v2.34 变更：使用 FillResult 判断
+        // v2.36 变更：分离 eof_count / error_count，EOF 是正常结束而非错误
         int success_count = 0;
         int eagain_count = 0;
+        int eof_count   = 0;
         int error_count = 0;
         
         for (const auto& [name, r] : sync.worker_results) {
@@ -164,8 +166,12 @@ bool WorkerSyncCoordinator::arrive(
                 success_count++;
             } else if (r.shouldContinue() || r.shouldRetry()) {
                 eagain_count++;
+            } else if (r.isEoFlush() || r.isAcquireEof()) {
+                // 干净退出信号，不计入 error_count：
+                // - isEoFlush()：codec flush pipeline 清空
+                // - isAcquireEof()：数据获取层报告数据源耗尽（消费者此时 isAtEnd() 同步为 true）
+                eof_count++;
             } else {
-                // 终止/错误状态（EOF, 各种不可恢复的 Error）
                 error_count++;
             }
         }
@@ -208,12 +214,20 @@ bool WorkerSyncCoordinator::arrive(
             sync.should_submit = false;
             // TODO: 可以设置标志通知外部切换比较模式
         }
-        else {
-            // 场景 2b/3b：有 ERROR（无论是否有成功）→ 跳过回调，继续下一帧
-            LOG4CPLUS_DEBUG_FMT(logger_, 
-                "[Frame %llu] 有 Worker 返回错误 (成功:%d, EAGAIN:%d, ERROR:%d)，跳过当前帧", 
+        else if (eof_count > 0) {
+            // 场景 4：有 Worker 正常 EOF → 数据源结束，干净跳过，不算错误
+            LOG4CPLUS_DEBUG_FMT(logger_,
+                "[Frame %llu] 有 Worker EOF (成功:%d, EAGAIN:%d, EOF:%d, 错误:%d)，跳过当前帧",
                 (unsigned long long)frame_version,
-                success_count, eagain_count, error_count);
+                success_count, eagain_count, eof_count, error_count);
+            sync.should_submit = false;
+        }
+        else {
+            // 场景 2b/3b：有不可恢复 ERROR（无论是否有成功）→ 跳过回调，继续下一帧
+            LOG4CPLUS_WARN_FMT(logger_, 
+                "[Frame %llu] 有 Worker 返回错误 (成功:%d, EAGAIN:%d, EOF:%d, 错误:%d)，跳过当前帧", 
+                (unsigned long long)frame_version,
+                success_count, eagain_count, eof_count, error_count);
             sync.should_submit = false;
         }
         

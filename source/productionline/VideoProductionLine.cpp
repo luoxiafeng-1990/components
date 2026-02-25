@@ -293,109 +293,95 @@ void VideoProductionLine::producerThreadFunc(int thread_id) {
     int thread_produced = 0;
     int thread_skipped = 0;
     int consecutive_failures = 0;
-    int buffer_wait_count = 0;  // 缓冲区等待计数器，避免频繁日志
+    int buffer_wait_count = 0;
+    bool stop_loop = false;  // 用于从 switch-case 内部退出外层 while
+
     if (monitor_) {
-        monitor_->start();  // 启动后Timer会自动触发周期性报告
+        monitor_->start();
     }
-    
-    while (running_.load()) {
-        // 🎯 统一的流程：从工作 BufferPool 获取 buffer（使用临时 shared_ptr）
+
+    while (running_.load() && !stop_loop) {
+        // ── 步骤 1：获取空闲 buffer ──
         Buffer* buffer = nullptr;
         while (running_.load() && buffer == nullptr) {
             buffer = pool_sptr->acquireFree(true, 100);  // 100ms 超时
             if (buffer == nullptr && running_.load()) {
-                // 超时但仍在运行，继续等待
                 buffer_wait_count++;
-                // 每100次等待才打印一次日志，避免过于频繁
                 if (buffer_wait_count % 100 == 1) {
-                    LOG4CPLUS_DEBUG_FMT(logger_, "[VideoProductionLine][Thread #%d] Waiting for free buffer from pool '%s' (thread_produced=%d, wait_count=%d)...",
-                                  thread_id, pool_sptr->getName().c_str(), thread_produced, buffer_wait_count);
+                    LOG4CPLUS_DEBUG_FMT(logger_,
+                        "[Thread #%d] Waiting for free buffer (pool='%s', produced=%d, wait=%d)",
+                        thread_id, pool_sptr->getName().c_str(), thread_produced, buffer_wait_count);
                 }
             }
         }
+        if (!running_.load()) break;
 
-        // 检查是否因为停止信号退出循环
-        if (!running_.load()) {
-            break;
-        }
-        
-        if (monitor_) {
-            monitor_->beginTiming("fill_buffer");
-        }
-        
-        // v2.33 变更：fillBuffer 返回 FillResult
-        FillResult fill_result = worker_facade_sptr_->fillBuffer(thread_produced, buffer);
-        
-        // 5. 🎯 统一的处理：提交或归还
-        if (fill_result.ok()) {
-            // ✅ 填充成功：提交到 filled 队列（供消费者使用）
-            pool_sptr->submitFilled(buffer);
-            produced_frames_.fetch_add(1);
-            thread_produced++;
-            consecutive_failures = 0;  // 重置失败计数
-            if (monitor_) {
-                monitor_->endTiming("fill_buffer");
-            }
-        } else if (fill_result.isEof() || worker_facade_sptr_->isAtEnd()) {
-            // ⚠️ EOF：检查是否循环模式
-            if (loop_) {
-                // 🔧 修复：循环模式下，当 Worker 到达 EOF 时，重置 Worker
-                // 这确保循环播放时 Worker 能够从文件开头重新开始读取
-                LOG4CPLUS_DEBUG_FMT(logger_, "[Thread #%d] Worker reached EOF in loop mode, resetting to begin (frame_index=%d)", 
-                              thread_id, thread_produced);
-                if (worker_facade_sptr_->seekToBegin()) {
-                    // 重置成功：归还 buffer，重置失败计数，继续下一次循环
-                    // 注意：不增加 skipped_frames，因为这是正常的循环重置操作
-                    pool_sptr->releaseFree(buffer);
-                    consecutive_failures = 0;
-                } else {
-                    LOG4CPLUS_ERROR_FMT(logger_, "[Thread #%d] Failed to reset Worker to begin", thread_id);
-                    // 重置失败，按正常失败处理
-                    pool_sptr->releaseFree(buffer);
-                    skipped_frames_.fetch_add(1);
-                    thread_skipped++;
-                    consecutive_failures++;
-                }
-            } else {
-                // 🔧 修复：非循环模式下，Worker 到达 EOF 时应该停止循环
-                LOG4CPLUS_DEBUG_FMT(logger_, "[Thread #%d] Worker reached EOF in non-loop mode, stopping producer thread", 
-                              thread_id);
+        // ── 步骤 2：填充 buffer（lambda 提供独立作用域，ScopedTiming 在 fillBuffer 返回后立即析构）──
+        FillResult result = [&]() -> FillResult {
+            ScopedTiming timing(monitor_.get(), "fill_buffer");
+            return worker_facade_sptr_->fillBuffer(thread_produced, buffer);
+        }();
+
+        // ── 步骤 3：根据行动指令处理结果（switch 强制穷举所有 case）──
+        switch (result.toAction()) {
+            case FillResult::ConsumerAction::kSubmit:
+                // ✅ 填充成功：提交 buffer
+                pool_sptr->submitFilled(buffer);
+                produced_frames_.fetch_add(1);
+                ++thread_produced;
+                consecutive_failures = 0;
+                break;
+
+            case FillResult::ConsumerAction::kSkip:
+                // ⏭ 跳过当前 packet（PacketAlreadyProcessed / NonVideoPacket / InvalidData）
                 pool_sptr->releaseFree(buffer);
-                if (monitor_) {
-                    monitor_->endTiming("fill_buffer");
-                }
-                // 停止循环，退出生产者线程
                 break;
-            }
-            if (monitor_) {
-                monitor_->endTiming("fill_buffer");
-            }
-        } else if (fill_result.shouldContinue() || fill_result.shouldRetry()) {
-            // ⏭ shouldContinue: 跳过当前 packet，获取下一个（PacketAlreadyProcessed / NonVideoPacket / InvalidData）
-            // 🔄 shouldRetry: 重试当前操作（Again / TimedOut / CodecEagain）
-            // 两者都释放 buffer，继续循环（不累计失败次数）
-            pool_sptr->releaseFree(buffer);
-            if (monitor_) {
-                monitor_->endTiming("fill_buffer");
-            }
-        } else {
-            // ❌ 真正的错误：累计失败次数
-            pool_sptr->releaseFree(buffer);
-            skipped_frames_.fetch_add(1);
-            thread_skipped++;
-            // 🎯 累加连续失败次数（PerformanceMonitor的Timer会每2秒自动打印统计）
-            consecutive_failures++;
-            if (consecutive_failures > kMaxConsecutiveFailures) {
-                LOG4CPLUS_ERROR_FMT(logger_, "[Thread #%d] Failed to fill buffer %d times in a row, stopping producer thread", 
-                              thread_id, kMaxConsecutiveFailures);
-                if (monitor_) {
-                    monitor_->endTiming("fill_buffer");
+
+            case FillResult::ConsumerAction::kRetry:
+                // 🔄 重试当前操作（Again / TimedOut / CodecEagain）
+                pool_sptr->releaseFree(buffer);
+                break;
+
+            case FillResult::ConsumerAction::kTerminate:
+                // 🔚 终止：EOF 或不可恢复错误
+                pool_sptr->releaseFree(buffer);
+                // v2.36：用 isAtEnd()（权威）+  isEoFlush()（codec flush）两路联合判断干净退出
+                // isAtEnd() 覆盖：文件/流 EOF、Buffer pool 停止（含 window 期内的错误路径）
+                // isEoFlush() 覆盖：codec 内部 flush pipeline 清空
+                if (result.isEoFlush() || worker_facade_sptr_->isAtEnd()) {
+                    if (!loop_) {
+                        // 非循环模式：正常结束
+                        LOG4CPLUS_DEBUG_FMT(logger_,
+                            "[Thread #%d] data source exhausted in non-loop mode, stopping", thread_id);
+                        stop_loop = true;
+                        break;
+                    }
+                    // 循环模式：重置到文件开头
+                    LOG4CPLUS_DEBUG_FMT(logger_,
+                        "[Thread #%d] data source exhausted in loop mode, seeking to begin (produced=%d)",
+                        thread_id, thread_produced);
+                    if (worker_facade_sptr_->seekToBegin()) {
+                        consecutive_failures = 0;
+                        break;  // seekToBegin 成功，继续循环
+                    }
+                    // seekToBegin 失败：fall-through 到错误计数
+                    LOG4CPLUS_ERROR_FMT(logger_, "[Thread #%d] seekToBegin failed", thread_id);
+                } else {
+                    // 不可恢复错误：记录详情
+                    LOG4CPLUS_ERROR_FMT(logger_,
+                        "[Thread #%d] fillBuffer terminal error: [%s] %s",
+                        thread_id, errorSourceToString(result.source()), result.statusString());
+                }
+                // ── 统一计数 + break 判断（覆盖：非循环EOF seekToBegin失败 / 真正错误）──
+                skipped_frames_.fetch_add(1);
+                ++thread_skipped;
+                if (++consecutive_failures > kMaxConsecutiveFailures) {
+                    LOG4CPLUS_ERROR_FMT(logger_,
+                        "[Thread #%d] %d consecutive failures, stopping producer thread",
+                        thread_id, kMaxConsecutiveFailures);
+                    stop_loop = true;
                 }
                 break;
-            }
-            if (monitor_) {
-                monitor_->endTiming("fill_buffer");
-            }
         }
     }
     

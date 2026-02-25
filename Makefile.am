@@ -6,6 +6,9 @@ noinst_LTLIBRARIES = libcomponents.la
 
 libcomponents_la_SOURCES = \
     source/display/LinuxFramebufferDevice.cpp \
+    source/display/TacoVOContext.cpp \
+    source/display/TacoVODisplayDevice.cpp \
+    source/display/DisplayDeviceFactory.cpp \
     source/productionline/worker/WorkerBase.cpp \
     source/productionline/worker/BufferFillingWorkerFacade.cpp \
     source/productionline/worker/BufferFillingWorkerFactory.cpp \
@@ -48,7 +51,7 @@ libcomponents_la_SOURCES = \
 # 1. Buildroot 会自动编译 log4cplus（已在 components.mk 中声明依赖）
 # 2. log4cplus 库位置：$(STAGING_DIR)/usr/lib/liblog4cplus-2.0.so.3.4.7
 # 3. 运行时需要目标系统有 log4cplus 动态库（Buildroot 会自动安装到 TARGET_DIR）
-COMMON_LIBS = -lpthread -luring -lavformat -lavcodec -lavutil -lswscale -ltacosys -llog4cplus
+COMMON_LIBS = -lpthread -luring -lavformat -lavcodec -lavutil -lswscale -ltacosys -ltacovo -ltacocv -llog4cplus
 
 # display_test 主程序（已废弃，原 test_cases/dec/ 目录已重命名为 old_case/）
 # display_test_SOURCES = test_cases/dec/test.cpp
@@ -75,7 +78,7 @@ qa_cases_SOURCES = \
     test_cases/writer/WriterTestSuite.cpp
 qa_cases_LDADD = libcomponents.la $(COMMON_LIBS)
 qa_cases_CPPFLAGS = -I$(top_srcdir)/test_cases $(AM_CPPFLAGS)
-qa_cases_LDFLAGS = 
+qa_cases_LDFLAGS = -Wl,--allow-shlib-undefined
 
 # ========== 编译选项 ==========
 AM_CPPFLAGS = -I$(top_srcdir)/include

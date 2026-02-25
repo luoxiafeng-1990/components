@@ -406,8 +406,7 @@ static std::shared_ptr<IBufferConsumer> createConsumerForWorker(
     
     // 1. 显示消费者
     if (flags & CONSUME_DISPLAY) {
-        consumers.push_back(std::make_shared<DisplayConsumer>(
-            config.display.device_id));
+        consumers.push_back(std::make_shared<DisplayConsumer>(config.display));
     }
     
     // 2. 保存原始数据消费者
@@ -738,8 +737,7 @@ std::shared_ptr<IBufferConsumer> BufferConsumerService::createConsumerFromFlags(
             return std::make_shared<CountConsumer>();
         }
         if (flags & CONSUME_DISPLAY) {
-            return std::make_shared<DisplayConsumer>(
-                config.consumer_type.display.device_id);
+            return std::make_shared<DisplayConsumer>(config.consumer_type.display);
         }
         if (flags & CONSUME_SAVE_RAW) {
             return std::make_shared<SaveRawConsumer>(
@@ -763,8 +761,7 @@ std::shared_ptr<IBufferConsumer> BufferConsumerService::createConsumerFromFlags(
     multi->addStrategy(std::make_shared<CountConsumer>());
     
     if (flags & CONSUME_DISPLAY) {
-        multi->addStrategy(std::make_shared<DisplayConsumer>(
-            config.consumer_type.display.device_id));
+        multi->addStrategy(std::make_shared<DisplayConsumer>(config.consumer_type.display));
     }
     if (flags & CONSUME_SAVE_RAW) {
         multi->addStrategy(std::make_shared<SaveRawConsumer>(
