@@ -17,6 +17,8 @@
 #include <memory>
 #include <cstdint>
 
+#include "common/Timer.hpp"
+
 #include <log4cplus/logger.h>
 #include <log4cplus/loggingmacros.h>
 
@@ -122,7 +124,7 @@ private:
     void ppCopy(Buffer* src, Buffer* dst);
     void computeGridLayout(int channel_index, ChannelLayout& layout) const;
 
-    void timerThreadFunc();
+    void onTimerTick();
     void displayThreadFunc();
 
     // === 配置 ===
@@ -182,11 +184,11 @@ private:
     // === display_buf_ 读写保护 ===
     std::mutex display_mutex_;
 
-    // === 线程 ===
-    std::thread timer_thread_;
+    // === 线程 & 定时器 ===
+    Timer timer_;
+    Timer::TimerId timer_id_ = 0;
     std::thread display_thread_;
     std::atomic<bool> running_{false};
-    int timer_fd_ = -1;
 
     // === OSD 叠加（可选，图形层 overlay1）===
     std::unique_ptr<OsdOverlay> osd_;

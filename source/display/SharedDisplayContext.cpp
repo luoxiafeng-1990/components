@@ -6,7 +6,6 @@
 #include <unistd.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
-#include <sys/timerfd.h>
 #include <linux/fb.h>
 #include <cstring>
 #include <cerrno>
@@ -805,29 +804,14 @@ void SharedDisplayContext::ppCopy(Buffer* src, Buffer* dst) {
 // ============================================================
 
 bool SharedDisplayContext::startThreads() {
-    timer_fd_ = timerfd_create(CLOCK_MONOTONIC, TFD_CLOEXEC);
-    if (timer_fd_ < 0) {
-        LOG4CPLUS_ERROR_FMT(logger_, "timerfd_create failed: %s", strerror(errno));
-        return false;
-    }
-
     int fps = config_.target_fps > 0 ? config_.target_fps : 30;
-    long interval_ns = 1000000000L / fps;
-
-    struct itimerspec ts = {};
-    ts.it_interval.tv_sec  = interval_ns / 1000000000L;
-    ts.it_interval.tv_nsec = interval_ns % 1000000000L;
-    ts.it_value = ts.it_interval;
-
-    if (timerfd_settime(timer_fd_, 0, &ts, nullptr) < 0) {
-        LOG4CPLUS_ERROR_FMT(logger_, "timerfd_settime failed: %s", strerror(errno));
-        close(timer_fd_);
-        timer_fd_ = -1;
-        return false;
-    }
+    int interval_ms = 1000 / fps;
 
     running_ = true;
-    timer_thread_   = std::thread(&SharedDisplayContext::timerThreadFunc, this);
+
+    timer_.start();
+    timer_id_ = timer_.scheduleRepeated(interval_ms, [this]() { onTimerTick(); });
+
     display_thread_ = std::thread(&SharedDisplayContext::displayThreadFunc, this);
 
     LOG4CPLUS_INFO_FMT(logger_, "Timer and display threads started (target_fps=%d)", fps);
@@ -837,100 +821,46 @@ bool SharedDisplayContext::startThreads() {
 void SharedDisplayContext::stopThreads() {
     running_ = false;
 
-    // 唤醒所有阻塞在条件变量上的通道线程
     round_cv_.notify_all();
 
-    if (timer_fd_ >= 0) {
-        struct itimerspec ts = {};
-        timerfd_settime(timer_fd_, 0, &ts, nullptr);
+    if (timer_id_ != 0) {
+        timer_.cancel(timer_id_);
+        timer_id_ = 0;
     }
+    timer_.stop();
 
-    // 唤醒显示线程（可能阻塞在 acquireFilled）
     auto pool = getPool();
     if (pool) {
         pool->shutdown();
     }
 
-    if (timer_thread_.joinable()) {
-        timer_thread_.join();
-    }
     if (display_thread_.joinable()) {
         display_thread_.join();
     }
-
-    if (timer_fd_ >= 0) {
-        close(timer_fd_);
-        timer_fd_ = -1;
-    }
 }
 
-void SharedDisplayContext::timerThreadFunc() {
-    LOG4CPLUS_DEBUG(logger_, "Timer thread started");
+void SharedDisplayContext::onTimerTick() {
+    if (!running_) return;
+
     auto pool = getPool();
-    if (!pool) {
-        LOG4CPLUS_ERROR(logger_, "Timer thread: pool is null");
+    if (!pool) return;
+
+    Buffer* old_render = nullptr;
+
+    {
+        std::unique_lock<std::shared_mutex> lock(rw_mutex_);
+        old_render = render_buf_;
+        render_buf_ = nullptr;
+    }
+
+    if (!old_render) {
         return;
     }
 
-    while (running_) {
-        uint64_t expirations = 0;
-        ssize_t s = read(timer_fd_, &expirations, sizeof(expirations));
-        if (s != sizeof(expirations)) {
-            if (!running_) break;
-            continue;
-        }
-
-        Buffer* old_render = nullptr;
-
-        // Step 1: 获取独占锁 → 等待所有正在进行的 PP resize 完成
-        {
-            std::unique_lock<std::shared_mutex> lock(rw_mutex_);
-            old_render = render_buf_;
-            render_buf_ = nullptr;
-        }
-
-        if (!old_render) {
-            continue;
-        }
-
-        // Step 2: 尝试获取空闲 buffer
-        Buffer* new_render = pool->acquireFree(false, 0);
-        if (!new_render) {
-            std::unique_lock<std::shared_mutex> lock(rw_mutex_);
-            render_buf_ = old_render;
-            // 即使没拿到新 buffer，也要重置标记唤醒通道，
-            // 否则通道会永远阻塞
-            {
-                std::lock_guard<std::mutex> round_lock(round_mutex_);
-                for (auto& ch : channels_) {
-                    ch.written_this_round = false;
-                }
-            }
-            round_cv_.notify_all();
-            continue;
-        }
-
-        // Step 3: 提交旧 buffer 到 FILLED 队列
-        pool->submitFilled(old_render);
-
-        // Step 4: PP 硬件拷贝陈旧区域（display_buf_ → new_render）
-        // 在 display_mutex_ 保护下读取 display_buf_，
-        // 防止 displayThreadFunc 在 ppCopy 期间释放该 buffer
-        // 注：display_buf_ 为 nullptr 仅发生在首次定时器 tick（DMA 内存已在 allocateDmaMemory 中清零）
-        {
-            std::lock_guard<std::mutex> dlock(display_mutex_);
-            if (display_buf_) {
-                ppCopy(display_buf_, new_render);
-            }
-        }
-
-        // Step 5: 设置新的渲染目标
-        {
-            std::unique_lock<std::shared_mutex> lock(rw_mutex_);
-            render_buf_ = new_render;
-        }
-
-        // Step 6: 重置所有通道的写入标记，唤醒等待的通道线程
+    Buffer* new_render = pool->acquireFree(false, 0);
+    if (!new_render) {
+        std::unique_lock<std::shared_mutex> lock(rw_mutex_);
+        render_buf_ = old_render;
         {
             std::lock_guard<std::mutex> round_lock(round_mutex_);
             for (auto& ch : channels_) {
@@ -938,9 +868,30 @@ void SharedDisplayContext::timerThreadFunc() {
             }
         }
         round_cv_.notify_all();
+        return;
     }
 
-    LOG4CPLUS_DEBUG(logger_, "Timer thread exited");
+    pool->submitFilled(old_render);
+
+    {
+        std::lock_guard<std::mutex> dlock(display_mutex_);
+        if (display_buf_) {
+            ppCopy(display_buf_, new_render);
+        }
+    }
+
+    {
+        std::unique_lock<std::shared_mutex> lock(rw_mutex_);
+        render_buf_ = new_render;
+    }
+
+    {
+        std::lock_guard<std::mutex> round_lock(round_mutex_);
+        for (auto& ch : channels_) {
+            ch.written_this_round = false;
+        }
+    }
+    round_cv_.notify_all();
 }
 
 // ============================================================

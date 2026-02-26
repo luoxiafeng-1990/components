@@ -4,9 +4,9 @@
 #include <string>
 #include <vector>
 #include <mutex>
-#include <thread>
 #include <atomic>
 #include <cstdint>
+#include <memory>
 
 #include <log4cplus/logger.h>
 #include <log4cplus/loggingmacros.h>
@@ -14,17 +14,21 @@
 #include <ft2build.h>
 #include FT_FREETYPE_H
 
+#include "common/Timer.hpp"
+#include "buffer/BufferAllocatorFacade.hpp"
+#include "buffer/bufferpool/BufferPool.hpp"
+#include "buffer/bufferpool/BufferPoolRegistry.hpp"
+
 extern "C" {
 #include "taco_sys_api.h"
 }
-
-struct tpsfb_dma_info;
 
 /**
  * OsdOverlay - 图形层 OSD 叠加显示
  *
  * 在 DSS overlay1 上渲染通道号、时间戳、帧率等文字信息。
  * 使用 ARGB8888 格式，alpha=0 的区域完全透明，不遮挡视频层。
+ * 通过 BufferPool 管理 4 个 DMA 缓冲页，FBIOPAN_DISPLAY 硬件翻页实现零拷贝无闪烁。
  *
  * 前提：设备树中 overlay-1 的 resolution 需配置为与屏幕一致（如 1920x1080）。
  */
@@ -73,19 +77,20 @@ private:
         }
     };
 
+    static constexpr int BUFFER_COUNT = 4;
+
     bool openFbDevice();
     bool allocateDmaMemory();
     void freeDmaMemory();
+    bool createBufferPool();
     bool setupDssOverlay1();
     bool initFreeType(const Config& config);
     void cleanupFreeType();
 
-    void refreshThreadFunc();
+    void onTimerTick();
     void renderOsd();
-    void clearBuffer();
-    void drawRect(int x, int y, int w, int h, uint32_t argb_color);
-    void drawText(int x, int y, const std::string& text, uint32_t color);
-    void drawCharGlyph(int base_x, int base_y, FT_GlyphSlot glyph, uint32_t color);
+    void drawText(int x, int y, const std::string& text, uint32_t color, uint32_t* buf);
+    void drawCharGlyph(int base_x, int base_y, FT_GlyphSlot glyph, uint32_t color, uint32_t* buf);
 
     int screen_width_;
     int screen_height_;
@@ -97,12 +102,14 @@ private:
         uint32_t blk_id = 0;
         uint64_t phys_addr = 0;
         void*    virt_addr = nullptr;
-        size_t   size = 0;
+        size_t   frame_size = 0;
+        size_t   total_size = 0;
     };
     DmaMemory dma_mem_;
 
-    uint32_t* pixel_buf_ = nullptr;
-    uint32_t* shadow_buf_ = nullptr;
+    std::unique_ptr<BufferAllocatorFacade> allocator_;
+    uint64_t pool_id_ = 0;
+    Buffer* display_buf_ = nullptr;
 
     FT_Library ft_lib_ = nullptr;
     FT_Face    ft_face_ = nullptr;
@@ -110,9 +117,8 @@ private:
     std::vector<OsdChannelInfo> channels_;
     std::mutex channel_mutex_;
 
-    std::thread refresh_thread_;
-    std::atomic<bool> running_{false};
-    int timer_fd_ = -1;
+    Timer timer_;
+    Timer::TimerId timer_id_ = 0;
     Config config_;
 
     log4cplus::Logger logger_;

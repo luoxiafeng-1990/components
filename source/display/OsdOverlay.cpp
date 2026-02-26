@@ -4,7 +4,6 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <sys/ioctl.h>
-#include <sys/timerfd.h>
 #include <linux/fb.h>
 #include <cstring>
 #include <cerrno>
@@ -66,68 +65,49 @@ bool OsdOverlay::init(const Config& config) {
 
     if (!openFbDevice()) return false;
     if (!allocateDmaMemory()) { close(fb_fd_); fb_fd_ = -1; return false; }
+    if (!createBufferPool()) { freeDmaMemory(); close(fb_fd_); fb_fd_ = -1; return false; }
     if (!setupDssOverlay1()) { freeDmaMemory(); close(fb_fd_); fb_fd_ = -1; return false; }
     if (!initFreeType(config)) { freeDmaMemory(); close(fb_fd_); fb_fd_ = -1; return false; }
 
-    shadow_buf_ = static_cast<uint32_t*>(malloc(dma_mem_.size));
-    if (!shadow_buf_) {
-        LOG4CPLUS_ERROR(logger_, "OSD shadow buffer malloc failed");
-        cleanupFreeType(); freeDmaMemory(); close(fb_fd_); fb_fd_ = -1;
-        return false;
-    }
-
-    clearBuffer();
-
-    timer_fd_ = timerfd_create(CLOCK_MONOTONIC, TFD_CLOEXEC);
-    if (timer_fd_ < 0) {
-        LOG4CPLUS_ERROR_FMT(logger_, "OSD timerfd_create failed: %s", strerror(errno));
-        cleanupFreeType(); freeDmaMemory(); close(fb_fd_); fb_fd_ = -1;
-        return false;
-    }
-
     int fps = config_.refresh_fps > 0 ? config_.refresh_fps : 1;
-    long interval_ns = 1000000000L / fps;
-    struct itimerspec ts = {};
-    ts.it_interval.tv_sec  = interval_ns / 1000000000L;
-    ts.it_interval.tv_nsec = interval_ns % 1000000000L;
-    ts.it_value = ts.it_interval;
+    int interval_ms = 1000 / fps;
 
-    if (timerfd_settime(timer_fd_, 0, &ts, nullptr) < 0) {
-        LOG4CPLUS_ERROR_FMT(logger_, "OSD timerfd_settime failed: %s", strerror(errno));
-        close(timer_fd_); timer_fd_ = -1;
-        cleanupFreeType(); freeDmaMemory(); close(fb_fd_); fb_fd_ = -1;
-        return false;
-    }
-
-    running_ = true;
-    refresh_thread_ = std::thread(&OsdOverlay::refreshThreadFunc, this);
+    timer_.start();
+    timer_id_ = timer_.scheduleRepeated(interval_ms, [this]() { onTimerTick(); });
 
     LOG4CPLUS_INFO_FMT(logger_,
-        "OSD initialized: %dx%d, refresh=%dfps, font=%s size=%d",
-        screen_width_, screen_height_, fps,
+        "OSD initialized: %dx%d, %d buffers (BufferPool), refresh=%dfps, font=%s size=%d",
+        screen_width_, screen_height_, BUFFER_COUNT, fps,
         config_.font_path.c_str(), config_.font_size);
     return true;
 }
 
 void OsdOverlay::shutdown() {
-    running_ = false;
-
-    if (timer_fd_ >= 0) {
-        struct itimerspec ts = {};
-        timerfd_settime(timer_fd_, 0, &ts, nullptr);
+    if (timer_id_ != 0) {
+        timer_.cancel(timer_id_);
+        timer_id_ = 0;
     }
-
-    if (refresh_thread_.joinable()) {
-        refresh_thread_.join();
-    }
-
-    if (timer_fd_ >= 0) { close(timer_fd_); timer_fd_ = -1; }
+    timer_.stop();
 
     write_sysfs(OVL1_ENABLED_PATH, "0");
     write_sysfs(LCD_TRANS_KEY_ENABLED_PATH, "0");
 
     cleanupFreeType();
-    free(shadow_buf_); shadow_buf_ = nullptr;
+
+    if (pool_id_ != 0) {
+        auto pool = BufferPoolRegistry::getInstance().getPool(pool_id_).lock();
+        if (pool) {
+            if (display_buf_) {
+                pool->releaseFilled(display_buf_);
+                display_buf_ = nullptr;
+            }
+            pool->shutdown();
+        }
+        pool_id_ = 0;
+    }
+    allocator_.reset();
+    display_buf_ = nullptr;
+
     freeDmaMemory();
 
     if (fb_fd_ >= 0) { close(fb_fd_); fb_fd_ = -1; }
@@ -173,11 +153,11 @@ bool OsdOverlay::openFbDevice() {
         return false;
     }
 
-    // 读取 fb 设备的实际分辨率（由设备树决定）
     struct fb_var_screeninfo var_info;
     if (ioctl(fb_fd_, FBIOGET_VSCREENINFO, &var_info) == 0) {
-        LOG4CPLUS_INFO_FMT(logger_, "OSD fb device: %s, resolution=%dx%d, bpp=%d",
-            fb_path, var_info.xres, var_info.yres, var_info.bits_per_pixel);
+        LOG4CPLUS_INFO_FMT(logger_, "OSD fb device: %s, resolution=%dx%d, bpp=%d, yres_virtual=%d",
+            fb_path, var_info.xres, var_info.yres,
+            var_info.bits_per_pixel, var_info.yres_virtual);
 
         if (static_cast<int>(var_info.xres) != screen_width_ ||
             static_cast<int>(var_info.yres) != screen_height_) {
@@ -191,50 +171,92 @@ bool OsdOverlay::openFbDevice() {
 }
 
 // ============================================================
-// DMA 内存分配
+// DMA 内存分配（4 帧）
 // ============================================================
 
 bool OsdOverlay::allocateDmaMemory() {
-    size_t buf_size = static_cast<size_t>(screen_width_) * screen_height_ * 4;
+    size_t frame_size = static_cast<size_t>(screen_width_) * screen_height_ * 4;
+    size_t total_size = frame_size * BUFFER_COUNT;
 
-    uint32_t blk_id = taco_sys_get_block(TACO_INVALID_POOLID, buf_size, "osd_overlay1");
+    uint32_t blk_id = taco_sys_get_block(TACO_INVALID_POOLID, total_size, "osd_overlay1");
     if (blk_id == 0) {
-        LOG4CPLUS_ERROR_FMT(logger_, "OSD taco_sys_get_block failed, size=%zu", buf_size);
+        LOG4CPLUS_ERROR_FMT(logger_, "OSD taco_sys_get_block failed, size=%zu", total_size);
         return false;
     }
 
     uint64_t phys = taco_sys_handle2_phys_addr(blk_id);
-    void* virt = taco_sys_mmap_noncache(phys, buf_size);
+    void* virt = taco_sys_mmap_noncache(phys, total_size);
     if (!virt) {
         LOG4CPLUS_ERROR(logger_, "OSD taco_sys_mmap_noncache failed");
         taco_sys_release_block(blk_id);
         return false;
     }
 
+    memset(virt, 0, total_size);
+
     dma_mem_.blk_id = blk_id;
     dma_mem_.phys_addr = phys;
     dma_mem_.virt_addr = virt;
-    dma_mem_.size = buf_size;
-    pixel_buf_ = static_cast<uint32_t*>(virt);
+    dma_mem_.frame_size = frame_size;
+    dma_mem_.total_size = total_size;
 
     LOG4CPLUS_INFO_FMT(logger_,
-        "OSD DMA: blk_id=%u, phys=0x%llx, virt=%p, size=%zu",
-        blk_id, (unsigned long long)phys, virt, buf_size);
+        "OSD DMA: blk_id=%u, phys=0x%llx, virt=%p, frame=%zu, total=%zu (%d buffers)",
+        blk_id, (unsigned long long)phys, virt, frame_size, total_size, BUFFER_COUNT);
     return true;
 }
 
 void OsdOverlay::freeDmaMemory() {
     if (dma_mem_.virt_addr) {
-        taco_sys_munmap(dma_mem_.virt_addr, dma_mem_.size);
+        taco_sys_munmap(dma_mem_.virt_addr, dma_mem_.total_size);
         dma_mem_.virt_addr = nullptr;
-        pixel_buf_ = nullptr;
     }
     if (dma_mem_.blk_id) {
         taco_sys_release_block(dma_mem_.blk_id);
         dma_mem_.blk_id = 0;
     }
     dma_mem_.phys_addr = 0;
-    dma_mem_.size = 0;
+    dma_mem_.frame_size = 0;
+    dma_mem_.total_size = 0;
+}
+
+// ============================================================
+// BufferPool 创建（4 个 DMA 页注入）
+// ============================================================
+
+bool OsdOverlay::createBufferPool() {
+    allocator_ = std::make_unique<BufferAllocatorFacade>(
+        BufferAllocatorFactory::AllocatorType::FRAMEBUFFER);
+    if (!allocator_) {
+        LOG4CPLUS_ERROR(logger_, "Failed to create BufferAllocatorFacade");
+        return false;
+    }
+
+    pool_id_ = allocator_->allocatePoolWithBuffers(
+        0, 0, "OsdOverlay_fb", "Display");
+    if (pool_id_ == 0) {
+        LOG4CPLUS_ERROR(logger_, "Failed to create OSD BufferPool");
+        return false;
+    }
+
+    uint8_t* base = static_cast<uint8_t*>(dma_mem_.virt_addr);
+    for (int i = 0; i < BUFFER_COUNT; i++) {
+        void*    virt = base + dma_mem_.frame_size * i;
+        uint64_t phys = dma_mem_.phys_addr + dma_mem_.frame_size * i;
+
+        Buffer* buf = allocator_->injectExternalBufferToPool(
+            pool_id_, virt, phys, dma_mem_.frame_size, QueueType::FREE);
+        if (!buf) {
+            LOG4CPLUS_ERROR_FMT(logger_, "Failed to inject OSD buffer #%d", i);
+            pool_id_ = 0;
+            allocator_.reset();
+            return false;
+        }
+    }
+
+    LOG4CPLUS_INFO_FMT(logger_, "OSD BufferPool created: %d buffers, %zu bytes each",
+        BUFFER_COUNT, dma_mem_.frame_size);
+    return true;
 }
 
 // ============================================================
@@ -246,8 +268,6 @@ bool OsdOverlay::setupDssOverlay1() {
     write_sysfs(LCD_ALPHA_BLEND_PATH, "0");
     write_sysfs(LCD_TRANS_KEY_VALUE_PATH, "0");
     write_sysfs(LCD_TRANS_KEY_ENABLED_PATH, "1");
-
-    memset(pixel_buf_, 0, dma_mem_.size);
 
     struct tpsfb_dma_info dma_info;
     dma_info.ovl_idx = 1;
@@ -342,47 +362,38 @@ void OsdOverlay::recordFrame(int channel_id) {
 }
 
 // ============================================================
-// 刷新线程
+// 定时器回调
 // ============================================================
 
-void OsdOverlay::refreshThreadFunc() {
-    while (running_) {
-        uint64_t expirations = 0;
-        ssize_t s = read(timer_fd_, &expirations, sizeof(expirations));
-        if (s != static_cast<ssize_t>(sizeof(expirations))) {
-            if (!running_) break;
-            continue;
-        }
+void OsdOverlay::onTimerTick() {
+    int fps = config_.refresh_fps > 0 ? config_.refresh_fps : 1;
 
-        int fps_multiplier = config_.refresh_fps > 0 ? config_.refresh_fps : 1;
-        {
-            std::lock_guard<std::mutex> lock(channel_mutex_);
-            for (auto& ch : channels_) {
-                if (ch.active) {
-                    int count = ch.frame_count.exchange(0, std::memory_order_relaxed);
-                    ch.current_fps = static_cast<double>(count) * fps_multiplier;
-                }
+    {
+        std::lock_guard<std::mutex> lock(channel_mutex_);
+        for (auto& ch : channels_) {
+            if (ch.active) {
+                int count = ch.frame_count.exchange(0, std::memory_order_relaxed);
+                ch.current_fps = static_cast<double>(count) * fps;
             }
         }
-
-        renderOsd();
     }
+
+    renderOsd();
 }
 
 // ============================================================
-// OSD 渲染
+// OSD 渲染（acquireFree → 渲染 → submitFilled → acquireFilled → pan → releaseFilled旧页）
 // ============================================================
-
-void OsdOverlay::clearBuffer() {
-    if (shadow_buf_) {
-        memset(shadow_buf_, 0, dma_mem_.size);
-    } else if (pixel_buf_) {
-        memset(pixel_buf_, 0, dma_mem_.size);
-    }
-}
 
 void OsdOverlay::renderOsd() {
-    clearBuffer();
+    auto pool = BufferPoolRegistry::getInstance().getPool(pool_id_).lock();
+    if (!pool) return;
+
+    Buffer* buf = pool->acquireFree(false, 0);
+    if (!buf) return;
+
+    uint32_t* pixels = static_cast<uint32_t*>(buf->getVirtualAddress());
+    memset(pixels, 0, dma_mem_.frame_size);
 
     struct timespec ts;
     clock_gettime(CLOCK_REALTIME, &ts);
@@ -392,43 +403,44 @@ void OsdOverlay::renderOsd() {
     char time_str[32];
     strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S", &tm_info);
 
-    std::lock_guard<std::mutex> lock(channel_mutex_);
-    for (const auto& ch : channels_) {
-        if (!ch.active) continue;
+    {
+        std::lock_guard<std::mutex> lock(channel_mutex_);
+        for (const auto& ch : channels_) {
+            if (!ch.active) continue;
 
-        char osd_text[128];
-        snprintf(osd_text, sizeof(osd_text), "CH%d | %s | %.1ffps",
-                 ch.channel_id + 1, time_str, ch.current_fps);
+            char osd_text[128];
+            snprintf(osd_text, sizeof(osd_text), "CH%d | %s | %.1ffps",
+                     ch.channel_id + 1, time_str, ch.current_fps);
 
-        int text_x = ch.x + 4;
-        int text_y = ch.y + config_.font_size + 4;
-
-        drawText(text_x, text_y, osd_text, 0xFFFFFFFF);
-    }
-
-    if (shadow_buf_ && pixel_buf_) {
-        memcpy(pixel_buf_, shadow_buf_, dma_mem_.size);
-    }
-}
-
-void OsdOverlay::drawRect(int x, int y, int w, int h, uint32_t argb_color) {
-    uint32_t* buf = shadow_buf_ ? shadow_buf_ : pixel_buf_;
-    if (!buf) return;
-
-    int x0 = std::max(0, x);
-    int y0 = std::max(0, y);
-    int x1 = std::min(screen_width_, x + w);
-    int y1 = std::min(screen_height_, y + h);
-
-    for (int py = y0; py < y1; ++py) {
-        for (int px = x0; px < x1; ++px) {
-            buf[py * screen_width_ + px] = argb_color;
+            drawText(ch.x + 4, ch.y + config_.font_size + 4, osd_text, 0xFFFFFFFF, pixels);
         }
     }
+
+    pool->submitFilled(buf);
+
+    Buffer* disp = pool->acquireFilled(false, 0);
+    if (!disp) return;
+
+    size_t offset = disp->getPhysicalAddress() - dma_mem_.phys_addr;
+    int page_index = static_cast<int>(offset / dma_mem_.frame_size);
+
+    struct fb_var_screeninfo var;
+    if (ioctl(fb_fd_, FBIOGET_VSCREENINFO, &var) == 0) {
+        var.yoffset = page_index * var.yres;
+        ioctl(fb_fd_, FBIOPAN_DISPLAY, &var);
+    }
+
+    if (display_buf_) {
+        pool->releaseFilled(display_buf_);
+    }
+    display_buf_ = disp;
 }
 
-void OsdOverlay::drawText(int x, int y, const std::string& text, uint32_t color) {
-    uint32_t* buf = shadow_buf_ ? shadow_buf_ : pixel_buf_;
+// ============================================================
+// 绘制函数
+// ============================================================
+
+void OsdOverlay::drawText(int x, int y, const std::string& text, uint32_t color, uint32_t* buf) {
     if (!ft_face_ || !buf) return;
 
     int pen_x = x;
@@ -439,21 +451,15 @@ void OsdOverlay::drawText(int x, int y, const std::string& text, uint32_t color)
         if (err) continue;
 
         FT_GlyphSlot glyph = ft_face_->glyph;
-        int glyph_x = pen_x + glyph->bitmap_left;
-        int glyph_y = pen_y - glyph->bitmap_top;
-
-        drawCharGlyph(glyph_x, glyph_y, glyph, color);
-
+        drawCharGlyph(pen_x + glyph->bitmap_left, pen_y - glyph->bitmap_top, glyph, color, buf);
         pen_x += static_cast<int>(glyph->advance.x >> 6);
     }
 }
 
-void OsdOverlay::drawCharGlyph(int base_x, int base_y, FT_GlyphSlot glyph, uint32_t color) {
-    uint32_t* buf = shadow_buf_ ? shadow_buf_ : pixel_buf_;
+void OsdOverlay::drawCharGlyph(int base_x, int base_y, FT_GlyphSlot glyph, uint32_t color, uint32_t* buf) {
     if (!buf) return;
 
     FT_Bitmap& bmp = glyph->bitmap;
-
     uint8_t r = (color >> 16) & 0xFF;
     uint8_t g = (color >> 8) & 0xFF;
     uint8_t b = color & 0xFF;
