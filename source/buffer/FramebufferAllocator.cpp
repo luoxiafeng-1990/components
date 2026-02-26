@@ -2,7 +2,6 @@
 #include "common/Logger.hpp"
 #include "buffer/bufferpool/BufferPool.hpp"
 #include "buffer/bufferpool/BufferPoolRegistry.hpp"
-#include "display/LinuxFramebufferDevice.hpp"
 #include <stdio.h>
 #include <vector>
 #include <unordered_map>
@@ -38,21 +37,6 @@ FramebufferAllocator::FramebufferAllocator(const std::vector<BufferInfo>& extern
            external_buffers_.size());
 }
 
-FramebufferAllocator::FramebufferAllocator(LinuxFramebufferDevice* device)
-    : next_buffer_index_(0)
-    , logger_(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Allocator.Framebuffer")))
-{
-    if (!device) {
-        LOG4CPLUS_ERROR(logger_, "ERROR: Device pointer is null");
-        return;
-    }
-    
-    // 调用私有方法构建 BufferInfo 列表
-    external_buffers_ = buildBufferInfosFromDevice(device);
-    
-    LOG4CPLUS_DEBUG_FMT(logger_, "创建: 从device获取%zu buffers", 
-           external_buffers_.size());
-}
 
 FramebufferAllocator::~FramebufferAllocator() {
     // v2.0: 子类析构函数中显式清理所有 Pool
@@ -180,48 +164,6 @@ void FramebufferAllocator::deallocateBuffer(Buffer* buffer) {
     
     // 2. 仅删除 Buffer 对象
     delete buffer;
-}
-
-// ============================================================
-// 私有辅助方法：从设备构建 BufferInfo 列表
-// ============================================================
-
-std::vector<FramebufferAllocator::BufferInfo> 
-FramebufferAllocator::buildBufferInfosFromDevice(LinuxFramebufferDevice* device)
-{
-    // 静态函数需要临时创建 logger 实例
-    auto logger = log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Allocator.Framebuffer"));
-    
-    std::vector<BufferInfo> infos;
-    
-    if (!device) {
-        LOG4CPLUS_ERROR(logger, "ERROR: Device pointer is null in buildBufferInfosFromDevice");
-        return infos;
-    }
-    
-    // 1. 从设备获取 mmap 信息
-    auto mapped_info = device->getMappedInfo();
-    
-    LOG4CPLUS_INFO(logger, "📋 Building BufferInfo list from device:");
-    LOG4CPLUS_INFO_FMT(logger, "   base_addr=%p, buffer_size=%zu, buffer_count=%d",
-           mapped_info.base_addr, mapped_info.buffer_size, mapped_info.buffer_count);
-    
-    // 2. 计算每个 buffer 的地址并构建 BufferInfo
-    unsigned char* base = (unsigned char*)mapped_info.base_addr;
-    infos.reserve(mapped_info.buffer_count);
-    
-    for (int i = 0; i < mapped_info.buffer_count; i++) {
-        infos.push_back({
-            .virt_addr = (void*)(base + i * mapped_info.buffer_size),
-            .phys_addr = 0,  // 物理地址由系统自动获取
-            .size = mapped_info.buffer_size
-        });
-        
-        LOG4CPLUS_DEBUG_FMT(logger, "   Buffer[%d]: virt=%p, size=%zu", 
-               i, infos.back().virt_addr, infos.back().size);
-    }
-    
-    return infos;
 }
 
 // ============================================================

@@ -221,7 +221,7 @@ ConsumeResult BufferConsumerService::startProductionLine(
     
     try {
         // 1. 创建 VideoProductionLine
-        VideoProductionLine producer;
+        VideoProductionLine producer(config.data_source.loop);
         
         // 2. 启动生产线（配置在 start 中传入）
         if (!producer.start(config)) {

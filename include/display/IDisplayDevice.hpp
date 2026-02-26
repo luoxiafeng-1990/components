@@ -13,9 +13,8 @@ class BufferPool;
  * 定义跨平台的显示设备接口，任何平台的显示实现都需要继承此接口。
  * 
  * 平台实现示例：
- * - Linux Framebuffer: LinuxFramebufferDevice
- * - Windows DirectX: WindowsD3DDisplayDevice
- * - X11: X11DisplayDevice
+ * - SharedFramebufferDevice（多通道共享显示）
+ * - TacoVODisplayDevice（taco-vo 视频输出）
  * 
  * 核心功能：
  * - 设备初始化和清理

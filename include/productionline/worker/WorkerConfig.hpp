@@ -203,6 +203,11 @@ struct WorkerConfig {
          */
         bool deferred_commit = false;
         
+        // ========================================
+        // 循环播放（loop）
+        // ========================================
+        bool loop = false;                    ///< true=文件播放结束后自动回到开头循环播放
+        
         DataSourceConfig() = default;
         DataSourceConfig(const DataSourceConfig&) = default;
         DataSourceConfig& operator=(const DataSourceConfig&) = default;
@@ -439,11 +444,10 @@ struct WorkerConfig {
             int device_id = 0;            ///< 显示设备 ID
 
             enum DisplayMode {
-                FRAMEBUFFER = 0,          ///< Linux Framebuffer 直接显示（默认，现有行为）
                 TACO_VO = 1,              ///< taco-vo 视频输出管道（旧实现，支持多通道 + 硬件 CSC/Resize）
-                SHARED_FB = 2             ///< 共享 Framebuffer（SharedDisplayContext + BufferPool 多通道显示）
+                SHARED_FB = 2             ///< 共享 Framebuffer（SharedDisplayContext + BufferPool 多通道显示，默认）
             };
-            DisplayMode mode = FRAMEBUFFER;
+            DisplayMode mode = SHARED_FB;
 
             struct TacoVOConfig {
                 int target_fps = 30;          ///< 目标帧率（Device attr + Channel attr）

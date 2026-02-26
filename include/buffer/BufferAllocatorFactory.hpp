@@ -26,8 +26,8 @@
  * - 无参构造函数创建的 FramebufferAllocator 需要后续设置外部内存信息
  * - 如需直接使用外部内存，建议使用带参数的构造函数：
  *   ```cpp
- *   // 方式1：从 LinuxFramebufferDevice 创建
- *   auto allocator = std::make_unique<FramebufferAllocator>(device.get());
+ *   // 方式1：从外部 BufferInfo 列表创建
+ *   auto allocator = std::make_unique<FramebufferAllocator>(buffer_infos);
  *   
  *   // 方式2：从 BufferInfo 列表创建
  *   std::vector<FramebufferAllocator::BufferInfo> infos = {...};

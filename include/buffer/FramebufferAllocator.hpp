@@ -5,9 +5,6 @@
 #include <log4cplus/logger.h>
 #include <log4cplus/loggingmacros.h>
 
-// 前向声明（避免循环依赖）
-class LinuxFramebufferDevice;
-
 /**
  * @brief FramebufferAllocator - Framebuffer 外部内存分配器
  * 
@@ -86,31 +83,9 @@ public:
      * 
      * 适用场景：
      * - 高级用户需要完全控制 buffer 信息
-     * - 非 LinuxFramebufferDevice 的外部内存源
+     * - 外部 DMA 内存源
      */
     explicit FramebufferAllocator(const std::vector<BufferInfo>& external_buffers);
-    
-    /**
-     * @brief 构造函数 2：从 LinuxFramebufferDevice 构造（推荐）
-     * 
-     * 工作流程：
-     * 1. 调用 device->getMappedInfo() 获取 mmap 信息
-     * 2. 调用私有方法 buildBufferInfosFromDevice() 构建 BufferInfo 列表
-     * 3. 存储到 external_buffers_
-     * 
-     * @param device LinuxFramebufferDevice 指针（必须已初始化）
-     * 
-     * 使用示例：
-     * @code
-     * auto device = std::make_unique<LinuxFramebufferDevice>();
-     * device->initialize(0);
-     * 
-     * auto allocator = std::make_unique<FramebufferAllocator>(device.get());
-     * auto pool = allocator->allocatePoolWithBuffers(0, 0, "FBPool", "Display");
-     * device->setBufferPool(pool.get());
-     * @endcode
-     */
-    explicit FramebufferAllocator(LinuxFramebufferDevice* device);
     
     ~FramebufferAllocator() override;
     
@@ -160,7 +135,6 @@ public:
      * v2.0: @param pool_id BufferPool ID（从 Registry 获取）
      * 
      * @note FramebufferAllocator 支持此方法，可以包装外部内存为 Buffer
-     * @note 这是 LinuxFramebufferDevice 使用的主要方法（逐个注入）
      */
     Buffer* injectExternalBufferToPool(
         uint64_t pool_id,
@@ -211,21 +185,6 @@ protected:
     void deallocateBuffer(Buffer* buffer) override;
     
 private:
-    
-    /**
-     * @brief 从 LinuxFramebufferDevice 构建 BufferInfo 列表（私有辅助方法）
-     * 
-     * 工作流程：
-     * 1. 调用 device->getMappedInfo() 获取信息
-     * 2. 计算每个 buffer 的虚拟地址
-     * 3. 构建并返回 BufferInfo 列表
-     * 
-     * @param device LinuxFramebufferDevice 指针
-     * @return vector<BufferInfo> BufferInfo 列表
-     */
-    static std::vector<BufferInfo> buildBufferInfosFromDevice(
-        LinuxFramebufferDevice* device
-    );
     
     std::vector<BufferInfo> external_buffers_;  // 外部内存信息
     size_t next_buffer_index_;                   // 下一个可用索引

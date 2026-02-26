@@ -368,12 +368,26 @@ bool FFmpegDecodeWorker::seek(int frame_index) {
         return false;
     }
     
-    // 3. seek 成功后，清理解码器状态（flush内部缓冲区）
-    if (codec_ctx_ptr_) {
+    // 3. 清理缓存的解码帧和未提交的 packet
+    for (AVFrame* frame : cached_frames_) {
+        if (frame) av_frame_free(&frame);
+    }
+    cached_frames_.clear();
+
+    if (packet_acquired_) {
+        packet_source_->commitEncodedPacket(this);
+        packet_acquired_ = false;
+        current_packet_ptr_ = nullptr;
+    }
+
+    // 4. 重置解码器状态
+    //    软件解码器：调用 avcodec_flush_buffers 清空内部缓冲
+    //    硬件解码器（h264_taco）：跳过 flush，因为 taco 的 flush 回调会将通道
+    //    置为 STOPPED 状态（state=5）且不会重新启动，导致后续 send_packet 失败。
+    //    文件从 I 帧开始，解码器无需 flush 也能正确解码。
+    if (codec_ctx_ptr_ && !use_hardware_decoder_) {
         avcodec_flush_buffers(codec_ctx_ptr_);
     }
-    
-    // ⚠️ 注意：EOF 状态由数据源的 seek() 自动重置，不需要手动重置
     
     LOG4CPLUS_DEBUG_FMT(logger_, " Successfully seeked to frame %d", frame_index);
     return true;

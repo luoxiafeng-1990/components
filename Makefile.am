@@ -5,7 +5,6 @@ AUTOMAKE_OPTIONS = foreign
 noinst_LTLIBRARIES = libcomponents.la
 
 libcomponents_la_SOURCES = \
-    source/display/LinuxFramebufferDevice.cpp \
     source/display/TacoVOContext.cpp \
     source/display/TacoVODisplayDevice.cpp \
     source/display/SharedDisplayContext.cpp \

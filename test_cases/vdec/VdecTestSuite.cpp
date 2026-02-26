@@ -200,12 +200,14 @@ int VdecTestSuite::run(int argc, char* argv[]) {
             config.data_source.path, params.codec, params.width, params.height);
         hw_config.consumer_type = config.consumer_type;
         hw_config.consumer_type.performance.target_fps = params.fps;
-        hw_config.data_source.max_frames = config.data_source.max_frames;  // v2.23: 传递帧数限制
+        hw_config.data_source.max_frames = config.data_source.max_frames;
+        hw_config.data_source.loop = config.data_source.loop;
         
         auto sw_config = common::WorkerConfigFactory::createSoftwareDecode(
             config.data_source.path, params.width, params.height);
         sw_config.consumer_type.performance.target_fps = params.fps;
-        sw_config.data_source.max_frames = config.data_source.max_frames;  // v2.23: 传递帧数限制
+        sw_config.data_source.max_frames = config.data_source.max_frames;
+        sw_config.data_source.loop = config.data_source.loop;
         
         // COMPARE 模式也支持叠加其他消费类型（display、save）
         uint32_t compare_flags = 0;
@@ -273,7 +275,8 @@ int VdecTestSuite::run(int argc, char* argv[]) {
             }
             cfg.consumer_type = config.consumer_type;
             cfg.consumer_type.performance.target_fps = params.fps;
-            cfg.data_source.max_frames = config.data_source.max_frames;  // v2.23: 传递帧数限制
+            cfg.data_source.max_frames = config.data_source.max_frames;
+            cfg.data_source.loop = config.data_source.loop;
             // 每个线程仅设置属于自己的那一条输出路径
             if (config.consumer_type.save_raw.enable && !all_paths.empty()) {
                 std::string thread_path = (static_cast<size_t>(i) < all_paths.size())
@@ -309,7 +312,8 @@ int VdecTestSuite::run(int argc, char* argv[]) {
     }
     full_config.consumer_type = config.consumer_type;
     full_config.consumer_type.performance.target_fps = params.fps;
-    full_config.data_source.max_frames = config.data_source.max_frames;  // v2.23: 传递帧数限制
+    full_config.data_source.max_frames = config.data_source.max_frames;
+    full_config.data_source.loop = config.data_source.loop;
     
     uint32_t flags = buildConsumeFlags(full_config);
     auto result = runSingle(full_config, flags, test_name.str());
@@ -346,6 +350,7 @@ bool VdecTestSuite::parseArgs(int argc, char* argv[], WorkerConfig& config, Deco
         {"min-ssim",   required_argument, 0, 'M'},
         {"verbose",    no_argument,       0, 'v'},
         {"threads",    required_argument, 0, 't'},  // 并发路数（PARALLEL 模式）
+        {"loop",       no_argument,       0, 1003},
         {0, 0, 0, 0}
     };
     
@@ -432,15 +437,12 @@ bool VdecTestSuite::parseArgs(int argc, char* argv[], WorkerConfig& config, Deco
                 if (mode_str == "vo" || mode_str == "taco-vo") {
                     config.consumer_type.display.mode =
                         WorkerConfig::ConsumerTypeConfig::DisplayType::TACO_VO;
-                } else if (mode_str == "shared_fb" || mode_str == "shared-fb") {
+                } else if (mode_str == "shared_fb" || mode_str == "shared-fb" || mode_str == "fb") {
                     config.consumer_type.display.mode =
                         WorkerConfig::ConsumerTypeConfig::DisplayType::SHARED_FB;
-                } else if (mode_str == "fb" || mode_str == "framebuffer") {
-                    config.consumer_type.display.mode =
-                        WorkerConfig::ConsumerTypeConfig::DisplayType::FRAMEBUFFER;
                 } else {
                     LOG4CPLUS_ERROR_FMT(getLogger(),
-                        "Invalid display mode '%s', use 'vo', 'shared_fb' or 'fb'", optarg);
+                        "Invalid display mode '%s', use 'vo' or 'shared_fb'", optarg);
                     return false;
                 }
                 break;
@@ -456,6 +458,10 @@ bool VdecTestSuite::parseArgs(int argc, char* argv[], WorkerConfig& config, Deco
 
             case 1002:
                 config.consumer_type.display.taco_vo.osd_fps = std::stoi(optarg);
+                break;
+
+            case 1003:
+                config.data_source.loop = true;
                 break;
 
             case 'p':
@@ -584,7 +590,7 @@ void VdecTestSuite::printHelp() const {
               << "  -s, --save <n>          保存帧数 (0=不保存, -1=全部)，需配合 -o 使用\n"
               << "  -o, --output <path>     输出文件路径，启用保存功能\n"
               << "  -d, --display           启用显示输出 (CONSUME_DISPLAY)\n"
-              << "  --display-mode <mode>   显示模式: fb(framebuffer, 默认), vo(taco-vo), shared_fb(共享帧缓冲)\n"
+              << "  --display-mode <mode>   显示模式: shared_fb(共享帧缓冲, 默认), vo(taco-vo)\n"
               << "  --display-fps <n>       显示刷新帧率 (默认: 30, 常用: 25/30/60)\n"
               << "  --osd                   启用 OSD 叠加 (通道号/时间戳/帧率)\n"
               << "  --osd-fps <n>           OSD 刷新频率 (默认: 1, 即每秒刷新一次)\n"
@@ -594,6 +600,7 @@ void VdecTestSuite::printHelp() const {
               << "  -M, --min-ssim <n>      SSIM 阈值 (默认: 0.95)\n"
               << "  -v, --verbose           详细日志\n"
               << "  -t, --threads <n>       并发路数 (启用 PARALLEL 模式，可任意指定)\n"
+              << "  --loop                  循环播放 (文件结束后自动回到开头继续播放)\n"
               << "\n"
               << "ExecuteMode Mapping:\n"
               << "  SINGLE   - 默认单路解码，支持 --decoder hw/sw\n"
