@@ -178,9 +178,6 @@ private:
     std::mutex round_mutex_;
     std::condition_variable round_cv_;
 
-    // === PP 硬件调用序列化 ===
-    std::mutex pp_mutex_;
-
     // === display_buf_ 读写保护 ===
     std::mutex display_mutex_;
 

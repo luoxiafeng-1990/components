@@ -487,12 +487,6 @@ bool SharedDisplayContext::channelWrite(int channel_id, Buffer* decoded) {
         return false;
     }
 
-    LOG4CPLUS_DEBUG_FMT(logger_,
-        "Channel %d: ppResize src=%dx%d dst=(%d,%d,%d,%d) render_buf=%p",
-        channel_id, src_width, src_height,
-        ch_info->x, ch_info->y, ch_info->w, ch_info->h,
-        (void*)render_buf_);
-
     ppResize(decoded, render_buf_,
              ch_info->x, ch_info->y, ch_info->w, ch_info->h,
              src_width, src_height, 0, 0, nullptr);
@@ -601,9 +595,6 @@ void SharedDisplayContext::ppResize(
     int in_format = avframe_in->format;
     bool both_nv12 = (in_format == TA_AV_PIX_FMT_NV12 && out_format == TA_AV_PIX_FMT_NV12);
 
-    // PP 硬件调用序列化
-    std::lock_guard<std::mutex> pp_lock(pp_mutex_);
-
     ta_image_t image_in = {};
     ta_image_t image_out = {};
 
@@ -666,10 +657,6 @@ void SharedDisplayContext::ppCopy(Buffer* src, Buffer* dst) {
         return;
     }
 
-    LOG4CPLUS_DEBUG_FMT(logger_,
-        "ppCopy: src_buf=%p(off=%zu) dst_buf=%p(off=%zu) size=%zu",
-        (void*)src, src_offset, (void*)dst, dst_offset, buffer_size_);
-
     int bytes_per_pixel = bits_per_pixel_ / 8;
     int out_format = TA_AV_PIX_FMT_NONE;
     if (bits_per_pixel_ == 32) {
@@ -731,9 +718,6 @@ void SharedDisplayContext::ppCopy(Buffer* src, Buffer* dst) {
         resize_attr.y_stride = screen_width_ * bytes_per_pixel;
         resize_attr.u_stride = screen_width_ * bytes_per_pixel;
     }
-
-    // PP 硬件调用序列化
-    std::lock_guard<std::mutex> pp_lock(pp_mutex_);
 
     ta_image_t image_in = {};
     ta_image_t image_out = {};
@@ -879,20 +863,13 @@ void SharedDisplayContext::timerThreadFunc() {
         pool->submitFilled(old_render);
 
         // Step 4: PP 硬件拷贝陈旧区域（display_buf_ → new_render）
-        // 在 display_mutex_ 保护下快照 display_buf_，
+        // 在 display_mutex_ 保护下读取 display_buf_，
         // 防止 displayThreadFunc 在 ppCopy 期间释放该 buffer
+        // 注：display_buf_ 为 nullptr 仅发生在首次定时器 tick（DMA 内存已在 allocateDmaMemory 中清零）
         {
             std::lock_guard<std::mutex> dlock(display_mutex_);
             if (display_buf_) {
-                LOG4CPLUS_DEBUG_FMT(logger_,
-                    "Timer: ppCopy display_buf_=%p → new_render=%p",
-                    (void*)display_buf_, (void*)new_render);
                 ppCopy(display_buf_, new_render);
-            } else {
-                LOG4CPLUS_DEBUG(logger_, "Timer: no display_buf_, memset new_render");
-                uint8_t* nr_virt = static_cast<uint8_t*>(dma_mem_.virt_addr)
-                    + (new_render->getPhysicalAddress() - dma_mem_.phys_addr);
-                memset(nr_virt, 0, buffer_size_);
             }
         }
 
