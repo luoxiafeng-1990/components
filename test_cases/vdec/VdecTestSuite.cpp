@@ -338,6 +338,8 @@ bool VdecTestSuite::parseArgs(int argc, char* argv[], WorkerConfig& config, Deco
         {"display",    no_argument,       0, 'd'},
         {"display-mode", required_argument, 0, 'X'},
         {"display-fps",  required_argument, 0, 'Z'},
+        {"osd",          no_argument,       0,  1001},
+        {"osd-fps",      required_argument, 0,  1002},
         {"psnr",       no_argument,       0, 'p'},
         {"ssim",       no_argument,       0, 'S'},
         {"min-psnr",   required_argument, 0, 'P'},
@@ -446,6 +448,14 @@ bool VdecTestSuite::parseArgs(int argc, char* argv[], WorkerConfig& config, Deco
 
             case 'Z':
                 config.consumer_type.display.taco_vo.target_fps = std::stoi(optarg);
+                break;
+
+            case 1001:
+                config.consumer_type.display.taco_vo.osd_enable = true;
+                break;
+
+            case 1002:
+                config.consumer_type.display.taco_vo.osd_fps = std::stoi(optarg);
                 break;
 
             case 'p':
@@ -576,6 +586,8 @@ void VdecTestSuite::printHelp() const {
               << "  -d, --display           启用显示输出 (CONSUME_DISPLAY)\n"
               << "  --display-mode <mode>   显示模式: fb(framebuffer, 默认), vo(taco-vo), shared_fb(共享帧缓冲)\n"
               << "  --display-fps <n>       显示刷新帧率 (默认: 30, 常用: 25/30/60)\n"
+              << "  --osd                   启用 OSD 叠加 (通道号/时间戳/帧率)\n"
+              << "  --osd-fps <n>           OSD 刷新频率 (默认: 1, 即每秒刷新一次)\n"
               << "  -p, --psnr              启用 PSNR 验证 (ExecuteMode::COMPARE)\n"
               << "  -S, --ssim              启用 SSIM 验证 (ExecuteMode::COMPARE)\n"
               << "  -P, --min-psnr <n>      PSNR 阈值 (默认: 30.0 dB)\n"

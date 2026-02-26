@@ -1,4 +1,5 @@
 #include "display/SharedDisplayContext.hpp"
+#include "display/OsdOverlay.hpp"
 #include "common/Logger.hpp"
 
 #include <fcntl.h>
@@ -78,6 +79,11 @@ SharedDisplayContext::~SharedDisplayContext() {
 // ============================================================
 
 bool SharedDisplayContext::init() {
+    {
+        FILE* f = fopen("/sys/devices/platform/soc/soc:dss@c9200000/dss-overlay1/enabled", "w");
+        if (f) { fprintf(f, "0"); fclose(f); }
+    }
+
     if (!openFramebufferDevice()) {
         return false;
     }
@@ -132,14 +138,34 @@ bool SharedDisplayContext::init() {
         return false;
     }
 
+    // OSD 叠加初始化（可选）
+    if (config_.osd_enable) {
+        osd_ = std::make_unique<OsdOverlay>(screen_width_, screen_height_, config_.max_channels);
+        OsdOverlay::Config osd_cfg;
+        osd_cfg.refresh_fps = config_.osd_fps;
+        osd_cfg.font_path   = config_.osd_font_path;
+        osd_cfg.font_size   = config_.osd_font_size;
+
+        if (!osd_->init(osd_cfg)) {
+            LOG4CPLUS_WARN(logger_, "OSD initialization failed, continuing without OSD");
+            osd_.reset();
+        }
+    }
+
     LOG4CPLUS_INFO_FMT(logger_,
-        "SharedDisplayContext initialized: %dx%d, %dbpp, %d buffers, %dfps",
-        screen_width_, screen_height_, bits_per_pixel_, buffer_count_, config_.target_fps);
+        "SharedDisplayContext initialized: %dx%d, %dbpp, %d buffers, %dfps, osd=%s",
+        screen_width_, screen_height_, bits_per_pixel_, buffer_count_, config_.target_fps,
+        osd_ ? "on" : "off");
 
     return true;
 }
 
 void SharedDisplayContext::shutdown() {
+    if (osd_) {
+        osd_->shutdown();
+        osd_.reset();
+    }
+
     stopThreads();
 
     auto pool = getPool();
@@ -210,7 +236,14 @@ bool SharedDisplayContext::openFramebufferDevice() {
         return false;
     }
 
-    // 查询硬件参数
+    // 视频层使用 NV12 格式（设备树默认 ARGB8888，需运行时切换）
+    {
+        static const char* OVL0_PIX_FMT_PATH =
+            "/sys/devices/platform/soc/soc:dss@c9200000/dss-overlay0/pixel_fmt";
+        FILE* f = fopen(OVL0_PIX_FMT_PATH, "w");
+        if (f) { fprintf(f, "nv12"); fclose(f); }
+    }
+
     struct fb_var_screeninfo var_info;
     if (ioctl(fd_, FBIOGET_VSCREENINFO, &var_info) < 0) {
         LOG4CPLUS_ERROR_FMT(logger_, "FBIOGET_VSCREENINFO failed: %s", strerror(errno));
@@ -219,7 +252,7 @@ bool SharedDisplayContext::openFramebufferDevice() {
 
     screen_width_   = var_info.xres;
     screen_height_  = var_info.yres;
-    bits_per_pixel_ = var_info.bits_per_pixel;
+    bits_per_pixel_ = 12;
     buffer_count_   = var_info.yres_virtual / var_info.yres;
     if (buffer_count_ < 2) buffer_count_ = 4;
 
@@ -379,6 +412,10 @@ int SharedDisplayContext::registerChannel() {
     LOG4CPLUS_INFO_FMT(logger_,
         "Channel %d registered (auto): region=(%d,%d,%d,%d)", id, layout.x, layout.y, layout.w, layout.h);
 
+    if (osd_) {
+        osd_->registerChannel(id, layout.x, layout.y, layout.w, layout.h);
+    }
+
     return id;
 }
 
@@ -397,6 +434,10 @@ int SharedDisplayContext::registerChannel(const ChannelLayout& layout) {
 
     LOG4CPLUS_INFO_FMT(logger_,
         "Channel %d registered: region=(%d,%d,%d,%d)", id, layout.x, layout.y, layout.w, layout.h);
+
+    if (osd_) {
+        osd_->registerChannel(id, layout.x, layout.y, layout.w, layout.h);
+    }
 
     return id;
 }
@@ -419,15 +460,21 @@ void SharedDisplayContext::computeGridLayout(int channel_index, ChannelLayout& l
 }
 
 void SharedDisplayContext::unregisterChannel(int channel_id) {
-    std::lock_guard<std::mutex> lock(channel_mgmt_mutex_);
-
-    for (auto& ch : channels_) {
-        if (ch.channel_id == channel_id) {
-            ch.active = false;
-            LOG4CPLUS_INFO_FMT(logger_, "Channel %d unregistered", channel_id);
-            return;
+    {
+        std::lock_guard<std::mutex> lock(channel_mgmt_mutex_);
+        for (auto& ch : channels_) {
+            if (ch.channel_id == channel_id) {
+                ch.active = false;
+                LOG4CPLUS_INFO_FMT(logger_, "Channel %d unregistered", channel_id);
+                if (osd_) {
+                    osd_->unregisterChannel(channel_id);
+                }
+                break;
+            }
         }
     }
+    // 唤醒可能阻塞在 channelWrite 中的该通道线程
+    round_cv_.notify_all();
 }
 
 // ============================================================
@@ -458,9 +505,9 @@ bool SharedDisplayContext::channelWrite(int channel_id, Buffer* decoded) {
     {
         std::unique_lock<std::mutex> round_lock(round_mutex_);
         round_cv_.wait(round_lock, [&]() {
-            return !ch_info->written_this_round || !running_;
+            return !ch_info->written_this_round || !running_ || !ch_info->active;
         });
-        if (!running_) return false;
+        if (!running_ || !ch_info->active) return false;
     }
 
     // 获取 shared_lock 保护 render_buf_（防止定时器 swap 期间写入）
@@ -495,6 +542,10 @@ bool SharedDisplayContext::channelWrite(int channel_id, Buffer* decoded) {
     {
         std::lock_guard<std::mutex> round_lock(round_mutex_);
         ch_info->written_this_round = true;
+    }
+
+    if (osd_) {
+        osd_->recordFrame(channel_id);
     }
 
     return true;

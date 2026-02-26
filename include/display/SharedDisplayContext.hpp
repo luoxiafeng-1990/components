@@ -26,6 +26,7 @@ extern "C" {
 }
 
 struct tpsfb_dma_info;
+class OsdOverlay;
 
 /**
  * SharedDisplayContext - 多通道共享显示上下文（单例模式）
@@ -186,6 +187,9 @@ private:
     std::thread display_thread_;
     std::atomic<bool> running_{false};
     int timer_fd_ = -1;
+
+    // === OSD 叠加（可选，图形层 overlay1）===
+    std::unique_ptr<OsdOverlay> osd_;
 
     // === 单例 ===
     static std::mutex s_acquire_mutex_;
