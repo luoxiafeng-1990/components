@@ -125,61 +125,43 @@ bool test_opencv() {
         std::cout << "hw_pts: " << hw_pts << std::endl;
         std::cout << "sw_pts: " << sw_pts << std::endl;
         if (sw_pts == hw_pts){
-            std::cout << "[1]" << std::endl;
             cv::MatAllocator* sw_allocator = cv::Mat::getDefaultAllocator();
             cv::MatAllocator* hw_allocator = cv::hal::getAllocator();
-            std::cout << "[2]" << std::endl;
+            // 因为mat和avframe内存共享，所以对象的析构顺序必须是mat->avframe->buffer
+            {
             cv::Mat::setDefaultAllocator(hw_allocator);
-            cv::Mat hw_mat = cv::Mat(hw_buf->getAVFrame());
-            std::cout << "[3]" << std::endl;
+            cv::Mat original_mat = cv::Mat(hw_buf->getAVFrame());
             cv::Mat::setDefaultAllocator(sw_allocator);
-            std::cout << "[4.1]" << std::endl;
-            AVFrame* sw_frame = sw_buf->getAVFrame();
-            std::cout << "sw_frame pointer: " << sw_frame << std::endl;
-            if (sw_frame) {
-                std::cout << "sw_frame->data[0]: " << (void*)sw_frame->data[0] << std::endl;
-                std::cout << "sw_frame->data[1]: " << (void*)sw_frame->data[1] << std::endl;
-                std::cout << "sw_frame->width: " << sw_frame->width << std::endl;
-                std::cout << "sw_frame->height: " << sw_frame->height << std::endl;
-                std::cout << "sw_frame->format: " << sw_frame->format << std::endl;
-                std::cout << "sw_frame->linesize[0]: " << sw_frame->linesize[0] << std::endl;
-            }
-            // ⭐ 添加这些检查
-            std::cout << "sw_frame->metadata: " << (void*)sw_frame->metadata << std::endl;
-            if (sw_frame->metadata) {
-                std::cout << "metadata exists" << std::endl;
-                // 尝试读取 metadata 内容
-                AVDictionaryEntry* entry = nullptr;
-                while ((entry = av_dict_get(sw_frame->metadata, "", entry, AV_DICT_IGNORE_SUFFIX))) {
-                    std::cout << "  metadata[" << entry->key << "] = " << entry->value << std::endl;
-                }
-            } else {
-                std::cout << "ERROR: metadata is NULL!" << std::endl;
-            }
-            cv::Mat sw_mat = cv::Mat(sw_buf->getAVFrame());
-            std::cout << "[4]" << std::endl;
             cv::Mat hw_resized_mat;
             cv::Mat sw_resized_mat;
             
             cv::Mat::setDefaultAllocator(hw_allocator);
             auto hw_start = std::chrono::high_resolution_clock::now();
-            cv::resize(hw_mat, hw_resized_mat,cv::Size(target_width, target_height));
+            cv::resize(original_mat, hw_resized_mat,cv::Size(target_width, target_height));
             auto hw_end = std::chrono::high_resolution_clock::now();
             
             cv::Mat::setDefaultAllocator(sw_allocator);
             auto sw_start = std::chrono::high_resolution_clock::now();
-            cv::resize(sw_mat, sw_resized_mat,cv::Size(target_width, target_height));
+            cv::resize(original_mat, sw_resized_mat,cv::Size(target_width, target_height));
             auto sw_end = std::chrono::high_resolution_clock::now();
             auto hw_duration = std::chrono::duration_cast<std::chrono::milliseconds>(hw_end - hw_start);
             auto sw_duration = std::chrono::duration_cast<std::chrono::milliseconds>(sw_end - sw_start);
             std::cout << "hw_duration: " << hw_duration.count() << std::endl;
             std::cout << "sw_duration: " << sw_duration.count() << std::endl;
+
+            std::cout << "[DEBUG] Before hw_imwrite" << std::endl;
             cv::imwrite(hw_output,hw_resized_mat);
+            std::cout << "[DEBUG] After hw_imwrite, before sw_imwrite" << std::endl;
             cv::imwrite(sw_output,sw_resized_mat);
+            std::cout << "[DEBUG] After sw_imwrite, before scope end" << std::endl;
+            }
+            std::cout << "[DEBUG] After scope end" << std::endl;
             sw_pool->releaseFilled(sw_buf);
             hw_pool->releaseFilled(hw_buf);
+            std::cout << "[1]" << std::endl;
             sw_buf = sw_pool->acquireFilled(true,100);
             hw_buf = hw_pool->acquireFilled(true,100);
+            std::cout << "[2]" << std::endl;
             break;
         }
         else if (sw_pts < hw_pts){
@@ -191,7 +173,91 @@ bool test_opencv() {
             hw_buf = hw_pool->acquireFilled(true,100);
         }
     }
+
+    std::cout << "[3]" << std::endl;
     
+    hw_producer.stop();
+    sw_producer.stop();
+
+    std::cout << "[4]" << std::endl;
+    return result_passed;
+}
+
+
+bool test_single_pp (
+    std::string data_source_path,
+    std::string codec
+){
+    bool g_running = true;
+
+    WorkerConfig::DataSourceConfig g_data_source_config = DataSourceConfigBuilder().
+                                    setPath(data_source_path).
+                                    setBufferCount(16).
+                                    build();
+    TacoConfigBuilder taco_config_builder = TacoConfigBuilder().
+                                    setReorderDisable(false);
+    WorkerConfig::DecoderConfig::TacoConfig g_taco_config = taco_config_builder.build();
+    WorkerConfig::DecoderConfig g_hw_decoder_config = DecoderConfigBuilder().useTaco(codec,g_taco_config).build();
+    WorkerConfig::DecoderConfig g_sw_decoder_config = DecoderConfigBuilder().useSoftware().build();
+    WorkerConfig g_hw_worker_config = WorkerConfigBuilder().
+                                    setDataSourceConfig(g_data_source_config).
+                                    setDecoderConfig(g_hw_decoder_config).
+                                    setWorkerType(WorkerType::FFMPEG_DECODE).
+                                    build();
+    WorkerConfig g_sw_worker_config = WorkerConfigBuilder().
+                                    setDataSourceConfig(g_data_source_config).
+                                    setDecoderConfig(g_sw_decoder_config).
+                                    setWorkerType(WorkerType::FFMPEG_DECODE).
+                                    build();
+
+    VideoProductionLine hw_producer = VideoProductionLine(false,1,false);
+    VideoProductionLine sw_producer = VideoProductionLine(false,1,false);
+    bool hw_result = hw_producer.start(g_hw_worker_config);
+    if (!hw_result) {hw_producer.stop(); return false;}
+    bool sw_result = sw_producer.start(g_sw_worker_config);
+    if (!sw_result) {sw_producer.stop(); return false;}
+
+    uint64_t hw_pool_id = hw_producer.getWorkingBufferPoolId();
+    uint64_t sw_pool_id = sw_producer.getWorkingBufferPoolId();
+    if (hw_pool_id ==0 || sw_pool_id == 0){hw_producer.stop(); sw_producer.stop(); return false;}
+    auto hw_pool = BufferPoolRegistry::getInstance().getPool(hw_pool_id).lock();
+    auto sw_pool = BufferPoolRegistry::getInstance().getPool(sw_pool_id).lock();
+    if (! hw_pool || ! sw_pool){hw_producer.stop(); sw_producer.stop(); return false;}
+
+    bool result_passed = true;
+
+    Buffer* hw_buf = hw_pool->acquireFilled(true, 100);
+    Buffer* sw_buf = sw_pool->acquireFilled(true, 100);
+    while (g_running) {
+        if (hw_buf == nullptr && sw_buf == nullptr){
+            std::cout << "no more avframe" << std::endl;
+            break;
+        }
+        else if (hw_buf == nullptr){
+            std::cout << "sw_pts: " << sw_buf->getAVFrame()->pts << std::endl;
+            hw_pool->releaseFilled(hw_buf);
+            hw_buf = hw_pool->acquireFilled(true, 100);
+            continue;
+        }
+        else if (sw_buf == nullptr){
+            std::cout << "hw_pts: " << hw_buf->getAVFrame()->pts << std::endl;
+            sw_pool->releaseFilled(sw_buf);
+            sw_buf = sw_pool->acquireFilled(true, 100);
+            continue;
+        }
+        else {
+            int64_t hw_pts = hw_buf->getAVFrame()->pts;
+            int64_t sw_pts = sw_buf->getAVFrame()->pts;
+            std::cout << "hw_pts: " << hw_pts
+                      << "sw_pts: " << sw_pts
+                      << "same? " << (hw_pts==sw_pts ? "true":"false")
+                      << std::endl;
+            sw_pool->releaseFilled(sw_buf);
+            hw_pool->releaseFilled(hw_buf);
+            sw_buf = sw_pool->acquireFilled(true,100);
+            hw_buf = hw_pool->acquireFilled(true,100);
+        }
+    }
     hw_producer.stop();
     sw_producer.stop();
 
@@ -225,7 +291,7 @@ int TaOpencvTestSuite::run(int argc, char* argv[]) {
                   << " " << static_cast<int>(params.fps) << "fps)";
     }
     
-    return test_opencv() ? 0:1;
+    return test_single_pp("input.mp4","h264") ? 0:1;
 }
 
 bool TaOpencvTestSuite::parseArgs(int argc, char* argv[], WorkerConfig& config, TaOpencvTestParams& params) {
