@@ -138,7 +138,10 @@ bool LinuxFramebufferDevice::initialize(int device_index) {
     unsigned char* base = (unsigned char*)framebuffer_base_ptr_;
     for (int i = 0; i < buffer_count_; i++) {
         void* virt_addr = (void*)(base + buffer_size_ * i);
-        uint64_t phys_addr = 0;  // TODO: 获取实际物理地址
+        uint64_t phys_addr = 0;
+        // 物理地址在通用 Linux FB 下不可用
+        // 对于 TACO 平台使用 SharedDisplayContext 的 DMA 内存方案
+        // 此处保留为 0，使用 memcpy 路径显示
         
         Buffer* buffer = allocator_facade_->injectExternalBufferToPool(
             buffer_pool_id_,  // v2.0: 第一个参数是 pool_id
@@ -257,55 +260,14 @@ bool LinuxFramebufferDevice::displayBuffer(Buffer* buffer) {
         return false;
     }
     
-    if (buffer_pool_id_ == 0) {
-        LOG4CPLUS_ERROR_FMT(logger_, "[Display] ERROR: BufferPool not initialized");
-        return false;
+    // 智能选择显示方式：DMA 零拷贝优先，回退到 memcpy
+    if (buffer->getPhysicalAddress() != 0) {
+        if (displayBufferByDMA(buffer)) {
+            return true;
+        }
     }
     
-    // v2.0: 从 Registry 获取 Pool
-    auto pool_weak = BufferPoolRegistry::getInstance().getPool(buffer_pool_id_);
-    auto pool = pool_weak.lock();
-    if (!pool) {
-        LOG4CPLUS_ERROR_FMT(logger_, "[Display] ERROR: BufferPool (ID: %lu) not found or already destroyed", buffer_pool_id_);
-        return false;
-    }
-    
-    // 验证Buffer是否属于当前设备的BufferPool
-    Buffer* pool_buffer = pool->getBufferById(buffer->id());
-    if (!pool_buffer || pool_buffer != buffer) {
-        LOG4CPLUS_ERROR_FMT(logger_, "[Display] ERROR: Buffer (ID=%u) does not belong to device's BufferPool", 
-               buffer->id());
-        return false;
-    }
-    
-    // 通过Buffer的ID获取buffer_index
-    int buffer_index = static_cast<int>(buffer->id());
-    
-    if (buffer_index < 0 || buffer_index >= buffer_count_) {
-        LOG4CPLUS_ERROR_FMT(logger_, "[Display] ERROR: Invalid buffer index %d (from Buffer ID %u)", 
-               buffer_index, buffer->id());
-        return false;
-    }
-    
-    // 获取当前屏幕信息
-    struct fb_var_screeninfo var_info;
-    if (ioctl(fd_, FBIOGET_VSCREENINFO, &var_info) < 0) {
-        LOG4CPLUS_ERROR_FMT(logger_, "[Display] ERROR: FBIOGET_VSCREENINFO failed: %s", strerror(errno));
-        return false;
-    }
-    
-    // 设置yoffset（buffer索引 * 屏幕高度）
-    // 这样驱动就知道从哪个buffer读取数据显示
-    var_info.yoffset = var_info.yres * buffer_index;
-    
-    // 通过ioctl通知驱动切换buffer
-    if (ioctl(fd_, FBIOPAN_DISPLAY, &var_info) < 0) {
-        LOG4CPLUS_ERROR_FMT(logger_, "[Display] ERROR: FBIOPAN_DISPLAY failed: %s", strerror(errno));
-        return false;
-    }
-    
-    current_buffer_index_ = buffer_index;
-    return true;
+    return displayBufferByMemcpyToFramebuffer(buffer);
 }
 
 bool LinuxFramebufferDevice::displayBuffer(BufferPool* pool, int buffer_index) {

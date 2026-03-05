@@ -437,7 +437,31 @@ struct WorkerConfig {
         // ========================================
         struct DisplayType {
             bool enable = false;          ///< 是否启用显示
-            int device_id = 0;            ///< Framebuffer 设备 ID
+            int device_id = 0;            ///< 显示设备 ID
+
+            enum DisplayMode {
+                FRAMEBUFFER = 0,          ///< Linux Framebuffer 直接显示（默认，现有行为）
+                TACO_VO = 1,              ///< taco-vo 视频输出管道（旧实现，支持多通道 + 硬件 CSC/Resize）
+                SHARED_FB = 2             ///< 共享 Framebuffer（SharedDisplayContext + BufferPool 多通道显示）
+            };
+            DisplayMode mode = FRAMEBUFFER;
+
+            struct TacoVOConfig {
+                int target_fps = 30;          ///< 目标帧率（Device attr + Channel attr）
+                int screen_width = 1920;      ///< 屏幕/Layer 宽度（用于网格布局）
+                int screen_height = 1080;     ///< 屏幕/Layer 高度
+                int frame_width = 1920;       ///< 输入帧宽度
+                int frame_height = 1080;      ///< 输入帧高度
+                int frame_format = 23;        ///< TA_AV_PIX_FMT_NV12 = 23（帧像素格式，同时用于 layer attr）
+                int frame_pool_size = 4;      ///< 每通道 DMA 帧池大小
+                int max_channels = 9;         ///< 最大通道数（默认 3x3 九宫格）
+                bool osd_enable = false;      ///< 是否启用 OSD 叠加（图形层 overlay1）
+                int  osd_fps = 1;             ///< OSD 刷新频率（默认每秒刷新一次）
+                std::string osd_font_path = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf";
+                int  osd_font_size = 24;      ///< OSD 字体大小（像素）
+                TacoVOConfig() = default;
+            } taco_vo;
+
             DisplayType() = default;
         } display;
         

@@ -311,10 +311,14 @@ ConsumeResult BufferConsumerService::startProductionLinesParallel(
         // 获取线程池引用
         auto& thread_pool = thread_pool_ ? *thread_pool_ : GlobalThreadPool::getInstance().getThreadPool();
         
-        // 为每个 config 提交任务到线程池
-        for (const auto& config : configs) {
-            auto future = thread_pool.submit_task([this, config, consume_flags]() {
-                return startProductionLine(config, consume_flags);
+        // 为每个 config 提交任务到线程池（显式复制 config，确保每个任务获得独立副本）
+        for (size_t idx = 0; idx < configs.size(); idx++) {
+            WorkerConfig cfg_copy = configs[idx];
+            LOG4CPLUS_DEBUG_FMT(logger_, "PARALLEL worker[%zu] save_raw.output_paths[0]=%s",
+                idx, cfg_copy.consumer_type.save_raw.output_paths.empty()
+                    ? "(none)" : cfg_copy.consumer_type.save_raw.getOutputPath(0).c_str());
+            auto future = thread_pool.submit_task([this, cfg_copy, consume_flags]() {
+                return startProductionLine(cfg_copy, consume_flags);
             });
             futures.push_back(std::move(future));
         }
@@ -402,8 +406,7 @@ static std::shared_ptr<IBufferConsumer> createConsumerForWorker(
     
     // 1. 显示消费者
     if (flags & CONSUME_DISPLAY) {
-        consumers.push_back(std::make_shared<DisplayConsumer>(
-            config.display.device_id));
+        consumers.push_back(std::make_shared<DisplayConsumer>(config.display));
     }
     
     // 2. 保存原始数据消费者
@@ -734,8 +737,7 @@ std::shared_ptr<IBufferConsumer> BufferConsumerService::createConsumerFromFlags(
             return std::make_shared<CountConsumer>();
         }
         if (flags & CONSUME_DISPLAY) {
-            return std::make_shared<DisplayConsumer>(
-                config.consumer_type.display.device_id);
+            return std::make_shared<DisplayConsumer>(config.consumer_type.display);
         }
         if (flags & CONSUME_SAVE_RAW) {
             return std::make_shared<SaveRawConsumer>(
@@ -759,8 +761,7 @@ std::shared_ptr<IBufferConsumer> BufferConsumerService::createConsumerFromFlags(
     multi->addStrategy(std::make_shared<CountConsumer>());
     
     if (flags & CONSUME_DISPLAY) {
-        multi->addStrategy(std::make_shared<DisplayConsumer>(
-            config.consumer_type.display.device_id));
+        multi->addStrategy(std::make_shared<DisplayConsumer>(config.consumer_type.display));
     }
     if (flags & CONSUME_SAVE_RAW) {
         multi->addStrategy(std::make_shared<SaveRawConsumer>(
@@ -788,31 +789,35 @@ void BufferConsumerService::consumeLoop(
     int frame_index = 0;
     int timeout_count = 0;
     bool initialized = false;
+    Buffer* held_buffer = nullptr;
     
     LOG4CPLUS_DEBUG(logger_, "Starting consume loop");
     
     while (!stop_requested_) {
-        // 检查最大帧数限制
         if (config.max_frames > 0 && frame_index >= config.max_frames) {
             LOG4CPLUS_DEBUG_FMT(logger_, "Reached max frames: %d", config.max_frames);
             break;
         }
         
-        // 获取填充的 Buffer
-        Buffer* buffer = pool->acquireFilled(true, config.timeout_ms);
-        
-        if (!buffer) {
-            timeout_count++;
-            if (timeout_count >= config.max_timeout_count) {
-                LOG4CPLUS_DEBUG_FMT(logger_, "Max timeout count reached: %d", timeout_count);
-                break;
+        Buffer* buffer = nullptr;
+
+        if (held_buffer) {
+            buffer = held_buffer;
+            held_buffer = nullptr;
+        } else {
+            buffer = pool->acquireFilled(true, config.timeout_ms);
+            if (!buffer) {
+                timeout_count++;
+                if (timeout_count >= config.max_timeout_count) {
+                    LOG4CPLUS_DEBUG_FMT(logger_, "Max timeout count reached: %d", timeout_count);
+                    break;
+                }
+                continue;
             }
-            continue;
         }
         
         timeout_count = 0;
         
-        // 首帧初始化
         if (!initialized) {
             std::vector<Buffer*> first_buffers = {buffer};
             if (!consumer->initialize(first_buffers)) {
@@ -823,15 +828,16 @@ void BufferConsumerService::consumeLoop(
             initialized = true;
         }
         
-        // 消费 Buffer
         std::vector<Buffer*> buffers = {buffer};
         bool continue_consume = consumer->consume(buffers, frame_index);
         
-        // 归还 Buffer
-        pool->releaseFilled(buffer);
-        
-        frame_index++;
-        result.frames_consumed++;
+        if (consumer->shouldRetainBuffer()) {
+            held_buffer = buffer;
+        } else {
+            pool->releaseFilled(buffer);
+            frame_index++;
+            result.frames_consumed++;
+        }
         
         if (!continue_consume) {
             LOG4CPLUS_DEBUG(logger_, "Consumer requested stop");
@@ -839,7 +845,11 @@ void BufferConsumerService::consumeLoop(
         }
     }
     
-    // 注意：drain 和 finalize 由调用者负责（在 producer.stop() 之后执行）
+    if (held_buffer) {
+        pool->releaseFilled(held_buffer);
+        held_buffer = nullptr;
+    }
+    
     LOG4CPLUS_DEBUG_FMT(logger_, "Consume loop finished, %d frames consumed", result.frames_consumed);
 }
 

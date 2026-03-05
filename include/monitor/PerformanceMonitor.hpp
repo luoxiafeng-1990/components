@@ -243,5 +243,41 @@ private:
     log4cplus::Logger logger_;
 };
 
+// ============================================================
+// ScopedTiming - RAII 计时守卫（v2.36 新增）
+// ============================================================
+
+/**
+ * @brief RAII 计时守卫
+ * 
+ * 构造时调用 beginTiming，析构时自动调用 endTiming。
+ * 无论 return / break / continue / goto 从何处退出作用域，
+ * 计时都会正确结束，彻底消除手动配对 beginTiming/endTiming 的负担。
+ * 
+ * 使用示例：
+ * @code
+ * {
+ *     ScopedTiming timing(monitor_.get(), "fill_buffer");
+ *     result = worker->fillBuffer(index, buffer);
+ * }   // ← 此处自动调用 endTiming，无论 fillBuffer 如何退出
+ * @endcode
+ */
+class ScopedTiming {
+public:
+    ScopedTiming(PerformanceMonitor* monitor, const char* key) noexcept
+        : monitor_(monitor), key_(key) {
+        if (monitor_) monitor_->beginTiming(key_);
+    }
+    ~ScopedTiming() noexcept {
+        if (monitor_) monitor_->endTiming(key_);
+    }
+    ScopedTiming(const ScopedTiming&) = delete;
+    ScopedTiming& operator=(const ScopedTiming&) = delete;
+
+private:
+    PerformanceMonitor* monitor_;
+    const char* key_;
+};
+
 #endif // PERFORMANCE_MONITOR_HPP
 

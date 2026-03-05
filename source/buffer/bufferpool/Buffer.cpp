@@ -182,6 +182,8 @@ void Buffer::freeBuffer() {
     //   - 但保留 AVFrame 结构体本身（不调用 av_frame_free）
     if (avframe_) {
         av_frame_unref(avframe_);
+        // virt_addr_ 指向 frame->data[0]，AVFrame 数据清空后地址失效
+        virt_addr_ = nullptr;
     }
 
     // 2. 清空 AVPacket 的引用计数（清空数据，但不释放结构体）

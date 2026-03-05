@@ -227,6 +227,39 @@ int VdecTestSuite::run(int argc, char* argv[]) {
         if (params.profile.find("parallel_") == 0) {
             thread_count = std::stoi(params.profile.substr(9));
         }
+        // taco-vo / shared_fb 显示时，通道数需与线程数一致
+        if (config.consumer_type.display.enable &&
+            (config.consumer_type.display.mode == WorkerConfig::ConsumerTypeConfig::DisplayType::TACO_VO ||
+             config.consumer_type.display.mode == WorkerConfig::ConsumerTypeConfig::DisplayType::SHARED_FB)) {
+            config.consumer_type.display.taco_vo.max_channels = thread_count;
+        }
+        // 为每个线程生成独立的输出路径（每个线程的 Buffer.getOutputChannel() 均回退为 0，
+        // 因此每个 config 仅设置一条路径，避免多线程写入同一文件）
+        std::vector<std::string> all_paths;
+        if (config.consumer_type.save_raw.enable) {
+            const auto& paths = config.consumer_type.save_raw.output_paths;
+            if (paths.size() == 1) {
+                const std::string& first = paths[0];
+                size_t dot_pos = first.find('.');
+                if (dot_pos == std::string::npos) {
+                    // 前缀模式：file -> file1.yuv, file2.yuv, ...
+                    for (int i = 0; i < thread_count; i++) {
+                        all_paths.push_back(first + std::to_string(i + 1) + ".yuv");
+                    }
+                } else {
+                    // 单文件名模式：file.yuv -> file_1.yuv, file_2.yuv, ...
+                    size_t last_dot = first.rfind('.');
+                    std::string base = first.substr(0, last_dot);
+                    std::string ext = first.substr(last_dot);
+                    for (int i = 0; i < thread_count; i++) {
+                        all_paths.push_back(base + "_" + std::to_string(i + 1) + ext);
+                    }
+                }
+            } else {
+                // 逗号分隔模式：用户已指定多个路径
+                all_paths = paths;
+            }
+        }
         
         std::vector<WorkerConfig> configs;
         for (int i = 0; i < thread_count; i++) {
@@ -241,7 +274,21 @@ int VdecTestSuite::run(int argc, char* argv[]) {
             cfg.consumer_type = config.consumer_type;
             cfg.consumer_type.performance.target_fps = params.fps;
             cfg.data_source.max_frames = config.data_source.max_frames;  // v2.23: 传递帧数限制
+            // 每个线程仅设置属于自己的那一条输出路径
+            if (config.consumer_type.save_raw.enable && !all_paths.empty()) {
+                std::string thread_path = (static_cast<size_t>(i) < all_paths.size())
+                    ? all_paths[i]
+                    : all_paths[0];
+                cfg.consumer_type.save_raw.output_paths = {thread_path};
+            }
             configs.push_back(cfg);
+        }
+        
+        // 调试：确认每个 worker 的 save 路径
+        for (size_t idx = 0; idx < configs.size(); idx++) {
+            LOG4CPLUS_DEBUG_FMT(getLogger(), "PARALLEL config[%zu] save_raw.output_paths[0]=%s",
+                idx, configs[idx].consumer_type.save_raw.output_paths.empty()
+                    ? "(none)" : configs[idx].consumer_type.save_raw.getOutputPath(0).c_str());
         }
         
         uint32_t parallel_flags = buildConsumeFlags(config);
@@ -289,6 +336,10 @@ bool VdecTestSuite::parseArgs(int argc, char* argv[], WorkerConfig& config, Deco
         {"save",       required_argument, 0, 's'},
         {"output",     required_argument, 0, 'o'},
         {"display",    no_argument,       0, 'd'},
+        {"display-mode", required_argument, 0, 'X'},
+        {"display-fps",  required_argument, 0, 'Z'},
+        {"osd",          no_argument,       0,  1001},
+        {"osd-fps",      required_argument, 0,  1002},
         {"psnr",       no_argument,       0, 'p'},
         {"ssim",       no_argument,       0, 'S'},
         {"min-psnr",   required_argument, 0, 'P'},
@@ -301,7 +352,7 @@ bool VdecTestSuite::parseArgs(int argc, char* argv[], WorkerConfig& config, Deco
     std::string input_path;
     
     int opt;
-    while ((opt = getopt_long(argc, argv, "hlf:r:c:D:W:H:R:F:m:s:o:dpSP:M:vt:", 
+    while ((opt = getopt_long(argc, argv, "hlf:r:c:D:W:H:R:F:m:s:o:dpSP:M:vt:X:Z:", 
                               long_options, nullptr)) != -1) {
         switch (opt) {
             case 'h':
@@ -375,7 +426,38 @@ bool VdecTestSuite::parseArgs(int argc, char* argv[], WorkerConfig& config, Deco
             case 'd':
                 config.consumer_type.display.enable = true;
                 break;
-            
+
+            case 'X': {
+                std::string mode_str = optarg;
+                if (mode_str == "vo" || mode_str == "taco-vo") {
+                    config.consumer_type.display.mode =
+                        WorkerConfig::ConsumerTypeConfig::DisplayType::TACO_VO;
+                } else if (mode_str == "shared_fb" || mode_str == "shared-fb") {
+                    config.consumer_type.display.mode =
+                        WorkerConfig::ConsumerTypeConfig::DisplayType::SHARED_FB;
+                } else if (mode_str == "fb" || mode_str == "framebuffer") {
+                    config.consumer_type.display.mode =
+                        WorkerConfig::ConsumerTypeConfig::DisplayType::FRAMEBUFFER;
+                } else {
+                    LOG4CPLUS_ERROR_FMT(getLogger(),
+                        "Invalid display mode '%s', use 'vo', 'shared_fb' or 'fb'", optarg);
+                    return false;
+                }
+                break;
+            }
+
+            case 'Z':
+                config.consumer_type.display.taco_vo.target_fps = std::stoi(optarg);
+                break;
+
+            case 1001:
+                config.consumer_type.display.taco_vo.osd_enable = true;
+                break;
+
+            case 1002:
+                config.consumer_type.display.taco_vo.osd_fps = std::stoi(optarg);
+                break;
+
             case 'p':
                 config.consumer_type.compare.enable_psnr = true;
                 break;
@@ -502,6 +584,10 @@ void VdecTestSuite::printHelp() const {
               << "  -s, --save <n>          保存帧数 (0=不保存, -1=全部)，需配合 -o 使用\n"
               << "  -o, --output <path>     输出文件路径，启用保存功能\n"
               << "  -d, --display           启用显示输出 (CONSUME_DISPLAY)\n"
+              << "  --display-mode <mode>   显示模式: fb(framebuffer, 默认), vo(taco-vo), shared_fb(共享帧缓冲)\n"
+              << "  --display-fps <n>       显示刷新帧率 (默认: 30, 常用: 25/30/60)\n"
+              << "  --osd                   启用 OSD 叠加 (通道号/时间戳/帧率)\n"
+              << "  --osd-fps <n>           OSD 刷新频率 (默认: 1, 即每秒刷新一次)\n"
               << "  -p, --psnr              启用 PSNR 验证 (ExecuteMode::COMPARE)\n"
               << "  -S, --ssim              启用 SSIM 验证 (ExecuteMode::COMPARE)\n"
               << "  -P, --min-psnr <n>      PSNR 阈值 (默认: 30.0 dB)\n"
@@ -516,7 +602,8 @@ void VdecTestSuite::printHelp() const {
               << "\n"
               << "Examples:\n"
               << "  qa_cases vdec video.mp4                           # SINGLE\n"
-              << "  qa_cases vdec --display video.mp4                 # SINGLE + DISPLAY\n"
+              << "  qa_cases vdec --display video.mp4                 # SINGLE + DISPLAY (framebuffer)\n"
+              << "  qa_cases vdec --display --display-mode vo -t 9 video.mp4  # 9路 taco-vo 显示\n"
               << "  qa_cases vdec -s 100 -o /tmp/out.yuv video.mp4    # SINGLE + SAVE 100帧\n"
               << "  qa_cases vdec --psnr video.mp4                    # COMPARE (HW vs SW)\n"
               << "  qa_cases vdec --threads 16 video.mp4              # PARALLEL x16 (自定义路数)\n"

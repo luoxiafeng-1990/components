@@ -113,7 +113,7 @@ PacketAcquireResult EncodedPacketSourceFromFile::acquireEncodedPacket(AVPacket* 
     using Result = PacketAcquireResult;
     
     if (!is_open_.load(std::memory_order_acquire) || !format_ctx_ptr_ || !out_packet) {
-        return Result::failure(AcquireStatus::InvalidMode);
+        return Result::invalidMode();
     }
     
     // v2.23 新增：检查是否达到最大帧数限制
@@ -127,22 +127,44 @@ PacketAcquireResult EncodedPacketSourceFromFile::acquireEncodedPacket(AVPacket* 
     int ret = av_read_frame(format_ctx_ptr_, out_packet);
     
     if (ret < 0) {
+        char err_buf[AV_ERROR_MAX_STRING_SIZE];
+        av_strerror(ret, err_buf, sizeof(err_buf));
+        
         if (ret == AVERROR_EOF) {
             LOG4CPLUS_DEBUG(logger_, "EOF reached");
             eof_reached_ = true;
-        } else {
-            char err_buf[AV_ERROR_MAX_STRING_SIZE];
-            av_strerror(ret, err_buf, sizeof(err_buf));
-            LOG4CPLUS_WARN_FMT(logger_, "av_read_frame failed: %s", err_buf);
+            return Result::eof();
         }
-        return Result::eof();
+        if (ret == AVERROR_INVALIDDATA) {
+            LOG4CPLUS_WARN_FMT(logger_, "av_read_frame: invalid data: %s", err_buf);
+            return Result::invalidData();
+        }
+        if (ret == AVERROR(EIO)) {
+            LOG4CPLUS_ERROR_FMT(logger_, "av_read_frame: IO error: %s", err_buf);
+            return Result::ioError();
+        }
+        if (ret == AVERROR(ENOMEM)) {
+            LOG4CPLUS_ERROR_FMT(logger_, "av_read_frame: out of memory: %s", err_buf);
+            return Result::outOfMemory();
+        }
+        if (ret == AVERROR_EXIT) {
+            LOG4CPLUS_WARN_FMT(logger_, "av_read_frame: exit requested: %s", err_buf);
+            return Result::interrupted();
+        }
+        if (ret == AVERROR(EAGAIN)) {
+            LOG4CPLUS_DEBUG_FMT(logger_, "av_read_frame: EAGAIN: %s", err_buf);
+            return Result::again();
+        }
+        
+        LOG4CPLUS_ERROR_FMT(logger_, "av_read_frame: unknown error %d: %s", ret, err_buf);
+        return Result::unknownError();
     }
     
     // 检查是否是视频流
     if (out_packet->stream_index != video_stream_index_) {
-        // 不是视频流，释放并返回 Again 让调用者重试
+        // 不是视频流（音频/字幕等），释放并返回 NonVideoPacket 让调用者跳过
         av_packet_unref(out_packet);
-        return Result::again();  // 让调用者继续调用
+        return Result::nonVideoPacket();  // v2.34 修复：使用正确的语义状态码
     }
     
     current_frame_index_++;

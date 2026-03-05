@@ -151,9 +151,9 @@ public:
      * 返回值状态：
      * - Success：成功获取，可通过 packet() 获取指针
      * - Eof：数据流正常结束
-     * - Again：已处理当前版本，需等待新 buffer
+     * - PacketAlreadyProcessed：已处理当前版本，需等待新 buffer
      * - InvalidMode：非共享模式
-     * - NoData：无可用数据（异常）
+     * - InternalError：内部逻辑异常（不应到达的代码路径）
      */
     PacketAcquireResult acquireEncodedPacket(AVPacket* out_packet, void* worker_id = nullptr) override;
     

@@ -282,13 +282,11 @@ FillResult FfmpegPacketRecorderWorker::fillBuffer(int frame_index, Buffer* buffe
     
     if (!buffer) {
         LOG4CPLUS_ERROR(logger_, "ERROR: buffer is nullptr");
-        setLastFillStatus(FillStatus::InvalidParam);
         return FillResult::invalidParam();
     }
     
     if (!is_open_ || !packet_source_) {
         LOG4CPLUS_ERROR(logger_, "ERROR: Worker is not open or packet source is null");
-        setLastFillStatus(FillStatus::NotOpen);
         return FillResult::notOpen();
     }
     
@@ -296,7 +294,6 @@ FillResult FfmpegPacketRecorderWorker::fillBuffer(int frame_index, Buffer* buffe
     AVPacket* packet = buffer->getAVPacket();
     if (!packet) {
         LOG4CPLUS_ERROR(logger_, "ERROR: Buffer has no AVPacket (AVFrameAllocator not used?)");
-        setLastFillStatus(FillStatus::InvalidParam);
         return FillResult::invalidParam();
     }
     
@@ -306,30 +303,19 @@ FillResult FfmpegPacketRecorderWorker::fillBuffer(int frame_index, Buffer* buffe
     // 传入 Buffer 的 AVPacket，数据直接填充到里面
     auto acquire_result = packet_source_->acquireEncodedPacket(packet, nullptr);
     
-    if (acquire_result.shouldRetry()) {
-        // 读到非视频流 packet，需要继续读取
-        setLastFillStatus(FillStatus::NonVideoPacket);
-        return FillResult::nonVideoPacket();
-    }
-    
     if (!acquire_result.ok()) {
-        if (acquire_result.isEof()) {
-            LOG4CPLUS_DEBUG(logger_, "🔄 EOF reached (via packet source)");
-            setLastFillStatus(FillStatus::EndOfStream);
-            return FillResult::endOfStream();
-        } else {
-            LOG4CPLUS_ERROR_FMT(logger_, "ERROR: packet_source_->acquireEncodedPacket() failed: %s", 
-                               acquire_result.statusString());
-            setLastFillStatus(FillStatus::AcquireError);
-            return FillResult::acquireError();
+        // v2.34 重构：直接透传给 FillResult
+        if (acquire_result.isError()) {
+            LOG4CPLUS_WARN_FMT(logger_, "acquireEncodedPacket: %s",
+                              acquire_result.statusString());
         }
+        return FillResult::fromAcquire(acquire_result);
     }
     
     // 3. 检查是否是视频流（数据源已过滤，但保险起见再检查一次）
     int video_stream_index = packet_source_->getVideoStreamIndex();
     if (packet->stream_index != video_stream_index) {
         av_packet_unref(packet);  // 清空非视频流的数据
-        setLastFillStatus(FillStatus::NonVideoPacket);
         return FillResult::nonVideoPacket();  // 不是视频流，让调用者继续读取
     }
     
@@ -343,7 +329,6 @@ FillResult FfmpegPacketRecorderWorker::fillBuffer(int frame_index, Buffer* buffe
     // 记录包信息（用于调试）
     packet_count_++;
     
-    setLastFillStatus(FillStatus::Success);
     return FillResult::success();
 }
 

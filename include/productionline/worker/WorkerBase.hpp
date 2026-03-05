@@ -2,11 +2,14 @@
 #define WORKER_BASE_HPP
 
 #include "productionline/worker/IDataSourceNavigator.hpp"
+#include "productionline/worker/IEncodedPacketSource.hpp"
 #include <log4cplus/logger.h>
 #include <log4cplus/loggingmacros.h>
 #include "productionline/worker/WorkerConfig.hpp"
-#include <log4cplus/logger.h>
-#include <log4cplus/loggingmacros.h>
+
+extern "C" {
+#include <libavutil/error.h>
+}
 #include "buffer/bufferpool/Buffer.hpp"
 #include <log4cplus/logger.h>
 #include <log4cplus/loggingmacros.h>
@@ -94,35 +97,62 @@ enum class BufferPoolType {
 // ============================================================
 
 /**
- * @brief Buffer 填充结果状态
+ * @brief Buffer 填充结果状态（v2.33 新增，v2.34 重构为两值 + 错误来源分层）
  * 
- * v2.33 新增：统一所有 Worker 的 fillBuffer 返回状态
- * 
- * 状态值设计：
- * - 成功：0
- * - 可重试：正值 1-99
- * - 终止：-1
- * - 错误：负值 -10 以下
+ * v2.34 设计变更：
+ * - FillStatus 只表达"成功"或"错误"两种结果
+ * - 具体错误来源由 ErrorSource 枚举表达（Acquire / Codec / Worker）
+ * - 具体错误原因由各模块的 cause 枚举表达（AcquireStatus / CodecStatus / WorkerStatus）
  */
 enum class FillStatus : int {
-    // ===== ✅ 成功 =====
-    Success = 0,           ///< 成功填充
+    Success = 0,       ///< 成功
+    Error = -1         ///< 错误（具体看 source + cause）
+};
+
+/**
+ * @brief 错误来源模块（v2.34 新增）
+ */
+enum class ErrorSource : int {
+    None = 0,          ///< 无错误来源（Success 时）
+    Acquire = 1,       ///< 来自数据获取层（File/RTSP/Buffer）
+    Codec = 2,         ///< 来自编解码器层
+    Worker = 3         ///< 来自 Worker 自身（状态/参数）
+};
+
+/**
+ * @brief Codec 层错误状态（v2.34 新增，v2.35 重构：细分错误码 + 新增 CodecSendResult）
+ * 
+ * v2.35 设计变更：
+ * - 新增 Eof：区分 Codec 层 flush 完成（AVERROR_EOF）和 Acquire 层数据源 EOF
+ * - 新增 InvalidState：区分编解码器状态错误（EINVAL）和码流损坏（DecodeError）
+ * - 新增 EncodeError：区分编码器错误和解码器错误
+ * - 新增 CodecSendResult 结果类：集中 FFmpeg 错误码映射，与 PacketAcquireResult 对称
+ */
+enum class CodecStatus : int {
+    // ===== 业务状态 =====
+    Success = 0,           ///< 成功
+    Eagain = 1,            ///< 解码器/编码器需要更多输入（AVERROR(EAGAIN)）
+    Eof = -1,              ///< 编解码器 flush 完成（AVERROR_EOF）
     
-    // ===== ⏳ 可重试（调用者应继续循环）=====
-    NonVideoPacket = 1,    ///< 遇到非视频流 packet，需继续读取
-    CodecEagain = 2,       ///< 编解码器需要更多输入才能输出（B帧重排序等）
-    DataPending = 3,       ///< Buffer 共享模式，等待新数据
+    // ===== 解码器错误 =====
+    SendFailed = -2,       ///< avcodec_send_packet EAGAIN 重试耗尽
+    InvalidState = -3,     ///< 编解码器状态错误（AVERROR(EINVAL)，未正确打开等）
+    DecodeError = -4,      ///< 码流损坏等解码错误（其他未识别错误码）
+    ReceiveError = -5,     ///< avcodec_receive_frame 失败
+    AllocFailed = -6,      ///< Codec 内部内存分配失败（AVERROR(ENOMEM)）
     
-    // ===== 📍 终止（调用者应退出循环）=====
-    EndOfStream = -1,      ///< 数据流正常结束
-    
-    // ===== ❌ 错误 =====
-    AcquireError = -10,    ///< 获取 packet/frame 失败
-    CodecError = -11,      ///< 编解码器操作失败（send/receive）
-    InvalidParam = -12,    ///< 参数无效（空指针等）
-    NotOpen = -13,         ///< Worker 未打开/未初始化
-    AllocFailed = -14,     ///< 资源分配失败
-    InternalError = -15    ///< 内部逻辑错误（不应到达的代码路径）
+    // ===== 编码器错误 =====
+    EncodeError = -7       ///< avcodec_send_frame 失败（非 EAGAIN）
+};
+
+/**
+ * @brief Worker 层错误状态（v2.34 新增）
+ */
+enum class WorkerStatus : int {
+    Success = 0,           ///< 成功
+    InvalidParam = -1,     ///< 参数无效（空指针等）
+    NotOpen = -2,          ///< Worker 未打开/未初始化
+    InternalError = -3     ///< 内部逻辑错误（不应到达的代码路径）
 };
 
 /**
@@ -130,113 +160,227 @@ enum class FillStatus : int {
  */
 inline const char* fillStatusToString(FillStatus status) {
     switch (status) {
-        case FillStatus::Success:        return "Success";
-        case FillStatus::NonVideoPacket: return "NonVideoPacket";
-        case FillStatus::CodecEagain:    return "CodecEagain";
-        case FillStatus::DataPending:    return "DataPending";
-        case FillStatus::EndOfStream:    return "EndOfStream";
-        case FillStatus::AcquireError:   return "AcquireError";
-        case FillStatus::CodecError:     return "CodecError";
-        case FillStatus::InvalidParam:   return "InvalidParam";
-        case FillStatus::NotOpen:        return "NotOpen";
-        case FillStatus::AllocFailed:    return "AllocFailed";
-        case FillStatus::InternalError:  return "InternalError";
-        default:                         return "Unknown";
+        case FillStatus::Success: return "Success";
+        case FillStatus::Error:   return "Error";
+        default:                  return "Unknown";
     }
 }
+
+/**
+ * @brief 获取 ErrorSource 的字符串描述
+ */
+inline const char* errorSourceToString(ErrorSource source) {
+    switch (source) {
+        case ErrorSource::None:    return "None";
+        case ErrorSource::Acquire: return "Acquire";
+        case ErrorSource::Codec:   return "Codec";
+        case ErrorSource::Worker:  return "Worker";
+        default:                   return "Unknown";
+    }
+}
+
+/**
+ * @brief 获取 CodecStatus 的字符串描述
+ */
+inline const char* codecStatusToString(CodecStatus status) {
+    switch (status) {
+        case CodecStatus::Success:      return "Success";
+        case CodecStatus::Eagain:       return "Eagain";
+        case CodecStatus::Eof:          return "Eof";
+        case CodecStatus::SendFailed:   return "SendFailed";
+        case CodecStatus::InvalidState: return "InvalidState";
+        case CodecStatus::DecodeError:  return "DecodeError";
+        case CodecStatus::ReceiveError: return "ReceiveError";
+        case CodecStatus::AllocFailed:  return "AllocFailed";
+        case CodecStatus::EncodeError:  return "EncodeError";
+        default:                        return "Unknown";
+    }
+}
+
+/**
+ * @brief 获取 WorkerStatus 的字符串描述
+ */
+inline const char* workerStatusToString(WorkerStatus status) {
+    switch (status) {
+        case WorkerStatus::Success:       return "Success";
+        case WorkerStatus::InvalidParam:  return "InvalidParam";
+        case WorkerStatus::NotOpen:       return "NotOpen";
+        case WorkerStatus::InternalError: return "InternalError";
+        default:                          return "Unknown";
+    }
+}
+
+// ============================================================
+// CodecSendResult - Codec 层操作结果类（v2.35 新增）
+// ============================================================
+
+/**
+ * @brief Codec 层操作结果（v2.35 新增，与 PacketAcquireResult 对称设计）
+ * 
+ * 封装 CodecStatus + 查询方法，FFmpeg 错误码映射由各调用点自行完成
+ * （与 PacketAcquireResult 在各 EncodedPacketSource 实现类中映射的风格一致）。
+ * 
+ * 使用示例：
+ * @code
+ * // 解码器：发送 packet 后映射错误码
+ * int ret = avcodec_send_packet(ctx, pkt);
+ * if (ret == 0)               return FillResult::success();
+ * if (ret == AVERROR_EOF)     return FillResult::fromCodec(CodecSendResult::eof());
+ * if (ret == AVERROR(EINVAL)) return FillResult::fromCodec(CodecSendResult::invalidState());
+ * if (ret == AVERROR(ENOMEM)) return FillResult::fromCodec(CodecSendResult::allocFailed());
+ * return FillResult::fromCodec(CodecSendResult::decodeError());
+ * @endcode
+ */
+class CodecSendResult {
+public:
+    // ===== 工厂方法 =====
+    
+    /// 成功
+    static CodecSendResult success() { return CodecSendResult(CodecStatus::Success); }
+    
+    /// 编解码器需要更多输入/输出
+    static CodecSendResult eagain() { return CodecSendResult(CodecStatus::Eagain); }
+    
+    /// 编解码器 flush 完成
+    static CodecSendResult eof() { return CodecSendResult(CodecStatus::Eof); }
+    
+    /// avcodec_send_packet EAGAIN 重试耗尽
+    static CodecSendResult sendFailed() { return CodecSendResult(CodecStatus::SendFailed); }
+    
+    /// 编解码器状态错误（EINVAL）
+    static CodecSendResult invalidState() { return CodecSendResult(CodecStatus::InvalidState); }
+    
+    /// 码流损坏等解码错误
+    static CodecSendResult decodeError() { return CodecSendResult(CodecStatus::DecodeError); }
+    
+    /// avcodec_receive_frame 失败
+    static CodecSendResult receiveError() { return CodecSendResult(CodecStatus::ReceiveError); }
+    
+    /// Codec 内部内存分配失败
+    static CodecSendResult allocFailed() { return CodecSendResult(CodecStatus::AllocFailed); }
+    
+    /// 编码器错误
+    static CodecSendResult encodeError() { return CodecSendResult(CodecStatus::EncodeError); }
+    
+    // ===== 查询方法 =====
+    
+    /// 是否成功
+    bool ok() const noexcept { return status_ == CodecStatus::Success; }
+    
+    /// codec flush pipeline 已清空（avcodec_send_packet/frame 返回 AVERROR_EOF）
+    bool isEoFlush() const noexcept { return status_ == CodecStatus::Eof; }
+
+    /// 是否 EAGAIN
+    bool isEagain() const noexcept { return status_ == CodecStatus::Eagain; }
+    
+    /// 是否可重试（Eagain）
+    bool isRetryable() const noexcept { return isEagain(); }
+    
+    /// 是否终止错误
+    bool isTerminal() const noexcept {
+        return !ok() && !isEoFlush() && !isEagain();
+    }
+    
+    /// 获取状态码
+    CodecStatus status() const noexcept { return status_; }
+    
+    /// 获取状态字符串
+    const char* statusString() const noexcept { return codecStatusToString(status_); }
+    
+    /// 隐式 bool 转换
+    explicit operator bool() const noexcept { return ok(); }
+
+private:
+    explicit CodecSendResult(CodecStatus status) : status_(status) {}
+    CodecStatus status_;
+};
 
 // ============================================================
 // FillResult - Buffer 填充结果类（v2.33 新增）
 // ============================================================
 
 /**
- * @brief Buffer 填充结果
+ * @brief Buffer 填充结果（v2.33 新增，v2.34 重构为三层错误查询，v2.36 新增消费者决策接口）
  * 
- * v2.33 新增：封装 FillStatus，提供丰富的查询方法
+ * v2.34 设计变更：错误来源分层 + 各层携带自己的 cause
+ * v2.36 设计变更：新增消费者决策接口（ConsumerAction / toAction() / shouldTerminate() / shouldBypassFrameSync()）
  * 
- * 设计原则（与 PacketAcquireResult 保持一致）：
- * - 工厂方法创建，语义清晰
- * - 分类查询方法
- * - 零开销抽象
- * 
- * 使用示例：
+ * 推荐消费方式（v2.36）：
  * @code
  * FillResult result = worker->fillBuffer(index, buffer);
  * 
- * if (result.ok()) {
- *     // ✅ 成功，处理 buffer
- * } else if (result.shouldRetry()) {
- *     // ⏳ 需要重试
- *     continue;
- * } else if (result.isEof()) {
- *     // 📍 正常结束
- *     break;
- * } else {
- *     // ❌ 错误
- *     LOG_ERROR("Fill failed: %s", result.statusString());
+ * switch (result.toAction()) {
+ *     case FillResult::ConsumerAction::kSubmit:
+ *         // ✅ 提交 buffer
+ *         break;
+ *     case FillResult::ConsumerAction::kSkip:
+ *         // ⏭ 跳过当前 packet（PacketAlreadyProcessed / NonVideoPacket / InvalidData）
+ *         break;
+ *     case FillResult::ConsumerAction::kRetry:
+ *         // 🔄 重试当前操作（Again / TimedOut / CodecEagain）
+ *         break;
+     *     case FillResult::ConsumerAction::kTerminate:
+ *         // 正常结束：codec flush 完 or 数据源到头
+ *         // 真正错误：result.source() + result.statusString()
+ *         if (result.isEoFlush() || worker->isAtEnd()) { ... }
+ *         break;
  * }
  * @endcode
  */
 class FillResult {
 public:
-    // ===== 工厂方法 =====
+    // ===== 核心工厂方法 =====
     
     /// 成功
     static FillResult success() {
         return FillResult(FillStatus::Success);
     }
     
-    /// 非视频流 packet，需继续读取
-    static FillResult nonVideoPacket() {
-        return FillResult(FillStatus::NonVideoPacket);
+    /// 从 Acquire 层结果构造
+    static FillResult fromAcquire(const PacketAcquireResult& result) {
+        if (result.ok()) return success();
+        FillResult r(FillStatus::Error);
+        r.source_ = ErrorSource::Acquire;
+        r.acquire_cause_ = result.status();
+        return r;
     }
     
-    /// 编解码器需要更多输入
-    static FillResult codecEagain() {
-        return FillResult(FillStatus::CodecEagain);
+    /// 从 Codec 层结果构造（v2.35 重构：接受 CodecSendResult）
+    static FillResult fromCodec(const CodecSendResult& result) {
+        if (result.ok()) return success();
+        FillResult r(FillStatus::Error);
+        r.source_ = ErrorSource::Codec;
+        r.codec_cause_ = result.status();
+        return r;
     }
     
-    /// Buffer 共享模式等待数据
-    static FillResult dataPending() {
-        return FillResult(FillStatus::DataPending);
+    /// 从 Codec 层错误码直接构造（保留向后兼容）
+    static FillResult fromCodec(CodecStatus cause) {
+        if (cause == CodecStatus::Success) return success();
+        FillResult r(FillStatus::Error);
+        r.source_ = ErrorSource::Codec;
+        r.codec_cause_ = cause;
+        return r;
     }
     
-    /// 数据流结束
-    static FillResult endOfStream() {
-        return FillResult(FillStatus::EndOfStream);
+    /// 从 Worker 层结果构造
+    static FillResult fromWorker(WorkerStatus cause) {
+        if (cause == WorkerStatus::Success) return success();
+        FillResult r(FillStatus::Error);
+        r.source_ = ErrorSource::Worker;
+        r.worker_cause_ = cause;
+        return r;
     }
     
-    /// 获取 packet/frame 失败
-    static FillResult acquireError() {
-        return FillResult(FillStatus::AcquireError);
-    }
+    // ===== 向后兼容便捷方法 =====
+    // Acquire 层便捷方法（仍在使用）
+    static FillResult nonVideoPacket()         { return fromAcquire(PacketAcquireResult::nonVideoPacket()); }
+    // Worker 层便捷方法（仍在使用）
+    static FillResult invalidParam()           { return fromWorker(WorkerStatus::InvalidParam); }
+    static FillResult notOpen()                { return fromWorker(WorkerStatus::NotOpen); }
+    static FillResult internalError()          { return fromWorker(WorkerStatus::InternalError); }
     
-    /// 编解码器错误
-    static FillResult codecError() {
-        return FillResult(FillStatus::CodecError);
-    }
-    
-    /// 参数无效
-    static FillResult invalidParam() {
-        return FillResult(FillStatus::InvalidParam);
-    }
-    
-    /// 未打开
-    static FillResult notOpen() {
-        return FillResult(FillStatus::NotOpen);
-    }
-    
-    /// 资源分配失败
-    static FillResult allocFailed() {
-        return FillResult(FillStatus::AllocFailed);
-    }
-    
-    /// 内部错误
-    static FillResult internalError() {
-        return FillResult(FillStatus::InternalError);
-    }
-    
-    // ===== 状态查询 =====
+    // ===== 第一层查询：成功还是失败 =====
     
     /// 获取状态
     FillStatus status() const noexcept { return status_; }
@@ -244,37 +388,202 @@ public:
     /// 是否成功
     bool ok() const noexcept { return status_ == FillStatus::Success; }
     
-    /// 是否到达 EOF（正常结束）
-    bool isEof() const noexcept { return status_ == FillStatus::EndOfStream; }
+    /// 是否错误
+    bool isError() const noexcept { return status_ == FillStatus::Error; }
     
-    /// 是否需要重试（可继续尝试）
-    bool shouldRetry() const noexcept {
-        // 正值都是可重试状态
-        return static_cast<int>(status_) > 0;
-    }
-    
-    /// 是否是终止状态（EOF 或错误，应停止循环）
-    bool isTerminal() const noexcept {
-        return isEof() || isError();
-    }
-    
-    /// 是否是错误（负值且非 EOF）
-    bool isError() const noexcept {
-        return static_cast<int>(status_) < -1;
-    }
-    
-    /// 隐式 bool 转换（方便条件判断）
+    /// 隐式 bool 转换
     explicit operator bool() const noexcept { return ok(); }
     
-    /// 获取状态描述
+    // ===== 错误分类查询方法（v2.34 重构：拆分 shouldRetry 为 shouldContinue + shouldRetry）=====
+
+    /**
+     * @brief Codec 内部 flush pipeline 已清空（v2.36 重命名，语义收窄）
+     * 
+     * 仅检查 Codec 层 EOF（avcodec_send_packet/frame 返回 AVERROR_EOF），
+     * 表示解码器/编码器的内部 pipeline 已完全 flush 清空。
+     * 
+     * @note 不代表数据源到达文件末尾。数据源是否结束请查询 worker->isAtEnd()。
+     *       v2.35 旧名：isEof()，原来同时覆盖 AcquireStatus::Eof，已拆分。
+     */
+    bool isEoFlush() const noexcept {
+        return isCodecError() && codec_cause_ == CodecStatus::Eof;
+    }
+
+    /**
+     * @brief 数据获取层报告数据源已耗尽（AcquireStatus::Eof）
+     * 
+     * 表示 packet 获取层（文件/流/buffer）在本次 fillBuffer() 中明确报告"无更多数据"。
+     * 此时 worker->isAtEnd() 通常也同时为 true（两者来自同一代码路径），
+     * 但 isAtEnd() 是权威来源，消费者应优先使用 isAtEnd()。
+     * 
+     * @note 设计用途：在 WorkerSyncCoordinator 等无法访问 worker 对象的场景中，
+     *       通过 FillResult 本身区分"干净退出"与"真正错误"。
+     */
+    bool isAcquireEof() const noexcept {
+        return isAcquireError() && acquire_cause_ == AcquireStatus::Eof;
+    }
+    
+    /// 是否应该 continue（跳过当前 packet，获取下一个）
+    /// 适用于：当前 packet 无意义或已损坏，跳过即可
+    bool shouldContinue() const noexcept {
+        if (!isError()) return false;
+        if (isAcquireError()) {
+            return acquire_cause_ == AcquireStatus::PacketAlreadyProcessed ||
+                   acquire_cause_ == AcquireStatus::NonVideoPacket ||
+                   acquire_cause_ == AcquireStatus::InvalidData;
+        }
+        return false;
+    }
+    
+    /// 是否应该 retry（重试当前读取/解码操作）
+    /// 适用于：暂时性问题，重试同一操作可能成功
+    bool shouldRetry() const noexcept {
+        if (!isError()) return false;
+        // Acquire 层：暂时无数据 / 网络超时 → 重试当前读取
+        if (isAcquireError()) {
+            return acquire_cause_ == AcquireStatus::Again ||
+                   acquire_cause_ == AcquireStatus::TimedOut;
+        }
+        // Codec 层：解码器需要更多输入 → 重试（再送一个 packet）
+        if (isCodecError()) {
+            return codec_cause_ == CodecStatus::Eagain;
+        }
+        return false;
+    }
+    
+    /**
+     * @brief 是否是不可恢复的异常错误（排除法）
+     * 
+     * 定义：既不能 continue、也不能 retry、也不是 codec flush EOF、也不是 data source EOF
+     * 这类错误才应计入连续失败计数。
+     */
+    bool isTerminal() const noexcept {
+        return isError() && !shouldContinue() && !shouldRetry() && !isEoFlush() && !isAcquireEof();
+    }
+    
+    // ===== v2.36 消费者决策接口 =====
+    
+    /**
+     * @brief 消费者行动指令枚举
+     * 
+     * 将所有 FillResult 状态映射为消费者循环中的四种互斥行动。
+     * 配合 toAction() 使用，让 switch 语句穷举所有 case，
+     * 避免 if-else if 链遗漏分支（编译器会警告缺失的 case）。
+     * 
+     * 注：shouldContinue() / shouldRetry() / shouldTerminate() 仍可单独使用，
+     * toAction() 是在此基础上提供的 switch 聚合入口。
+     */
+    enum class ConsumerAction {
+        kSubmit,    ///< ok()：填充成功，提交 buffer
+        kSkip,      ///< shouldContinue()：跳过当前 packet，获取下一个
+        kRetry,     ///< shouldRetry()：重试当前操作
+        kTerminate, ///< shouldTerminate()：终止循环（配合 isAtEnd()/isEoFlush() 区分正常结束与错误中止）
+    };
+    
+    /**
+     * @brief 将 FillResult 映射为消费者行动指令
+     * 
+     * 聚合 shouldContinue() / shouldRetry() / shouldTerminate()，
+     * 供消费者 switch 语句使用，保证四路互斥完备。
+     * 
+     * 使用示例：
+     * @code
+     * switch (result.toAction()) {
+     *     case FillResult::ConsumerAction::kSubmit:    // 提交 buffer
+     *     case FillResult::ConsumerAction::kSkip:      // continue
+     *     case FillResult::ConsumerAction::kRetry:     // continue（重试）
+     *     case FillResult::ConsumerAction::kTerminate: // break（配合 isAtEnd()/isEoFlush() 区分结束与错误）
+     * }
+     * @endcode
+     */
+    ConsumerAction toAction() const noexcept {
+        if (ok())             return ConsumerAction::kSubmit;
+        if (shouldContinue()) return ConsumerAction::kSkip;
+        if (shouldRetry())    return ConsumerAction::kRetry;
+        return                       ConsumerAction::kTerminate;
+    }
+    
+    /**
+     * @brief 是否应该终止循环（break）
+     * 
+     * 覆盖所有非 ok/skip/retry 的情况：
+     *   - isAcquireEof()：数据获取层报告数据源耗尽
+     *   - isEoFlush()：codec flush pipeline 清空
+     *   - isTerminal()：不可恢复的真正错误
+     * 
+     * 与 shouldContinue() / shouldRetry() 合并后，四路互斥完备（恒为 true）。
+     * 消费者通过 worker->isAtEnd() 或 isEoFlush() 区分"正常结束"与"异常中止"。
+     */
+    bool shouldTerminate() const noexcept {
+        return !ok() && !shouldContinue() && !shouldRetry();
+    }
+    
+    /**
+     * @brief 是否完全绕过帧同步点（不进入 arrive()，不调用 commit）
+     * 
+     * 适用于：packet 未被实际消费、帧版本号未推进的情况。
+     * 此时两路 Worker 均会同时得到相同状态，无需进入同步协调器。
+     * 
+     * 当前适用状态：PacketAlreadyProcessed / NonVideoPacket
+     * 
+     * @note 与 shouldContinue() 的区别：InvalidData 属于 shouldContinue()
+     *       但帧版本已推进，仍需进入同步点；而 PacketAlreadyProcessed /
+     *       NonVideoPacket 帧版本未推进，直接绕过。
+     */
+    bool shouldBypassFrameSync() const noexcept {
+        if (!isAcquireError()) return false;
+        return acquire_cause_ == AcquireStatus::PacketAlreadyProcessed ||
+               acquire_cause_ == AcquireStatus::NonVideoPacket;
+    }
+    
+    // ===== 第二层查询：哪个模块的错误 =====
+    
+    /// 获取错误来源
+    ErrorSource source() const noexcept { return source_; }
+    
+    /// 是否是 Acquire 层错误
+    bool isAcquireError() const noexcept { return isError() && source_ == ErrorSource::Acquire; }
+    
+    /// 是否是 Codec 层错误
+    bool isCodecError() const noexcept { return isError() && source_ == ErrorSource::Codec; }
+    
+    /// 是否是 Worker 层错误
+    bool isWorkerError() const noexcept { return isError() && source_ == ErrorSource::Worker; }
+    
+    // ===== 第三层查询：具体错误类型 =====
+    
+    /// 获取 Acquire 层具体错误（仅当 isAcquireError() 时有意义）
+    AcquireStatus acquireCause() const noexcept { return acquire_cause_; }
+    
+    /// 获取 Codec 层具体错误（仅当 isCodecError() 时有意义）
+    CodecStatus codecCause() const noexcept { return codec_cause_; }
+    
+    /// 获取 Worker 层具体错误（仅当 isWorkerError() 时有意义）
+    WorkerStatus workerCause() const noexcept { return worker_cause_; }
+    
+    /// 获取完整的状态描述
     const char* statusString() const noexcept {
-        return fillStatusToString(status_);
+        if (ok()) return "Success";
+        switch (source_) {
+            case ErrorSource::Acquire: return acquireStatusToString(acquire_cause_);
+            case ErrorSource::Codec:   return codecStatusToString(codec_cause_);
+            case ErrorSource::Worker:  return workerStatusToString(worker_cause_);
+            default:                   return "Unknown";
+        }
     }
 
 private:
-    explicit FillResult(FillStatus status) : status_(status) {}
+    explicit FillResult(FillStatus status)
+        : status_(status), source_(ErrorSource::None)
+        , acquire_cause_(AcquireStatus::Success)
+        , codec_cause_(CodecStatus::Success)
+        , worker_cause_(WorkerStatus::Success) {}
     
-    FillStatus status_;
+    FillStatus    status_;
+    ErrorSource   source_;
+    AcquireStatus acquire_cause_;
+    CodecStatus   codec_cause_;
+    WorkerStatus  worker_cause_;
 };
 
 /**
@@ -401,17 +710,6 @@ public:
      * v2.33 变更：返回类型从 bool 改为 FillResult
      */
     virtual FillResult fillBuffer(int frame_index, Buffer* buffer) = 0;
-    
-    /**
-     * @brief 获取最后一次 fillBuffer 的结果状态
-     * 
-     * v2.33 新增：返回 FillStatus 枚举
-     * 
-     * @return FillStatus 枚举值
-     */
-    FillStatus getLastFillStatus() const {
-        return last_fill_status_;
-    }
     
     /**
      * @brief 从AVFrame元数据中提取硬件解码器的物理内存地址
@@ -908,23 +1206,6 @@ protected:
     // 日志器
     log4cplus::Logger logger_;
     
-    /**
-     * @brief 最后一次 fillBuffer 的结果状态
-     * 
-     * v2.33 新增：使用新的 FillStatus 枚举
-     */
-    FillStatus last_fill_status_ = FillStatus::Success;
-    
-    /**
-     * @brief 设置最后一次 fillBuffer 的结果状态
-     * 
-     * v2.33 新增：供子类在 fillBuffer 实现中调用
-     * 
-     * @param status 结果状态
-     */
-    void setLastFillStatus(FillStatus status) {
-        last_fill_status_ = status;
-    }
 };
 
 #endif // WORKER_BASE_HPP

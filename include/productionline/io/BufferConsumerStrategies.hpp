@@ -20,7 +20,8 @@
 #include "productionline/io/BufferComparator.hpp"
 #include "productionline/worker/WorkerConfig.hpp"
 #include "buffer/bufferpool/BufferPool.hpp"
-#include "display/LinuxFramebufferDevice.hpp"
+#include "display/IDisplayDevice.hpp"
+#include "display/DisplayDeviceFactory.hpp"
 
 #include <memory>
 #include <atomic>
@@ -68,25 +69,28 @@ private:
  */
 class DisplayConsumer : public IBufferConsumer {
 public:
+    using DisplayType = WorkerConfig::ConsumerTypeConfig::DisplayType;
+
     /**
      * @brief 构造函数
-     * @param device_id Framebuffer 设备 ID（默认 0）
+     * @param config 显示类型配置（决定使用 Framebuffer 还是 taco-vo）
      */
-    explicit DisplayConsumer(int device_id = 0);
+    explicit DisplayConsumer(const DisplayType& config);
     ~DisplayConsumer() override;
     
     bool initialize(const std::vector<Buffer*>& first_buffers) override;
     bool consume(const std::vector<Buffer*>& buffers, int frame_index) override;
     void finalize() override;
     std::string getStats() const override;
+    bool shouldRetainBuffer() const override;
     
 private:
-    int device_id_;
-    std::unique_ptr<LinuxFramebufferDevice> display_;
-    uint64_t display_pool_id_ = 0;  ///< Display BufferPool ID（用于 memcpy 模式）
+    DisplayType config_;
+    std::unique_ptr<IDisplayDevice> display_;
     int success_count_ = 0;
     int failed_count_ = 0;
     bool initialized_ = false;
+    bool last_consume_failed_ = false;
 };
 
 // ============================================================

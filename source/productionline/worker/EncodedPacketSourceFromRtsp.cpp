@@ -142,7 +142,7 @@ PacketAcquireResult EncodedPacketSourceFromRtsp::acquireEncodedPacket(AVPacket* 
     
     if (!is_open_.load(std::memory_order_acquire) || !format_ctx_ptr_ || !out_packet) {
         LOG4CPLUS_ERROR(logger_, "Cannot acquire packet: not open or out_packet is nullptr");
-        return Result::failure(AcquireStatus::InvalidMode);
+        return Result::invalidMode();
     }
     
     // v2.32 新增：检查是否达到最大帧数限制
@@ -170,24 +170,49 @@ PacketAcquireResult EncodedPacketSourceFromRtsp::acquireEncodedPacket(AVPacket* 
     }
     
     if (ret < 0) {
+        char errbuf[AV_ERROR_MAX_STRING_SIZE];
+        av_strerror(ret, errbuf, sizeof(errbuf));
+        
         if (ret == AVERROR_EOF) {
             LOG4CPLUS_DEBUG(logger_, "EOF reached");
             eof_reached_.store(true, std::memory_order_release);
-        } else if (ret == AVERROR_INVALIDDATA_VALUE) {
-            LOG4CPLUS_ERROR_FMT(logger_, "Too many corrupted packets (%d), giving up", corrupted_retries);
-        } else {
-            char errbuf[AV_ERROR_MAX_STRING_SIZE];
-            av_strerror(ret, errbuf, sizeof(errbuf));
-            LOG4CPLUS_ERROR_FMT(logger_, "av_read_frame failed: %d (%s)", ret, errbuf);
+            return Result::eof();
         }
-        return Result::eof();
+        if (ret == AVERROR_INVALIDDATA_VALUE) {
+            LOG4CPLUS_ERROR_FMT(logger_, "av_read_frame: corrupted data (%d retries exhausted): %s", 
+                               corrupted_retries, errbuf);
+            return Result::invalidData();
+        }
+        if (ret == AVERROR(EIO)) {
+            LOG4CPLUS_ERROR_FMT(logger_, "av_read_frame: IO/network error: %s", errbuf);
+            return Result::ioError();
+        }
+        if (ret == AVERROR(ETIMEDOUT)) {
+            LOG4CPLUS_WARN_FMT(logger_, "av_read_frame: network timeout: %s", errbuf);
+            return Result::timedOut();
+        }
+        if (ret == AVERROR(ENOMEM)) {
+            LOG4CPLUS_ERROR_FMT(logger_, "av_read_frame: out of memory: %s", errbuf);
+            return Result::outOfMemory();
+        }
+        if (ret == AVERROR_EXIT) {
+            LOG4CPLUS_WARN_FMT(logger_, "av_read_frame: exit requested: %s", errbuf);
+            return Result::interrupted();
+        }
+        if (ret == AVERROR(EAGAIN)) {
+            LOG4CPLUS_DEBUG_FMT(logger_, "av_read_frame: EAGAIN: %s", errbuf);
+            return Result::again();
+        }
+        
+        LOG4CPLUS_ERROR_FMT(logger_, "av_read_frame: unknown error %d: %s", ret, errbuf);
+        return Result::unknownError();
     }
     
     // 检查是否是视频流
     if (out_packet->stream_index != video_stream_index_) {
-        // 不是视频流，释放并返回 Again 让调用者重试
+        // 不是视频流（音频/字幕等），释放并返回 NonVideoPacket 让调用者跳过
         av_packet_unref(out_packet);
-        return Result::again();
+        return Result::nonVideoPacket();  // v2.34 修复：使用正确的语义状态码
     }
     
     // 成功读取到视频流的 packet

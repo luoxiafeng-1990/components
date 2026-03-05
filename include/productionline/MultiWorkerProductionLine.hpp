@@ -400,12 +400,13 @@ private:
      * @return true=允许提交, false=拒绝提交（未启用帧同步时始终返回 true）
      * 
      * v2.33 变更：参数类型从 FillBufferResult 改为 FillStatus
+     * v2.34 变更：参数类型从 FillStatus 改为 FillResult
      */
     bool performFrameSync(const std::shared_ptr<WorkerGroupRuntime>& group,
                          const std::string& consumer_name,
                          WorkerGroupRuntime::ConsumerInfo* consumer_info,
                          Buffer* buffer,
-                         FillStatus status);
+                         const FillResult& result);
     
     /**
      * @brief 设置错误信息并触发回调

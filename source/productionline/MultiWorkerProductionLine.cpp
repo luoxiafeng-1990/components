@@ -818,7 +818,7 @@ bool MultiWorkerProductionLine::performFrameSync(
     const std::string& consumer_name,
     WorkerGroupRuntime::ConsumerInfo* consumer_info,
     Buffer* buffer,
-    FillStatus status
+    const FillResult& result
 ) {
     Connector* owner_connector = group->getConnectorForConsumer(consumer_name);
     if (!owner_connector) {
@@ -845,21 +845,23 @@ bool MultiWorkerProductionLine::performFrameSync(
                         << "'] shared_source 不是 EncodedPacketSourceFromBuffer 类型");
         return true;  // 类型错误，默认允许提交
     }
-    // 如果 fillBuffer 返回 CodecEagain，则直接提交 packet
-    if (status == FillStatus::CodecEagain) {
-        shared_source->commitEncodedPacket(consumer_info->worker->getWorkerBase());
-        return true;
-    }
-
-    if (status == FillStatus::NonVideoPacket || status == FillStatus::DataPending) { 
+    // v2.34 修复：CodecEagain 不再跳过同步点
+    // 原因：如果一个 Worker 返回 CodecEagain 时直接 commit 而不进入同步点，
+    // 另一个 Worker 可能已经在同步点等待（如 CodecError），导致死锁。
+    // 修复：让 CodecEagain 和其他状态一样走正常的同步流程（arrive + commit），
+    // WorkerSyncCoordinator::arrive() 已能正确处理 EAGAIN + ERROR 的混合场景。
+    //
+    // v2.36 重构：使用 FillResult::shouldBypassFrameSync() 代替原来直接枚举 AcquireStatus 的写法，
+    // 恢复封装性，消费者不应感知 Acquire 层的具体枚举值。
+    if (result.shouldBypassFrameSync()) {
         return true;
     }
     // 获取当前帧版本号
     uint64_t frame_version = shared_source->getCurrentBufferVersion();
     
     // ⭐ v2.29 修改：到达同步点，传递 fillBuffer 的结果状态
-    // v2.33 变更：使用 FillStatus
-    bool sync_result = it->second->arrive(consumer_name, frame_version, buffer, status);
+    // v2.34 变更：使用 FillResult
+    bool sync_result = it->second->arrive(consumer_name, frame_version, buffer, result);
     
     // 帧同步完成后，调用 commit 释放 packet
     // 所有 Worker 一起 commit，确保 fetchTaskFunc 不会提前被唤醒
@@ -919,80 +921,82 @@ void MultiWorkerProductionLine::workerThreadFunc(
             break;
                         
         buffer_wait_count = 0;
-        
-        // v2.33 变更：fillBuffer 返回 FillResult
+
+        // ── 步骤 2：填充 buffer ──
         FillResult fill_result = consumer_info->worker->fillBuffer(0, buffer);
-        
-        if (fill_result.ok()) {
-            // ✅ 解码成功
-            
-            // ⭐ v2.29 修改：帧同步逻辑，传递 SUCCESS 状态
-            // v2.33 变更：使用 FillStatus
-            bool should_submit = performFrameSync(group, consumer_name, consumer_info, 
-                                                  buffer, FillStatus::Success);
-            
-            // 根据同步结果决定是否提交
-            if (should_submit) {
-                pool_sptr->submitFilled(buffer);
-                worker_stats->worker_frames_produced.fetch_add(1);
-                group->stats.frames_produced.fetch_add(1);
-            } else {
-                pool_sptr->releaseFree(buffer);
-            }
-            
-            worker_stats->consecutive_failures.store(0);
-            
-        } else {
-            // ❌ 失败：释放 buffer
-            pool_sptr->releaseFree(buffer);
-            
-            // v2.33 变更：直接使用 FillResult 判断状态
-            if (fill_result.shouldRetry()) {
-                // ⏳ 可重试状态（DataPending / CodecEagain / NonVideoPacket）
-                performFrameSync(group, consumer_name, consumer_info, nullptr, 
-                                fill_result.status());
-                continue;
-            }
-            
-            if (fill_result.isEof()) {
-                // 📍 EOF：数据源已结束，退出线程
-                LOG4CPLUS_INFO(logger_, "[Worker '" << consumer_name 
-                               << "'] 检测到数据源 EOF，正常退出");
+
+        // ── 步骤 3：根据行动指令处理结果（switch 强制穷举所有 case）──
+        //
+        // v2.36 修复：无论 kSkip / kRetry / kTerminate，都必须先调用 performFrameSync，
+        // 再决定 continue / break，防止其他 Worker 在同步点永久等待而死锁。
+        bool stop_worker = false;
+        switch (fill_result.toAction()) {
+            case FillResult::ConsumerAction::kSubmit: {
+                // ✅ 解码成功：进入同步点，由 performFrameSync 决定是否最终提交
+                bool should_submit = performFrameSync(group, consumer_name, consumer_info,
+                                                     buffer, fill_result);
+                if (should_submit) {
+                    pool_sptr->submitFilled(buffer);
+                    worker_stats->worker_frames_produced.fetch_add(1);
+                    group->stats.frames_produced.fetch_add(1);
+                } else {
+                    pool_sptr->releaseFree(buffer);
+                }
+                worker_stats->consecutive_failures.store(0);
                 break;
             }
-            
-            // ❌ 错误状态
-            performFrameSync(group, consumer_name, consumer_info, nullptr, 
-                            fill_result.status());
-            
-            // 检查原因
-            if (consumer_info->worker->isAtEnd()) {
-                // EOF：数据源已结束
-                // ⭐ 参考 VideoProductionLine 的逻辑：
-                // Consumer Worker 在共享模式下，EOF 意味着 Producer 已停止
-                // 应该退出线程，而不是继续等待
-                LOG4CPLUS_INFO(logger_, "[Worker '" << consumer_name 
-                               << "'] 检测到数据源 EOF，正常退出");
-                break;  // 退出线程
-                
-            } else {
-                // 非 EOF 失败：可能是解码错误
-                int failures = worker_stats->consecutive_failures.fetch_add(1) + 1;
-                worker_stats->worker_frames_failed.fetch_add(1);
-                group->stats.frames_failed.fetch_add(1);
-                
-                if (failures >= MAX_CONSECUTIVE_FAILURES) {
-                    // FATAL：连续失败过多
-                    LOG4CPLUS_ERROR(logger_, "[Worker '" << consumer_name 
-                                   << "'] 连续失败 " << failures << " 次 - FATAL");
-                    worker_stats->is_active.store(false);
-                    break;
+
+            case FillResult::ConsumerAction::kSkip:
+                // ⏭ 跳过当前 packet（PacketAlreadyProcessed / NonVideoPacket / InvalidData）
+                pool_sptr->releaseFree(buffer);
+                performFrameSync(group, consumer_name, consumer_info, nullptr, fill_result);
+                break;
+
+            case FillResult::ConsumerAction::kRetry:
+                // 🔄 重试当前操作（Again / TimedOut / CodecEagain）
+                pool_sptr->releaseFree(buffer);
+                performFrameSync(group, consumer_name, consumer_info, nullptr, fill_result);
+                break;
+
+            case FillResult::ConsumerAction::kTerminate:
+                // 🔚 终止：EOF（正常结束）或不可恢复错误
+                // v2.36 修复：必须先通知同步点再退出，防止其他 Worker 永久等待。
+                pool_sptr->releaseFree(buffer);
+                performFrameSync(group, consumer_name, consumer_info, nullptr, fill_result);
+
+                // v2.36：用 isAtEnd()（权威）+ isEoFlush()（codec flush）两路联合判断干净退出
+                // isAtEnd() 覆盖：pool 停止（含 window 期内的错误路径）
+                // isEoFlush() 覆盖：codec 内部 flush pipeline 清空
+                if (fill_result.isEoFlush() || consumer_info->worker->isAtEnd()) {
+                    // 📍 数据源到头或 codec flush 完：干净退出，不计失败
+                    LOG4CPLUS_INFO(logger_, "[Worker '" << consumer_name
+                                   << "'] data source exhausted, exiting normally");
+                    stop_worker = true;
+                } else {
+                    // ❌ 不可恢复错误：计数，超限则标记退出
+                    int failures = worker_stats->consecutive_failures.fetch_add(1) + 1;
+                    worker_stats->worker_frames_failed.fetch_add(1);
+                    group->stats.frames_failed.fetch_add(1);
+                    LOG4CPLUS_ERROR_FMT(logger_,
+                        "[Worker '%s'] fillBuffer terminal error: [%s] %s (consecutive=%d)",
+                        consumer_name.c_str(),
+                        errorSourceToString(fill_result.source()),
+                        fill_result.statusString(),
+                        failures);
+                    if (failures >= MAX_CONSECUTIVE_FAILURES) {
+                        LOG4CPLUS_ERROR(logger_, "[Worker '" << consumer_name
+                                       << "'] " << MAX_CONSECUTIVE_FAILURES
+                                       << " consecutive failures - FATAL, stopping");
+                        worker_stats->is_active.store(false);
+                        stop_worker = true;
+                    } else {
+                        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                    }
                 }
-                
-                // 短暂休眠，避免忙等
-                std::this_thread::sleep_for(std::chrono::milliseconds(1));
-            }
+                break;
         }
+
+        if (stop_worker) break;
     }
     pool_sptr->shutdown();
     LOG4CPLUS_INFO(logger_, "[Worker '" << consumer_name << "'] 线程结束 "

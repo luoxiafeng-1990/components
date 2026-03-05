@@ -6,6 +6,12 @@ noinst_LTLIBRARIES = libcomponents.la
 
 libcomponents_la_SOURCES = \
     source/display/LinuxFramebufferDevice.cpp \
+    source/display/TacoVOContext.cpp \
+    source/display/TacoVODisplayDevice.cpp \
+    source/display/SharedDisplayContext.cpp \
+    source/display/SharedFramebufferDevice.cpp \
+    source/display/OsdOverlay.cpp \
+    source/display/DisplayDeviceFactory.cpp \
     source/productionline/worker/WorkerBase.cpp \
     source/productionline/worker/BufferFillingWorkerFacade.cpp \
     source/productionline/worker/BufferFillingWorkerFactory.cpp \
@@ -50,9 +56,11 @@ libcomponents_la_SOURCES = \
 # 1. Buildroot 会自动编译 log4cplus（已在 components.mk 中声明依赖）
 # 2. log4cplus 库位置：$(STAGING_DIR)/usr/lib/liblog4cplus-2.0.so.3.4.7
 # 3. 运行时需要目标系统有 log4cplus 动态库（Buildroot 会自动安装到 TARGET_DIR）
-COMMON_LIBS = -lpthread -luring -lavformat -lavcodec -lavutil -lswscale -ltacosys -llog4cplus $(OPENCV_LIBS)
+COMMON_LIBS = -lpthread -luring -lavformat -lavcodec -lavutil -lswscale -ltacosys -ltacovo -llog4cplus -lfreetype $(OPENCV_LIBS)
 OPENCV_LIBS = -ltacocv -lvx -lhwdec_jpeg -ltaco_ppvdec -lCLC -lOpenVX -lOpenVXU -lOpenCL -lSPIRV_viv -lCLC -lVSC -lGAL -lovxlib -lArchModelSw -lNNArchPerf -ldl \
         -lopencv_imgcodecs -lopencv_videoio -lopencv_core -lopencv_imgproc -lenc24 -lyuv -ljpeg
+
+
 # display_test 主程序（已废弃，原 test_cases/dec/ 目录已重命名为 old_case/）
 # display_test_SOURCES = test_cases/dec/test.cpp
 # display_test_CPPFLAGS = -I$(top_srcdir)/test_cases $(AM_CPPFLAGS)
@@ -80,12 +88,16 @@ qa_cases_SOURCES = \
     test_cases/taopencv/TaOpencvTestSuite.cpp
 qa_cases_LDADD = libcomponents.la $(COMMON_LIBS)
 qa_cases_CPPFLAGS = -I$(top_srcdir)/test_cases $(AM_CPPFLAGS)
-qa_cases_LDFLAGS = 
+qa_cases_LDFLAGS = -Wl,--allow-shlib-undefined
 
 # ========== 编译选项 ==========
+<<<<<<< HEAD
 AM_CPPFLAGS = -I$(top_srcdir)/include $(OPENCV_INCLUDE)
 # STAGING_DIR = /workshop-debian/output/current/host/riscv64-buildroot-linux-gnu/sysroot/
 OPENCV_INCLUDE = -I$(STAGING_DIR)/usr/include/opencv4
+=======
+AM_CPPFLAGS = -I$(top_srcdir)/include -I$(top_srcdir)/include/freetype2
+>>>>>>> dev
 
 if DEBUG
 AM_CXXFLAGS = -g -O0 -Wall -std=c++17

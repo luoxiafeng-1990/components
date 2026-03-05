@@ -7,32 +7,35 @@
 #include <stdlib.h>
 #include <string.h>
 
+log4cplus::Logger BufferFillingWorkerFactory::logger_ =
+    log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.BufferFillingWorkerFactory"));
+
 // ============ 公共接口 ============
 
 std::unique_ptr<WorkerBase> BufferFillingWorkerFactory::create(const WorkerConfig& config) {
     auto type = config.worker_type;
     // 1️⃣ 用户显式指定（最高优先级）
     if (type != WorkerType::AUTO) {
-        LOG4CPLUS_DEBUG_FMT(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Worker.Factory")), "[WorkerFactory] BufferFillingWorkerFactory: User specified type: %s", typeToString(type));
+        LOG4CPLUS_DEBUG_FMT(logger_, "User specified type: %s", typeToString(type));
         return createByType(type, config);
     }
     
     // 2️⃣ 环境变量配置
     WorkerType env_type = getTypeFromEnvironment();
     if (env_type != WorkerType::AUTO) {
-        LOG4CPLUS_DEBUG_FMT(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Worker.Factory")), "[WorkerFactory] BufferFillingWorkerFactory: Type from environment: %s", typeToString(env_type));
+        LOG4CPLUS_DEBUG_FMT(logger_, "Type from environment: %s", typeToString(env_type));
         return createByType(env_type, config);
     }
     
     // 3️⃣ 配置文件
     WorkerType config_type = getTypeFromConfig();
     if (config_type != WorkerType::AUTO) {
-        LOG4CPLUS_DEBUG_FMT(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Worker.Factory")), "[WorkerFactory] BufferFillingWorkerFactory: Type from config: %s", typeToString(config_type));
+        LOG4CPLUS_DEBUG_FMT(logger_, "Type from config: %s", typeToString(config_type));
         return createByType(config_type, config);
     }
     
     // 4️⃣ 自动检测
-    LOG4CPLUS_DEBUG(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Worker.Factory")), "[WorkerFactory] BufferFillingWorkerFactory: Auto-detecting best worker type...");
+    LOG4CPLUS_DEBUG(logger_, "Auto-detecting best worker type...");
     return autoDetect(config);
 }
 
@@ -55,8 +58,8 @@ const char* BufferFillingWorkerFactory::typeToString(WorkerType type) {
 // ============ 私有辅助方法 ============
 
 std::unique_ptr<WorkerBase> BufferFillingWorkerFactory::autoDetect(const WorkerConfig& config) {
-    LOG4CPLUS_INFO(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Worker.Factory")), "🔍 Auto-detecting Worker type...");
-    LOG4CPLUS_INFO(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Worker.Factory")), "   Using FFmpegDecodeWorker as default");
+    LOG4CPLUS_INFO(logger_, "Auto-detecting Worker type...");
+    LOG4CPLUS_INFO(logger_, "Using FFmpegDecodeWorker as default");
     
     // 默认使用 FFmpeg Decode Worker（统一处理文件和 RTSP）
     return std::make_unique<FFmpegDecodeWorker>(config);
@@ -108,7 +111,6 @@ BufferFillingWorkerFactory::WorkerType BufferFillingWorkerFactory::getTypeFromCo
     // 实际项目中可以实现配置文件解析
     return WorkerType::AUTO;
 }
-
 
 
 

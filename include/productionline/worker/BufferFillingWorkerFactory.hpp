@@ -74,6 +74,7 @@ public:
     static const char* typeToString(WorkerType type);
 
 private:
+    static log4cplus::Logger logger_;
     /**
      * 自动检测并创建最优Worker
      */
@@ -101,7 +102,6 @@ private:
 };
 
 #endif // BUFFER_FILLING_WORKER_FACTORY_HPP
-
 
 
 

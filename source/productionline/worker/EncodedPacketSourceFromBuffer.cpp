@@ -401,7 +401,7 @@ PacketAcquireResult EncodedPacketSourceFromBuffer::acquireEncodedPacket(AVPacket
     
     if (!is_shared_mode_) {
         LOG4CPLUS_ERROR(logger_, "acquireEncodedPacket() only supported in shared mode");
-        return Result::failure(AcquireStatus::InvalidMode);
+        return Result::invalidMode();
     }
     
     std::unique_lock<std::mutex> lock(mutex_);
@@ -418,8 +418,9 @@ PacketAcquireResult EncodedPacketSourceFromBuffer::acquireEncodedPacket(AVPacket
     }
     
     if (!current_buffer_) {
-        LOG4CPLUS_WARN_FMT(logger_, "[Worker %p] acquireEncodedPacket: Unexpected - no buffer", worker_id);
-        return Result::failure(AcquireStatus::NoData);
+        LOG4CPLUS_ERROR_FMT(logger_, "[Worker %p] acquireEncodedPacket: Internal error - "
+            "cv woke up with is_running=true but current_buffer is null", worker_id);
+        return Result::internalError();
     }
     
     uint64_t current_version = current_buffer_version_.load(std::memory_order_acquire);
@@ -436,7 +437,7 @@ PacketAcquireResult EncodedPacketSourceFromBuffer::acquireEncodedPacket(AVPacket
             "[Worker %p] acquireEncodedPacket: Already processed version %llu (has_acquired=%d, has_committed=%d)", 
             worker_id, (unsigned long long)current_version, 
             state.has_acquired, state.has_committed);
-        return Result::again();  // ⭐ v2.31：返回 Again 状态
+        return Result::packetAlreadyProcessed();  // ⭐ v2.31：当前 packet 已处理过
     }
     
     // ✅ 新版本或首次获取，可以获取
