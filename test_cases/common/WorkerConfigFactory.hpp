@@ -216,6 +216,120 @@ public:
         // 默认 H264
         return createH264Decode(path, width, height);
     }
+
+    static WorkerConfig createSoftwareCv(
+        const std::string& path,
+        int width,
+        int height
+    ) {
+        return WorkerConfigBuilder()
+            .setDataSourceConfig(
+                DataSourceConfigBuilder()
+                    .setPath(path)
+                    .setBufferCount(128)
+                    .build()
+            )
+            .setDisplayConfig(
+                DisplayConfigBuilder()
+                    .setDisplayResolution(width, height)
+                    .setBitsPerPixel(32)
+                    .build()
+            )
+            .setDecoderConfig(
+                DecoderConfigBuilder()
+                    .useSoftware()
+                    .build()
+            )
+            .setWorkerType(WorkerType::OPENCV)
+            .build();
+    }
+    
+    static WorkerConfig createHardwareCv(
+        const std::string& path,
+        const std::string& decoder,
+        int width,
+        int height
+    ) {
+        if (decoder == "software" || decoder == "sw") {
+            return createSoftwareDecode(path, width, height);
+        }
+        
+        // 解析解码器名称: codec_taco -> codec
+        std::string codec = decoder;
+        size_t pos = decoder.find("_taco");
+        if (pos != std::string::npos) {
+            codec = decoder.substr(0, pos);
+        }
+        
+        auto taco = TacoConfigBuilder()
+            .setChannels(true, false)
+            .build();
+
+        if (codec == "h264" || codec == "avc") {
+            return WorkerConfigBuilder()
+            .setDataSourceConfig(
+                DataSourceConfigBuilder()
+                    .setPath(path)
+                    .setBufferCount(isRtspUrl(path) ? 8 : 128)
+                    .build()
+            )
+            .setDisplayConfig(
+                DisplayConfigBuilder()
+                    .setDisplayResolution(width, height)
+                    .setBitsPerPixel(32)
+                    .build()
+            )
+            .setDecoderConfig(
+                DecoderConfigBuilder()
+                    .useTaco("h264", taco)
+                    .build()
+            )
+            .setWorkerType(WorkerType::OPENCV)
+            .build();
+        } else if (codec == "h265" || codec == "hevc") {
+            return WorkerConfigBuilder()
+            .setDataSourceConfig(
+                DataSourceConfigBuilder()
+                    .setPath(path)
+                    .setBufferCount(isRtspUrl(path) ? 8 : 128)
+                    .build()
+            )
+            .setDisplayConfig(
+                DisplayConfigBuilder()
+                    .setDisplayResolution(width, height)
+                    .setBitsPerPixel(32)
+                    .build()
+            )
+            .setDecoderConfig(
+                DecoderConfigBuilder()
+                    .useTaco("hevc", taco)
+                    .build()
+            )
+            .setWorkerType(WorkerType::OPENCV)
+            .build();
+        } else if (codec == "mjpeg" || codec == "jpeg") {
+            return WorkerConfigBuilder()
+            .setDataSourceConfig(
+                DataSourceConfigBuilder()
+                    .setPath(path)
+                    .setBufferCount(isRtspUrl(path) ? 8 : 128)
+                    .build()
+            )
+            .setDisplayConfig(
+                DisplayConfigBuilder()
+                    .setDisplayResolution(width, height)
+                    .setBitsPerPixel(32)
+                    .build()
+            )
+            .setDecoderConfig(
+                DecoderConfigBuilder()
+                    .useTaco("mjpeg", taco)
+                    .build()
+            )
+            .setWorkerType(WorkerType::OPENCV)
+            .build();
+        }
+    }
     
     // ========================================
     // PP（后处理）配置

@@ -20,6 +20,11 @@
 namespace test {
 namespace taopencv {
 
+// 获取模块级日志实例
+
+// ========================================
+// 辅助函数：从 WorkerConfig 构建消费标志
+// ========================================
 uint32_t TaOpencvTestSuite::buildConsumeFlags(const WorkerConfig& config) {
     uint32_t flags = consumer::CONSUME_COUNT;  // 默认计数
     
@@ -35,8 +40,18 @@ uint32_t TaOpencvTestSuite::buildConsumeFlags(const WorkerConfig& config) {
 
 const std::map<std::string, TaOpencvTestParams>& TaOpencvTestSuite::getPredefinedTests() {
     static std::map<std::string, TaOpencvTestParams> tests = {
-        {"h264_128x128_30",       {"h264", 128, 128, 30.0, true}},
-        {"h264_320x240_30",       {"h264", 320, 240, 30.0, true}}
+        // ========================================
+        // H.264 测试（9 个分辨率/帧率组合）
+        // ========================================
+        {"h264_128x128_30",       {"h264", 128, 128, 30.0, "main"}},
+        {"h264_320x240_30",       {"h264", 320, 240, 30.0, "high"}},
+        {"h264_640x480_30",       {"h264", 640, 480, 30.0, "main"}},
+        {"h264_640x480_60",       {"h264", 640, 480, 60.0, "high"}},
+        {"h264_1280x720_30",      {"h264", 1280, 720, 30.0, "high"}},
+        {"h264_1920x1080_30",     {"h264", 1920, 1080, 30.0, "high"}},
+        {"h264_1920x1080_60",     {"h264", 1920, 1080, 60.0, "high"}},
+        {"h264_2560x1440_30",     {"h264", 2560, 1440, 30.0, "high"}},
+        {"h264_3840x2160_30",     {"h264", 3840, 2160, 30.0, "high"}}
     };
     return tests;
 }
@@ -49,220 +64,9 @@ std::vector<std::string> TaOpencvTestSuite::getTestNames() const {
     return names;
 }
 
-bool test_opencv() {
-    bool g_running = true;
-    bool g_rtsp_interrupted = false;
-    
-    WorkerConfig::DataSourceConfig data_source_config = DataSourceConfigBuilder()
-                                    .setPath("input.mp4")
-                                    .setBufferCount(16)
-                                    .build();
-    
-    WorkerConfig::DecoderConfig::TacoConfig taco_config = TacoConfigBuilder()
-                                    .setReorderDisable(true)
-                                    .setChannels(false, false)
-                                    .build();
-    
-    WorkerConfig::DecoderConfig hw_decoder_config = DecoderConfigBuilder()
-                                    .useTaco("h264", taco_config)
-                                    .build();
-    WorkerConfig::DecoderConfig sw_decoder_config = DecoderConfigBuilder()
-                                    .useSoftware()
-                                    .build();
-    
-    WorkerConfig hw_worker_config = WorkerConfigBuilder()
-                                    .setDataSourceConfig(data_source_config)
-                                    .setDecoderConfig(hw_decoder_config)
-                                    .setWorkerType(WorkerType::FFMPEG_DECODE)
-                                    .build();
-    
-    WorkerConfig sw_worker_config = WorkerConfigBuilder()
-                                    .setDataSourceConfig(data_source_config)
-                                    .setDecoderConfig(sw_decoder_config)
-                                    .setWorkerType(WorkerType::FFMPEG_DECODE)
-                                    .build();
-
-    VideoProductionLine hw_producer = VideoProductionLine(false, 1, false);
-    VideoProductionLine sw_producer = VideoProductionLine(false, 1, false);
-
-    bool hw_result = hw_producer.start(hw_worker_config);
-    if (!hw_result) {hw_producer.stop(); return false;}
-    bool sw_result = sw_producer.start(sw_worker_config);
-    if (!sw_result) {sw_producer.stop(); return false;}
-
-    uint64_t hw_pool_id = hw_producer.getWorkingBufferPoolId();
-    uint64_t sw_pool_id = sw_producer.getWorkingBufferPoolId();
-    if (hw_pool_id ==0 || sw_pool_id == 0){hw_producer.stop(); sw_producer.stop(); return false;}
-
-    auto hw_pool = BufferPoolRegistry::getInstance().getPool(hw_pool_id).lock();
-    auto sw_pool = BufferPoolRegistry::getInstance().getPool(sw_pool_id).lock();
-    if (! hw_pool || ! sw_pool){hw_producer.stop(); sw_producer.stop(); return false;}
-
-    bool result_passed = true;
-    const int target_width = 480;
-    const int target_height = 360;
-    const std::string hw_output = "hw_output.jpg";
-    const std::string sw_output = "sw_output.jpg";
-
-    Buffer* hw_buf = hw_pool->acquireFilled(true,100);
-    Buffer* sw_buf = sw_pool->acquireFilled(true,100);
-    while (g_running) {
-        if (hw_buf == nullptr && sw_buf == nullptr){
-            break;
-        }
-        else if (hw_buf == nullptr){
-            sw_pool->releaseFilled(sw_buf);
-            sw_buf = sw_pool->acquireFilled(true,100);
-            continue;
-        }
-        else if (sw_buf == nullptr){
-            hw_pool->releaseFilled(hw_buf);
-            hw_buf = hw_pool->acquireFilled(true,100);
-            continue;
-        }
-        int64_t hw_pts = hw_buf->getAVFrame()->pts;
-        int64_t sw_pts = sw_buf->getAVFrame()->pts;
-        std::cout << "hw_pts: " << hw_pts << std::endl;
-        std::cout << "sw_pts: " << sw_pts << std::endl;
-        if (sw_pts == hw_pts){
-            cv::MatAllocator* sw_allocator = cv::Mat::getDefaultAllocator();
-            cv::MatAllocator* hw_allocator = cv::hal::getAllocator();
-            // 因为mat和avframe内存共享，所以对象的析构顺序必须是mat->avframe->buffer
-            {
-            cv::Mat::setDefaultAllocator(hw_allocator);
-            cv::Mat original_mat = cv::Mat(hw_buf->getAVFrame());
-            cv::Mat::setDefaultAllocator(sw_allocator);
-            cv::Mat hw_resized_mat;
-            cv::Mat sw_resized_mat;
-            
-            cv::Mat::setDefaultAllocator(hw_allocator);
-            auto hw_start = std::chrono::high_resolution_clock::now();
-            cv::resize(original_mat, hw_resized_mat,cv::Size(target_width, target_height));
-            auto hw_end = std::chrono::high_resolution_clock::now();
-            
-            cv::Mat::setDefaultAllocator(sw_allocator);
-            auto sw_start = std::chrono::high_resolution_clock::now();
-            cv::resize(original_mat, sw_resized_mat,cv::Size(target_width, target_height));
-            auto sw_end = std::chrono::high_resolution_clock::now();
-            auto hw_duration = std::chrono::duration_cast<std::chrono::milliseconds>(hw_end - hw_start);
-            auto sw_duration = std::chrono::duration_cast<std::chrono::milliseconds>(sw_end - sw_start);
-            std::cout << "hw_duration: " << hw_duration.count() << std::endl;
-            std::cout << "sw_duration: " << sw_duration.count() << std::endl;
-
-            std::cout << "[DEBUG] Before hw_imwrite" << std::endl;
-            cv::imwrite(hw_output,hw_resized_mat);
-            std::cout << "[DEBUG] After hw_imwrite, before sw_imwrite" << std::endl;
-            cv::imwrite(sw_output,sw_resized_mat);
-            std::cout << "[DEBUG] After sw_imwrite, before scope end" << std::endl;
-            }
-            std::cout << "[DEBUG] After scope end" << std::endl;
-            sw_pool->releaseFilled(sw_buf);
-            hw_pool->releaseFilled(hw_buf);
-            std::cout << "[1]" << std::endl;
-            sw_buf = sw_pool->acquireFilled(true,100);
-            hw_buf = hw_pool->acquireFilled(true,100);
-            std::cout << "[2]" << std::endl;
-            break;
-        }
-        else if (sw_pts < hw_pts){
-            sw_pool->releaseFilled(sw_buf);
-            sw_buf = sw_pool->acquireFilled(true,100);
-        }
-        else if (sw_pts > hw_pts){
-            hw_pool->releaseFilled(hw_buf);
-            hw_buf = hw_pool->acquireFilled(true,100);
-        }
-    }
-
-    std::cout << "[3]" << std::endl;
-    
-    hw_producer.stop();
-    sw_producer.stop();
-
-    std::cout << "[4]" << std::endl;
-    return result_passed;
-}
-
-
-bool test_single_pp (
-    std::string data_source_path,
-    std::string codec
-){
-    bool g_running = true;
-
-    WorkerConfig::DataSourceConfig g_data_source_config = DataSourceConfigBuilder().
-                                    setPath(data_source_path).
-                                    setBufferCount(16).
-                                    build();
-    TacoConfigBuilder taco_config_builder = TacoConfigBuilder().
-                                    setReorderDisable(false);
-    WorkerConfig::DecoderConfig::TacoConfig g_taco_config = taco_config_builder.build();
-    WorkerConfig::DecoderConfig g_hw_decoder_config = DecoderConfigBuilder().useTaco(codec,g_taco_config).build();
-    WorkerConfig::DecoderConfig g_sw_decoder_config = DecoderConfigBuilder().useSoftware().build();
-    WorkerConfig g_hw_worker_config = WorkerConfigBuilder().
-                                    setDataSourceConfig(g_data_source_config).
-                                    setDecoderConfig(g_hw_decoder_config).
-                                    setWorkerType(WorkerType::FFMPEG_DECODE).
-                                    build();
-    WorkerConfig g_sw_worker_config = WorkerConfigBuilder().
-                                    setDataSourceConfig(g_data_source_config).
-                                    setDecoderConfig(g_sw_decoder_config).
-                                    setWorkerType(WorkerType::FFMPEG_DECODE).
-                                    build();
-
-    VideoProductionLine hw_producer = VideoProductionLine(false,1,false);
-    VideoProductionLine sw_producer = VideoProductionLine(false,1,false);
-    bool hw_result = hw_producer.start(g_hw_worker_config);
-    if (!hw_result) {hw_producer.stop(); return false;}
-    bool sw_result = sw_producer.start(g_sw_worker_config);
-    if (!sw_result) {sw_producer.stop(); return false;}
-
-    uint64_t hw_pool_id = hw_producer.getWorkingBufferPoolId();
-    uint64_t sw_pool_id = sw_producer.getWorkingBufferPoolId();
-    if (hw_pool_id ==0 || sw_pool_id == 0){hw_producer.stop(); sw_producer.stop(); return false;}
-    auto hw_pool = BufferPoolRegistry::getInstance().getPool(hw_pool_id).lock();
-    auto sw_pool = BufferPoolRegistry::getInstance().getPool(sw_pool_id).lock();
-    if (! hw_pool || ! sw_pool){hw_producer.stop(); sw_producer.stop(); return false;}
-
-    bool result_passed = true;
-
-    Buffer* hw_buf = hw_pool->acquireFilled(true, 100);
-    Buffer* sw_buf = sw_pool->acquireFilled(true, 100);
-    while (g_running) {
-        if (hw_buf == nullptr && sw_buf == nullptr){
-            std::cout << "no more avframe" << std::endl;
-            break;
-        }
-        else if (hw_buf == nullptr){
-            std::cout << "sw_pts: " << sw_buf->getAVFrame()->pts << std::endl;
-            hw_pool->releaseFilled(hw_buf);
-            hw_buf = hw_pool->acquireFilled(true, 100);
-            continue;
-        }
-        else if (sw_buf == nullptr){
-            std::cout << "hw_pts: " << hw_buf->getAVFrame()->pts << std::endl;
-            sw_pool->releaseFilled(sw_buf);
-            sw_buf = sw_pool->acquireFilled(true, 100);
-            continue;
-        }
-        else {
-            int64_t hw_pts = hw_buf->getAVFrame()->pts;
-            int64_t sw_pts = sw_buf->getAVFrame()->pts;
-            std::cout << "hw_pts: " << hw_pts
-                      << "sw_pts: " << sw_pts
-                      << "same? " << (hw_pts==sw_pts ? "true":"false")
-                      << std::endl;
-            sw_pool->releaseFilled(sw_buf);
-            hw_pool->releaseFilled(hw_buf);
-            sw_buf = sw_pool->acquireFilled(true,100);
-            hw_buf = hw_pool->acquireFilled(true,100);
-        }
-    }
-    hw_producer.stop();
-    sw_producer.stop();
-
-    return result_passed;
-}
+// ========================================
+// ITestModule 接口实现
+// ========================================
 
 int TaOpencvTestSuite::run(int argc, char* argv[]) {
     WorkerConfig config;
@@ -272,6 +76,9 @@ int TaOpencvTestSuite::run(int argc, char* argv[]) {
         return 1;
     }
     
+    // 生成测试名称
+    // 方案 A：使用预定义测试名称（如果匹配）
+    // 方案 B：使用文件路径 + 实际配置（如果未匹配预定义测试）
     std::ostringstream test_name;
     if (params.isPredefined()) {
         // 使用预定义测试名称 + 参数信息
@@ -291,7 +98,30 @@ int TaOpencvTestSuite::run(int argc, char* argv[]) {
                   << " " << static_cast<int>(params.fps) << "fps)";
     }
     
-    return test_single_pp("input.mp4","h264") ? 0:1;
+    // if (config.consumer_type.compare.enable_psnr || config.consumer_type.compare.enable_ssim)
+    auto hw_config = common::WorkerConfigFactory::createHardwareCv(
+        config.data_source.path, params.codec, params.width, params.height);
+    hw_config.consumer_type = config.consumer_type;
+    hw_config.consumer_type.performance.target_fps = params.fps;
+    hw_config.data_source.max_frames = config.data_source.max_frames;  // v2.23: 传递帧数限制
+    
+    auto sw_config = common::WorkerConfigFactory::createSoftwareCv(
+        config.data_source.path, params.width, params.height);
+    sw_config.consumer_type.performance.target_fps = params.fps;
+    sw_config.data_source.max_frames = config.data_source.max_frames;  // v2.23: 传递帧数限制
+    
+    // COMPARE 模式也支持叠加其他消费类型（display、save）
+    uint32_t compare_flags = 0;
+    if (config.consumer_type.display.enable) {
+        compare_flags |= consumer::CONSUME_DISPLAY;
+    }
+    if (config.consumer_type.save_raw.enable) {
+        compare_flags |= consumer::CONSUME_SAVE_RAW;
+    }
+    
+    auto result = runCompare({hw_config, sw_config}, compare_flags, test_name.str() + " (COMPARE)");
+    consumer::BufferConsumerService::printResult(test_name.str(), result);
+    return result.success ? 0 : 1;
 }
 
 bool TaOpencvTestSuite::parseArgs(int argc, char* argv[], WorkerConfig& config, TaOpencvTestParams& params) {
@@ -312,6 +142,10 @@ bool TaOpencvTestSuite::parseArgs(int argc, char* argv[], WorkerConfig& config, 
         {"save",       required_argument, 0, 's'},
         {"output",     required_argument, 0, 'o'},
         {"display",    no_argument,       0, 'd'},
+        {"display-mode", required_argument, 0, 'X'},
+        {"display-fps",  required_argument, 0, 'Z'},
+        {"osd",          no_argument,       0,  1001},
+        {"osd-fps",      required_argument, 0,  1002},
         {"psnr",       no_argument,       0, 'p'},
         {"ssim",       no_argument,       0, 'S'},
         {"min-psnr",   required_argument, 0, 'P'},
@@ -324,7 +158,7 @@ bool TaOpencvTestSuite::parseArgs(int argc, char* argv[], WorkerConfig& config, 
     std::string input_path;
     
     int opt;
-    while ((opt = getopt_long(argc, argv, "hlf:r:c:D:W:H:R:F:m:s:o:dpSP:M:vt:", 
+    while ((opt = getopt_long(argc, argv, "hlf:r:c:D:W:H:R:F:m:s:o:dpSP:M:vt:X:Z:", 
                               long_options, nullptr)) != -1) {
         switch (opt) {
             case 'h':
@@ -398,7 +232,38 @@ bool TaOpencvTestSuite::parseArgs(int argc, char* argv[], WorkerConfig& config, 
             case 'd':
                 config.consumer_type.display.enable = true;
                 break;
-            
+
+            case 'X': {
+                std::string mode_str = optarg;
+                if (mode_str == "vo" || mode_str == "taco-vo") {
+                    config.consumer_type.display.mode =
+                        WorkerConfig::ConsumerTypeConfig::DisplayType::TACO_VO;
+                } else if (mode_str == "shared_fb" || mode_str == "shared-fb") {
+                    config.consumer_type.display.mode =
+                        WorkerConfig::ConsumerTypeConfig::DisplayType::SHARED_FB;
+                } else if (mode_str == "fb" || mode_str == "framebuffer") {
+                    config.consumer_type.display.mode =
+                        WorkerConfig::ConsumerTypeConfig::DisplayType::FRAMEBUFFER;
+                } else {
+                    LOG4CPLUS_ERROR_FMT(getLogger(),
+                        "Invalid display mode '%s', use 'vo', 'shared_fb' or 'fb'", optarg);
+                    return false;
+                }
+                break;
+            }
+
+            case 'Z':
+                config.consumer_type.display.taco_vo.target_fps = std::stoi(optarg);
+                break;
+
+            case 1001:
+                config.consumer_type.display.taco_vo.osd_enable = true;
+                break;
+
+            case 1002:
+                config.consumer_type.display.taco_vo.osd_fps = std::stoi(optarg);
+                break;
+
             case 'p':
                 config.consumer_type.compare.enable_psnr = true;
                 break;
@@ -426,6 +291,8 @@ bool TaOpencvTestSuite::parseArgs(int argc, char* argv[], WorkerConfig& config, 
                         "Invalid thread count '%s', must be >= 1", optarg);
                     return false;
                 }
+                // 设置 profile 为 parallel_N 格式，触发 PARALLEL 模式
+                // params.profile = "parallel_" + std::to_string(thread_count);
                 break;
             }
             
@@ -473,7 +340,7 @@ bool TaOpencvTestSuite::parseArgs(int argc, char* argv[], WorkerConfig& config, 
         config.consumer_type.save_raw.max_frames_per_channel[0] != 0 &&
         !config.consumer_type.save_raw.enable) {
         std::cerr << "Error: -s/--save requires -o/--output to specify output file path\n" << std::endl;
-        std::cerr << "Example: qa_cases opencv -s 100 -o /tmp/output.yuv video.mp4\n" << std::endl;
+        std::cerr << "Example: qa_cases taopencv -s 100 -o /tmp/output.yuv video.mp4\n" << std::endl;
         return false;
     }
     
@@ -501,12 +368,12 @@ int TaOpencvTestSuite::runPredefinedTest(const std::string& test_name, const std
 }
 
 void TaOpencvTestSuite::printHelp() const {
-    std::cout << ""
+    std::cout << "Empty\n"
               << std::endl;
 }
 
 void TaOpencvTestSuite::listTests() const {
-    std::cout << ""
+    std::cout << "Empty\n"
               << std::endl;
 }
 
