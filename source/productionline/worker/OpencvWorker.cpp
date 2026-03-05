@@ -594,58 +594,70 @@ bool OpencvWorker::fillBufferMetadataFromFrame(AVFrame* frame_ptr, Buffer* buffe
 }
 
 FillResult OpencvWorker::readAndSendPacket(AVPacket* packet_ptr) {
-    // ⭐ v2.32 统一接口：所有模式都使用 acquireEncodedPacket
     if (!packet_acquired_) {
         auto acquire_result = packet_source_->acquireEncodedPacket(packet_ptr, this);
-
-        if (acquire_result.ok()) {
-            // ✅ 成功获取
-            current_packet_ptr_ = acquire_result.packet();
-            packet_acquired_ = true;
-
-        } else if (acquire_result.isEof()) {
-            // 📍 EOF：数据流正常结束
-            LOG4CPLUS_DEBUG(logger_, "acquireEncodedPacket: EOF reached");
-            setLastFillStatus(FillStatus::EndOfStream);
-            return FillResult::endOfStream();
-
-        } else if (acquire_result.shouldRetry()) {
-            // ⏳ AGAIN：需要重试
-            if (acquire_result.status() == AcquireStatus::Again) {
-                setLastFillStatus(FillStatus::DataPending);
-                return FillResult::dataPending();
-            }
-            setLastFillStatus(FillStatus::NonVideoPacket);
-            return FillResult::nonVideoPacket();
-
-        } else {
-            // ❌ 错误
-            LOG4CPLUS_ERROR_FMT(logger_, "acquireEncodedPacket failed: %s",
-                               acquire_result.statusString());
-            setLastFillStatus(FillStatus::AcquireError);
-            return FillResult::acquireError();
+        
+        if (!acquire_result.ok()) {
+            return FillResult::fromAcquire(acquire_result);
         }
+        
+        current_packet_ptr_ = acquire_result.packet();
+        packet_acquired_ = true;
     }
 
     // ========== 发送到解码器 ==========
     int ret = avcodec_send_packet(codec_ctx_ptr_, current_packet_ptr_);
 
-    if (ret < 0 && ret != AVERROR(EAGAIN)) {
-        // ❌ 发送失败
-        char err_buf[AV_ERROR_MAX_STRING_SIZE];
-        av_strerror(ret, err_buf, sizeof(err_buf));
-        LOG4CPLUS_ERROR_FMT(logger_, "ERROR: avcodec_send_packet failed: %d (%s)", ret, err_buf);
-
-        if (!worker_config_.data_source.deferred_commit) {
-            packet_source_->cancelEncodedPacket(this);
+    // ⏳ EAGAIN 处理：解码器内部缓冲区已满，延迟后重试发送
+    if (ret == AVERROR(EAGAIN)) {
+        LOG4CPLUS_WARN(logger_, 
+            " avcodec_send_packet: decoder buffer full (EAGAIN), "
+            "will retry after short delay...");
+        
+        constexpr int kMaxRetries = 3;
+        constexpr int kRetryDelayMs = 10;
+        
+        for (int i = 0; i < kMaxRetries; ++i) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(kRetryDelayMs));
+            ret = avcodec_send_packet(codec_ctx_ptr_, current_packet_ptr_);
+            
+            if (ret == 0) {
+                LOG4CPLUS_INFO_FMT(logger_, 
+                    " avcodec_send_packet: retry #%d succeeded, packet consumed", i + 1);
+                return FillResult::success();
+            }
+            if (ret != AVERROR(EAGAIN)) {
+                break;  // 遇到其他错误，跳出重试进入后续错误处理
+            }
         }
-        packet_acquired_ = false;
-        current_packet_ptr_ = nullptr;
-        setLastFillStatus(FillStatus::CodecError);
-        return FillResult::codecError();
+        
+        if (ret == AVERROR(EAGAIN)) {
+            // ❌ 重试耗尽仍然 EAGAIN，返回发送失败错误，由调用者决定是否丢弃该帧
+            LOG4CPLUS_ERROR_FMT(logger_, 
+                " avcodec_send_packet: still EAGAIN after %d retries, "
+                "returning sendPacketFailed to caller", kMaxRetries);
+            return FillResult::fromCodec(CodecSendResult::sendFailed());
+        }
+        // ret 已变为其他错误码，fall through 到下方映射
     }
-
-    return FillResult::success();
+    
+    // v2.35 重构：与 Acquire 层保持一致，直接使用工厂方法映射
+    if (ret == 0) {
+        return FillResult::success();
+    }
+    
+    // 错误码映射（与 PacketAcquireResult 在 acquireEncodedPacket 中的风格一致）
+    using Result = CodecSendResult;
+    if (ret == AVERROR_EOF)     return FillResult::fromCodec(Result::eof());
+    if (ret == AVERROR(EINVAL)) return FillResult::fromCodec(Result::invalidState());
+    if (ret == AVERROR(ENOMEM)) return FillResult::fromCodec(Result::allocFailed());
+    
+    // 其他未识别错误
+    char err_buf[AV_ERROR_MAX_STRING_SIZE];
+    av_strerror(ret, err_buf, sizeof(err_buf));
+    LOG4CPLUS_ERROR_FMT(logger_, 
+        " ERROR: avcodec_send_packet: decode error (ret=%d, %s)", ret, err_buf);
+    return FillResult::fromCodec(Result::decodeError());
 }
 
 FillResult OpencvWorker::fillBuffer(int frame_index, Buffer* buffer) {
@@ -654,13 +666,11 @@ FillResult OpencvWorker::fillBuffer(int frame_index, Buffer* buffer) {
     // ========== 参数校验 ==========
     if (!buffer) {
         LOG4CPLUS_ERROR(logger_, "ERROR: buffer is nullptr");
-        setLastFillStatus(FillStatus::InvalidParam);
         return FillResult::invalidParam();
     }
 
     if (!packet_source_ || !packet_source_->isOpen()) {
         LOG4CPLUS_ERROR(logger_, "ERROR: Worker is not open");
-        setLastFillStatus(FillStatus::NotOpen);
         return FillResult::notOpen();
     }
 
@@ -669,7 +679,6 @@ FillResult OpencvWorker::fillBuffer(int frame_index, Buffer* buffer) {
     AVPacket* packet_ptr = buffer->getAVPacket();
     if (!packet_ptr) {
         LOG4CPLUS_ERROR(logger_, "ERROR: buffer->getAVPacket() is nullptr");
-        setLastFillStatus(FillStatus::InvalidParam);
         return FillResult::invalidParam();
     }
 
@@ -685,7 +694,6 @@ FillResult OpencvWorker::fillBuffer(int frame_index, Buffer* buffer) {
             LOG4CPLUS_ERROR(logger_, "Failed to convert cached AVFrame to Mat");
             delete mat;
             av_frame_free(&cached_frame);
-            setLastFillStatus(FillStatus::InternalError);
             return FillResult::internalError();
         }
 
@@ -693,37 +701,61 @@ FillResult OpencvWorker::fillBuffer(int frame_index, Buffer* buffer) {
         fillBufferMetadataFromFrame(cached_frame, buffer, mat);
 
         buffer->setAVFrame(cached_frame);
-
-        setLastFillStatus(FillStatus::Success);
         return FillResult::success();
     }
 
     // ========== 步骤2: 读取并发送 packet ==========
     FillResult send_result = readAndSendPacket(packet_ptr);
     if (!send_result.ok()) {
-        // readAndSendPacket() 已经设置了 lastFillStatus_，直接返回
         return send_result;
     }
-
+   
     // ========== 步骤3: 循环读取所有解码的帧到缓存 ==========
     bool decoded_at_least_one = false;
-
+    CodecSendResult receive_result = CodecSendResult::success();
+    
     while (true) {
         AVFrame* temp_frame = av_frame_alloc();
         if (!temp_frame) {
+            receive_result = CodecSendResult::allocFailed();
             break;
         }
-
+        
         int ret = avcodec_receive_frame(codec_ctx_ptr_, temp_frame);
-
-        if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF || ret < 0) {
-            av_frame_free(&temp_frame);
-            break;
+        
+        if (ret == 0) {
+            // ✅ 成功解码一帧
+            decoded_at_least_one = true;
+            cached_frames_.push_back(temp_frame);
+            continue;
         }
-
-        // ✅ 成功解码一帧
-        decoded_at_least_one = true;
-        cached_frames_.push_back(temp_frame);
+        
+        // 失败：释放临时帧，映射错误码
+        av_frame_free(&temp_frame);
+        
+        if (ret == AVERROR(EAGAIN)) {
+            receive_result = CodecSendResult::eagain();
+        } else if (ret == AVERROR_EOF) {
+            // 解码器缓存帧耗尽，等同于需要更多输入（不是文件 EOF）
+            receive_result = CodecSendResult::eagain();
+        } else if (ret == AVERROR(EINVAL)) {
+            // codec 未正确打开或类型不匹配（编程错误）
+            LOG4CPLUS_ERROR(logger_, 
+                " ERROR: avcodec_receive_frame: EINVAL - codec not opened or is an encoder");
+            receive_result = CodecSendResult::invalidState();
+        } else if (ret == AVERROR_INPUT_CHANGED) {
+            // 解码参数在帧间发生变化（需要 AV_CODEC_FLAG_DROPCHANGED）
+            LOG4CPLUS_WARN(logger_, 
+                " WARN: avcodec_receive_frame: input parameters changed between frames");
+            receive_result = CodecSendResult::receiveError();
+        } else {
+            char err_buf[AV_ERROR_MAX_STRING_SIZE];
+            av_strerror(ret, err_buf, sizeof(err_buf));
+            LOG4CPLUS_ERROR_FMT(logger_, 
+                " ERROR: avcodec_receive_frame: unknown error (ret=%d, %s)", ret, err_buf);
+            receive_result = CodecSendResult::receiveError();
+        }
+        break;
     }
 
     // ========== 步骤4: 检查是否成功解码 ==========
@@ -734,8 +766,7 @@ FillResult OpencvWorker::fillBuffer(int frame_index, Buffer* buffer) {
         }
         packet_acquired_ = false;
         current_packet_ptr_ = nullptr;
-        setLastFillStatus(FillStatus::CodecEagain);
-        return FillResult::codecEagain();
+        return FillResult::fromCodec(receive_result);
     }
 
     // ========== 步骤5: 成功解码，提交（释放）==========
@@ -759,7 +790,6 @@ FillResult OpencvWorker::fillBuffer(int frame_index, Buffer* buffer) {
         LOG4CPLUS_ERROR(logger_, "Failed to convert AVFrame to Mat");
         delete mat;
         av_frame_free(&first_frame);
-        setLastFillStatus(FillStatus::InternalError);
         return FillResult::internalError();
     }
 
@@ -768,7 +798,6 @@ FillResult OpencvWorker::fillBuffer(int frame_index, Buffer* buffer) {
 
     buffer->setAVFrame(first_frame);
 
-    setLastFillStatus(FillStatus::Success);
     return FillResult::success();
 }
 

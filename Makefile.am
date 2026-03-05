@@ -91,13 +91,8 @@ qa_cases_CPPFLAGS = -I$(top_srcdir)/test_cases $(AM_CPPFLAGS)
 qa_cases_LDFLAGS = -Wl,--allow-shlib-undefined
 
 # ========== 编译选项 ==========
-<<<<<<< HEAD
-AM_CPPFLAGS = -I$(top_srcdir)/include $(OPENCV_INCLUDE)
-# STAGING_DIR = /workshop-debian/output/current/host/riscv64-buildroot-linux-gnu/sysroot/
+AM_CPPFLAGS = -I$(top_srcdir)/include $(OPENCV_INCLUDE) -I$(top_srcdir)/include/freetype2
 OPENCV_INCLUDE = -I$(STAGING_DIR)/usr/include/opencv4
-=======
-AM_CPPFLAGS = -I$(top_srcdir)/include -I$(top_srcdir)/include/freetype2
->>>>>>> dev
 
 if DEBUG
 AM_CXXFLAGS = -g -O0 -Wall -std=c++17
