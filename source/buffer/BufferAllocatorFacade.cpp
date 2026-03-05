@@ -81,14 +81,15 @@ Buffer* BufferAllocatorFacade::injectExternalBufferToPool(
     void* virt_addr,
     uint64_t phys_addr,
     size_t size,
-    QueueType queue
+    QueueType queue,
+    uint32_t custom_id
 ) {
     if (!allocator_base_uptr_) {
         LOG4CPLUS_ERROR(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Allocator.Facade")), "Allocator not initialized");
         return nullptr;
     }
     
-    return allocator_base_uptr_->injectExternalBufferToPool(pool_id, virt_addr, phys_addr, size, queue);
+    return allocator_base_uptr_->injectExternalBufferToPool(pool_id, virt_addr, phys_addr, size, queue, custom_id);
 }
 
 bool BufferAllocatorFacade::removeBufferFromPool(uint64_t pool_id, Buffer* buffer) {

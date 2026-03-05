@@ -10,13 +10,18 @@
 #include <cstring>
 #include <cerrno>
 #include <cmath>
+#include <array>
 
-#define PROC_FB "/proc/fb"
-#define TPS_FB0 "tpsfb0"
-#define TPS_FB1 "tpsfb1"
-#define DEV_FB0 "/dev/fb0"
-#define DEV_FB1 "/dev/fb1"
-#define DEV_FB2 "/dev/fb2"
+namespace {
+    constexpr const char* kProcFb = "/proc/fb";
+    constexpr const char* kTpsFb0 = "tpsfb0";
+
+    constexpr std::array<const char*, 3> kDevFbPaths = {{
+        "/dev/fb0",
+        "/dev/fb1",
+        "/dev/fb2",
+    }};
+}
 
 struct tpsfb_dma_info {
     uint32_t ovl_idx;
@@ -41,7 +46,7 @@ std::shared_ptr<SharedDisplayContext> SharedDisplayContext::acquire(const TacoVO
     }
 
     auto ctx = std::shared_ptr<SharedDisplayContext>(new SharedDisplayContext(config));
-    if (!ctx->init()) {
+    if (!ctx->open()) {
         return nullptr;
     }
     s_instance_ = ctx;
@@ -70,48 +75,34 @@ SharedDisplayContext::SharedDisplayContext(const TacoVOConfig& config)
 }
 
 SharedDisplayContext::~SharedDisplayContext() {
-    shutdown();
+    close();
 }
 
 // ============================================================
-// 初始化
+// open / close（对齐 Worker 生命周期命名）
 // ============================================================
 
-bool SharedDisplayContext::init() {
+bool SharedDisplayContext::open() {
     {
         FILE* f = fopen("/sys/devices/platform/soc/soc:dss@c9200000/dss-overlay1/enabled", "w");
         if (f) { fprintf(f, "0"); fclose(f); }
     }
 
-    if (!openFramebufferDevice()) {
+    if (!openDevice()) {
         return false;
     }
 
-    if (!allocateDmaMemory()) {
-        close(fd_);
+    if (!createBufferPool()) {
+        ::close(fd_);
         fd_ = -1;
         return false;
     }
 
-    if (!setupDssForDma()) {
-        freeDmaMemory();
-        close(fd_);
-        fd_ = -1;
-        return false;
-    }
-
-    if (!createFramebufferPool()) {
-        freeDmaMemory();
-        close(fd_);
-        fd_ = -1;
-        return false;
-    }
-
-    // 从 FREE 队列获取第一个 buffer 作为初始渲染目标
-    auto pool = getPool();
+    auto pool = getBufferPool();
     if (!pool) {
-        freeDmaMemory();
-        close(fd_);
+        fb_pool_id_ = 0;
+        allocator_facade_.reset();
+        ::close(fd_);
         fd_ = -1;
         return false;
     }
@@ -119,25 +110,23 @@ bool SharedDisplayContext::init() {
     render_buf_ = pool->acquireFree(false, 0);
     if (!render_buf_) {
         LOG4CPLUS_ERROR(logger_, "Failed to acquire initial render buffer");
-        freeDmaMemory();
-        close(fd_);
+        fb_pool_id_ = 0;
+        allocator_facade_.reset();
+        ::close(fd_);
         fd_ = -1;
         return false;
     }
-
-    // 清零初始渲染 buffer
-    memset(render_buf_->getVirtualAddress(), 0, buffer_size_);
 
     if (!startThreads()) {
         pool->releaseFree(render_buf_);
         render_buf_ = nullptr;
-        freeDmaMemory();
-        close(fd_);
+        fb_pool_id_ = 0;
+        allocator_facade_.reset();
+        ::close(fd_);
         fd_ = -1;
         return false;
     }
 
-    // OSD 叠加初始化（可选）
     if (config_.osd_enable) {
         osd_ = std::make_unique<OsdOverlay>(screen_width_, screen_height_, config_.max_channels);
         OsdOverlay::Config osd_cfg;
@@ -152,14 +141,14 @@ bool SharedDisplayContext::init() {
     }
 
     LOG4CPLUS_INFO_FMT(logger_,
-        "SharedDisplayContext initialized: %dx%d, %dbpp, %d buffers, %dfps, osd=%s",
+        "SharedDisplayContext opened: %dx%d, %dbpp, %d buffers, %dfps, osd=%s",
         screen_width_, screen_height_, bits_per_pixel_, buffer_count_, config_.target_fps,
         osd_ ? "on" : "off");
 
     return true;
 }
 
-void SharedDisplayContext::shutdown() {
+void SharedDisplayContext::close() {
     if (osd_) {
         osd_->shutdown();
         osd_.reset();
@@ -167,42 +156,29 @@ void SharedDisplayContext::shutdown() {
 
     stopThreads();
 
-    auto pool = getPool();
+    render_buf_ = nullptr;
+    display_buf_ = nullptr;
 
-    // 归还 render_buf_
-    if (render_buf_ && pool) {
-        pool->releaseFree(render_buf_);
-        render_buf_ = nullptr;
-    }
-
-    // 归还 display_buf_
-    if (display_buf_ && pool) {
-        pool->releaseFilled(display_buf_);
-        display_buf_ = nullptr;
-    }
-
-    // 销毁 BufferPool
+    // destroyPool 内部自动 taco_sys_munmap + taco_sys_release_block
     fb_pool_id_ = 0;
-    allocator_.reset();
-
-    freeDmaMemory();
+    allocator_facade_.reset();
 
     if (fd_ >= 0) {
-        close(fd_);
+        ::close(fd_);
         fd_ = -1;
     }
 
-    LOG4CPLUS_INFO(logger_, "SharedDisplayContext shutdown complete");
+    LOG4CPLUS_INFO(logger_, "SharedDisplayContext closed");
 }
 
 // ============================================================
-// Framebuffer 设备
+// Framebuffer 设备（对齐 Worker::open 中的设备初始化）
 // ============================================================
 
-bool SharedDisplayContext::openFramebufferDevice() {
-    FILE* fp = fopen(PROC_FB, "r");
+bool SharedDisplayContext::openDevice() {
+    FILE* fp = fopen(kProcFb, "r");
     if (!fp) {
-        LOG4CPLUS_ERROR_FMT(logger_, "Cannot open %s: %s", PROC_FB, strerror(errno));
+        LOG4CPLUS_ERROR_FMT(logger_, "Cannot open %s: %s", kProcFb, strerror(errno));
         return false;
     }
 
@@ -213,11 +189,11 @@ bool SharedDisplayContext::openFramebufferDevice() {
 
     while (fgets(line, sizeof(line), fp)) {
         if (sscanf(line, "%d %s", &fb_num, fb_name) == 2) {
-            if (strcmp(fb_name, TPS_FB0) == 0) {
+            if (strcmp(fb_name, kTpsFb0) == 0) {
                 fb_index_ = 0;
-                if (fb_num == 0) device_node = DEV_FB0;
-                else if (fb_num == 1) device_node = DEV_FB1;
-                else if (fb_num == 2) device_node = DEV_FB2;
+                if (fb_num >= 0 && fb_num < static_cast<int>(kDevFbPaths.size())) {
+                    device_node = kDevFbPaths[fb_num];
+                }
                 break;
             }
         }
@@ -229,7 +205,7 @@ bool SharedDisplayContext::openFramebufferDevice() {
         return false;
     }
 
-    fd_ = open(device_node, O_RDWR);
+    fd_ = ::open(device_node, O_RDWR);
     if (fd_ < 0) {
         LOG4CPLUS_ERROR_FMT(logger_, "Cannot open %s: %s", device_node, strerror(errno));
         return false;
@@ -265,125 +241,25 @@ bool SharedDisplayContext::openFramebufferDevice() {
 }
 
 // ============================================================
-// DMA 内存分配
+// BufferPool 创建（TACO 分配由 FramebufferAllocator 内部完成）
 // ============================================================
 
-bool SharedDisplayContext::allocateDmaMemory() {
-    dma_mem_.total_size = buffer_size_ * buffer_count_;
-
-    dma_mem_.blk_id = taco_sys_get_block(
-        TACO_INVALID_POOLID,
-        dma_mem_.total_size,
-        "shared_display_ctx");
-
-    if (dma_mem_.blk_id == 0) {
-        LOG4CPLUS_ERROR_FMT(logger_, "taco_sys_get_block failed (size=%zu)", dma_mem_.total_size);
-        return false;
-    }
-
-    dma_mem_.phys_addr = taco_sys_handle2_phys_addr(dma_mem_.blk_id);
-    dma_mem_.virt_addr = taco_sys_mmap_noncache(
-        dma_mem_.phys_addr, static_cast<uint32_t>(dma_mem_.total_size));
-
-    if (!dma_mem_.virt_addr) {
-        LOG4CPLUS_ERROR(logger_, "taco_sys_mmap_noncache failed");
-        taco_sys_release_block(dma_mem_.blk_id);
-        dma_mem_.blk_id = 0;
-        return false;
-    }
-
-    memset(dma_mem_.virt_addr, 0, dma_mem_.total_size);
-
-    // 初始化 metadata（PP 硬件通过 metadata->elems->value 查找 blk_id → 物理地址）
-    snprintf(blk_id_str_, sizeof(blk_id_str_), "%u", dma_mem_.blk_id);
-    dict_entry_.key = const_cast<char*>("pool_blk_id");
-    dict_entry_.value = blk_id_str_;
-    dict_.count = 1;
-    dict_.elems = &dict_entry_;
-
-    LOG4CPLUS_INFO_FMT(logger_,
-        "DMA memory allocated: blk_id=%u, phys=0x%llx, virt=%p, size=%zu",
-        dma_mem_.blk_id, (unsigned long long)dma_mem_.phys_addr,
-        dma_mem_.virt_addr, dma_mem_.total_size);
-
-    return true;
-}
-
-void SharedDisplayContext::freeDmaMemory() {
-    if (dma_mem_.virt_addr) {
-        taco_sys_munmap(dma_mem_.virt_addr, static_cast<uint32_t>(dma_mem_.total_size));
-        dma_mem_.virt_addr = nullptr;
-    }
-    if (dma_mem_.blk_id != 0) {
-        taco_sys_release_block(dma_mem_.blk_id);
-        dma_mem_.blk_id = 0;
-    }
-    dma_mem_.phys_addr = 0;
-    dma_mem_.total_size = 0;
-}
-
-// ============================================================
-// DSS DMA 配置
-// ============================================================
-
-bool SharedDisplayContext::setupDssForDma() {
-    struct tpsfb_dma_info dma_info;
-    dma_info.ovl_idx = 0;
-    dma_info.phys_addr = dma_mem_.phys_addr;
-
-    if (ioctl(fd_, FB_IOCTL_SET_DMA_INFO, &dma_info) < 0) {
-        LOG4CPLUS_ERROR_FMT(logger_, "FB_IOCTL_SET_DMA_INFO failed: %s", strerror(errno));
-        return false;
-    }
-
-    LOG4CPLUS_INFO_FMT(logger_, "DSS DMA base set to 0x%llx",
-        (unsigned long long)dma_mem_.phys_addr);
-    return true;
-}
-
-// ============================================================
-// BufferPool 创建
-// ============================================================
-
-bool SharedDisplayContext::createFramebufferPool() {
-    allocator_ = std::make_unique<BufferAllocatorFacade>(
+bool SharedDisplayContext::createBufferPool() {
+    allocator_facade_ = std::make_unique<BufferAllocatorFacade>(
         BufferAllocatorFactory::AllocatorType::FRAMEBUFFER);
 
-    if (!allocator_) {
-        LOG4CPLUS_ERROR(logger_, "Failed to create BufferAllocatorFacade");
-        return false;
-    }
-
-    fb_pool_id_ = allocator_->allocatePoolWithBuffers(
-        0, 0, "SharedDisplayContext_fb", "Display");
-
+    fb_pool_id_ = allocator_facade_->allocatePoolWithBuffers(
+        buffer_count_, buffer_size_, "SharedDisplayContext_fb", "Display");
     if (fb_pool_id_ == 0) {
         LOG4CPLUS_ERROR(logger_, "Failed to create BufferPool");
+        allocator_facade_.reset();
         return false;
     }
 
-    uint8_t* base = static_cast<uint8_t*>(dma_mem_.virt_addr);
-
-    for (int i = 0; i < buffer_count_; i++) {
-        void*    virt_addr = base + buffer_size_ * i;
-        uint64_t phys_addr = dma_mem_.phys_addr + buffer_size_ * i;
-
-        Buffer* buf = allocator_->injectExternalBufferToPool(
-            fb_pool_id_, virt_addr, phys_addr, buffer_size_, QueueType::FREE);
-
-        if (!buf) {
-            LOG4CPLUS_ERROR_FMT(logger_, "Failed to inject buffer #%d", i);
-            fb_pool_id_ = 0;
-            allocator_.reset();
-            return false;
-        }
-    }
-
-    LOG4CPLUS_INFO_FMT(logger_, "BufferPool created with %d framebuffer pages", buffer_count_);
     return true;
 }
 
-std::shared_ptr<BufferPool> SharedDisplayContext::getPool() {
+std::shared_ptr<BufferPool> SharedDisplayContext::getBufferPool() {
     if (fb_pool_id_ == 0) return nullptr;
     return BufferPoolRegistry::getInstance().getPool(fb_pool_id_).lock();
 }
@@ -593,8 +469,12 @@ void SharedDisplayContext::ppResize(
     // 从 FFmpeg AVFrame 复制 metadata 指针（AVDictionary 与 TA_AVDictionary 布局一致）
     in_avframe.metadata = reinterpret_cast<TA_AVDictionary*>(avframe_in->metadata);
 
-    // === 构建输出 ta_avframe_t（仿照 taco-vo：data[0] 指向 DMA 基地址）===
-    TA_AVDictionaryEntry local_out_entry = dict_entry_;
+    // === 构建输出 ta_avframe_t（buf->id() == blk_id，用于 PP 物理地址查找）===
+    char blk_id_str[16];
+    snprintf(blk_id_str, sizeof(blk_id_str), "%u", dst->id());
+    TA_AVDictionaryEntry local_out_entry;
+    local_out_entry.key = const_cast<char*>("pool_blk_id");
+    local_out_entry.value = blk_id_str;
     TA_AVDictionary local_out_dict;
     local_out_dict.count = 1;
     local_out_dict.elems = &local_out_entry;
@@ -605,13 +485,8 @@ void SharedDisplayContext::ppResize(
     out_avframe.height = screen_height_;
     out_avframe.format = out_format;
     out_avframe.metadata = &local_out_dict;
-    out_avframe.data[0] = static_cast<uint8_t*>(dma_mem_.virt_addr);
+    out_avframe.data[0] = static_cast<uint8_t*>(dst->getVirtualAddress());
 
-    // 计算当前 render buffer 相对 DMA 基地址的页偏移
-    // 必须用 phys_addr 计算，因为 freeBuffer() 会将 virt_addr_ 清零
-    size_t page_offset = dst->getPhysicalAddress() - dma_mem_.phys_addr;
-
-    // === resize 参数（y_offset 加入页偏移，与 taco-vo send_chn_frame 一致）===
     ta_cv_resize_t resize_params = {};
     resize_params.in_width  = src_width;
     resize_params.in_height = src_height;
@@ -625,18 +500,18 @@ void SharedDisplayContext::ppResize(
     resize_attr.interpolation = 1;
 
     if (out_format == TA_AV_PIX_FMT_NV12) {
-        resize_attr.y_offset = dst_y * screen_width_ + dst_x + page_offset;
+        resize_attr.y_offset = dst_y * screen_width_ + dst_x;
         resize_attr.u_offset = screen_width_ * (screen_height_ - dst_y)
                              + (screen_width_ / 2) * dst_y;
         resize_attr.y_stride = screen_width_;
         resize_attr.u_stride = screen_width_;
     } else if (out_format == TA_AV_PIX_FMT_RGB24) {
-        resize_attr.y_offset = (dst_y * screen_width_ + dst_x) * 3 + page_offset;
+        resize_attr.y_offset = (dst_y * screen_width_ + dst_x) * 3;
         resize_attr.u_offset = 0;
         resize_attr.y_stride = screen_width_ * 3;
         resize_attr.u_stride = screen_width_ * 3;
     } else {
-        resize_attr.y_offset = (dst_y * screen_width_ + dst_x) * 4 + page_offset;
+        resize_attr.y_offset = (dst_y * screen_width_ + dst_x) * 4;
         resize_attr.u_offset = 0;
         resize_attr.y_stride = screen_width_ * 4;
         resize_attr.u_stride = screen_width_ * 4;
@@ -695,17 +570,8 @@ void SharedDisplayContext::ppCopy(Buffer* src, Buffer* dst) {
         return;
     }
 
-    // 通过物理地址计算虚拟地址（freeBuffer() 会清除 virt_addr_ 但保留 phys_addr_）
-    uint8_t* dma_base = static_cast<uint8_t*>(dma_mem_.virt_addr);
-    size_t src_offset = src->getPhysicalAddress() - dma_mem_.phys_addr;
-    size_t dst_offset = dst->getPhysicalAddress() - dma_mem_.phys_addr;
-
-    if (src_offset >= dma_mem_.total_size || dst_offset >= dma_mem_.total_size) {
-        LOG4CPLUS_ERROR_FMT(logger_,
-            "ppCopy: buffer outside DMA range src_off=%zu dst_off=%zu total=%zu",
-            src_offset, dst_offset, dma_mem_.total_size);
-        return;
-    }
+    uint8_t* src_virt = static_cast<uint8_t*>(src->getVirtualAddress());
+    uint8_t* dst_virt = static_cast<uint8_t*>(dst->getVirtualAddress());
 
     int bytes_per_pixel = bits_per_pixel_ / 8;
     int out_format = TA_AV_PIX_FMT_NONE;
@@ -717,16 +583,20 @@ void SharedDisplayContext::ppCopy(Buffer* src, Buffer* dst) {
         out_format = TA_AV_PIX_FMT_NV12;
     }
 
-    // ppCopy：data[0] 指向各自页的虚拟地址（通过 phys 偏移计算，绕过 freeBuffer() 清除问题）
-    uint8_t* src_virt = dma_base + src_offset;
-    uint8_t* dst_virt = dma_base + dst_offset;
+    char src_blk_str[16], dst_blk_str[16];
+    snprintf(src_blk_str, sizeof(src_blk_str), "%u", src->id());
+    snprintf(dst_blk_str, sizeof(dst_blk_str), "%u", dst->id());
 
-    TA_AVDictionaryEntry local_entry = dict_entry_;
+    TA_AVDictionaryEntry local_entry;
+    local_entry.key = const_cast<char*>("pool_blk_id");
+    local_entry.value = src_blk_str;
     TA_AVDictionary local_dict;
     local_dict.count = 1;
     local_dict.elems = &local_entry;
 
-    TA_AVDictionaryEntry local_entry2 = dict_entry_;
+    TA_AVDictionaryEntry local_entry2;
+    local_entry2.key = const_cast<char*>("pool_blk_id");
+    local_entry2.value = dst_blk_str;
     TA_AVDictionary local_dict2;
     local_dict2.count = 1;
     local_dict2.elems = &local_entry2;
@@ -760,7 +630,6 @@ void SharedDisplayContext::ppCopy(Buffer* src, Buffer* dst) {
     resize_attr.interpolation = 1;
 
     if (out_format == TA_AV_PIX_FMT_NV12) {
-        // u_offset 相对于 y_offset（即 Y 写入位置），需要跳过 Y 平面到达 UV 平面
         resize_attr.u_offset = screen_width_ * screen_height_;
         resize_attr.y_stride = screen_width_;
         resize_attr.u_stride = screen_width_;
@@ -829,7 +698,7 @@ void SharedDisplayContext::stopThreads() {
     }
     timer_.stop();
 
-    auto pool = getPool();
+    auto pool = getBufferPool();
     if (pool) {
         pool->shutdown();
     }
@@ -842,7 +711,7 @@ void SharedDisplayContext::stopThreads() {
 void SharedDisplayContext::onTimerTick() {
     if (!running_) return;
 
-    auto pool = getPool();
+    auto pool = getBufferPool();
     if (!pool) return;
 
     Buffer* old_render = nullptr;
@@ -900,7 +769,7 @@ void SharedDisplayContext::onTimerTick() {
 
 void SharedDisplayContext::displayThreadFunc() {
     LOG4CPLUS_DEBUG(logger_, "Display thread started");
-    auto pool = getPool();
+    auto pool = getBufferPool();
     if (!pool) {
         LOG4CPLUS_ERROR(logger_, "Display thread: pool is null");
         return;
@@ -912,7 +781,16 @@ void SharedDisplayContext::displayThreadFunc() {
             continue;
         }
 
-        // FBIOPAN_DISPLAY: 切换显示到此 buffer
+        // 每帧动态设置 DMA 基地址（每个 buffer 独立分配，地址不连续）
+        struct tpsfb_dma_info dma_info;
+        dma_info.ovl_idx = 0;
+        dma_info.phys_addr = buf->getPhysicalAddress();
+        if (ioctl(fd_, FB_IOCTL_SET_DMA_INFO, &dma_info) < 0) {
+            LOG4CPLUS_WARN_FMT(logger_, "Display: FB_IOCTL_SET_DMA_INFO failed: %s", strerror(errno));
+            pool->releaseFilled(buf);
+            continue;
+        }
+
         struct fb_var_screeninfo var_info;
         if (ioctl(fd_, FBIOGET_VSCREENINFO, &var_info) < 0) {
             LOG4CPLUS_WARN_FMT(logger_, "Display: FBIOGET_VSCREENINFO failed: %s", strerror(errno));
@@ -920,7 +798,7 @@ void SharedDisplayContext::displayThreadFunc() {
             continue;
         }
 
-        var_info.yoffset = var_info.yres * buf->id();
+        var_info.yoffset = 0;
         if (ioctl(fd_, FBIOPAN_DISPLAY, &var_info) < 0) {
             LOG4CPLUS_WARN_FMT(logger_, "Display: FBIOPAN_DISPLAY failed: %s", strerror(errno));
             pool->releaseFilled(buf);

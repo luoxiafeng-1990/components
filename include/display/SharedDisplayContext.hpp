@@ -23,7 +23,6 @@
 #include <log4cplus/loggingmacros.h>
 
 extern "C" {
-#include "taco_sys_api.h"
 #include "ta_cv_api_ext_c.h"
 }
 
@@ -34,15 +33,18 @@ class OsdOverlay;
  * SharedDisplayContext - 多通道共享显示上下文（单例模式）
  *
  * 核心职责：
- *   1. 管理 DMA 物理连续内存（taco_sys_get_block 分配的 framebuffer）
- *   2. 用 BufferPool 管理 4 个 framebuffer 页（FREE/FILLED 队列）
+ *   1. 通过 TACO 平台 API 独立分配每个 framebuffer 页的物理连续内存
+ *   2. 通过 BufferAllocatorFacade（FRAMEBUFFER 类型）+ BufferPool 管理 framebuffer 页
  *   3. 提供 channelWrite() 接口供多通道并发写入（PP 硬件 resize）
- *   4. timerfd 定时器驱动翻页（与通道解码速度解耦）
- *   5. 显示线程负责 FBIOPAN + VSYNC
+ *   4. Timer 定时器驱动翻页（与通道解码速度解耦）
+ *   5. 显示线程负责 SET_DMA_INFO + FBIOPAN + VSYNC
+ *
+ * 内存分配策略：
+ *   - 每个 buffer 由 FramebufferAllocator 内部独立分配物理连续内存
+ *   - 每帧显示时通过 FB_IOCTL_SET_DMA_INFO 动态设置 DMA 基地址
  *
  * 同步机制：
  *   - std::shared_mutex：通道获取 shared_lock 并发写入，定时器获取 unique_lock 切换 buffer
- *   - 保证 PP resize 一定完成后定时器才切换
  *   - 通道在定时器切换期间不阻塞，看到 nullptr 直接返回 false（调用方缓存帧）
  *
  * 生命周期：
@@ -106,14 +108,11 @@ public:
 
 private:
     explicit SharedDisplayContext(const TacoVOConfig& config);
-    bool init();
-    void shutdown();
+    bool open();
+    void close();
 
-    bool openFramebufferDevice();
-    bool allocateDmaMemory();
-    void freeDmaMemory();
-    bool setupDssForDma();
-    bool createFramebufferPool();
+    bool openDevice();
+    bool createBufferPool();
     bool startThreads();
     void stopThreads();
 
@@ -139,25 +138,12 @@ private:
     size_t buffer_size_;
     int buffer_count_;
 
-    // === DMA 物理连续内存 ===
-    struct DmaMemory {
-        uint32_t blk_id = 0;
-        uint64_t phys_addr = 0;
-        void*    virt_addr = nullptr;
-        size_t   total_size = 0;
-    };
-    DmaMemory dma_mem_;
-
-    // === 用于 ta_cv_image_create 的 metadata（PP 硬件需要 blk_id 查找物理地址）===
-    char blk_id_str_[32] = {};
-    TA_AVDictionaryEntry dict_entry_ = {};
-    TA_AVDictionary dict_ = {};
-
-    // === BufferPool 管理 framebuffer 页 ===
-    std::unique_ptr<BufferAllocatorFacade> allocator_;
+    // === BufferPool 管理 ===
+    // allocatePoolWithBuffers 内部通过 TACO API 分配，destroyPool 自动清理
+    std::unique_ptr<BufferAllocatorFacade> allocator_facade_;
     uint64_t fb_pool_id_ = 0;
 
-    std::shared_ptr<BufferPool> getPool();
+    std::shared_ptr<BufferPool> getBufferPool();
 
     // === 渲染/显示状态 ===
     Buffer* render_buf_;

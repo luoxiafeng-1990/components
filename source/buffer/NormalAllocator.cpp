@@ -199,7 +199,8 @@ Buffer* NormalAllocator::injectExternalBufferToPool(
     void* virt_addr,
     uint64_t phys_addr,
     size_t size,
-    QueueType queue
+    QueueType queue,
+    uint32_t custom_id
 ) {
     if (!virt_addr || size == 0) {
         LOG4CPLUS_ERROR(logger_, "injectExternalBufferToPool: invalid parameters");

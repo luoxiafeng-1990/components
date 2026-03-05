@@ -6,85 +6,40 @@
 #include <log4cplus/loggingmacros.h>
 
 /**
- * @brief FramebufferAllocator - Framebuffer 外部内存分配器
+ * @brief FramebufferAllocator - 物理连续 Framebuffer 内存分配器
  * 
  * 继承自 BufferAllocatorBase（抽象基类）
  * 
- * 管理由外部设备（如 framebuffer）提供的已映射内存
+ * 两种工作模式：
+ *   1. TACO 分配模式（推荐）：调用者指定 count + size，内部通过
+ *      taco_sys_get_block / handle2_phys / mmap_noncache 分配物理连续内存
+ *   2. 外部包装模式：调用者预先分配好内存，通过 BufferInfo 列表传入
  * 
- * 特点：
- * - 虚拟内存：由调用者提供（已 mmap）
- * - 物理地址：由调用者提供（可选）
- * - 连续性：通常是物理连续的
- * 
- * 职责：
- * - 不分配新内存
- * - 仅包装外部内存为 Buffer 对象
- * - 不释放内存（仅删除 Buffer 对象）
- * 
- * 使用场景：
- * - Framebuffer 设备内存
- * - DRM/KMS 显示内存
- * - GPU 共享内存
- * 
- * 使用示例：
+ * 使用示例（TACO 分配模式）：
  * @code
- * // 1. mmap framebuffer 内存
- * void* fb_base = mmap(..., fb_fd, 0);
+ * BufferAllocatorFacade facade(BufferAllocatorFactory::AllocatorType::FRAMEBUFFER);
+ * uint64_t pool_id = facade.allocatePoolWithBuffers(4, frame_size, "FBPool", "Display");
+ * @endcode
  * 
- * // 2. 计算每个 buffer 的地址
- * std::vector<FramebufferAllocator::BufferInfo> infos;
- * for (int i = 0; i < count; i++) {
- *     infos.push_back({
- *         .virt_addr = (void*)((char*)fb_base + i * size),
- *         .phys_addr = phys_base + i * size,
- *         .size = size
- *     });
- * }
- * 
- * // 3. 创建 Allocator 并注入到 pool
+ * 使用示例（外部包装模式）：
+ * @code
  * auto allocator = std::make_unique<FramebufferAllocator>(infos);
- * auto pool = allocator->allocatePoolWithBuffers(count, size, "FBPool", "Display");
+ * uint64_t pool_id = allocator->allocatePoolWithBuffers(0, 0, "FBPool", "Display");
  * @endcode
  */
 class FramebufferAllocator : public BufferAllocatorBase {
 public:
     /**
-     * @brief 外部 Buffer 信息结构
+     * @brief 外部 Buffer 信息结构（外部包装模式使用）
      */
     struct BufferInfo {
-        void* virt_addr;       // 虚拟地址（已 mmap）
-        uint64_t phys_addr;    // 物理地址（可选，0 表示无）
-        size_t size;           // Buffer 大小
+        void* virt_addr;
+        uint64_t phys_addr;
+        size_t size;
     };
     
-    /**
-     * @brief 默认构造函数（无参）
-     * 
-     * 创建一个空的 FramebufferAllocator 实例。
-     * 
-     * 注意：
-     * - 创建的实例 external_buffers_ 为空
-     * - 调用 allocatePoolWithBuffers() 时会失败（因为没有外部内存信息）
-     * - 需要通过其他方式设置外部内存信息（如通过 setExternalBuffers() 方法，如果存在）
-     * 
-     * 使用场景：
-     * - 通过 Factory 创建时使用
-     * - 需要延迟设置外部内存信息的场景
-     * 
-     * @note 通常建议使用带参数的构造函数直接初始化
-     */
     FramebufferAllocator();
     
-    /**
-     * @brief 构造函数 1：从预构建的 BufferInfo 列表构造
-     * 
-     * @param external_buffers 外部提供的 buffer 信息列表
-     * 
-     * 适用场景：
-     * - 高级用户需要完全控制 buffer 信息
-     * - 外部 DMA 内存源
-     */
     explicit FramebufferAllocator(const std::vector<BufferInfo>& external_buffers);
     
     ~FramebufferAllocator() override;
@@ -92,22 +47,18 @@ public:
     // ==================== 实现基类纯虚函数 ====================
     
     /**
-     * @brief 批量创建 Buffer 并构建 BufferPool（实际上是批量包装外部内存）
+     * @brief 分配 BufferPool 及其 Buffer
      * 
-     * v2.0 设计：
-     * - 返回 pool_id 而不是 unique_ptr
-     * - Registry 独占持有 BufferPool（shared_ptr，引用计数=1）
-     * - Allocator 只记录 pool_id，不持有指针
+     * - count > 0 且 size > 0：TACO 分配模式，内部调用 taco_sys_* 分配物理连续内存
+     * - count == 0：外部包装模式，使用构造时传入的 external_buffers_
      * 
-     * 注意：
-     * - count 和 size 参数会被忽略
-     * - 使用构造时传入的 external_buffers_ 数量和大小
-     * 
-     * @param count 忽略（使用 external_buffers_.size()）
-     * @param size 忽略（使用 external_buffers_[i].size）
-     * @param name BufferPool 名称
+     * TACO 模式下 Buffer::id() == taco blk_id，destroyPool 时自动 munmap + release
+     *
+     * @param count   buffer 数量（0 = 使用 external_buffers_）
+     * @param size    每个 buffer 大小（TACO 模式下必须 > 0）
+     * @param name    BufferPool 名称
      * @param category BufferPool 分类
-     * @return uint64_t 成功返回 pool_id，失败返回 0
+     * @return pool_id，失败返回 0
      */
     uint64_t allocatePoolWithBuffers(
         int count,
@@ -116,80 +67,40 @@ public:
         const std::string& category = ""
     ) override;
     
-    /**
-     * @brief 创建单个 Buffer 并注入到指定 BufferPool（内部分配）
-     * 
-     * v2.0: @param pool_id BufferPool ID（从 Registry 获取）
-     * 
-     * @note FramebufferAllocator 不支持内部分配，应使用 allocatePoolWithBuffers 或 injectExternalBufferToPool
-     */
     Buffer* injectBufferToPool(
         uint64_t pool_id,
         size_t size,
         QueueType queue = QueueType::FREE
     ) override;
     
-    /**
-     * @brief 注入外部已分配的内存到 BufferPool（外部注入）
-     * 
-     * v2.0: @param pool_id BufferPool ID（从 Registry 获取）
-     * 
-     * @note FramebufferAllocator 支持此方法，可以包装外部内存为 Buffer
-     */
     Buffer* injectExternalBufferToPool(
         uint64_t pool_id,
         void* virt_addr,
         uint64_t phys_addr,
         size_t size,
-        QueueType queue = QueueType::FREE
+        QueueType queue = QueueType::FREE,
+        uint32_t custom_id = 0
     ) override;
     
-    /**
-     * @brief 从 BufferPool 移除并销毁 Buffer
-     * 
-     * v2.0: @param pool_id BufferPool ID
-     */
     bool removeBufferFromPool(uint64_t pool_id, Buffer* buffer) override;
     
     /**
-     * @brief 销毁所有 BufferPool 及其所有 Buffer
+     * @brief 销毁所有 BufferPool 及其 Buffer
      * 
-     * 自动查询 Registry 获取所有属于此 Allocator 的 Pool，逐个清理。
+     * TACO 分配模式下自动执行 taco_sys_munmap + taco_sys_release_block
      */
     bool destroyPool() override;
     
 protected:
-    /**
-     * @brief 创建单个 Buffer（包装外部内存）
-     * 
-     * 实现逻辑：
-     * 1. 从 external_buffers_[id] 获取地址和大小
-     * 2. 创建 Buffer 对象（Ownership::EXTERNAL）
-     * 3. 返回 Buffer 指针
-     * 
-     * @param id Buffer ID（也是 external_buffers_ 索引）
-     * @param size Buffer 大小（忽略，使用 external_buffers_[id].size）
-     * @return Buffer* 成功返回 buffer，失败返回 nullptr
-     */
     Buffer* createBuffer(uint32_t id, size_t size) override;
-    
-    /**
-     * @brief 销毁 Buffer（仅删除对象，不释放内存）
-     * 
-     * 实现逻辑：
-     * 1. 不释放内存（外部管理）
-     * 2. 仅删除 Buffer 对象
-     * 
-     * @param buffer 要销毁的 Buffer
-     */
     void deallocateBuffer(Buffer* buffer) override;
     
 private:
+    bool taco_allocated_ = false;
     
-    std::vector<BufferInfo> external_buffers_;  // 外部内存信息
-    size_t next_buffer_index_;                   // 下一个可用索引
+    std::vector<BufferInfo> external_buffers_;
+    size_t next_buffer_index_;
     
-    // 日志器
     log4cplus::Logger logger_;
 };
 
