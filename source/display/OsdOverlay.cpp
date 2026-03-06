@@ -62,12 +62,12 @@ OsdOverlay::~OsdOverlay() {
 
 bool OsdOverlay::init(const Config& config) {
     config_ = config;
+    frame_size_ = static_cast<size_t>(screen_width_) * screen_height_ * 4;
 
     if (!openFbDevice()) return false;
-    if (!allocateDmaMemory()) { close(fb_fd_); fb_fd_ = -1; return false; }
-    if (!createBufferPool()) { freeDmaMemory(); close(fb_fd_); fb_fd_ = -1; return false; }
-    if (!setupDssOverlay1()) { freeDmaMemory(); close(fb_fd_); fb_fd_ = -1; return false; }
-    if (!initFreeType(config)) { freeDmaMemory(); close(fb_fd_); fb_fd_ = -1; return false; }
+    if (!createBufferPool()) { close(fb_fd_); fb_fd_ = -1; return false; }
+    if (!setupDssOverlay1()) { allocator_.reset(); pool_id_ = 0; close(fb_fd_); fb_fd_ = -1; return false; }
+    if (!initFreeType(config)) { allocator_.reset(); pool_id_ = 0; close(fb_fd_); fb_fd_ = -1; return false; }
 
     int fps = config_.refresh_fps > 0 ? config_.refresh_fps : 1;
     int interval_ms = 1000 / fps;
@@ -105,10 +105,9 @@ void OsdOverlay::shutdown() {
         }
         pool_id_ = 0;
     }
+    // allocator_.reset() → ~FramebufferAllocator → destroyPool → taco 清理
     allocator_.reset();
     display_buf_ = nullptr;
-
-    freeDmaMemory();
 
     if (fb_fd_ >= 0) { close(fb_fd_); fb_fd_ = -1; }
 
@@ -171,91 +170,21 @@ bool OsdOverlay::openFbDevice() {
 }
 
 // ============================================================
-// DMA 内存分配（4 帧）
-// ============================================================
-
-bool OsdOverlay::allocateDmaMemory() {
-    size_t frame_size = static_cast<size_t>(screen_width_) * screen_height_ * 4;
-    size_t total_size = frame_size * BUFFER_COUNT;
-
-    uint32_t blk_id = taco_sys_get_block(TACO_INVALID_POOLID, total_size, "osd_overlay1");
-    if (blk_id == 0) {
-        LOG4CPLUS_ERROR_FMT(logger_, "OSD taco_sys_get_block failed, size=%zu", total_size);
-        return false;
-    }
-
-    uint64_t phys = taco_sys_handle2_phys_addr(blk_id);
-    void* virt = taco_sys_mmap_noncache(phys, total_size);
-    if (!virt) {
-        LOG4CPLUS_ERROR(logger_, "OSD taco_sys_mmap_noncache failed");
-        taco_sys_release_block(blk_id);
-        return false;
-    }
-
-    memset(virt, 0, total_size);
-
-    dma_mem_.blk_id = blk_id;
-    dma_mem_.phys_addr = phys;
-    dma_mem_.virt_addr = virt;
-    dma_mem_.frame_size = frame_size;
-    dma_mem_.total_size = total_size;
-
-    LOG4CPLUS_INFO_FMT(logger_,
-        "OSD DMA: blk_id=%u, phys=0x%llx, virt=%p, frame=%zu, total=%zu (%d buffers)",
-        blk_id, (unsigned long long)phys, virt, frame_size, total_size, BUFFER_COUNT);
-    return true;
-}
-
-void OsdOverlay::freeDmaMemory() {
-    if (dma_mem_.virt_addr) {
-        taco_sys_munmap(dma_mem_.virt_addr, dma_mem_.total_size);
-        dma_mem_.virt_addr = nullptr;
-    }
-    if (dma_mem_.blk_id) {
-        taco_sys_release_block(dma_mem_.blk_id);
-        dma_mem_.blk_id = 0;
-    }
-    dma_mem_.phys_addr = 0;
-    dma_mem_.frame_size = 0;
-    dma_mem_.total_size = 0;
-}
-
-// ============================================================
-// BufferPool 创建（4 个 DMA 页注入）
+// BufferPool 创建（TACO 分配由 FramebufferAllocator 内部完成）
 // ============================================================
 
 bool OsdOverlay::createBufferPool() {
     allocator_ = std::make_unique<BufferAllocatorFacade>(
         BufferAllocatorFactory::AllocatorType::FRAMEBUFFER);
-    if (!allocator_) {
-        LOG4CPLUS_ERROR(logger_, "Failed to create BufferAllocatorFacade");
-        return false;
-    }
 
     pool_id_ = allocator_->allocatePoolWithBuffers(
-        0, 0, "OsdOverlay_fb", "Display");
+        BUFFER_COUNT, frame_size_, "OsdOverlay_fb", "Display");
     if (pool_id_ == 0) {
         LOG4CPLUS_ERROR(logger_, "Failed to create OSD BufferPool");
+        allocator_.reset();
         return false;
     }
 
-    uint8_t* base = static_cast<uint8_t*>(dma_mem_.virt_addr);
-    for (int i = 0; i < BUFFER_COUNT; i++) {
-        void*    virt = base + dma_mem_.frame_size * i;
-        uint64_t phys = dma_mem_.phys_addr + dma_mem_.frame_size * i;
-
-        Buffer* buf = allocator_->injectExternalBufferToPool(
-            pool_id_, virt, phys, dma_mem_.frame_size, QueueType::FREE);
-        if (!buf) {
-            LOG4CPLUS_ERROR_FMT(logger_, "Failed to inject OSD buffer #%d", i);
-            pool_id_ = 0;
-            allocator_.reset();
-            return false;
-        }
-    }
-
-    LOG4CPLUS_INFO_FMT(logger_, "OSD BufferPool created: %d buffers, %zu bytes each",
-        BUFFER_COUNT, dma_mem_.frame_size);
     return true;
 }
 
@@ -269,9 +198,16 @@ bool OsdOverlay::setupDssOverlay1() {
     write_sysfs(LCD_TRANS_KEY_VALUE_PATH, "0");
     write_sysfs(LCD_TRANS_KEY_ENABLED_PATH, "1");
 
+    auto pool = BufferPoolRegistry::getInstance().getPool(pool_id_).lock();
+    if (!pool || pool->getAllManagedBuffers().empty()) {
+        LOG4CPLUS_ERROR(logger_, "setupDssOverlay1: no buffers in pool");
+        return false;
+    }
+
+    Buffer* first_buf = *pool->getAllManagedBuffers().begin();
     struct tpsfb_dma_info dma_info;
     dma_info.ovl_idx = 1;
-    dma_info.phys_addr = dma_mem_.phys_addr;
+    dma_info.phys_addr = first_buf->getPhysicalAddress();
 
     if (ioctl(fb_fd_, FB_IOCTL_SET_DMA_INFO, &dma_info) < 0) {
         LOG4CPLUS_ERROR_FMT(logger_, "OSD FB_IOCTL_SET_DMA_INFO failed: %s", strerror(errno));
@@ -282,7 +218,7 @@ bool OsdOverlay::setupDssOverlay1() {
 
     LOG4CPLUS_INFO_FMT(logger_,
         "OSD DSS overlay1 configured: %dx%d ARGB8888, colorkey=0x000000, DMA=0x%llx",
-        screen_width_, screen_height_, (unsigned long long)dma_mem_.phys_addr);
+        screen_width_, screen_height_, (unsigned long long)first_buf->getPhysicalAddress());
     return true;
 }
 
@@ -393,7 +329,7 @@ void OsdOverlay::renderOsd() {
     if (!buf) return;
 
     uint32_t* pixels = static_cast<uint32_t*>(buf->getVirtualAddress());
-    memset(pixels, 0, dma_mem_.frame_size);
+    memset(pixels, 0, frame_size_);
 
     struct timespec ts;
     clock_gettime(CLOCK_REALTIME, &ts);
@@ -421,12 +357,14 @@ void OsdOverlay::renderOsd() {
     Buffer* disp = pool->acquireFilled(false, 0);
     if (!disp) return;
 
-    size_t offset = disp->getPhysicalAddress() - dma_mem_.phys_addr;
-    int page_index = static_cast<int>(offset / dma_mem_.frame_size);
+    struct tpsfb_dma_info dma_info;
+    dma_info.ovl_idx = 1;
+    dma_info.phys_addr = disp->getPhysicalAddress();
+    ioctl(fb_fd_, FB_IOCTL_SET_DMA_INFO, &dma_info);
 
     struct fb_var_screeninfo var;
     if (ioctl(fb_fd_, FBIOGET_VSCREENINFO, &var) == 0) {
-        var.yoffset = page_index * var.yres;
+        var.yoffset = 0;
         ioctl(fb_fd_, FBIOPAN_DISPLAY, &var);
     }
 

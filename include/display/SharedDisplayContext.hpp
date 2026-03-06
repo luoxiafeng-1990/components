@@ -154,8 +154,8 @@ private:
 
     // === 通道管理 ===
     struct ChannelInfo {
-        int  channel_id;
-        int  x, y, w, h;
+        int channel_id;
+        ChannelLayout layout;
         bool active;
         bool written_this_round = false;
     };

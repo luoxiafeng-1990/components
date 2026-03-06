@@ -277,15 +277,13 @@ int SharedDisplayContext::registerChannel() {
 
     ChannelInfo ch;
     ch.channel_id = id;
-    ch.x = layout.x;
-    ch.y = layout.y;
-    ch.w = layout.w;
-    ch.h = layout.h;
+    ch.layout = layout;
     ch.active = true;
     channels_.push_back(ch);
 
     LOG4CPLUS_INFO_FMT(logger_,
-        "Channel %d registered (auto): region=(%d,%d,%d,%d)", id, layout.x, layout.y, layout.w, layout.h);
+        "Channel %d registered (auto): region=(%d,%d,%d,%d)",
+        id, layout.x, layout.y, layout.w, layout.h);
 
     if (osd_) {
         osd_->registerChannel(id, layout.x, layout.y, layout.w, layout.h);
@@ -300,15 +298,13 @@ int SharedDisplayContext::registerChannel(const ChannelLayout& layout) {
     int id = next_channel_id_++;
     ChannelInfo ch;
     ch.channel_id = id;
-    ch.x = layout.x;
-    ch.y = layout.y;
-    ch.w = layout.w;
-    ch.h = layout.h;
+    ch.layout = layout;
     ch.active = true;
     channels_.push_back(ch);
 
     LOG4CPLUS_INFO_FMT(logger_,
-        "Channel %d registered: region=(%d,%d,%d,%d)", id, layout.x, layout.y, layout.w, layout.h);
+        "Channel %d registered: region=(%d,%d,%d,%d)",
+        id, layout.x, layout.y, layout.w, layout.h);
 
     if (osd_) {
         osd_->registerChannel(id, layout.x, layout.y, layout.w, layout.h);
@@ -410,7 +406,8 @@ bool SharedDisplayContext::channelWrite(int channel_id, Buffer* decoded) {
     }
 
     ppResize(decoded, render_buf_,
-             ch_info->x, ch_info->y, ch_info->w, ch_info->h,
+             ch_info->layout.x, ch_info->layout.y,
+             ch_info->layout.w, ch_info->layout.h,
              src_width, src_height, 0, 0, nullptr);
 
     // 标记本轮已写入
