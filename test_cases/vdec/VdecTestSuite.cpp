@@ -344,6 +344,9 @@ bool VdecTestSuite::parseArgs(int argc, char* argv[], WorkerConfig& config, Deco
         {"display-fps",  required_argument, 0, 'Z'},
         {"osd",          no_argument,       0,  1001},
         {"osd-fps",      required_argument, 0,  1002},
+        {"view-type",    required_argument, 0,  1004},
+        {"slot-assignment", required_argument, 0, 1005},
+        {"main-ratio",   required_argument, 0,  1006},
         {"psnr",       no_argument,       0, 'p'},
         {"ssim",       no_argument,       0, 'S'},
         {"min-psnr",   required_argument, 0, 'P'},
@@ -462,6 +465,28 @@ bool VdecTestSuite::parseArgs(int argc, char* argv[], WorkerConfig& config, Deco
 
             case 1003:
                 config.data_source.loop = true;
+                break;
+
+            case 1004:
+                config.consumer_type.display.taco_vo.view_type = optarg;
+                break;
+
+            case 1005: {
+                std::vector<int> assignment;
+                std::string arg = optarg;
+                size_t start = 0;
+                while (start < arg.size()) {
+                    size_t comma = arg.find(',', start);
+                    if (comma == std::string::npos) comma = arg.size();
+                    assignment.push_back(std::stoi(arg.substr(start, comma - start)));
+                    start = comma + 1;
+                }
+                config.consumer_type.display.taco_vo.slot_assignment = std::move(assignment);
+                break;
+            }
+
+            case 1006:
+                config.consumer_type.display.taco_vo.main_sidebar_ratio = std::stof(optarg);
                 break;
 
             case 'p':
@@ -594,6 +619,9 @@ void VdecTestSuite::printHelp() const {
               << "  --display-fps <n>       显示刷新帧率 (默认: 30, 常用: 25/30/60)\n"
               << "  --osd                   启用 OSD 叠加 (通道号/时间戳/帧率)\n"
               << "  --osd-fps <n>           OSD 刷新频率 (默认: 1, 即每秒刷新一次)\n"
+              << "  --view-type <type>      视图类型: grid(网格, 默认), main_sidebar(主+侧栏)\n"
+              << "  --slot-assignment <ids> 通道→slot 映射, 逗号分隔 (如: 1,4,2,3,0)\n"
+              << "  --main-ratio <ratio>    main_sidebar 主画面宽度占比 (默认: 0.75)\n"
               << "  -p, --psnr              启用 PSNR 验证 (ExecuteMode::COMPARE)\n"
               << "  -S, --ssim              启用 SSIM 验证 (ExecuteMode::COMPARE)\n"
               << "  -P, --min-psnr <n>      PSNR 阈值 (默认: 30.0 dB)\n"
@@ -616,6 +644,10 @@ void VdecTestSuite::printHelp() const {
               << "  qa_cases vdec --threads 16 video.mp4              # PARALLEL x16 (自定义路数)\n"
               << "  qa_cases vdec --threads 32 --decoder sw video.mp4 # PARALLEL x32 软解\n"
               << "  qa_cases vdec multithread_4 video.mp4             # PARALLEL x4 (预定义)\n"
+              << "  qa_cases vdec -d --display-mode shared_fb -t 5 --view-type main_sidebar video.mp4\n"
+              << "                                                    # 5路 主+侧栏 视图\n"
+              << "  qa_cases vdec -d --display-mode shared_fb -t 5 --view-type main_sidebar \\\n"
+              << "    --slot-assignment 1,4,2,3,0 video.mp4           # 自定义通道映射\n"
               << std::endl;
 }
 

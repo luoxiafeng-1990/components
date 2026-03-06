@@ -11,6 +11,8 @@
 #include <cerrno>
 #include <cmath>
 #include <array>
+#include <sstream>
+#include <algorithm>
 
 namespace {
     constexpr const char* kProcFb = "/proc/fb";
@@ -21,6 +23,41 @@ namespace {
         "/dev/fb1",
         "/dev/fb2",
     }};
+
+    int selectGridCount(int max_channels) {
+        constexpr int presets[] = {1, 2, 4, 9, 16, 25, 36};
+        for (int g : presets) {
+            if (max_channels <= g) return g;
+        }
+        int n = static_cast<int>(std::ceil(std::sqrt(static_cast<double>(max_channels))));
+        return n * n;
+    }
+
+    void computeGridSlots(int count, int screen_w, int screen_h,
+                          std::vector<SharedDisplayContext::ChannelLayout>& slots) {
+        int cols = static_cast<int>(std::ceil(std::sqrt(static_cast<double>(count))));
+        int rows = (count + cols - 1) / cols;
+        int cell_w = screen_w / cols;
+        int cell_h = screen_h / rows;
+
+        slots.resize(count);
+        for (int i = 0; i < count; ++i) {
+            slots[i] = {(i % cols) * cell_w, (i / cols) * cell_h, cell_w, cell_h};
+        }
+    }
+
+    void computeMainSidebarSlots(int screen_w, int screen_h, float ratio,
+                                  std::vector<SharedDisplayContext::ChannelLayout>& slots) {
+        int main_w = static_cast<int>(screen_w * ratio);
+        int side_w = screen_w - main_w;
+        int side_h = screen_h / 4;
+
+        slots.resize(5);
+        slots[0] = {0, 0, main_w, screen_h};
+        for (int i = 0; i < 4; ++i) {
+            slots[1 + i] = {main_w, i * side_h, side_w, side_h};
+        }
+    }
 }
 
 struct tpsfb_dma_info {
@@ -92,6 +129,8 @@ bool SharedDisplayContext::open() {
         return false;
     }
 
+    createView();
+
     if (!createBufferPool()) {
         ::close(fd_);
         fd_ = -1;
@@ -141,9 +180,12 @@ bool SharedDisplayContext::open() {
     }
 
     LOG4CPLUS_INFO_FMT(logger_,
-        "SharedDisplayContext opened: %dx%d, %dbpp, %d buffers, %dfps, osd=%s",
+        "SharedDisplayContext opened: %dx%d, %dbpp, %d buffers, %dfps, view=%s, osd=%s",
         screen_width_, screen_height_, bits_per_pixel_, buffer_count_, config_.target_fps,
+        (view_type_ == ViewType::GRID ? "grid" : "main_sidebar"),
         osd_ ? "on" : "off");
+
+    LOG4CPLUS_INFO(logger_, "View layout:\n" << getViewDiagram());
 
     return true;
 }
@@ -265,6 +307,47 @@ std::shared_ptr<BufferPool> SharedDisplayContext::getBufferPool() {
 }
 
 // ============================================================
+// 视图管理
+// ============================================================
+
+void SharedDisplayContext::createView() {
+    if (config_.view_type == "main_sidebar") {
+        view_type_ = ViewType::MAIN_SIDEBAR;
+        computeMainSidebarSlots(screen_width_, screen_height_,
+                                config_.main_sidebar_ratio, view_slots_);
+    } else {
+        view_type_ = ViewType::GRID;
+        int grid_count = selectGridCount(
+            config_.max_channels > 0 ? config_.max_channels : 9);
+        computeGridSlots(grid_count, screen_width_, screen_height_, view_slots_);
+    }
+
+    slot_assignment_ = config_.slot_assignment;
+
+    LOG4CPLUS_INFO_FMT(logger_, "View created: type=%s, slots=%d, assignment_size=%d",
+        (view_type_ == ViewType::GRID ? "grid" : "main_sidebar"),
+        static_cast<int>(view_slots_.size()),
+        static_cast<int>(slot_assignment_.size()));
+}
+
+const SharedDisplayContext::ChannelLayout&
+SharedDisplayContext::resolveLayout(int channel_id) const {
+    if (!slot_assignment_.empty()) {
+        for (int i = 0; i < static_cast<int>(slot_assignment_.size()); ++i) {
+            if (slot_assignment_[i] == channel_id) {
+                return view_slots_.at(i);
+            }
+        }
+    }
+    return view_slots_.at(channel_id);
+}
+
+const SharedDisplayContext::ChannelLayout&
+SharedDisplayContext::getSlotLayout(int slot_index) const {
+    return view_slots_.at(slot_index);
+}
+
+// ============================================================
 // 通道管理
 // ============================================================
 
@@ -272,8 +355,16 @@ int SharedDisplayContext::registerChannel() {
     std::lock_guard<std::mutex> lock(channel_mgmt_mutex_);
 
     int id = next_channel_id_++;
-    ChannelLayout layout;
-    computeGridLayout(id, layout);
+
+    if (id >= static_cast<int>(view_slots_.size())) {
+        LOG4CPLUS_ERROR_FMT(logger_,
+            "Channel %d exceeds view slot count (%d)", id,
+            static_cast<int>(view_slots_.size()));
+        --next_channel_id_;
+        return -1;
+    }
+
+    const auto& layout = resolveLayout(id);
 
     ChannelInfo ch;
     ch.channel_id = id;
@@ -282,7 +373,7 @@ int SharedDisplayContext::registerChannel() {
     channels_.push_back(ch);
 
     LOG4CPLUS_INFO_FMT(logger_,
-        "Channel %d registered (auto): region=(%d,%d,%d,%d)",
+        "Channel %d registered: slot region=(%d,%d,%d,%d)",
         id, layout.x, layout.y, layout.w, layout.h);
 
     if (osd_) {
@@ -303,7 +394,7 @@ int SharedDisplayContext::registerChannel(const ChannelLayout& layout) {
     channels_.push_back(ch);
 
     LOG4CPLUS_INFO_FMT(logger_,
-        "Channel %d registered: region=(%d,%d,%d,%d)",
+        "Channel %d registered (manual): region=(%d,%d,%d,%d)",
         id, layout.x, layout.y, layout.w, layout.h);
 
     if (osd_) {
@@ -311,23 +402,6 @@ int SharedDisplayContext::registerChannel(const ChannelLayout& layout) {
     }
 
     return id;
-}
-
-void SharedDisplayContext::computeGridLayout(int channel_index, ChannelLayout& layout) const {
-    int max_ch = config_.max_channels > 0 ? config_.max_channels : 9;
-    int grid_cols = static_cast<int>(std::ceil(std::sqrt(static_cast<double>(max_ch))));
-    int grid_rows = (max_ch + grid_cols - 1) / grid_cols;
-
-    int cell_w = screen_width_ / grid_cols;
-    int cell_h = screen_height_ / grid_rows;
-
-    int row = channel_index / grid_cols;
-    int col = channel_index % grid_cols;
-
-    layout.x = col * cell_w;
-    layout.y = row * cell_h;
-    layout.w = cell_w;
-    layout.h = cell_h;
 }
 
 void SharedDisplayContext::unregisterChannel(int channel_id) {
@@ -346,6 +420,192 @@ void SharedDisplayContext::unregisterChannel(int channel_id) {
     }
     // 唤醒可能阻塞在 channelWrite 中的该通道线程
     round_cv_.notify_all();
+}
+
+// ============================================================
+// 视图展示
+// ============================================================
+
+std::string SharedDisplayContext::getViewDiagram() const {
+    if (view_slots_.empty()) return "(empty view)\n";
+
+    if (view_type_ == ViewType::GRID) {
+        int slot_count = static_cast<int>(view_slots_.size());
+        int cols = static_cast<int>(std::ceil(std::sqrt(static_cast<double>(slot_count))));
+        int rows = (slot_count + cols - 1) / cols;
+
+        auto coord = [](int x, int y) -> std::string {
+            return "(" + std::to_string(x) + "," + std::to_string(y) + ")";
+        };
+
+        int cell_w = (slot_count > 0) ? view_slots_[0].w : 0;
+        int cell_h = (slot_count > 0) ? view_slots_[0].h : 0;
+
+        auto coord_width = [&](int c, int r) -> size_t {
+            return coord(c * cell_w, r * cell_h).size();
+        };
+
+        size_t max_coord_len = 0;
+        for (int r = 0; r <= rows; ++r) {
+            for (int c = 0; c <= cols; ++c) {
+                max_coord_len = std::max(max_coord_len, coord_width(c, r));
+            }
+        }
+
+        size_t cell_text_w = std::max(max_coord_len + 4, static_cast<size_t>(16));
+
+        std::ostringstream oss;
+
+        for (int r = 0; r < rows; ++r) {
+            // 坐标行（网格顶部水平线）
+            for (int c = 0; c <= cols; ++c) {
+                std::string pt = coord(c * cell_w, r * cell_h);
+                oss << pt;
+                if (c < cols) {
+                    size_t fill = cell_text_w - pt.size();
+                    for (size_t i = 0; i < fill; ++i) oss << "\xe2\x94\x80"; // ─
+                }
+            }
+            oss << "\n";
+
+            // 单元格内容行：通道信息
+            int slot_base = r * cols;
+            // 第一行：竖线 + 空格
+            for (int line = 0; line < 3; ++line) {
+                for (int c = 0; c <= cols; ++c) {
+                    oss << "\xe2\x94\x82"; // │
+                    if (c < cols) {
+                        int slot_idx = slot_base + c;
+                        std::string content;
+                        if (line == 0) {
+                            content = "";
+                        } else if (line == 1) {
+                            if (slot_idx < slot_count) {
+                                int ch_id = slot_idx;
+                                if (!slot_assignment_.empty()) {
+                                    ch_id = (slot_idx < static_cast<int>(slot_assignment_.size()))
+                                            ? slot_assignment_[slot_idx] : -1;
+                                }
+                                if (ch_id >= 0) {
+                                    content = "  [CH " + std::to_string(ch_id) + "]";
+                                } else {
+                                    content = "  [----]";
+                                }
+                            }
+                        } else if (line == 2) {
+                            if (slot_idx < slot_count) {
+                                const auto& s = view_slots_[slot_idx];
+                                content = "  " + std::to_string(s.w) + "x" + std::to_string(s.h);
+                            }
+                        }
+                        size_t pad = (content.size() < cell_text_w) ? cell_text_w - content.size() : 0;
+                        oss << content << std::string(pad, ' ');
+                    }
+                }
+                oss << "\n";
+            }
+        }
+
+        // 最后一行坐标（底部边线）
+        for (int c = 0; c <= cols; ++c) {
+            std::string pt = coord(c * cell_w, rows * cell_h);
+            oss << pt;
+            if (c < cols) {
+                size_t fill = cell_text_w - pt.size();
+                for (size_t i = 0; i < fill; ++i) oss << "\xe2\x94\x80"; // ─
+            }
+        }
+        oss << "\n";
+
+        return oss.str();
+
+    } else {
+        // MAIN_SIDEBAR
+        const auto& main_slot = view_slots_[0];
+        int main_w = main_slot.w;
+        int side_w = (view_slots_.size() > 1) ? view_slots_[1].w : 0;
+        int side_h = (view_slots_.size() > 1) ? view_slots_[1].h : 0;
+
+        auto coord = [](int x, int y) -> std::string {
+            return "(" + std::to_string(x) + "," + std::to_string(y) + ")";
+        };
+
+        size_t main_col_w = 32;
+        size_t side_col_w = 18;
+
+        std::ostringstream oss;
+
+        // 顶部边线
+        std::string tl = coord(0, 0);
+        std::string tm = coord(main_w, 0);
+        std::string tr = coord(main_w + side_w, 0);
+        oss << tl;
+        for (size_t i = tl.size(); i < main_col_w; ++i) oss << "\xe2\x94\x80";
+        oss << tm;
+        for (size_t i = tm.size(); i < side_col_w; ++i) oss << "\xe2\x94\x80";
+        oss << tr << "\n";
+
+        int main_ch_id = 0;
+        if (!slot_assignment_.empty()) {
+            main_ch_id = slot_assignment_[0];
+        }
+
+        for (int i = 0; i < 4; ++i) {
+            int ch_id = 1 + i;
+            if (!slot_assignment_.empty() && (1 + i) < static_cast<int>(slot_assignment_.size())) {
+                ch_id = slot_assignment_[1 + i];
+            }
+
+            // 3 行内容
+            for (int line = 0; line < 3; ++line) {
+                // 左列（主画面）
+                oss << "\xe2\x94\x82"; // │
+                std::string left_content;
+                if (i == 1 && line == 1) {
+                    left_content = "      [CH " + std::to_string(main_ch_id) + "]";
+                } else if (i == 2 && line == 1) {
+                    left_content = "      " + std::to_string(main_w) + "x" + std::to_string(screen_height_);
+                }
+                size_t lpad = (left_content.size() < main_col_w - 1) ? main_col_w - 1 - left_content.size() : 0;
+                oss << left_content << std::string(lpad, ' ');
+
+                // 右列（侧栏通道）
+                oss << "\xe2\x94\x82"; // │
+                std::string right_content;
+                if (line == 1) {
+                    right_content = " [CH " + std::to_string(ch_id) + "] " +
+                                    std::to_string(side_w) + "x" + std::to_string(side_h);
+                }
+                size_t rpad = (right_content.size() < side_col_w - 1) ? side_col_w - 1 - right_content.size() : 0;
+                oss << right_content << std::string(rpad, ' ');
+
+                oss << "\xe2\x94\x82\n"; // │
+            }
+
+            // 侧栏分隔线
+            if (i < 3) {
+                // 主画面左侧只有竖线，侧栏有水平线
+                oss << "\xe2\x94\x82"; // │
+                oss << std::string(main_col_w - 1, ' ');
+                std::string mid_pt = coord(main_w, (i + 1) * side_h);
+                oss << mid_pt;
+                for (size_t j = mid_pt.size(); j < side_col_w; ++j) oss << "\xe2\x94\x80";
+                oss << coord(main_w + side_w, (i + 1) * side_h) << "\n";
+            }
+        }
+
+        // 底部边线
+        std::string bl = coord(0, screen_height_);
+        std::string bm = coord(main_w, screen_height_);
+        std::string br = coord(main_w + side_w, screen_height_);
+        oss << bl;
+        for (size_t i = bl.size(); i < main_col_w; ++i) oss << "\xe2\x94\x80";
+        oss << bm;
+        for (size_t i = bm.size(); i < side_col_w; ++i) oss << "\xe2\x94\x80";
+        oss << br << "\n";
+
+        return oss.str();
+    }
 }
 
 // ============================================================

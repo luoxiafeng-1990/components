@@ -458,6 +458,9 @@ struct WorkerConfig {
                 int frame_format = 23;        ///< TA_AV_PIX_FMT_NV12 = 23（帧像素格式，同时用于 layer attr）
                 int frame_pool_size = 4;      ///< 每通道 DMA 帧池大小
                 int max_channels = 9;         ///< 最大通道数（默认 3x3 九宫格）
+                std::string view_type = "grid";           ///< 视图类型："grid"（网格）或 "main_sidebar"（主+侧栏）
+                std::vector<int> slot_assignment;          ///< 通道→slot 映射，slot_assignment[slot]=channel_id（可选）
+                float main_sidebar_ratio = 0.75f;          ///< main_sidebar 模式下主画面宽度占比
                 bool osd_enable = false;      ///< 是否启用 OSD 叠加（图形层 overlay1）
                 int  osd_fps = 1;             ///< OSD 刷新频率（默认每秒刷新一次）
                 std::string osd_font_path = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf";

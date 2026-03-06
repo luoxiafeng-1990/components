@@ -414,6 +414,55 @@ sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
     "~/qa_cases vdec --codec h264 --width 1920 --height 1080 /usr/data/ffmpeg/1920x1080.mp4"
 ```
 
+### 2.9 显示视图（View）测试
+
+> 视图系统支持两种布局模式：`grid`（网格）和 `main_sidebar`（主+侧栏）。
+> 需配合 `--display --display-mode shared_fb` 使用。
+
+**Grid 网格视图测试**
+
+```bash
+# Grid 4路 (2x2)，默认视图
+sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
+    "qa_cases vdec -f /usr/data/ffmpeg/1920x1080.mp4 -d --display-mode shared_fb --display-fps 25 --osd --osd-fps 1 -t 4 -c h264 --loop"
+
+# Grid 9路 (3x3)
+sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
+    "qa_cases vdec -f /usr/data/ffmpeg/1920x1080.mp4 -d --display-mode shared_fb --display-fps 25 --osd --osd-fps 1 -t 9 -c h264 --loop"
+
+# Grid 16路 (4x4)
+sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
+    "qa_cases vdec -f /usr/data/ffmpeg/1920x1080.mp4 -d --display-mode shared_fb --display-fps 25 --osd --osd-fps 1 -t 16 -c h264 --loop"
+```
+
+**Main+Sidebar 主+侧栏视图测试**
+
+```bash
+# Main+Sidebar 5路（默认映射：通道0为主画面，1-4为侧栏）
+sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
+    "qa_cases vdec -f /usr/data/ffmpeg/1920x1080.mp4 -d --display-mode shared_fb --display-fps 25 --osd --osd-fps 1 -t 5 -c h264 --view-type main_sidebar --loop"
+
+# Main+Sidebar 自定义通道映射（通道1为主画面，侧栏依次为4,2,3,0）
+sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
+    "qa_cases vdec -f /usr/data/ffmpeg/1920x1080.mp4 -d --display-mode shared_fb --display-fps 25 --osd --osd-fps 1 -t 5 -c h264 --view-type main_sidebar --slot-assignment 1,4,2,3,0 --loop"
+
+# Main+Sidebar 自定义主画面宽度比例 (80%)
+sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
+    "qa_cases vdec -f /usr/data/ffmpeg/1920x1080.mp4 -d --display-mode shared_fb --display-fps 25 --osd --osd-fps 1 -t 5 -c h264 --view-type main_sidebar --main-ratio 0.8 --loop"
+
+# Main+Sidebar 自定义映射 + 自定义宽度比例 (70%)
+sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
+    "qa_cases vdec -f /usr/data/ffmpeg/1920x1080.mp4 -d --display-mode shared_fb --display-fps 25 --osd --osd-fps 1 -t 5 -c h264 --view-type main_sidebar --slot-assignment 2,0,1,3,4 --main-ratio 0.7 --loop"
+```
+
+**视图参数说明**
+
+| 参数 | 说明 | 默认值 |
+|------|------|--------|
+| `--view-type <type>` | 视图类型: `grid`(网格) 或 `main_sidebar`(主+侧栏) | `grid` |
+| `--slot-assignment <ids>` | 通道→slot 映射，逗号分隔的通道 ID 列表 | 按注册顺序 |
+| `--main-ratio <ratio>` | `main_sidebar` 主画面宽度占比 | `0.75` |
+
 ---
 
 ## 3. PP 后处理格式测试
@@ -1117,6 +1166,9 @@ done
 | `-M, --min-ssim <n>` | SSIM 阈值 (默认: 0.95) |
 | `-v, --verbose` | 详细日志 |
 | `-t, --threads <n>` | **并发路数（启用 PARALLEL 模式，可任意指定 1-128）** |
+| `--view-type <type>` | 视图类型: `grid`(网格, 默认) 或 `main_sidebar`(主+侧栏) |
+| `--slot-assignment <ids>` | 通道→slot 映射，逗号分隔 (如: `1,4,2,3,0`) |
+| `--main-ratio <ratio>` | `main_sidebar` 主画面宽度占比 (默认: 0.75) |
 
 **ExecuteMode 映射**:
 | 模式 | 触发条件 | 说明 |

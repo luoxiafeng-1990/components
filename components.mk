@@ -4,7 +4,7 @@
 #
 ################################################################################
 
-COMPONENTS_VERSION = 2.43
+COMPONENTS_VERSION = 2.44
 COMPONENTS_SITE = ../packages/components
 COMPONENTS_SITE_METHOD = local
 COMPONENTS_INSTALL_STAGING = YES

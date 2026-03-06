@@ -15,6 +15,7 @@
 #include <atomic>
 #include <vector>
 #include <memory>
+#include <string>
 #include <cstdint>
 
 #include "common/Timer.hpp"
@@ -25,6 +26,8 @@
 extern "C" {
 #include "ta_cv_api_ext_c.h"
 }
+
+enum class ViewType { GRID, MAIN_SIDEBAR };
 
 struct tpsfb_dma_info;
 class OsdOverlay;
@@ -106,6 +109,16 @@ public:
     int getScreenHeight() const { return screen_height_; }
     int getBitsPerPixel() const { return bits_per_pixel_; }
 
+    ViewType getViewType() const { return view_type_; }
+    int getSlotCount() const { return static_cast<int>(view_slots_.size()); }
+    const ChannelLayout& getSlotLayout(int slot_index) const;
+
+    /**
+     * 获取当前视图的 ASCII 示意图（坐标标注在网格交叉点）
+     * 用于日志输出 / 调试 / 展示给用户确认布局
+     */
+    std::string getViewDiagram() const;
+
 private:
     explicit SharedDisplayContext(const TacoVOConfig& config);
     bool open();
@@ -121,7 +134,9 @@ private:
                   int src_width, int src_height,
                   uint64_t src_phys, int src_format, const int* src_linesize);
     void ppCopy(Buffer* src, Buffer* dst);
-    void computeGridLayout(int channel_index, ChannelLayout& layout) const;
+
+    void createView();
+    const ChannelLayout& resolveLayout(int channel_id) const;
 
     void onTimerTick();
     void displayThreadFunc();
@@ -151,6 +166,11 @@ private:
 
     // === 同步原语 ===
     std::shared_mutex rw_mutex_;
+
+    // === 视图管理 ===
+    ViewType view_type_ = ViewType::GRID;
+    std::vector<ChannelLayout> view_slots_;     // 预计算的所有 slot 布局
+    std::vector<int> slot_assignment_;           // slot_assignment_[slot_index] = channel_id
 
     // === 通道管理 ===
     struct ChannelInfo {
