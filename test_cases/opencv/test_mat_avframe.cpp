@@ -49,19 +49,28 @@ int main(int argc, char* argv[]) {
         if (avcodec_send_packet(codec_ctx, pkt) == 0) {
             while (avcodec_receive_frame(codec_ctx, frame) == 0 && frame_count < 10) {
                 // ---- 核心接口测试 ----
-                cv::Mat mat(frame);
-                // ----------------------
-                printf("Frame %2d: Mat %dx%d type=%d data=%p\n",
-                       frame_count, mat.cols, mat.rows, mat.type(), mat.data);
-                frame_count++;
+                // cv::Mat(frame) 是零拷贝，Mat 引用 AVFrame 数据
+                // 用花括号缩小作用域，让 Mat 在 av_frame_unref 之前析构
+                {
+                    cv::Mat test_mat = cv::Mat(frame);
+                    printf("Frame %2d: Mat %dx%d type=%d data=%p\n",
+                           frame_count, test_mat.cols, test_mat.rows, test_mat.type(), test_mat.data);
+                    frame_count++;
 
-                std::string output_file = "output" + std::to_string(frame_count) + ".jpg"; 
-                cv::imwrite(output_file, mat);
-                std::cout << "hello,world" << std::endl;
+                    std::string output_file = "output" + std::to_string(frame_count) + ".jpg";
+                    cv::imwrite(output_file, test_mat);
+                    std::cout << "Mat used, now exiting scope..." << std::endl;
+                }  // <-- test_mat 在这里析构
+                // ----------------------
+
+                std::cout << "Mat destructed, now av_frame_unref..." << std::endl;
                 av_frame_unref(frame);
+                std::cout << "av_frame_unref done" << std::endl;
             }
         }
+        std::cout << "hello,world2" << std::endl;
         av_packet_unref(pkt);
+        std::cout << "hello,world2" << std::endl;
     }
 
     printf("Decoded %d frames\n", frame_count);
