@@ -244,7 +244,9 @@ FrameCompareResult BufferComparator::compare(
             break;
             
         case CompareConfig::NATIVE:
-            if (ref_info.format != test_info.format) {
+            // Mat 没有 AVPixelFormat，跳过格式一致性检查，直接按 is_yuv/is_rgb 路由
+            if (!ref_info.is_mat && !test_info.is_mat &&
+                ref_info.format != test_info.format) {
                 result.error_message = "Format mismatch in NATIVE mode";
                 result.passed = false;
                 result.level = FrameCompareResult::FAIL;
