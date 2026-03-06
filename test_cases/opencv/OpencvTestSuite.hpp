@@ -1,5 +1,5 @@
-#ifndef OPENCV_TEST_SUITE_HPP
-#define OPENCV_TEST_SUITE_HPP
+#ifndef TAOPENCV_TEST_SUITE_HPP
+#define TAOPENCV_TEST_SUITE_HPP
 
 #include "../common/ITestModule.hpp"
 #include "productionline/io/BufferConsumerService.hpp"
@@ -46,7 +46,7 @@ public:
     // ========================================
     
     std::string getName() const override { return "opencv"; }
-    std::string getDescription() const override { return "Opencv测试"; }
+    std::string getDescription() const override { return "opencv测试"; }
     
     int run(int argc, char* argv[]) override;
     void printHelp() const override;
@@ -62,7 +62,7 @@ private:
     
 };
 
-} // namespace opencv
-} // namespace test
+}
+}
 
-#endif // OPENCV_TEST_SUITE_HPP
+#endif
