@@ -370,11 +370,39 @@ BufferComparator::FormatInfo BufferComparator::analyzeFormat(Buffer* buffer) {
     FormatInfo info = {};
     info.format = AV_PIX_FMT_NONE;
     info.name = "Unknown";
-    
-    if (!buffer || !buffer->hasImageMetadata()) {
+
+    if (!buffer) {
         return info;
     }
-    
+
+    // Mat 路径：Buffer 持有 cv::Mat，无 AVFrame 元数据
+    cv::Mat* mat = buffer->getMat();
+    if (mat && !mat->empty()) {
+        info.width      = mat->cols;
+        info.height     = mat->rows;
+        info.num_planes = mat->channels();
+        info.is_planar  = false;
+        info.is_mat     = true;
+
+        // 按通道数映射为已有逻辑类型，使 compareYUV/compareRGB 路由可直接复用：
+        //   单通道（灰度）→ is_yuv=true  ，与 Y 平面计算逻辑相同
+        //   多通道（BGR/RGB 等 packed）→ is_rgb=true，与 packed RGB 计算逻辑相同
+        if (mat->channels() == 1) {
+            info.is_yuv = true;
+            info.is_rgb = false;
+            info.name   = "Mat_Gray";
+        } else {
+            info.is_yuv = false;
+            info.is_rgb = true;
+            info.name   = "Mat_" + std::to_string(mat->channels()) + "ch";
+        }
+        return info;
+    }
+
+    if (!buffer->hasImageMetadata()) {
+        return info;
+    }
+
     info.format = buffer->getImageFormat();
     info.width = buffer->getImageWidth();
     info.height = buffer->getImageHeight();
@@ -1217,7 +1245,21 @@ double BufferComparator::calculatePSNR_YUV_Y(
     Buffer* buf1, Buffer* buf2,
     const FormatInfo& info1, const FormatInfo& info2
 ) {
-    // 获取Y平面数据
+    // Mat 单通道路径：直接从 Mat 读取数据
+    if (info1.is_mat || info2.is_mat) {
+        cv::Mat* mat1 = buf1->getMat();
+        cv::Mat* mat2 = buf2->getMat();
+        if (!mat1 || !mat2 || mat1->empty() || mat2->empty()) {
+            return 0.0;
+        }
+        // Mat::step[0] 是行字节数（即 stride），与 AVFrame linesize 等价
+        return calculatePSNR(mat1->ptr<uint8_t>(0), mat2->ptr<uint8_t>(0),
+                             info1.width, info1.height,
+                             static_cast<int>(mat1->step[0]),
+                             static_cast<int>(mat2->step[0]));
+    }
+
+    // AVFrame 路径
     uint8_t* data1 = buf1->getImagePlaneData(0);
     uint8_t* data2 = buf2->getImagePlaneData(0);
     
@@ -1236,6 +1278,11 @@ double BufferComparator::calculatePSNR_YUV_U(
     Buffer* buf1, Buffer* buf2,
     const FormatInfo& info1, const FormatInfo& info2
 ) {
+    // Mat 单通道没有 U 平面，视为完全一致
+    if (info1.is_mat || info2.is_mat) {
+        return 100.0;
+    }
+
     // 获取U平面数据
     uint8_t* data1 = buf1->getImagePlaneData(1);
     uint8_t* data2 = buf2->getImagePlaneData(1);
@@ -1259,6 +1306,11 @@ double BufferComparator::calculatePSNR_YUV_V(
     Buffer* buf1, Buffer* buf2,
     const FormatInfo& info1, const FormatInfo& info2
 ) {
+    // Mat 单通道没有 V 平面，视为完全一致
+    if (info1.is_mat || info2.is_mat) {
+        return 100.0;
+    }
+
     // 获取V平面数据
     uint8_t* data1 = buf1->getImagePlaneData(2);
     uint8_t* data2 = buf2->getImagePlaneData(2);
@@ -1298,7 +1350,33 @@ static bool extractRGBChannel(
     if (!buffer || !out_data || channel < 0 || channel > 2) {
         return false;
     }
-    
+
+    // Mat packed 路径：Buffer 持有 cv::Mat（多通道 packed 格式）
+    cv::Mat* mat = buffer->getMat();
+    if (mat && !mat->empty()) {
+        int channels = mat->channels();
+        if (channel >= channels) {
+            return false;
+        }
+        // 单通道退化情况（不应走到这里，但做防御处理）
+        if (channels == 1) {
+            for (int y = 0; y < height; y++) {
+                memcpy(out_data + y * width, mat->ptr<uint8_t>(y), width);
+            }
+            return true;
+        }
+        // 多通道：逐像素提取指定通道（BGR/RGB 顺序由调用方负责解释）
+        for (int y = 0; y < height; y++) {
+            const uint8_t* src_row = mat->ptr<uint8_t>(y);
+            uint8_t* dst_row = out_data + y * width;
+            for (int x = 0; x < width; x++) {
+                dst_row[x] = src_row[x * channels + channel];
+            }
+        }
+        return true;
+    }
+
+    // AVFrame 路径（原有逻辑）
     uint8_t* src_data = buffer->getImagePlaneData(0);
     const int* linesize = buffer->getImageLinesize();
     
@@ -1384,6 +1462,10 @@ static bool extractRGBChannel(
     
     return true;
 }
+
+// ============================================================================
+// PSNR计算 - RGB格式
+// ============================================================================
 
 double BufferComparator::calculatePSNR_RGB_R(
     Buffer* buf1, Buffer* buf2,
@@ -1736,6 +1818,20 @@ double BufferComparator::calculateSSIM_YUV_Y(
     Buffer* buf1, Buffer* buf2,
     const FormatInfo& info1, const FormatInfo& info2
 ) {
+    // Mat 单通道路径
+    if (info1.is_mat || info2.is_mat) {
+        cv::Mat* mat1 = buf1->getMat();
+        cv::Mat* mat2 = buf2->getMat();
+        if (!mat1 || !mat2 || mat1->empty() || mat2->empty()) {
+            return 0.0;
+        }
+        return calculateSSIM(mat1->ptr<uint8_t>(0), mat2->ptr<uint8_t>(0),
+                             info1.width, info1.height,
+                             static_cast<int>(mat1->step[0]),
+                             static_cast<int>(mat2->step[0]));
+    }
+
+    // AVFrame 路径
     uint8_t* data1 = buf1->getImagePlaneData(0);
     uint8_t* data2 = buf2->getImagePlaneData(0);
     
@@ -1754,6 +1850,11 @@ double BufferComparator::calculateSSIM_YUV_U(
     Buffer* buf1, Buffer* buf2,
     const FormatInfo& info1, const FormatInfo& info2
 ) {
+    // Mat 单通道没有 U 平面，视为完全一致
+    if (info1.is_mat || info2.is_mat) {
+        return 1.0;
+    }
+
     uint8_t* data1 = buf1->getImagePlaneData(1);
     uint8_t* data2 = buf2->getImagePlaneData(1);
     
@@ -1775,6 +1876,11 @@ double BufferComparator::calculateSSIM_YUV_V(
     Buffer* buf1, Buffer* buf2,
     const FormatInfo& info1, const FormatInfo& info2
 ) {
+    // Mat 单通道没有 V 平面，视为完全一致
+    if (info1.is_mat || info2.is_mat) {
+        return 1.0;
+    }
+
     uint8_t* data1 = buf1->getImagePlaneData(2);
     uint8_t* data2 = buf2->getImagePlaneData(2);
     
