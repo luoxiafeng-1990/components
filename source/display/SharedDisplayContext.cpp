@@ -14,6 +14,10 @@
 #include <sstream>
 #include <algorithm>
 
+extern "C" {
+#include "taco_sys_api.h"
+}
+
 namespace {
     constexpr const char* kProcFb = "/proc/fb";
     constexpr const char* kTpsFb0 = "tpsfb0";
@@ -104,7 +108,6 @@ SharedDisplayContext::SharedDisplayContext(const TacoVOConfig& config)
     , buffer_size_(0)
     , buffer_count_(4)
     , render_buf_(nullptr)
-    , display_buf_(nullptr)
     , logger_(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Display.SharedContext")))
 {
     int max_ch = config_.max_channels > 0 ? config_.max_channels : 64;
@@ -146,9 +149,11 @@ bool SharedDisplayContext::open() {
         return false;
     }
 
-    render_buf_ = pool->acquireFree(false, 0);
-    if (!render_buf_) {
-        LOG4CPLUS_ERROR(logger_, "Failed to acquire initial render buffer");
+    // 分配专用模板帧（独立 TACO 内存，不进 BufferPool）
+    template_blk_id_ = taco_sys_get_block(
+        TACO_INVALID_POOLID, buffer_size_, "template_frame");
+    if (template_blk_id_ == 0) {
+        LOG4CPLUS_ERROR(logger_, "Failed to allocate TACO block for template frame");
         fb_pool_id_ = 0;
         allocator_facade_.reset();
         ::close(fd_);
@@ -156,9 +161,34 @@ bool SharedDisplayContext::open() {
         return false;
     }
 
+    uint64_t tmpl_phys = taco_sys_handle2_phys_addr(template_blk_id_);
+    void* tmpl_virt = taco_sys_mmap_noncache(
+        tmpl_phys, static_cast<uint32_t>(buffer_size_));
+    if (!tmpl_virt) {
+        LOG4CPLUS_ERROR(logger_, "Failed to mmap template frame");
+        taco_sys_release_block(template_blk_id_);
+        template_blk_id_ = 0;
+        fb_pool_id_ = 0;
+        allocator_facade_.reset();
+        ::close(fd_);
+        fd_ = -1;
+        return false;
+    }
+
+    memset(tmpl_virt, 0, buffer_size_);
+    template_buf_ = std::make_unique<Buffer>(
+        template_blk_id_, tmpl_virt, tmpl_phys, buffer_size_,
+        Buffer::Ownership::EXTERNAL);
+
+    LOG4CPLUS_INFO_FMT(logger_,
+        "Template frame allocated: blk_id=%u, phys=0x%llx, size=%zu",
+        template_blk_id_, (unsigned long long)tmpl_phys, buffer_size_);
+
     if (!startThreads()) {
-        pool->releaseFree(render_buf_);
-        render_buf_ = nullptr;
+        template_buf_.reset();
+        taco_sys_munmap(tmpl_virt, static_cast<uint32_t>(buffer_size_));
+        taco_sys_release_block(template_blk_id_);
+        template_blk_id_ = 0;
         fb_pool_id_ = 0;
         allocator_facade_.reset();
         ::close(fd_);
@@ -199,7 +229,19 @@ void SharedDisplayContext::close() {
     stopThreads();
 
     render_buf_ = nullptr;
-    display_buf_ = nullptr;
+
+    // 释放模板帧（独立 TACO 内存）
+    if (template_buf_) {
+        void* virt = template_buf_->getVirtualAddress();
+        if (virt) {
+            taco_sys_munmap(virt, static_cast<uint32_t>(buffer_size_));
+        }
+        template_buf_.reset();
+    }
+    if (template_blk_id_ != 0) {
+        taco_sys_release_block(template_blk_id_);
+        template_blk_id_ = 0;
+    }
 
     // destroyPool 内部自动 taco_sys_munmap + taco_sys_release_block
     fb_pool_id_ = 0;
@@ -609,13 +651,12 @@ std::string SharedDisplayContext::getViewDiagram() const {
 }
 
 // ============================================================
-// 通道写入（条件变量节流：每通道每轮只写一次）
+// 通道写入（等待渲染线程开启新一轮，每通道每轮只写一次）
 // ============================================================
 
 bool SharedDisplayContext::channelWrite(int channel_id, Buffer* decoded) {
     if (!decoded) return false;
 
-    // 查找通道
     ChannelInfo* ch_info = nullptr;
     {
         std::lock_guard<std::mutex> mgmt_lock(channel_mgmt_mutex_);
@@ -632,7 +673,7 @@ bool SharedDisplayContext::channelWrite(int channel_id, Buffer* decoded) {
         return false;
     }
 
-    // 条件变量等待：如果本轮已经写过，阻塞直到定时器重置标记
+    // 等待渲染线程开启新一轮（written_this_round == false）
     {
         std::unique_lock<std::mutex> round_lock(round_mutex_);
         round_cv_.wait(round_lock, [&]() {
@@ -641,40 +682,44 @@ bool SharedDisplayContext::channelWrite(int channel_id, Buffer* decoded) {
         if (!running_ || !ch_info->active) return false;
     }
 
-    // 获取 shared_lock 保护 render_buf_（防止定时器 swap 期间写入）
-    std::shared_lock<std::shared_mutex> lock(rw_mutex_);
+    // 写入 render_buf_（shared_lock 限定作用域，写完即释放）
+    {
+        std::shared_lock<std::shared_mutex> lock(rw_mutex_);
 
-    if (render_buf_ == nullptr) {
-        return false;
+        if (render_buf_ == nullptr) {
+            return false;
+        }
+
+        int src_width  = decoded->getImageWidth();
+        int src_height = decoded->getImageHeight();
+
+        if (src_width <= 0 || src_height <= 0 || !decoded->getAVFrame()) {
+            LOG4CPLUS_WARN_FMT(logger_,
+                "Channel %d: invalid decoded frame (%dx%d, avframe=%p)",
+                channel_id, src_width, src_height, (void*)decoded->getAVFrame());
+            return false;
+        }
+
+        AVFrame* avf = decoded->getAVFrame();
+        if (!avf->data[0]) {
+            LOG4CPLUS_WARN_FMT(logger_,
+                "Channel %d: AVFrame data[0] is NULL, skipping", channel_id);
+            return false;
+        }
+
+        ppResize(decoded, render_buf_,
+                 ch_info->layout.x, ch_info->layout.y,
+                 ch_info->layout.w, ch_info->layout.h,
+                 src_width, src_height, 0, 0, nullptr);
     }
+    // shared_lock 已释放 — 确保渲染线程可安全获取 exclusive_lock
 
-    int src_width  = decoded->getImageWidth();
-    int src_height = decoded->getImageHeight();
-
-    if (src_width <= 0 || src_height <= 0 || !decoded->getAVFrame()) {
-        LOG4CPLUS_WARN_FMT(logger_,
-            "Channel %d: invalid decoded frame (%dx%d, avframe=%p)",
-            channel_id, src_width, src_height, (void*)decoded->getAVFrame());
-        return false;
-    }
-
-    AVFrame* avf = decoded->getAVFrame();
-    if (!avf->data[0]) {
-        LOG4CPLUS_WARN_FMT(logger_,
-            "Channel %d: AVFrame data[0] is NULL, skipping", channel_id);
-        return false;
-    }
-
-    ppResize(decoded, render_buf_,
-             ch_info->layout.x, ch_info->layout.y,
-             ch_info->layout.w, ch_info->layout.h,
-             src_width, src_height, 0, 0, nullptr);
-
-    // 标记本轮已写入
+    // 标记本轮已写入，通知渲染线程
     {
         std::lock_guard<std::mutex> round_lock(round_mutex_);
         ch_info->written_this_round = true;
     }
+    render_cv_.notify_one();
 
     if (osd_) {
         osd_->recordFrame(channel_id);
@@ -925,22 +970,59 @@ void SharedDisplayContext::ppCopy(Buffer* src, Buffer* dst) {
     ta_cv_image_destroy(&image_out);
 }
 
+void SharedDisplayContext::copyTemplateRegion(Buffer* dst, const ChannelLayout& layout) {
+    if (!template_buf_ || !dst) return;
+
+    uint8_t* src_data = static_cast<uint8_t*>(template_buf_->getVirtualAddress());
+    uint8_t* dst_data = static_cast<uint8_t*>(dst->getVirtualAddress());
+    if (!src_data || !dst_data) return;
+
+    int x = layout.x, y = layout.y, w = layout.w, h = layout.h;
+
+    if (bits_per_pixel_ <= 12) {
+        // NV12: Y plane
+        for (int row = y; row < y + h; row++) {
+            memcpy(dst_data + row * screen_width_ + x,
+                   src_data + row * screen_width_ + x,
+                   w);
+        }
+        // NV12: UV plane（隔行存储，高度减半）
+        int uv_offset = screen_width_ * screen_height_;
+        for (int row = y / 2; row < (y + h) / 2; row++) {
+            memcpy(dst_data + uv_offset + row * screen_width_ + x,
+                   src_data + uv_offset + row * screen_width_ + x,
+                   w);
+        }
+    } else {
+        int bytes_per_pixel = bits_per_pixel_ / 8;
+        int stride = screen_width_ * bytes_per_pixel;
+        for (int row = y; row < y + h; row++) {
+            memcpy(dst_data + row * stride + x * bytes_per_pixel,
+                   src_data + row * stride + x * bytes_per_pixel,
+                   w * bytes_per_pixel);
+        }
+    }
+}
+
 // ============================================================
-// 定时器线程
+// 渲染线程 & 显示定时器
 // ============================================================
 
 bool SharedDisplayContext::startThreads() {
     int fps = config_.target_fps > 0 ? config_.target_fps : 30;
-    int interval_ms = 1000 / fps;
+    frame_timeout_ms_ = 15;
 
     running_ = true;
 
+    render_thread_ = std::thread(&SharedDisplayContext::renderThreadFunc, this);
+
     timer_.start();
-    timer_id_ = timer_.scheduleRepeated(interval_ms, [this]() { onTimerTick(); });
+    timer_id_ = timer_.scheduleRepeated(frame_timeout_ms_,
+                                        [this]() { onDisplayTick(); });
 
-    display_thread_ = std::thread(&SharedDisplayContext::displayThreadFunc, this);
-
-    LOG4CPLUS_INFO_FMT(logger_, "Timer and display threads started (target_fps=%d)", fps);
+    LOG4CPLUS_INFO_FMT(logger_,
+        "Render thread and display timer started (fps=%d, frame_timeout=%dms)",
+        fps, frame_timeout_ms_);
     return true;
 }
 
@@ -948,6 +1030,7 @@ void SharedDisplayContext::stopThreads() {
     running_ = false;
 
     round_cv_.notify_all();
+    render_cv_.notify_all();
 
     if (timer_id_ != 0) {
         timer_.cancel(timer_id_);
@@ -960,125 +1043,158 @@ void SharedDisplayContext::stopThreads() {
         pool->shutdown();
     }
 
-    if (display_thread_.joinable()) {
-        display_thread_.join();
+    if (render_thread_.joinable()) {
+        render_thread_.join();
     }
 }
 
-void SharedDisplayContext::onTimerTick() {
+void SharedDisplayContext::renderThreadFunc() {
+    LOG4CPLUS_DEBUG(logger_, "Render thread started");
+    auto pool = getBufferPool();
+    if (!pool) {
+        LOG4CPLUS_ERROR(logger_, "Render thread: pool is null");
+        return;
+    }
+
+    while (running_) {
+        // 无活跃通道时短暂休眠，避免空转
+        {
+            bool has_active = false;
+            {
+                std::lock_guard<std::mutex> round_lock(round_mutex_);
+                for (const auto& ch : channels_) {
+                    if (ch.active) { has_active = true; break; }
+                }
+            }
+            if (!has_active) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                continue;
+            }
+        }
+
+        // (1) 从 BufferPool 获取空闲 buffer
+        Buffer* buf = pool->acquireFree(true, 100);
+        if (!buf) continue;
+
+        // (2) 从模板帧继承上一帧内容
+        // 硬件约束：显示控制器在 PAN 之后持续扫描该 buffer 直到下一次 PAN，
+        // 而 releaseFilled 后渲染线程可能立刻拿到同一块 buffer 开始写入。
+        // ppCopy 确保 buffer 初始内容与当前显示一致，避免扫描重叠产生撕裂。
+        ppCopy(template_buf_.get(), buf);
+
+        // (3) 设置 render_buf_，通道可以开始写入
+        {
+            std::unique_lock<std::shared_mutex> lock(rw_mutex_);
+            render_buf_ = buf;
+        }
+
+        // (4) 重置所有通道标记，唤醒通道线程
+        {
+            std::lock_guard<std::mutex> round_lock(round_mutex_);
+            for (auto& ch : channels_) {
+                if (ch.active) ch.written_this_round = false;
+            }
+        }
+        round_cv_.notify_all();
+
+        // (5) 等待所有活跃通道写完 OR 帧超时
+        {
+            std::unique_lock<std::mutex> round_lock(round_mutex_);
+            render_cv_.wait_for(round_lock,
+                std::chrono::milliseconds(frame_timeout_ms_),
+                [this]() {
+                    if (!running_) return true;
+                    for (const auto& ch : channels_) {
+                        if (ch.active && !ch.written_this_round) return false;
+                    }
+                    return true;
+                });
+
+            // (6) 更新健康状态，记录超时通道
+            // ppCopy(template→buf) 已在步骤(2)中覆盖全帧，超时通道自动保留上一帧内容
+            for (auto& ch : channels_) {
+                if (!ch.active) continue;
+                if (!ch.written_this_round) {
+                    ch.consecutive_misses++;
+                    LOG4CPLUS_WARN_FMT(logger_,
+                        "Channel %d: missed frame (timeout=%dms, consecutive=%d)",
+                        ch.channel_id, frame_timeout_ms_, ch.consecutive_misses);
+                    if (ch.consecutive_misses == kMaxConsecutiveMisses) {
+                        LOG4CPLUS_ERROR_FMT(logger_,
+                            "Channel %d: %d consecutive misses (%ds), marking unhealthy",
+                            ch.channel_id, ch.consecutive_misses,
+                            ch.consecutive_misses * frame_timeout_ms_ / 1000);
+                    }
+                } else {
+                    ch.consecutive_misses = 0;
+                }
+            }
+        }
+
+        if (!running_) {
+            pool->releaseFree(buf);
+            break;
+        }
+
+        // (7) 断开 render_buf_（等待通道释放 shared_lock）
+        {
+            std::unique_lock<std::shared_mutex> lock(rw_mutex_);
+            render_buf_ = nullptr;
+        }
+
+        // (8) 保存当前帧到模板，然后立即提交
+        ppCopy(buf, template_buf_.get());
+        pool->submitFilled(buf);
+    }
+
+    LOG4CPLUS_DEBUG(logger_, "Render thread exited");
+}
+
+// ============================================================
+// 显示定时器回调
+// ============================================================
+
+void SharedDisplayContext::onDisplayTick() {
     if (!running_) return;
 
     auto pool = getBufferPool();
     if (!pool) return;
 
-    Buffer* old_render = nullptr;
-
-    {
-        std::unique_lock<std::shared_mutex> lock(rw_mutex_);
-        old_render = render_buf_;
-        render_buf_ = nullptr;
-    }
-
-    if (!old_render) {
+    Buffer* buf = pool->acquireFilled(false, 0);
+    if (!buf) {
+        LOG4CPLUS_WARN(logger_,
+            "Display: no filled buffer available, render pipeline may be stalled");
         return;
     }
 
-    Buffer* new_render = pool->acquireFree(false, 0);
-    if (!new_render) {
-        std::unique_lock<std::shared_mutex> lock(rw_mutex_);
-        render_buf_ = old_render;
-        {
-            std::lock_guard<std::mutex> round_lock(round_mutex_);
-            for (auto& ch : channels_) {
-                ch.written_this_round = false;
-            }
-        }
-        round_cv_.notify_all();
+    struct tpsfb_dma_info dma_info;
+    dma_info.ovl_idx = 0;
+    dma_info.phys_addr = buf->getPhysicalAddress();
+    if (ioctl(fd_, FB_IOCTL_SET_DMA_INFO, &dma_info) < 0) {
+        LOG4CPLUS_WARN_FMT(logger_,
+            "Display: FB_IOCTL_SET_DMA_INFO failed: %s", strerror(errno));
+        pool->releaseFilled(buf);
         return;
     }
 
-    pool->submitFilled(old_render);
-
-    {
-        std::lock_guard<std::mutex> dlock(display_mutex_);
-        if (display_buf_) {
-            ppCopy(display_buf_, new_render);
-        }
-    }
-
-    {
-        std::unique_lock<std::shared_mutex> lock(rw_mutex_);
-        render_buf_ = new_render;
-    }
-
-    {
-        std::lock_guard<std::mutex> round_lock(round_mutex_);
-        for (auto& ch : channels_) {
-            ch.written_this_round = false;
-        }
-    }
-    round_cv_.notify_all();
-}
-
-// ============================================================
-// 显示线程
-// ============================================================
-
-void SharedDisplayContext::displayThreadFunc() {
-    LOG4CPLUS_DEBUG(logger_, "Display thread started");
-    auto pool = getBufferPool();
-    if (!pool) {
-        LOG4CPLUS_ERROR(logger_, "Display thread: pool is null");
+    struct fb_var_screeninfo var_info;
+    if (ioctl(fd_, FBIOGET_VSCREENINFO, &var_info) < 0) {
+        LOG4CPLUS_WARN_FMT(logger_,
+            "Display: FBIOGET_VSCREENINFO failed: %s", strerror(errno));
+        pool->releaseFilled(buf);
         return;
     }
 
-    while (running_) {
-        Buffer* buf = pool->acquireFilled(true, 100);
-        if (!buf) {
-            continue;
-        }
-
-        // 每帧动态设置 DMA 基地址（每个 buffer 独立分配，地址不连续）
-        struct tpsfb_dma_info dma_info;
-        dma_info.ovl_idx = 0;
-        dma_info.phys_addr = buf->getPhysicalAddress();
-        if (ioctl(fd_, FB_IOCTL_SET_DMA_INFO, &dma_info) < 0) {
-            LOG4CPLUS_WARN_FMT(logger_, "Display: FB_IOCTL_SET_DMA_INFO failed: %s", strerror(errno));
-            pool->releaseFilled(buf);
-            continue;
-        }
-
-        struct fb_var_screeninfo var_info;
-        if (ioctl(fd_, FBIOGET_VSCREENINFO, &var_info) < 0) {
-            LOG4CPLUS_WARN_FMT(logger_, "Display: FBIOGET_VSCREENINFO failed: %s", strerror(errno));
-            pool->releaseFilled(buf);
-            continue;
-        }
-
-        var_info.yoffset = 0;
-        if (ioctl(fd_, FBIOPAN_DISPLAY, &var_info) < 0) {
-            LOG4CPLUS_WARN_FMT(logger_, "Display: FBIOPAN_DISPLAY failed: %s", strerror(errno));
-            pool->releaseFilled(buf);
-            continue;
-        }
-
-        // VSYNC: 等待垂直消隐期
-        int zero = 0;
-        ioctl(fd_, FBIO_WAITFORVSYNC, &zero);
-
-        // 在 display_mutex_ 保护下切换 display_buf_，
-        // 防止 timerThreadFunc 在 ppCopy 期间读到过时指针
-        Buffer* old_display = nullptr;
-        {
-            std::lock_guard<std::mutex> dlock(display_mutex_);
-            old_display = display_buf_;
-            display_buf_ = buf;
-        }
-
-        if (old_display) {
-            pool->releaseFilled(old_display);
-        }
+    var_info.yoffset = 0;
+    if (ioctl(fd_, FBIOPAN_DISPLAY, &var_info) < 0) {
+        LOG4CPLUS_WARN_FMT(logger_,
+            "Display: FBIOPAN_DISPLAY failed: %s", strerror(errno));
+        pool->releaseFilled(buf);
+        return;
     }
 
-    LOG4CPLUS_DEBUG(logger_, "Display thread exited");
+    int zero = 0;
+    ioctl(fd_, FBIO_WAITFORVSYNC, &zero);
+
+    pool->releaseFilled(buf);
 }

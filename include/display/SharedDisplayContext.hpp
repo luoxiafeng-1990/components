@@ -39,16 +39,17 @@ class OsdOverlay;
  *   1. 通过 TACO 平台 API 独立分配每个 framebuffer 页的物理连续内存
  *   2. 通过 BufferAllocatorFacade（FRAMEBUFFER 类型）+ BufferPool 管理 framebuffer 页
  *   3. 提供 channelWrite() 接口供多通道并发写入（PP 硬件 resize）
- *   4. Timer 定时器驱动翻页（与通道解码速度解耦）
- *   5. 显示线程负责 SET_DMA_INFO + FBIOPAN + VSYNC
+ *   4. 渲染线程等待所有通道写完后提交（帧级超时保护）
+ *   5. 显示定时器定时从 FILLED 队列取帧 → DMA → VSYNC
  *
  * 内存分配策略：
  *   - 每个 buffer 由 FramebufferAllocator 内部独立分配物理连续内存
  *   - 每帧显示时通过 FB_IOCTL_SET_DMA_INFO 动态设置 DMA 基地址
  *
  * 同步机制：
- *   - std::shared_mutex：通道获取 shared_lock 并发写入，定时器获取 unique_lock 切换 buffer
- *   - 通道在定时器切换期间不阻塞，看到 nullptr 直接返回 false（调用方缓存帧）
+ *   - std::shared_mutex：通道获取 shared_lock 并发写入，渲染线程获取 unique_lock 切换 buffer
+ *   - render_cv_：通道写完后通知渲染线程，渲染线程等待所有通道完成或帧超时
+ *   - round_cv_：渲染线程新一轮开始时唤醒等待的通道线程
  *
  * 生命周期：
  *   - 通过 acquire() 获取 shared_ptr（内部 weak_ptr 单例）
@@ -134,12 +135,13 @@ private:
                   int src_width, int src_height,
                   uint64_t src_phys, int src_format, const int* src_linesize);
     void ppCopy(Buffer* src, Buffer* dst);
+    void copyTemplateRegion(Buffer* dst, const ChannelLayout& layout);
 
     void createView();
     const ChannelLayout& resolveLayout(int channel_id) const;
 
-    void onTimerTick();
-    void displayThreadFunc();
+    void renderThreadFunc();
+    void onDisplayTick();
 
     // === 配置 ===
     TacoVOConfig config_;
@@ -160,9 +162,12 @@ private:
 
     std::shared_ptr<BufferPool> getBufferPool();
 
-    // === 渲染/显示状态 ===
+    // === 渲染状态 ===
     Buffer* render_buf_;
-    Buffer* display_buf_;
+
+    // === 模板帧（专用 TACO 内存，用于跨帧继承）===
+    std::unique_ptr<Buffer> template_buf_;
+    uint32_t template_blk_id_ = 0;
 
     // === 同步原语 ===
     std::shared_mutex rw_mutex_;
@@ -178,6 +183,7 @@ private:
         ChannelLayout layout;
         bool active;
         bool written_this_round = false;
+        int consecutive_misses = 0;
     };
     std::vector<ChannelInfo> channels_;
     std::mutex channel_mgmt_mutex_;
@@ -185,16 +191,16 @@ private:
 
     // === 通道写入节流（条件变量）===
     std::mutex round_mutex_;
-    std::condition_variable round_cv_;
-
-    // === display_buf_ 读写保护 ===
-    std::mutex display_mutex_;
+    std::condition_variable round_cv_;        // 渲染线程 → 通道线程：新一轮开始
+    std::condition_variable render_cv_;       // 通道线程 → 渲染线程：写入完成
 
     // === 线程 & 定时器 ===
     Timer timer_;
     Timer::TimerId timer_id_ = 0;
-    std::thread display_thread_;
+    std::thread render_thread_;
     std::atomic<bool> running_{false};
+    int frame_timeout_ms_ = 33;
+    static constexpr int kMaxConsecutiveMisses = 90;
 
     // === OSD 叠加（可选，图形层 overlay1）===
     std::unique_ptr<OsdOverlay> osd_;
