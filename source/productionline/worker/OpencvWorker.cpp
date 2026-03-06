@@ -57,11 +57,11 @@ OpencvWorker::OpencvWorker(const WorkerConfig& config)
         if (path.empty()) {
             LOG4CPLUS_WARN(logger_, "data_source.path is empty, cannot create packet source");
         } else if (path.rfind("rtsp://", 0) == 0 || path.rfind("rtsps://", 0) == 0) {
-            packet_source_ = std::make_shared<EncodedPacketSourceFromRtsp>(path);
-            LOG4CPLUS_DEBUG_FMT(logger_, "Created EncodedPacketSourceFromRtsp for '%s'", path.c_str());
+            packet_source_ = std::make_shared<EncodedPacketSourceFromRtsp>(path, config.data_source.max_frames);
+            LOG4CPLUS_DEBUG_FMT(logger_, "Created EncodedPacketSourceFromRtsp for '%s' (max_frames=%d)", path.c_str(), config.data_source.max_frames);
         } else {
-            packet_source_ = std::make_shared<EncodedPacketSourceFromFile>(path);
-            LOG4CPLUS_DEBUG_FMT(logger_, "Created EncodedPacketSourceFromFile for '%s'", path.c_str());
+            packet_source_ = std::make_shared<EncodedPacketSourceFromFile>(path, config.data_source.max_frames);
+            LOG4CPLUS_DEBUG_FMT(logger_, "Created EncodedPacketSourceFromFile for '%s' (max_frames=%d)", path.c_str(), config.data_source.max_frames);
         }
     }
 }
@@ -148,7 +148,27 @@ bool OpencvWorker::open() {
         output_height_ = getSourceHeight() > 0 ? getSourceHeight() : 1080;
         LOG4CPLUS_DEBUG_FMT(logger_, "Output resolution not set in config, using: %dx%d", 
                       output_width_, output_height_);
-    } else {        
+    } else {
+        // 边界检查：验证用户配置的分辨率是否合理
+        if (width < 0 || height < 0) {
+            LOG4CPLUS_ERROR_FMT(logger_, "Invalid resolution: %dx%d (negative values not allowed)",
+                          width, height);
+            packet_source_->close();
+            return false;
+        }
+        if (width < MIN_RESOLUTION || height < MIN_RESOLUTION) {
+            LOG4CPLUS_ERROR_FMT(logger_, "Resolution %dx%d too small (minimum: %dx%d)",
+                          width, height, MIN_RESOLUTION, MIN_RESOLUTION);
+            packet_source_->close();
+            return false;
+        }
+        if (width > MAX_RESOLUTION || height > MAX_RESOLUTION) {
+            LOG4CPLUS_ERROR_FMT(logger_, "Resolution %dx%d too large (maximum: %dx%d)",
+                          width, height, MAX_RESOLUTION, MAX_RESOLUTION);
+            packet_source_->close();
+            return false;
+        }
+
         output_width_ = width;
         output_height_ = height;
         LOG4CPLUS_DEBUG_FMT(logger_, "Output resolution from config: %dx%d", output_width_, output_height_);
@@ -240,14 +260,10 @@ void OpencvWorker::close() {
         LOG4CPLUS_INFO(logger_, "");
         LOG4CPLUS_INFO(logger_, "🛑 Closing video source...");
         
-        // ⭐ v2.22 新增：清理未提交的 packet（Buffer 模式）
-        if (worker_config_.data_source.buffer_mode && packet_acquired_) {
-            auto ps = std::dynamic_pointer_cast<EncodedPacketSourceFromBuffer>(packet_source_);
-            if (ps) {
-                // 强制提交（避免订阅者计数永久占用）
-                LOG4CPLUS_DEBUG(logger_, "Cleaning up pending packet on close");
-                ps->commitEncodedPacket(this);
-            }
+        // 清理未提交的 packet（避免订阅者计数永久占用）
+        if (packet_acquired_) {
+            LOG4CPLUS_DEBUG(logger_, "Cleaning up pending packet on close");
+            packet_source_->commitEncodedPacket(this);
             packet_acquired_ = false;
             current_packet_ptr_ = nullptr;
         }
@@ -688,7 +704,6 @@ FillResult OpencvWorker::fillBuffer(int frame_index, Buffer* buffer) {
         cached_frames_.erase(cached_frames_.begin());
 
         // 转换AVFrame到Mat
-        //cv::Mat* mat = convertAVFrameToMat(cached_frame);
         cv::Mat* mat = new cv::Mat(cached_frame);
         if (mat->empty()) {
             LOG4CPLUS_ERROR(logger_, "Failed to convert cached AVFrame to Mat");
@@ -799,54 +814,6 @@ FillResult OpencvWorker::fillBuffer(int frame_index, Buffer* buffer) {
     buffer->setAVFrame(first_frame);
 
     return FillResult::success();
-}
-
-cv::Mat* OpencvWorker::convertAVFrameToMat(AVFrame* avframe) {
-    if (!avframe || !avframe->data[0] ||
-        avframe->width <= 0 || avframe->height <= 0) {
-        return nullptr;
-    }
-
-    int width = avframe->width;
-    int height = avframe->height;
-    AVPixelFormat fmt = static_cast<AVPixelFormat>(avframe->format);
-
-    switch (fmt){
-        case AV_PIX_FMT_RGB24: {
-            // 创建堆上的Mat对象并拷贝数据
-            cv::Mat temp(height, width, CV_8UC3, avframe->data[0], avframe->linesize[0]);
-            return new cv::Mat(temp.clone());
-        }
-        case AV_PIX_FMT_NV12: {
-            // NV12格式：先构建完整的NV12 Mat，然后转换为BGR
-            int total_height = height + height / 2;
-            cv::Mat nv12_mat(total_height, width, CV_8UC1);
-
-            // 复制Y平面
-            int y_size = width * height;
-            cv::Mat y_plane(height, width, CV_8UC1, nv12_mat.data, width);
-            cv::Mat av_y(height, width, CV_8UC1, avframe->data[0], avframe->linesize[0]);
-            av_y.copyTo(y_plane);
-
-            // 复制UV平面（NV12是UV交错）
-            cv::Mat uv_plane(height / 2, width, CV_8UC1,
-                            nv12_mat.data + y_size, width);
-            cv::Mat av_uv(height / 2, width, CV_8UC1,
-                        avframe->data[1], avframe->linesize[1]);
-            av_uv.copyTo(uv_plane);
-
-            // 转换NV12到BGR
-            cv::Mat* result_mat = new cv::Mat();
-            cv::cvtColor(nv12_mat, *result_mat, cv::COLOR_YUV2BGR_NV12);
-
-            return result_mat;
-        }
-        default:
-            LOG4CPLUS_ERROR_FMT(logger_, "Unsupported pixel format: %d. Supported: RGB24, NV12", fmt);
-            return nullptr;
-    }
-
-    return nullptr;
 }
 
 const AVCodecParameters* OpencvWorker::getCodecParameters() const {

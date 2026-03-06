@@ -827,7 +827,7 @@ void BufferConsumerService::consumeLoop(
             }
             initialized = true;
         }
-        
+
         std::vector<Buffer*> buffers = {buffer};
         bool continue_consume = consumer->consume(buffers, frame_index);
         

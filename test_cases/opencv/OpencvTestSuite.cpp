@@ -403,6 +403,8 @@ int OpencvTestSuite::runPredefinedTest(const std::string& test_name, const std::
         config = common::WorkerConfigFactory::createSoftwareCv(
             path, params.width, params.height);
     }
+    config = common::WorkerConfigFactory::createSoftwareCv(
+            path, params.width, params.height);
     config.consumer_type.performance.target_fps = params.fps;
 
     auto result = runSingle(config, consumer::CONSUME_COUNT, test_name);

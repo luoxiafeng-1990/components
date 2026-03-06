@@ -128,21 +128,21 @@ void MatAllocator::deallocateBuffer(Buffer* buffer) {
     if (!buffer) {
         return;
     }
-    
-    // 1. ⭐ v2.7改进：直接从 Buffer 获取 Mat 指针
-    cv::Mat* mat = buffer->getMat();
 
-    // 2. 释放 AVFrame（如果存在）
+    // 1. ⭐ 先释放 Mat（必须在 AVFrame free 之前）
+    // cv::Mat(AVFrame*) 零拷贝：Mat 和 AVFrame 共享同一块 GPU 内存。
+    // 若先 av_frame_free，GPU 内存立即无效，再 delete mat 时 Mat 析构器崩溃。
+    cv::Mat* mat = buffer->getMat();
+    if (mat) {
+        delete mat;
+        buffer->setMat(nullptr);
+    }
+
+    // 2. 再释放 AVFrame
     AVFrame* avframe = buffer->getAVFrame();
     if (avframe) {
         av_frame_free(&avframe);
         buffer->setAVFrame(nullptr);
-    }
-    
-    // 3. 释放 Mat
-    if (mat) {
-        delete mat;
-        buffer->setMat(nullptr);
     }
 
     AVPacket* packet_ptr = buffer->getAVPacket();

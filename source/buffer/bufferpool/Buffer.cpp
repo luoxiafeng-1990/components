@@ -175,7 +175,21 @@ int Buffer::getOutputChannel() const {
 // ========== 生命周期管理接口实现 ⭐ v2.19新增 ==========
 
 void Buffer::freeBuffer() {
-    // 1. 清空 AVFrame 的引用计数（清空数据，但不释放结构体）
+    // 1. 先释放 Mat 对象（必须在 AVFrame unref 之前）
+    // cv::Mat(AVFrame*) 是 TACO SDK 的零拷贝接口，Mat 和 AVFrame 共享同一块 GPU 内存。
+    // 若先调用 av_frame_unref，GPU 内存立即归还硬件，Mat 的 data 指针随即失效，
+    // 之后再 delete mat_ 时 Mat 析构函数访问无效地址，导致 libGAL SIGSEGV。
+    // 因此必须先 delete Mat（趁 AVFrame 数据仍有效），再 unref AVFrame。
+    std::cout << "hello,world3" << std::endl;
+    if (mat_) {
+        cv::imwrite("output.jpg",*mat_);
+        delete mat_;
+        mat_ = nullptr;
+    }
+
+    std::cout << "hello,world3" << std::endl;
+
+    // 2. 清空 AVFrame 的引用计数（清空数据，但不释放结构体）
     // av_frame_unref() 会：
     //   - 清空 frame->data[0] 到 frame->data[7]
     //   - 清空 frame->buf[0] 到 frame->buf[7]（释放引用计数）
@@ -186,7 +200,7 @@ void Buffer::freeBuffer() {
         virt_addr_ = nullptr;
     }
 
-    // 2. 清空 AVPacket 的引用计数（清空数据，但不释放结构体）
+    // 3. 清空 AVPacket 的引用计数（清空数据，但不释放结构体）
     // av_packet_unref() 会：
     //   - 清空 packet->data
     //   - 清空 packet->buf（释放引用计数）
@@ -194,13 +208,7 @@ void Buffer::freeBuffer() {
     if (avpacket_) {
         av_packet_unref(avpacket_);
     }
-
-    // 2.5. ⭐ 新增：清理 Mat 对象
-    // 释放由 convertAVFrameToMat 创建的 Mat 对象
-    if (mat_) {
-        delete mat_;
-        mat_ = nullptr;
-    }
+    std::cout << "hello,world3" << std::endl;
 
     // 3. 重置虚拟地址（因为 AVFrame 的数据已被清空）
     // virt_addr_ 之前指向 frame->data[0]，现在 frame->data[0] 已被清空，所以重置为 nullptr

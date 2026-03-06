@@ -56,7 +56,8 @@ libcomponents_la_SOURCES = \
 # 1. Buildroot 会自动编译 log4cplus（已在 components.mk 中声明依赖）
 # 2. log4cplus 库位置：$(STAGING_DIR)/usr/lib/liblog4cplus-2.0.so.3.4.7
 # 3. 运行时需要目标系统有 log4cplus 动态库（Buildroot 会自动安装到 TARGET_DIR）
-COMMON_LIBS = -lpthread -luring -lavformat -lavcodec -lavutil -lswscale -ltacosys -ltacovo -llog4cplus -lfreetype $(OPENCV_LIBS)
+COMMON_LIBS = -lpthread -luring -ltacosys -ltacovo -llog4cplus -lfreetype $(FFMPEG_LIBS) $(OPENCV_LIBS)
+FFMPEG_LIBS = -lavformat -lavcodec -lavutil -lswscale
 OPENCV_LIBS = -ltacocv -lvx -lhwdec_jpeg -ltaco_ppvdec -lCLC -lOpenVX -lOpenVXU -lOpenCL -lSPIRV_viv -lCLC -lVSC -lGAL -lovxlib -lArchModelSw -lNNArchPerf -ldl \
         -lopencv_imgcodecs -lopencv_videoio -lopencv_core -lopencv_imgproc -lenc24 -lyuv -ljpeg
 
@@ -76,7 +77,13 @@ OPENCV_LIBS = -ltacocv -lvx -lhwdec_jpeg -ltaco_ppvdec -lCLC -lOpenVX -lOpenVXU 
 # google_test_LDFLAGS = 
 
 # ========== QA 测试程序（模块化测试入口）==========
-bin_PROGRAMS = qa_cases
+bin_PROGRAMS = qa_cases test_mat
+
+# ========== Mat(AVFrame*) 接口最小化测试 ==========
+test_mat_SOURCES = test_cases/opencv/test_mat_avframe.cpp
+test_mat_CPPFLAGS = $(AM_CPPFLAGS)
+test_mat_LDADD = $(FFMPEG_LIBS) $(OPENCV_LIBS)
+test_mat_LDFLAGS = -Wl,--allow-shlib-undefined
 qa_cases_SOURCES = \
     test_cases/test_module_main.cpp \
     test_cases/common/ITestModule.cpp \
