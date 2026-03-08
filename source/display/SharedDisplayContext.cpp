@@ -108,6 +108,7 @@ SharedDisplayContext::SharedDisplayContext(const TacoVOConfig& config)
     , buffer_size_(0)
     , buffer_count_(4)
     , render_buf_(nullptr)
+    , displayed_buf_(nullptr)
     , logger_(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Display.SharedContext")))
 {
     int max_ch = config_.max_channels > 0 ? config_.max_channels : 64;
@@ -230,6 +231,15 @@ void SharedDisplayContext::close() {
 
     render_buf_ = nullptr;
 
+    // 释放显示定时器持有的帧（上一次 onDisplayTick 保留的 buffer）
+    if (displayed_buf_) {
+        auto pool = getBufferPool();
+        if (pool) {
+            pool->releaseFilled(displayed_buf_);
+        }
+        displayed_buf_ = nullptr;
+    }
+
     // 释放模板帧（独立 TACO 内存）
     if (template_buf_) {
         void* virt = template_buf_->getVirtualAddress();
@@ -312,8 +322,7 @@ bool SharedDisplayContext::openDevice() {
     screen_width_   = var_info.xres;
     screen_height_  = var_info.yres;
     bits_per_pixel_ = 12;
-    buffer_count_   = var_info.yres_virtual / var_info.yres;
-    if (buffer_count_ < 2) buffer_count_ = 4;
+    buffer_count_ = 8;
 
     size_t total_bits = static_cast<size_t>(screen_width_) * screen_height_ * bits_per_pixel_;
     buffer_size_ = (total_bits + 7) / 8;
@@ -1010,19 +1019,20 @@ void SharedDisplayContext::copyTemplateRegion(Buffer* dst, const ChannelLayout& 
 
 bool SharedDisplayContext::startThreads() {
     int fps = config_.target_fps > 0 ? config_.target_fps : 30;
-    frame_timeout_ms_ = 15;
+    int display_interval_ms = 1000 / fps;
+    frame_timeout_ms_ = display_interval_ms * 2;
 
     running_ = true;
 
     render_thread_ = std::thread(&SharedDisplayContext::renderThreadFunc, this);
 
     timer_.start();
-    timer_id_ = timer_.scheduleRepeated(frame_timeout_ms_,
+    timer_id_ = timer_.scheduleRepeated(display_interval_ms,
                                         [this]() { onDisplayTick(); });
 
     LOG4CPLUS_INFO_FMT(logger_,
-        "Render thread and display timer started (fps=%d, frame_timeout=%dms)",
-        fps, frame_timeout_ms_);
+        "Render thread and display timer started (fps=%d, display_interval=%dms, frame_timeout=%dms)",
+        fps, display_interval_ms, frame_timeout_ms_);
     return true;
 }
 
@@ -1076,10 +1086,8 @@ void SharedDisplayContext::renderThreadFunc() {
         Buffer* buf = pool->acquireFree(true, 100);
         if (!buf) continue;
 
-        // (2) 从模板帧继承上一帧内容
-        // 硬件约束：显示控制器在 PAN 之后持续扫描该 buffer 直到下一次 PAN，
-        // 而 releaseFilled 后渲染线程可能立刻拿到同一块 buffer 开始写入。
-        // ppCopy 确保 buffer 初始内容与当前显示一致，避免扫描重叠产生撕裂。
+        // (2) 从模板帧继承上一帧内容（必须在 render_buf_ 赋值之前完成，
+        //     否则通道线程的 ppResize 会与 ppCopy 竞争同一块 buffer）
         ppCopy(template_buf_.get(), buf);
 
         // (3) 设置 render_buf_，通道可以开始写入
@@ -1110,14 +1118,14 @@ void SharedDisplayContext::renderThreadFunc() {
                     return true;
                 });
 
-            // (6) 更新健康状态，记录超时通道
-            // ppCopy(template→buf) 已在步骤(2)中覆盖全帧，超时通道自动保留上一帧内容
+            // (6) 超时通道：从 template 拷贝该区域到当前 buf（保留上一帧画面）
             for (auto& ch : channels_) {
                 if (!ch.active) continue;
                 if (!ch.written_this_round) {
+                    copyTemplateRegion(buf, ch.layout);
                     ch.consecutive_misses++;
                     LOG4CPLUS_WARN_FMT(logger_,
-                        "Channel %d: missed frame (timeout=%dms, consecutive=%d)",
+                        "Channel %d: missed frame, copied from template (timeout=%dms, consecutive=%d)",
                         ch.channel_id, frame_timeout_ms_, ch.consecutive_misses);
                     if (ch.consecutive_misses == kMaxConsecutiveMisses) {
                         LOG4CPLUS_ERROR_FMT(logger_,
@@ -1142,7 +1150,7 @@ void SharedDisplayContext::renderThreadFunc() {
             render_buf_ = nullptr;
         }
 
-        // (8) 保存当前帧到模板，然后立即提交
+        // (8) 保存当前帧到模板，然后提交到 FILLED 队列供显示定时器取用
         ppCopy(buf, template_buf_.get());
         pool->submitFilled(buf);
     }
@@ -1161,11 +1169,7 @@ void SharedDisplayContext::onDisplayTick() {
     if (!pool) return;
 
     Buffer* buf = pool->acquireFilled(false, 0);
-    if (!buf) {
-        LOG4CPLUS_WARN(logger_,
-            "Display: no filled buffer available, render pipeline may be stalled");
-        return;
-    }
+    if (!buf) return;
 
     struct tpsfb_dma_info dma_info;
     dma_info.ovl_idx = 0;

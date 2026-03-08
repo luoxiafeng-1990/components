@@ -165,6 +165,9 @@ private:
     // === 渲染状态 ===
     Buffer* render_buf_;
 
+    // === 显示状态（当前正被显示控制器扫描的帧，延后到下一 tick 释放）===
+    Buffer* displayed_buf_ = nullptr;
+
     // === 模板帧（专用 TACO 内存，用于跨帧继承）===
     std::unique_ptr<Buffer> template_buf_;
     uint32_t template_blk_id_ = 0;
