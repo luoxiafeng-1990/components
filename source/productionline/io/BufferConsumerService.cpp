@@ -590,6 +590,7 @@ ConsumeResult BufferConsumerService::startMultiWorkerCompare(
             // 轮询每个 worker 的 BufferPool
             for (auto& ctx : worker_contexts) {
                 Buffer* buffer = ctx.pool->acquireFilled(true, timeout_ms);
+                std::cout << "hello,world" << std::endl;
                 if (buffer) {
                     // 首帧初始化
                     if (ctx.frame_count == 0) {

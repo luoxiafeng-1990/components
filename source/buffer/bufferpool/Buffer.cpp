@@ -180,14 +180,11 @@ void Buffer::freeBuffer() {
     // 若先调用 av_frame_unref，GPU 内存立即归还硬件，Mat 的 data 指针随即失效，
     // 之后再 delete mat_ 时 Mat 析构函数访问无效地址，导致 libGAL SIGSEGV。
     // 因此必须先 delete Mat（趁 AVFrame 数据仍有效），再 unref AVFrame。
-    std::cout << "hello,world3" << std::endl;
     if (mat_) {
         cv::imwrite("output.jpg",*mat_);
         delete mat_;
         mat_ = nullptr;
     }
-
-    std::cout << "hello,world3" << std::endl;
 
     // 2. 清空 AVFrame 的引用计数（清空数据，但不释放结构体）
     // av_frame_unref() 会：
@@ -208,7 +205,6 @@ void Buffer::freeBuffer() {
     if (avpacket_) {
         av_packet_unref(avpacket_);
     }
-    std::cout << "hello,world3" << std::endl;
 
     // 3. 重置虚拟地址（因为 AVFrame 的数据已被清空）
     // virt_addr_ 之前指向 frame->data[0]，现在 frame->data[0] 已被清空，所以重置为 nullptr

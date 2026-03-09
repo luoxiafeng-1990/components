@@ -242,9 +242,7 @@ void BufferPool::releaseFilled(Buffer* buffer) {
         
         // ⭐ v2.19新增：清理 buffer 的引用计数和元数据，确保回到 free 队列时是"干净"的
         // 这解决了 AVFrame 数据在 fillBuffer() 后被清空的问题
-        std::cout << "hello,world2" << std::endl;
         buffer->freeBuffer();
-        std::cout << "hello,world2" << std::endl;
     }
     
     // 通知生产者（锁外通知）

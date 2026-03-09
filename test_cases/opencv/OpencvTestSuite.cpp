@@ -1,11 +1,3 @@
-/**
- * @file OpencvTestSuite.cpp
- * @brief OpencvTestSuite 实现
- *
- * 参考 VdecTestSuite 重构，使用 WorkerConfigFactory::createHardwareCv /
- * createSoftwareCv 生成 WorkerType::OPENCV 的 WorkerConfig。
- */
-
 #include "OpencvTestSuite.hpp"
 #include "../common/WorkerConfigFactory.hpp"
 #include "productionline/io/BufferConsumerService.hpp"
@@ -136,8 +128,14 @@ int OpencvTestSuite::run(int argc, char* argv[]) {
         hw_config.consumer_type.performance.target_fps = params.fps;
         hw_config.data_source.max_frames = config.data_source.max_frames;
 
-        auto sw_config = common::WorkerConfigFactory::createSoftwareCv(
-            config.data_source.path, params.width, params.height);
+        //auto sw_config = common::WorkerConfigFactory::createSoftwareCv(
+        //    config.data_source.path, params.width, params.height);
+        //sw_config.consumer_type.performance.target_fps = params.fps;
+        //sw_config.data_source.max_frames = config.data_source.max_frames;
+
+        auto sw_config = common::WorkerConfigFactory::createHardwareCv(
+            config.data_source.path, params.codec, params.width, params.height);
+        sw_config.consumer_type = config.consumer_type;
         sw_config.consumer_type.performance.target_fps = params.fps;
         sw_config.data_source.max_frames = config.data_source.max_frames;
 
@@ -403,8 +401,7 @@ int OpencvTestSuite::runPredefinedTest(const std::string& test_name, const std::
         config = common::WorkerConfigFactory::createSoftwareCv(
             path, params.width, params.height);
     }
-    config = common::WorkerConfigFactory::createSoftwareCv(
-            path, params.width, params.height);
+    
     config.consumer_type.performance.target_fps = params.fps;
 
     auto result = runSingle(config, consumer::CONSUME_COUNT, test_name);
