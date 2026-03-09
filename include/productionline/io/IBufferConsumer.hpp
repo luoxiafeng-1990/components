@@ -15,6 +15,7 @@
  * - SaveRawConsumer: 保存原始 YUV/RGB
  * - SaveEncodedConsumer: 保存编码流
  * - MultiConsumer: 多策略组合（消费类型叠加）
+ * - NpuInferenceConsumer: NPU 推理输出
  * 
  * 注：PSNR/SSIM 比较功能已迁移至 WorkerSyncCoordinator::createDefaultCompareCallback
  */
@@ -42,6 +43,7 @@ enum ConsumeTypeFlags : uint32_t {
     CONSUME_SAVE_RAW     = 1 << 2,    ///< 保存原始 YUV/RGB（0x04）
     CONSUME_SAVE_ENCODED = 1 << 3,    ///< 保存编码流（0x08）
     CONSUME_CHANNEL_COMPARE = 1 << 4, ///< ⭐ v2.27：通道比较（0x10）
+    CONSUME_NPU_INFERENCE   = 1 << 5, ///< ⭐ v2.28：NPU 推理（0x20）
 };
 
 /**

@@ -757,7 +757,6 @@ void SharedDisplayContext::ppResize(
         return;
     }
 
-    int bytes_per_pixel = bits_per_pixel_ / 8;
     int out_format = TA_AV_PIX_FMT_NONE;
     if (bits_per_pixel_ == 32) {
         out_format = TA_AV_PIX_FMT_ARGB;
@@ -982,35 +981,122 @@ void SharedDisplayContext::ppCopy(Buffer* src, Buffer* dst) {
 void SharedDisplayContext::copyTemplateRegion(Buffer* dst, const ChannelLayout& layout) {
     if (!template_buf_ || !dst) return;
 
-    uint8_t* src_data = static_cast<uint8_t*>(template_buf_->getVirtualAddress());
-    uint8_t* dst_data = static_cast<uint8_t*>(dst->getVirtualAddress());
-    if (!src_data || !dst_data) return;
-
-    int x = layout.x, y = layout.y, w = layout.w, h = layout.h;
-
-    if (bits_per_pixel_ <= 12) {
-        // NV12: Y plane
-        for (int row = y; row < y + h; row++) {
-            memcpy(dst_data + row * screen_width_ + x,
-                   src_data + row * screen_width_ + x,
-                   w);
-        }
-        // NV12: UV plane（隔行存储，高度减半）
-        int uv_offset = screen_width_ * screen_height_;
-        for (int row = y / 2; row < (y + h) / 2; row++) {
-            memcpy(dst_data + uv_offset + row * screen_width_ + x,
-                   src_data + uv_offset + row * screen_width_ + x,
-                   w);
-        }
+    int out_format = TA_AV_PIX_FMT_NONE;
+    if (bits_per_pixel_ == 32) {
+        out_format = TA_AV_PIX_FMT_ARGB;
+    } else if (bits_per_pixel_ == 24) {
+        out_format = TA_AV_PIX_FMT_RGB24;
     } else {
-        int bytes_per_pixel = bits_per_pixel_ / 8;
-        int stride = screen_width_ * bytes_per_pixel;
-        for (int row = y; row < y + h; row++) {
-            memcpy(dst_data + row * stride + x * bytes_per_pixel,
-                   src_data + row * stride + x * bytes_per_pixel,
-                   w * bytes_per_pixel);
-        }
+        out_format = TA_AV_PIX_FMT_NV12;
     }
+
+    // 构建输入 ta_avframe_t（template_buf_ 区域作为源）
+    char src_blk_str[16];
+    snprintf(src_blk_str, sizeof(src_blk_str), "%u", template_blk_id_);
+    TA_AVDictionaryEntry src_entry;
+    src_entry.key   = const_cast<char*>("pool_blk_id");
+    src_entry.value = src_blk_str;
+    TA_AVDictionary src_dict;
+    src_dict.count = 1;
+    src_dict.elems = &src_entry;
+
+    ta_avframe_t in_avframe;
+    memset(&in_avframe, 0, sizeof(in_avframe));
+    in_avframe.width    = layout.w;
+    in_avframe.height   = layout.h;
+    in_avframe.format   = out_format;
+    in_avframe.metadata = &src_dict;
+
+    uint8_t* src_base = static_cast<uint8_t*>(template_buf_->getVirtualAddress());
+    if (!src_base) return;
+
+    if (out_format == TA_AV_PIX_FMT_NV12) {
+        in_avframe.data[0]     = src_base + layout.y * screen_width_ + layout.x;
+        in_avframe.linesize[0] = screen_width_;
+        in_avframe.data[1]     = src_base + screen_width_ * screen_height_
+                                 + (layout.y / 2) * screen_width_ + layout.x;
+        in_avframe.linesize[1] = screen_width_;
+    } else {
+        int bpp = bits_per_pixel_ / 8;
+        in_avframe.data[0]     = src_base + (layout.y * screen_width_ + layout.x) * bpp;
+        in_avframe.linesize[0] = screen_width_ * bpp;
+    }
+
+    // 构建输出 ta_avframe_t（dst buffer 的同一区域）
+    char dst_blk_str[16];
+    snprintf(dst_blk_str, sizeof(dst_blk_str), "%u", dst->id());
+    TA_AVDictionaryEntry dst_entry;
+    dst_entry.key   = const_cast<char*>("pool_blk_id");
+    dst_entry.value = dst_blk_str;
+    TA_AVDictionary dst_dict;
+    dst_dict.count = 1;
+    dst_dict.elems = &dst_entry;
+
+    ta_avframe_t out_avframe;
+    memset(&out_avframe, 0, sizeof(out_avframe));
+    out_avframe.width    = screen_width_;
+    out_avframe.height   = screen_height_;
+    out_avframe.format   = out_format;
+    out_avframe.metadata = &dst_dict;
+    out_avframe.data[0]  = static_cast<uint8_t*>(dst->getVirtualAddress());
+
+    ta_cv_resize_t resize_params = {};
+    resize_params.in_width   = layout.w;
+    resize_params.in_height  = layout.h;
+    resize_params.out_width  = layout.w;
+    resize_params.out_height = layout.h;
+    resize_params.start_x    = 0;
+    resize_params.start_y    = 0;
+
+    ta_cv_resize_image_t resize_attr = {};
+    resize_attr.resize_img_attr = &resize_params;
+    resize_attr.interpolation   = 1;
+
+    if (out_format == TA_AV_PIX_FMT_NV12) {
+        resize_attr.y_offset = layout.y * screen_width_ + layout.x;
+        resize_attr.u_offset = screen_width_ * (screen_height_ - layout.y)
+                             + (screen_width_ / 2) * layout.y;
+        resize_attr.y_stride = screen_width_;
+        resize_attr.u_stride = screen_width_;
+    } else if (out_format == TA_AV_PIX_FMT_RGB24) {
+        resize_attr.y_offset = (layout.y * screen_width_ + layout.x) * 3;
+        resize_attr.u_offset = 0;
+        resize_attr.y_stride = screen_width_ * 3;
+        resize_attr.u_stride = screen_width_ * 3;
+    } else {
+        resize_attr.y_offset = (layout.y * screen_width_ + layout.x) * 4;
+        resize_attr.u_offset = 0;
+        resize_attr.y_stride = screen_width_ * 4;
+        resize_attr.u_stride = screen_width_ * 4;
+    }
+
+    ta_image_t image_in = {}, image_out = {};
+    tacv_status_t ret = ta_cv_image_create(0, 0, (ta_image_format_ext_t)0,
+        (ta_image_data_format_ext_t)0, &image_in, &in_avframe);
+    if (ret != 0) {
+        LOG4CPLUS_WARN_FMT(logger_,
+            "copyTemplateRegion: ta_cv_image_create(input) failed: %d", ret);
+        return;
+    }
+
+    ret = ta_cv_image_create(0, 0, (ta_image_format_ext_t)0,
+        (ta_image_data_format_ext_t)0, &image_out, &out_avframe);
+    if (ret != 0) {
+        LOG4CPLUS_WARN_FMT(logger_,
+            "copyTemplateRegion: ta_cv_image_create(output) failed: %d", ret);
+        ta_cv_image_destroy(&image_in);
+        return;
+    }
+
+    ret = ta_cv_image_resize(&resize_attr, image_in, image_out);
+    if (ret != 0) {
+        LOG4CPLUS_WARN_FMT(logger_,
+            "copyTemplateRegion: ta_cv_image_resize failed: ret=%d (ch region %d,%d %dx%d)",
+            ret, layout.x, layout.y, layout.w, layout.h);
+    }
+
+    ta_cv_image_destroy(&image_in);
+    ta_cv_image_destroy(&image_out);
 }
 
 // ============================================================
@@ -1200,5 +1286,8 @@ void SharedDisplayContext::onDisplayTick() {
     int zero = 0;
     ioctl(fd_, FBIO_WAITFORVSYNC, &zero);
 
-    pool->releaseFilled(buf);
+    if (displayed_buf_) {
+        pool->releaseFilled(displayed_buf_);
+    }
+    displayed_buf_ = buf;
 }

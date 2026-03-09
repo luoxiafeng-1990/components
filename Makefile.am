@@ -41,7 +41,8 @@ libcomponents_la_SOURCES = \
     source/productionline/io/BufferWriter.cpp \
     source/productionline/io/BufferComparator.cpp \
     source/productionline/io/BufferConsumerStrategies.cpp \
-    source/productionline/io/BufferConsumerService.cpp
+    source/productionline/io/BufferConsumerService.cpp \
+    source/inference/NpuInferenceConsumer.cpp
 
 # ========== 测试程序 ==========
 # 注意：display_test 已废弃（原 test_cases/dec/ 目录已重命名为 old_case/）
@@ -53,7 +54,7 @@ libcomponents_la_SOURCES = \
 # 1. Buildroot 会自动编译 log4cplus（已在 components.mk 中声明依赖）
 # 2. log4cplus 库位置：$(STAGING_DIR)/usr/lib/liblog4cplus-2.0.so.3.4.7
 # 3. 运行时需要目标系统有 log4cplus 动态库（Buildroot 会自动安装到 TARGET_DIR）
-COMMON_LIBS = -lpthread -luring -lavformat -lavcodec -lavutil -lswscale -ltacosys -ltacovo -ltacocv -llog4cplus -lfreetype
+COMMON_LIBS = -lpthread -luring -lavformat -lavcodec -lavutil -lswscale -ltacosys -ltacovo -ltacocv -llog4cplus -lfreetype -lta_runtime -lVIPhal -lNBGlinker -lopencv_imgproc -lopencv_core
 
 # display_test 主程序（已废弃，原 test_cases/dec/ 目录已重命名为 old_case/）
 # display_test_SOURCES = test_cases/dec/test.cpp

@@ -8,6 +8,7 @@
 #include "productionline/WorkerSyncCoordinator.hpp"
 #include "common/GlobalThreadPool.hpp"
 #include "buffer/bufferpool/BufferPoolRegistry.hpp"
+#include "inference/NpuInferenceConsumer.hpp"
 
 #include <future>
 #include <sstream>
@@ -374,6 +375,9 @@ static uint32_t getConsumeFlagsFromConfig(const WorkerConfig::ConsumerTypeConfig
     if (config.save_encoded.enable) {
         flags |= CONSUME_SAVE_ENCODED;
     }
+    if (config.npu_inference.enable) {
+        flags |= CONSUME_NPU_INFERENCE;
+    }
     // 注：compare 是执行模式（ExecuteMode），不是消费类型
     if (config.count.enable) {
         flags |= CONSUME_COUNT;
@@ -424,7 +428,20 @@ static std::shared_ptr<IBufferConsumer> createConsumerForWorker(
             time_base));
     }
     
-    // 4. 统计消费者（如果没有其他消费者或显式启用）
+    // 4. NPU 推理消费者
+    if (flags & CONSUME_NPU_INFERENCE) {
+        NpuInferenceConfig npu_config;
+        npu_config.model_path       = config.npu_inference.model_path;
+        npu_config.conf_threshold   = config.npu_inference.conf_threshold;
+        npu_config.nms_threshold    = config.npu_inference.nms_threshold;
+        npu_config.npu_core_index   = config.npu_inference.npu_core_index;
+        npu_config.input_mode       = config.npu_inference.use_physical_addr
+            ? NpuInferenceConfig::InputMode::PHYSICAL_ADDR
+            : NpuInferenceConfig::InputMode::VIRTUAL_ADDR;
+        consumers.push_back(std::make_shared<NpuInferenceConsumer>(npu_config));
+    }
+    
+    // 5. 统计消费者（如果没有其他消费者或显式启用）
     if (consumers.empty() || (flags & CONSUME_COUNT)) {
         consumers.push_back(std::make_shared<CountConsumer>());
     }
@@ -725,6 +742,7 @@ std::shared_ptr<IBufferConsumer> BufferConsumerService::createConsumerFromFlags(
     if (flags & CONSUME_DISPLAY) type_count++;
     if (flags & CONSUME_SAVE_RAW) type_count++;
     if (flags & CONSUME_SAVE_ENCODED) type_count++;
+    if (flags & CONSUME_NPU_INFERENCE) type_count++;
     
     // 如果没有指定任何类型，默认使用 COUNT
     if (type_count == 0) {
@@ -752,6 +770,17 @@ std::shared_ptr<IBufferConsumer> BufferConsumerService::createConsumerFromFlags(
                 config.data_source.time_base
             );
         }
+        if (flags & CONSUME_NPU_INFERENCE) {
+            NpuInferenceConfig npu_cfg;
+            npu_cfg.model_path     = config.consumer_type.npu_inference.model_path;
+            npu_cfg.conf_threshold = config.consumer_type.npu_inference.conf_threshold;
+            npu_cfg.nms_threshold  = config.consumer_type.npu_inference.nms_threshold;
+            npu_cfg.npu_core_index = config.consumer_type.npu_inference.npu_core_index;
+            npu_cfg.input_mode     = config.consumer_type.npu_inference.use_physical_addr
+                ? NpuInferenceConfig::InputMode::PHYSICAL_ADDR
+                : NpuInferenceConfig::InputMode::VIRTUAL_ADDR;
+            return std::make_shared<NpuInferenceConsumer>(npu_cfg);
+        }
     }
     
     // 多种类型叠加，使用 MultiConsumer
@@ -775,6 +804,17 @@ std::shared_ptr<IBufferConsumer> BufferConsumerService::createConsumerFromFlags(
             config.data_source.codec_params,
             config.data_source.time_base
         ));
+    }
+    if (flags & CONSUME_NPU_INFERENCE) {
+        NpuInferenceConfig npu_cfg;
+        npu_cfg.model_path     = config.consumer_type.npu_inference.model_path;
+        npu_cfg.conf_threshold = config.consumer_type.npu_inference.conf_threshold;
+        npu_cfg.nms_threshold  = config.consumer_type.npu_inference.nms_threshold;
+        npu_cfg.npu_core_index = config.consumer_type.npu_inference.npu_core_index;
+        npu_cfg.input_mode     = config.consumer_type.npu_inference.use_physical_addr
+            ? NpuInferenceConfig::InputMode::PHYSICAL_ADDR
+            : NpuInferenceConfig::InputMode::VIRTUAL_ADDR;
+        multi->addStrategy(std::make_shared<NpuInferenceConsumer>(npu_cfg));
     }
     
     return multi;

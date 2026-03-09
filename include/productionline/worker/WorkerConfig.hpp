@@ -530,6 +530,20 @@ struct WorkerConfig {
         } save_encoded;
         
         // ========================================
+        // NPU 推理消费类型（CONSUME_NPU_INFERENCE）⭐ v2.28 新增
+        // 将解码帧送入 NPU 进行模型推理（如目标检测）
+        // ========================================
+        struct NpuInferenceType {
+            bool enable = false;                  ///< 是否启用 NPU 推理
+            std::string model_path;               ///< .nb 模型文件路径
+            float conf_threshold  = 0.25f;        ///< 置信度阈值
+            float nms_threshold   = 0.45f;        ///< NMS IoU 阈值
+            int   npu_core_index  = 0;            ///< NPU 核心索引
+            bool  use_physical_addr = false;      ///< 是否使用物理地址输入（零拷贝，需模型支持 NV12）
+            NpuInferenceType() = default;
+        } npu_inference;
+        
+        // ========================================
         // 比较配置（用于 COMPARE 执行模式）
         // 注：compare 是执行模式，不是消费类型
         // ========================================
