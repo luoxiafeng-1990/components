@@ -128,16 +128,18 @@ int OpencvTestSuite::run(int argc, char* argv[]) {
         hw_config.consumer_type.performance.target_fps = params.fps;
         hw_config.data_source.max_frames = config.data_source.max_frames;
 
-        //auto sw_config = common::WorkerConfigFactory::createSoftwareCv(
-        //    config.data_source.path, params.width, params.height);
-        //sw_config.consumer_type.performance.target_fps = params.fps;
-        //sw_config.data_source.max_frames = config.data_source.max_frames;
-
+        auto sw_config = common::WorkerConfigFactory::createSoftwareCv(
+            config.data_source.path, params.width, params.height);
+        sw_config.consumer_type.performance.target_fps = params.fps;
+        sw_config.data_source.max_frames = config.data_source.max_frames;
+        
+        /*
         auto sw_config = common::WorkerConfigFactory::createHardwareCv(
             config.data_source.path, params.codec, params.width, params.height);
         sw_config.consumer_type = config.consumer_type;
         sw_config.consumer_type.performance.target_fps = params.fps;
         sw_config.data_source.max_frames = config.data_source.max_frames;
+        */
 
         uint32_t compare_flags = 0;
         if (config.consumer_type.display.enable) {
