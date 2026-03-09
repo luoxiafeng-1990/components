@@ -29,6 +29,13 @@
 #include <vector>
 #include <map>
 
+extern "C" {
+#include <libavutil/frame.h>
+}
+
+#include "opencv2/core.hpp"
+#include "opencv2/core/tacv.hpp"
+
 namespace consumer {
 
 // ============================================================
@@ -268,6 +275,56 @@ private:
     double ssim_sum_ = 0.0;
     bool passed_ = true;
     bool initialized_ = false;
+};
+
+// ============================================================
+// OpencvConsumer - Buffer→Mat转换并计算PSNR/SSIM
+// ============================================================
+
+/**
+ * @brief OpenCV 消费者
+ *
+ * 将 Buffer 转换为 cv::Mat（BGR 格式），然后：
+ * - 单 Buffer：仅转换并统计
+ * - 多 Buffer（≥2）：调用 BufferComparator 计算 PSNR/SSIM
+ *
+ * 使用场景：
+ * - SINGLE 模式：验证解码结果可正常转为 Mat
+ * - COMPARE 模式（通过 callback_chain）：比较两路解码器输出的质量差异
+ */
+class OpencvConsumer : public IBufferConsumer {
+public:
+    using OpencvType = WorkerConfig::ConsumerTypeConfig::OpencvType;
+
+    explicit OpencvConsumer(const OpencvType& config);
+    ~OpencvConsumer() override;
+
+    bool initialize(const std::vector<Buffer*>& first_buffers) override;
+    bool consume(const std::vector<Buffer*>& buffers, int frame_index) override;
+    void finalize() override;
+    std::string getStats() const override;
+
+    // ---- 结果查询 ----
+    int  getFrameCount()    const { return frames_processed_; }
+    int  getCompareCount()  const { return frames_compared_; }
+    double getAveragePsnr() const;
+    double getAverageSsim() const;
+    bool isPassed()         const;
+
+private:
+    /// 将单个 Buffer 转换为 BGR cv::Mat
+    /// 优先顺序：getMat() → getAVFrame()+swscale → 原始 YUV 元数据
+    cv::Mat bufferToMat(Buffer* buf) const;
+
+    OpencvType config_;
+    std::unique_ptr<productionline::io::BufferComparator> comparator_;
+
+    int    frames_processed_ = 0;
+    int    frames_compared_  = 0;
+    double psnr_sum_         = 0.0;
+    double ssim_sum_         = 0.0;
+    bool   passed_           = true;
+    bool   initialized_      = false;
 };
 
 // ============================================================

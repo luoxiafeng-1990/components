@@ -53,7 +53,6 @@ enum class WorkerType {
     AUTO,                   // 自动检测（默认）
     FFMPEG_DECODE,          // FFmpeg 解码 Worker（统一处理文件和 RTSP 流）
     FFMPEG_PACKET_RECORDER,  // FFmpeg Packet 录制器（支持 RTSP/文件/HTTP 等多种数据源）
-    OPENCV,
     FFMPEG_ENCODE           // ⭐ v2.29 新增：FFmpeg 编码 Worker（H.264/H.265/JPEG 编码）
 };
 
@@ -602,7 +601,21 @@ struct WorkerConfig {
             bool enable = false;          ///< 是否启用统计
             CountType() = default;
         } count;
-        
+
+        // ========================================
+        // OpenCV 消费类型（CONSUME_OPENCV）
+        // Buffer → cv::Mat 转换后使用 BufferComparator 计算 PSNR/SSIM
+        // ========================================
+        struct OpencvType {
+            bool enable = false;          ///< 是否启用 OpenCV 消费
+            bool enable_psnr = true;      ///< 是否计算 PSNR
+            bool enable_ssim = false;     ///< 是否计算 SSIM（计算量较大）
+            double min_psnr = 38.0;       ///< PSNR 通过阈值（dB，>= 此值为通过）
+            double min_ssim = 0.95;       ///< SSIM 通过阈值（>= 此值为通过）
+            bool verbose = false;         ///< 是否输出每帧详细日志
+            OpencvType() = default;
+        } opencv;
+
         ConsumerTypeConfig() = default;
         ConsumerTypeConfig(const ConsumerTypeConfig&) = default;
         ConsumerTypeConfig& operator=(const ConsumerTypeConfig&) = default;

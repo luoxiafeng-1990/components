@@ -240,7 +240,7 @@ public:
                     .useSoftware()
                     .build()
             )
-            .setWorkerType(WorkerType::OPENCV)
+            .setWorkerType(WorkerType::FFMPEG_DECODE)
             .build();
     }
     
@@ -284,7 +284,7 @@ public:
                     .useTaco("h264", taco)
                     .build()
             )
-            .setWorkerType(WorkerType::OPENCV)
+            .setWorkerType(WorkerType::FFMPEG_DECODE)
             .build();
         } else if (codec == "h265" || codec == "hevc") {
             return WorkerConfigBuilder()
@@ -305,7 +305,7 @@ public:
                     .useTaco("hevc", taco)
                     .build()
             )
-            .setWorkerType(WorkerType::OPENCV)
+            .setWorkerType(WorkerType::FFMPEG_DECODE)
             .build();
         } else if (codec == "mjpeg" || codec == "jpeg") {
             return WorkerConfigBuilder()
@@ -326,7 +326,7 @@ public:
                     .useTaco("mjpeg", taco)
                     .build()
             )
-            .setWorkerType(WorkerType::OPENCV)
+            .setWorkerType(WorkerType::FFMPEG_DECODE)
             .build();
         }
     }

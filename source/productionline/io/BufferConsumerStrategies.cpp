@@ -629,4 +629,161 @@ std::string MultiConsumer::getStats() const {
     return oss.str();
 }
 
+// ============================================================
+// OpencvConsumer 实现
+// ============================================================
+
+OpencvConsumer::OpencvConsumer(const OpencvType& config)
+    : config_(config)
+    , comparator_(nullptr)
+    , frames_processed_(0)
+    , frames_compared_(0)
+    , psnr_sum_(0.0)
+    , ssim_sum_(0.0)
+    , passed_(true)
+    , initialized_(false)
+{
+}
+
+OpencvConsumer::~OpencvConsumer() {
+    finalize();
+}
+
+bool OpencvConsumer::initialize(const std::vector<Buffer*>& first_buffers) {
+    if (initialized_) return true;
+    (void)first_buffers;
+
+    // 构建 BufferComparator 配置
+    productionline::io::CompareConfig cmp_cfg;
+    cmp_cfg.enable_psnr = config_.enable_psnr;
+    cmp_cfg.enable_ssim = config_.enable_ssim;
+    cmp_cfg.min_psnr    = config_.min_psnr;
+    cmp_cfg.min_ssim    = config_.min_ssim;
+    cmp_cfg.verbose     = config_.verbose;
+
+    comparator_ = std::make_unique<productionline::io::BufferComparator>();
+    if (!comparator_->open(cmp_cfg)) {
+        LOG4CPLUS_ERROR(log4cplus::Logger::getRoot(),
+                        "OpencvConsumer: Failed to open BufferComparator");
+        return false;
+    }
+
+    initialized_ = true;
+    LOG4CPLUS_INFO(log4cplus::Logger::getRoot(),
+                   "OpencvConsumer: Initialized"
+                   " (psnr=" << (config_.enable_psnr ? "ON" : "OFF")
+                   << ", ssim=" << (config_.enable_ssim ? "ON" : "OFF") << ")");
+    return true;
+}
+
+cv::Mat OpencvConsumer::bufferToMat(Buffer* buf) const {
+    if (!buf) return cv::Mat();
+
+    // 路径 1：Buffer 已关联 cv::Mat（已由上层转换好）
+    if (buf->getMat() && !buf->getMat()->empty()) {
+        return buf->getMat()->clone();
+    }
+
+    // 路径 2：cv::Mat(AVFrame*) 零拷贝接口（来自 opencv2/core/tacv.hpp）
+    // 注意：Mat 与 AVFrame 共享底层内存，调用方必须在 av_frame_unref 之前销毁 Mat
+    AVFrame* frame = buf->getAVFrame();
+    if (frame && frame->data[0] && frame->width > 0 && frame->height > 0) {
+        return cv::Mat(frame);
+    }
+
+    LOG4CPLUS_WARN(log4cplus::Logger::getRoot(),
+                   "OpencvConsumer::bufferToMat: no usable data source in Buffer");
+    return cv::Mat();
+}
+
+bool OpencvConsumer::consume(const std::vector<Buffer*>& buffers, int frame_index) {
+    if (!initialized_) {
+        if (!initialize(buffers)) return false;
+    }
+
+    frames_processed_++;
+
+    if (buffers.size() >= 2 && buffers[0] && buffers[1]) {
+        // ── 比较模式：转换两个 Buffer 为 Mat，再交由 BufferComparator 比较 ──
+        cv::Mat mat0 = bufferToMat(buffers[0]);
+        cv::Mat mat1 = bufferToMat(buffers[1]);
+
+        // 将 Mat 临时挂载到 Buffer，以便 BufferComparator 走 is_mat 路径
+        buffers[0]->setMat(&mat0);
+        buffers[1]->setMat(&mat1);
+
+        auto result = comparator_->compare(buffers[0], buffers[1]);
+
+        // 清除临时挂载
+        buffers[0]->setMat(nullptr);
+        buffers[1]->setMat(nullptr);
+
+        frames_compared_++;
+        psnr_sum_ += result.psnr_avg;
+        ssim_sum_ += result.ssim_avg;
+
+        if (!result.passed) {
+            passed_ = false;
+        }
+
+        if (config_.verbose) {
+            LOG4CPLUS_INFO_FMT(log4cplus::Logger::getRoot(),
+                "OpencvConsumer [frame %d] PSNR=%.2f dB  SSIM=%.4f  %s",
+                frame_index, result.psnr_avg, result.ssim_avg,
+                result.passed ? "PASS" : "FAIL");
+        }
+    } else if (!buffers.empty() && buffers[0]) {
+        // ── 单 Buffer 模式：仅做 Mat 转换，确认数据可访问 ──
+        cv::Mat mat = bufferToMat(buffers[0]);
+        if (config_.verbose) {
+            LOG4CPLUS_INFO_FMT(log4cplus::Logger::getRoot(),
+                "OpencvConsumer [frame %d] Mat size=%dx%d",
+                frame_index, mat.cols, mat.rows);
+        }
+    }
+
+    return true;
+}
+
+void OpencvConsumer::finalize() {
+    if (!initialized_) return;
+
+    if (comparator_) {
+        comparator_->close();
+        comparator_->printSummary();
+    }
+
+    LOG4CPLUS_INFO_FMT(log4cplus::Logger::getRoot(),
+        "OpencvConsumer: processed=%d  compared=%d  avgPSNR=%.2f dB  avgSSIM=%.4f  %s",
+        frames_processed_, frames_compared_,
+        getAveragePsnr(), getAverageSsim(),
+        passed_ ? "PASS" : "FAIL");
+
+    initialized_ = false;
+}
+
+std::string OpencvConsumer::getStats() const {
+    std::ostringstream oss;
+    oss << "OpencvConsumer: processed=" << frames_processed_
+        << " compared=" << frames_compared_
+        << std::fixed << std::setprecision(2)
+        << " avgPSNR=" << getAveragePsnr() << "dB"
+        << std::setprecision(4)
+        << " avgSSIM=" << getAverageSsim()
+        << " " << (passed_ ? "PASS" : "FAIL");
+    return oss.str();
+}
+
+double OpencvConsumer::getAveragePsnr() const {
+    return frames_compared_ > 0 ? psnr_sum_ / frames_compared_ : 0.0;
+}
+
+double OpencvConsumer::getAverageSsim() const {
+    return frames_compared_ > 0 ? ssim_sum_ / frames_compared_ : 0.0;
+}
+
+bool OpencvConsumer::isPassed() const {
+    return passed_;
+}
+
 } // namespace consumer

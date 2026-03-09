@@ -2,7 +2,6 @@
 #include "common/Logger.hpp"
 #include "productionline/worker/FFmpegDecodeWorker.hpp"
 #include "productionline/worker/FfmpegPacketRecorderWorker.hpp"
-#include "productionline/worker/OpencvWorker.hpp"
 #include "productionline/worker/FFmpegEncodeWorker.hpp"  // ⭐ v2.29 新增
 #include <stdlib.h>
 #include <string.h>
@@ -49,7 +48,6 @@ const char* BufferFillingWorkerFactory::typeToString(WorkerType type) {
         case WorkerType::AUTO:                  return "AUTO";
         case WorkerType::FFMPEG_DECODE:         return "FFMPEG_DECODE";
         case WorkerType::FFMPEG_PACKET_RECORDER: return "FFMPEG_PACKET_RECORDER";
-        case WorkerType::OPENCV:                return "OPENCV";
         case WorkerType::FFMPEG_ENCODE:         return "FFMPEG_ENCODE";  // ⭐ v2.29 新增
         default:                                return "UNKNOWN";
     }
@@ -69,16 +67,13 @@ std::unique_ptr<WorkerBase> BufferFillingWorkerFactory::createByType(WorkerType 
     switch (type) {
         case WorkerType::FFMPEG_DECODE:
             return std::make_unique<FFmpegDecodeWorker>(config);
-            
+
         case WorkerType::FFMPEG_PACKET_RECORDER:
             return std::make_unique<FfmpegPacketRecorderWorker>(config);
-        
-        case WorkerType::OPENCV:
-            return std::make_unique<OpencvWorker>(config);
-            
+
         case WorkerType::FFMPEG_ENCODE:  // ⭐ v2.29 新增
             return std::make_unique<FFmpegEncodeWorker>(config);
-            
+
         case WorkerType::AUTO:
         default:
             return autoDetect(config);

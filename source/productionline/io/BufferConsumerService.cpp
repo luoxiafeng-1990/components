@@ -378,7 +378,10 @@ static uint32_t getConsumeFlagsFromConfig(const WorkerConfig::ConsumerTypeConfig
     if (config.count.enable) {
         flags |= CONSUME_COUNT;
     }
-    
+    if (config.opencv.enable) {
+        flags |= CONSUME_OPENCV;
+    }
+
     // 如果没有启用任何消费类型，默认启用 COUNT
     if (flags == 0) {
         flags = CONSUME_COUNT;
@@ -423,8 +426,13 @@ static std::shared_ptr<IBufferConsumer> createConsumerForWorker(
             codec_params,
             time_base));
     }
-    
-    // 4. 统计消费者（如果没有其他消费者或显式启用）
+
+    // 4. OpenCV 消费者（Buffer→Mat 转换 + PSNR/SSIM）
+    if (flags & CONSUME_OPENCV) {
+        consumers.push_back(std::make_shared<OpencvConsumer>(config.opencv));
+    }
+
+    // 5. 统计消费者（如果没有其他消费者或显式启用）
     if (consumers.empty() || (flags & CONSUME_COUNT)) {
         consumers.push_back(std::make_shared<CountConsumer>());
     }
@@ -726,12 +734,13 @@ std::shared_ptr<IBufferConsumer> BufferConsumerService::createConsumerFromFlags(
     if (flags & CONSUME_DISPLAY) type_count++;
     if (flags & CONSUME_SAVE_RAW) type_count++;
     if (flags & CONSUME_SAVE_ENCODED) type_count++;
-    
+    if (flags & CONSUME_OPENCV) type_count++;
+
     // 如果没有指定任何类型，默认使用 COUNT
     if (type_count == 0) {
         return std::make_shared<CountConsumer>();
     }
-    
+
     // 如果只有一种类型，直接创建
     if (type_count == 1) {
         if (flags & CONSUME_COUNT) {
@@ -753,14 +762,17 @@ std::shared_ptr<IBufferConsumer> BufferConsumerService::createConsumerFromFlags(
                 config.data_source.time_base
             );
         }
+        if (flags & CONSUME_OPENCV) {
+            return std::make_shared<OpencvConsumer>(config.consumer_type.opencv);
+        }
     }
-    
+
     // 多种类型叠加，使用 MultiConsumer
     auto multi = std::make_shared<MultiConsumer>();
-    
+
     // 注意：COUNT 通常与其他类型组合使用，所以总是添加
     multi->addStrategy(std::make_shared<CountConsumer>());
-    
+
     if (flags & CONSUME_DISPLAY) {
         multi->addStrategy(std::make_shared<DisplayConsumer>(config.consumer_type.display));
     }
@@ -777,7 +789,10 @@ std::shared_ptr<IBufferConsumer> BufferConsumerService::createConsumerFromFlags(
             config.data_source.time_base
         ));
     }
-    
+    if (flags & CONSUME_OPENCV) {
+        multi->addStrategy(std::make_shared<OpencvConsumer>(config.consumer_type.opencv));
+    }
+
     return multi;
 }
 
