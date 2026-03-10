@@ -196,6 +196,7 @@ private:
     std::mutex round_mutex_;
     std::condition_variable round_cv_;        // 渲染线程 → 通道线程：新一轮开始
     std::condition_variable render_cv_;       // 通道线程 → 渲染线程：写入完成
+    uint64_t round_seq_ = 0;                 // 轮次计数器，每轮递增
 
     // === 线程 & 定时器 ===
     Timer timer_;

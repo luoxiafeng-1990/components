@@ -682,46 +682,54 @@ bool SharedDisplayContext::channelWrite(int channel_id, Buffer* decoded) {
         return false;
     }
 
-    // 等待渲染线程开启新一轮（written_this_round == false）
-    {
-        std::unique_lock<std::mutex> round_lock(round_mutex_);
-        round_cv_.wait(round_lock, [&]() {
-            return !ch_info->written_this_round || !running_ || !ch_info->active;
-        });
-        if (!running_ || !ch_info->active) return false;
+    // 等待渲染线程开启新一轮，然后尝试写入 render_buf_
+    // 使用轮次号 round_seq_ 判断新一轮是否开始，避免 render_buf_ 为空时忙等
+    uint64_t my_round = 0;
+    for (;;) {
+        {
+            std::unique_lock<std::mutex> round_lock(round_mutex_);
+            round_cv_.wait(round_lock, [&]() {
+                return (round_seq_ > my_round && !ch_info->written_this_round)
+                       || !running_ || !ch_info->active;
+            });
+            if (!running_ || !ch_info->active) return false;
+            my_round = round_seq_;
+        }
+
+        {
+            std::shared_lock<std::shared_mutex> lock(rw_mutex_);
+
+            if (render_buf_ == nullptr) {
+                // 本轮已结束（渲染线程已清空 render_buf_），等待下一轮
+                // 不设置 written_this_round = true，确保渲染线程仍会为此通道执行 copyTemplateRegion
+                // round_cv_.wait 会阻塞直到 round_seq_ > my_round（下一轮开始）
+                continue;
+            }
+
+            int src_width  = decoded->getImageWidth();
+            int src_height = decoded->getImageHeight();
+
+            if (src_width <= 0 || src_height <= 0 || !decoded->getAVFrame()) {
+                LOG4CPLUS_WARN_FMT(logger_,
+                    "Channel %d: invalid decoded frame (%dx%d, avframe=%p)",
+                    channel_id, src_width, src_height, (void*)decoded->getAVFrame());
+                return false;
+            }
+
+            AVFrame* avf = decoded->getAVFrame();
+            if (!avf->data[0]) {
+                LOG4CPLUS_WARN_FMT(logger_,
+                    "Channel %d: AVFrame data[0] is NULL, skipping", channel_id);
+                return false;
+            }
+
+            ppResize(decoded, render_buf_,
+                     ch_info->layout.x, ch_info->layout.y,
+                     ch_info->layout.w, ch_info->layout.h,
+                     src_width, src_height, 0, 0, nullptr);
+        }
+        break;
     }
-
-    // 写入 render_buf_（shared_lock 限定作用域，写完即释放）
-    {
-        std::shared_lock<std::shared_mutex> lock(rw_mutex_);
-
-        if (render_buf_ == nullptr) {
-            return false;
-        }
-
-        int src_width  = decoded->getImageWidth();
-        int src_height = decoded->getImageHeight();
-
-        if (src_width <= 0 || src_height <= 0 || !decoded->getAVFrame()) {
-            LOG4CPLUS_WARN_FMT(logger_,
-                "Channel %d: invalid decoded frame (%dx%d, avframe=%p)",
-                channel_id, src_width, src_height, (void*)decoded->getAVFrame());
-            return false;
-        }
-
-        AVFrame* avf = decoded->getAVFrame();
-        if (!avf->data[0]) {
-            LOG4CPLUS_WARN_FMT(logger_,
-                "Channel %d: AVFrame data[0] is NULL, skipping", channel_id);
-            return false;
-        }
-
-        ppResize(decoded, render_buf_,
-                 ch_info->layout.x, ch_info->layout.y,
-                 ch_info->layout.w, ch_info->layout.h,
-                 src_width, src_height, 0, 0, nullptr);
-    }
-    // shared_lock 已释放 — 确保渲染线程可安全获取 exclusive_lock
 
     // 标记本轮已写入，通知渲染线程
     {
@@ -1172,8 +1180,7 @@ void SharedDisplayContext::renderThreadFunc() {
         Buffer* buf = pool->acquireFree(true, 100);
         if (!buf) continue;
 
-        // (2) 从模板帧继承上一帧内容（必须在 render_buf_ 赋值之前完成，
-        //     否则通道线程的 ppResize 会与 ppCopy 竞争同一块 buffer）
+        // (2) 用 template 整帧初始化 buf，确保所有区域（含通道间隙）都有完整内容
         ppCopy(template_buf_.get(), buf);
 
         // (3) 设置 render_buf_，通道可以开始写入
@@ -1182,9 +1189,10 @@ void SharedDisplayContext::renderThreadFunc() {
             render_buf_ = buf;
         }
 
-        // (4) 重置所有通道标记，唤醒通道线程
+        // (4) 递增轮次号，重置所有通道标记，唤醒通道线程
         {
             std::lock_guard<std::mutex> round_lock(round_mutex_);
+            round_seq_++;
             for (auto& ch : channels_) {
                 if (ch.active) ch.written_this_round = false;
             }
@@ -1203,15 +1211,28 @@ void SharedDisplayContext::renderThreadFunc() {
                     }
                     return true;
                 });
+        }
 
-            // (6) 超时通道：从 template 拷贝该区域到当前 buf（保留上一帧画面）
+        if (!running_) {
+            pool->releaseFree(buf);
+            break;
+        }
+
+        // (6) 断开 render_buf_（独占锁等待所有正在执行的 ppResize 完成）
+        {
+            std::unique_lock<std::shared_mutex> lock(rw_mutex_);
+            render_buf_ = nullptr;
+        }
+
+        // (7) 检查超时通道（buf 已在步骤 2 用 template 整帧初始化，无需再做子区域拷贝）
+        {
+            std::lock_guard<std::mutex> round_lock(round_mutex_);
             for (auto& ch : channels_) {
                 if (!ch.active) continue;
                 if (!ch.written_this_round) {
-                    copyTemplateRegion(buf, ch.layout);
                     ch.consecutive_misses++;
                     LOG4CPLUS_WARN_FMT(logger_,
-                        "Channel %d: missed frame, copied from template (timeout=%dms, consecutive=%d)",
+                        "Channel %d: missed frame, kept template content (timeout=%dms, consecutive=%d)",
                         ch.channel_id, frame_timeout_ms_, ch.consecutive_misses);
                     if (ch.consecutive_misses == kMaxConsecutiveMisses) {
                         LOG4CPLUS_ERROR_FMT(logger_,
@@ -1223,17 +1244,6 @@ void SharedDisplayContext::renderThreadFunc() {
                     ch.consecutive_misses = 0;
                 }
             }
-        }
-
-        if (!running_) {
-            pool->releaseFree(buf);
-            break;
-        }
-
-        // (7) 断开 render_buf_（等待通道释放 shared_lock）
-        {
-            std::unique_lock<std::shared_mutex> lock(rw_mutex_);
-            render_buf_ = nullptr;
         }
 
         // (8) 保存当前帧到模板，然后提交到 FILLED 队列供显示定时器取用

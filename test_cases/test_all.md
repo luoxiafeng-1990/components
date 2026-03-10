@@ -4,7 +4,7 @@
 
 ## 环境说明
 
-- **远程主机**: root@192.168.56.48
+- **远程主机**: [root@192.168.56.48](mailto:root@192.168.56.48)
 - **测试程序**: ~/qa_cases
 - **测试文件目录**: /usr/data/ffmpeg/
 - **密码**: 123456
@@ -14,26 +14,28 @@
 
 ## 测试需求覆盖汇总
 
-| 测试类别 | 测试项数 | 状态 |
-|----------|---------|------|
-| H.264 解码测试（9种分辨率/帧率） | 9 | ✅ 已覆盖 |
-| H.265 解码测试（9种分辨率/帧率） | 9 | ✅ 已覆盖 |
-| MJPEG 解码测试（9种分辨率/帧率） | 9 | ✅ 已覆盖 |
-| PP0 YUV 格式测试（15种格式） | 15 | ✅ 已覆盖 |
-| PP1 RGB 格式测试（18种格式） | 18 | ✅ 已覆盖 |
-| PP1 YUV 格式测试（15种格式） | 15 | ✅ 已覆盖 |
-| 双通道 PP 测试（10种组合） | 10 | ✅ 已覆盖 |
-| 裁剪（Crop）测试（4种配置） | 4 | ✅ 已覆盖 |
-| 缩放（Scale）测试（4种配置） | 4 | ✅ 已覆盖 |
-| RTSP 流测试（H.264/H.265/MJPEG） | 9 | ✅ 已覆盖 |
-| 软件解码测试 | 2 | ✅ 已覆盖 |
-| 多 Worker/多线程测试（支持 --threads N 自定义路数） | 5+ | ✅ 已覆盖 |
-| PSNR/SSIM 质量验证测试 | 16 | ✅ 已覆盖 |
-| Record 录制测试 | 12 | ✅ 已覆盖 |
-| Writer 格式输出测试 | 22 | ✅ 已覆盖 |
-| **一致性验证测试（MD5对比）** | **3** | ⏳ 待实现 |
-| **ZYW 新增 MP4 解码 + PP 测试** | **84** | ✅ 已覆盖 |
-| **合计** | **280** | 180 项框架已支持 |
+
+| 测试类别                                 | 测试项数    | 状态         |
+| ------------------------------------ | ------- | ---------- |
+| H.264 解码测试（9种分辨率/帧率）                 | 9       | ✅ 已覆盖      |
+| H.265 解码测试（9种分辨率/帧率）                 | 9       | ✅ 已覆盖      |
+| MJPEG 解码测试（9种分辨率/帧率）                 | 9       | ✅ 已覆盖      |
+| PP0 YUV 格式测试（15种格式）                  | 15      | ✅ 已覆盖      |
+| PP1 RGB 格式测试（18种格式）                  | 18      | ✅ 已覆盖      |
+| PP1 YUV 格式测试（15种格式）                  | 15      | ✅ 已覆盖      |
+| 双通道 PP 测试（10种组合）                     | 10      | ✅ 已覆盖      |
+| 裁剪（Crop）测试（4种配置）                     | 4       | ✅ 已覆盖      |
+| 缩放（Scale）测试（4种配置）                    | 4       | ✅ 已覆盖      |
+| RTSP 流测试（H.264/H.265/MJPEG）          | 9       | ✅ 已覆盖      |
+| 软件解码测试                               | 2       | ✅ 已覆盖      |
+| 多 Worker/多线程测试（支持 --threads N 自定义路数） | 5+      | ✅ 已覆盖      |
+| PSNR/SSIM 质量验证测试                     | 16      | ✅ 已覆盖      |
+| Record 录制测试                          | 12      | ✅ 已覆盖      |
+| Writer 格式输出测试                        | 22      | ✅ 已覆盖      |
+| **一致性验证测试（MD5对比）**                   | **3**   | ⏳ 待实现      |
+| **ZYW 新增 MP4 解码 + PP 测试**            | **84**  | ✅ 已覆盖      |
+| **合计**                               | **280** | 180 项框架已支持 |
+
 
 > **注意**: 一致性验证测试（comparison 模块）需要新增代码实现，将在方案二中完成。
 
@@ -310,6 +312,7 @@ sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
 ```
 
 **并发限制说明**:
+
 - 默认线程池大小：64
 - 最大线程池大小：128
 - 当并发路数超过线程池大小时，任务会排队执行
@@ -457,11 +460,13 @@ sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
 
 **视图参数说明**
 
-| 参数 | 说明 | 默认值 |
-|------|------|--------|
-| `--view-type <type>` | 视图类型: `grid`(网格) 或 `main_sidebar`(主+侧栏) | `grid` |
-| `--slot-assignment <ids>` | 通道→slot 映射，逗号分隔的通道 ID 列表 | 按注册顺序 |
-| `--main-ratio <ratio>` | `main_sidebar` 主画面宽度占比 | `0.75` |
+
+| 参数                        | 说明                                      | 默认值    |
+| ------------------------- | --------------------------------------- | ------ |
+| `--view-type <type>`      | 视图类型: `grid`(网格) 或 `main_sidebar`(主+侧栏) | `grid` |
+| `--slot-assignment <ids>` | 通道→slot 映射，逗号分隔的通道 ID 列表                | 按注册顺序  |
+| `--main-ratio <ratio>`    | `main_sidebar` 主画面宽度占比                  | `0.75` |
+
 
 ---
 
@@ -717,18 +722,20 @@ sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
 
 **双通道 PP 测试：PP0 输出 YUV，PP1 同时输出 RGB（10 项）**
 
-| 测试项 | PP0 格式 | PP1 格式 | 说明 |
-|--------|----------|----------|------|
-| T01 | YUV420 NV12 8-bit | RGB888 | 基础 8-bit 组合 |
-| T02 | YUV420 NV12 8-bit | ARGB8888 | NV12 + 带 Alpha 的 RGB |
-| T03 | YUV420 NV21 8-bit | BGR888 | NV21 + BGR 顺序 |
-| T04 | YUV420 NV12 8-bit | RGB888 | 重复验证 |
-| T05 | YUV420 P010 10-bit | ARGB2101010 | 10-bit YUV + 10-bit RGB |
-| T06 | YUV420 P010 10-bit | RGB161616 | 10-bit YUV + 16-bit RGB |
-| T07 | YUV420 NV12 8-bit | RGB888 | YUV400 模拟 |
-| T09 | YUV420 NV12 8-bit | RGB888 Planar | NV12 + Planar RGB |
-| T10 | YUV420 P010 10-bit | ARGB8888 | Tiled 10-bit + RGB |
-| T11 | YUV420 NV12 8-bit | YUV420 NV21 8-bit | 双 YUV 输出 |
+
+| 测试项 | PP0 格式             | PP1 格式            | 说明                      |
+| --- | ------------------ | ----------------- | ----------------------- |
+| T01 | YUV420 NV12 8-bit  | RGB888            | 基础 8-bit 组合             |
+| T02 | YUV420 NV12 8-bit  | ARGB8888          | NV12 + 带 Alpha 的 RGB    |
+| T03 | YUV420 NV21 8-bit  | BGR888            | NV21 + BGR 顺序           |
+| T04 | YUV420 NV12 8-bit  | RGB888            | 重复验证                    |
+| T05 | YUV420 P010 10-bit | ARGB2101010       | 10-bit YUV + 10-bit RGB |
+| T06 | YUV420 P010 10-bit | RGB161616         | 10-bit YUV + 16-bit RGB |
+| T07 | YUV420 NV12 8-bit  | RGB888            | YUV400 模拟               |
+| T09 | YUV420 NV12 8-bit  | RGB888 Planar     | NV12 + Planar RGB       |
+| T10 | YUV420 P010 10-bit | ARGB8888          | Tiled 10-bit + RGB      |
+| T11 | YUV420 NV12 8-bit  | YUV420 NV21 8-bit | 双 YUV 输出                |
+
 
 ```bash
 # Multi-PP T01: PP0=YUV420 NV12 8-bit, PP1=RGB888
@@ -776,12 +783,14 @@ sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
 
 **裁剪（Crop）测试（4 项）**
 
-| 测试项 | 通道 | 输入分辨率 | 裁剪/输出分辨率 | 说明 |
-|--------|------|-----------|----------------|------|
-| Crop1 | PP0 | 4096x2160 | 1920x1080 | 4K 裁剪到 1080p |
-| Crop2 | PP0 | 32768x32768 | 1280x720 | 超大分辨率裁剪到 720p |
-| Crop3 | PP1 | 4096x2160 | 1920x1080 | PP1 通道 4K 裁剪 |
-| Crop4 | PP1 | 32768x32768 | 1280x720 | PP1 通道超大分辨率裁剪 |
+
+| 测试项   | 通道  | 输入分辨率       | 裁剪/输出分辨率  | 说明            |
+| ----- | --- | ----------- | --------- | ------------- |
+| Crop1 | PP0 | 4096x2160   | 1920x1080 | 4K 裁剪到 1080p  |
+| Crop2 | PP0 | 32768x32768 | 1280x720  | 超大分辨率裁剪到 720p |
+| Crop3 | PP1 | 4096x2160   | 1920x1080 | PP1 通道 4K 裁剪  |
+| Crop4 | PP1 | 32768x32768 | 1280x720  | PP1 通道超大分辨率裁剪 |
+
 
 ```bash
 # Crop1: PP0 裁剪 4096x2160 -> 1920x1080 (4K to 1080p)
@@ -803,12 +812,14 @@ sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
 
 **缩放（Scale）测试（4 项）**
 
-| 测试项 | 通道 | 输入分辨率 | 输出分辨率 | 说明 |
-|--------|------|-----------|-----------|------|
-| Scale1 | PP0 | 32768x32768 | 256x256 | 超大分辨率缩放到 256x256 |
-| Scale2 | PP1 | 4096x2160 | 128x128 | 4K 缩放到 128x128 |
-| Scale3 | PP0+PP1 | 32768x32768 | 256x256 | 双通道同时缩放 |
-| Scale4 | PP0+PP1 | 4096x2160 | 128x128 | 双通道 4K 缩放 |
+
+| 测试项    | 通道      | 输入分辨率       | 输出分辨率   | 说明               |
+| ------ | ------- | ----------- | ------- | ---------------- |
+| Scale1 | PP0     | 32768x32768 | 256x256 | 超大分辨率缩放到 256x256 |
+| Scale2 | PP1     | 4096x2160   | 128x128 | 4K 缩放到 128x128   |
+| Scale3 | PP0+PP1 | 32768x32768 | 256x256 | 双通道同时缩放          |
+| Scale4 | PP0+PP1 | 4096x2160   | 128x128 | 双通道 4K 缩放        |
+
 
 ```bash
 # Scale1: PP0 缩放 32768x32768 -> 256x256 (极端缩放)
@@ -1144,101 +1155,114 @@ done
 
 ### A.1 VDEC 模块参数
 
-| 参数 | 说明 |
-|------|------|
-| `-h, --help` | 显示帮助信息 |
-| `-l, --list` | 列出所有预定义测试 |
-| `-f, --file <path>` | 输入视频文件路径 |
-| `-r, --rtsp <url>` | RTSP URL |
-| `-c, --codec <name>` | 编解码器 (h264/h265/mjpeg/software) |
-| `-D, --decoder <type>` | 解码方式 (hw/hardware/sw/software，默认: hw) |
-| `-W, --width <n>` | 视频宽度 |
-| `-H, --height <n>` | 视频高度 |
-| `-R, --resolution <WxH>` | 分辨率 (等同于 -W 和 -H 组合) |
-| `-F, --fps <n>` | 目标帧率 |
-| `-m, --max-frames <n>` | 最大帧数 (-1=无限制) |
-| `-s, --save <n>` | 保存帧数 (0=不保存, -1=全部) |
-| `-o, --output <path>` | 输出文件路径 |
-| `-d, --display` | 启用显示输出 |
-| `-p, --psnr` | 启用 PSNR 验证 |
-| `-S, --ssim` | 启用 SSIM 验证 |
-| `-P, --min-psnr <n>` | PSNR 阈值 (默认: 30.0 dB) |
-| `-M, --min-ssim <n>` | SSIM 阈值 (默认: 0.95) |
-| `-v, --verbose` | 详细日志 |
-| `-t, --threads <n>` | **并发路数（启用 PARALLEL 模式，可任意指定 1-128）** |
-| `--view-type <type>` | 视图类型: `grid`(网格, 默认) 或 `main_sidebar`(主+侧栏) |
-| `--slot-assignment <ids>` | 通道→slot 映射，逗号分隔 (如: `1,4,2,3,0`) |
-| `--main-ratio <ratio>` | `main_sidebar` 主画面宽度占比 (默认: 0.75) |
+
+| 参数                        | 说明                                          |
+| ------------------------- | ------------------------------------------- |
+| `-h, --help`              | 显示帮助信息                                      |
+| `-l, --list`              | 列出所有预定义测试                                   |
+| `-f, --file <path>`       | 输入视频文件路径                                    |
+| `-r, --rtsp <url>`        | RTSP URL                                    |
+| `-c, --codec <name>`      | 编解码器 (h264/h265/mjpeg/software)             |
+| `-D, --decoder <type>`    | 解码方式 (hw/hardware/sw/software，默认: hw)       |
+| `-W, --width <n>`         | 视频宽度                                        |
+| `-H, --height <n>`        | 视频高度                                        |
+| `-R, --resolution <WxH>`  | 分辨率 (等同于 -W 和 -H 组合)                        |
+| `-F, --fps <n>`           | 目标帧率                                        |
+| `-m, --max-frames <n>`    | 最大帧数 (-1=无限制)                               |
+| `-s, --save <n>`          | 保存帧数 (0=不保存, -1=全部)                         |
+| `-o, --output <path>`     | 输出文件路径                                      |
+| `-d, --display`           | 启用显示输出                                      |
+| `-p, --psnr`              | 启用 PSNR 验证                                  |
+| `-S, --ssim`              | 启用 SSIM 验证                                  |
+| `-P, --min-psnr <n>`      | PSNR 阈值 (默认: 30.0 dB)                       |
+| `-M, --min-ssim <n>`      | SSIM 阈值 (默认: 0.95)                          |
+| `-v, --verbose`           | 详细日志                                        |
+| `-t, --threads <n>`       | **并发路数（启用 PARALLEL 模式，可任意指定 1-128）**        |
+| `--view-type <type>`      | 视图类型: `grid`(网格, 默认) 或 `main_sidebar`(主+侧栏) |
+| `--slot-assignment <ids>` | 通道→slot 映射，逗号分隔 (如: `1,4,2,3,0`)            |
+| `--main-ratio <ratio>`    | `main_sidebar` 主画面宽度占比 (默认: 0.75)           |
+
 
 **ExecuteMode 映射**:
-| 模式 | 触发条件 | 说明 |
-|------|---------|------|
-| SINGLE | 默认 | 单路解码 |
-| COMPARE | `--psnr` 或 `--ssim` | HW vs SW 质量对比 |
-| PARALLEL | `--threads N` 或预定义 multithread_N | 多路并发解码 |
+
+
+| 模式       | 触发条件                             | 说明            |
+| -------- | -------------------------------- | ------------- |
+| SINGLE   | 默认                               | 单路解码          |
+| COMPARE  | `--psnr` 或 `--ssim`              | HW vs SW 质量对比 |
+| PARALLEL | `--threads N` 或预定义 multithread_N | 多路并发解码        |
+
 
 ### A.2 PP 模块参数
 
-| 参数 | 说明 |
-|------|------|
-| `-h, --help` | 显示帮助信息 |
-| `-l, --list` | 列出所有预定义测试 |
-| `-i, --input <path>` | 输入视频路径 |
-| `-f, --format <fmt>` | 输出格式 (nv12/argb888/...) |
-| `-c, --channel <ch>` | 通道选择 (0/1/0,1) |
-| `-W, --width <n>` | 输出宽度 |
-| `-H, --height <n>` | 输出高度 |
-| `-R, --resolution <WxH>` | 分辨率 (等同于 -W 和 -H 组合) |
-| `-C, --crop <x,y,w,h>` | 裁剪区域 |
-| `-s, --color-std <s>` | 颜色标准 (bt601/bt709/bt2020) |
-| `-o, --output <path>` | 输出文件路径 |
-| `-n, --save <n>` | 保存帧数 |
-| `-d, --display` | 启用显示输出 |
-| `-m, --max-frames <n>` | 最大帧数 |
-| `-v, --verbose` | 详细日志 |
+
+| 参数                       | 说明                        |
+| ------------------------ | ------------------------- |
+| `-h, --help`             | 显示帮助信息                    |
+| `-l, --list`             | 列出所有预定义测试                 |
+| `-i, --input <path>`     | 输入视频路径                    |
+| `-f, --format <fmt>`     | 输出格式 (nv12/argb888/...)   |
+| `-c, --channel <ch>`     | 通道选择 (0/1/0,1)            |
+| `-W, --width <n>`        | 输出宽度                      |
+| `-H, --height <n>`       | 输出高度                      |
+| `-R, --resolution <WxH>` | 分辨率 (等同于 -W 和 -H 组合)      |
+| `-C, --crop <x,y,w,h>`   | 裁剪区域                      |
+| `-s, --color-std <s>`    | 颜色标准 (bt601/bt709/bt2020) |
+| `-o, --output <path>`    | 输出文件路径                    |
+| `-n, --save <n>`         | 保存帧数                      |
+| `-d, --display`          | 启用显示输出                    |
+| `-m, --max-frames <n>`   | 最大帧数                      |
+| `-v, --verbose`          | 详细日志                      |
+
 
 ### A.3 Record 模块参数
 
-| 参数 | 说明 |
-|------|------|
-| `-h, --help` | 显示帮助信息 |
-| `-l, --list` | 列出所有预定义测试 |
-| `-r, --rtsp <url>` | RTSP 流 URL |
-| `-f, --file <path>` | 输入文件路径 |
-| `-i, --input <path>` | 输入路径 (等同于 -f) |
-| `-o, --output <path>` | 输出文件路径 |
-| `-F, --format <fmt>` | 输出格式 (mp4/mkv/ts/flv/avi/mov/3gp) |
-| `-d, --duration <sec>` | 录制时长（秒） |
-| `-a, --all-formats` | 测试所有输出格式 |
-| `-v, --verbose` | 详细日志 |
+
+| 参数                     | 说明                                |
+| ---------------------- | --------------------------------- |
+| `-h, --help`           | 显示帮助信息                            |
+| `-l, --list`           | 列出所有预定义测试                         |
+| `-r, --rtsp <url>`     | RTSP 流 URL                        |
+| `-f, --file <path>`    | 输入文件路径                            |
+| `-i, --input <path>`   | 输入路径 (等同于 -f)                     |
+| `-o, --output <path>`  | 输出文件路径                            |
+| `-F, --format <fmt>`   | 输出格式 (mp4/mkv/ts/flv/avi/mov/3gp) |
+| `-d, --duration <sec>` | 录制时长（秒）                           |
+| `-a, --all-formats`    | 测试所有输出格式                          |
+| `-v, --verbose`        | 详细日志                              |
+
 
 ### A.4 Writer 模块参数
 
-| 参数 | 说明 |
-|------|------|
-| `-h, --help` | 显示帮助信息 |
-| `-l, --list` | 列出所有预定义测试 |
-| `-i, --input <path>` | 输入视频路径 |
-| `-f, --format <fmt>` | 输出格式 |
-| `-o, --output <path>` | 输出文件路径 |
-| `-n, --frames <n>` | 保存帧数 |
-| `-R, --all-rgb` | 测试所有 RGB 格式 (12个) |
-| `-Y, --all-yuv` | 测试所有 YUV 格式 (10个) |
-| `-v, --verbose` | 详细日志 |
+
+| 参数                    | 说明                |
+| --------------------- | ----------------- |
+| `-h, --help`          | 显示帮助信息            |
+| `-l, --list`          | 列出所有预定义测试         |
+| `-i, --input <path>`  | 输入视频路径            |
+| `-f, --format <fmt>`  | 输出格式              |
+| `-o, --output <path>` | 输出文件路径            |
+| `-n, --frames <n>`    | 保存帧数              |
+| `-R, --all-rgb`       | 测试所有 RGB 格式 (12个) |
+| `-Y, --all-yuv`       | 测试所有 YUV 格式 (10个) |
+| `-v, --verbose`       | 详细日志              |
+
 
 ---
 
 ## 附录 B. 测试统计模板
 
-| 模块 | 测试项 | 平均 FPS | PSNR (dB) | SSIM | 状态 |
-|------|--------|----------|-----------|------|------|
-| VDEC | h264_1920x1080 | | | | [ ] PASS |
-| VDEC | h265_1920x1080 | | | | [ ] PASS |
-| VDEC | psnr_h264_1080p | | | | [ ] PASS |
-| PP | pp0_nv12 | | | | [ ] PASS |
-| PP | pp1_argb888 | | | | [ ] PASS |
-| Record | rtsp_to_mp4 | | | | [ ] PASS |
-| Writer | rgb_argb888 | | | | [ ] PASS |
+
+| 模块     | 测试项             | 平均 FPS | PSNR (dB) | SSIM | 状态       |
+| ------ | --------------- | ------ | --------- | ---- | -------- |
+| VDEC   | h264_1920x1080  |        |           |      | [ ] PASS |
+| VDEC   | h265_1920x1080  |        |           |      | [ ] PASS |
+| VDEC   | psnr_h264_1080p |        |           |      | [ ] PASS |
+| PP     | pp0_nv12        |        |           |      | [ ] PASS |
+| PP     | pp1_argb888     |        |           |      | [ ] PASS |
+| Record | rtsp_to_mp4     |        |           |      | [ ] PASS |
+| Writer | rgb_argb888     |        |           |      | [ ] PASS |
+
 
 ---
 
@@ -1276,19 +1300,21 @@ PASS|SUCCESS|completed|finished
 
 #### C.2.2 日志验证规则
 
-| 命令参数 | 日志中必须出现 | 说明 |
-|----------|---------------|------|
-| `--codec h264` | `codec: h264` 或 `h264_taco` | 验证编解码器选择正确 |
-| `--resolution 1920x1080` | `width: 1920, height: 1080` | 验证分辨率设置正确 |
-| `--max-frames 100` | `max_frames: 100` 且帧数≤100 | 验证帧数限制生效 |
-| `--display` | `display: enabled` 或 `framebuffer` | 验证显示输出启用 |
-| `--psnr` | `PSNR` 计算结果 | 验证 PSNR 验证启用 |
-| `--ssim` | `SSIM` 计算结果 | 验证 SSIM 验证启用 |
-| `--save 10` | `saved 10 frames` 或输出文件存在 | 验证帧保存功能 |
-| `--output /tmp/xxx` | 文件 `/tmp/xxx` 存在 | 验证输出路径正确 |
-| `--format argb888` | `format: ARGB888` | 验证输出格式正确 |
-| `--color-std bt709` | `color_standard: BT709` | 验证颜色标准设置 |
-| `--crop x,y,w,h` | `crop: x,y,w,h` | 验证裁剪区域设置 |
+
+| 命令参数                     | 日志中必须出现                            | 说明           |
+| ------------------------ | ---------------------------------- | ------------ |
+| `--codec h264`           | `codec: h264` 或 `h264_taco`        | 验证编解码器选择正确   |
+| `--resolution 1920x1080` | `width: 1920, height: 1080`        | 验证分辨率设置正确    |
+| `--max-frames 100`       | `max_frames: 100` 且帧数≤100          | 验证帧数限制生效     |
+| `--display`              | `display: enabled` 或 `framebuffer` | 验证显示输出启用     |
+| `--psnr`                 | `PSNR` 计算结果                        | 验证 PSNR 验证启用 |
+| `--ssim`                 | `SSIM` 计算结果                        | 验证 SSIM 验证启用 |
+| `--save 10`              | `saved 10 frames` 或输出文件存在          | 验证帧保存功能      |
+| `--output /tmp/xxx`      | 文件 `/tmp/xxx` 存在                   | 验证输出路径正确     |
+| `--format argb888`       | `format: ARGB888`                  | 验证输出格式正确     |
+| `--color-std bt709`      | `color_standard: BT709`            | 验证颜色标准设置     |
+| `--crop x,y,w,h`         | `crop: x,y,w,h`                    | 验证裁剪区域设置     |
+
 
 ### C.3 输出文件验证方法
 
@@ -1323,18 +1349,20 @@ actual_size=$(stat -c%s output.rgb)
 
 #### C.3.3 各格式预期文件大小公式
 
-| 格式 | 每帧字节数 | 公式 |
-|------|-----------|------|
-| NV12/NV21 | W × H × 1.5 | `width * height * 3 / 2` |
-| I420/YV12 | W × H × 1.5 | `width * height * 3 / 2` |
-| P010 | W × H × 3 | `width * height * 3` |
-| NV16/NV61 | W × H × 2 | `width * height * 2` |
-| I422 | W × H × 2 | `width * height * 2` |
-| NV24 | W × H × 3 | `width * height * 3` |
-| I444 | W × H × 3 | `width * height * 3` |
-| RGB888/BGR888 | W × H × 3 | `width * height * 3` |
-| ARGB8888/RGBA8888 等 | W × H × 4 | `width * height * 4` |
-| R16G16B16 | W × H × 6 | `width * height * 6` |
+
+| 格式                  | 每帧字节数       | 公式                       |
+| ------------------- | ----------- | ------------------------ |
+| NV12/NV21           | W × H × 1.5 | `width * height * 3 / 2` |
+| I420/YV12           | W × H × 1.5 | `width * height * 3 / 2` |
+| P010                | W × H × 3   | `width * height * 3`     |
+| NV16/NV61           | W × H × 2   | `width * height * 2`     |
+| I422                | W × H × 2   | `width * height * 2`     |
+| NV24                | W × H × 3   | `width * height * 3`     |
+| I444                | W × H × 3   | `width * height * 3`     |
+| RGB888/BGR888       | W × H × 3   | `width * height * 3`     |
+| ARGB8888/RGBA8888 等 | W × H × 4   | `width * height * 4`     |
+| R16G16B16           | W × H × 6   | `width * height * 6`     |
+
 
 ### C.4 自动化测试脚本
 
@@ -1717,8 +1745,10 @@ echo "复测完成，报告: $NEW_REPORT"
 - **命令**: `qa_cases pp pp1_argb888 video.mp4`
 - **错误日志**:
 ```
+
 [ERROR] Format ARGB888 not supported on this hardware
 [ERROR] PP1 initialization failed
+
 ```
 - **分析**: 硬件不支持 ARGB888 格式
 - **建议**: 检查硬件配置或使用其他格式
@@ -1732,27 +1762,27 @@ echo "复测完成，报告: $NEW_REPORT"
 
 #### C.6.1 执行前检查
 
-- [ ] 远程主机可访问 (`ping 192.168.56.48`)
-- [ ] qa_cases 已部署到远程主机
-- [ ] 测试视频文件存在 (`/usr/data/ffmpeg/`)
-- [ ] 磁盘空间充足 (输出文件需要空间)
-- [ ] 日志目录已创建
+- 远程主机可访问 (`ping 192.168.56.48`)
+- qa_cases 已部署到远程主机
+- 测试视频文件存在 (`/usr/data/ffmpeg/`)
+- 磁盘空间充足 (输出文件需要空间)
+- 日志目录已创建
 
 #### C.6.2 每条命令检查
 
-- [ ] 命令执行无崩溃 (exit code = 0)
-- [ ] 日志无 ERROR/FATAL 关键字
-- [ ] 命令参数在日志中有体现
-- [ ] 输出文件存在且非空
-- [ ] 输出文件格式/大小符合预期
-- [ ] PSNR/SSIM 值在合理范围内 (如适用)
+- 命令执行无崩溃 (exit code = 0)
+- 日志无 ERROR/FATAL 关键字
+- 命令参数在日志中有体现
+- 输出文件存在且非空
+- 输出文件格式/大小符合预期
+- PSNR/SSIM 值在合理范围内 (如适用)
 
 #### C.6.3 执行后检查
 
-- [ ] 所有测试用例已执行
-- [ ] 测试报告已生成
-- [ ] 失败用例已记录详细信息
-- [ ] 日志文件已保存备查
+- 所有测试用例已执行
+- 测试报告已生成
+- 失败用例已记录详细信息
+- 日志文件已保存备查
 
 ---
 
@@ -1770,14 +1800,16 @@ echo "复测完成，报告: $NEW_REPORT"
 
 ### 7.1 H264 PP0/PP1 Crop 测试（6个）
 
-| 序号 | 测试用例名 | 描述 |
-|:----:|-----------|------|
-| 1 | mp4_decode_h264_1280x720_30_pp0_crop | H264 720p PP0 裁剪 |
-| 2 | mp4_decode_h264_1920x1080_30_pp0_crop | H264 1080p PP0 裁剪 |
-| 3 | mp4_decode_h264_1280x720_30_pp1_rgb_crop | H264 720p PP1 RGB 裁剪 |
-| 4 | mp4_decode_h264_1920x1080_30_pp1_rgb_crop | H264 1080p PP1 RGB 裁剪 |
-| 5 | mp4_decode_h264_1280x720_30_pp1_yuv_crop | H264 720p PP1 YUV 裁剪 |
-| 6 | mp4_decode_h264_1920x1080_30_pp1_yuv_crop | H264 1080p PP1 YUV 裁剪 |
+
+| 序号  | 测试用例名                                     | 描述                    |
+| --- | ----------------------------------------- | --------------------- |
+| 1   | mp4_decode_h264_1280x720_30_pp0_crop      | H264 720p PP0 裁剪      |
+| 2   | mp4_decode_h264_1920x1080_30_pp0_crop     | H264 1080p PP0 裁剪     |
+| 3   | mp4_decode_h264_1280x720_30_pp1_rgb_crop  | H264 720p PP1 RGB 裁剪  |
+| 4   | mp4_decode_h264_1920x1080_30_pp1_rgb_crop | H264 1080p PP1 RGB 裁剪 |
+| 5   | mp4_decode_h264_1280x720_30_pp1_yuv_crop  | H264 720p PP1 YUV 裁剪  |
+| 6   | mp4_decode_h264_1920x1080_30_pp1_yuv_crop | H264 1080p PP1 YUV 裁剪 |
+
 
 ```bash
 # H264 720p PP0 裁剪
@@ -1807,14 +1839,16 @@ sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
 
 ### 7.2 H265 PP0/PP1 Crop 测试（6个）
 
-| 序号 | 测试用例名 | 描述 |
-|:----:|-----------|------|
-| 7 | mp4_decode_h265_1280x720_30_pp0_crop | H265 720p PP0 裁剪 |
-| 8 | mp4_decode_h265_1920x1080_30_pp0_crop | H265 1080p PP0 裁剪 |
-| 9 | mp4_decode_h265_1280x720_30_pp1_rgb_crop | H265 720p PP1 RGB 裁剪 |
-| 10 | mp4_decode_h265_1920x1080_30_pp1_rgb_crop | H265 1080p PP1 RGB 裁剪 |
-| 11 | mp4_decode_h265_1280x720_30_pp1_yuv_crop | H265 720p PP1 YUV 裁剪 |
-| 12 | mp4_decode_h265_1920x1080_30_pp1_yuv_crop | H265 1080p PP1 YUV 裁剪 |
+
+| 序号  | 测试用例名                                     | 描述                    |
+| --- | ----------------------------------------- | --------------------- |
+| 7   | mp4_decode_h265_1280x720_30_pp0_crop      | H265 720p PP0 裁剪      |
+| 8   | mp4_decode_h265_1920x1080_30_pp0_crop     | H265 1080p PP0 裁剪     |
+| 9   | mp4_decode_h265_1280x720_30_pp1_rgb_crop  | H265 720p PP1 RGB 裁剪  |
+| 10  | mp4_decode_h265_1920x1080_30_pp1_rgb_crop | H265 1080p PP1 RGB 裁剪 |
+| 11  | mp4_decode_h265_1280x720_30_pp1_yuv_crop  | H265 720p PP1 YUV 裁剪  |
+| 12  | mp4_decode_h265_1920x1080_30_pp1_yuv_crop | H265 1080p PP1 YUV 裁剪 |
+
 
 ```bash
 # H265 720p PP0 裁剪
@@ -1844,12 +1878,14 @@ sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
 
 ### 7.3 H264 Multi-PP 测试（4个）
 
-| 序号 | 测试用例名 | 描述 |
-|:----:|-----------|------|
-| 13 | mp4_decode_h264_1920x1080_30_multi_pp | H264 1080p 双通道 PP |
-| 14 | mp4_decode_h264_1920x1080_30_multi_pp_crop | H264 1080p 双通道 PP + 裁剪 |
-| 15 | mp4_decode_h264_1920x1080_30_multi_pp_scale | H264 1080p 双通道 PP + 缩放 |
-| 16 | mp4_decode_h264_1920x1080_30_multi_pp_crop_scale | H264 1080p 双通道 PP + 裁剪 + 缩放 |
+
+| 序号  | 测试用例名                                            | 描述                          |
+| --- | ------------------------------------------------ | --------------------------- |
+| 13  | mp4_decode_h264_1920x1080_30_multi_pp            | H264 1080p 双通道 PP           |
+| 14  | mp4_decode_h264_1920x1080_30_multi_pp_crop       | H264 1080p 双通道 PP + 裁剪      |
+| 15  | mp4_decode_h264_1920x1080_30_multi_pp_scale      | H264 1080p 双通道 PP + 缩放      |
+| 16  | mp4_decode_h264_1920x1080_30_multi_pp_crop_scale | H264 1080p 双通道 PP + 裁剪 + 缩放 |
+
 
 ```bash
 # H264 1080p 双通道 PP
@@ -1871,12 +1907,14 @@ sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
 
 ### 7.4 H265 Multi-PP 测试（4个）
 
-| 序号 | 测试用例名 | 描述 |
-|:----:|-----------|------|
-| 17 | mp4_decode_h265_1920x1080_30_multi_pp | H265 1080p 双通道 PP |
-| 18 | mp4_decode_h265_1920x1080_30_multi_pp_crop | H265 1080p 双通道 PP + 裁剪 |
-| 19 | mp4_decode_h265_1920x1080_30_multi_pp_scale | H265 1080p 双通道 PP + 缩放 |
-| 20 | mp4_decode_h265_1920x1080_30_multi_pp_crop_scale | H265 1080p 双通道 PP + 裁剪 + 缩放 |
+
+| 序号  | 测试用例名                                            | 描述                          |
+| --- | ------------------------------------------------ | --------------------------- |
+| 17  | mp4_decode_h265_1920x1080_30_multi_pp            | H265 1080p 双通道 PP           |
+| 18  | mp4_decode_h265_1920x1080_30_multi_pp_crop       | H265 1080p 双通道 PP + 裁剪      |
+| 19  | mp4_decode_h265_1920x1080_30_multi_pp_scale      | H265 1080p 双通道 PP + 缩放      |
+| 20  | mp4_decode_h265_1920x1080_30_multi_pp_crop_scale | H265 1080p 双通道 PP + 裁剪 + 缩放 |
+
 
 ```bash
 # H265 1080p 双通道 PP
@@ -1898,13 +1936,15 @@ sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
 
 ### 7.5 H264 PP0 YUV400 格式测试（5个）
 
-| 序号 | 测试用例名 | 描述 |
-|:----:|-----------|------|
-| 21 | mp4_decode_h264_1920x1080_30_pp0_yuv400_p010 | H264 1080p PP0 YUV400 P010 |
-| 22 | mp4_decode_h264_1920x1080_30_pp0_yuv400_i010 | H264 1080p PP0 YUV400 I010 |
-| 23 | mp4_decode_h264_1920x1080_30_pp0_yuv400_l010 | H264 1080p PP0 YUV400 L010 |
-| 24 | mp4_decode_h264_1920x1080_30_pp0_yuv400_pack10 | H264 1080p PP0 YUV400 PACK10 |
-| 25 | mp4_decode_h264_1920x1080_30_pp0_yuv400_8bit | H264 1080p PP0 YUV400 8bit |
+
+| 序号  | 测试用例名                                          | 描述                           |
+| --- | ---------------------------------------------- | ---------------------------- |
+| 21  | mp4_decode_h264_1920x1080_30_pp0_yuv400_p010   | H264 1080p PP0 YUV400 P010   |
+| 22  | mp4_decode_h264_1920x1080_30_pp0_yuv400_i010   | H264 1080p PP0 YUV400 I010   |
+| 23  | mp4_decode_h264_1920x1080_30_pp0_yuv400_l010   | H264 1080p PP0 YUV400 L010   |
+| 24  | mp4_decode_h264_1920x1080_30_pp0_yuv400_pack10 | H264 1080p PP0 YUV400 PACK10 |
+| 25  | mp4_decode_h264_1920x1080_30_pp0_yuv400_8bit   | H264 1080p PP0 YUV400 8bit   |
+
 
 ```bash
 # H264 1080p PP0 YUV400 P010
@@ -1930,18 +1970,20 @@ sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
 
 ### 7.6 H264 PP0 YUV420 格式测试（10个）
 
-| 序号 | 测试用例名 | 描述 |
-|:----:|-----------|------|
-| 26 | mp4_decode_h264_1920x1080_30_pp0_yuv420_nv12_p010 | H264 1080p PP0 YUV420 NV12 P010 |
-| 27 | mp4_decode_h264_1920x1080_30_pp0_yuv420_nv12_i010 | H264 1080p PP0 YUV420 NV12 I010 |
-| 28 | mp4_decode_h264_1920x1080_30_pp0_yuv420_nv12_l010 | H264 1080p PP0 YUV420 NV12 L010 |
-| 29 | mp4_decode_h264_1920x1080_30_pp0_yuv420_nv12_pack10 | H264 1080p PP0 YUV420 NV12 PACK10 |
-| 30 | mp4_decode_h264_1920x1080_30_pp0_yuv420_8bit_nv12 | H264 1080p PP0 YUV420 8bit NV12 |
-| 31 | mp4_decode_h264_1920x1080_30_pp0_yuv420_nv21_p010_tiled | H264 1080p PP0 YUV420 NV21 P010 Tiled |
-| 32 | mp4_decode_h264_1920x1080_30_pp0_yuv420_nv21_i011 | H264 1080p PP0 YUV420 NV21 I011 |
-| 33 | mp4_decode_h264_1920x1080_30_pp0_yuv420_nv21_l010 | H264 1080p PP0 YUV420 NV21 L010 |
-| 34 | mp4_decode_h264_1920x1080_30_pp0_yuv420_p010 | H264 1080p PP0 YUV420 P010 |
-| 35 | mp4_decode_h264_1920x1080_30_pp0_yuv420_8bit_nv21 | H264 1080p PP0 YUV420 8bit NV21 |
+
+| 序号  | 测试用例名                                                   | 描述                                    |
+| --- | ------------------------------------------------------- | ------------------------------------- |
+| 26  | mp4_decode_h264_1920x1080_30_pp0_yuv420_nv12_p010       | H264 1080p PP0 YUV420 NV12 P010       |
+| 27  | mp4_decode_h264_1920x1080_30_pp0_yuv420_nv12_i010       | H264 1080p PP0 YUV420 NV12 I010       |
+| 28  | mp4_decode_h264_1920x1080_30_pp0_yuv420_nv12_l010       | H264 1080p PP0 YUV420 NV12 L010       |
+| 29  | mp4_decode_h264_1920x1080_30_pp0_yuv420_nv12_pack10     | H264 1080p PP0 YUV420 NV12 PACK10     |
+| 30  | mp4_decode_h264_1920x1080_30_pp0_yuv420_8bit_nv12       | H264 1080p PP0 YUV420 8bit NV12       |
+| 31  | mp4_decode_h264_1920x1080_30_pp0_yuv420_nv21_p010_tiled | H264 1080p PP0 YUV420 NV21 P010 Tiled |
+| 32  | mp4_decode_h264_1920x1080_30_pp0_yuv420_nv21_i011       | H264 1080p PP0 YUV420 NV21 I011       |
+| 33  | mp4_decode_h264_1920x1080_30_pp0_yuv420_nv21_l010       | H264 1080p PP0 YUV420 NV21 L010       |
+| 34  | mp4_decode_h264_1920x1080_30_pp0_yuv420_p010            | H264 1080p PP0 YUV420 P010            |
+| 35  | mp4_decode_h264_1920x1080_30_pp0_yuv420_8bit_nv21       | H264 1080p PP0 YUV420 8bit NV21       |
+
 
 ```bash
 # H264 1080p PP0 YUV420 NV12 P010
@@ -1987,15 +2029,17 @@ sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
 
 ### 7.7 H264 PP1 RGB 格式测试（7个）
 
-| 序号 | 测试用例名 | 描述 |
-|:----:|-----------|------|
-| 36 | mp4_decode_h264_1920x1080_30_pp1_abgr8888 | H264 1080p PP1 ABGR8888 |
-| 37 | mp4_decode_h264_1920x1080_30_pp1_argb8888 | H264 1080p PP1 ARGB8888 |
-| 38 | mp4_decode_h264_1920x1080_30_pp1_bgr888 | H264 1080p PP1 BGR888 |
-| 39 | mp4_decode_h264_1920x1080_30_pp1_bgra8888 | H264 1080p PP1 BGRA8888 |
-| 40 | mp4_decode_h264_1920x1080_30_pp1_rgb888_planar | H264 1080p PP1 RGB888 Planar |
-| 41 | mp4_decode_h264_1920x1080_30_pp1_rgb888 | H264 1080p PP1 RGB888 |
-| 42 | mp4_decode_h264_1920x1080_30_pp1_rgba8888 | H264 1080p PP1 RGBA8888 |
+
+| 序号  | 测试用例名                                          | 描述                           |
+| --- | ---------------------------------------------- | ---------------------------- |
+| 36  | mp4_decode_h264_1920x1080_30_pp1_abgr8888      | H264 1080p PP1 ABGR8888      |
+| 37  | mp4_decode_h264_1920x1080_30_pp1_argb8888      | H264 1080p PP1 ARGB8888      |
+| 38  | mp4_decode_h264_1920x1080_30_pp1_bgr888        | H264 1080p PP1 BGR888        |
+| 39  | mp4_decode_h264_1920x1080_30_pp1_bgra8888      | H264 1080p PP1 BGRA8888      |
+| 40  | mp4_decode_h264_1920x1080_30_pp1_rgb888_planar | H264 1080p PP1 RGB888 Planar |
+| 41  | mp4_decode_h264_1920x1080_30_pp1_rgb888        | H264 1080p PP1 RGB888        |
+| 42  | mp4_decode_h264_1920x1080_30_pp1_rgba8888      | H264 1080p PP1 RGBA8888      |
+
 
 ```bash
 # H264 1080p PP1 ABGR8888
@@ -2029,13 +2073,15 @@ sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
 
 ### 7.8 H264 PP1 YUV400 格式测试（5个）
 
-| 序号 | 测试用例名 | 描述 |
-|:----:|-----------|------|
-| 43 | mp4_decode_h264_1920x1080_30_pp1_yuv400_p010 | H264 1080p PP1 YUV400 P010 |
-| 44 | mp4_decode_h264_1920x1080_30_pp1_yuv400_i010 | H264 1080p PP1 YUV400 I010 |
-| 45 | mp4_decode_h264_1920x1080_30_pp1_yuv400_l010 | H264 1080p PP1 YUV400 L010 |
-| 46 | mp4_decode_h264_1920x1080_30_pp1_yuv400_pack10 | H264 1080p PP1 YUV400 PACK10 |
-| 47 | mp4_decode_h264_1920x1080_30_pp1_yuv400_8bit | H264 1080p PP1 YUV400 8bit |
+
+| 序号  | 测试用例名                                          | 描述                           |
+| --- | ---------------------------------------------- | ---------------------------- |
+| 43  | mp4_decode_h264_1920x1080_30_pp1_yuv400_p010   | H264 1080p PP1 YUV400 P010   |
+| 44  | mp4_decode_h264_1920x1080_30_pp1_yuv400_i010   | H264 1080p PP1 YUV400 I010   |
+| 45  | mp4_decode_h264_1920x1080_30_pp1_yuv400_l010   | H264 1080p PP1 YUV400 L010   |
+| 46  | mp4_decode_h264_1920x1080_30_pp1_yuv400_pack10 | H264 1080p PP1 YUV400 PACK10 |
+| 47  | mp4_decode_h264_1920x1080_30_pp1_yuv400_8bit   | H264 1080p PP1 YUV400 8bit   |
+
 
 ```bash
 # H264 1080p PP1 YUV400 P010
@@ -2061,18 +2107,20 @@ sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
 
 ### 7.9 H264 PP1 YUV420 格式测试（10个）
 
-| 序号 | 测试用例名 | 描述 |
-|:----:|-----------|------|
-| 48 | mp4_decode_h264_1920x1080_30_pp1_yuv420_nv12_p010 | H264 1080p PP1 YUV420 NV12 P010 |
-| 49 | mp4_decode_h264_1920x1080_30_pp1_yuv420_nv12_i010 | H264 1080p PP1 YUV420 NV12 I010 |
-| 50 | mp4_decode_h264_1920x1080_30_pp1_yuv420_nv12_l010 | H264 1080p PP1 YUV420 NV12 L010 |
-| 51 | mp4_decode_h264_1920x1080_30_pp1_yuv420_nv12_pack10 | H264 1080p PP1 YUV420 NV12 PACK10 |
-| 52 | mp4_decode_h264_1920x1080_30_pp1_yuv420_8bit_nv12 | H264 1080p PP1 YUV420 8bit NV12 |
-| 53 | mp4_decode_h264_1920x1080_30_pp1_yuv420_nv21_p010_tiled | H264 1080p PP1 YUV420 NV21 P010 Tiled |
-| 54 | mp4_decode_h264_1920x1080_30_pp1_yuv420_nv21_i010 | H264 1080p PP1 YUV420 NV21 I010 |
-| 55 | mp4_decode_h264_1920x1080_30_pp1_yuv420_nv21_l010 | H264 1080p PP1 YUV420 NV21 L010 |
-| 56 | mp4_decode_h264_1920x1080_30_pp1_yuv420_p010 | H264 1080p PP1 YUV420 P010 |
-| 57 | mp4_decode_h264_1920x1080_30_pp1_yuv420_8bit_nv21 | H264 1080p PP1 YUV420 8bit NV21 |
+
+| 序号  | 测试用例名                                                   | 描述                                    |
+| --- | ------------------------------------------------------- | ------------------------------------- |
+| 48  | mp4_decode_h264_1920x1080_30_pp1_yuv420_nv12_p010       | H264 1080p PP1 YUV420 NV12 P010       |
+| 49  | mp4_decode_h264_1920x1080_30_pp1_yuv420_nv12_i010       | H264 1080p PP1 YUV420 NV12 I010       |
+| 50  | mp4_decode_h264_1920x1080_30_pp1_yuv420_nv12_l010       | H264 1080p PP1 YUV420 NV12 L010       |
+| 51  | mp4_decode_h264_1920x1080_30_pp1_yuv420_nv12_pack10     | H264 1080p PP1 YUV420 NV12 PACK10     |
+| 52  | mp4_decode_h264_1920x1080_30_pp1_yuv420_8bit_nv12       | H264 1080p PP1 YUV420 8bit NV12       |
+| 53  | mp4_decode_h264_1920x1080_30_pp1_yuv420_nv21_p010_tiled | H264 1080p PP1 YUV420 NV21 P010 Tiled |
+| 54  | mp4_decode_h264_1920x1080_30_pp1_yuv420_nv21_i010       | H264 1080p PP1 YUV420 NV21 I010       |
+| 55  | mp4_decode_h264_1920x1080_30_pp1_yuv420_nv21_l010       | H264 1080p PP1 YUV420 NV21 L010       |
+| 56  | mp4_decode_h264_1920x1080_30_pp1_yuv420_p010            | H264 1080p PP1 YUV420 P010            |
+| 57  | mp4_decode_h264_1920x1080_30_pp1_yuv420_8bit_nv21       | H264 1080p PP1 YUV420 8bit NV21       |
+
 
 ```bash
 # H264 1080p PP1 YUV420 NV12 P010
@@ -2118,19 +2166,21 @@ sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
 
 ### 7.10 H264 Multi-PP 组合测试（11个）
 
-| 序号 | 测试用例名 | 描述 |
-|:----:|-----------|------|
-| 58 | mp4_decode_h264_1920x1080_30_multi_pp_t01 | H264 1080p Multi-PP 组合测试 T01 |
-| 59 | mp4_decode_h264_1920x1080_30_multi_pp_t02 | H264 1080p Multi-PP 组合测试 T02 |
-| 60 | mp4_decode_h264_1920x1080_30_multi_pp_t03 | H264 1080p Multi-PP 组合测试 T03 |
-| 61 | mp4_decode_h264_1920x1080_30_multi_pp_t04 | H264 1080p Multi-PP 组合测试 T04 |
-| 62 | mp4_decode_h264_1920x1080_30_multi_pp_t05 | H264 1080p Multi-PP 组合测试 T05 |
-| 63 | mp4_decode_h264_1920x1080_30_multi_pp_t06 | H264 1080p Multi-PP 组合测试 T06 |
-| 64 | mp4_decode_h264_1920x1080_30_multi_pp_t07 | H264 1080p Multi-PP 组合测试 T07 |
-| 65 | mp4_decode_h264_1920x1080_30_multi_pp_t08 | H264 1080p Multi-PP 组合测试 T08 |
-| 66 | mp4_decode_h264_1920x1080_30_multi_pp_t09 | H264 1080p Multi-PP 组合测试 T09 |
-| 67 | mp4_decode_h264_1920x1080_30_multi_pp_t10 | H264 1080p Multi-PP 组合测试 T10 |
-| 68 | mp4_decode_h264_1920x1080_30_multi_pp_t11 | H264 1080p Multi-PP 组合测试 T11 |
+
+| 序号  | 测试用例名                                     | 描述                           |
+| --- | ----------------------------------------- | ---------------------------- |
+| 58  | mp4_decode_h264_1920x1080_30_multi_pp_t01 | H264 1080p Multi-PP 组合测试 T01 |
+| 59  | mp4_decode_h264_1920x1080_30_multi_pp_t02 | H264 1080p Multi-PP 组合测试 T02 |
+| 60  | mp4_decode_h264_1920x1080_30_multi_pp_t03 | H264 1080p Multi-PP 组合测试 T03 |
+| 61  | mp4_decode_h264_1920x1080_30_multi_pp_t04 | H264 1080p Multi-PP 组合测试 T04 |
+| 62  | mp4_decode_h264_1920x1080_30_multi_pp_t05 | H264 1080p Multi-PP 组合测试 T05 |
+| 63  | mp4_decode_h264_1920x1080_30_multi_pp_t06 | H264 1080p Multi-PP 组合测试 T06 |
+| 64  | mp4_decode_h264_1920x1080_30_multi_pp_t07 | H264 1080p Multi-PP 组合测试 T07 |
+| 65  | mp4_decode_h264_1920x1080_30_multi_pp_t08 | H264 1080p Multi-PP 组合测试 T08 |
+| 66  | mp4_decode_h264_1920x1080_30_multi_pp_t09 | H264 1080p Multi-PP 组合测试 T09 |
+| 67  | mp4_decode_h264_1920x1080_30_multi_pp_t10 | H264 1080p Multi-PP 组合测试 T10 |
+| 68  | mp4_decode_h264_1920x1080_30_multi_pp_t11 | H264 1080p Multi-PP 组合测试 T11 |
+
 
 ```bash
 # H264 1080p Multi-PP 组合测试 T01
@@ -2180,12 +2230,14 @@ sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
 
 ### 7.11 H264 PP0 格式测试 - Commit 1 新增（4个）
 
-| 序号 | 测试用例名 | 描述 |
-|:----:|-----------|------|
-| 69 | mp4_decode_h264_1280x720_30_pp0_nv12 | H264 720p PP0 NV12 |
-| 70 | mp4_decode_h264_1280x720_30_pp0_p010 | H264 720p PP0 P010 |
-| 71 | mp4_decode_h264_1920x1080_30_pp0_nv21 | H264 1080p PP0 NV21 |
-| 72 | mp4_decode_h264_3840x2160_30_pp0_nv12 | H264 4K PP0 NV12 |
+
+| 序号  | 测试用例名                                 | 描述                  |
+| --- | ------------------------------------- | ------------------- |
+| 69  | mp4_decode_h264_1280x720_30_pp0_nv12  | H264 720p PP0 NV12  |
+| 70  | mp4_decode_h264_1280x720_30_pp0_p010  | H264 720p PP0 P010  |
+| 71  | mp4_decode_h264_1920x1080_30_pp0_nv21 | H264 1080p PP0 NV21 |
+| 72  | mp4_decode_h264_3840x2160_30_pp0_nv12 | H264 4K PP0 NV12    |
+
 
 ```bash
 # H264 720p PP0 NV12
@@ -2207,10 +2259,12 @@ sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
 
 ### 7.12 H264 PP1 格式测试 - Commit 1 新增（2个）
 
-| 序号 | 测试用例名 | 描述 |
-|:----:|-----------|------|
-| 73 | mp4_decode_h264_1280x720_30_pp1_argb8888 | H264 720p PP1 ARGB8888 |
-| 74 | mp4_decode_h264_3840x2160_30_pp1_argb8888 | H264 4K PP1 ARGB8888 |
+
+| 序号  | 测试用例名                                     | 描述                     |
+| --- | ----------------------------------------- | ---------------------- |
+| 73  | mp4_decode_h264_1280x720_30_pp1_argb8888  | H264 720p PP1 ARGB8888 |
+| 74  | mp4_decode_h264_3840x2160_30_pp1_argb8888 | H264 4K PP1 ARGB8888   |
+
 
 ```bash
 # H264 720p PP1 ARGB8888
@@ -2224,10 +2278,12 @@ sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
 
 ### 7.13 H264 Crop 测试 - Commit 1 新增（2个）
 
-| 序号 | 测试用例名 | 描述 |
-|:----:|-----------|------|
-| 75 | mp4_decode_h264_1280x720_30_pp0_crop_1024x576 | H264 720p PP0 裁剪到 1024x576 |
-| 76 | mp4_decode_h264_1920x1080_30_pp0_crop_1600x900 | H264 1080p PP0 裁剪到 1600x900 |
+
+| 序号  | 测试用例名                                          | 描述                          |
+| --- | ---------------------------------------------- | --------------------------- |
+| 75  | mp4_decode_h264_1280x720_30_pp0_crop_1024x576  | H264 720p PP0 裁剪到 1024x576  |
+| 76  | mp4_decode_h264_1920x1080_30_pp0_crop_1600x900 | H264 1080p PP0 裁剪到 1600x900 |
+
 
 ```bash
 # H264 720p PP0 裁剪到 1024x576
@@ -2241,10 +2297,12 @@ sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
 
 ### 7.14 H264 Scale 测试 - Commit 1 新增（2个）
 
-| 序号 | 测试用例名 | 描述 |
-|:----:|-----------|------|
-| 77 | mp4_decode_h264_1280x720_30_pp0_scale_512x288 | H264 720p PP0 缩放到 512x288 |
-| 78 | mp4_decode_h264_1920x1080_30_pp0_scale_800x450 | H264 1080p PP0 缩放到 800x450 |
+
+| 序号  | 测试用例名                                          | 描述                         |
+| --- | ---------------------------------------------- | -------------------------- |
+| 77  | mp4_decode_h264_1280x720_30_pp0_scale_512x288  | H264 720p PP0 缩放到 512x288  |
+| 78  | mp4_decode_h264_1920x1080_30_pp0_scale_800x450 | H264 1080p PP0 缩放到 800x450 |
+
 
 ```bash
 # H264 720p PP0 缩放到 512x288
@@ -2258,11 +2316,13 @@ sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
 
 ### 7.15 H265 PP0 格式测试 - Commit 1 新增（3个）
 
-| 序号 | 测试用例名 | 描述 |
-|:----:|-----------|------|
-| 79 | mp4_decode_h265_1280x720_30_pp0_nv12 | H265 720p PP0 NV12 |
-| 80 | mp4_decode_h265_1920x1080_30_pp0_p010 | H265 1080p PP0 P010 |
-| 81 | mp4_decode_h265_3840x2160_30_pp0_nv12 | H265 4K PP0 NV12 |
+
+| 序号  | 测试用例名                                 | 描述                  |
+| --- | ------------------------------------- | ------------------- |
+| 79  | mp4_decode_h265_1280x720_30_pp0_nv12  | H265 720p PP0 NV12  |
+| 80  | mp4_decode_h265_1920x1080_30_pp0_p010 | H265 1080p PP0 P010 |
+| 81  | mp4_decode_h265_3840x2160_30_pp0_nv12 | H265 4K PP0 NV12    |
+
 
 ```bash
 # H265 720p PP0 NV12
@@ -2280,10 +2340,12 @@ sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
 
 ### 7.16 H265 PP1 格式测试 - Commit 1 新增（2个）
 
-| 序号 | 测试用例名 | 描述 |
-|:----:|-----------|------|
-| 82 | mp4_decode_h265_1280x720_30_pp1_rgb888 | H265 720p PP1 RGB888 |
-| 83 | mp4_decode_h265_1920x1080_30_pp1_argb8888 | H265 1080p PP1 ARGB8888 |
+
+| 序号  | 测试用例名                                     | 描述                      |
+| --- | ----------------------------------------- | ----------------------- |
+| 82  | mp4_decode_h265_1280x720_30_pp1_rgb888    | H265 720p PP1 RGB888    |
+| 83  | mp4_decode_h265_1920x1080_30_pp1_argb8888 | H265 1080p PP1 ARGB8888 |
+
 
 ```bash
 # H265 720p PP1 RGB888
@@ -2297,9 +2359,11 @@ sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
 
 ### 7.17 H265 Crop+Scale 测试 - Commit 1 新增（1个）
 
-| 序号 | 测试用例名 | 描述 |
-|:----:|-----------|------|
-| 84 | mp4_decode_h265_1920x1080_30_pp0_crop_scale | H265 1080p PP0 裁剪 + 缩放 |
+
+| 序号  | 测试用例名                                       | 描述                     |
+| --- | ------------------------------------------- | ---------------------- |
+| 84  | mp4_decode_h265_1920x1080_30_pp0_crop_scale | H265 1080p PP0 裁剪 + 缩放 |
+
 
 ```bash
 # H265 1080p PP0 裁剪 + 缩放
@@ -2309,26 +2373,28 @@ sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
 
 ### 7.18 ZYW 新增测试用例汇总
 
-| 类别 | 测试项数 | Commit |
-|------|:-------:|--------|
-| H264 PP0/PP1 Crop 测试 | 6 | e642762 |
-| H265 PP0/PP1 Crop 测试 | 6 | e642762 |
-| H264 Multi-PP 测试 | 4 | e642762 |
-| H265 Multi-PP 测试 | 4 | e642762 |
-| H264 PP0 YUV400 格式测试 | 5 | e642762 |
-| H264 PP0 YUV420 格式测试 | 10 | e642762 |
-| H264 PP1 RGB 格式测试 | 7 | e642762 |
-| H264 PP1 YUV400 格式测试 | 5 | e642762 |
-| H264 PP1 YUV420 格式测试 | 10 | e642762 |
-| H264 Multi-PP 组合测试 | 11 | e642762 |
-| H264 PP0 格式测试 | 4 | e74e179 |
-| H264 PP1 格式测试 | 2 | e74e179 |
-| H264 Crop 测试 | 2 | e74e179 |
-| H264 Scale 测试 | 2 | e74e179 |
-| H265 PP0 格式测试 | 3 | e74e179 |
-| H265 PP1 格式测试 | 2 | e74e179 |
-| H265 Crop+Scale 测试 | 1 | e74e179 |
-| **合计** | **84** | |
+
+| 类别                   | 测试项数   | Commit  |
+| -------------------- | ------ | ------- |
+| H264 PP0/PP1 Crop 测试 | 6      | e642762 |
+| H265 PP0/PP1 Crop 测试 | 6      | e642762 |
+| H264 Multi-PP 测试     | 4      | e642762 |
+| H265 Multi-PP 测试     | 4      | e642762 |
+| H264 PP0 YUV400 格式测试 | 5      | e642762 |
+| H264 PP0 YUV420 格式测试 | 10     | e642762 |
+| H264 PP1 RGB 格式测试    | 7      | e642762 |
+| H264 PP1 YUV400 格式测试 | 5      | e642762 |
+| H264 PP1 YUV420 格式测试 | 10     | e642762 |
+| H264 Multi-PP 组合测试   | 11     | e642762 |
+| H264 PP0 格式测试        | 4      | e74e179 |
+| H264 PP1 格式测试        | 2      | e74e179 |
+| H264 Crop 测试         | 2      | e74e179 |
+| H264 Scale 测试        | 2      | e74e179 |
+| H265 PP0 格式测试        | 3      | e74e179 |
+| H265 PP1 格式测试        | 2      | e74e179 |
+| H265 Crop+Scale 测试   | 1      | e74e179 |
+| **合计**               | **84** |         |
+
 
 ---
 
