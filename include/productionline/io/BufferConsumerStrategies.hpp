@@ -316,6 +316,9 @@ private:
     /// 优先顺序：getMat() → getAVFrame()+swscale → 原始 YUV 元数据
     cv::Mat bufferToMat(Buffer* buf) const;
 
+    /// 根据 config_.op_type 对 Mat 执行 resize 或 crop 变换
+    cv::Mat applyOpencvTransform(const cv::Mat& src) const;
+
     OpencvType config_;
     std::unique_ptr<productionline::io::BufferComparator> comparator_;
 

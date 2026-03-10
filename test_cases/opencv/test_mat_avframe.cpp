@@ -34,7 +34,7 @@ int main(int argc, char* argv[]) {
     if (video_idx < 0) { fprintf(stderr, "No video stream\n"); return 1; }
 
     AVCodecParameters* par = fmt_ctx->streams[video_idx]->codecpar;
-    const AVCodec* codec = avcodec_find_decoder_by_name("h264_taco");
+    const AVCodec* codec = avcodec_find_decoder_by_name("h264");
     AVCodecContext* codec_ctx = avcodec_alloc_context3(codec);
     avcodec_parameters_to_context(codec_ctx, par);
     avcodec_open2(codec_ctx, codec, nullptr);

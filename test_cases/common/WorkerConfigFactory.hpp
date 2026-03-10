@@ -17,6 +17,8 @@
 
 #include "productionline/worker/WorkerConfig.hpp"
 #include <string>
+#include <sstream>
+#include <vector>
 
 namespace test {
 namespace common {
@@ -217,133 +219,78 @@ public:
         return createH264Decode(path, width, height);
     }
 
-    static WorkerConfig createSoftwareCv(
-        const std::string& path,
-        int width,
-        int height
-    ) {
-        return WorkerConfigBuilder()
-            .setDataSourceConfig(
-                DataSourceConfigBuilder()
-                    .setPath(path)
-                    .setBufferCount(128)
-                    .build()
-            )
-            .setDisplayConfig(
-                DisplayConfigBuilder()
-                    .setDisplayResolution(width, height)
-                    .setBitsPerPixel(32)
-                    .build()
-            )
-            .setDecoderConfig(
-                DecoderConfigBuilder()
-                    .useSoftware()
-                    .build()
-            )
-            .setWorkerType(WorkerType::FFMPEG_DECODE)
-            .build();
-    }
-    
-    static WorkerConfig createHardwareCv(
-        const std::string& path,
-        const std::string& decoder,
-        int width,
-        int height
-    ) {
-        if (decoder == "software" || decoder == "sw") {
-            return createSoftwareDecode(path, width, height);
-        }
-        
-        // 解析解码器名称: codec_taco -> codec
-        std::string codec = decoder;
-        size_t pos = decoder.find("_taco");
-        if (pos != std::string::npos) {
-            codec = decoder.substr(0, pos);
-        }
-        
-        auto taco = TacoConfigBuilder()
-            .setChannels(true, false)
-            .build();
+    // ========================================
+    // OpenCV 操作配置
+    // ========================================
 
-        if (codec == "h264" || codec == "avc") {
-            return WorkerConfigBuilder()
-            .setDataSourceConfig(
-                DataSourceConfigBuilder()
-                    .setPath(path)
-                    .setBufferCount(isRtspUrl(path) ? 8 : 128)
-                    .build()
-            )
-            .setDisplayConfig(
-                DisplayConfigBuilder()
-                    .setDisplayResolution(width, height)
-                    .setBitsPerPixel(32)
-                    .build()
-            )
-            .setDecoderConfig(
-                DecoderConfigBuilder()
-                    .useTaco("h264", taco)
-                    .build()
-            )
-            .setWorkerType(WorkerType::FFMPEG_DECODE)
-            .build();
-        } else if (codec == "h265" || codec == "hevc") {
-            return WorkerConfigBuilder()
-            .setDataSourceConfig(
-                DataSourceConfigBuilder()
-                    .setPath(path)
-                    .setBufferCount(isRtspUrl(path) ? 8 : 128)
-                    .build()
-            )
-            .setDisplayConfig(
-                DisplayConfigBuilder()
-                    .setDisplayResolution(width, height)
-                    .setBitsPerPixel(32)
-                    .build()
-            )
-            .setDecoderConfig(
-                DecoderConfigBuilder()
-                    .useTaco("hevc", taco)
-                    .build()
-            )
-            .setWorkerType(WorkerType::FFMPEG_DECODE)
-            .build();
-        } else if (codec == "mjpeg" || codec == "jpeg") {
-            return WorkerConfigBuilder()
-            .setDataSourceConfig(
-                DataSourceConfigBuilder()
-                    .setPath(path)
-                    .setBufferCount(isRtspUrl(path) ? 8 : 128)
-                    .build()
-            )
-            .setDisplayConfig(
-                DisplayConfigBuilder()
-                    .setDisplayResolution(width, height)
-                    .setBitsPerPixel(32)
-                    .build()
-            )
-            .setDecoderConfig(
-                DecoderConfigBuilder()
-                    .useTaco("mjpeg", taco)
-                    .build()
-            )
-            .setWorkerType(WorkerType::FFMPEG_DECODE)
-            .build();
-        }
-    }
-    
-    // ========================================
-    // PP（后处理）配置
-    // ========================================
-    
     /**
-     * @brief 创建 PP0（通道0）YUV 格式配置
-     * 
-     * @param path 视频路径
-     * @param format YUV 输出格式
-     * @param width 输出宽度
-     * @param height 输出高度
-     * @param color_std 颜色标准
+     * @brief 从参数字符串构建 WorkerConfig（含 OpencvType 配置）
+     *
+     * 参数字符串格式（以 '+' 分隔）：
+     *   "<opencv_op>+<output_w>+<output_h>"
+     *   - opencv_op : "resize" | "crop"
+     *   - output_w  : 输出宽度（resize 的目标宽 / crop 的裁剪宽）
+     *   - output_h  : 输出高度（resize 的目标高 / crop 的裁剪高）
+     *
+     * @param path        视频文件路径或 RTSP URL
+     * @param params_str  参数字符串，例如 "resize+1280+720" 或 "crop+960+540"
+     * @param use_hardware 是否使用硬件解码（默认 true，使用 h264_taco）
+     * @return 完整的 WorkerConfig，consumer_type.opencv 已按参数填好
      */
+    static WorkerConfig buildOpencvConfig(
+        const std::string& path,
+        const std::string& params_str,
+        bool use_hardware = true
+    ) {
+        using OpType = WorkerConfig::ConsumerTypeConfig::OpencvType::OpType;
+
+        // 按 '+' 分割参数字符串
+        std::vector<std::string> fields;
+        std::istringstream ss(params_str);
+        std::string token;
+        while (std::getline(ss, token, '+')) {
+            fields.push_back(token);
+        }
+
+        OpType op    = OpType::NONE;
+        int output_w = 0;
+        int output_h = 0;
+
+        if (!fields.empty()) {
+            if      (fields[0] == "resize") op = OpType::RESIZE;
+            else if (fields[0] == "crop")   op = OpType::CROP;
+        }
+        if (fields.size() > 1) output_w = std::stoi(fields[1]);
+        if (fields.size() > 2) output_h = std::stoi(fields[2]);
+
+        const std::string decoder = use_hardware ? "h264" : "software";
+        auto config = createDecode(path, decoder);
+        config.consumer_type.compare.enable_psnr = true;
+        config.consumer_type.compare.min_psnr = 1.0;
+        config.consumer_type.compare.enable_ssim = true;
+        config.consumer_type.compare.min_ssim = 1.0;
+
+        auto& opencv = config.consumer_type.opencv;
+        if (op != OpType::NONE) {
+            opencv.enable  = true;
+            opencv.op_type = op;
+            if (op == OpType::RESIZE) {
+                opencv.resize.dst_width     = output_w;
+                opencv.resize.dst_height    = output_h;
+                opencv.resize.fx = 0.0;
+                opencv.resize.fy = 0.0;
+                opencv.resize.interpolation = 1;
+            } else if (op == OpType::CROP) {
+                opencv.crop.x      = 0;
+                opencv.crop.y      = 0;
+                opencv.crop.width  = output_w;
+                opencv.crop.height = output_h;
+            }
+        }
+
+        return config;
+    }
+
     static WorkerConfig createPP0YuvConfig(
         const std::string& path,
         OutputFormat format,

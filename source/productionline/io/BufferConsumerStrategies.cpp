@@ -696,6 +696,42 @@ cv::Mat OpencvConsumer::bufferToMat(Buffer* buf) const {
     return cv::Mat();
 }
 
+cv::Mat OpencvConsumer::applyOpencvTransform(const cv::Mat& src) const {
+    if (src.empty()) return src;
+
+    switch (config_.op_type) {
+        case OpencvType::OpType::RESIZE: {
+            const auto& r = config_.resize;
+            if (r.dst_width <= 0 && r.dst_height <= 0 && r.fx <= 0.0 && r.fy <= 0.0) {
+                LOG4CPLUS_WARN(log4cplus::Logger::getRoot(),
+                    "OpencvConsumer::applyOpencvTransform: RESIZE params invalid, skip");
+                return src;
+            }
+            cv::Mat dst;
+            cv::resize(src, dst,
+                       cv::Size(r.dst_width, r.dst_height),
+                       r.fx, r.fy,
+                       r.interpolation);
+            return dst;
+        }
+        case OpencvType::OpType::CROP: {
+            const auto& c = config_.crop;
+            if (c.width <= 0 || c.height <= 0 ||
+                c.x < 0 || c.y < 0 ||
+                c.x + c.width > src.cols || c.y + c.height > src.rows) {
+                LOG4CPLUS_WARN_FMT(log4cplus::Logger::getRoot(),
+                    "OpencvConsumer::applyOpencvTransform: CROP ROI(%d,%d,%d,%d) "
+                    "out of bounds for Mat(%dx%d), skip",
+                    c.x, c.y, c.width, c.height, src.cols, src.rows);
+                return src;
+            }
+            return src(cv::Rect(c.x, c.y, c.width, c.height)).clone();
+        }
+        default:
+            return src;
+    }
+}
+
 bool OpencvConsumer::consume(const std::vector<Buffer*>& buffers, int frame_index) {
     if (!initialized_) {
         if (!initialize(buffers)) return false;
@@ -708,9 +744,19 @@ bool OpencvConsumer::consume(const std::vector<Buffer*>& buffers, int frame_inde
         cv::Mat mat0 = bufferToMat(buffers[0]);
         cv::Mat mat1 = bufferToMat(buffers[1]);
 
+        // 对 SW 参考帧（mat1）施加 opencv 变换，以便与 HW 输出（mat0）比较
+        if (config_.op_type != OpencvType::OpType::NONE) {
+            mat0 = applyOpencvTransform(mat0);
+            mat1 = applyOpencvTransform(mat1);
+        }
+
         // 将 Mat 临时挂载到 Buffer，以便 BufferComparator 走 is_mat 路径
         buffers[0]->setMat(&mat0);
         buffers[1]->setMat(&mat1);
+
+        cv::imwrite("mat0_output_"+std::to_string(frame_index)+".jpg",mat0);
+        cv::imwrite("mat1_output_"+std::to_string(frame_index)+".jpg",mat1);
+        std::cout << "saved picture" << std::endl;
 
         auto result = comparator_->compare(buffers[0], buffers[1]);
 
@@ -733,9 +779,20 @@ bool OpencvConsumer::consume(const std::vector<Buffer*>& buffers, int frame_inde
                 result.passed ? "PASS" : "FAIL");
         }
     } else if (!buffers.empty() && buffers[0]) {
-        // ── 单 Buffer 模式：仅做 Mat 转换，确认数据可访问 ──
+        // ── 单 Buffer 模式：做 Mat 转换，并按 op_type 执行 resize/crop ──
         cv::Mat mat = bufferToMat(buffers[0]);
-        if (config_.verbose) {
+        if (config_.op_type != OpencvType::OpType::NONE) {
+            cv::Mat transformed = applyOpencvTransform(mat);
+            if (config_.verbose) {
+                const char* op_name = (config_.op_type == OpencvType::OpType::RESIZE)
+                                      ? "RESIZE" : "CROP";
+                LOG4CPLUS_INFO_FMT(log4cplus::Logger::getRoot(),
+                    "OpencvConsumer [frame %d] %s: %dx%d -> %dx%d",
+                    frame_index, op_name,
+                    mat.cols, mat.rows,
+                    transformed.cols, transformed.rows);
+            }
+        } else if (config_.verbose) {
             LOG4CPLUS_INFO_FMT(log4cplus::Logger::getRoot(),
                 "OpencvConsumer [frame %d] Mat size=%dx%d",
                 frame_index, mat.cols, mat.rows);

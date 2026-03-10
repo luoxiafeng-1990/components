@@ -604,7 +604,7 @@ struct WorkerConfig {
 
         // ========================================
         // OpenCV 消费类型（CONSUME_OPENCV）
-        // Buffer → cv::Mat 转换后使用 BufferComparator 计算 PSNR/SSIM
+        // Buffer → cv::Mat 转换后执行指定操作，再计算 PSNR/SSIM
         // ========================================
         struct OpencvType {
             bool enable = false;          ///< 是否启用 OpenCV 消费
@@ -613,6 +613,47 @@ struct WorkerConfig {
             double min_psnr = 38.0;       ///< PSNR 通过阈值（dB，>= 此值为通过）
             double min_ssim = 0.95;       ///< SSIM 通过阈值（>= 此值为通过）
             bool verbose = false;         ///< 是否输出每帧详细日志
+
+            /// 操作类型：决定对 SW 参考帧施加哪种 OpenCV 变换
+            enum class OpType {
+                NONE,    ///< 无操作，直接比较原始解码帧
+                RESIZE,  ///< cv::resize 缩放
+                CROP,    ///< ROI 裁剪（src(cv::Rect(...))）
+            };
+            OpType op_type = OpType::NONE;
+
+            // ----------------------------------------
+            // cv::resize 参数
+            //   cv::resize(src, dst, Size(dst_width, dst_height), fx, fy, interpolation)
+            // 注：dst_width/dst_height 与 fx/fy 二选一，另一组置 0
+            // interpolation 取值：
+            //   0 = cv::INTER_NEAREST
+            //   1 = cv::INTER_LINEAR  （默认）
+            //   2 = cv::INTER_CUBIC
+            //   3 = cv::INTER_AREA
+            //   4 = cv::INTER_LANCZOS4
+            // ----------------------------------------
+            struct Resize {
+                int    dst_width;    ///< 目标宽度（像素，0 = 由 fx 决定）
+                int    dst_height;    ///< 目标高度（像素，0 = 由 fy 决定）
+                double fx;  ///< 水平缩放因子（0 = 由 dst_width 决定）
+                double fy;  ///< 垂直缩放因子（0 = 由 dst_height 决定）
+                int    interpolation;    ///< 插值方法（默认 1 = INTER_LINEAR）
+                Resize() = default;
+            } resize;
+
+            // ----------------------------------------
+            // ROI 裁剪参数
+            //   cropped = src(cv::Rect(x, y, width, height))
+            // ----------------------------------------
+            struct Crop {
+                int x;  ///< 裁剪起始 X 坐标（像素）
+                int y;  ///< 裁剪起始 Y 坐标（像素）
+                int width;  ///< 裁剪区域宽度（像素）
+                int height;  ///< 裁剪区域高度（像素）
+                Crop() = default;
+            } crop;
+
             OpencvType() = default;
         } opencv;
 

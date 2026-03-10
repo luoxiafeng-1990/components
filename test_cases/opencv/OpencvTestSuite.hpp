@@ -17,23 +17,12 @@ namespace opencv {
 using TestResult = consumer::ConsumeResult;
 
 struct OpencvTestParams {
-    std::string codec;           ///< 编解码器 (h264, h265, mjpeg)
-    int width;                   ///< 分辨率宽度
-    int height;                  ///< 分辨率高度
-    double fps;                  ///< 目标帧率
-    bool use_hardware;           ///< 是否使用硬件解码（默认 true）
-    std::string predefined_name; ///< 匹配的预定义测试名称（空表示未使用预定义测试）
-    
-    OpencvTestParams(
-        const std::string& c = "h264",
-        int w = 1920,
-        int h = 1080,
-        double f = 30.0,
-        bool hw = true
-    ) : codec(c), width(w), height(h), fps(f), use_hardware(hw) {}
-    
-    /// 是否使用了预定义测试
-    bool isPredefined() const { return !predefined_name.empty(); }
+    using OpType = WorkerConfig::ConsumerTypeConfig::OpencvType::OpType;
+    OpType opencv_op  = OpType::NONE;  ///< 操作类型（NONE/RESIZE/CROP）
+    bool   use_hardware = true;        ///< 是否使用硬件解码
+    std::string params_str;            ///< 编码参数，格式: "<op>+<output_w>+<output_h>"
+
+    bool hasOpencvOp() const { return opencv_op != OpType::NONE; }
 };
 
 class OpencvTestSuite : public common::ITestModule {
