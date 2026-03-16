@@ -616,13 +616,24 @@ struct WorkerConfig {
 
             /// 操作类型：决定对 SW 参考帧施加哪种 OpenCV 变换
             enum class OpType {
-                NONE,        ///< 无操作，直接比较原始解码帧
-                RESIZE,      ///< cv::resize 缩放
-                CROP,        ///< ROI 裁剪（src(cv::Rect(...))）
-                ERODE,       ///< cv::erode 腐蚀
-                DILATE,      ///< cv::dilate 膨胀
-                MORPH_OPEN,  ///< 开运算：先腐蚀后膨胀
-                MORPH_CLOSE, ///< 闭运算：先膨胀后腐蚀
+                NONE,         ///< 无操作，直接比较原始解码帧
+                RESIZE,       ///< cv::resize 缩放
+                CROP,         ///< ROI 裁剪（src(cv::Rect(...))）
+                ERODE,        ///< cv::erode 腐蚀
+                DILATE,       ///< cv::dilate 膨胀
+                MORPH_OPEN,   ///< 开运算：先腐蚀后膨胀
+                MORPH_CLOSE,  ///< 闭运算：先膨胀后腐蚀
+                SOBEL,        ///< cv::Sobel 边缘检测
+                CANNY,        ///< cv::Canny 边缘检测
+                LAPLACIAN,    ///< cv::Laplacian 拉普拉斯边缘
+                TRANSLATE,    ///< cv::warpAffine 平移
+                ROTATE,       ///< cv::warpAffine 旋转
+                PERSPECTIVE,  ///< cv::warpPerspective 透视变换
+                DRAW_LINE,    ///< cv::line 画线
+                DRAW_RECT,    ///< cv::rectangle 画矩形
+                PUT_TEXT,     ///< cv::putText 绘文字
+                GAUSSIAN_BLUR,///< cv::GaussianBlur 高斯模糊
+                THRESHOLD,    ///< cv::threshold 二值化
             };
             OpType op_type = OpType::NONE;
 
@@ -674,6 +685,124 @@ struct WorkerConfig {
                 int iterations   = 1;  ///< 迭代次数
                 Morph() = default;
             } morph;
+
+            // ----------------------------------------
+            // cv::Sobel 边缘检测参数
+            //   cv::Sobel(src, dst, CV_8U, dx, dy, ksize, scale, delta)
+            // ----------------------------------------
+            struct Sobel {
+                int    dx    = 1;   ///< X 方向导数阶数
+                int    dy    = 0;   ///< Y 方向导数阶数
+                int    ksize = 3;   ///< Sobel 核大小（1/3/5/7）
+                double scale = 1.0; ///< 缩放因子
+                double delta = 0.0; ///< 加到结果的偏移值
+                Sobel() = default;
+            } sobel;
+
+            // ----------------------------------------
+            // cv::Canny 边缘检测参数
+            // ----------------------------------------
+            struct Canny {
+                double threshold1    = 100.0; ///< 低阈值
+                double threshold2    = 200.0; ///< 高阈值
+                int    aperture_size = 3;     ///< Sobel 核大小（3/5/7）
+                Canny() = default;
+            } canny;
+
+            // ----------------------------------------
+            // cv::Laplacian 拉普拉斯边缘参数
+            // ----------------------------------------
+            struct Laplacian {
+                int    ksize = 1;   ///< 核大小（正奇数）
+                double scale = 1.0;
+                double delta = 0.0;
+                Laplacian() = default;
+            } laplacian;
+
+            // ----------------------------------------
+            // cv::warpAffine 平移参数
+            //   M = [1 0 tx; 0 1 ty]
+            // ----------------------------------------
+            struct Translate {
+                double tx = 0.0; ///< X 方向平移量（像素）
+                double ty = 0.0; ///< Y 方向平移量（像素）
+                Translate() = default;
+            } translate;
+
+            // ----------------------------------------
+            // cv::warpAffine 旋转参数
+            //   以图像中心旋转 angle 度
+            // ----------------------------------------
+            struct Rotate {
+                double angle = 0.0; ///< 旋转角度（度，逆时针为正）
+                double scale = 1.0; ///< 缩放因子
+                Rotate() = default;
+            } rotate;
+
+            // ----------------------------------------
+            // cv::warpPerspective 透视变换参数
+            //   使用简单的四角偏移生成透视矩阵
+            // ----------------------------------------
+            struct Perspective {
+                int offset = 50; ///< 右上角、左上角的透视偏移量（像素）
+                Perspective() = default;
+            } perspective;
+
+            // ----------------------------------------
+            // cv::line 画线参数
+            // ----------------------------------------
+            struct DrawLine {
+                int x1        = 0;   ///< 起点 X
+                int y1        = 0;   ///< 起点 Y
+                int x2        = 100; ///< 终点 X
+                int y2        = 100; ///< 终点 Y
+                int thickness = 2;   ///< 线宽（像素）
+                DrawLine() = default;
+            } draw_line;
+
+            // ----------------------------------------
+            // cv::rectangle 画矩形参数
+            // ----------------------------------------
+            struct DrawRect {
+                int x         = 100; ///< 左上角 X
+                int y         = 100; ///< 左上角 Y
+                int width     = 200; ///< 宽度
+                int height    = 200; ///< 高度
+                int thickness = 2;   ///< 线宽（-1=填充）
+                DrawRect() = default;
+            } draw_rect;
+
+            // ----------------------------------------
+            // cv::putText 绘文字参数
+            // ----------------------------------------
+            struct PutText {
+                int    x          = 10;  ///< 文字起始 X
+                int    y          = 50;  ///< 文字起始 Y（基线）
+                double font_scale = 1.0; ///< 字体缩放
+                int    thickness  = 2;   ///< 字体线宽
+                PutText() = default;
+            } put_text;
+
+            // ----------------------------------------
+            // cv::GaussianBlur 高斯模糊参数
+            // ----------------------------------------
+            struct GaussianBlur {
+                int    ksize   = 5;   ///< 核大小（正奇数）
+                double sigma_x = 0.0; ///< X 方向标准差（0=由 ksize 自动计算）
+                GaussianBlur() = default;
+            } gaussian_blur;
+
+            // ----------------------------------------
+            // cv::threshold 二值化参数
+            //   type 取值：0=THRESH_BINARY, 1=THRESH_BINARY_INV
+            //              2=THRESH_TRUNC, 3=THRESH_TOZERO, 4=THRESH_TOZERO_INV
+            // ----------------------------------------
+            struct Threshold {
+                double thresh = 128.0; ///< 阈值
+                double maxval = 255.0; ///< 最大值
+                int    type   = 0;     ///< 阈值类型（默认 THRESH_BINARY）
+                Threshold() = default;
+            } threshold;
 
             OpencvType() = default;
         } opencv;

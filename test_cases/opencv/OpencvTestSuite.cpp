@@ -75,6 +75,40 @@ const std::map<std::string, OpencvTestParams>& OpencvTestSuite::getPredefinedTes
         add("cv_close_h264_1080p_k3_30",     OpType::MORPH_CLOSE, true,  "close_3_1");
         add("cv_close_h264_1080p_k5_30",     OpType::MORPH_CLOSE, true,  "close_5_1");
 
+        // ---- OpenCV Sobel 边缘检测 ----
+        add("cv_sobel_h264_1080p_dx_30",     OpType::SOBEL,        true, "sobel_1_0_3");
+        add("cv_sobel_h264_1080p_dy_30",     OpType::SOBEL,        true, "sobel_0_1_3");
+
+        // ---- OpenCV Canny 边缘检测 ----
+        add("cv_canny_h264_1080p_30",        OpType::CANNY,        true, "canny_100_200");
+
+        // ---- OpenCV Laplacian 拉普拉斯边缘 ----
+        add("cv_laplacian_h264_1080p_30",    OpType::LAPLACIAN,    true, "laplacian_1");
+
+        // ---- WarpAffine 平移 ----
+        add("cv_translate_h264_1080p_30",    OpType::TRANSLATE,    true, "translate_100_50");
+
+        // ---- WarpAffine 旋转 ----
+        add("cv_rotate_h264_1080p_30",       OpType::ROTATE,       true, "rotate_45_1");
+
+        // ---- WarpPerspective 透视变换 ----
+        add("cv_perspective_h264_1080p_30",  OpType::PERSPECTIVE,  true, "perspective_50");
+
+        // ---- cv::line 画线 ----
+        add("cv_line_h264_1080p_30",         OpType::DRAW_LINE,    true, "line_0_0_1919_1079");
+
+        // ---- cv::rectangle 画矩形 ----
+        add("cv_rectangle_h264_1080p_30",    OpType::DRAW_RECT,    true, "rectangle_100_100_300_300");
+
+        // ---- cv::putText 绘文字 ----
+        add("cv_puttext_h264_1080p_30",      OpType::PUT_TEXT,     true, "puttext_50_100");
+
+        // ---- cv::GaussianBlur 高斯模糊 ----
+        add("cv_blur_h264_1080p_k5_30",      OpType::GAUSSIAN_BLUR,true, "blur_5_0");
+
+        // ---- cv::threshold 二值化 ----
+        add("cv_threshold_h264_1080p_30",    OpType::THRESHOLD,    true, "threshold_128_255");
+
         return m;
     }();
     return tests;
@@ -208,9 +242,33 @@ bool OpencvTestSuite::parseArgs(int argc, char* argv[], WorkerConfig& config, Op
         params.opencv_op = OpencvTestParams::OpType::MORPH_OPEN;
     } else if (case_str == "close") {
         params.opencv_op = OpencvTestParams::OpType::MORPH_CLOSE;
+    } else if (case_str == "sobel") {
+        params.opencv_op = OpencvTestParams::OpType::SOBEL;
+    } else if (case_str == "canny") {
+        params.opencv_op = OpencvTestParams::OpType::CANNY;
+    } else if (case_str == "laplacian") {
+        params.opencv_op = OpencvTestParams::OpType::LAPLACIAN;
+    } else if (case_str == "translate") {
+        params.opencv_op = OpencvTestParams::OpType::TRANSLATE;
+    } else if (case_str == "rotate") {
+        params.opencv_op = OpencvTestParams::OpType::ROTATE;
+    } else if (case_str == "perspective") {
+        params.opencv_op = OpencvTestParams::OpType::PERSPECTIVE;
+    } else if (case_str == "line") {
+        params.opencv_op = OpencvTestParams::OpType::DRAW_LINE;
+    } else if (case_str == "rectangle") {
+        params.opencv_op = OpencvTestParams::OpType::DRAW_RECT;
+    } else if (case_str == "puttext") {
+        params.opencv_op = OpencvTestParams::OpType::PUT_TEXT;
+    } else if (case_str == "blur") {
+        params.opencv_op = OpencvTestParams::OpType::GAUSSIAN_BLUR;
+    } else if (case_str == "threshold") {
+        params.opencv_op = OpencvTestParams::OpType::THRESHOLD;
     } else {
-        std::cerr << "Error: --case must be 'resize', 'crop', 'erode', 'dilate', 'open', or 'close', got '"
-                  << case_str << "'\n" << std::endl;
+        std::cerr << "Error: unknown --case '" << case_str
+                  << "'. Valid: resize/crop/erode/dilate/open/close/"
+                     "sobel/canny/laplacian/translate/rotate/perspective/"
+                     "line/rectangle/puttext/blur/threshold\n" << std::endl;
         return false;
     }
 

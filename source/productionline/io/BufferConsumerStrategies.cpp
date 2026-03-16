@@ -807,6 +807,112 @@ cv::Mat OpencvConsumer::applyOpencvTransform(const cv::Mat& src) const {
                       m.iterations);
             return dst;
         }
+        case OpencvType::OpType::SOBEL: {
+            const auto& s = config_.sobel;
+            int ksize = (s.ksize % 2 == 0) ? s.ksize + 1 : s.ksize;
+            cv::Mat gray, dst;
+            if (src.channels() != 1) cv::cvtColor(src, gray, cv::COLOR_BGR2GRAY);
+            else gray = src;
+            cv::Sobel(gray, dst, CV_8U, s.dx, s.dy, ksize, s.scale, s.delta);
+            return dst;
+        }
+        case OpencvType::OpType::CANNY: {
+            const auto& c = config_.canny;
+            cv::Mat gray, dst;
+            if (src.channels() != 1) cv::cvtColor(src, gray, cv::COLOR_BGR2GRAY);
+            else gray = src;
+            cv::Canny(gray, dst, c.threshold1, c.threshold2, c.aperture_size);
+            return dst;
+        }
+        case OpencvType::OpType::LAPLACIAN: {
+            const auto& l = config_.laplacian;
+            int ksize = (l.ksize % 2 == 0) ? l.ksize + 1 : l.ksize;
+            cv::Mat gray, dst;
+            if (src.channels() != 1) cv::cvtColor(src, gray, cv::COLOR_BGR2GRAY);
+            else gray = src;
+            cv::Laplacian(gray, dst, CV_8U, ksize, l.scale, l.delta);
+            return dst;
+        }
+        case OpencvType::OpType::TRANSLATE: {
+            const auto& t = config_.translate;
+            cv::Mat M = (cv::Mat_<double>(2, 3) << 1, 0, t.tx, 0, 1, t.ty);
+            cv::Mat dst;
+            cv::warpAffine(src, dst, M, src.size());
+            return dst;
+        }
+        case OpencvType::OpType::ROTATE: {
+            const auto& r = config_.rotate;
+            cv::Point2f center(src.cols / 2.0f, src.rows / 2.0f);
+            cv::Mat M = cv::getRotationMatrix2D(center, r.angle, r.scale);
+            cv::Mat dst;
+            cv::warpAffine(src, dst, M, src.size());
+            return dst;
+        }
+        case OpencvType::OpType::PERSPECTIVE: {
+            const auto& p = config_.perspective;
+            int off = p.offset;
+            cv::Point2f src_pts[4] = {
+                {0.f, 0.f},
+                {(float)src.cols, 0.f},
+                {(float)src.cols, (float)src.rows},
+                {0.f, (float)src.rows}
+            };
+            cv::Point2f dst_pts[4] = {
+                {(float)off,              (float)off},
+                {(float)(src.cols - off), 0.f},
+                {(float)src.cols,         (float)src.rows},
+                {0.f,                     (float)src.rows}
+            };
+            cv::Mat M = cv::getPerspectiveTransform(src_pts, dst_pts);
+            cv::Mat dst;
+            cv::warpPerspective(src, dst, M, src.size());
+            return dst;
+        }
+        case OpencvType::OpType::DRAW_LINE: {
+            const auto& l = config_.draw_line;
+            cv::Mat dst = src.clone();
+            cv::line(dst,
+                     cv::Point(l.x1, l.y1),
+                     cv::Point(l.x2, l.y2),
+                     cv::Scalar(0, 255, 0),
+                     l.thickness);
+            return dst;
+        }
+        case OpencvType::OpType::DRAW_RECT: {
+            const auto& r = config_.draw_rect;
+            cv::Mat dst = src.clone();
+            cv::rectangle(dst,
+                          cv::Rect(r.x, r.y, r.width, r.height),
+                          cv::Scalar(0, 0, 255),
+                          r.thickness);
+            return dst;
+        }
+        case OpencvType::OpType::PUT_TEXT: {
+            const auto& t = config_.put_text;
+            cv::Mat dst = src.clone();
+            cv::putText(dst, "Hello OpenCV",
+                        cv::Point(t.x, t.y),
+                        cv::FONT_HERSHEY_SIMPLEX,
+                        t.font_scale,
+                        cv::Scalar(255, 255, 255),
+                        t.thickness);
+            return dst;
+        }
+        case OpencvType::OpType::GAUSSIAN_BLUR: {
+            const auto& g = config_.gaussian_blur;
+            int k = (g.ksize % 2 == 0) ? g.ksize + 1 : g.ksize;
+            cv::Mat dst;
+            cv::GaussianBlur(src, dst, cv::Size(k, k), g.sigma_x, g.sigma_x);
+            return dst;
+        }
+        case OpencvType::OpType::THRESHOLD: {
+            const auto& t = config_.threshold;
+            cv::Mat gray, dst;
+            if (src.channels() != 1) cv::cvtColor(src, gray, cv::COLOR_BGR2GRAY);
+            else gray = src;
+            cv::threshold(gray, dst, t.thresh, t.maxval, t.type);
+            return dst;
+        }
         default:
             return src;
     }

@@ -226,14 +226,25 @@ public:
     /**
      * @brief 从参数字符串构建 WorkerConfig（含 OpencvType 配置）
      *
-     * 参数字符串格式（以 '+' 分隔）：
-     *   "<opencv_op>+<param1>+<param2>"
-     *   - opencv_op : "resize" | "crop" | "erode" | "dilate" | "open" | "close"
-     *   - resize/crop: param1=宽, param2=高
-     *   - erode/dilate/open/close: param1=kernel_size（默认3）, param2=iterations（默认1）
+     * 参数字符串格式（以 '_' 分隔）：
+     *   "<opencv_op>_<param1>_<param2>..."
+     *   - resize   : param1=dst_width, param2=dst_height
+     *   - crop     : param1=width, param2=height
+     *   - erode/dilate/open/close : param1=kernel_size, param2=iterations
+     *   - sobel    : param1=dx, param2=dy, param3=ksize
+     *   - canny    : param1=threshold1, param2=threshold2
+     *   - laplacian: param1=ksize
+     *   - translate: param1=tx, param2=ty
+     *   - rotate   : param1=angle, param2=scale
+     *   - perspective: param1=offset
+     *   - line     : param1=x1, param2=y1, param3=x2, param4=y2
+     *   - rectangle: param1=x, param2=y, param3=width, param4=height
+     *   - puttext  : param1=x, param2=y
+     *   - blur     : param1=ksize, param2=sigma_x
+     *   - threshold: param1=thresh, param2=maxval
      *
      * @param path        视频文件路径或 RTSP URL
-     * @param params_str  参数字符串，例如 "resize+1280+720" 或 "crop+960+540"
+     * @param params_str  参数字符串，例如 "resize_1280_720" 或 "canny_100_200"
      * @param use_hardware 是否使用硬件解码（默认 true，使用 h264_taco）
      * @return 完整的 WorkerConfig，consumer_type.opencv 已按参数填好
      */
@@ -244,28 +255,43 @@ public:
     ) {
         using OpType = WorkerConfig::ConsumerTypeConfig::OpencvType::OpType;
 
-        // 按 '+' 分割参数字符串
+        // 按 '_' 分割参数字符串
         std::vector<std::string> fields;
         std::istringstream ss(params_str);
         std::string token;
-        while (std::getline(ss, token, '+')) {
+        while (std::getline(ss, token, '_')) {
             fields.push_back(token);
         }
 
-        OpType op    = OpType::NONE;
-        int output_w = 0;
-        int output_h = 0;
+        OpType op = OpType::NONE;
 
         if (!fields.empty()) {
-            if      (fields[0] == "resize") op = OpType::RESIZE;
-            else if (fields[0] == "crop")   op = OpType::CROP;
-            else if (fields[0] == "erode")  op = OpType::ERODE;
-            else if (fields[0] == "dilate") op = OpType::DILATE;
-            else if (fields[0] == "open")   op = OpType::MORPH_OPEN;
-            else if (fields[0] == "close")  op = OpType::MORPH_CLOSE;
+            if      (fields[0] == "resize")      op = OpType::RESIZE;
+            else if (fields[0] == "crop")        op = OpType::CROP;
+            else if (fields[0] == "erode")       op = OpType::ERODE;
+            else if (fields[0] == "dilate")      op = OpType::DILATE;
+            else if (fields[0] == "open")        op = OpType::MORPH_OPEN;
+            else if (fields[0] == "close")       op = OpType::MORPH_CLOSE;
+            else if (fields[0] == "sobel")       op = OpType::SOBEL;
+            else if (fields[0] == "canny")       op = OpType::CANNY;
+            else if (fields[0] == "laplacian")   op = OpType::LAPLACIAN;
+            else if (fields[0] == "translate")   op = OpType::TRANSLATE;
+            else if (fields[0] == "rotate")      op = OpType::ROTATE;
+            else if (fields[0] == "perspective") op = OpType::PERSPECTIVE;
+            else if (fields[0] == "line")        op = OpType::DRAW_LINE;
+            else if (fields[0] == "rectangle")   op = OpType::DRAW_RECT;
+            else if (fields[0] == "puttext")     op = OpType::PUT_TEXT;
+            else if (fields[0] == "blur")        op = OpType::GAUSSIAN_BLUR;
+            else if (fields[0] == "threshold")   op = OpType::THRESHOLD;
         }
-        if (fields.size() > 1) output_w = std::stoi(fields[1]);
-        if (fields.size() > 2) output_h = std::stoi(fields[2]);
+
+        // 辅助函数：安全读取第 idx 个字段
+        auto getI = [&](size_t idx, int def) -> int {
+            return (idx < fields.size()) ? std::stoi(fields[idx]) : def;
+        };
+        auto getD = [&](size_t idx, double def) -> double {
+            return (idx < fields.size()) ? std::stod(fields[idx]) : def;
+        };
 
         const std::string decoder = use_hardware ? "h264" : "software";
         auto config = createDecode(path, decoder);
@@ -279,21 +305,56 @@ public:
             opencv.enable  = true;
             opencv.op_type = op;
             if (op == OpType::RESIZE) {
-                opencv.resize.dst_width     = output_w;
-                opencv.resize.dst_height    = output_h;
-                opencv.resize.fx = 0.0;
-                opencv.resize.fy = 0.0;
+                opencv.resize.dst_width     = getI(1, 0);
+                opencv.resize.dst_height    = getI(2, 0);
+                opencv.resize.fx            = 0.0;
+                opencv.resize.fy            = 0.0;
                 opencv.resize.interpolation = 1;
             } else if (op == OpType::CROP) {
                 opencv.crop.x      = 0;
                 opencv.crop.y      = 0;
-                opencv.crop.width  = output_w;
-                opencv.crop.height = output_h;
+                opencv.crop.width  = getI(1, 0);
+                opencv.crop.height = getI(2, 0);
             } else if (op == OpType::ERODE  || op == OpType::DILATE ||
                        op == OpType::MORPH_OPEN || op == OpType::MORPH_CLOSE) {
-                // param1=kernel_size（fields[1]），param2=iterations（fields[2]）
-                opencv.morph.kernel_size = (output_w > 0) ? output_w : 3;
-                opencv.morph.iterations  = (output_h > 0) ? output_h : 1;
+                opencv.morph.kernel_size = getI(1, 3);
+                opencv.morph.iterations  = getI(2, 1);
+            } else if (op == OpType::SOBEL) {
+                opencv.sobel.dx    = getI(1, 1);
+                opencv.sobel.dy    = getI(2, 0);
+                opencv.sobel.ksize = getI(3, 3);
+            } else if (op == OpType::CANNY) {
+                opencv.canny.threshold1 = getD(1, 100.0);
+                opencv.canny.threshold2 = getD(2, 200.0);
+            } else if (op == OpType::LAPLACIAN) {
+                opencv.laplacian.ksize = getI(1, 1);
+            } else if (op == OpType::TRANSLATE) {
+                opencv.translate.tx = getD(1, 0.0);
+                opencv.translate.ty = getD(2, 0.0);
+            } else if (op == OpType::ROTATE) {
+                opencv.rotate.angle = getD(1, 0.0);
+                opencv.rotate.scale = getD(2, 1.0);
+            } else if (op == OpType::PERSPECTIVE) {
+                opencv.perspective.offset = getI(1, 50);
+            } else if (op == OpType::DRAW_LINE) {
+                opencv.draw_line.x1 = getI(1, 0);
+                opencv.draw_line.y1 = getI(2, 0);
+                opencv.draw_line.x2 = getI(3, 100);
+                opencv.draw_line.y2 = getI(4, 100);
+            } else if (op == OpType::DRAW_RECT) {
+                opencv.draw_rect.x      = getI(1, 100);
+                opencv.draw_rect.y      = getI(2, 100);
+                opencv.draw_rect.width  = getI(3, 200);
+                opencv.draw_rect.height = getI(4, 200);
+            } else if (op == OpType::PUT_TEXT) {
+                opencv.put_text.x = getI(1, 10);
+                opencv.put_text.y = getI(2, 50);
+            } else if (op == OpType::GAUSSIAN_BLUR) {
+                opencv.gaussian_blur.ksize   = getI(1, 5);
+                opencv.gaussian_blur.sigma_x = getD(2, 0.0);
+            } else if (op == OpType::THRESHOLD) {
+                opencv.threshold.thresh = getD(1, 128.0);
+                opencv.threshold.maxval = getD(2, 255.0);
             }
         }
 
