@@ -684,11 +684,38 @@ cv::Mat OpencvConsumer::bufferToMat(Buffer* buf) const {
         return buf->getMat()->clone();
     }
 
-    // 路径 2：cv::Mat(AVFrame*) 零拷贝接口（来自 opencv2/core/tacv.hpp）
-    // 注意：Mat 与 AVFrame 共享底层内存，调用方必须在 av_frame_unref 之前销毁 Mat
+    // 路径 2：直接使用 AVFrame 数据指针创建 Mat（零拷贝）
     AVFrame* frame = buf->getAVFrame();
     if (frame && frame->data[0] && frame->width > 0 && frame->height > 0) {
-        return cv::Mat(frame);
+        // 根据 frame->format 确定类型和通道数
+        int type = CV_8UC1;
+        int cn = 1;
+        switch (frame->format) {
+            case AV_PIX_FMT_GRAY8:
+            case AV_PIX_FMT_YUV420P:
+            case AV_PIX_FMT_NV12:
+            case AV_PIX_FMT_NV21:
+                type = CV_8UC1;
+                cn = 1;
+                break;
+            case AV_PIX_FMT_BGR24:
+            case AV_PIX_FMT_RGB24:
+                type = CV_8UC3;
+                cn = 3;
+                break;
+            case AV_PIX_FMT_BGRA:
+            case AV_PIX_FMT_RGBA:
+                type = CV_8UC4;
+                cn = 4;
+                break;
+            default:
+                // 默认尝试单通道
+                type = CV_8UC1;
+                cn = 1;
+                break;
+        }
+        // 使用 data[0] 和 linesize[0]（行跨度）创建 Mat，不拷贝数据
+        return cv::Mat(frame->height, frame->width, type, frame->data[0], frame->linesize[0]);
     }
 
     LOG4CPLUS_WARN(log4cplus::Logger::getRoot(),
@@ -707,6 +734,7 @@ cv::Mat OpencvConsumer::applyOpencvTransform(const cv::Mat& src) const {
                     "OpencvConsumer::applyOpencvTransform: RESIZE params invalid, skip");
                 return src;
             }
+            
             cv::Mat dst;
             cv::resize(src, dst,
                        cv::Size(r.dst_width, r.dst_height),
@@ -727,9 +755,111 @@ cv::Mat OpencvConsumer::applyOpencvTransform(const cv::Mat& src) const {
             }
             return src(cv::Rect(c.x, c.y, c.width, c.height)).clone();
         }
+        case OpencvType::OpType::ERODE: {
+            const auto& m = config_.morph;
+            cv::Mat kernel = cv::getStructuringElement(
+                m.kernel_shape,
+                cv::Size(m.kernel_size, m.kernel_size));
+            cv::Mat dst;
+            cv::erode(src, dst, kernel,
+                      cv::Point(m.anchor_x, m.anchor_y),
+                      m.iterations);
+            return dst;
+        }
+        case OpencvType::OpType::DILATE: {
+            const auto& m = config_.morph;
+            cv::Mat kernel = cv::getStructuringElement(
+                m.kernel_shape,
+                cv::Size(m.kernel_size, m.kernel_size));
+            cv::Mat dst;
+            cv::dilate(src, dst, kernel,
+                       cv::Point(m.anchor_x, m.anchor_y),
+                       m.iterations);
+            return dst;
+        }
+        case OpencvType::OpType::MORPH_OPEN: {
+            // 开运算：先腐蚀后膨胀
+            const auto& m = config_.morph;
+            cv::Mat kernel = cv::getStructuringElement(
+                m.kernel_shape,
+                cv::Size(m.kernel_size, m.kernel_size));
+            cv::Mat tmp, dst;
+            cv::erode(src, tmp, kernel,
+                      cv::Point(m.anchor_x, m.anchor_y),
+                      m.iterations);
+            cv::dilate(tmp, dst, kernel,
+                       cv::Point(m.anchor_x, m.anchor_y),
+                       m.iterations);
+            return dst;
+        }
+        case OpencvType::OpType::MORPH_CLOSE: {
+            // 闭运算：先膨胀后腐蚀
+            const auto& m = config_.morph;
+            cv::Mat kernel = cv::getStructuringElement(
+                m.kernel_shape,
+                cv::Size(m.kernel_size, m.kernel_size));
+            cv::Mat tmp, dst;
+            cv::dilate(src, tmp, kernel,
+                       cv::Point(m.anchor_x, m.anchor_y),
+                       m.iterations);
+            cv::erode(tmp, dst, kernel,
+                      cv::Point(m.anchor_x, m.anchor_y),
+                      m.iterations);
+            return dst;
+        }
         default:
             return src;
     }
+}
+
+std::string matInfoToString(const cv::Mat& mat) {
+    int matType = mat.type();
+    int depth = matType & CV_MAT_DEPTH_MASK;
+    int channels = (matType >> CV_CN_SHIFT) + 1;
+    
+    std::string depthStr;
+    switch(depth) {
+        case CV_8U:  depthStr = "CV_8U"; break;
+        case CV_8S:  depthStr = "CV_8S"; break;
+        case CV_16U: depthStr = "CV_16U"; break;
+        case CV_16S: depthStr = "CV_16S"; break;
+        case CV_32S: depthStr = "CV_32S"; break;
+        case CV_32F: depthStr = "CV_32F"; break;
+        case CV_64F: depthStr = "CV_64F"; break;
+        case CV_16F: depthStr = "CV_16F"; break;
+        default:     depthStr = "CV_UNKNOWN";
+    }
+    
+    std::stringstream ss;
+    ss << "Mat Info: ";
+    
+    // 添加尺寸信息
+    if (mat.dims == 2) {
+        // 二维矩阵：显示rows和cols
+        ss << "Size(" << mat.cols << "x" << mat.rows << ") ";
+    } else if (mat.dims > 2) {
+        // 多维矩阵：显示各个维度
+        ss << "Dims[" << mat.dims << "] Size[";
+        for (int i = 0; i < mat.dims; ++i) {
+            ss << mat.size[i];
+            if (i < mat.dims - 1) ss << "x";
+        }
+        ss << "] ";
+    } else {
+        // 空矩阵或无维度
+        ss << "Empty ";
+    }
+    
+    // 添加类型信息
+    ss << depthStr << "C" << channels;
+    
+    // 添加更多详细信息
+    ss << " | Depth:" << depth 
+       << " | Channels:" << channels
+       << " | Total:" << mat.total()
+       << " | Continuous:" << (mat.isContinuous() ? "Yes" : "No");
+    
+    return ss.str();
 }
 
 bool OpencvConsumer::consume(const std::vector<Buffer*>& buffers, int frame_index) {
@@ -740,62 +870,66 @@ bool OpencvConsumer::consume(const std::vector<Buffer*>& buffers, int frame_inde
     frames_processed_++;
 
     if (buffers.size() >= 2 && buffers[0] && buffers[1]) {
-        // ── 比较模式：转换两个 Buffer 为 Mat，再交由 BufferComparator 比较 ──
-        cv::Mat mat0 = bufferToMat(buffers[0]);
-        cv::Mat mat1 = bufferToMat(buffers[1]);
-
-        // 对 SW 参考帧（mat1）施加 opencv 变换，以便与 HW 输出（mat0）比较
-        if (config_.op_type != OpencvType::OpType::NONE) {
-            mat0 = applyOpencvTransform(mat0);
-            mat1 = applyOpencvTransform(mat1);
+        std::cout << "dual buffer is not supported" << std::endl;
+    } else if (!buffers.empty() && buffers[0]) {
+        // ── 单 Buffer 模式：直接用 frame->data 创建 Mat（零拷贝），无需深拷贝 ──
+        AVFrame* orig_frame = buffers[0]->getAVFrame();
+        if (!orig_frame) {
+            LOG4CPLUS_WARN(log4cplus::Logger::getRoot(),
+                "OpencvConsumer: no AVFrame in buffer, skip");
+            return true;
         }
 
-        // 将 Mat 临时挂载到 Buffer，以便 BufferComparator 走 is_mat 路径
-        buffers[0]->setMat(&mat0);
-        buffers[1]->setMat(&mat1);
+        // 直接用同一个 frame 创建两个 Mat，共享数据指针
+        // applyOpencvTransform 会返回新的 Mat（clone 或新建），所以变换后数据独立
+        // cv::Mat mat_hw = bufferToMat(buffers[0]);
+        cv::Mat mat_hw = cv::Mat(orig_frame);
 
-        cv::imwrite("mat0_output_"+std::to_string(frame_index)+".jpg",mat0);
-        cv::imwrite("mat1_output_"+std::to_string(frame_index)+".jpg",mat1);
-        std::cout << "saved picture" << std::endl;
+        // 用 frame->data[0] 再创建一个 Mat（与 mat_hw 共享原始数据）
+        int type = CV_8UC1;
+        switch (orig_frame->format) {
+            case AV_PIX_FMT_BGR24:
+            case AV_PIX_FMT_RGB24:
+                type = CV_8UC3;
+                break;
+            case AV_PIX_FMT_BGRA:
+            case AV_PIX_FMT_RGBA:
+                type = CV_8UC4;
+                break;
+        }
+        cv::Mat mat_sw(orig_frame->height, orig_frame->width, type,
+                       orig_frame->data[0], orig_frame->linesize[0]);
 
-        auto result = comparator_->compare(buffers[0], buffers[1]);
+        // 对两路施加同一 OpenCV 变换
+        if (config_.op_type != OpencvType::OpType::NONE) {
+            mat_hw = applyOpencvTransform(mat_hw);
+            mat_sw = applyOpencvTransform(mat_sw);
 
-        // 清除临时挂载
+            std::cout << matInfoToString(mat_hw) << std::endl;
+            std::cout << matInfoToString(mat_sw) << std::endl;
+        }
+
+        // 临时 Buffer 包装 Mat；comparator 检测到 setMat 后走 is_mat 路径
+        Buffer ref_buf(0, nullptr, 0, 0, Buffer::Ownership::EXTERNAL);
+        ref_buf.setMat(&mat_sw);
+        buffers[0]->setMat(&mat_hw);
+
+        // 比较
+        auto result = comparator_->compare(buffers[0], &ref_buf);
+
+        // 清理
         buffers[0]->setMat(nullptr);
-        buffers[1]->setMat(nullptr);
 
         frames_compared_++;
         psnr_sum_ += result.psnr_avg;
         ssim_sum_ += result.ssim_avg;
-
-        if (!result.passed) {
-            passed_ = false;
-        }
+        if (!result.passed) passed_ = false;
 
         if (config_.verbose) {
             LOG4CPLUS_INFO_FMT(log4cplus::Logger::getRoot(),
                 "OpencvConsumer [frame %d] PSNR=%.2f dB  SSIM=%.4f  %s",
                 frame_index, result.psnr_avg, result.ssim_avg,
                 result.passed ? "PASS" : "FAIL");
-        }
-    } else if (!buffers.empty() && buffers[0]) {
-        // ── 单 Buffer 模式：做 Mat 转换，并按 op_type 执行 resize/crop ──
-        cv::Mat mat = bufferToMat(buffers[0]);
-        if (config_.op_type != OpencvType::OpType::NONE) {
-            cv::Mat transformed = applyOpencvTransform(mat);
-            if (config_.verbose) {
-                const char* op_name = (config_.op_type == OpencvType::OpType::RESIZE)
-                                      ? "RESIZE" : "CROP";
-                LOG4CPLUS_INFO_FMT(log4cplus::Logger::getRoot(),
-                    "OpencvConsumer [frame %d] %s: %dx%d -> %dx%d",
-                    frame_index, op_name,
-                    mat.cols, mat.rows,
-                    transformed.cols, transformed.rows);
-            }
-        } else if (config_.verbose) {
-            LOG4CPLUS_INFO_FMT(log4cplus::Logger::getRoot(),
-                "OpencvConsumer [frame %d] Mat size=%dx%d",
-                frame_index, mat.cols, mat.rows);
         }
     }
 

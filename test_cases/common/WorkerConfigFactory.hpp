@@ -227,10 +227,10 @@ public:
      * @brief 从参数字符串构建 WorkerConfig（含 OpencvType 配置）
      *
      * 参数字符串格式（以 '+' 分隔）：
-     *   "<opencv_op>+<output_w>+<output_h>"
-     *   - opencv_op : "resize" | "crop"
-     *   - output_w  : 输出宽度（resize 的目标宽 / crop 的裁剪宽）
-     *   - output_h  : 输出高度（resize 的目标高 / crop 的裁剪高）
+     *   "<opencv_op>+<param1>+<param2>"
+     *   - opencv_op : "resize" | "crop" | "erode" | "dilate" | "open" | "close"
+     *   - resize/crop: param1=宽, param2=高
+     *   - erode/dilate/open/close: param1=kernel_size（默认3）, param2=iterations（默认1）
      *
      * @param path        视频文件路径或 RTSP URL
      * @param params_str  参数字符串，例如 "resize+1280+720" 或 "crop+960+540"
@@ -259,6 +259,10 @@ public:
         if (!fields.empty()) {
             if      (fields[0] == "resize") op = OpType::RESIZE;
             else if (fields[0] == "crop")   op = OpType::CROP;
+            else if (fields[0] == "erode")  op = OpType::ERODE;
+            else if (fields[0] == "dilate") op = OpType::DILATE;
+            else if (fields[0] == "open")   op = OpType::MORPH_OPEN;
+            else if (fields[0] == "close")  op = OpType::MORPH_CLOSE;
         }
         if (fields.size() > 1) output_w = std::stoi(fields[1]);
         if (fields.size() > 2) output_h = std::stoi(fields[2]);
@@ -285,6 +289,11 @@ public:
                 opencv.crop.y      = 0;
                 opencv.crop.width  = output_w;
                 opencv.crop.height = output_h;
+            } else if (op == OpType::ERODE  || op == OpType::DILATE ||
+                       op == OpType::MORPH_OPEN || op == OpType::MORPH_CLOSE) {
+                // param1=kernel_size（fields[1]），param2=iterations（fields[2]）
+                opencv.morph.kernel_size = (output_w > 0) ? output_w : 3;
+                opencv.morph.iterations  = (output_h > 0) ? output_h : 1;
             }
         }
 

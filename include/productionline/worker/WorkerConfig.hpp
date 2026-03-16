@@ -616,9 +616,13 @@ struct WorkerConfig {
 
             /// 操作类型：决定对 SW 参考帧施加哪种 OpenCV 变换
             enum class OpType {
-                NONE,    ///< 无操作，直接比较原始解码帧
-                RESIZE,  ///< cv::resize 缩放
-                CROP,    ///< ROI 裁剪（src(cv::Rect(...))）
+                NONE,        ///< 无操作，直接比较原始解码帧
+                RESIZE,      ///< cv::resize 缩放
+                CROP,        ///< ROI 裁剪（src(cv::Rect(...))）
+                ERODE,       ///< cv::erode 腐蚀
+                DILATE,      ///< cv::dilate 膨胀
+                MORPH_OPEN,  ///< 开运算：先腐蚀后膨胀
+                MORPH_CLOSE, ///< 闭运算：先膨胀后腐蚀
             };
             OpType op_type = OpType::NONE;
 
@@ -653,6 +657,23 @@ struct WorkerConfig {
                 int height;  ///< 裁剪区域高度（像素）
                 Crop() = default;
             } crop;
+
+            // ----------------------------------------
+            // 形态学操作参数（erode / dilate / open / close）
+            //   cv::erode / cv::dilate / cv::morphologyEx
+            // kernel_shape 取值：
+            //   0 = cv::MORPH_RECT（默认）
+            //   1 = cv::MORPH_CROSS
+            //   2 = cv::MORPH_ELLIPSE
+            // ----------------------------------------
+            struct Morph {
+                int kernel_size  = 3;  ///< 结构元素边长（像素，需为奇数）
+                int kernel_shape = 0;  ///< 结构元素形状（MORPH_RECT=0）
+                int anchor_x     = -1; ///< 锚点 X（-1 = 中心）
+                int anchor_y     = -1; ///< 锚点 Y（-1 = 中心）
+                int iterations   = 1;  ///< 迭代次数
+                Morph() = default;
+            } morph;
 
             OpencvType() = default;
         } opencv;

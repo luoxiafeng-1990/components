@@ -18,9 +18,9 @@ using TestResult = consumer::ConsumeResult;
 
 struct OpencvTestParams {
     using OpType = WorkerConfig::ConsumerTypeConfig::OpencvType::OpType;
-    OpType opencv_op  = OpType::NONE;  ///< 操作类型（NONE/RESIZE/CROP）
+    OpType opencv_op  = OpType::NONE;  ///< 操作类型（NONE/RESIZE/CROP/ERODE/DILATE/MORPH_OPEN/MORPH_CLOSE）
     bool   use_hardware = true;        ///< 是否使用硬件解码
-    std::string params_str;            ///< 编码参数，格式: "<op>+<output_w>+<output_h>"
+    std::string params_str;            ///< 编码参数，格式: "<op>+<param1>+<param2>"
 
     bool hasOpencvOp() const { return opencv_op != OpType::NONE; }
 };

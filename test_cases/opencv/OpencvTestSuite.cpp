@@ -46,16 +46,34 @@ const std::map<std::string, OpencvTestParams>& OpencvTestSuite::getPredefinedTes
         using OpType = OpencvTestParams::OpType;
 
         // ---- OpenCV resize 预定义测试 ----
-        add("cv_resize_h264_1080p_to_720p_30",    OpType::RESIZE, true,  "resize+1280+720");
-        add("cv_resize_h264_1080p_to_480p_30",    OpType::RESIZE, true,  "resize+640+480");
-        add("cv_resize_h265_1080p_to_720p_30",    OpType::RESIZE, true,  "resize+1280+720");
-        add("cv_resize_sw_h264_1080p_to_720p_30", OpType::RESIZE, false, "resize+1280+720");
+        add("cv_resize_h264_1080p_to_720p_30",    OpType::RESIZE, true,  "resize_1280_720");
+        add("cv_resize_h264_1080p_to_480p_30",    OpType::RESIZE, true,  "resize_640_480");
+        add("cv_resize_h265_1080p_to_720p_30",    OpType::RESIZE, true,  "resize_1280_720");
+        add("cv_resize_sw_h264_1080p_to_720p_30", OpType::RESIZE, false, "resize_1280_720");
 
         // ---- OpenCV crop 预定义测试 ----
-        add("cv_crop_h264_1080p_topleft_30",    OpType::CROP, true,  "crop+960+540");
-        add("cv_crop_h264_1080p_center_30",     OpType::CROP, true,  "crop+960+540");
-        add("cv_crop_h265_1080p_topleft_30",    OpType::CROP, true,  "crop+960+540");
-        add("cv_crop_sw_h264_1080p_topleft_30", OpType::CROP, false, "crop+960+540");
+        add("cv_crop_h264_1080p_topleft_30",    OpType::CROP, true,  "crop_960_540");
+        add("cv_crop_h264_1080p_center_30",     OpType::CROP, true,  "crop_960_540");
+        add("cv_crop_h265_1080p_topleft_30",    OpType::CROP, true,  "crop_960_540");
+        add("cv_crop_sw_h264_1080p_topleft_30", OpType::CROP, false, "crop_960_540");
+
+        // ---- OpenCV erode 预定义测试 ----
+        add("cv_erode_h264_1080p_k3_30",     OpType::ERODE,       true,  "erode_3_1");
+        add("cv_erode_h264_1080p_k5_30",     OpType::ERODE,       true,  "erode_5_1");
+        add("cv_erode_sw_h264_1080p_k3_30",  OpType::ERODE,       false, "erode_3_1");
+
+        // ---- OpenCV dilate 预定义测试 ----
+        add("cv_dilate_h264_1080p_k3_30",    OpType::DILATE,      true,  "dilate_3_1");
+        add("cv_dilate_h264_1080p_k5_30",    OpType::DILATE,      true,  "dilate_5_1");
+        add("cv_dilate_sw_h264_1080p_k3_30", OpType::DILATE,      false, "dilate_3_1");
+
+        // ---- OpenCV 开运算（先腐蚀后膨胀）预定义测试 ----
+        add("cv_open_h264_1080p_k3_30",      OpType::MORPH_OPEN,  true,  "open_3_1");
+        add("cv_open_h264_1080p_k5_30",      OpType::MORPH_OPEN,  true,  "open_5_1");
+
+        // ---- OpenCV 闭运算（先膨胀后腐蚀）预定义测试 ----
+        add("cv_close_h264_1080p_k3_30",     OpType::MORPH_CLOSE, true,  "close_3_1");
+        add("cv_close_h264_1080p_k5_30",     OpType::MORPH_CLOSE, true,  "close_5_1");
 
         return m;
     }();
@@ -89,13 +107,6 @@ int OpencvTestSuite::run(int argc, char* argv[]) {
     hw_config.consumer_type.verbose  = config.consumer_type.verbose;
     hw_config.data_source.max_frames = config.data_source.max_frames;
 
-    auto sw_config = common::WorkerConfigFactory::buildOpencvConfig(
-        config.data_source.path, params.params_str, false);
-
-    // 合并附加设置
-    sw_config.consumer_type.verbose  = config.consumer_type.verbose;
-    sw_config.data_source.max_frames = config.data_source.max_frames;
-
     uint32_t flags = buildConsumeFlags(hw_config);
 
     std::string filename = config.data_source.path;
@@ -105,7 +116,7 @@ int OpencvTestSuite::run(int argc, char* argv[]) {
     }
     const std::string test_name = "Custom: " + filename;
 
-    auto result = runCompare({hw_config,sw_config}, flags, test_name);
+    auto result = runSingle(hw_config, flags, test_name);
     consumer::BufferConsumerService::printResult(test_name, result);
 
     return result.success ? 0 : 1;
@@ -189,15 +200,24 @@ bool OpencvTestSuite::parseArgs(int argc, char* argv[], WorkerConfig& config, Op
         params.opencv_op = OpencvTestParams::OpType::RESIZE;
     } else if (case_str == "crop") {
         params.opencv_op = OpencvTestParams::OpType::CROP;
+    } else if (case_str == "erode") {
+        params.opencv_op = OpencvTestParams::OpType::ERODE;
+    } else if (case_str == "dilate") {
+        params.opencv_op = OpencvTestParams::OpType::DILATE;
+    } else if (case_str == "open") {
+        params.opencv_op = OpencvTestParams::OpType::MORPH_OPEN;
+    } else if (case_str == "close") {
+        params.opencv_op = OpencvTestParams::OpType::MORPH_CLOSE;
     } else {
-        std::cerr << "Error: --case must be 'resize' or 'crop', got '" << case_str << "'\n" << std::endl;
+        std::cerr << "Error: --case must be 'resize', 'crop', 'erode', 'dilate', 'open', or 'close', got '"
+                  << case_str << "'\n" << std::endl;
         return false;
     }
 
-    // 将 case 和 params 用 + 拼接
+    // 将 case 和 params 用 _ 拼接
     params.params_str = case_str;
     if (!params_arg.empty()) {
-        params.params_str += "+" + params_arg;
+        params.params_str += "_" + params_arg;
     }
 
     config.data_source.path = input_path;
