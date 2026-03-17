@@ -285,6 +285,7 @@ public:
             else if (fields[0] == "threshold")   op = OpType::THRESHOLD;
             else if (fields[0] == "split")       op = OpType::SPLIT;
             else if (fields[0] == "merge")       op = OpType::MERGE;
+            else if (fields[0] == "cvtcolor")    op = OpType::CVTCOLOR;
         }
 
         // 辅助函数：安全读取第 idx 个字段
@@ -359,6 +360,12 @@ public:
                 opencv.threshold.maxval = getD(2, 255.0);
             } else if (op == OpType::SPLIT || op == OpType::MERGE) {
                 opencv.split_merge.channels = getI(1, 3);  // 默认 3 通道
+            } else if (op == OpType::CVTCOLOR) {
+                // cvtcolor_<code>[_<dstCn>]
+                // code 取值：40=YUV2BGR_NV12, 91=YUV2GRAY_NV12, 116=YUV2RGB_NV12, 等
+                // 完整列表见 opencv2/imgproc.hpp
+                opencv.cvtcolor.code = getI(1, 40);   // 默认 CV_YUV2BGR_NV12
+                opencv.cvtcolor.dstCn = getI(2, 0);   // 0=自动
             }
         }
 

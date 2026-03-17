@@ -879,6 +879,21 @@ cv::Mat OpencvConsumer::applyOpencvTransform(const cv::Mat& src) const {
             cv::merge(channels, merged);
             return merged;
         }
+        case OpencvType::OpType::CVTCOLOR: {
+            // cvtColor 测试：颜色空间转换
+            const auto& c = config_.cvtcolor;
+            cv::Mat dst;
+
+            // 对于 NV12 等 YUV 格式，需要特殊处理
+            // cv::Mat(AVFrame*) 创建的 Mat 高度是原图的 3/2（Y+UV 平面）
+            // cvtColor 的 code 如 COLOR_YUV2BGR_NV12 需要完整高度的输入
+            if (c.dstCn > 0) {
+                cv::cvtColor(src, dst, c.code, c.dstCn);
+            } else {
+                cv::cvtColor(src, dst, c.code);
+            }
+            return dst;
+        }
         default:
             return src;
     }

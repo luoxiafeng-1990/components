@@ -119,6 +119,12 @@ const std::map<std::string, OpencvTestParams>& OpencvTestSuite::getPredefinedTes
         add("cv_merge_h265_1080p_30",        OpType::MERGE,        true, "merge_3");
         add("cv_merge_sw_h264_1080p_30",     OpType::MERGE,        false, "merge_3");
 
+        // ---- cv::cvtColor 颜色空间转换测试 ----
+        // code=40: CV_YUV2BGR_NV12, code=91: CV_YUV2GRAY_NV12, code=116: CV_YUV2RGB_NV12
+        add("cv_cvtcolor_h264_1080p_30",     OpType::CVTCOLOR,     true, "cvtcolor_40");
+        add("cv_cvtcolor_h265_1080p_30",     OpType::CVTCOLOR,     true, "cvtcolor_40");
+        add("cv_cvtcolor_sw_h264_1080p_30",  OpType::CVTCOLOR,     false, "cvtcolor_40");
+
         return m;
     }();
     return tests;
@@ -215,14 +221,6 @@ bool OpencvTestSuite::parseArgs(int argc, char* argv[], WorkerConfig& config, Op
                 params_arg = optarg;
                 break;
 
-            case 1003:  // --split
-                case_str = "split";
-                break;
-
-            case 1004:  // --merge
-                case_str = "merge";
-                break;
-
             default:
                 printHelp();
                 return false;
@@ -286,6 +284,8 @@ bool OpencvTestSuite::parseArgs(int argc, char* argv[], WorkerConfig& config, Op
         params.opencv_op = OpencvTestParams::OpType::SPLIT;
     } else if (case_str == "merge") {
         params.opencv_op = OpencvTestParams::OpType::MERGE;
+    } else if (case_str == "cvtcolor") {
+        params.opencv_op = OpencvTestParams::OpType::CVTCOLOR;
     } else {
         std::cerr << "Error: unknown --case '" << case_str
                   << "'. Valid: resize/crop/erode/dilate/open/close/"

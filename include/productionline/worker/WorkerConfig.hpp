@@ -636,6 +636,7 @@ struct WorkerConfig {
                 THRESHOLD,    ///< cv::threshold 二值化
                 SPLIT,        ///< cv::split 通道分离
                 MERGE,        ///< cv::merge 通道合并
+                CVTCOLOR,     ///< cv::cvtColor 颜色空间转换
             };
             OpType op_type = OpType::NONE;
 
@@ -816,6 +817,17 @@ struct WorkerConfig {
                 int    channels = 3;     ///< 通道数（3=BGR, 4=BGRA）
                 SplitMerge() = default;
             } split_merge;
+
+            // ----------------------------------------
+            // cv::cvtColor 颜色空间转换参数
+            //   cvtColor: 将图像从一种颜色空间转换到另一种
+            // 注：测试逻辑为 mat -> cvtColor -> 与软件 cvtColor 结果比较
+            // ----------------------------------------
+            struct ColorConvert {
+                int    code = 0;         ///< cv::ColorConversionCodes
+                int    dstCn = 0;        ///< 目标通道数（0=自动）
+                ColorConvert() = default;
+            } cvtcolor;
 
             OpencvType() = default;
         } opencv;
