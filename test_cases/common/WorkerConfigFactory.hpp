@@ -283,6 +283,8 @@ public:
             else if (fields[0] == "puttext")     op = OpType::PUT_TEXT;
             else if (fields[0] == "blur")        op = OpType::GAUSSIAN_BLUR;
             else if (fields[0] == "threshold")   op = OpType::THRESHOLD;
+            else if (fields[0] == "split")       op = OpType::SPLIT;
+            else if (fields[0] == "merge")       op = OpType::MERGE;
         }
 
         // 辅助函数：安全读取第 idx 个字段
@@ -355,10 +357,39 @@ public:
             } else if (op == OpType::THRESHOLD) {
                 opencv.threshold.thresh = getD(1, 128.0);
                 opencv.threshold.maxval = getD(2, 255.0);
+            } else if (op == OpType::SPLIT || op == OpType::MERGE) {
+                opencv.split_merge.channels = getI(1, 3);  // 默认 3 通道
             }
         }
 
         return config;
+    }
+
+    /**
+     * @brief 从参数字符串构建 WorkerConfig（含 OpencvType 配置）- 支持 split/merge 测试
+     *
+     * split/merge 测试逻辑：
+     *   硬件 Mat -> split -> merge -> 与软件 Mat 比较
+     *
+     * 参数字符串格式：
+     *   - split      : 通道分离测试（默认 3 通道）
+     *   - split_3    : 3 通道分离测试
+     *   - split_4    : 4 通道分离测试
+     *   - merge      : 通道合并测试（默认 3 通道）
+     *   - merge_3    : 3 通道合并测试
+     *   - merge_4    : 4 通道合并测试
+     *
+     * @param path        视频文件路径或 RTSP URL
+     * @param params_str  参数字符串，例如 "split" 或 "merge_4"
+     * @param use_hardware 是否使用硬件解码（默认 true）
+     * @return 完整的 WorkerConfig
+     */
+    static WorkerConfig buildSplitMergeConfig(
+        const std::string& path,
+        const std::string& params_str,
+        bool use_hardware = true
+    ) {
+        return buildOpencvConfig(path, params_str, use_hardware);
     }
 
     static WorkerConfig createPP0YuvConfig(

@@ -634,6 +634,8 @@ struct WorkerConfig {
                 PUT_TEXT,     ///< cv::putText 绘文字
                 GAUSSIAN_BLUR,///< cv::GaussianBlur 高斯模糊
                 THRESHOLD,    ///< cv::threshold 二值化
+                SPLIT,        ///< cv::split 通道分离
+                MERGE,        ///< cv::merge 通道合并
             };
             OpType op_type = OpType::NONE;
 
@@ -803,6 +805,17 @@ struct WorkerConfig {
                 int    type   = 0;     ///< 阈值类型（默认 THRESH_BINARY）
                 Threshold() = default;
             } threshold;
+
+            // ----------------------------------------
+            // cv::split / cv::merge 通道分离合并参数
+            //   split: 将多通道图像分离为单通道平面
+            //   merge: 将多个单通道平面合并为多通道图像
+            // 注：测试逻辑为 mat -> split -> merge -> 与原始 mat 比较
+            // ----------------------------------------
+            struct SplitMerge {
+                int    channels = 3;     ///< 通道数（3=BGR, 4=BGRA）
+                SplitMerge() = default;
+            } split_merge;
 
             OpencvType() = default;
         } opencv;

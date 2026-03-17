@@ -13,6 +13,10 @@
 #include <iomanip>
 #include <cstring>
 
+extern "C" {
+#include <libavutil/avutil.h>
+#include <libavutil/pixdesc.h>
+}
 namespace consumer {
 
 // ============================================================
@@ -676,53 +680,6 @@ bool OpencvConsumer::initialize(const std::vector<Buffer*>& first_buffers) {
     return true;
 }
 
-cv::Mat OpencvConsumer::bufferToMat(Buffer* buf) const {
-    if (!buf) return cv::Mat();
-
-    // 路径 1：Buffer 已关联 cv::Mat（已由上层转换好）
-    if (buf->getMat() && !buf->getMat()->empty()) {
-        return buf->getMat()->clone();
-    }
-
-    // 路径 2：直接使用 AVFrame 数据指针创建 Mat（零拷贝）
-    AVFrame* frame = buf->getAVFrame();
-    if (frame && frame->data[0] && frame->width > 0 && frame->height > 0) {
-        // 根据 frame->format 确定类型和通道数
-        int type = CV_8UC1;
-        int cn = 1;
-        switch (frame->format) {
-            case AV_PIX_FMT_GRAY8:
-            case AV_PIX_FMT_YUV420P:
-            case AV_PIX_FMT_NV12:
-            case AV_PIX_FMT_NV21:
-                type = CV_8UC1;
-                cn = 1;
-                break;
-            case AV_PIX_FMT_BGR24:
-            case AV_PIX_FMT_RGB24:
-                type = CV_8UC3;
-                cn = 3;
-                break;
-            case AV_PIX_FMT_BGRA:
-            case AV_PIX_FMT_RGBA:
-                type = CV_8UC4;
-                cn = 4;
-                break;
-            default:
-                // 默认尝试单通道
-                type = CV_8UC1;
-                cn = 1;
-                break;
-        }
-        // 使用 data[0] 和 linesize[0]（行跨度）创建 Mat，不拷贝数据
-        return cv::Mat(frame->height, frame->width, type, frame->data[0], frame->linesize[0]);
-    }
-
-    LOG4CPLUS_WARN(log4cplus::Logger::getRoot(),
-                   "OpencvConsumer::bufferToMat: no usable data source in Buffer");
-    return cv::Mat();
-}
-
 cv::Mat OpencvConsumer::applyOpencvTransform(const cv::Mat& src) const {
     if (src.empty()) return src;
 
@@ -913,6 +870,15 @@ cv::Mat OpencvConsumer::applyOpencvTransform(const cv::Mat& src) const {
             cv::threshold(gray, dst, t.thresh, t.maxval, t.type);
             return dst;
         }
+        case OpencvType::OpType::SPLIT:
+        case OpencvType::OpType::MERGE: {
+            // split/merge 测试：将多通道图像分离后重新合并，验证通道处理正确性
+            std::vector<cv::Mat> channels;
+            cv::split(src, channels);
+            cv::Mat merged;
+            cv::merge(channels, merged);
+            return merged;
+        }
         default:
             return src;
     }
@@ -968,6 +934,25 @@ std::string matInfoToString(const cv::Mat& mat) {
     return ss.str();
 }
 
+std::string avframeInfoToString(const AVFrame* frame) {
+    // 安全检查：检查输入指针是否有效
+    if (frame == NULL) {
+        fprintf(stderr, "错误：AVFrame指针为空\n");
+        return std::string();
+    }
+    
+    // 获取像素格式的枚举值
+    enum AVPixelFormat pix_fmt = static_cast<AVPixelFormat>(frame->format);
+    
+    // 打印像素格式的数值（枚举值）
+    printf("AVFrame像素格式（数值）: %d\n", pix_fmt);
+    
+    // 获取像素格式的字符串名称
+    const char* pix_fmt_name = av_get_pix_fmt_name(pix_fmt);
+
+    return std::string(pix_fmt_name);    
+}
+
 bool OpencvConsumer::consume(const std::vector<Buffer*>& buffers, int frame_index) {
     if (!initialized_) {
         if (!initialize(buffers)) return false;
@@ -988,8 +973,9 @@ bool OpencvConsumer::consume(const std::vector<Buffer*>& buffers, int frame_inde
 
         // 直接用同一个 frame 创建两个 Mat，共享数据指针
         // applyOpencvTransform 会返回新的 Mat（clone 或新建），所以变换后数据独立
-        // cv::Mat mat_hw = bufferToMat(buffers[0]);
         cv::Mat mat_hw = cv::Mat(orig_frame);
+
+        std::cout << avframeInfoToString(orig_frame) << std::endl;
 
         // 用 frame->data[0] 再创建一个 Mat（与 mat_hw 共享原始数据）
         int type = CV_8UC1;

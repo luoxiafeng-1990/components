@@ -109,6 +109,16 @@ const std::map<std::string, OpencvTestParams>& OpencvTestSuite::getPredefinedTes
         // ---- cv::threshold 二值化 ----
         add("cv_threshold_h264_1080p_30",    OpType::THRESHOLD,    true, "threshold_128_255");
 
+        // ---- cv::split 通道分离测试 ----
+        add("cv_split_h264_1080p_30",        OpType::SPLIT,        true, "split_3");
+        add("cv_split_h265_1080p_30",        OpType::SPLIT,        true, "split_3");
+        add("cv_split_sw_h264_1080p_30",     OpType::SPLIT,        false, "split_3");
+
+        // ---- cv::merge 通道合并测试 ----
+        add("cv_merge_h264_1080p_30",        OpType::MERGE,        true, "merge_3");
+        add("cv_merge_h265_1080p_30",        OpType::MERGE,        true, "merge_3");
+        add("cv_merge_sw_h264_1080p_30",     OpType::MERGE,        false, "merge_3");
+
         return m;
     }();
     return tests;
@@ -205,6 +215,14 @@ bool OpencvTestSuite::parseArgs(int argc, char* argv[], WorkerConfig& config, Op
                 params_arg = optarg;
                 break;
 
+            case 1003:  // --split
+                case_str = "split";
+                break;
+
+            case 1004:  // --merge
+                case_str = "merge";
+                break;
+
             default:
                 printHelp();
                 return false;
@@ -264,6 +282,10 @@ bool OpencvTestSuite::parseArgs(int argc, char* argv[], WorkerConfig& config, Op
         params.opencv_op = OpencvTestParams::OpType::GAUSSIAN_BLUR;
     } else if (case_str == "threshold") {
         params.opencv_op = OpencvTestParams::OpType::THRESHOLD;
+    } else if (case_str == "split") {
+        params.opencv_op = OpencvTestParams::OpType::SPLIT;
+    } else if (case_str == "merge") {
+        params.opencv_op = OpencvTestParams::OpType::MERGE;
     } else {
         std::cerr << "Error: unknown --case '" << case_str
                   << "'. Valid: resize/crop/erode/dilate/open/close/"
