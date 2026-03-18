@@ -32,6 +32,9 @@ uint32_t VdecTestSuite::buildConsumeFlags(const WorkerConfig& config) {
     if (config.consumer_type.save_raw.enable) {
         flags |= consumer::CONSUME_SAVE_RAW;
     }
+    if (config.consumer_type.npu_inference.enable) {
+        flags |= consumer::CONSUME_NPU_INFERENCE;
+    }
     
     return flags;
 }
@@ -354,6 +357,14 @@ bool VdecTestSuite::parseArgs(int argc, char* argv[], WorkerConfig& config, Deco
         {"verbose",    no_argument,       0, 'v'},
         {"threads",    required_argument, 0, 't'},  // 并发路数（PARALLEL 模式）
         {"loop",       no_argument,       0, 1003},
+        {"npu",              required_argument, 0, 2001},
+        {"model-path",       required_argument, 0, 2001},
+        {"conf-threshold",   required_argument, 0, 2002},
+        {"nms-threshold",    required_argument, 0, 2003},
+        {"npu-core",         required_argument, 0, 2004},
+        {"npu-physical-addr", no_argument,      0, 2005},
+        {"draw-detections",  no_argument,      0, 2006},
+        {"inference-interval", required_argument, 0, 2007},
         {0, 0, 0, 0}
     };
     
@@ -489,6 +500,35 @@ bool VdecTestSuite::parseArgs(int argc, char* argv[], WorkerConfig& config, Deco
                 config.consumer_type.display.taco_vo.main_sidebar_ratio = std::stof(optarg);
                 break;
 
+            case 2001:
+                config.consumer_type.npu_inference.enable = true;
+                config.consumer_type.npu_inference.model_path = optarg;
+                break;
+
+            case 2002:
+                config.consumer_type.npu_inference.conf_threshold = std::stof(optarg);
+                break;
+
+            case 2003:
+                config.consumer_type.npu_inference.nms_threshold = std::stof(optarg);
+                break;
+
+            case 2004:
+                config.consumer_type.npu_inference.npu_core_index = std::stoi(optarg);
+                break;
+
+            case 2005:
+                config.consumer_type.npu_inference.use_physical_addr = true;
+                break;
+
+            case 2006:
+                config.consumer_type.npu_inference.enable_draw = true;
+                break;
+
+            case 2007:
+                config.consumer_type.npu_inference.inference_interval = std::stoi(optarg);
+                break;
+
             case 'p':
                 config.consumer_type.compare.enable_psnr = true;
                 break;
@@ -571,6 +611,15 @@ bool VdecTestSuite::parseArgs(int argc, char* argv[], WorkerConfig& config, Deco
     
     config.data_source.path = input_path;
     
+    // 当 NPU 推理 + Display 同时启用时，自动开启画框 + 帧跳过
+    if (config.consumer_type.npu_inference.enable &&
+        config.consumer_type.display.enable) {
+        config.consumer_type.npu_inference.enable_draw = true;
+        if (config.consumer_type.npu_inference.inference_interval <= 1) {
+            config.consumer_type.npu_inference.inference_interval = 15;
+        }
+    }
+    
     return true;
 }
 
@@ -630,6 +679,15 @@ void VdecTestSuite::printHelp() const {
               << "  -t, --threads <n>       并发路数 (启用 PARALLEL 模式，可任意指定)\n"
               << "  --loop                  循环播放 (文件结束后自动回到开头继续播放)\n"
               << "\n"
+              << "NPU Inference Options:\n"
+              << "  --npu <model_path>      启用 NPU 推理，指定 .nb 模型文件路径\n"
+              << "  --conf-threshold <f>    置信度阈值 (默认: 0.25)\n"
+              << "  --nms-threshold <f>     NMS IoU 阈值 (默认: 0.45)\n"
+              << "  --npu-core <n>          NPU 核心索引 (默认: 0)\n"
+              << "  --npu-physical-addr     使用物理地址零拷贝输入 (需模型支持 NV12)\n"
+              << "  --draw-detections       推理后在画面上绘制检测框 (NPU+Display 时自动启用)\n"
+              << "  --inference-interval <N> 每 N 帧执行一次推理 (NPU+Display 默认15, 纯推理默认1)\n"
+              << "\n"
               << "ExecuteMode Mapping:\n"
               << "  SINGLE   - 默认单路解码，支持 --decoder hw/sw\n"
               << "  COMPARE  - --psnr/--ssim 启用时，HW vs SW 对比\n"
@@ -648,6 +706,14 @@ void VdecTestSuite::printHelp() const {
               << "                                                    # 5路 主+侧栏 视图\n"
               << "  qa_cases vdec -d --display-mode shared_fb -t 5 --view-type main_sidebar \\\n"
               << "    --slot-assignment 1,4,2,3,0 video.mp4           # 自定义通道映射\n"
+              << "\n"
+              << "  # NPU 推理示例：\n"
+              << "  qa_cases vdec --npu /model/yolov11.nb video.mp4   # NPU 推理 (仅统计)\n"
+              << "  qa_cases vdec --npu /model/yolov11.nb -d video.mp4 # NPU 推理 + 显示\n"
+              << "  qa_cases vdec --npu /model/yolov11.nb --conf-threshold 0.5 -d video.mp4\n"
+              << "                                                    # 调整置信度 + 显示\n"
+              << "  qa_cases vdec --npu /model/yolov11.nb --npu-physical-addr -d video.mp4\n"
+              << "                                                    # 零拷贝 + 显示\n"
               << std::endl;
 }
 

@@ -8,7 +8,7 @@
 #include "productionline/WorkerSyncCoordinator.hpp"
 #include "common/GlobalThreadPool.hpp"
 #include "buffer/bufferpool/BufferPoolRegistry.hpp"
-#include "inference/NpuInferenceConsumer.hpp"
+#include "productionline/io/inference/NpuInferenceConsumer.hpp"
 
 #include <future>
 #include <sstream>
@@ -438,6 +438,8 @@ static std::shared_ptr<IBufferConsumer> createConsumerForWorker(
         npu_config.input_mode       = config.npu_inference.use_physical_addr
             ? NpuInferenceConfig::InputMode::PHYSICAL_ADDR
             : NpuInferenceConfig::InputMode::VIRTUAL_ADDR;
+        npu_config.enable_draw      = config.npu_inference.enable_draw;
+        npu_config.inference_interval = config.npu_inference.inference_interval;
         consumers.push_back(std::make_shared<NpuInferenceConsumer>(npu_config));
     }
     
@@ -779,15 +781,30 @@ std::shared_ptr<IBufferConsumer> BufferConsumerService::createConsumerFromFlags(
             npu_cfg.input_mode     = config.consumer_type.npu_inference.use_physical_addr
                 ? NpuInferenceConfig::InputMode::PHYSICAL_ADDR
                 : NpuInferenceConfig::InputMode::VIRTUAL_ADDR;
+            npu_cfg.enable_draw    = config.consumer_type.npu_inference.enable_draw;
+            npu_cfg.inference_interval = config.consumer_type.npu_inference.inference_interval;
             return std::make_shared<NpuInferenceConsumer>(npu_cfg);
         }
     }
     
     // 多种类型叠加，使用 MultiConsumer
+    // 顺序：NPU推理(画框) → Display(显示带框画面) → Save → Count
     auto multi = std::make_shared<MultiConsumer>();
     
-    // 注意：COUNT 通常与其他类型组合使用，所以总是添加
-    multi->addStrategy(std::make_shared<CountConsumer>());
+    // NPU 推理必须在 Display 之前：先画框再显示
+    if (flags & CONSUME_NPU_INFERENCE) {
+        NpuInferenceConfig npu_cfg;
+        npu_cfg.model_path     = config.consumer_type.npu_inference.model_path;
+        npu_cfg.conf_threshold = config.consumer_type.npu_inference.conf_threshold;
+        npu_cfg.nms_threshold  = config.consumer_type.npu_inference.nms_threshold;
+        npu_cfg.npu_core_index = config.consumer_type.npu_inference.npu_core_index;
+        npu_cfg.input_mode     = config.consumer_type.npu_inference.use_physical_addr
+            ? NpuInferenceConfig::InputMode::PHYSICAL_ADDR
+            : NpuInferenceConfig::InputMode::VIRTUAL_ADDR;
+        npu_cfg.enable_draw    = config.consumer_type.npu_inference.enable_draw;
+        npu_cfg.inference_interval = config.consumer_type.npu_inference.inference_interval;
+        multi->addStrategy(std::make_shared<NpuInferenceConsumer>(npu_cfg));
+    }
     
     if (flags & CONSUME_DISPLAY) {
         multi->addStrategy(std::make_shared<DisplayConsumer>(config.consumer_type.display));
@@ -805,17 +822,9 @@ std::shared_ptr<IBufferConsumer> BufferConsumerService::createConsumerFromFlags(
             config.data_source.time_base
         ));
     }
-    if (flags & CONSUME_NPU_INFERENCE) {
-        NpuInferenceConfig npu_cfg;
-        npu_cfg.model_path     = config.consumer_type.npu_inference.model_path;
-        npu_cfg.conf_threshold = config.consumer_type.npu_inference.conf_threshold;
-        npu_cfg.nms_threshold  = config.consumer_type.npu_inference.nms_threshold;
-        npu_cfg.npu_core_index = config.consumer_type.npu_inference.npu_core_index;
-        npu_cfg.input_mode     = config.consumer_type.npu_inference.use_physical_addr
-            ? NpuInferenceConfig::InputMode::PHYSICAL_ADDR
-            : NpuInferenceConfig::InputMode::VIRTUAL_ADDR;
-        multi->addStrategy(std::make_shared<NpuInferenceConsumer>(npu_cfg));
-    }
+    
+    // COUNT 放在最后
+    multi->addStrategy(std::make_shared<CountConsumer>());
     
     return multi;
 }

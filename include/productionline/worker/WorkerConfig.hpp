@@ -540,6 +540,8 @@ struct WorkerConfig {
             float nms_threshold   = 0.45f;        ///< NMS IoU 阈值
             int   npu_core_index  = 0;            ///< NPU 核心索引
             bool  use_physical_addr = false;      ///< 是否使用物理地址输入（零拷贝，需模型支持 NV12）
+            bool  enable_draw = false;            ///< 推理后在 buffer 上画检测框（供 Display 显示带框画面）
+            int   inference_interval = 1;         ///< 每 N 帧执行一次推理（1=每帧，>1 跳帧以保证显示流畅）
             NpuInferenceType() = default;
         } npu_inference;
         
@@ -1169,6 +1171,18 @@ public:
      * @param target_fps 目标帧率
      */
     WorkerConfigBuilder& enablePerformance(bool enable = true, double target_fps = 30.0);
+    
+    /**
+     * @brief 启用 NPU 推理消费类型
+     * @param model_path .nb 模型文件路径
+     * @param conf_threshold 置信度阈值
+     * @param nms_threshold NMS IoU 阈值
+     * @param enable_draw 是否在 buffer 上画检测框
+     */
+    WorkerConfigBuilder& enableNpuInference(const std::string& model_path,
+                                             float conf_threshold = 0.25f,
+                                             float nms_threshold = 0.45f,
+                                             bool enable_draw = false);
     
     /**
      * @brief 设置详细日志模式

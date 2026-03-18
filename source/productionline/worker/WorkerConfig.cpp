@@ -439,6 +439,18 @@ WorkerConfigBuilder& WorkerConfigBuilder::enablePerformance(bool enable, double 
     return *this;
 }
 
+WorkerConfigBuilder& WorkerConfigBuilder::enableNpuInference(const std::string& model_path,
+                                                              float conf_threshold,
+                                                              float nms_threshold,
+                                                              bool enable_draw) {
+    worker_config_.consumer_type.npu_inference.enable = true;
+    worker_config_.consumer_type.npu_inference.model_path = model_path;
+    worker_config_.consumer_type.npu_inference.conf_threshold = conf_threshold;
+    worker_config_.consumer_type.npu_inference.nms_threshold = nms_threshold;
+    worker_config_.consumer_type.npu_inference.enable_draw = enable_draw;
+    return *this;
+}
+
 WorkerConfigBuilder& WorkerConfigBuilder::setVerbose(bool verbose) {
     worker_config_.consumer_type.verbose = verbose;
     return *this;

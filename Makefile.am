@@ -42,7 +42,7 @@ libcomponents_la_SOURCES = \
     source/productionline/io/BufferComparator.cpp \
     source/productionline/io/BufferConsumerStrategies.cpp \
     source/productionline/io/BufferConsumerService.cpp \
-    source/inference/NpuInferenceConsumer.cpp
+    source/productionline/io/inference/NpuInferenceConsumer.cpp
 
 # ========== 测试程序 ==========
 # 注意：display_test 已废弃（原 test_cases/dec/ 目录已重命名为 old_case/）
