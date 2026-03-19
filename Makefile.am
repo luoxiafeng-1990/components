@@ -74,11 +74,13 @@ COMMON_LIBS = -lpthread -luring -lavformat -lavcodec -lavutil -lswscale -ltacosy
 bin_PROGRAMS = qa_cases
 qa_cases_SOURCES = \
     test_cases/test_module_main.cpp \
-    test_cases/common/ITestModule.cpp \
-    test_cases/vdec/VdecTestSuite.cpp \
-    test_cases/pp/PPTestSuite.cpp \
-    test_cases/record/RecordTestSuite.cpp \
-    test_cases/writer/WriterTestSuite.cpp
+    test_cases/common/ExecuteMode.cpp \
+    test_cases/vdec/VdecPlugin.cpp \
+    test_cases/pp/PPPlugin.cpp \
+    test_cases/record/RecordPlugin.cpp \
+    test_cases/writer/WriterPlugin.cpp \
+    test_cases/display/DisplayPlugin.cpp \
+    test_cases/npu/NpuPlugin.cpp
 qa_cases_LDADD = libcomponents.la $(COMMON_LIBS)
 qa_cases_CPPFLAGS = -I$(top_srcdir)/test_cases $(AM_CPPFLAGS)
 qa_cases_LDFLAGS = -Wl,--allow-shlib-undefined

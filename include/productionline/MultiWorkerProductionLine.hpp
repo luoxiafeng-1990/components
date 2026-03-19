@@ -153,7 +153,7 @@ private:
 class MultiWorkerProductionLine : public VideoProductionLine {
 public:
     // ⭐ v2.20：配置结构已移动到 WorkerConfig.hpp
-    // 使用：ProducerConfig, ConsumerConfig, ConnectorConfig, WorkerGroup, MultiWorkerConfig
+    // 使用：ProducerConfig, ConsumerConfig, ConnectorConfig, WorkerGroupConfig, MultiWorkerConfig
     
     /**
      * @brief 构造函数

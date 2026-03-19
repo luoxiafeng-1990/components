@@ -97,10 +97,8 @@ buildMultiWorkerConfigForCompare(
     ConsumerConfig consumer_sw;
     consumer_sw.consumer_name = "sw_decoder";
     consumer_sw.worker_config = configs[1];
-    // 同样合并外部 flags
-    if (flags & CONSUME_DISPLAY) {
-        consumer_sw.worker_config.consumer_type.display.enable = true;
-    }
+    // sw_decoder 禁用 display：软解帧在系统内存中，PP 硬件无法 DMA 访问
+    consumer_sw.worker_config.consumer_type.display.enable = false;
     if (flags & CONSUME_SAVE_RAW) {
         consumer_sw.worker_config.consumer_type.save_raw.enable = true;
     }

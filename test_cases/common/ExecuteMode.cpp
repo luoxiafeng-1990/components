@@ -1,44 +1,44 @@
 /**
- * @file ITestModule.cpp
- * @brief ITestModule 公共方法实现
- * 
- * 实现所有测试模块共享的 runSingle/runCompare/runParallel 方法
+ * @file ExecuteMode.cpp
+ * @brief ExecuteMode 静态方法实现（从原 ITestModule.cpp 提取）
  */
 
-#include "ITestModule.hpp"
+#include "ExecuteMode.hpp"
+#include "productionline/VideoProductionLine.hpp"
+#include "productionline/io/BufferConsumerStrategies.hpp"
+#include "buffer/bufferpool/BufferPoolRegistry.hpp"
+#include <log4cplus/logger.h>
 #include <log4cplus/loggingmacros.h>
 
 namespace test {
-namespace common {
 
-// ========================================
-// 公共执行方法实现
-// ========================================
+static log4cplus::Logger& getLogger() {
+    static log4cplus::Logger logger = log4cplus::Logger::getInstance(
+        LOG4CPLUS_TEXT("components.test.ExecuteMode"));
+    return logger;
+}
 
-consumer::ConsumeResult ITestModule::runSingle(
+consumer::ConsumeResult ExecuteMode::single(
     const WorkerConfig& config,
     uint32_t flags,
-    const std::string& test_name
-) {
-    auto& logger = getLogger();
-    
+    const std::string& test_name)
+{
     if (!test_name.empty()) {
         consumer::BufferConsumerService::printHeader(test_name, config);
     }
-    
-    LOG4CPLUS_DEBUG_FMT(logger, "runSingle: mode=SINGLE, flags=0x%X", flags);
-    
+    LOG4CPLUS_DEBUG_FMT(getLogger(), "single: mode=SINGLE, flags=0x%X", flags);
+
     consumer::BufferConsumerService service;
     return service.start({config}, consumer::ExecuteMode::SINGLE, flags);
 }
 
-consumer::ConsumeResult ITestModule::runCompare(
+consumer::ConsumeResult ExecuteMode::compare(
     const std::vector<WorkerConfig>& configs,
     uint32_t flags,
-    const std::string& test_name
-) {
+    const std::string& test_name)
+{
     auto& logger = getLogger();
-    
+
     if (!test_name.empty()) {
         LOG4CPLUS_INFO(logger, "");
         LOG4CPLUS_INFO(logger, "═══════════════════════════════════════════════════════");
@@ -55,32 +55,31 @@ consumer::ConsumeResult ITestModule::runCompare(
             if (configs[0].consumer_type.compare.enable_ssim) {
                 LOG4CPLUS_INFO_FMT(logger, "  SSIM:       enabled (min: %.2f)", configs[0].consumer_type.compare.min_ssim);
             }
-            // 显示叠加的消费类型
             if (flags & consumer::CONSUME_DISPLAY) {
                 LOG4CPLUS_INFO(logger, "  Display:    enabled (stacked)");
             }
             if (flags & consumer::CONSUME_SAVE_RAW) {
-                LOG4CPLUS_INFO_FMT(logger, "  Save:       enabled to %s (stacked)", 
+                LOG4CPLUS_INFO_FMT(logger, "  Save:       enabled to %s (stacked)",
                                   configs[0].consumer_type.save_raw.getOutputPath().c_str());
             }
         }
         LOG4CPLUS_INFO(logger, "═══════════════════════════════════════════════════════");
     }
-    
-    LOG4CPLUS_DEBUG_FMT(logger, "runCompare: mode=COMPARE, workers=%zu, flags=0x%X", 
+
+    LOG4CPLUS_DEBUG_FMT(logger, "compare: mode=COMPARE, workers=%zu, flags=0x%X",
                         configs.size(), flags);
-    
+
     consumer::BufferConsumerService service;
     return service.start(configs, consumer::ExecuteMode::COMPARE, flags);
 }
 
-consumer::ConsumeResult ITestModule::runParallel(
+consumer::ConsumeResult ExecuteMode::parallel(
     const std::vector<WorkerConfig>& configs,
     uint32_t flags,
-    const std::string& test_name
-) {
+    const std::string& test_name)
+{
     auto& logger = getLogger();
-    
+
     if (!test_name.empty()) {
         LOG4CPLUS_INFO(logger, "");
         LOG4CPLUS_INFO(logger, "═══════════════════════════════════════════════════════");
@@ -94,13 +93,75 @@ consumer::ConsumeResult ITestModule::runParallel(
         }
         LOG4CPLUS_INFO(logger, "═══════════════════════════════════════════════════════");
     }
-    
-    LOG4CPLUS_DEBUG_FMT(logger, "runParallel: mode=PARALLEL, workers=%zu, flags=0x%X", 
+
+    LOG4CPLUS_DEBUG_FMT(logger, "parallel: mode=PARALLEL, workers=%zu, flags=0x%X",
                         configs.size(), flags);
-    
+
     consumer::BufferConsumerService service;
     return service.start(configs, consumer::ExecuteMode::PARALLEL, flags);
 }
 
-} // namespace common
+consumer::ConsumeResult ExecuteMode::channelCompare(
+    const WorkerConfig& config,
+    const std::string& test_name)
+{
+    auto& logger = getLogger();
+    consumer::ConsumeResult result;
+
+    LOG4CPLUS_INFO_FMT(logger, "channelCompare: ref_ch=%d, cmp_ch=%d",
+        config.consumer_type.compare.reference_channel,
+        config.consumer_type.compare.compare_channel);
+
+    VideoProductionLine producer;
+    if (!producer.start(config)) {
+        result.success = false;
+        result.error_message = "Failed to start production line";
+        return result;
+    }
+
+    auto pool_id = producer.getWorkingBufferPoolId();
+    auto pool = BufferPoolRegistry::getInstance().getPool(pool_id).lock();
+    if (!pool) {
+        result.success = false;
+        result.error_message = "Failed to get BufferPool";
+        producer.stop();
+        return result;
+    }
+
+    auto consumer_ptr = std::make_shared<consumer::ChannelCompareConsumer>(
+        pool, config.consumer_type.compare);
+
+    int max_frames = config.consumer_type.max_frames;
+    consumer_ptr->run(max_frames);
+    producer.stop();
+
+    result.success = consumer_ptr->isPassed();
+    result.frames_consumed = consumer_ptr->getComparedCount();
+    if (!result.success) {
+        result.error_message = "Channel compare failed: " + consumer_ptr->getStats();
+    }
+
+    std::cout << "\n" << test_name << ": "
+              << (result.success ? "PASSED" : "FAILED") << "\n"
+              << "  Compared: " << consumer_ptr->getComparedCount() << " frames\n"
+              << "  Avg PSNR: " << consumer_ptr->getAveragePsnr() << " dB\n"
+              << "  Avg SSIM: " << consumer_ptr->getAverageSsim() << "\n"
+              << "  Mismatch: " << consumer_ptr->getMismatchCount() << "\n";
+
+    return result;
+}
+
+uint32_t ExecuteMode::buildConsumeFlags(const WorkerConfig& config) {
+    uint32_t flags = consumer::CONSUME_COUNT;
+    if (config.consumer_type.display.enable)
+        flags |= consumer::CONSUME_DISPLAY;
+    if (config.consumer_type.save_raw.enable)
+        flags |= consumer::CONSUME_SAVE_RAW;
+    if (config.consumer_type.save_encoded.enable)
+        flags |= consumer::CONSUME_SAVE_ENCODED;
+    if (config.consumer_type.npu_inference.enable)
+        flags |= consumer::CONSUME_NPU_INFERENCE;
+    return flags;
+}
+
 } // namespace test

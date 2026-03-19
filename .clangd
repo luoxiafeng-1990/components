@@ -1,0 +1,7 @@
+# clangd 配置：让「跳转到定义」在 components 内生效
+# 原因：项目用 Autotools，没有 compile_commands.json，需手动指定编译参数
+CompileFlags:
+  Add:
+    - -Iinclude
+    - -Iinclude/freetype2
+    - -std=c++17

@@ -1,21 +1,21 @@
 /**
- * @file PPTestSuite.cpp
- * @brief PPTestSuite 实现
+ * @file PPPlugin.cpp
+ * @brief PPPlugin 实现
  * 
- * 重构为 ExecuteMode 风格，与 BufferConsumerService 架构对齐
+ * 重构为 IOptionPlugin 插件架构，使用 ExecuteMode 静态工具类
  */
 
-#include "PPTestSuite.hpp"
+#include "PPPlugin.hpp"
 #include "../common/WorkerConfigFactory.hpp"
 #include "productionline/io/BufferConsumerService.hpp"
 #include "productionline/io/BufferConsumerStrategies.hpp"
-#include "productionline/VideoProductionLine.hpp"
-#include "buffer/bufferpool/BufferPoolRegistry.hpp"
+
+#include "../common/third_party/CLI11.hpp"
 
 #include <iostream>
-#include <getopt.h>
 #include <cstring>
 #include <sstream>
+#include <log4cplus/logger.h>
 #include <log4cplus/loggingmacros.h>
 
 namespace test {
@@ -66,394 +66,18 @@ static std::vector<OutputFormat> parseFormats(const std::string& str) {
     return result.empty() ? std::vector<OutputFormat>{OutputFormat::YUV_NV12} : result;
 }
 
-/// 解析整数列表（支持 "200", "100,200" 等格式）
-static std::vector<int> parseIntList(const std::string& str) {
-    std::vector<int> result;
-    for (const auto& s : parseStringList(str)) {
-        try {
-            result.push_back(std::stoi(s));
-        } catch (...) {
-            // 忽略无效的数字
-        }
-    }
-    return result;
-}
-
-// 获取模块级日志实例
-
-// ========================================
-// 辅助函数：从 WorkerConfig 构建消费标志
-// ========================================
-uint32_t PPTestSuite::buildConsumeFlags(const WorkerConfig& config) {
-    uint32_t flags = consumer::CONSUME_COUNT;  // 默认计数
-    
-    if (config.consumer_type.display.enable) {
-        flags |= consumer::CONSUME_DISPLAY;
-    }
-    if (config.consumer_type.save_raw.enable) {
-        flags |= consumer::CONSUME_SAVE_RAW;
-    }
-    
-    return flags;
+// 模块级日志实例
+static log4cplus::Logger& getLogger() {
+    static log4cplus::Logger logger = log4cplus::Logger::getInstance(
+        LOG4CPLUS_TEXT("components.test.pp"));
+    return logger;
 }
 
 // ========================================
 // 预定义测试参数表
 // ========================================
 
-
-
-std::vector<std::string> PPTestSuite::getTestNames() const {
-    std::vector<std::string> names;
-    for (const auto& pair : getPredefinedTests()) {
-        names.push_back(pair.first);
-    }
-    return names;
-}
-
-// ========================================
-// ITestModule 接口实现
-// ========================================
-
-int PPTestSuite::run(int argc, char* argv[]) {
-    WorkerConfig config;
-    PPTestParams params;
-    
-    if (!parseArgs(argc, argv, config, params)) {
-        return 1;
-    }
-    
-    // 生成测试名称
-    std::ostringstream test_name;
-    test_name << params.getChannelString();
-    for (size_t i = 0; i < params.formats.size(); ++i) {
-        test_name << (i == 0 ? " " : ",") 
-                  << TacoConfigBuilder::mapFormatEnumToName(params.formats[i]);
-    }
-    test_name << " (" << params.width << "x" << params.height << ")";
-    
-    // ========================================
-    // 根据配置字段判断执行模式
-    // ========================================
-    
-    // COMPARE 模式：PSNR/SSIM 质量验证
-    if (config.consumer_type.compare.enable_psnr || config.consumer_type.compare.enable_ssim) {
-        
-        // ⭐ v2.27: 多通道 + PSNR/SSIM → 通道比较模式（pp0 vs pp1）
-        if (params.channels.size() >= 2) {
-            LOG4CPLUS_INFO_FMT(getLogger(), 
-                "Channel Compare Mode: ch%d vs ch%d", 
-                params.channels[0], params.channels[1]);
-            
-            // 构建多通道配置
-            WorkerConfig full_config = buildConfig(config.data_source.path, params);
-            full_config.consumer_type = config.consumer_type;
-            
-            // 设置通道比较参数
-            full_config.consumer_type.compare.enable_channel_compare = true;
-            full_config.consumer_type.compare.reference_channel = params.channels[0];
-            full_config.consumer_type.compare.compare_channel = params.channels[1];
-            
-            // 启动生产线
-            VideoProductionLine producer;
-            if (!producer.start(full_config)) {
-                LOG4CPLUS_ERROR(getLogger(), "Failed to start production line");
-                return 1;
-            }
-            
-            // 获取 BufferPool
-            auto pool_id = producer.getWorkingBufferPoolId();
-            auto pool = BufferPoolRegistry::getInstance().getPool(pool_id).lock();
-            if (!pool) {
-                LOG4CPLUS_ERROR(getLogger(), "Failed to get BufferPool");
-                producer.stop();
-                return 1;
-            }
-            
-            // 创建通道比较消费者
-            auto consumer = std::make_shared<consumer::ChannelCompareConsumer>(
-                pool, full_config.consumer_type.compare);
-            
-            // 运行比较
-            int max_frames = full_config.consumer_type.max_frames;
-            consumer->run(max_frames);
-            
-            // 停止生产线
-            producer.stop();
-            
-            // 输出结果
-            LOG4CPLUS_INFO_FMT(getLogger(), "Channel Compare Result: %s", 
-                consumer->getStats().c_str());
-            
-            std::cout << "\n" << test_name.str() << " (CHANNEL_COMPARE): "
-                      << (consumer->isPassed() ? "PASSED" : "FAILED") << "\n"
-                      << "  Compared: " << consumer->getComparedCount() << " frames\n"
-                      << "  Avg PSNR: " << consumer->getAveragePsnr() << " dB\n"
-                      << "  Avg SSIM: " << consumer->getAverageSsim() << "\n"
-                      << "  Mismatch: " << consumer->getMismatchCount() << "\n";
-            
-            return consumer->isPassed() ? 0 : 1;
-        }
-        
-        // 单通道 + PSNR/SSIM → HW vs SW 比较模式
-        // 构建 HW PP 配置
-        auto hw_config = buildConfig(config.data_source.path, params);
-        hw_config.consumer_type = config.consumer_type;
-        
-        // 构建 SW 配置（软件解码作为参考）
-        auto sw_config = common::WorkerConfigFactory::createSoftwareDecode(
-            config.data_source.path, params.width, params.height);
-        sw_config.consumer_type = config.consumer_type;
-        
-        // COMPARE 模式也支持叠加其他消费类型（display、save）
-        uint32_t compare_flags = 0;
-        if (config.consumer_type.display.enable) {
-            compare_flags |= consumer::CONSUME_DISPLAY;
-        }
-        if (config.consumer_type.save_raw.enable) {
-            compare_flags |= consumer::CONSUME_SAVE_RAW;
-        }
-        
-        auto result = runCompare({hw_config, sw_config}, compare_flags, 
-                                  test_name.str() + " (COMPARE)");
-        consumer::BufferConsumerService::printResult(test_name.str(), result);
-        return result.success ? 0 : 1;
-    }
-    
-    // SINGLE 模式：默认单路消费
-    WorkerConfig full_config = buildConfig(config.data_source.path, params);
-    full_config.consumer_type = config.consumer_type;
-    
-    uint32_t flags = buildConsumeFlags(full_config);
-    
-    auto result = runSingle(full_config, flags, test_name.str());
-    consumer::BufferConsumerService::printResult(test_name.str(), result);
-    
-    return result.success ? 0 : 1;
-}
-
-bool PPTestSuite::parseArgs(int argc, char* argv[], WorkerConfig& config, PPTestParams& params) {
-    optind = 1;
-    
-    static struct option long_options[] = {
-        {"help",       no_argument,       0, 'h'},
-        {"list",       no_argument,       0, 'l'},
-        {"input",      required_argument, 0, 'i'},
-        {"decoder",    required_argument, 0, 'D'},
-        {"format",     required_argument, 0, 'f'},
-        {"channel",    required_argument, 0, 'c'},
-        {"width",      required_argument, 0, 'W'},
-        {"height",     required_argument, 0, 'H'},
-        {"resolution", required_argument, 0, 'R'},
-        {"crop",       required_argument, 0, 'C'},
-        {"color-std",  required_argument, 0, 's'},
-        {"output",     required_argument, 0, 'o'},
-        {"save",       required_argument, 0, 'n'},
-        {"display",    no_argument,       0, 'd'},
-        {"max-frames", required_argument, 0, 'm'},
-        {"psnr",       no_argument,       0, 'p'},
-        {"ssim",       no_argument,       0, 'S'},
-        {"min-psnr",   required_argument, 0, 'P'},
-        {"min-ssim",   required_argument, 0, 'M'},
-        {"verbose",    no_argument,       0, 'v'},
-        {0, 0, 0, 0}
-    };
-    
-    std::string input_path;
-    std::string format_str = "nv12";
-    std::string channel_str;        // 通道参数（命令行）
-    std::string color_std_str = "bt601";
-    
-    int opt;
-    while ((opt = getopt_long(argc, argv, "hli:D:f:c:W:H:R:C:s:o:n:dm:pSP:M:v",
-                              long_options, nullptr)) != -1) {
-        switch (opt) {
-            case 'h':
-                printHelp();
-                return false;
-            
-            case 'l':
-                listTests();
-                return false;
-            
-            case 'i':
-                input_path = optarg;
-                break;
-            
-            case 'D': {
-                std::string decoder_type = optarg;
-                if (decoder_type == "hw" || decoder_type == "hardware") {
-                    params.use_hardware = true;
-                } else if (decoder_type == "sw" || decoder_type == "software") {
-                    params.use_hardware = false;
-                } else {
-                    LOG4CPLUS_ERROR_FMT(getLogger(), 
-                        "Invalid decoder type '%s', use 'hw' or 'sw'", optarg);
-                    return false;
-                }
-                break;
-            }
-            
-            case 'f':
-                format_str = optarg;
-                params.formats = parseFormats(optarg);
-                break;
-            
-            case 'c':
-                channel_str = optarg;
-                params.channels = parseChannels(optarg);
-                break;
-            
-            case 'W':
-                params.width = std::stoi(optarg);
-                break;
-            
-            case 'H':
-                params.height = std::stoi(optarg);
-                break;
-            
-            case 'R': {
-                std::string res = optarg;
-                size_t pos = res.find('x');
-                if (pos != std::string::npos) {
-                    params.width = std::stoi(res.substr(0, pos));
-                    params.height = std::stoi(res.substr(pos + 1));
-                }
-                break;
-            }
-            
-            case 'C': {
-                // 解析裁剪参数: x,y,w,h
-                std::string crop = optarg;
-                int vals[4] = {0};
-                int idx = 0;
-                size_t start = 0, end;
-                while ((end = crop.find(',', start)) != std::string::npos && idx < 4) {
-                    vals[idx++] = std::stoi(crop.substr(start, end - start));
-                    start = end + 1;
-                }
-                if (idx < 4 && start < crop.length()) {
-                    vals[idx] = std::stoi(crop.substr(start));
-                }
-                params.crop_x = vals[0];
-                params.crop_y = vals[1];
-                params.crop_w = vals[2];
-                params.crop_h = vals[3];
-                break;
-            }
-            
-            case 's':
-                color_std_str = optarg;
-                break;
-            
-            case 'o':
-                config.consumer_type.save_raw.enable = true;  // 指定路径即启用保存
-                config.consumer_type.save_raw.output_paths = parseStringList(optarg);
-                break;
-            
-            case 'n':
-                config.consumer_type.save_raw.max_frames_per_channel = parseIntList(optarg);
-                break;
-            
-            case 'd':
-                config.consumer_type.display.enable = true;
-                break;
-            
-            case 'm':
-                config.consumer_type.max_frames = std::stoi(optarg);
-                break;
-            
-            case 'p':
-                config.consumer_type.compare.enable_psnr = true;
-                break;
-            
-            case 'S':
-                config.consumer_type.compare.enable_ssim = true;
-                break;
-            
-            case 'P':
-                config.consumer_type.compare.min_psnr = std::stod(optarg);
-                break;
-            
-            case 'M':
-                config.consumer_type.compare.min_ssim = std::stod(optarg);
-                break;
-            
-            case 'v':
-                config.consumer_type.verbose = true;
-                break;
-            
-            default:
-                printHelp();
-                return false;
-        }
-    }
-    
-    // 处理剩余参数
-    for (int i = optind; i < argc; i++) {
-        std::string arg = argv[i];
-        
-        // 检查是否是预定义测试
-        const auto& tests = getPredefinedTests();
-        auto it = tests.find(arg);
-        if (it != tests.end()) {
-            params = it->second;
-            if (i + 1 < argc) {
-                input_path = argv[++i];
-            }
-            continue;
-        }
-        
-        if (input_path.empty()) {
-            input_path = arg;
-        } else {
-            LOG4CPLUS_WARN_FMT(getLogger(), 
-                "Extra positional argument ignored: '%s' (input already set to: '%s')",
-                arg.c_str(), input_path.c_str());
-        }
-    }
-    
-    if (input_path.empty()) {
-        LOG4CPLUS_ERROR(getLogger(), "No input file specified");
-        printHelp();
-        return false;
-    }
-    
-    config.data_source.path = input_path;
-    
-    // 只有当没有使用预定义测试时才解析 channel、format 和 color_std 参数
-    // 预定义测试通过 channels 非空来标识
-    if (params.channels.empty()) {
-        // 没有使用预定义测试，从命令行参数解析
-        if (channel_str.empty()) {
-            params.channels = {0};  // 默认通道 0
-        }
-        if (params.formats.empty()) {
-            params.formats = parseFormats(format_str);
-        }
-        params.color_std = TacoConfigBuilder::mapColorStdNameToEnum(color_std_str);
-        
-        // 提示用户使用了默认配置
-        std::string channels_info;
-        for (size_t i = 0; i < params.channels.size(); ++i) {
-            if (i > 0) channels_info += ",";
-            channels_info += std::to_string(params.channels[i]);
-        }
-        std::string formats_info;
-        for (size_t i = 0; i < params.formats.size(); ++i) {
-            if (i > 0) formats_info += ",";
-            formats_info += std::string(TacoConfigBuilder::mapFormatEnumToName(params.formats[i]));
-        }
-        LOG4CPLUS_INFO_FMT(getLogger(), 
-            "Using PP configuration: channels=[%s], formats=[%s] (use -c and -f to customize)",
-            channels_info.c_str(), formats_info.c_str());
-    }
-    // 如果使用了预定义测试，params 已经被正确设置，不需要覆盖
-    
-    return true;
-}
-
-const std::map<std::string, PPTestParams>& PPTestSuite::getPredefinedTests() {
+const std::map<std::string, PPTestParams>& PPPlugin::getPredefinedTests() {
     static std::map<std::string, PPTestParams> tests = {
         // ════════════════════════════════════════════════════════════════════
         // PP0 YUV 格式（15 种，对应 lfl 分支 test_decode.cpp 定义）
@@ -683,33 +307,179 @@ const std::map<std::string, PPTestParams>& PPTestSuite::getPredefinedTests() {
     return tests;
 }
 
-int PPTestSuite::runPredefinedTest(const std::string& test_name, const std::string& path) {
-    const auto& tests = getPredefinedTests();
-    auto it = tests.find(test_name);
-    if (it == tests.end()) {
-        LOG4CPLUS_ERROR_FMT(getLogger(), "Unknown test '%s'", test_name.c_str());
-        return 1;
-    }
-    
-    // 构建配置
-    WorkerConfig config = buildConfig(path, it->second);
-    config.consumer_type.save_raw.enable = true;
-    config.consumer_type.save_raw.max_frames_per_channel = {10};  // 默认保存前10帧验证
-    
-    uint32_t flags = consumer::CONSUME_COUNT | consumer::CONSUME_SAVE_RAW;
-    
-    // 使用基类 runSingle（ExecuteMode::SINGLE）
-    auto result = runSingle(config, flags, test_name);
-    consumer::BufferConsumerService::printResult(test_name, result);
-    return result.success ? 0 : 1;
+// ========================================
+// IOptionPlugin 接口实现
+// ========================================
+
+void PPPlugin::registerOptions(CLI::App& app) {
+    app.add_flag("-l,--list", show_list_, "列出所有预定义测试");
+    app.add_option("-i,--input", input_path_, "输入视频路径");
+    app.add_option("-D,--decoder", decoder_str_, "解码方式 (hw|sw, 默认: hw)");
+    app.add_option("-f,--format", format_str_, "输出格式, 多通道用逗号分隔");
+    app.add_option("-c,--channel", channel_str_, "通道选择 (0|1|0,1)");
+    app.add_option("-W,--width", params_.width, "输出宽度");
+    app.add_option("-H,--height", params_.height, "输出高度");
+    app.add_option("-R,--resolution", resolution_str_, "分辨率 (如 1920x1080)");
+    app.add_option("-C,--crop", crop_str_, "裁剪区域 (x,y,w,h)");
+    app.add_option("-s,--color-std", color_std_str_, "颜色标准 (bt601|bt709|bt2020)");
+    app.add_option("-o,--output", save_paths_, "输出文件路径")->delimiter(',');
+    app.add_option("-n,--save", save_frames_, "保存帧数")->delimiter(',');
+    app.add_option("-m,--max-frames", max_frames_, "最大帧数");
+    app.add_flag("-p,--psnr", enable_psnr_, "启用 PSNR 验证");
+    app.add_flag("-S,--ssim", enable_ssim_, "启用 SSIM 验证");
+    app.add_option("-P,--min-psnr", min_psnr_, "PSNR 阈值");
+    app.add_option("-M,--min-ssim", min_ssim_, "SSIM 阈值");
+    app.add_flag("-v,--verbose", verbose_, "详细日志");
+    app.add_option("positional", positional_args_, "测试名或输入文件路径");
+
+    app.footer(
+        "Examples:\n"
+        "  qa_cases pp video.mp4\n"
+        "  qa_cases pp --channel 0 --format nv12 video.mp4\n"
+        "  qa_cases pp --channel 1 --format argb888 video.mp4\n"
+        "  qa_cases pp --psnr video.mp4\n"
+        "  qa_cases pp pp1_argb888 video.mp4\n"
+    );
 }
 
+void PPPlugin::applyTo(WorkerConfig& config) const {
+    if (enable_psnr_)
+        config.consumer_type.compare.enable_psnr = true;
+    if (enable_ssim_)
+        config.consumer_type.compare.enable_ssim = true;
+    if (min_psnr_ >= 0)
+        config.consumer_type.compare.min_psnr = min_psnr_;
+    if (min_ssim_ >= 0)
+        config.consumer_type.compare.min_ssim = min_ssim_;
+    if (verbose_)
+        config.consumer_type.verbose = true;
+    if (!save_paths_.empty()) {
+        config.consumer_type.save_raw.enable = true;
+        config.consumer_type.save_raw.output_paths = save_paths_;
+    }
+    if (!save_frames_.empty())
+        config.consumer_type.save_raw.max_frames_per_channel = save_frames_;
+    if (max_frames_ != 0)
+        config.consumer_type.max_frames = max_frames_;
+    if (!input_path_.empty())
+        config.data_source.path = input_path_;
+}
+
+int PPPlugin::handlePreActions() {
+    if (!decoder_str_.empty()) {
+        if (decoder_str_ == "sw" || decoder_str_ == "software")
+            params_.use_hardware = false;
+    }
+    if (!resolution_str_.empty()) {
+        size_t pos = resolution_str_.find('x');
+        if (pos != std::string::npos) {
+            params_.width = std::stoi(resolution_str_.substr(0, pos));
+            params_.height = std::stoi(resolution_str_.substr(pos + 1));
+        }
+    }
+    if (!crop_str_.empty()) {
+        int vals[4] = {0}; int idx = 0;
+        size_t start = 0, end;
+        while ((end = crop_str_.find(',', start)) != std::string::npos && idx < 4) {
+            vals[idx++] = std::stoi(crop_str_.substr(start, end - start));
+            start = end + 1;
+        }
+        if (idx < 4 && start < crop_str_.length())
+            vals[idx] = std::stoi(crop_str_.substr(start));
+        params_.crop_x = vals[0]; params_.crop_y = vals[1];
+        params_.crop_w = vals[2]; params_.crop_h = vals[3];
+    }
+    if (!channel_str_.empty()) params_.channels = parseChannels(channel_str_);
+    if (!format_str_.empty() && format_str_ != "nv12") params_.formats = parseFormats(format_str_);
+
+    for (const auto& a : positional_args_) {
+        const auto& tests = getPredefinedTests();
+        auto it = tests.find(a);
+        if (it != tests.end()) { params_ = it->second; continue; }
+        if (input_path_.empty()) input_path_ = a;
+    }
+
+    if (show_list_) { listTests(); return 0; }
+    if (input_path_.empty()) {
+        LOG4CPLUS_ERROR(getLogger(), "No input file specified");
+        return 1;
+    }
+    return -1;
+}
+
+std::string PPPlugin::getTestName() const {
+    PPTestParams params = params_;
+    if (params.channels.empty()) params.channels = {0};
+    if (params.formats.empty()) params.formats = parseFormats(format_str_);
+
+    std::ostringstream test_name;
+    test_name << params.getChannelString();
+    for (size_t i = 0; i < params.formats.size(); ++i) {
+        test_name << (i == 0 ? " " : ",")
+                  << TacoConfigBuilder::mapFormatEnumToName(params.formats[i]);
+    }
+    test_name << " (" << params.width << "x" << params.height << ")";
+    return test_name.str();
+}
+
+std::vector<WorkerConfig> PPPlugin::buildPipelineConfigs(const WorkerConfig& shared_config) {
+    if (input_path_.empty()) return {};
+
+    PPTestParams params = params_;
+
+    if (params.channels.empty()) {
+        if (channel_str_.empty()) params.channels = {0};
+        if (params.formats.empty()) params.formats = parseFormats(format_str_);
+        params.color_std = TacoConfigBuilder::mapColorStdNameToEnum(color_std_str_);
+
+        std::string channels_info, formats_info;
+        for (size_t i = 0; i < params.channels.size(); ++i) {
+            if (i > 0) channels_info += ",";
+            channels_info += std::to_string(params.channels[i]);
+        }
+        for (size_t i = 0; i < params.formats.size(); ++i) {
+            if (i > 0) formats_info += ",";
+            formats_info += std::string(TacoConfigBuilder::mapFormatEnumToName(params.formats[i]));
+        }
+        LOG4CPLUS_INFO_FMT(getLogger(),
+            "Using PP configuration: channels=[%s], formats=[%s] (use -c and -f to customize)",
+            channels_info.c_str(), formats_info.c_str());
+    }
+
+    // COMPARE：多通道 → 通道比较（channel compare）
+    if ((shared_config.consumer_type.compare.enable_psnr || shared_config.consumer_type.compare.enable_ssim)
+        && params.channels.size() >= 2) {
+        WorkerConfig full_config = buildConfig(input_path_, params);
+        full_config.consumer_type = shared_config.consumer_type;
+        full_config.consumer_type.compare.enable_channel_compare = true;
+        full_config.consumer_type.compare.reference_channel = params.channels[0];
+        full_config.consumer_type.compare.compare_channel = params.channels[1];
+        return {full_config};
+    }
+
+    // COMPARE：单通道 → HW vs SW
+    if (shared_config.consumer_type.compare.enable_psnr || shared_config.consumer_type.compare.enable_ssim) {
+        auto hw_config = buildConfig(input_path_, params);
+        hw_config.consumer_type = shared_config.consumer_type;
+
+        auto sw_config = common::WorkerConfigFactory::createSoftwareDecode(
+            input_path_, params.width, params.height);
+        sw_config.consumer_type = shared_config.consumer_type;
+
+        return {hw_config, sw_config};
+    }
+
+    // SINGLE
+    WorkerConfig full_config = buildConfig(input_path_, params);
+    full_config.consumer_type = shared_config.consumer_type;
+    return {full_config};
+}
 
 // ========================================
-// 核心测试方法实现（与 ExecuteMode 对齐）
+// 核心辅助方法实现
 // ========================================
 
-WorkerConfig PPTestSuite::buildConfig(const std::string& path, const PPTestParams& params) {
+WorkerConfig PPPlugin::buildConfig(const std::string& path, const PPTestParams& params) {
     WorkerConfig config;
     
     // 软件解码模式：不使用硬件 PP，直接解码
@@ -757,62 +527,7 @@ WorkerConfig PPTestSuite::buildConfig(const std::string& path, const PPTestParam
     return config;
 }
 
-void PPTestSuite::printHelp() const {
-    std::cout << "\n"
-              << "PP Module - 后处理格式测试\n"
-              << "\n"
-              << "Usage:\n"
-              << "  qa_cases pp [options] <video_path>\n"
-              << "  qa_cases pp [options] <test_name> <video_path>\n"
-              << "\n"
-              << "Options:\n"
-              << "  -h, --help              显示帮助信息\n"
-              << "  -l, --list              列出所有预定义测试\n"
-              << "  -i, --input <path>      输入视频路径\n"
-              << "  -D, --decoder <type>    解码方式 (hw|hardware|sw|software，默认: hw)\n"
-              << "  -f, --format <fmt>      输出格式 (nv12|argb888|...), 多通道用逗号分隔\n"
-              << "  -c, --channel <ch>      通道选择 (0|1|0,1), 多通道用逗号分隔\n"
-              << "  -W, --width <n>         输出宽度\n"
-              << "  -H, --height <n>        输出高度\n"
-              << "  -R, --resolution <WxH>  分辨率 (如 1920x1080)\n"
-              << "  -C, --crop <x,y,w,h>    裁剪区域\n"
-              << "  -s, --color-std <s>     颜色标准 (bt601|bt709|bt2020)\n"
-              << "  -o, --output <path>     输出文件路径\n"
-              << "  -n, --save <n>          保存帧数 (0=不保存, -1=全部)\n"
-              << "  -d, --display           启用显示输出 (CONSUME_DISPLAY)\n"
-              << "  -m, --max-frames <n>    最大帧数 (-1=无限制)\n"
-              << "  -p, --psnr              启用 PSNR 验证 (ExecuteMode::COMPARE)\n"
-              << "  -S, --ssim              启用 SSIM 验证 (ExecuteMode::COMPARE)\n"
-              << "  -P, --min-psnr <n>      PSNR 阈值 (默认: 30.0 dB)\n"
-              << "  -M, --min-ssim <n>      SSIM 阈值 (默认: 0.95)\n"
-              << "  -v, --verbose           详细日志\n"
-              << "\n"
-              << "ExecuteMode Mapping:\n"
-              << "  SINGLE          - 默认单路 PP 处理\n"
-              << "  COMPARE (HW/SW) - 单通道 + --psnr/--ssim 时，HW PP vs SW 对比\n"
-              << "  COMPARE (CH)    - 多通道 + --psnr/--ssim 时，通道间对比 (如 ch0 vs ch1)\n"
-              << "\n"
-              << "Supported formats:\n"
-              << "  PP0 (YUV):  nv12, nv21, i420, yv12, p010, nv16, nv61, i422, nv24, i444\n"
-              << "  PP1 (RGB):  argb888, abgr888, rgba888, bgra888, rgb888, bgr888\n"
-              << "              xrgb888, xbgr888, rgbx888, bgrx888\n"
-              << "              rgb888_planar, bgr888_planar, r16g16b16, b16g16r16, gbrp\n"
-              << "  PP1 (YUV):  同 PP0\n"
-              << "\n"
-              << "Examples:\n"
-              << "  qa_cases pp video.mp4                                      # SINGLE (ch0)\n"
-              << "  qa_cases pp --channel 0 --format nv12 video.mp4            # SINGLE ch0\n"
-              << "  qa_cases pp --channel 1 --format argb888 video.mp4         # SINGLE ch1\n"
-              << "  qa_cases pp --display video.mp4                            # SINGLE + DISPLAY\n"
-              << "  qa_cases pp --psnr video.mp4                               # HW vs SW 比较\n"
-              << "  qa_cases pp --channel 0,1 --psnr video.mp4                 # 通道比较 ch0 vs ch1\n"
-              << "  qa_cases pp --channel 0,1 --format nv12,argb888 --psnr video.mp4\n"
-              << "  qa_cases pp pp1_argb888 video.mp4                          # 预定义测试\n"
-              << "  qa_cases pp --crop 0,0,1280,720 --resolution 1280x720 video.mp4\n"
-              << std::endl;
-}
-
-void PPTestSuite::listTests() const {
+void PPPlugin::listTests() const {
     std::cout << "\nAvailable PP tests:\n";
     std::cout << "════════════════════════════════════════════════════════\n";
     

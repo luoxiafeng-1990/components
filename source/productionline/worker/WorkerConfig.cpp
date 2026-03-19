@@ -71,11 +71,6 @@ WorkerConfig::DisplayConfig DisplayConfigBuilder::build() const {
 // TacoConfigBuilder 实现
 // ============================================================
 
-TacoConfigBuilder& TacoConfigBuilder::setReorderDisable(bool disable) {
-    taco_config_.reorder_disable = disable;
-    return *this;
-}
-
 TacoConfigBuilder& TacoConfigBuilder::setChannels(bool ch0, bool ch1) {
     taco_config_.ch0_enable = ch0;
     taco_config_.ch1_enable = ch1;
@@ -291,11 +286,6 @@ DecoderConfigBuilder& DecoderConfigBuilder::setDecoderName(const char* name) {
     return *this;
 }
 
-DecoderConfigBuilder& DecoderConfigBuilder::clearDecoderName() {
-    decoder_config_.name = std::nullopt;
-    return *this;
-}
-
 DecoderConfigBuilder& DecoderConfigBuilder::setHwaccelDevice(std::string_view device) {
     decoder_config_.hwaccel_device = std::string(device);
     return *this;
@@ -329,27 +319,6 @@ DecoderConfigBuilder& DecoderConfigBuilder::useTaco(
 DecoderConfigBuilder& DecoderConfigBuilder::useSoftware() {
     decoder_config_.name = std::nullopt;
     decoder_config_.enable_hardware = false;
-    return *this;
-}
-
-DecoderConfigBuilder& DecoderConfigBuilder::useCuvid(std::string_view codec) {
-    decoder_config_.name = std::string(codec) + "_cuvid";
-    decoder_config_.enable_hardware = true;
-    decoder_config_.hwaccel_device = "cuda";
-    return *this;
-}
-
-DecoderConfigBuilder& DecoderConfigBuilder::useQsv(std::string_view codec) {
-    decoder_config_.name = std::string(codec) + "_qsv";
-    decoder_config_.enable_hardware = true;
-    decoder_config_.hwaccel_device = "qsv";
-    return *this;
-}
-
-DecoderConfigBuilder& DecoderConfigBuilder::useVaapi(std::string_view codec) {
-    decoder_config_.name = std::string(codec) + "_vaapi";
-    decoder_config_.enable_hardware = true;
-    decoder_config_.hwaccel_device = "vaapi";
     return *this;
 }
 

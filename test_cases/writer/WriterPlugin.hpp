@@ -1,5 +1,5 @@
 /**
- * @file WriterTestSuite.hpp
+ * @file WriterPlugin.hpp
  * @brief 帧写入测试套件
  * 
  * 封装所有帧写入相关的测试功能，包括：
@@ -8,7 +8,8 @@
  * - 批量格式测试
  * 
  * 架构设计：
- * - 与 BufferConsumerService 的 ExecuteMode 对齐
+ * - 实现 IOptionPlugin 接口，作为主插件（canExecute = true）
+ * - 使用 ExecuteMode 静态工具类执行 SINGLE 模式
  * - 帧写入测试使用 ExecuteMode::SINGLE + CONSUME_SAVE_RAW
  * 
  * 使用示例：
@@ -18,19 +19,22 @@
  * ./qa_cases writer -h
  * @endcode
  * 
- * @version 4.0 - 重构为 ExecuteMode 风格
+ * @version 6.0 - 迁移到 CLI11
  */
 
-#ifndef WRITER_TEST_SUITE_HPP
-#define WRITER_TEST_SUITE_HPP
+#ifndef WRITER_PLUGIN_HPP
+#define WRITER_PLUGIN_HPP
 
-#include "../common/ITestModule.hpp"
+#include "../common/IOptionPlugin.hpp"
+#include "../common/ExecuteMode.hpp"
 #include "productionline/io/BufferConsumerService.hpp"
 #include "productionline/worker/WorkerConfig.hpp"
+
 #include <map>
 #include <string>
 #include <vector>
-#include <log4cplus/logger.h>
+
+namespace CLI { class App; }
 
 namespace test {
 namespace writer {
@@ -61,48 +65,31 @@ struct WriterTestParams {
 /**
  * @brief 帧写入测试套件
  * 
- * 实现 ITestModule 接口，提供完整的帧写入测试功能。
+ * 实现 IOptionPlugin 接口，作为主插件提供完整的帧写入测试功能。
  * 
  * 架构设计：
  * - 所有帧写入测试使用 ExecuteMode::SINGLE
  * - 消费标志：CONSUME_COUNT | CONSUME_SAVE_RAW
  */
-class WriterTestSuite : public common::ITestModule {
+class WriterPlugin : public IOptionPlugin {
 public:
-    WriterTestSuite() = default;
-    ~WriterTestSuite() override = default;
+    WriterPlugin() = default;
+    ~WriterPlugin() override = default;
     
     // ========================================
-    // ITestModule 接口实现
+    // IOptionPlugin 接口实现
     // ========================================
     
     std::string getName() const override { return "writer"; }
     std::string getDescription() const override { return "帧写入测试"; }
     
-    int run(int argc, char* argv[]) override;
-    void printHelp() const override;
+    void registerOptions(CLI::App& app) override;
+    void applyTo(WorkerConfig& config) const override;
     void listTests() const override;
-    std::vector<std::string> getTestNames() const override;
     
-    // ========================================
-    // 核心测试方法（与 ExecuteMode 对齐）
-    // ========================================
-    
-    /**
-     * @brief 单路消费测试（ExecuteMode::SINGLE + CONSUME_SAVE_RAW）
-     * 
-     * 帧写入测试统一入口
-     * 
-     * @param input_path 输入文件路径
-     * @param params 写入参数
-     * @param output_path 输出文件路径（可选，空则自动生成）
-     * @return 测试结果
-     */
-    static TestResult runSingle(
-        const std::string& input_path,
-        const WriterTestParams& params,
-        const std::string& output_path = ""
-    );
+    int handlePreActions() override;
+    std::vector<WorkerConfig> buildPipelineConfigs(const WorkerConfig& shared_config) override;
+    std::string getTestName() const override;
     
     /**
      * @brief 获取预定义测试参数
@@ -120,18 +107,23 @@ public:
     static const std::vector<std::pair<OutputFormat, std::string>>& getYuvFormats();
 
 private:
-    /**
-     * @brief 解析命令行参数
-     */
-    bool parseArgs(int argc, char* argv[], WorkerConfig& config, WriterTestParams& params, std::string& output_path);
-    
-    /**
-     * @brief 获取模块级日志实例
-     */
-    static log4cplus::Logger& getLogger();
+    // ========================================
+    // 解析状态（由 CLI11 自动填充）
+    // ========================================
+    bool show_list_ = false;
+    std::string input_path_;
+    std::string output_path_;
+    std::string decoder_str_;
+    std::string format_str_ = "nv12";
+    std::vector<std::string> positional_args_;
+    WriterTestParams params_;
+    bool verbose_ = false;
+    bool format_specified_ = false;
+    bool all_rgb_ = false;
+    bool all_yuv_ = false;
 };
 
 } // namespace writer
 } // namespace test
 
-#endif // WRITER_TEST_SUITE_HPP
+#endif // WRITER_PLUGIN_HPP

@@ -1,5 +1,5 @@
 /**
- * @file PPTestSuite.hpp
+ * @file PPPlugin.hpp
  * @brief 后处理（PP）测试套件
  * 
  * 封装所有后处理相关的测试功能，包括：
@@ -10,8 +10,8 @@
  * - PSNR/SSIM 质量验证
  * 
  * 架构设计：
- * - 与 BufferConsumerService 的 ExecuteMode 对齐
- * - 测试方法直接映射到 SINGLE / COMPARE / PARALLEL 模式
+ * - 实现 IOptionPlugin 接口，作为主插件（canExecute = true）
+ * - 使用 ExecuteMode 静态工具类执行 SINGLE / COMPARE / PARALLEL 模式
  * 
  * 使用示例：
  * @code
@@ -22,13 +22,14 @@
  * ./qa_cases pp -h
  * @endcode
  * 
- * @version 4.1 - 重构为 ExecuteMode 风格，与 VdecTestSuite 架构对齐
+ * @version 5.0 - 重构为 IOptionPlugin 插件架构
  */
 
-#ifndef PP_TEST_SUITE_HPP
-#define PP_TEST_SUITE_HPP
+#ifndef PP_PLUGIN_HPP
+#define PP_PLUGIN_HPP
 
-#include "../common/ITestModule.hpp"
+#include "../common/IOptionPlugin.hpp"
+#include "../common/ExecuteMode.hpp"
 #include "productionline/io/BufferConsumerService.hpp"
 #include "productionline/worker/WorkerConfig.hpp"
 
@@ -36,7 +37,6 @@
 #include <vector>
 #include <sstream>
 #include <map>
-#include <log4cplus/logger.h>
 
 namespace test {
 namespace pp {
@@ -171,47 +171,42 @@ private:
 /**
  * @brief 后处理测试套件
  * 
- * 实现 ITestModule 接口，提供完整的后处理测试功能。
+ * 实现 IOptionPlugin 接口，作为主插件提供完整的后处理测试功能。
  * 
  * 架构设计：
- * - 所有测试方法与 BufferConsumerService::ExecuteMode 对齐
- * - runSingle()   → ExecuteMode::SINGLE
- * - runCompare()  → ExecuteMode::COMPARE (PSNR/SSIM)
- * - runParallel() → ExecuteMode::PARALLEL (多线程/多Worker)
+ * - 所有测试方法通过 ExecuteMode 静态工具类执行
+ * - ExecuteMode::single()   → SINGLE
+ * - ExecuteMode::compare()  → COMPARE (PSNR/SSIM)
+ * - ExecuteMode::parallel() → PARALLEL (多线程/多Worker)
  */
-class PPTestSuite : public common::ITestModule {
+class PPPlugin : public IOptionPlugin {
 public:
-    PPTestSuite() = default;
-    ~PPTestSuite() override = default;
+    PPPlugin() = default;
+    ~PPPlugin() override = default;
     
     // ========================================
-    // ITestModule 接口实现
+    // IOptionPlugin 接口实现
     // ========================================
     
     std::string getName() const override { return "pp"; }
     std::string getDescription() const override { return "后处理格式测试"; }
     
-    int run(int argc, char* argv[]) override;
-    void printHelp() const override;
+    void registerOptions(CLI::App& app) override;
+    void applyTo(WorkerConfig& config) const override;
     void listTests() const override;
-    std::vector<std::string> getTestNames() const override;
+    
+    int handlePreActions() override;
+    std::vector<WorkerConfig> buildPipelineConfigs(const WorkerConfig& shared_config) override;
+    std::string getTestName() const override;
     
     // ========================================
     // 辅助方法
     // ========================================
-    // 注：runSingle/runCompare/runParallel 已移至基类 ITestModule
     
     /**
      * @brief 获取预定义测试参数
-     * 
-     * @return 预定义测试名称到参数的映射
      */
     static const std::map<std::string, PPTestParams>& getPredefinedTests();
-    
-    /**
-     * @brief 从 WorkerConfig 构建消费标志
-     */
-    static uint32_t buildConsumeFlags(const WorkerConfig& config);
     
     /**
      * @brief 从 PPTestParams 构建 WorkerConfig
@@ -219,19 +214,30 @@ public:
     static WorkerConfig buildConfig(const std::string& path, const PPTestParams& params);
 
 private:
-    /**
-     * @brief 解析命令行参数
-     */
-    bool parseArgs(int argc, char* argv[], WorkerConfig& config, PPTestParams& params);
-    
-    /**
-     * @brief 执行预定义测试
-     */
-    int runPredefinedTest(const std::string& test_name, const std::string& path);
-    
+    // ========================================
+    // 解析状态（由 CLI11 自动填充）
+    // ========================================
+    bool show_list_ = false;
+    PPTestParams params_;
+    std::string input_path_;
+    std::string decoder_str_;
+    std::string format_str_ = "nv12";
+    std::string channel_str_;
+    std::string resolution_str_;
+    std::string crop_str_;
+    std::string color_std_str_ = "bt601";
+    bool enable_psnr_ = false;
+    bool enable_ssim_ = false;
+    double min_psnr_ = -1.0;
+    double min_ssim_ = -1.0;
+    bool verbose_ = false;
+    std::vector<std::string> save_paths_;
+    std::vector<int> save_frames_;
+    int max_frames_ = 0;
+    std::vector<std::string> positional_args_;
 };
 
 } // namespace pp
 } // namespace test
 
-#endif // PP_TEST_SUITE_HPP
+#endif // PP_PLUGIN_HPP

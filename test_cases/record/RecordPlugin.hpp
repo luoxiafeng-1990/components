@@ -1,5 +1,5 @@
 /**
- * @file RecordTestSuite.hpp
+ * @file RecordPlugin.hpp
  * @brief 录制测试套件
  * 
  * 封装所有录制相关的测试功能，包括：
@@ -8,7 +8,8 @@
  * - 多格式输出
  * 
  * 架构设计：
- * - 与 BufferConsumerService 的 ExecuteMode 对齐
+ * - 实现 IOptionPlugin 接口，作为主插件（canExecute = true）
+ * - 使用 ExecuteMode 静态工具类执行 SINGLE 模式
  * - 录制测试使用 ExecuteMode::SINGLE + CONSUME_SAVE_ENCODED
  * 
  * 使用示例：
@@ -18,20 +19,22 @@
  * ./qa_cases record -h
  * @endcode
  * 
- * @version 4.0 - 重构为 ExecuteMode 风格
+ * @version 6.0 - 迁移到 CLI11
  */
 
-#ifndef RECORD_TEST_SUITE_HPP
-#define RECORD_TEST_SUITE_HPP
+#ifndef RECORD_PLUGIN_HPP
+#define RECORD_PLUGIN_HPP
 
-#include "../common/ITestModule.hpp"
+#include "../common/IOptionPlugin.hpp"
+#include "../common/ExecuteMode.hpp"
 #include "productionline/io/BufferConsumerService.hpp"
 #include "productionline/worker/WorkerConfig.hpp"
 
 #include <string>
 #include <vector>
 #include <map>
-#include <log4cplus/logger.h>
+
+namespace CLI { class App; }
 
 namespace test {
 namespace record {
@@ -55,48 +58,31 @@ struct RecordTestParams {
 /**
  * @brief 录制测试套件
  * 
- * 实现 ITestModule 接口，提供完整的录制测试功能。
+ * 实现 IOptionPlugin 接口，作为主插件提供完整的录制测试功能。
  * 
  * 架构设计：
  * - 所有录制测试使用 ExecuteMode::SINGLE
  * - 消费标志：CONSUME_SAVE_ENCODED
  */
-class RecordTestSuite : public common::ITestModule {
+class RecordPlugin : public IOptionPlugin {
 public:
-    RecordTestSuite() = default;
-    ~RecordTestSuite() override = default;
+    RecordPlugin() = default;
+    ~RecordPlugin() override = default;
     
     // ========================================
-    // ITestModule 接口实现
+    // IOptionPlugin 接口实现
     // ========================================
     
     std::string getName() const override { return "record"; }
     std::string getDescription() const override { return "流录制测试"; }
     
-    int run(int argc, char* argv[]) override;
-    void printHelp() const override;
+    void registerOptions(CLI::App& app) override;
+    void applyTo(WorkerConfig& config) const override;
     void listTests() const override;
-    std::vector<std::string> getTestNames() const override;
     
-    // ========================================
-    // 核心测试方法（与 ExecuteMode 对齐）
-    // ========================================
-    
-    /**
-     * @brief 单路消费测试（ExecuteMode::SINGLE + CONSUME_SAVE_ENCODED）
-     * 
-     * 录制测试统一入口
-     * 
-     * @param input_source 输入源（RTSP URL 或文件路径）
-     * @param output_path 输出文件路径
-     * @param params 录制参数
-     * @return 测试结果
-     */
-    static TestResult runSingle(
-        const std::string& input_source,
-        const std::string& output_path,
-        const RecordTestParams& params = RecordTestParams()
-    );
+    int handlePreActions() override;
+    std::vector<WorkerConfig> buildPipelineConfigs(const WorkerConfig& shared_config) override;
+    std::string getTestName() const override;
     
     /**
      * @brief 获取预定义测试参数
@@ -104,18 +90,21 @@ public:
     static const std::map<std::string, RecordTestParams>& getPredefinedTests();
 
 private:
-    /**
-     * @brief 解析命令行参数
-     */
-    bool parseArgs(int argc, char* argv[], WorkerConfig& config, std::string& output_path, RecordTestParams& params);
-    
-    /**
-     * @brief 获取模块级日志实例
-     */
-    static log4cplus::Logger& getLogger();
+    // ========================================
+    // 解析状态（由 CLI11 自动填充）
+    // ========================================
+    static const std::vector<std::string>& getAllFormats();
+
+    bool show_list_ = false;
+    std::string input_path_;
+    std::string output_path_;
+    RecordTestParams params_;
+    bool verbose_ = false;
+    bool all_formats_ = false;
+    std::vector<std::string> positional_args_;
 };
 
 } // namespace record
 } // namespace test
 
-#endif // RECORD_TEST_SUITE_HPP
+#endif // RECORD_PLUGIN_HPP

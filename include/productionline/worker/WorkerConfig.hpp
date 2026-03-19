@@ -788,12 +788,6 @@ public:
     // ========================================
     
     /**
-     * @brief 设置是否禁用重排序
-     * @param disable true=禁用重排序（推荐），false=启用重排序
-     */
-    TacoConfigBuilder& setReorderDisable(bool disable = true);
-    
-    /**
      * @brief 同时设置两个通道的启用状态（快捷方法）
      * @param ch0 是否启用通道0
      * @param ch1 是否启用通道1
@@ -939,9 +933,6 @@ public:
     // 兼容 const char*（保持向后兼容）
     DecoderConfigBuilder& setDecoderName(const char* name);
     
-    // 清除解码器名称（使用自动选择）
-    DecoderConfigBuilder& clearDecoderName();
-    
     // 接受 std::string_view（推荐）
     DecoderConfigBuilder& setHwaccelDevice(std::string_view device);
     
@@ -978,84 +969,6 @@ public:
      * @brief 预设：软件解码（自动选择）
      */
     DecoderConfigBuilder& useSoftware();
-    
-    /**
-     * @brief 预设：NVIDIA CUDA 硬件解码（通用，支持多种编解码器）
-     * 
-     * 设置解码器为 NVIDIA CUDA 平台的指定编解码器。
-     * CUDA 是 NVIDIA GPU 硬件加速平台，支持 H.264、H.265、VP9、AV1 等。
-     * 
-     * @param codec 编解码器类型（如 "h264"、"h265"、"vp9"、"av1" 等）
-     * 
-     * 示例：
-     * @code
-     * // H.264 CUDA 解码
-     * DecoderConfigBuilder().useCuvid("h264").build()
-     * 
-     * // H.265/HEVC CUDA 解码
-     * DecoderConfigBuilder().useCuvid("h265").build()
-     * 
-     * // VP9 CUDA 解码
-     * DecoderConfigBuilder().useCuvid("vp9").build()
-     * 
-     * // AV1 CUDA 解码
-     * DecoderConfigBuilder().useCuvid("av1").build()
-     * @endcode
-     * 
-     * 生成的解码器名称格式为：{codec}_cuvid（如 "h264_cuvid"、"h265_cuvid"）
-     */
-    DecoderConfigBuilder& useCuvid(std::string_view codec);
-    
-    /**
-     * @brief 预设：Intel Quick Sync Video 硬件解码（通用，支持多种编解码器）
-     * 
-     * 设置解码器为 Intel QSV 平台的指定编解码器。
-     * QSV 是 Intel 集成显卡硬件加速平台，支持 H.264、H.265、VP9、AV1 等。
-     * 
-     * @param codec 编解码器类型（如 "h264"、"h265"、"vp9"、"av1" 等）
-     * 
-     * 示例：
-     * @code
-     * // H.264 QSV 解码
-     * DecoderConfigBuilder().useQsv("h264").build()
-     * 
-     * // H.265/HEVC QSV 解码
-     * DecoderConfigBuilder().useQsv("h265").build()
-     * 
-     * // VP9 QSV 解码
-     * DecoderConfigBuilder().useQsv("vp9").build()
-     * 
-     * // AV1 QSV 解码
-     * DecoderConfigBuilder().useQsv("av1").build()
-     * @endcode
-     * 
-     * 生成的解码器名称格式为：{codec}_qsv（如 "h264_qsv"、"h265_qsv"）
-     */
-    DecoderConfigBuilder& useQsv(std::string_view codec);
-    
-    /**
-     * @brief 预设：VA-API 硬件解码（通用，支持多种编解码器）
-     * 
-     * 设置解码器为 VA-API 平台的指定编解码器。
-     * VA-API 是 Linux 视频加速 API，支持 Intel/AMD GPU 硬件加速。
-     * 
-     * @param codec 编解码器类型（如 "h264"、"h265"、"vp9"、"av1" 等）
-     * 
-     * 示例：
-     * @code
-     * // H.264 VA-API 解码
-     * DecoderConfigBuilder().useVaapi("h264").build()
-     * 
-     * // H.265/HEVC VA-API 解码
-     * DecoderConfigBuilder().useVaapi("h265").build()
-     * 
-     * // VP9 VA-API 解码
-     * DecoderConfigBuilder().useVaapi("vp9").build()
-     * @endcode
-     * 
-     * 生成的解码器名称格式为：{codec}_vaapi（如 "h264_vaapi"、"h265_vaapi"）
-     */
-    DecoderConfigBuilder& useVaapi(std::string_view codec);
     
     WorkerConfig::DecoderConfig build() const;
     
@@ -1360,9 +1273,6 @@ struct WorkerGroupConfig {
     WorkerGroupConfig() = default;
     explicit WorkerGroupConfig(const std::string& id) : group_id(id) {}
 };
-
-// 向后兼容：保留 WorkerGroup 作为 WorkerGroupConfig 的别名
-using WorkerGroup = WorkerGroupConfig;
 
 /**
  * @brief MultiWorkerConfig - 多Worker配置结构
