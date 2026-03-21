@@ -7,8 +7,8 @@
 
 #include "PPPlugin.hpp"
 #include "../common/WorkerConfigFactory.hpp"
-#include "productionline/io/BufferConsumerService.hpp"
-#include "productionline/io/BufferConsumerStrategies.hpp"
+#include "consumptionline/BufferConsumerService.hpp"
+#include "consumptionline/BufferConsumerStrategies.hpp"
 
 #include "../common/third_party/CLI11.hpp"
 

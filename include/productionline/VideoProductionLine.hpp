@@ -3,7 +3,7 @@
 #include "buffer/bufferpool/BufferPool.hpp"
 #include "productionline/worker/BufferFillingWorkerFacade.hpp"
 #include "productionline/worker/WorkerConfig.hpp"
-#include "monitor/PerformanceMonitor.hpp"
+#include "common/PerformanceMonitor.hpp"
 #include "common/GlobalThreadPool.hpp"
 #include <string>
 #include <vector>

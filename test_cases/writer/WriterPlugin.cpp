@@ -8,7 +8,7 @@
 #include "WriterPlugin.hpp"
 #include "../common/WorkerConfigFactory.hpp"
 #include "../common/third_party/CLI11.hpp"
-#include "productionline/io/BufferConsumerService.hpp"
+#include "consumptionline/BufferConsumerService.hpp"
 
 #include <iostream>
 #include <log4cplus/logger.h>

@@ -13,7 +13,7 @@
 #ifndef EXECUTE_MODE_HPP
 #define EXECUTE_MODE_HPP
 
-#include "productionline/io/BufferConsumerService.hpp"
+#include "consumptionline/BufferConsumerService.hpp"
 #include "productionline/worker/WorkerConfig.hpp"
 
 #include <string>

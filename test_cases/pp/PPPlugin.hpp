@@ -30,7 +30,7 @@
 
 #include "../common/IOptionPlugin.hpp"
 #include "../common/ExecuteMode.hpp"
-#include "productionline/io/BufferConsumerService.hpp"
+#include "consumptionline/BufferConsumerService.hpp"
 #include "productionline/worker/WorkerConfig.hpp"
 
 #include <string>

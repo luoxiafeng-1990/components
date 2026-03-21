@@ -12,7 +12,7 @@ log4cplus::Logger BufferFillingWorkerFactory::logger_ =
 // ============ 公共接口 ============
 
 std::unique_ptr<WorkerBase> BufferFillingWorkerFactory::create(const WorkerConfig& config) {
-    auto type = config.worker_type;
+    auto type = config.global.worker_type;
     // 1️⃣ 用户显式指定（最高优先级）
     if (type != WorkerType::AUTO) {
         LOG4CPLUS_DEBUG_FMT(logger_, "User specified type: %s", typeToString(type));

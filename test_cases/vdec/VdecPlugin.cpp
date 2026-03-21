@@ -7,7 +7,7 @@
 
 #include "VdecPlugin.hpp"
 #include "../common/WorkerConfigFactory.hpp"
-#include "productionline/io/BufferConsumerService.hpp"
+#include "consumptionline/BufferConsumerService.hpp"
 
 #include "../common/third_party/CLI11.hpp"
 

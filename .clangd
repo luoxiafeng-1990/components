@@ -3,5 +3,5 @@
 CompileFlags:
   Add:
     - -Iinclude
-    - -Iinclude/freetype2
+    - -Iinclude/common/third_party/freetype2
     - -std=c++17

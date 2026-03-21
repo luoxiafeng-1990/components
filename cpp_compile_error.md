@@ -694,7 +694,7 @@ BufferPool& getBufferPool() {
 }
 ```
 
-**4. LinuxFramebufferDevice.cpp - 添加 <string>**
+**4. LinuxFramebufferDevice.cpp - 添加 <string>**（历史记录：当时为 `include/display/`；该类已演进/移除，现行显示实现见 `vendor/taco/display/`。）
 
 ```cpp
 // LinuxFramebufferDevice.cpp
@@ -776,7 +776,7 @@ MyClass obj;  // OK
 /toolchain/riscv64-unknown-linux-gnu/include/c++/14.1.1/bits/new_allocator.h:191:11: error: no matching function for call to 'std::pair<const std::__cxx11::basic_string<char>, PerformanceMonitor::MetricData>::pair(const std::__cxx11::basic_string<char>&, PerformanceMonitor::MetricData)'
   191 |         { ::new((void *)__p) _Up(std::forward<_Args>(__args)...); }
       |           ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-source/monitor/PerformanceMonitor.cpp:292:30:   required from here
+source/common/PerformanceMonitor.cpp:292:30:   required from here
   292 |         it = metrics_.emplace(metric_name, MetricData()).first;
       |              ~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~
 ```
@@ -785,7 +785,7 @@ source/monitor/PerformanceMonitor.cpp:292:30:   required from here
 
 ```cpp
 // PerformanceMonitor.cpp
-#include "monitor/PerformanceMonitor.hpp"
+#include "common/PerformanceMonitor.hpp"
 #include <stdio.h>
 #include <string.h>
 // ❌ 缺少 #include <utility>
@@ -885,7 +885,7 @@ map.emplace(
 
 ```cpp
 // PerformanceMonitor.cpp
-#include "monitor/PerformanceMonitor.hpp"
+#include "common/PerformanceMonitor.hpp"
 #include <stdio.h>
 #include <string.h>
 #include <utility>  // ✅ 添加：for std::piecewise_construct, std::forward_as_tuple

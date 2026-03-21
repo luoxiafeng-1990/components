@@ -1,4 +1,5 @@
 #include "productionline/worker/FFmpegDecodeWorker.hpp"
+#include "vendor/taco/decode/TacoDecoderExtension.hpp"
 #include "productionline/worker/EncodedPacketSourceFromRtsp.hpp"
 #include "productionline/worker/EncodedPacketSourceFromBuffer.hpp"
 #include "productionline/worker/EncodedPacketSourceFromFile.hpp"
@@ -1072,8 +1073,12 @@ bool FFmpegDecodeWorker::configureSpecialDecoder() {
         return false;
     }
     
-    // 🎯 从 worker_config_ 获取 taco 配置（非 const，可能需要修改）
-    auto& taco = worker_config_.decoder.taco;
+    TacoConfig* taco_ptr = tacoDecoderConfig(worker_config_.decoder);
+    if (!taco_ptr) {
+        LOG4CPLUS_ERROR(logger_, " configureSpecialDecoder: no TACO vendor config (decoder.vendor)");
+        return false;
+    }
+    TacoConfig& taco = *taco_ptr;
     
     LOG4CPLUS_DEBUG_FMT(logger_, " Configuring h264_taco decoder options from config...");
     

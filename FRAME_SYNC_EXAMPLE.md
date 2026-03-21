@@ -137,13 +137,16 @@ int main() {
     ProducerConfig producer_cfg;
     producer_cfg.producer_name = "hw_recorder";
     producer_cfg.worker_config = WorkerConfigBuilder()
+        .setGlobalConfig(
+            WorkerGlobalConfigBuilder()
+                .setWorkerType(WorkerType::FFMPEG_PACKET_RECORDER)
+                .build())
         .setDataSourceConfig(
             DataSourceConfigBuilder()
                 .setPath("rtsp://example.com/stream")
                 .setBufferCount(64)
                 .build()
         )
-        .setWorkerType(WorkerType::FFMPEG_PACKET_RECORDER)
         .build();
     group_config.producer_configs.push_back(producer_cfg);
     
@@ -151,12 +154,15 @@ int main() {
     ConsumerConfig consumer1_cfg;
     consumer1_cfg.consumer_name = "hw_decoder";
     consumer1_cfg.worker_config = WorkerConfigBuilder()
+        .setGlobalConfig(
+            WorkerGlobalConfigBuilder()
+                .setWorkerType(WorkerType::FFMPEG_DECODE)
+                .build())
         .setDecoderConfig(
             DecoderConfigBuilder()
                 .useTaco("h264", TacoConfigBuilder().setChannels(true, false).build())
                 .build()
         )
-        .setWorkerType(WorkerType::FFMPEG_DECODE)
         .build();
     group_config.consumer_configs.push_back(consumer1_cfg);
     
@@ -164,8 +170,11 @@ int main() {
     ConsumerConfig consumer2_cfg;
     consumer2_cfg.consumer_name = "sw_decoder";
     consumer2_cfg.worker_config = WorkerConfigBuilder()
+        .setGlobalConfig(
+            WorkerGlobalConfigBuilder()
+                .setWorkerType(WorkerType::FFMPEG_DECODE)
+                .build())
         .setDecoderConfig(DecoderConfigBuilder().useSoftware().build())
-        .setWorkerType(WorkerType::FFMPEG_DECODE)
         .build();
     group_config.consumer_configs.push_back(consumer2_cfg);
     

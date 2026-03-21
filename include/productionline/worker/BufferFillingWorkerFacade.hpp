@@ -40,7 +40,7 @@
  * ```cpp
  * // 通过 WorkerConfig 配置 Worker 类型和所有参数
  * WorkerConfig config;
- * config.worker_type = WorkerType::FFMPEG_DECODE;
+ * config.global.worker_type = WorkerType::FFMPEG_DECODE;
  * config.data_source.path = "video.mp4";
  * 
  * BufferFillingWorkerFacade worker(config);
@@ -52,7 +52,7 @@ class BufferFillingWorkerFacade {
 private:
     // ============ 门面模式：持有具体实现 ============
     std::unique_ptr<WorkerBase> worker_base_uptr_;  // 实际的Worker实现（统一基类）
-    WorkerConfig config_;  // Worker配置（包含 worker_type 和所有配置参数）
+    WorkerConfig config_;  // Worker配置（含 global.worker_type 及子模块配置）
     log4cplus::Logger logger_;  // 日志记录器
 
 public:
@@ -60,7 +60,7 @@ public:
     
     /**
      * 构造函数
-     * @param config Worker配置（包含 worker_type 和所有配置参数）
+     * @param config Worker配置（含 global 与各子配置块）
      */
     explicit BufferFillingWorkerFacade(const WorkerConfig& config = WorkerConfig());
     

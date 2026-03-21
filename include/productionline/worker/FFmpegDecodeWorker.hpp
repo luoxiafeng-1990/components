@@ -106,7 +106,7 @@ public:
      * - worker_config_.data_source.path（文件路径或 RTSP URL）
      * - worker_config_.display.width/height/bits_per_pixel
      * - worker_config_.decoder.name（解码器名称）
-     * - worker_config_.decoder.taco（TACO 配置）
+     * - tacoDecoderConfig(worker_config_.decoder)（TACO 厂商扩展 vendor 内的 TacoConfig）
      * 
      * @return 成功返回 true
      */

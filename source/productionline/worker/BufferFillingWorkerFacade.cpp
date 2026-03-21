@@ -27,7 +27,7 @@ const char* BufferFillingWorkerFacade::getWorkerType() const {
         return worker_base_uptr_->getWorkerType();
     }
     // Worker 未创建：返回 config_ 中设置的 worker_type
-    return BufferFillingWorkerFactory::typeToString(config_.worker_type);
+    return BufferFillingWorkerFactory::typeToString(config_.global.worker_type);
 }
 
 // ============ 文件操作（门面转发） ============

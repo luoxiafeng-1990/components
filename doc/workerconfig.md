@@ -49,7 +49,9 @@ WorkerConfig (顶层配置)
 │   └── TacoConfig (TACO 解码器特定配置)
 │       ├── 通道0配置 (YUV 输出)
 │       └── 通道1配置 (RGB/YUV 输出)
-└── worker_type (Worker 类型)
+├── GlobalConfig (全局：Worker 类型、线程池规模请求)
+├── ConsumerTypeConfig (消费类型与执行控制)
+└── （编码器等其它顶层块见头文件）
 ```
 
 ### Builder 模式优势
@@ -60,7 +62,9 @@ WorkerConfig config;
 config.data_source.path = "rtsp://...";
 config.data_source.buffer_count = 8;
 config.decoder.name = "h264_taco";
-config.decoder.taco.ch0_enable = true;
+TacoConfig t;
+t.ch0_enable = true;
+config.decoder.vendor = makeTacoDecoderExtension(t);
 // ... 数十行配置代码
 
 // ✅ 新方式：Builder 模式，清晰易读
@@ -114,7 +118,10 @@ auto decoder = DecoderConfigBuilder()
 auto config = WorkerConfigBuilder()
     .setDataSourceConfig(dataSource)
     .setDecoderConfig(decoder)
-    .setWorkerType(WorkerType::FFMPEG_DECODE)
+    .setGlobalConfig(
+        WorkerGlobalConfigBuilder()
+            .setWorkerType(WorkerType::FFMPEG_DECODE)
+            .build())
     .build();
 ```
 
@@ -133,7 +140,10 @@ auto config = WorkerConfigBuilder()
             .useSoftware()
             .build()
     )
-    .setWorkerType(WorkerType::FFMPEG_DECODE)
+    .setGlobalConfig(
+        WorkerGlobalConfigBuilder()
+            .setWorkerType(WorkerType::FFMPEG_DECODE)
+            .build())
     .build();
 ```
 
@@ -154,7 +164,12 @@ Worker 实现类型枚举。
 
 **使用示例**：
 ```cpp
-WorkerConfigBuilder().setWorkerType(WorkerType::FFMPEG_DECODE).build();
+WorkerConfigBuilder()
+    .setGlobalConfig(
+        WorkerGlobalConfigBuilder()
+            .setWorkerType(WorkerType::FFMPEG_DECODE)
+            .build())
+    .build();
 ```
 
 ---
@@ -270,9 +285,12 @@ TacoConfigBuilder()
 | `display` | `DisplayConfig` | 显示设备配置 |
 | `decoder` | `DecoderConfig` | 解码器配置 |
 | `encoder` | `EncoderConfig` | 编码器配置（⭐ v2.29 新增） |
-| `worker_type` | `WorkerType` | Worker 类型（默认：`AUTO`） |
-| `consumer_type` | `ConsumerTypeConfig` | 消费类型配置（v3.2 重构） |
-| `thread_pool_size` | `int` | 全局线程池大小（默认：64，范围：1-128） |
+| `global` | `GlobalConfig` | 全局配置：`worker_type`、`thread_pool_size`（默认线程池 64，范围：1-128） |
+| `consumer_type` | `ConsumerTypeConfig` | **消费阶段**整包配置：执行控制 + display / save_raw / save_encoded / npu / compare 等（v3.2 重构） |
+
+**勿混淆两处「显示」**：
+- `display`（`DisplayConfig`）：管线侧显示设备分辨率、bpp，与 Buffer 几何对齐。
+- `consumer_type.display`（`DisplayType`）：消费时是否走 CONSUME_DISPLAY、用哪块屏、taco-vo 布局等。
 
 **说明**：
 - ⭐ v3.2 重构：`consumer` 重命名为 `consumer_type`，`ConsumerConfig` 重命名为 `ConsumerTypeConfig`
@@ -284,7 +302,22 @@ TacoConfigBuilder()
 
 ### ConsumerTypeConfig（v3.2 重构）
 
-消费类型配置结构体（`WorkerConfig::ConsumerTypeConfig`）。
+`WorkerConfig::ConsumerTypeConfig` 描述**消费路径**上启用哪些能力；`WorkerConfigBuilder::setConsumerTypeConfig` 一次写入**整个**该结构体（包含下列所有子块），并非只配置「显示」一类。
+
+#### 子块一览
+
+| 成员 | 作用 |
+|------|------|
+| （本节第一张表：标量字段） | 消费循环执行控制：`max_frames`、`timeout_ms`、`verbose` 等 |
+| `display` | CONSUME_DISPLAY：是否上屏、`device_id`、SHARED_FB / TACO_VO 等 |
+| `save_raw` | CONSUME_SAVE_RAW：解码后 YUV/RGB 写文件 |
+| `save_encoded` | CONSUME_SAVE_ENCODED：编码 packet 写文件 |
+| `npu_inference` | CONSUME_NPU_INFERENCE：NPU 推理 |
+| `compare` | 画质/通道比较（PSNR、SSIM 等） |
+| `performance` | 性能验证（目标 FPS） |
+| `count` | CONSUME_COUNT：仅统计 |
+
+多种消费子块可同时 `enable=true`，由运行时策略组合执行。
 
 #### 执行控制
 
@@ -473,11 +506,14 @@ config.consumer_type.save_raw.enable = true;
 config.consumer_type.save_raw.setOutputPath("/tmp/output.yuv");
 config.consumer_type.save_raw.max_frames_per_channel = {50};
 
-// 使用 Builder
-auto config = WorkerConfigBuilder()
-    .setMaxFrames(100)
+// 使用 ConsumerTypeConfigBuilder（消费循环 max_frames；勿与 DataSourceConfig::max_frames 混淆）
+auto consumer = ConsumerTypeConfigBuilder()
+    .setConsumerMaxFrames(100)
     .enableDisplay(true, 0)
     .enableSaveRaw(true, "/tmp/output.yuv", 50)
+    .build();
+auto config = WorkerConfigBuilder()
+    .setConsumerTypeConfig(consumer)
     .build();
 ```
 
@@ -514,7 +550,9 @@ auto config = WorkerConfigBuilder()
 
 ### DisplayConfig
 
-显示设备配置结构体（`WorkerConfig::DisplayConfig`）。
+显示设备配置结构体（`WorkerConfig::DisplayConfig`），表示**管线/Buffer 与设备几何**（宽、高、bpp）。
+
+与 `consumer_type.display`（`DisplayType`）不同：后者决定消费阶段**是否**走显示路径、用哪个 `device_id`、TACO_VO 布局等。二者可同时需要：前者对齐内存与输出尺寸，后者打开 CONSUME_DISPLAY。
 
 #### 成员变量
 
@@ -540,13 +578,15 @@ auto config = WorkerConfigBuilder()
 | `enable_hardware` | `bool` | 启用硬件加速（默认：`true`） |
 | `hwaccel_device` | `std::optional<std::string>` | 硬件设备（如 "cuda:0", "vaapi"） |
 | `decode_threads` | `int` | 解码线程数（0=自动） |
-| `taco` | `TacoConfig` | TACO 解码器特定配置 |
+| `vendor` | `std::unique_ptr<IDecoderVendorExtension>` | 厂商扩展载荷（如 TACO 为 `TacoDecoderExtension`，`nullptr` 表示无） |
+
+**访问 TACO 参数**：`#include "vendor/taco/decode/TacoDecoderExtension.hpp"`，使用 `tacoDecoderConfig(decoder)` 得 `TacoConfig*`，或 `DecoderConfigBuilder::useTaco` / `makeTacoDecoderExtension`。
 
 ---
 
 ### TacoConfig
 
-TACO 解码器特定配置结构体（`WorkerConfig::DecoderConfig::TacoConfig`）。
+TACO 解码器特定配置（`vendor/taco/decode/TacoDecoderConfig.hpp` 中的 `TacoConfig`，由 `TacoDecoderExtension::config` 持有）。
 
 #### 解码器行为配置
 
@@ -709,7 +749,7 @@ TACO 解码器特定配置构建器。
 | `setOutputFormat(Channel ch, OutputFormat format, ColorStandard std)` | `TacoConfigBuilder&` | 设置通道输出格式 |
 | `setCrop(Channel ch, int x, int y, int width, int height)` | `TacoConfigBuilder&` | 设置通道裁剪区域 |
 | `setScale(Channel ch, int width, int height)` | `TacoConfigBuilder&` | 设置通道缩放分辨率 |
-| `build()` | `WorkerConfig::DecoderConfig::TacoConfig` | 构建最终配置 |
+| `build()` | `TacoConfig` | 构建最终配置 |
 
 ##### 静态辅助函数（向后兼容）
 
@@ -861,39 +901,58 @@ auto decoder = DecoderConfigBuilder()
 
 ---
 
-### WorkerConfigBuilder
+### WorkerGlobalConfigBuilder
 
-Worker 配置构建器（顶层）。
-
-#### 基础配置
+全局配置构建器（`WorkerConfig::GlobalConfig`）。
 
 | 函数签名 | 返回值 | 说明 |
 |----------|--------|------|
+| `setWorkerType(WorkerType type)` | `WorkerGlobalConfigBuilder&` | 设置 Worker 类型 |
+| `setThreadPoolSize(int size)` | `WorkerGlobalConfigBuilder&` | 设置全局线程池大小（验证规则见下） |
+| `build()` | `WorkerConfig::GlobalConfig` | 构建全局配置块 |
+
+### ConsumerTypeConfigBuilder
+
+在内存中累积**一份完整的** `ConsumerTypeConfig`；每个链式方法只改**对应子块**，其余保持默认或链上已设值，最后 `build()` 交给 `setConsumerTypeConfig`。
+
+`setConsumerMaxFrames` 只写消费循环的 `max_frames`，与 `DataSourceConfigBuilder::setMaxFrames`（数据源读帧上限）不同。
+
+| 函数签名 | 返回值 | 写入的 `ConsumerTypeConfig` 成员 |
+|----------|--------|----------------------------------|
+| `setConsumerMaxFrames(int frames)` | `ConsumerTypeConfigBuilder&` | 顶部 `max_frames` |
+| `setVerbose(bool verbose)` | `ConsumerTypeConfigBuilder&` | 顶部 `verbose` |
+| `enableDisplay(bool enable, int device_id)` | `ConsumerTypeConfigBuilder&` | `display` |
+| `enableSaveRaw(...)` | `ConsumerTypeConfigBuilder&` | `save_raw` |
+| `enableSaveEncoded(...)` | `ConsumerTypeConfigBuilder&` | `save_encoded` |
+| `enableCompare(...)` | `ConsumerTypeConfigBuilder&` | `compare` |
+| `enablePerformance(...)` | `ConsumerTypeConfigBuilder&` | `performance` |
+| `enableNpuInference(...)` | `ConsumerTypeConfigBuilder&` | `npu_inference` |
+| `build()` | `ConsumerTypeConfig` | 产出整包，含未通过 Builder 改动的子块（仍为默认） |
+
+未提供便捷方法的子块（如 `count`、或 `compare` 的细项）请对 `build()` 结果做结构体赋值，或先构造 `ConsumerTypeConfig` 再 `setConsumerTypeConfig`。
+
+### WorkerConfigBuilder
+
+Worker 配置构建器（顶层），**只负责组装**各子配置块。
+
+| 函数签名 | 返回值 | 说明 |
+|----------|--------|------|
+| `setGlobalConfig(const GlobalConfig& config)` | `WorkerConfigBuilder&` | 设置全局配置 |
 | `setDataSourceConfig(const DataSourceConfig& config)` | `WorkerConfigBuilder&` | 设置数据源配置 |
 | `setDisplayConfig(const DisplayConfig& config)` | `WorkerConfigBuilder&` | 设置显示设备配置 |
 | `setDecoderConfig(const DecoderConfig& config)` | `WorkerConfigBuilder&` | 设置解码器配置 |
-| `setWorkerType(WorkerType type)` | `WorkerConfigBuilder&` | 设置 Worker 类型 |
-| `setThreadPoolSize(int size)` | `WorkerConfigBuilder&` | 设置全局线程池大小 |
+| `setConsumerTypeConfig(const ConsumerTypeConfig& config)` | `WorkerConfigBuilder&` | **整包**设置 `consumer_type`（含 display / save / npu / compare 等全部子块，见上文） |
 | `build()` | `WorkerConfig` | 构建最终配置 |
-
-#### 消费类型配置（v2.24 新增）
-
-| 函数签名 | 返回值 | 说明 |
-|----------|--------|------|
-| `setConsumerTypeConfig(const ConsumerTypeConfig& config)` | `WorkerConfigBuilder&` | 设置完整消费类型配置 |
-| `setMaxFrames(int frames)` | `WorkerConfigBuilder&` | 设置最大处理帧数 |
-| `enableDisplay(bool enable, int device_id)` | `WorkerConfigBuilder&` | 启用显示消费类型 |
-| `enableSaveRaw(bool enable, const std::string& path, int max_frames)` | `WorkerConfigBuilder&` | 启用保存原始数据消费类型 |
-| `enableSaveEncoded(bool enable, const std::string& path)` | `WorkerConfigBuilder&` | 启用保存编码数据消费类型 |
-| `enableCompare(bool enable, double min_psnr, double min_ssim)` | `WorkerConfigBuilder&` | 启用比较消费类型 |
-| `enablePerformance(bool enable, double target_fps)` | `WorkerConfigBuilder&` | 启用性能验证消费类型 |
-| `enableNpuInference(const std::string& model_path, float conf_threshold, float nms_threshold, bool enable_draw)` | `WorkerConfigBuilder&` | 启用 NPU 推理消费类型 |
-| `setVerbose(bool verbose)` | `WorkerConfigBuilder&` | 设置详细日志模式 |
 
 #### 使用示例
 
 ```cpp
 auto config = WorkerConfigBuilder()
+    .setGlobalConfig(
+        WorkerGlobalConfigBuilder()
+            .setWorkerType(WorkerType::FFMPEG_DECODE)
+            .setThreadPoolSize(32)
+            .build())
     .setDataSourceConfig(
         DataSourceConfigBuilder()
             .setPath("rtsp://192.168.1.100/stream")
@@ -910,8 +969,6 @@ auto config = WorkerConfigBuilder()
             )
             .build()
     )
-    .setWorkerType(WorkerType::FFMPEG_DECODE)
-    .setThreadPoolSize(32)
     .build();
 ```
 
@@ -942,8 +999,11 @@ auto config = WorkerConfigBuilder()
 ProducerConfig producer;
 producer.producer_name = "hw_recorder";
 producer.worker_config = WorkerConfigBuilder()
+    .setGlobalConfig(
+        WorkerGlobalConfigBuilder()
+            .setWorkerType(WorkerType::FFMPEG_PACKET_RECORDER)
+            .build())
     .setDataSourceConfig(...)
-    .setWorkerType(WorkerType::FFMPEG_PACKET_RECORDER)
     .build();
 ```
 
@@ -966,8 +1026,11 @@ producer.worker_config = WorkerConfigBuilder()
 ConsumerConfig consumer;
 consumer.consumer_name = "hw_decoder";
 consumer.worker_config = WorkerConfigBuilder()
+    .setGlobalConfig(
+        WorkerGlobalConfigBuilder()
+            .setWorkerType(WorkerType::FFMPEG_DECODE)
+            .build())
     .setDecoderConfig(...)
-    .setWorkerType(WorkerType::FFMPEG_DECODE)
     .build();
 ```
 
@@ -1111,6 +1174,8 @@ group.connector_configs.push_back(connector);
 | `groups` | `std::vector<WorkerGroupConfig>` | Worker Group 配置列表 |
 | `thread_pool_size` | `int` | 全局线程池大小（默认：64，范围：1-128） |
 
+**与 `WorkerConfig::global.thread_pool_size` 的区别**：`MultiWorkerConfig::thread_pool_size` 供 `MultiWorkerProductionLine` 初始化全局线程池；单条 `VideoProductionLine::start(WorkerConfig)` 则读取 `worker_config.global.thread_pool_size`。
+
 #### 使用示例
 
 ```cpp
@@ -1162,8 +1227,11 @@ int main() {
                 )
                 .build()
         )
-        .setWorkerType(WorkerType::FFMPEG_DECODE)
-        .setThreadPoolSize(32)
+        .setGlobalConfig(
+            WorkerGlobalConfigBuilder()
+                .setWorkerType(WorkerType::FFMPEG_DECODE)
+                .setThreadPoolSize(32)
+                .build())
         .build();
     
     // 创建生产线
@@ -1199,13 +1267,16 @@ int main() {
     ProducerConfig producer;
     producer.producer_name = "hw_recorder";
     producer.worker_config = WorkerConfigBuilder()
+        .setGlobalConfig(
+            WorkerGlobalConfigBuilder()
+                .setWorkerType(WorkerType::FFMPEG_PACKET_RECORDER)
+                .build())
         .setDataSourceConfig(
             DataSourceConfigBuilder()
                 .setPath("rtsp://192.168.1.100/stream")
                 .setBufferCount(64)
                 .build()
         )
-        .setWorkerType(WorkerType::FFMPEG_PACKET_RECORDER)
         .build();
     group.producer_configs.push_back(producer);
     
@@ -1213,6 +1284,10 @@ int main() {
     ConsumerConfig consumer1;
     consumer1.consumer_name = "hw_decoder";
     consumer1.worker_config = WorkerConfigBuilder()
+        .setGlobalConfig(
+            WorkerGlobalConfigBuilder()
+                .setWorkerType(WorkerType::FFMPEG_DECODE)
+                .build())
         .setDecoderConfig(
             DecoderConfigBuilder()
                 .useTaco("h264", 
@@ -1224,7 +1299,6 @@ int main() {
                 )
                 .build()
         )
-        .setWorkerType(WorkerType::FFMPEG_DECODE)
         .build();
     group.consumer_configs.push_back(consumer1);
     
@@ -1232,12 +1306,15 @@ int main() {
     ConsumerConfig consumer2;
     consumer2.consumer_name = "sw_decoder";
     consumer2.worker_config = WorkerConfigBuilder()
+        .setGlobalConfig(
+            WorkerGlobalConfigBuilder()
+                .setWorkerType(WorkerType::FFMPEG_DECODE)
+                .build())
         .setDecoderConfig(
             DecoderConfigBuilder()
                 .useSoftware()
                 .build()
         )
-        .setWorkerType(WorkerType::FFMPEG_DECODE)
         .build();
     group.consumer_configs.push_back(consumer2);
     
@@ -1296,7 +1373,10 @@ auto config = WorkerConfigBuilder()
             )
             .build()
     )
-    .setWorkerType(WorkerType::FFMPEG_DECODE)
+    .setGlobalConfig(
+        WorkerGlobalConfigBuilder()
+            .setWorkerType(WorkerType::FFMPEG_DECODE)
+            .build())
     .build();
 ```
 

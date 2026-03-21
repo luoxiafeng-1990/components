@@ -401,12 +401,15 @@ config.consumer_type.save_raw.enable = true;
 config.consumer_type.save_raw.output_path = "/tmp/output.yuv";
 config.consumer_type.save_raw.max_frames = 100;
 
-// 使用 Builder
+// 使用 ConsumerTypeConfigBuilder + 顶层组装
 auto config = WorkerConfigBuilder()
-    .setMaxFrames(100)
-    .enableDisplay(true, 0)
-    .enableSaveRaw(true, "/tmp/output.yuv", 100)
-    .enableCompare(true, 35.0, 0.95)
+    .setConsumerTypeConfig(
+        ConsumerTypeConfigBuilder()
+            .setConsumerMaxFrames(100)
+            .enableDisplay(true, 0)
+            .enableSaveRaw(true, "/tmp/output.yuv", 100)
+            .enableCompare(true, 35.0, 0.95)
+            .build())
     .build();
 
 // MultiWorker 比较模式
@@ -1296,7 +1299,7 @@ MultiWorkerProductionLine → 触发所有 Consumers → EncodedPacketSourceFrom
 - ✅ **getBytesPerPixel() 优化（方案A）**：
   - 返回类型改为 `double`，支持 NV12 等格式的 1.5 字节/像素
   - 优先从解码器实际输出格式 `codec_ctx_ptr_->pix_fmt` 计算
-  - Fallback 从 `worker_config_.decoder.taco` 的格式枚举推断（RGB整型枚举/YUV自动）
+  - Fallback 从 `tacoDecoderConfig(worker_config_.decoder)` 指向的 `TacoConfig` 格式枚举推断（RGB整型枚举/YUV自动）
   - 删除冗余的 `output_bits_per_pixel_` 成员变量
   - **注**：v2.17 后，TacoConfig 使用整型枚举而非字符串
 - ✅ **架构一致性改进**：所有 Worker（`FfmpegDecodeVideoFileWorker`、`FfmpegDecodeRtspWorker`、`FfmpegRecordRtspWorker`）统一实现无参 `open()`
@@ -2974,7 +2977,10 @@ auto workerConfig = WorkerConfigBuilder()
             .useH264Taco()
             .build()
     )
-    .setWorkerType(WorkerType::FFMPEG_DECODE)
+    .setGlobalConfig(
+        WorkerGlobalConfigBuilder()
+            .setWorkerType(WorkerType::FFMPEG_DECODE)
+            .build())
     .build();
 
 VideoProductionLine producer;
@@ -3574,8 +3580,8 @@ bool FfmpegDecodeRtspWorker::fillBuffer(...) {
 ### 9. PerformanceMonitor（性能监控系统）- v2.4 动态设计
 
 **文件位置**：
-- 头文件: `include/monitor/PerformanceMonitor.hpp`
-- 实现文件: `source/monitor/PerformanceMonitor.cpp`
+- 头文件: `include/common/PerformanceMonitor.hpp`
+- 实现文件: `source/common/PerformanceMonitor.cpp`
 
 **架构角色**: 监控层（Monitoring Layer）
 
@@ -4076,8 +4082,8 @@ diff output_test_argb.raw ffmpeg_output.raw
   ├── include/buffer/bufferpool/Buffer.hpp          ⭐ 新增图像元数据字段和方法
   ├── source/buffer/bufferpool/Buffer.cpp           ⭐ 实现元数据方法
   ├── source/productionline/worker/FfmpegDecodeVideoFileWorker.cpp  ⭐ fillBuffer中调用setImageMetadataFromAVFrame
-  ├── include/productionline/io/BufferWriter.hpp    ⭐ 新增writeWithMetadata方法
-  └── source/productionline/io/BufferWriter.cpp     ⭐ 实现基于元数据的正确写入逻辑
+  ├── include/consumptionline/BufferWriter.hpp    ⭐ 新增writeWithMetadata方法
+  └── source/consumptionline/BufferWriter.cpp     ⭐ 实现基于元数据的正确写入逻辑
 
 数据流：
   AVFrame → Worker → Buffer (带元数据) → BufferWriter → 文件（正确格式）
@@ -4310,8 +4316,8 @@ worker->checkCodecMismatch(...);  // ❌ Error: 'checkCodecMismatch' is protecte
 ### 11. BufferWriter（Buffer输出工具）- v2.5 新增（v2.6增强）
 
 **文件位置**：
-- 头文件: `include/productionline/io/BufferWriter.hpp`
-- 实现文件: `source/productionline/io/BufferWriter.cpp`
+- 头文件: `include/consumptionline/BufferWriter.hpp`
+- 实现文件: `source/consumptionline/BufferWriter.cpp`
 
 **架构角色**: I/O工具层（I/O Utility Layer）
 
@@ -4338,7 +4344,7 @@ worker->checkCodecMismatch(...);  // ❌ Error: 'checkCodecMismatch' is protecte
 **设计特点（v2.5）**：
 - ✅ **职责单一**：只负责输出，不参与生产流程
 - ✅ **对称设计**：与Worker形成输入/输出对称
-- ✅ **独立工具**：放在`productionline/io/`目录，独立于worker
+- ✅ **独立工具**：放在 `consumptionline/` 目录，独立于 worker
 - ✅ **易于使用**：简单的open/write/close接口
 - ✅ **可扩展**：支持多种输出格式（预留扩展）
 
@@ -4392,7 +4398,7 @@ public:
 
 ```cpp
 #include "productionline/VideoProductionLine.hpp"
-#include "productionline/io/BufferWriter.hpp"
+#include "consumptionline/BufferWriter.hpp"
 
 int main() {
     using namespace productionline::io;
@@ -4531,7 +4537,10 @@ int main() {
                 .useH264Taco()  // 🎯 使用 h264_taco 预设
                 .build()
         )
-        .setWorkerType(WorkerType::FFMPEG_DECODE)
+        .setGlobalConfig(
+            WorkerGlobalConfigBuilder()
+                .setWorkerType(WorkerType::FFMPEG_DECODE)
+                .build())
         .build();
     
     // 或者自定义配置
@@ -4601,7 +4610,10 @@ int main() {
         .setDecoderConfig(
             DecoderConfigBuilder().useTaco("h264").build()  // 硬件解码
         )
-        .setWorkerType(WorkerType::FFMPEG_DECODE)
+        .setGlobalConfig(
+            WorkerGlobalConfigBuilder()
+                .setWorkerType(WorkerType::FFMPEG_DECODE)
+                .build())
         .build();
     
     // 2. 创建并启动生产线
@@ -4657,7 +4669,10 @@ auto workerConfig = WorkerConfigBuilder()
             .setBitsPerPixel(32)
             .build()
     )
-    .setWorkerType(WorkerType::FFMPEG_DECODE)
+    .setGlobalConfig(
+        WorkerGlobalConfigBuilder()
+            .setWorkerType(WorkerType::FFMPEG_DECODE)
+            .build())
     .build();
 
 // 2. 创建并启动生产线

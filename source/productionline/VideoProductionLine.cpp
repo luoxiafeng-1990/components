@@ -1,4 +1,5 @@
 #include "productionline/VideoProductionLine.hpp"
+#include "vendor/contracts/DecoderConfigValidate.hpp"
 #include "buffer/bufferpool/BufferPoolRegistry.hpp"
 #include "common/Logger.hpp"
 #include "common/GlobalThreadPool.hpp"
@@ -81,9 +82,17 @@ bool VideoProductionLine::start(const WorkerConfig& worker_config) {
         LOG4CPLUS_WARN(logger_, "Already running");
         return false;
     }
+
+    {
+        std::string dec_err;
+        if (!validateDecoderConfig(worker_config.decoder, dec_err)) {
+            setError(dec_err);
+            return false;
+        }
+    }
     
     // ⭐ 初始化全局线程池（从配置读取）
-    initializeGlobalThreadPool(worker_config.thread_pool_size);
+    initializeGlobalThreadPool(worker_config.global.thread_pool_size);
     
     // 创建共享的 BufferFillingWorkerFacade 对象（v2.2：只传入完整配置）
     worker_facade_sptr_ = std::make_shared<BufferFillingWorkerFacade>(worker_config);

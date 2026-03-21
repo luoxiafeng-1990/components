@@ -9,6 +9,8 @@
 #include <map>
 #include <functional>
 #include "common/Logger.hpp"
+#include "vendor/contracts/DecoderVendorExtension.hpp"
+#include "vendor/taco/decode/TacoDecoderConfig.hpp"
 
 // FFmpeg 头文件（用于 AVRational 和 AVCodecParameters）
 extern "C" {
@@ -138,7 +140,7 @@ enum class ColorStandard {
  * - DataSourceConfig: 数据源路径、模式（Buffer/文件）、共享数据源、编解码器参数
  * - DisplayConfig: 显示设备分辨率和格式
  * - DecoderConfig: 解码器类型和参数
- * - worker_type: Worker 实现类型
+ * - GlobalConfig: Worker 实现类型、全局线程池规模请求等
  * 
  * ⭐ v2.22 重构：数据源相关配置统一归属 DataSourceConfig
  * - buffer_mode, shared_packet_source, codec_params, time_base 从 DecoderConfig 移至 DataSourceConfig
@@ -219,12 +221,14 @@ struct WorkerConfig {
     // 显示设备配置
     // ========================================
     /**
-     * @brief 显示设备配置
-     * 
-     * 用于配置目标显示设备（如 Framebuffer、显示器）的参数。
-     * 
-     * ⚠️ 注意：此配置指定的是显示设备分辨率，不是解码器输出分辨率！
-     * 解码器输出分辨率请使用 TacoConfig::setDecoderOutputResolution()
+     * @brief 显示设备配置（管线 / Buffer 几何）
+     *
+     * 用于配置目标显示设备（如 Framebuffer、显示器）的宽度、高度、bpp，供 BufferPool
+     * 与显示链路对齐。**不等于** `consumer_type.display`：
+     * - 本结构 `display`：设备侧分辨率与像素格式深度（解码产物如何落 Buffer）。
+     * - `consumer_type.display`：消费阶段是否执行 CONSUME_DISPLAY、设备 ID、TACO_VO 等。
+     *
+     * ⚠️ 注意：此处是显示设备分辨率，不是解码器输出分辨率；解码输出尺寸见 TacoConfig 缩放/裁剪。
      */
     struct DisplayConfig {
         int width = 0;                         ///< 显示设备宽度（像素）
@@ -243,71 +247,34 @@ struct WorkerConfig {
         bool enable_hardware = true;                   // 启用硬件加速
         std::optional<std::string> hwaccel_device;     // 硬件设备（如 "cuda:0", "vaapi"）
         int decode_threads = 0;                        // 解码线程数（0=自动）
-        
-        // ========================================
-        // h264_taco 特定配置（子子结构体）
-        // ========================================
-        struct TacoConfig {
-            // ========================================
-            // 解码器行为配置
-            // ========================================
-            bool reorder_disable = true;  // 禁用重排序（推荐保持 true）
 
-            // ========================================
-            // 通道0配置（Channel 0 - YUV Output）
-            // ========================================
-            bool ch0_enable = true;                    // 启用通道0（YUV 格式输出）
-            
-            // YUV 格式配置
-            int ch0_yuv_format = -1;                   // YUV格式类型（-1=自动，0=NV12, 1=NV21, 等）
-            int ch0_yuv_std = 1;                       // YUV颜色标准（默认 1=BT.601）
-            
-            // 裁剪参数（Crop）
-            int ch0_crop_x = 0;                        // 裁剪起始X坐标（0=不裁剪）
-            int ch0_crop_y = 0;                        // 裁剪起始Y坐标（0=不裁剪）
-            int ch0_crop_width = 0;                    // 裁剪宽度（0=不裁剪）
-            int ch0_crop_height = 0;                   // 裁剪高度（0=不裁剪）
-            
-            // 缩放参数（Scale）
-            int ch0_scale_width = 0;                   // 缩放目标宽度（0=不缩放）
-            int ch0_scale_height = 0;                  // 缩放目标高度（0=不缩放）
+        /// 厂商专用解码参数（TACO 等为 IDecoderVendorExtension 实现）；nullptr 表示未挂载扩展
+        std::unique_ptr<IDecoderVendorExtension> vendor;
 
-            // ========================================
-            // 通道1配置（Channel 1 - RGB/YUV Output）
-            // ========================================
-            bool ch1_enable = false;                   // 启用通道1（默认禁用）
-            bool ch1_rgb = false;                      // 是否输出RGB格式（false=YUV）
-            
-            // RGB 格式配置（仅当 ch1_rgb=true 时有效）
-            int ch1_rgb_format = 9;                    // RGB格式类型（默认 9=argb888 packed）
-            int ch1_rgb_std = 1;                       // RGB颜色标准（默认 1=BT.601 full range）
-            
-            // YUV 格式配置（仅当 ch1_rgb=false 时有效）
-            int ch1_yuv_format = -1;                   // YUV格式类型（-1=自动）
-            int ch1_yuv_std = 1;                       // YUV颜色标准（默认 1=BT.601）
-            
-            // 裁剪参数（Crop）
-            int ch1_crop_x = 0;                        // 裁剪起始X坐标（0=不裁剪）
-            int ch1_crop_y = 0;                        // 裁剪起始Y坐标（0=不裁剪）
-            int ch1_crop_width = 0;                    // 裁剪宽度（0=不裁剪）
-            int ch1_crop_height = 0;                   // 裁剪高度（0=不裁剪）
-            
-            // 缩放参数（Scale）
-            int ch1_scale_width = 0;                   // 缩放目标宽度（0=不缩放）
-            int ch1_scale_height = 0;                  // 缩放目标高度（0=不缩放）
-            
-            TacoConfig() = default;
-            TacoConfig(const TacoConfig&) = default;
-            TacoConfig& operator=(const TacoConfig&) = default;
-            TacoConfig(TacoConfig&&) = default;
-            TacoConfig& operator=(TacoConfig&&) = default;
-        } taco;
-        
         DecoderConfig() = default;
-        DecoderConfig(const DecoderConfig&) = default;
-        DecoderConfig& operator=(const DecoderConfig&) = default;
-        DecoderConfig(DecoderConfig&&) = default;
-        DecoderConfig& operator=(DecoderConfig&&) = default;
+        ~DecoderConfig() = default;
+
+        DecoderConfig(const DecoderConfig& o)
+            : name(o.name)
+            , enable_hardware(o.enable_hardware)
+            , hwaccel_device(o.hwaccel_device)
+            , decode_threads(o.decode_threads)
+            , vendor(o.vendor ? o.vendor->clone() : nullptr) {}
+
+        DecoderConfig& operator=(const DecoderConfig& o) {
+            if (this == &o) {
+                return *this;
+            }
+            name = o.name;
+            enable_hardware = o.enable_hardware;
+            hwaccel_device = o.hwaccel_device;
+            decode_threads = o.decode_threads;
+            vendor = o.vendor ? o.vendor->clone() : nullptr;
+            return *this;
+        }
+
+        DecoderConfig(DecoderConfig&&) noexcept = default;
+        DecoderConfig& operator=(DecoderConfig&&) noexcept = default;
     } decoder;
     
     // ========================================
@@ -404,31 +371,56 @@ struct WorkerConfig {
     } encoder;
     
     // ========================================
-    // Worker 类型
+    // 全局配置（Worker 类型、线程池等）
     // ========================================
-    WorkerType worker_type = WorkerType::AUTO;
+    struct GlobalConfig {
+        WorkerType worker_type = WorkerType::AUTO;
+        /**
+         * @brief 全局线程池大小（默认 64，范围：1-128）
+         *
+         * 注意：只在第一次调用时生效，如果线程池已初始化则忽略。
+         * 0 表示不初始化（使用默认值 64）。
+         */
+        int thread_pool_size = 64;
+
+        GlobalConfig() = default;
+        GlobalConfig(const GlobalConfig&) = default;
+        GlobalConfig& operator=(const GlobalConfig&) = default;
+        GlobalConfig(GlobalConfig&&) = default;
+        GlobalConfig& operator=(GlobalConfig&&) = default;
+    } global;
     
     // ========================================
     // 消费类型配置（v3.2 重构）
     // ========================================
     /**
-     * @brief 消费类型配置
-     * 
-     * 用于配置 Buffer 消费行为的参数，控制数据的处理、保存和验证。
-     * 
+     * @brief 消费类型配置（整包：执行控制 + 多种可叠加的消费能力）
+     *
+     * 描述**消费线程/策略**在拿到解码后的 Buffer 时要做什么：是否上屏、是否落盘、是否
+     * NPU 推理、是否做画质对比等。`WorkerConfigBuilder::setConsumerTypeConfig` 一次赋值
+     * **整个**本结构体，不是只配置某一种消费类型。
+     *
+     * 成员一览（与常见 CONSUME_* 标志对应关系见各子结构注释）：
+     * | 成员 | 含义 |
+     * |------|------|
+     * | （本段标量） | 消费循环：`max_frames`、`timeout_ms`、`verbose` 等 |
+     * | `display` | CONSUME_DISPLAY：是否走显示消费、device_id、模式、taco_vo 等 |
+     * | `save_raw` | CONSUME_SAVE_RAW：解码后 YUV/RGB 写文件 |
+     * | `save_encoded` | CONSUME_SAVE_ENCODED：未解码 packet 写文件 |
+     * | `npu_inference` | CONSUME_NPU_INFERENCE：NPU 模型推理 |
+     * | `compare` | 画质/通道比较（常与 COMPARE 执行模式配合） |
+     * | `performance` | 性能统计（目标 FPS 等） |
+     * | `count` | CONSUME_COUNT：仅统计帧数 |
+     *
      * 设计理念：
-     * - 每种消费类型独立配置，通过 enable 标志控制
-     * - 支持多种消费类型叠加（如同时显示和保存）
-     * - 执行控制参数用于消费循环，与消费类型分离
-     * 
-     * v3.2 变更：
-     * - 结构体名从 ConsumerConfig 改为 ConsumerTypeConfig
-     * - 成员变量名从 consumer 改为 consumer_type
-     * - 使用嵌套结构体分类不同消费类型
+     * - 各消费子块独立，各自 `enable`（或等价开关），可多选同时开启
+     * - 执行控制字段作用于整段消费循环，与具体「消费种类」正交
+     *
+     * v3.2：`ConsumerConfig` 更名为 `ConsumerTypeConfig`，成员名为 `consumer_type`。
      */
     struct ConsumerTypeConfig {
         // ========================================
-        // 执行控制（通用，用于消费循环）
+        // 执行控制（通用，用于消费循环；不属于某一类 CONSUME_*）
         // ========================================
         int max_frames = -1;              ///< 最大处理帧数（-1=无限制）
         double max_duration_seconds = -1; ///< 最大执行时长（秒，-1=无限制）
@@ -631,17 +623,6 @@ struct WorkerConfig {
         ConsumerTypeConfig(ConsumerTypeConfig&&) = default;
         ConsumerTypeConfig& operator=(ConsumerTypeConfig&&) = default;
     } consumer_type;
-    
-    // ========================================
-    // 全局资源配置
-    // ========================================
-    /**
-     * @brief 全局线程池大小（默认 64，范围：1-128）
-     * 
-     * 注意：只在第一次调用时生效，如果线程池已初始化则忽略
-     * 0 表示不初始化（使用默认值 64）
-     */
-    int thread_pool_size = 64;
     
     WorkerConfig() = default;
     WorkerConfig(const WorkerConfig&) = default;
@@ -868,7 +849,7 @@ public:
     /**
      * @brief 构建最终的 TacoConfig 对象
      */
-    WorkerConfig::DecoderConfig::TacoConfig build() const;
+    TacoConfig build() const;
     
     // ========================================
     // 辅助映射函数（向后兼容，供外部使用）
@@ -907,7 +888,7 @@ public:
     static std::string_view mapColorStdEnumToName(ColorStandard std);
 
 private:
-    WorkerConfig::DecoderConfig::TacoConfig taco_config_;
+    TacoConfig taco_config_;
     
     /**
      * @brief 将 OutputFormat 枚举值映射回 TACO 驱动的原始 RGB 格式值
@@ -960,10 +941,7 @@ public:
      * DecoderConfigBuilder().useTaco("h264", tacoConfig).build()
      * @endcode
      */
-    DecoderConfigBuilder& useTaco(
-        std::string_view codec,
-        const WorkerConfig::DecoderConfig::TacoConfig& taco_config
-    );
+    DecoderConfigBuilder& useTaco(std::string_view codec, const TacoConfig& taco_config);
     
     /**
      * @brief 预设：软件解码（自动选择）
@@ -977,6 +955,70 @@ private:
 };
 
 /**
+ * @brief 全局配置构建器（Worker 类型、线程池规模等）
+ */
+class WorkerGlobalConfigBuilder {
+public:
+    WorkerGlobalConfigBuilder() = default;
+
+    WorkerGlobalConfigBuilder& setWorkerType(WorkerType type);
+    WorkerGlobalConfigBuilder& setThreadPoolSize(int size);
+
+    WorkerConfig::GlobalConfig build() const;
+
+private:
+    WorkerConfig::GlobalConfig global_config_;
+};
+
+/**
+ * @brief 消费类型配置构建器
+ *
+ * 内部持有一个完整的 `WorkerConfig::ConsumerTypeConfig`。链式调用时，每个方法只修改
+ * **对应子块**（其余子块保持默认值或先前链上已写入的值），最后 `build()` 得到可交给
+ * `WorkerConfigBuilder::setConsumerTypeConfig` 的整包配置。
+ *
+ * 方法与成员对应关系：
+ * - `setConsumerMaxFrames` / `setVerbose` → 顶部执行控制字段
+ * - `enableDisplay` → `display`
+ * - `enableSaveRaw` → `save_raw`
+ * - `enableSaveEncoded` → `save_encoded`
+ * - `enableNpuInference` → `npu_inference`
+ * - `enableCompare` → `compare`（PSNR/SSIM 开关与阈值）
+ * - `enablePerformance` → `performance`
+ * （`count` 等暂无便捷方法时需直接改 `ConsumerTypeConfig::count` 或先 `build()` 再赋值。）
+ *
+ * `setConsumerMaxFrames` 与 `DataSourceConfigBuilder::setMaxFrames` 不同：后者约束**数据源读帧**，
+ * 前者约束**消费侧循环**处理帧数上限。
+ */
+class ConsumerTypeConfigBuilder {
+public:
+    ConsumerTypeConfigBuilder() = default;
+
+    ConsumerTypeConfigBuilder& setConsumerMaxFrames(int frames);
+    ConsumerTypeConfigBuilder& setVerbose(bool verbose);
+
+    ConsumerTypeConfigBuilder& enableDisplay(bool enable = true, int device_id = 0);
+    ConsumerTypeConfigBuilder& enableSaveRaw(bool enable = true,
+                                            const std::string& output_path = "",
+                                            int max_frames = -1);
+    ConsumerTypeConfigBuilder& enableSaveEncoded(bool enable = true,
+                                                const std::string& output_path = "");
+    ConsumerTypeConfigBuilder& enableCompare(bool enable = true,
+                                            double min_psnr = 30.0,
+                                            double min_ssim = 0.95);
+    ConsumerTypeConfigBuilder& enablePerformance(bool enable = true, double target_fps = 30.0);
+    ConsumerTypeConfigBuilder& enableNpuInference(const std::string& model_path,
+                                               float conf_threshold = 0.25f,
+                                               float nms_threshold = 0.45f,
+                                               bool enable_draw = false);
+
+    WorkerConfig::ConsumerTypeConfig build() const;
+
+private:
+    WorkerConfig::ConsumerTypeConfig consumer_type_config_;
+};
+
+/**
  * @brief Worker 配置构建器（顶层）
  * 
  * 职责：只负责组装 WorkerConfig，不涉及具体配置细节
@@ -984,6 +1026,8 @@ private:
 class WorkerConfigBuilder {
 public:
     WorkerConfigBuilder() = default;
+
+    WorkerConfigBuilder& setGlobalConfig(const WorkerConfig::GlobalConfig& global_config);
     
     /**
      * @brief 设置数据源配置
@@ -1002,105 +1046,14 @@ public:
     WorkerConfigBuilder& setDecoderConfig(const WorkerConfig::DecoderConfig& decoder_config);
     
     /**
-     * @brief 设置 Worker 类型
-     */
-    WorkerConfigBuilder& setWorkerType(WorkerType type);
-    
-    /**
-     * @brief 设置全局线程池大小
-     * 
-     * @param size 线程池大小（范围：1-128，默认：64）
-     * 
-     * @note 验证规则（在 VideoProductionLine::start() 中执行）：
-     *   - 必须 > 0，否则使用默认值 64
-     *   - 最大 128，超过则使用 128
-     *   - 0 表示使用默认值 64
-     * 
-     * @note 注意：只在第一次调用时生效，如果线程池已初始化则忽略
-     * 
-     * @example
-     * ```cpp
-     * WorkerConfigBuilder()
-     *     .setThreadPoolSize(32)
-     *     .setDataSourceConfig(...)
-     *     .build()
-     * ```
-     */
-    WorkerConfigBuilder& setThreadPoolSize(int size);
-    
-    // ========================================
-    // 消费类型配置（v3.2 重构）
-    // ========================================
-    
-    /**
-     * @brief 设置消费类型配置
+     * @brief 设置消费类型配置（整包替换 `worker_config.consumer_type`）
+     *
+     * 参数包含 **全部** 消费相关子块：`display`、`save_raw`、`save_encoded`、`npu_inference`、
+     * `compare`、`performance`、`count` 以及顶部的 `max_frames` / `verbose` 等执行控制字段。
+     * 与 `setDisplayConfig` 无关：后者设置的是 `WorkerConfig::display`（设备/Buffer 几何），
+     * 不是消费阶段的 `consumer_type.display`。
      */
     WorkerConfigBuilder& setConsumerTypeConfig(const WorkerConfig::ConsumerTypeConfig& consumer_type_config);
-    
-    /**
-     * @brief 设置最大处理帧数（执行控制）
-     * @param frames 最大帧数（-1=无限制）
-     */
-    WorkerConfigBuilder& setMaxFrames(int frames);
-    
-    /**
-     * @brief 启用显示消费类型
-     * @param enable 是否启用
-     * @param device_id Framebuffer 设备 ID
-     */
-    WorkerConfigBuilder& enableDisplay(bool enable = true, int device_id = 0);
-    
-    /**
-     * @brief 启用保存原始数据消费类型
-     * @param enable 是否启用
-     * @param output_path 输出文件路径
-     * @param max_frames 最大保存帧数（-1=全部）
-     */
-    WorkerConfigBuilder& enableSaveRaw(bool enable = true, 
-                                        const std::string& output_path = "",
-                                        int max_frames = -1);
-    
-    /**
-     * @brief 启用保存编码数据消费类型
-     * @param enable 是否启用
-     * @param output_path 输出文件路径
-     */
-    WorkerConfigBuilder& enableSaveEncoded(bool enable = true,
-                                            const std::string& output_path = "");
-    
-    /**
-     * @brief 启用比较消费类型
-     * @param enable 是否启用
-     * @param min_psnr PSNR 阈值（dB）
-     * @param min_ssim SSIM 阈值（0.0-1.0）
-     */
-    WorkerConfigBuilder& enableCompare(bool enable = true, 
-                                        double min_psnr = 30.0, 
-                                        double min_ssim = 0.95);
-    
-    /**
-     * @brief 启用性能验证
-     * @param enable 是否启用
-     * @param target_fps 目标帧率
-     */
-    WorkerConfigBuilder& enablePerformance(bool enable = true, double target_fps = 30.0);
-    
-    /**
-     * @brief 启用 NPU 推理消费类型
-     * @param model_path .nb 模型文件路径
-     * @param conf_threshold 置信度阈值
-     * @param nms_threshold NMS IoU 阈值
-     * @param enable_draw 是否在 buffer 上画检测框
-     */
-    WorkerConfigBuilder& enableNpuInference(const std::string& model_path,
-                                             float conf_threshold = 0.25f,
-                                             float nms_threshold = 0.45f,
-                                             bool enable_draw = false);
-    
-    /**
-     * @brief 设置详细日志模式
-     */
-    WorkerConfigBuilder& setVerbose(bool verbose);
     
     /**
      * @brief 构建最终配置

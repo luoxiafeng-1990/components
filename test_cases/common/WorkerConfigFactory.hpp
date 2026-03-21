@@ -31,7 +31,7 @@ namespace common {
  * 
  * // 创建带测试参数的配置
  * auto config = WorkerConfigFactory::createH264Decode("/path/to/video.mp4")
- *     .setMaxFrames(300)
+ *     ConsumerTypeConfigBuilder().setConsumerMaxFrames(300).build()  // 并入 setConsumerTypeConfig
  *     .setSaveFrames(-1)
  *     .setTargetFps(30.0);
  * @endcode
@@ -77,7 +77,7 @@ public:
                     .useTaco("h264", taco)
                     .build()
             )
-            .setWorkerType(WorkerType::FFMPEG_DECODE)
+            .setGlobalConfig(WorkerGlobalConfigBuilder().setWorkerType(WorkerType::FFMPEG_DECODE).build())
             .build();
     }
     
@@ -111,7 +111,7 @@ public:
                     .useTaco("hevc", taco)
                     .build()
             )
-            .setWorkerType(WorkerType::FFMPEG_DECODE)
+            .setGlobalConfig(WorkerGlobalConfigBuilder().setWorkerType(WorkerType::FFMPEG_DECODE).build())
             .build();
     }
     
@@ -145,7 +145,7 @@ public:
                     .useTaco("mjpeg", taco)
                     .build()
             )
-            .setWorkerType(WorkerType::FFMPEG_DECODE)
+            .setGlobalConfig(WorkerGlobalConfigBuilder().setWorkerType(WorkerType::FFMPEG_DECODE).build())
             .build();
     }
     
@@ -175,7 +175,7 @@ public:
                     .useSoftware()
                     .build()
             )
-            .setWorkerType(WorkerType::FFMPEG_DECODE)
+            .setGlobalConfig(WorkerGlobalConfigBuilder().setWorkerType(WorkerType::FFMPEG_DECODE).build())
             .build();
     }
     
@@ -261,7 +261,7 @@ public:
                     .useTaco("h264", taco)
                     .build()
             )
-            .setWorkerType(WorkerType::FFMPEG_DECODE)
+            .setGlobalConfig(WorkerGlobalConfigBuilder().setWorkerType(WorkerType::FFMPEG_DECODE).build())
             .build();
     }
     
@@ -305,7 +305,7 @@ public:
                     .useTaco("h264", taco)
                     .build()
             )
-            .setWorkerType(WorkerType::FFMPEG_DECODE)
+            .setGlobalConfig(WorkerGlobalConfigBuilder().setWorkerType(WorkerType::FFMPEG_DECODE).build())
             .build();
     }
     
@@ -343,7 +343,7 @@ public:
                     .useTaco("h264", taco)
                     .build()
             )
-            .setWorkerType(WorkerType::FFMPEG_DECODE)
+            .setGlobalConfig(WorkerGlobalConfigBuilder().setWorkerType(WorkerType::FFMPEG_DECODE).build())
             .build();
     }
     
@@ -390,7 +390,7 @@ public:
                     .useTaco("h264", taco)
                     .build()
             )
-            .setWorkerType(WorkerType::FFMPEG_DECODE)
+            .setGlobalConfig(WorkerGlobalConfigBuilder().setWorkerType(WorkerType::FFMPEG_DECODE).build())
             .build();
     }
     
@@ -434,7 +434,7 @@ public:
                     .useTaco("h264", taco)
                     .build()
             )
-            .setWorkerType(WorkerType::FFMPEG_DECODE)
+            .setGlobalConfig(WorkerGlobalConfigBuilder().setWorkerType(WorkerType::FFMPEG_DECODE).build())
             .build();
     }
     
@@ -475,7 +475,7 @@ public:
                     .setBufferCount(buffer_count)
                     .build()
             )
-            .setWorkerType(WorkerType::FFMPEG_PACKET_RECORDER)
+            .setGlobalConfig(WorkerGlobalConfigBuilder().setWorkerType(WorkerType::FFMPEG_PACKET_RECORDER).build())
             .build();
     }
     

@@ -5,16 +5,19 @@ AUTOMAKE_OPTIONS = foreign
 noinst_LTLIBRARIES = libcomponents.la
 
 libcomponents_la_SOURCES = \
-    source/display/TacoVOContext.cpp \
-    source/display/TacoVODisplayDevice.cpp \
-    source/display/SharedDisplayContext.cpp \
-    source/display/SharedFramebufferDevice.cpp \
-    source/display/OsdOverlay.cpp \
-    source/display/DisplayDeviceFactory.cpp \
+    source/vendor/taco/display/TacoVOContext.cpp \
+    source/vendor/taco/display/TacoVODisplayDevice.cpp \
+    source/vendor/taco/display/OsdOverlay.cpp \
+    source/vendor/taco/display/SharedDisplayContext.cpp \
+    source/vendor/taco/display/SharedFramebufferDevice.cpp \
+    source/vendor/taco/display/DisplayDeviceFactory.cpp \
     source/productionline/worker/WorkerBase.cpp \
     source/productionline/worker/BufferFillingWorkerFacade.cpp \
     source/productionline/worker/BufferFillingWorkerFactory.cpp \
     source/productionline/worker/WorkerConfig.cpp \
+    source/vendor/contracts/DecoderVendorRegistry.cpp \
+    source/vendor/taco/decode/TacoDecoderExtension.cpp \
+    source/vendor/taco/decode/TacoDecoderPluginLoader.cpp \
     source/productionline/worker/FFmpegDecodeWorker.cpp \
     source/productionline/worker/FfmpegPacketRecorderWorker.cpp \
     source/productionline/worker/FFmpegEncodeWorker.cpp \
@@ -23,7 +26,7 @@ libcomponents_la_SOURCES = \
     source/productionline/worker/EncodedPacketSourceFromRtsp.cpp \
     source/productionline/worker/RawFrameSourceFromFile.cpp \
     source/productionline/worker/RawFrameSourceFromBuffer.cpp \
-    source/monitor/PerformanceMonitor.cpp \
+    source/common/PerformanceMonitor.cpp \
     source/common/Timer.cpp \
     source/common/GlobalThreadPool.cpp \
     source/buffer/bufferpool/Buffer.cpp \
@@ -38,11 +41,11 @@ libcomponents_la_SOURCES = \
     source/productionline/VideoProductionLine.cpp \
     source/productionline/MultiWorkerProductionLine.cpp \
     source/productionline/WorkerSyncCoordinator.cpp \
-    source/productionline/io/BufferWriter.cpp \
-    source/productionline/io/BufferComparator.cpp \
-    source/productionline/io/BufferConsumerStrategies.cpp \
-    source/productionline/io/BufferConsumerService.cpp \
-    source/productionline/io/inference/NpuInferenceConsumer.cpp
+    source/consumptionline/BufferWriter.cpp \
+    source/consumptionline/BufferComparator.cpp \
+    source/consumptionline/BufferConsumerStrategies.cpp \
+    source/consumptionline/BufferConsumerService.cpp \
+    source/consumptionline/inference/NpuInferenceConsumer.cpp
 
 # ========== 测试程序 ==========
 # 注意：display_test 已废弃（原 test_cases/dec/ 目录已重命名为 old_case/）
@@ -54,7 +57,7 @@ libcomponents_la_SOURCES = \
 # 1. Buildroot 会自动编译 log4cplus（已在 components.mk 中声明依赖）
 # 2. log4cplus 库位置：$(STAGING_DIR)/usr/lib/liblog4cplus-2.0.so.3.4.7
 # 3. 运行时需要目标系统有 log4cplus 动态库（Buildroot 会自动安装到 TARGET_DIR）
-COMMON_LIBS = -lpthread -luring -lavformat -lavcodec -lavutil -lswscale -ltacosys -ltacovo -ltacocv -llog4cplus -lfreetype -lta_runtime -lVIPhal -lNBGlinker -lopencv_imgproc -lopencv_core
+COMMON_LIBS = -lpthread -luring -lavformat -lavcodec -lavutil -lswscale -ltacosys -ltacovo -ltacocv -llog4cplus -lfreetype -lta_runtime -lVIPhal -lNBGlinker -lopencv_imgproc -lopencv_core -ldl
 
 # display_test 主程序（已废弃，原 test_cases/dec/ 目录已重命名为 old_case/）
 # display_test_SOURCES = test_cases/dec/test.cpp
@@ -86,7 +89,7 @@ qa_cases_CPPFLAGS = -I$(top_srcdir)/test_cases $(AM_CPPFLAGS)
 qa_cases_LDFLAGS = -Wl,--allow-shlib-undefined
 
 # ========== 编译选项 ==========
-AM_CPPFLAGS = -I$(top_srcdir)/include -I$(top_srcdir)/include/freetype2
+AM_CPPFLAGS = -I$(top_srcdir)/include -I$(top_srcdir)/include/common/third_party/freetype2
 
 if DEBUG
 AM_CXXFLAGS = -g -O0 -Wall -std=c++17

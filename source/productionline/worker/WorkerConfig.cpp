@@ -1,4 +1,5 @@
 #include "productionline/worker/WorkerConfig.hpp"
+#include "vendor/taco/decode/TacoDecoderExtension.hpp"
 #include <stdexcept>
 
 // ============================================================
@@ -142,7 +143,7 @@ TacoConfigBuilder& TacoConfigBuilder::setScale(Channel ch, int width, int height
     return *this;
 }
 
-WorkerConfig::DecoderConfig::TacoConfig TacoConfigBuilder::build() const {
+TacoConfig TacoConfigBuilder::build() const {
     return taco_config_;
 }
 
@@ -305,20 +306,17 @@ DecoderConfigBuilder& DecoderConfigBuilder::setDecodeThreads(int threads) {
     return *this;
 }
 
-DecoderConfigBuilder& DecoderConfigBuilder::useTaco(
-    std::string_view codec,
-    const WorkerConfig::DecoderConfig::TacoConfig& taco_config
-) {
-    // 拼接解码器名称：codec + "_taco"
+DecoderConfigBuilder& DecoderConfigBuilder::useTaco(std::string_view codec, const TacoConfig& taco_config) {
     decoder_config_.name = std::string(codec) + "_taco";
     decoder_config_.enable_hardware = true;
-    decoder_config_.taco = taco_config;
+    decoder_config_.vendor = makeTacoDecoderExtension(taco_config);
     return *this;
 }
 
 DecoderConfigBuilder& DecoderConfigBuilder::useSoftware() {
     decoder_config_.name = std::nullopt;
     decoder_config_.enable_hardware = false;
+    decoder_config_.vendor = nullptr;
     return *this;
 }
 
@@ -327,8 +325,99 @@ WorkerConfig::DecoderConfig DecoderConfigBuilder::build() const {
 }
 
 // ============================================================
+// WorkerGlobalConfigBuilder 实现
+// ============================================================
+
+WorkerGlobalConfigBuilder& WorkerGlobalConfigBuilder::setWorkerType(WorkerType type) {
+    global_config_.worker_type = type;
+    return *this;
+}
+
+WorkerGlobalConfigBuilder& WorkerGlobalConfigBuilder::setThreadPoolSize(int size) {
+    global_config_.thread_pool_size = size;
+    return *this;
+}
+
+WorkerConfig::GlobalConfig WorkerGlobalConfigBuilder::build() const {
+    return global_config_;
+}
+
+// ============================================================
+// ConsumerTypeConfigBuilder 实现
+// ============================================================
+
+ConsumerTypeConfigBuilder& ConsumerTypeConfigBuilder::setConsumerMaxFrames(int frames) {
+    consumer_type_config_.max_frames = frames;
+    return *this;
+}
+
+ConsumerTypeConfigBuilder& ConsumerTypeConfigBuilder::setVerbose(bool verbose) {
+    consumer_type_config_.verbose = verbose;
+    return *this;
+}
+
+ConsumerTypeConfigBuilder& ConsumerTypeConfigBuilder::enableDisplay(bool enable, int device_id) {
+    consumer_type_config_.display.enable = enable;
+    consumer_type_config_.display.device_id = device_id;
+    return *this;
+}
+
+ConsumerTypeConfigBuilder& ConsumerTypeConfigBuilder::enableSaveRaw(bool enable,
+                                                                    const std::string& output_path,
+                                                                    int max_frames) {
+    consumer_type_config_.save_raw.enable = enable;
+    consumer_type_config_.save_raw.setOutputPath(output_path);
+    consumer_type_config_.save_raw.max_frames_per_channel = {max_frames};
+    return *this;
+}
+
+ConsumerTypeConfigBuilder& ConsumerTypeConfigBuilder::enableSaveEncoded(bool enable,
+                                                                        const std::string& output_path) {
+    consumer_type_config_.save_encoded.enable = enable;
+    consumer_type_config_.save_encoded.output_path = output_path;
+    return *this;
+}
+
+ConsumerTypeConfigBuilder& ConsumerTypeConfigBuilder::enableCompare(bool enable,
+                                                                    double min_psnr,
+                                                                    double min_ssim) {
+    consumer_type_config_.compare.enable_psnr = enable;
+    consumer_type_config_.compare.enable_ssim = enable;
+    consumer_type_config_.compare.min_psnr = min_psnr;
+    consumer_type_config_.compare.min_ssim = min_ssim;
+    return *this;
+}
+
+ConsumerTypeConfigBuilder& ConsumerTypeConfigBuilder::enablePerformance(bool enable, double target_fps) {
+    consumer_type_config_.performance.enable = enable;
+    consumer_type_config_.performance.target_fps = target_fps;
+    return *this;
+}
+
+ConsumerTypeConfigBuilder& ConsumerTypeConfigBuilder::enableNpuInference(const std::string& model_path,
+                                                                       float conf_threshold,
+                                                                       float nms_threshold,
+                                                                       bool enable_draw) {
+    consumer_type_config_.npu_inference.enable = true;
+    consumer_type_config_.npu_inference.model_path = model_path;
+    consumer_type_config_.npu_inference.conf_threshold = conf_threshold;
+    consumer_type_config_.npu_inference.nms_threshold = nms_threshold;
+    consumer_type_config_.npu_inference.enable_draw = enable_draw;
+    return *this;
+}
+
+WorkerConfig::ConsumerTypeConfig ConsumerTypeConfigBuilder::build() const {
+    return consumer_type_config_;
+}
+
+// ============================================================
 // WorkerConfigBuilder 实现
 // ============================================================
+
+WorkerConfigBuilder& WorkerConfigBuilder::setGlobalConfig(const WorkerConfig::GlobalConfig& global_config) {
+    worker_config_.global = global_config;
+    return *this;
+}
 
 WorkerConfigBuilder& WorkerConfigBuilder::setDataSourceConfig(const WorkerConfig::DataSourceConfig& data_source_config) {
     worker_config_.data_source = data_source_config;
@@ -345,83 +434,8 @@ WorkerConfigBuilder& WorkerConfigBuilder::setDecoderConfig(const WorkerConfig::D
     return *this;
 }
 
-WorkerConfigBuilder& WorkerConfigBuilder::setWorkerType(WorkerType type) {
-    worker_config_.worker_type = type;
-    return *this;
-}
-
-WorkerConfigBuilder& WorkerConfigBuilder::setThreadPoolSize(int size) {
-    worker_config_.thread_pool_size = size;
-    return *this;
-}
-
-// ========================================
-// 消费类型配置方法实现（v3.2 重构）
-// ========================================
-
 WorkerConfigBuilder& WorkerConfigBuilder::setConsumerTypeConfig(const WorkerConfig::ConsumerTypeConfig& consumer_type_config) {
     worker_config_.consumer_type = consumer_type_config;
-    return *this;
-}
-
-WorkerConfigBuilder& WorkerConfigBuilder::setMaxFrames(int frames) {
-    worker_config_.consumer_type.max_frames = frames;
-    return *this;
-}
-
-WorkerConfigBuilder& WorkerConfigBuilder::enableDisplay(bool enable, int device_id) {
-    worker_config_.consumer_type.display.enable = enable;
-    worker_config_.consumer_type.display.device_id = device_id;
-    return *this;
-}
-
-WorkerConfigBuilder& WorkerConfigBuilder::enableSaveRaw(bool enable, 
-                                                         const std::string& output_path,
-                                                         int max_frames) {
-    worker_config_.consumer_type.save_raw.enable = enable;
-    worker_config_.consumer_type.save_raw.setOutputPath(output_path);
-    worker_config_.consumer_type.save_raw.max_frames_per_channel = {max_frames};
-    return *this;
-}
-
-WorkerConfigBuilder& WorkerConfigBuilder::enableSaveEncoded(bool enable,
-                                                             const std::string& output_path) {
-    worker_config_.consumer_type.save_encoded.enable = enable;
-    worker_config_.consumer_type.save_encoded.output_path = output_path;
-    return *this;
-}
-
-WorkerConfigBuilder& WorkerConfigBuilder::enableCompare(bool enable, 
-                                                         double min_psnr, 
-                                                         double min_ssim) {
-    // enable 参数同时控制 PSNR 和 SSIM
-    worker_config_.consumer_type.compare.enable_psnr = enable;
-    worker_config_.consumer_type.compare.enable_ssim = enable;
-    worker_config_.consumer_type.compare.min_psnr = min_psnr;   // 通过阈值
-    worker_config_.consumer_type.compare.min_ssim = min_ssim;   // 通过阈值
-    return *this;
-}
-
-WorkerConfigBuilder& WorkerConfigBuilder::enablePerformance(bool enable, double target_fps) {
-    worker_config_.consumer_type.performance.enable = enable;
-    worker_config_.consumer_type.performance.target_fps = target_fps;
-    return *this;
-}
-
-WorkerConfigBuilder& WorkerConfigBuilder::enableNpuInference(const std::string& model_path,
-                                                              float conf_threshold,
-                                                              float nms_threshold,
-                                                              bool enable_draw) {
-    worker_config_.consumer_type.npu_inference.enable = true;
-    worker_config_.consumer_type.npu_inference.model_path = model_path;
-    worker_config_.consumer_type.npu_inference.conf_threshold = conf_threshold;
-    worker_config_.consumer_type.npu_inference.nms_threshold = nms_threshold;
-    worker_config_.consumer_type.npu_inference.enable_draw = enable_draw;
-    return *this;
-}
-
-WorkerConfigBuilder& WorkerConfigBuilder::setVerbose(bool verbose) {
-    worker_config_.consumer_type.verbose = verbose;
     return *this;
 }
 

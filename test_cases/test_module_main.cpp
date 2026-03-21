@@ -52,12 +52,12 @@ int main(int argc, char* argv[]) {
         test::IOptionPlugin* plugin;
         CLI::App* cmd;
     };
-    std::vector<PluginEntry> all_plugins;
+    std::vector<PluginEntry> all_plugin_entries;
 
     auto register_plugin = [&](test::IOptionPlugin* p) {
         auto* cmd = app.add_subcommand(p->getName(), p->getDescription());
         p->registerOptions(*cmd);
-        all_plugins.push_back({p, cmd});
+        all_plugin_entries.push_back({p, cmd});
     };
 
     register_plugin(vdec_plugin.get());
@@ -76,7 +76,7 @@ int main(int argc, char* argv[]) {
 
     // ── 4. 收集所有被解析到的插件 ──
     std::vector<test::IOptionPlugin*> actived_plugins;
-    for (auto& entry : all_plugins) {
+    for (auto& entry : all_plugin_entries) {
         if (entry.cmd->parsed())
             actived_plugins.push_back(entry.plugin);
     }

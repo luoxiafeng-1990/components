@@ -5,7 +5,7 @@
 
 #include "ExecuteMode.hpp"
 #include "productionline/VideoProductionLine.hpp"
-#include "productionline/io/BufferConsumerStrategies.hpp"
+#include "consumptionline/BufferConsumerStrategies.hpp"
 #include "buffer/bufferpool/BufferPoolRegistry.hpp"
 #include <log4cplus/logger.h>
 #include <log4cplus/loggingmacros.h>

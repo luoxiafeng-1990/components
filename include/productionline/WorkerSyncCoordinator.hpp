@@ -17,7 +17,7 @@ class Buffer;
 // 这里只需要包含该头文件即可
 #include "productionline/worker/WorkerConfig.hpp"
 #include "productionline/worker/WorkerBase.hpp"  // for FillStatus, FillResult
-#include "productionline/io/BufferComparator.hpp"
+#include "consumptionline/BufferComparator.hpp"
 
 // ============================================================
 // 比较回调上下文（与 WorkerSyncCoordinator 配套使用）
@@ -67,7 +67,7 @@ struct CompareCallbackContext {
         result_callback;
     
     // ⭐ v2.28 优化：BufferComparator 作为成员，避免每帧重复创建
-    std::unique_ptr<productionline::io::BufferComparator> comparator_;
+    std::unique_ptr<consumptionline::io::BufferComparator> comparator_;
     bool comparator_opened_ = false;
     
     CompareCallbackContext() = default;

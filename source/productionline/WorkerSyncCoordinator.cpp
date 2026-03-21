@@ -1,5 +1,5 @@
 #include "productionline/WorkerSyncCoordinator.hpp"
-#include "productionline/io/BufferComparator.hpp"
+#include "consumptionline/BufferComparator.hpp"
 #include "buffer/bufferpool/Buffer.hpp"
 #include <log4cplus/loggingmacros.h>
 
@@ -47,10 +47,10 @@ bool CompareCallbackContext::openComparator() {
     }
     
     // 创建 comparator
-    comparator_ = std::make_unique<productionline::io::BufferComparator>();
+    comparator_ = std::make_unique<consumptionline::io::BufferComparator>();
     
     // 配置
-    productionline::io::CompareConfig config;
+    consumptionline::io::CompareConfig config;
     config.enable_psnr = enable_psnr;
     config.enable_ssim = enable_ssim;
     config.min_psnr = min_psnr;
