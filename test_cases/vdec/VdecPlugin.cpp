@@ -143,8 +143,6 @@ void VdecPlugin::registerOptions(CLI::App& app) {
     app.add_option("-R,--resolution", resolution_str_, "分辨率 (如 1920x1080)");
     app.add_option("-F,--fps", params_.fps, "目标帧率");
     app.add_option("-m,--max-frames", max_frames_, "最大帧数 (-1=无限制)");
-    app.add_option("-s,--save", save_frames_, "保存帧数 (0=不保存, -1=全部)");
-    app.add_option("-o,--output", output_path_, "输出文件路径");
     app.add_flag("-p,--psnr", enable_psnr_, "启用 PSNR 验证");
     app.add_flag("-S,--ssim", enable_ssim_, "启用 SSIM 验证");
     app.add_option("-P,--min-psnr", min_psnr_, "PSNR 阈值 (默认: 30.0 dB)");
@@ -152,13 +150,6 @@ void VdecPlugin::registerOptions(CLI::App& app) {
     app.add_flag("-v,--verbose", verbose_, "详细日志");
     app.add_option("-t,--threads", threads_, "并发路数 (启用 PARALLEL 模式)");
     app.add_flag("--loop", loop_, "循环播放");
-    
-    app.add_flag("-d,--display", enable_display_, "启用显示输出");
-    app.add_option("--display-mode", display_mode_str_, "显示模式: shared_fb(默认), vo(taco-vo)");
-    app.add_option("--display-fps", display_fps_, "显示刷新帧率 (默认: 30)");
-    app.add_flag("--osd", osd_enable_, "启用 OSD 叠加");
-    app.add_option("--osd-fps", osd_fps_, "OSD 刷新频率 (默认: 1)");
-    
     app.add_option("positional", positional_args_, "测试名或输入文件路径");
 
     app.footer(
@@ -169,11 +160,11 @@ void VdecPlugin::registerOptions(CLI::App& app) {
         "\n"
         "Examples:\n"
         "  qa_cases vdec video.mp4\n"
-        "  qa_cases vdec --display video.mp4\n"
         "  qa_cases vdec --psnr video.mp4\n"
         "  qa_cases vdec --threads 4 video.mp4\n"
         "  qa_cases vdec h264_1920x1080_30 video.mp4\n"
-        "  qa_cases vdec --npu /model/yolov11.nb -d video.mp4\n"
+        "  qa_cases vdec video.mp4 display --mode vo\n"
+        "  qa_cases vdec video.mp4 display npu --model m.nb\n"
     );
 }
 
@@ -188,15 +179,6 @@ void VdecPlugin::applyTo(WorkerConfig& config) const {
     config.data_source.max_frames = max_frames_;
     config.data_source.loop = loop_;
     
-    // save 设置
-    if (!output_path_.empty()) {
-        config.consumer_type.save_raw.enable = true;
-        config.consumer_type.save_raw.setOutputPath(output_path_.c_str());
-    }
-    if (save_frames_ != 0) {
-        config.consumer_type.save_raw.max_frames_per_channel = {save_frames_};
-    }
-    
     // compare 设置
     config.consumer_type.compare.enable_psnr = enable_psnr_;
     config.consumer_type.compare.enable_ssim = enable_ssim_;
@@ -208,19 +190,6 @@ void VdecPlugin::applyTo(WorkerConfig& config) const {
     }
     
     config.consumer_type.verbose = verbose_;
-    
-    // display 设置
-    if (enable_display_) {
-        using DisplayMode = WorkerConfig::ConsumerTypeConfig::DisplayType::DisplayMode;
-        config.consumer_type.display.enable = true;
-        if (display_mode_str_ == "vo" || display_mode_str_ == "taco-vo")
-            config.consumer_type.display.mode = DisplayMode::TACO_VO;
-        else
-            config.consumer_type.display.mode = DisplayMode::SHARED_FB;
-        config.consumer_type.display.taco_vo.target_fps = display_fps_;
-        config.consumer_type.display.taco_vo.osd_enable = osd_enable_;
-        config.consumer_type.display.taco_vo.osd_fps    = osd_fps_;
-    }
 }
 
 // ========================================
@@ -257,10 +226,6 @@ int VdecPlugin::handlePreActions() {
     if (show_list_) { listTests(); return 0; }
     if (input_path_.empty()) {
         std::cerr << "Error: No input file or RTSP URL specified\n" << std::endl;
-        return 1;
-    }
-    if (save_frames_ != 0 && output_path_.empty()) {
-        std::cerr << "Error: -s/--save requires -o/--output\n" << std::endl;
         return 1;
     }
     return -1;
@@ -324,29 +289,8 @@ std::vector<WorkerConfig> VdecPlugin::buildPipelineConfigs(const WorkerConfig& s
         }
 
         WorkerConfig base = shared_config;
-        if (base.consumer_type.display.enable &&
-            (base.consumer_type.display.mode == WorkerConfig::ConsumerTypeConfig::DisplayType::TACO_VO ||
-             base.consumer_type.display.mode == WorkerConfig::ConsumerTypeConfig::DisplayType::SHARED_FB)) {
+        if (base.consumer_type.display.enable) {
             base.consumer_type.display.taco_vo.max_channels = thread_count;
-        }
-
-        std::vector<std::string> all_paths;
-        if (base.consumer_type.save_raw.enable) {
-            const auto& paths = base.consumer_type.save_raw.output_paths;
-            if (paths.size() == 1) {
-                const std::string& first = paths[0];
-                size_t last_dot = first.rfind('.');
-                if (last_dot == std::string::npos) {
-                    for (int i = 0; i < thread_count; i++)
-                        all_paths.push_back(first + std::to_string(i + 1) + ".yuv");
-                } else {
-                    std::string b = first.substr(0, last_dot), ext = first.substr(last_dot);
-                    for (int i = 0; i < thread_count; i++)
-                        all_paths.push_back(b + "_" + std::to_string(i + 1) + ext);
-                }
-            } else {
-                all_paths = paths;
-            }
         }
 
         std::vector<WorkerConfig> configs;
@@ -363,11 +307,6 @@ std::vector<WorkerConfig> VdecPlugin::buildPipelineConfigs(const WorkerConfig& s
             cfg.consumer_type.performance.target_fps = params.fps;
             cfg.data_source.max_frames = base.data_source.max_frames;
             cfg.data_source.loop = base.data_source.loop;
-            if (base.consumer_type.save_raw.enable && !all_paths.empty()) {
-                cfg.consumer_type.save_raw.output_paths = {
-                    (static_cast<size_t>(i) < all_paths.size()) ? all_paths[i] : all_paths[0]
-                };
-            }
             configs.push_back(cfg);
         }
         return configs;

@@ -617,6 +617,18 @@ struct WorkerConfig {
             CountType() = default;
         } count;
         
+        /**
+         * @brief 从 shared config 继承伴随消费者设置
+         *
+         * 当驱动插件（save / vdec / pp）的 buildPipelineConfigs 创建全新的
+         * WorkerConfig 时，伴随插件（display / npu）通过 applyTo 写入 shared
+         * config 的设置不会自动传播。本方法将 shared 中已启用、但本配置中
+         * 未启用的伴随消费设置补充过来。
+         *
+         * @param shared applyTo 阶段产出的共享 ConsumerTypeConfig
+         */
+        void inheritCompanionSettings(const ConsumerTypeConfig& shared);
+
         ConsumerTypeConfig() = default;
         ConsumerTypeConfig(const ConsumerTypeConfig&) = default;
         ConsumerTypeConfig& operator=(const ConsumerTypeConfig&) = default;

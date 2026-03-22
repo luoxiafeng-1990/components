@@ -117,10 +117,6 @@ private:
     std::string decoder_str_;
     std::string resolution_str_;
     
-    // save 设置
-    int save_frames_ = 0;          ///< -s/--save 帧数
-    std::string output_path_;      ///< -o/--output 路径
-    
     // compare 设置
     bool enable_psnr_ = false;
     bool enable_ssim_ = false;
@@ -131,13 +127,6 @@ private:
     int threads_ = 0;              ///< 0 = 未指定
     int max_frames_ = -1;          ///< -1 = 无限制
     bool loop_ = false;
-    
-    // display 设置（内联显示选项，无需单独 display 子命令）
-    bool enable_display_ = false;       ///< -d/--display 启用显示
-    std::string display_mode_str_ = "shared_fb"; ///< --display-mode (shared_fb|vo)
-    int display_fps_ = 30;              ///< --display-fps 显示刷新帧率
-    bool osd_enable_ = false;           ///< --osd 启用 OSD 叠加
-    int osd_fps_ = 1;                   ///< --osd-fps OSD 刷新频率
 };
 
 } // namespace vdec

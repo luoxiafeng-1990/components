@@ -411,6 +411,25 @@ WorkerConfig::ConsumerTypeConfig ConsumerTypeConfigBuilder::build() const {
 }
 
 // ============================================================
+// ConsumerTypeConfig::inheritCompanionSettings 实现
+// ============================================================
+
+void WorkerConfig::ConsumerTypeConfig::inheritCompanionSettings(const ConsumerTypeConfig& shared) {
+    if (shared.display.enable && !display.enable)
+        display = shared.display;
+
+    if (shared.npu_inference.enable && !npu_inference.enable)
+        npu_inference = shared.npu_inference;
+
+    if ((shared.compare.enable_psnr || shared.compare.enable_ssim)
+        && !compare.enable_psnr && !compare.enable_ssim)
+        compare = shared.compare;
+
+    if (shared.verbose)
+        verbose = true;
+}
+
+// ============================================================
 // WorkerConfigBuilder 实现
 // ============================================================
 

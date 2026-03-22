@@ -80,8 +80,7 @@ qa_cases_SOURCES = \
     test_cases/common/ExecuteMode.cpp \
     test_cases/vdec/VdecPlugin.cpp \
     test_cases/pp/PPPlugin.cpp \
-    test_cases/record/RecordPlugin.cpp \
-    test_cases/writer/WriterPlugin.cpp \
+    test_cases/save/SavePlugin.cpp \
     test_cases/display/DisplayPlugin.cpp \
     test_cases/npu/NpuPlugin.cpp
 qa_cases_LDADD = libcomponents.la $(COMMON_LIBS)

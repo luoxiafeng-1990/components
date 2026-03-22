@@ -2,7 +2,7 @@
  * @file test_module_main.cpp
  * @brief 插件化测试入口（CLI11 版本）
  *
- * 架构：所有功能（vdec、pp、record、writer、display、npu）均为 IOptionPlugin，
+ * 架构：所有功能（vdec、pp、save、display、npu）均为 IOptionPlugin，
  * 地位平等，统一注册为子命令。用户可在一条命令中组合多个子命令：
  *
  *   ./qa_cases vdec --file video.mp4 display --display-mode vo npu --model m.nb
@@ -24,8 +24,7 @@
 #include "npu/NpuPlugin.hpp"
 #include "vdec/VdecPlugin.hpp"
 #include "pp/PPPlugin.hpp"
-#include "record/RecordPlugin.hpp"
-#include "writer/WriterPlugin.hpp"
+#include "save/SavePlugin.hpp"
 #include "common/Logger.hpp"
 
 #include <iostream>
@@ -42,8 +41,7 @@ int main(int argc, char* argv[]) {
     // ── 1. 创建所有插件 ──
     auto vdec_plugin    = std::make_unique<test::vdec::VdecPlugin>();
     auto pp_plugin      = std::make_unique<test::pp::PPPlugin>();
-    auto record_plugin  = std::make_unique<test::record::RecordPlugin>();
-    auto writer_plugin  = std::make_unique<test::writer::WriterPlugin>();
+    auto save_plugin    = std::make_unique<test::save::SavePlugin>();
     auto display_plugin = std::make_unique<test::display::DisplayPlugin>();
     auto npu_plugin     = std::make_unique<test::npu::NpuPlugin>();
 
@@ -62,8 +60,7 @@ int main(int argc, char* argv[]) {
 
     register_plugin(vdec_plugin.get());
     register_plugin(pp_plugin.get());
-    register_plugin(record_plugin.get());
-    register_plugin(writer_plugin.get());
+    register_plugin(save_plugin.get());
     register_plugin(display_plugin.get());
     register_plugin(npu_plugin.get());
 
@@ -113,6 +110,11 @@ int main(int argc, char* argv[]) {
     if (pipeline_configs.empty()) {
         std::cerr << "Error: No recognized module or insufficient parameters.\n" << std::endl;
         return 1;
+    }
+
+    // ── 7.5. 将 applyTo 阶段的伴随设置继承到管线配置 ──
+    for (auto& pc : pipeline_configs) {
+        pc.consumer_type.inheritCompanionSettings(config.consumer_type);
     }
 
     // ── 8. 从 config 推断执行模式，统一执行 ──
