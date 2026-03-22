@@ -174,8 +174,9 @@ void SavePlugin::registerOptions(CLI::App& app) {
 }
 
 void SavePlugin::applyTo(WorkerConfig& config) const {
-    if (!input_path_.empty())
-        config.data_source.path = input_path_;
+    config.data_source = DataSourceConfigBuilder(config.data_source)
+        .setPathIfNonEmpty(input_path_)
+        .build();
     if (verbose_)
         config.consumer_type.verbose = true;
 }

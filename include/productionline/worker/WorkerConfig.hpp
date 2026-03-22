@@ -653,6 +653,10 @@ struct WorkerConfig {
 class DataSourceConfigBuilder {
 public:
     DataSourceConfigBuilder() = default;
+
+    /// 从现有配置拷贝为起点，再链式 set* 只覆盖需要修改的字段（插件/工厂补丁场景）
+    explicit DataSourceConfigBuilder(const WorkerConfig::DataSourceConfig& seed)
+        : data_source_config_(seed) {}
     
     /**
      * @brief 设置数据源路径/URL
@@ -670,6 +674,9 @@ public:
     
     // 兼容 std::string
     DataSourceConfigBuilder& setPath(const std::string& path);
+
+    /// path 非空时才写入，避免用空串清空已有路径（与插件 applyTo 语义一致）
+    DataSourceConfigBuilder& setPathIfNonEmpty(std::string_view path);
     
     /**
      * @brief 设置 BufferPool 的 Buffer 数量
@@ -689,6 +696,45 @@ public:
      * 数据源读取到此帧数后将返回 EOF，停止生产
      */
     DataSourceConfigBuilder& setMaxFrames(int max_frames);
+
+    /// max_frames==0 时不修改（PP 约定：0 表示 CLI 未指定覆盖）
+    DataSourceConfigBuilder& setMaxFramesIfNonZero(int max_frames);
+    
+    /**
+     * @brief 设置数据源模式
+     * @param mode true=从Buffer数据源获取packet, false=从文件数据源读取
+     */
+    DataSourceConfigBuilder& setBufferMode(bool mode);
+    
+    /**
+     * @brief 设置 Buffer 模式下的编解码器参数
+     * @param params 编解码器参数指针（从 Record Worker 获取，生命周期由调用方管理）
+     */
+    DataSourceConfigBuilder& setCodecParams(const struct AVCodecParameters* params);
+    
+    /**
+     * @brief 设置时间基准
+     * @param tb 时间基准（从 Record Worker 获取，用于同步）
+     */
+    DataSourceConfigBuilder& setTimeBase(AVRational tb);
+    
+    /**
+     * @brief 设置共享的 Packet 数据源
+     * @param source 共享数据源实例（nullptr=Worker 自己创建独立实例）
+     */
+    DataSourceConfigBuilder& setSharedPacketSource(std::shared_ptr<IEncodedPacketSource> source);
+    
+    /**
+     * @brief 设置延迟提交模式
+     * @param deferred true=fillBuffer()不调用commit，由外部帧同步后调用
+     */
+    DataSourceConfigBuilder& setDeferredCommit(bool deferred);
+    
+    /**
+     * @brief 设置循环播放
+     * @param loop true=文件播放结束后自动回到开头循环播放
+     */
+    DataSourceConfigBuilder& setLoop(bool loop);
     
     WorkerConfig::DataSourceConfig build() const;
     

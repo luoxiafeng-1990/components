@@ -25,6 +25,13 @@ DataSourceConfigBuilder& DataSourceConfigBuilder::setPath(const std::string& pat
     return *this;
 }
 
+DataSourceConfigBuilder& DataSourceConfigBuilder::setPathIfNonEmpty(std::string_view path) {
+    if (!path.empty()) {
+        data_source_config_.path = std::string(path);
+    }
+    return *this;
+}
+
 DataSourceConfigBuilder& DataSourceConfigBuilder::setBufferCount(int count) {
     data_source_config_.buffer_count = count;
     return *this;
@@ -32,6 +39,43 @@ DataSourceConfigBuilder& DataSourceConfigBuilder::setBufferCount(int count) {
 
 DataSourceConfigBuilder& DataSourceConfigBuilder::setMaxFrames(int max_frames) {
     data_source_config_.max_frames = max_frames;
+    return *this;
+}
+
+DataSourceConfigBuilder& DataSourceConfigBuilder::setMaxFramesIfNonZero(int max_frames) {
+    if (max_frames != 0) {
+        data_source_config_.max_frames = max_frames;
+    }
+    return *this;
+}
+
+DataSourceConfigBuilder& DataSourceConfigBuilder::setBufferMode(bool mode) {
+    data_source_config_.buffer_mode = mode;
+    return *this;
+}
+
+DataSourceConfigBuilder& DataSourceConfigBuilder::setCodecParams(const AVCodecParameters* params) {
+    data_source_config_.codec_params = params;
+    return *this;
+}
+
+DataSourceConfigBuilder& DataSourceConfigBuilder::setTimeBase(AVRational tb) {
+    data_source_config_.time_base = tb;
+    return *this;
+}
+
+DataSourceConfigBuilder& DataSourceConfigBuilder::setSharedPacketSource(std::shared_ptr<IEncodedPacketSource> source) {
+    data_source_config_.shared_packet_source = std::move(source);
+    return *this;
+}
+
+DataSourceConfigBuilder& DataSourceConfigBuilder::setDeferredCommit(bool deferred) {
+    data_source_config_.deferred_commit = deferred;
+    return *this;
+}
+
+DataSourceConfigBuilder& DataSourceConfigBuilder::setLoop(bool loop) {
+    data_source_config_.loop = loop;
     return *this;
 }
 

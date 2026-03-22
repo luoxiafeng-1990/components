@@ -22,6 +22,7 @@ void DisplayPlugin::registerOptions(CLI::App& app) {
     app.add_option("--fps", target_fps_, "显示刷新帧率 (默认: 30)");
     app.add_flag("--osd", osd_enable_, "启用 OSD 叠加");
     app.add_option("--osd-fps", osd_fps_, "OSD 刷新频率 (默认: 1)");
+    app.add_option("--max-channels", max_channels_, "最大显示通道数；不指定时为 1（单路全屏）。多宫格需显式指定，如 16");
     app.add_option("--view-type", view_type_, "视图类型: grid(默认), main_sidebar");
     app.add_option("--slot-assignment", slot_assignment_, "通道→slot 映射")->delimiter(',');
     app.add_option("--main-ratio", main_sidebar_ratio_, "main_sidebar 主画面宽度占比 (默认: 0.75)");
@@ -40,6 +41,9 @@ void DisplayPlugin::applyTo(WorkerConfig& config) const {
     config.consumer_type.display.taco_vo.target_fps      = target_fps_;
     config.consumer_type.display.taco_vo.osd_enable      = osd_enable_;
     config.consumer_type.display.taco_vo.osd_fps         = osd_fps_;
+    // 未指定 --max-channels 时用 1：与单路解码一致（全屏单画面）；多画面需显式 --max-channels N
+    config.consumer_type.display.taco_vo.max_channels =
+        (max_channels_ > 0) ? max_channels_ : 1;
     if (!view_type_.empty())
         config.consumer_type.display.taco_vo.view_type   = view_type_;
     if (!slot_assignment_.empty())

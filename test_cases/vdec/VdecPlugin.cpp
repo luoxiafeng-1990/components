@@ -142,7 +142,7 @@ void VdecPlugin::registerOptions(CLI::App& app) {
     app.add_option("-H,--height", params_.height, "分辨率高度");
     app.add_option("-R,--resolution", resolution_str_, "分辨率 (如 1920x1080)");
     app.add_option("-F,--fps", params_.fps, "目标帧率");
-    app.add_option("-m,--max-frames", max_frames_, "最大帧数 (-1=无限制)");
+    app.add_option("-m,--max-frames", max_frames_, "最大帧数（数据源读取与消费循环共用，-1=无限制）");
     app.add_flag("-p,--psnr", enable_psnr_, "启用 PSNR 验证");
     app.add_flag("-S,--ssim", enable_ssim_, "启用 SSIM 验证");
     app.add_option("-P,--min-psnr", min_psnr_, "PSNR 阈值 (默认: 30.0 dB)");
@@ -173,11 +173,13 @@ void VdecPlugin::registerOptions(CLI::App& app) {
 // ========================================
 
 void VdecPlugin::applyTo(WorkerConfig& config) const {
-    if (!input_path_.empty()) {
-        config.data_source.path = input_path_;
-    }
-    config.data_source.max_frames = max_frames_;
-    config.data_source.loop = loop_;
+    config.data_source = DataSourceConfigBuilder(config.data_source)
+        .setPathIfNonEmpty(input_path_)
+        .setMaxFrames(max_frames_)
+        .setLoop(loop_)
+        .build();
+    // 与数据源读帧上限一致：消费循环使用同一上限（-1=无限制）
+    config.consumer_type.max_frames = max_frames_;
     
     // compare 设置
     config.consumer_type.compare.enable_psnr = enable_psnr_;
@@ -269,14 +271,19 @@ std::vector<WorkerConfig> VdecPlugin::buildPipelineConfigs(const WorkerConfig& s
             shared_config.data_source.path, params.codec, params.width, params.height);
         hw_config.consumer_type = shared_config.consumer_type;
         hw_config.consumer_type.performance.target_fps = params.fps;
-        hw_config.data_source.max_frames = shared_config.data_source.max_frames;
-        hw_config.data_source.loop = shared_config.data_source.loop;
+        hw_config.data_source = DataSourceConfigBuilder(hw_config.data_source)
+            .setMaxFrames(shared_config.data_source.max_frames)
+            .setLoop(shared_config.data_source.loop)
+            .build();
 
         auto sw_config = common::WorkerConfigFactory::createSoftwareDecode(
             shared_config.data_source.path, params.width, params.height);
         sw_config.consumer_type.performance.target_fps = params.fps;
-        sw_config.data_source.max_frames = shared_config.data_source.max_frames;
-        sw_config.data_source.loop = shared_config.data_source.loop;
+        sw_config.consumer_type.max_frames = shared_config.consumer_type.max_frames;
+        sw_config.data_source = DataSourceConfigBuilder(sw_config.data_source)
+            .setMaxFrames(shared_config.data_source.max_frames)
+            .setLoop(shared_config.data_source.loop)
+            .build();
 
         return {hw_config, sw_config};
     }
@@ -290,6 +297,9 @@ std::vector<WorkerConfig> VdecPlugin::buildPipelineConfigs(const WorkerConfig& s
 
         WorkerConfig base = shared_config;
         if (base.consumer_type.display.enable) {
+            int mc = base.consumer_type.display.taco_vo.max_channels;
+            if (mc > thread_count)
+                thread_count = mc;
             base.consumer_type.display.taco_vo.max_channels = thread_count;
         }
 
@@ -305,8 +315,10 @@ std::vector<WorkerConfig> VdecPlugin::buildPipelineConfigs(const WorkerConfig& s
             }
             cfg.consumer_type = base.consumer_type;
             cfg.consumer_type.performance.target_fps = params.fps;
-            cfg.data_source.max_frames = base.data_source.max_frames;
-            cfg.data_source.loop = base.data_source.loop;
+            cfg.data_source = DataSourceConfigBuilder(cfg.data_source)
+                .setMaxFrames(base.data_source.max_frames)
+                .setLoop(base.data_source.loop)
+                .build();
             configs.push_back(cfg);
         }
         return configs;
@@ -323,8 +335,35 @@ std::vector<WorkerConfig> VdecPlugin::buildPipelineConfigs(const WorkerConfig& s
     }
     full_config.consumer_type = shared_config.consumer_type;
     full_config.consumer_type.performance.target_fps = params.fps;
-    full_config.data_source.max_frames = shared_config.data_source.max_frames;
-    full_config.data_source.loop = shared_config.data_source.loop;
+    full_config.data_source = DataSourceConfigBuilder(full_config.data_source)
+        .setMaxFrames(shared_config.data_source.max_frames)
+        .setLoop(shared_config.data_source.loop)
+        .build();
+
+    // 显示多宫格：每路画面需要独立解码 worker（各注册一个 display channel）。仅 max_channels>1 时展开。
+    if (full_config.consumer_type.display.enable
+        && full_config.consumer_type.display.taco_vo.max_channels > 1) {
+        const int n = full_config.consumer_type.display.taco_vo.max_channels;
+        std::vector<WorkerConfig> configs;
+        for (int i = 0; i < n; i++) {
+            WorkerConfig cfg;
+            if (params.use_hardware) {
+                cfg = common::WorkerConfigFactory::createDecode(
+                    shared_config.data_source.path, params.codec, params.width, params.height);
+            } else {
+                cfg = common::WorkerConfigFactory::createSoftwareDecode(
+                    shared_config.data_source.path, params.width, params.height);
+            }
+            cfg.consumer_type = full_config.consumer_type;
+            cfg.consumer_type.performance.target_fps = params.fps;
+            cfg.data_source = DataSourceConfigBuilder(cfg.data_source)
+                .setMaxFrames(shared_config.data_source.max_frames)
+                .setLoop(shared_config.data_source.loop)
+                .build();
+            configs.push_back(std::move(cfg));
+        }
+        return configs;
+    }
 
     return {full_config};
 }

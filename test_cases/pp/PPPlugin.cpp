@@ -324,7 +324,7 @@ void PPPlugin::registerOptions(CLI::App& app) {
     app.add_option("-s,--color-std", color_std_str_, "颜色标准 (bt601|bt709|bt2020)");
     app.add_option("-o,--output", save_paths_, "输出文件路径")->delimiter(',');
     app.add_option("-n,--save", save_frames_, "保存帧数")->delimiter(',');
-    app.add_option("-m,--max-frames", max_frames_, "最大帧数");
+    app.add_option("-m,--max-frames", max_frames_, "最大帧数（数据源读取与消费循环共用，0=不覆盖）");
     app.add_flag("-p,--psnr", enable_psnr_, "启用 PSNR 验证");
     app.add_flag("-S,--ssim", enable_ssim_, "启用 SSIM 验证");
     app.add_option("-P,--min-psnr", min_psnr_, "PSNR 阈值");
@@ -361,8 +361,10 @@ void PPPlugin::applyTo(WorkerConfig& config) const {
         config.consumer_type.save_raw.max_frames_per_channel = save_frames_;
     if (max_frames_ != 0)
         config.consumer_type.max_frames = max_frames_;
-    if (!input_path_.empty())
-        config.data_source.path = input_path_;
+    config.data_source = DataSourceConfigBuilder(config.data_source)
+        .setPathIfNonEmpty(input_path_)
+        .setMaxFramesIfNonZero(max_frames_)
+        .build();
 }
 
 int PPPlugin::handlePreActions() {
@@ -425,6 +427,14 @@ std::string PPPlugin::getTestName() const {
 std::vector<WorkerConfig> PPPlugin::buildPipelineConfigs(const WorkerConfig& shared_config) {
     if (input_path_.empty()) return {};
 
+    // applyTo 写入的 data_source 读帧上限 / loop 需合并进工厂生成的 config（工厂默认可能为 -1/false）
+    auto sync_data_source_caps = [](WorkerConfig& cfg, const WorkerConfig& shared) {
+        cfg.data_source = DataSourceConfigBuilder(cfg.data_source)
+            .setMaxFrames(shared.data_source.max_frames)
+            .setLoop(shared.data_source.loop)
+            .build();
+    };
+
     PPTestParams params = params_;
 
     if (params.channels.empty()) {
@@ -454,6 +464,7 @@ std::vector<WorkerConfig> PPPlugin::buildPipelineConfigs(const WorkerConfig& sha
         full_config.consumer_type.compare.enable_channel_compare = true;
         full_config.consumer_type.compare.reference_channel = params.channels[0];
         full_config.consumer_type.compare.compare_channel = params.channels[1];
+        sync_data_source_caps(full_config, shared_config);
         return {full_config};
     }
 
@@ -461,10 +472,12 @@ std::vector<WorkerConfig> PPPlugin::buildPipelineConfigs(const WorkerConfig& sha
     if (shared_config.consumer_type.compare.enable_psnr || shared_config.consumer_type.compare.enable_ssim) {
         auto hw_config = buildConfig(input_path_, params);
         hw_config.consumer_type = shared_config.consumer_type;
+        sync_data_source_caps(hw_config, shared_config);
 
         auto sw_config = common::WorkerConfigFactory::createSoftwareDecode(
             input_path_, params.width, params.height);
         sw_config.consumer_type = shared_config.consumer_type;
+        sync_data_source_caps(sw_config, shared_config);
 
         return {hw_config, sw_config};
     }
@@ -472,6 +485,7 @@ std::vector<WorkerConfig> PPPlugin::buildPipelineConfigs(const WorkerConfig& sha
     // SINGLE
     WorkerConfig full_config = buildConfig(input_path_, params);
     full_config.consumer_type = shared_config.consumer_type;
+    sync_data_source_caps(full_config, shared_config);
     return {full_config};
 }
 

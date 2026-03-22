@@ -40,6 +40,8 @@ private:
     std::string       view_type_;
     std::vector<int>  slot_assignment_;
     float             main_sidebar_ratio_ = 0.75f;
+    /// 0 = 使用默认 1 路（applyTo 写入 taco_vo.max_channels）；>0 为指定路数
+    int               max_channels_       = 0;
 };
 
 } // namespace display
