@@ -267,8 +267,49 @@ std::vector<WorkerConfig> VdecPlugin::buildPipelineConfigs(const WorkerConfig& s
 
     auto params = resolveParams();
 
-    // COMPARE 模式：hw + sw 两组 config
-    if (shared_config.consumer_type.compare.enable_psnr || shared_config.consumer_type.compare.enable_ssim) {
+    const bool is_compare = shared_config.consumer_type.compare.enable_psnr
+                         || shared_config.consumer_type.compare.enable_ssim;
+    const bool is_parallel = (params.profile == "parallel"
+                           || params.profile.find("parallel_") == 0);
+
+    int thread_count = 1;
+    if (is_parallel && params.profile.find("parallel_") == 0) {
+        thread_count = std::stoi(params.profile.substr(9));
+    } else if (is_parallel) {
+        thread_count = 2;
+    }
+
+    // PARALLEL + COMPARE：N 路并发，每路各自 hw vs sw 对比
+    // 输出 2N 个 config：[hw_0, sw_0, hw_1, sw_1, ..., hw_N-1, sw_N-1]
+    if (is_compare && is_parallel) {
+        std::vector<WorkerConfig> configs;
+        for (int i = 0; i < thread_count; i++) {
+            auto hw_cfg = common::WorkerConfigFactory::createDecode(
+                shared_config.data_source.path, params.codec);
+            hw_cfg.consumer_type = shared_config.consumer_type;
+            hw_cfg.consumer_type.performance.target_fps = params.fps;
+            hw_cfg.data_source = DataSourceConfigBuilder(hw_cfg.data_source)
+                .setMaxFrames(shared_config.data_source.max_frames)
+                .setLoop(shared_config.data_source.loop)
+                .build();
+
+            auto sw_cfg = common::WorkerConfigFactory::createSoftwareDecode(
+                shared_config.data_source.path);
+            sw_cfg.consumer_type = shared_config.consumer_type;
+            sw_cfg.consumer_type.performance.target_fps = params.fps;
+            sw_cfg.data_source = DataSourceConfigBuilder(sw_cfg.data_source)
+                .setMaxFrames(shared_config.data_source.max_frames)
+                .setLoop(shared_config.data_source.loop)
+                .build();
+
+            configs.push_back(hw_cfg);
+            configs.push_back(sw_cfg);
+        }
+        return configs;
+    }
+
+    // COMPARE 模式（无 -t）：1 路 hw + 1 路 sw
+    if (is_compare) {
         auto hw_config = common::WorkerConfigFactory::createDecode(
             shared_config.data_source.path, params.codec);
         hw_config.consumer_type = shared_config.consumer_type;
@@ -290,13 +331,8 @@ std::vector<WorkerConfig> VdecPlugin::buildPipelineConfigs(const WorkerConfig& s
         return {hw_config, sw_config};
     }
 
-    // PARALLEL 模式：N 组 config
-    if (params.profile == "parallel" || params.profile.find("parallel_") == 0) {
-        int thread_count = 2;
-        if (params.profile.find("parallel_") == 0) {
-            thread_count = std::stoi(params.profile.substr(9));
-        }
-
+    // PARALLEL 模式（无 compare）：N 路硬件或软件
+    if (is_parallel) {
         WorkerConfig base = shared_config;
 
         std::vector<WorkerConfig> configs;

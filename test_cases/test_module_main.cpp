@@ -31,6 +31,7 @@
 #include <memory>
 #include <vector>
 #include <string>
+#include <thread>
 
 int main(int argc, char* argv[]) {
     LoggerGuard logger_guard;
@@ -128,9 +129,50 @@ int main(int argc, char* argv[]) {
         return result.success ? 0 : 1;
     }
 
+    // PARALLEL COMPARE (N 组 hw vs sw 并发对比)
+    const bool compare_enabled = config.consumer_type.compare.enable_psnr
+                              || config.consumer_type.compare.enable_ssim;
+    if (compare_enabled && pipeline_configs.size() > 2 && pipeline_configs.size() % 2 == 0)
+    {
+        const int groups = static_cast<int>(pipeline_configs.size()) / 2;
+
+        std::vector<std::thread> threads(groups);
+        std::vector<consumer::ConsumeResult> results(groups);
+
+        std::cout << "\n═══════════════════════════════════════════════════════\n"
+                  << "  " << test_name << " (PARALLEL COMPARE x" << groups << ")\n"
+                  << "═══════════════════════════════════════════════════════\n\n";
+
+        for (int i = 0; i < groups; i++) {
+            threads[i] = std::thread([&, i]() {
+                std::vector<WorkerConfig> pair = {
+                    pipeline_configs[i * 2],
+                    pipeline_configs[i * 2 + 1]
+                };
+                auto name = test_name + " [" + std::to_string(i + 1)
+                          + "/" + std::to_string(groups) + "]";
+                results[i] = test::ExecuteMode::compare(pair, flags, name);
+            });
+        }
+
+        for (auto& t : threads) t.join();
+
+        bool all_ok = true;
+        int total_frames = 0;
+        for (int i = 0; i < groups; i++) {
+            if (!results[i].success) all_ok = false;
+            total_frames += results[i].frames_consumed;
+            std::cout << "  [" << (i + 1) << "/" << groups << "] "
+                      << (results[i].success ? "PASSED" : "FAILED")
+                      << " (" << results[i].frames_consumed << " frames)\n";
+        }
+        std::cout << "\n  Summary: " << (all_ok ? "ALL PASSED" : "SOME FAILED")
+                  << " (" << total_frames << " total frames)\n";
+        return all_ok ? 0 : 1;
+    }
+
     // COMPARE (PSNR/SSIM, 2 configs = hw vs sw)
-    if ((config.consumer_type.compare.enable_psnr || config.consumer_type.compare.enable_ssim)
-        && pipeline_configs.size() == 2) {
+    if (compare_enabled && pipeline_configs.size() == 2) {
         auto result = test::ExecuteMode::compare(pipeline_configs, flags, test_name + " (COMPARE)");
         consumer::BufferConsumerService::printResult(test_name, result);
         return result.success ? 0 : 1;
