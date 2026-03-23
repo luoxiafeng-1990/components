@@ -26,6 +26,7 @@
 
 #include "../common/IOptionPlugin.hpp"
 #include "../common/ExecuteMode.hpp"
+#include "../common/DataSourceOptions.hpp"
 #include "consumptionline/BufferConsumerService.hpp"
 #include "productionline/worker/WorkerConfig.hpp"
 
@@ -109,6 +110,7 @@ private:
     // Frame-specific
     std::string decoder_str_;
     int save_frames_ = 10;
+    DataSourceOptions ds_opts_;    ///< DataSource 横切选项
     bool all_rgb_ = false;
     bool all_yuv_ = false;
     bool format_specified_ = false;

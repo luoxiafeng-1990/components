@@ -5,11 +5,13 @@ AUTOMAKE_OPTIONS = foreign
 noinst_LTLIBRARIES = libcomponents.la
 
 libcomponents_la_SOURCES = \
-    source/vendor/taco/display/TacoVOContext.cpp \
-    source/vendor/taco/display/TacoVODisplayDevice.cpp \
+    source/vendor/taco/display/TacoDisplayContext.cpp \
+    source/vendor/taco/display/TacoDisplayDevice.cpp \
+    source/vendor/taco/display/TacoDisplayExtension.cpp \
     source/vendor/taco/display/OsdOverlay.cpp \
-    source/vendor/taco/display/SharedDisplayContext.cpp \
-    source/vendor/taco/display/SharedFramebufferDevice.cpp \
+    source/vendor/taco/display/TacoProDisplayContext.cpp \
+    source/vendor/taco/display/TacoProDisplayDevice.cpp \
+    source/vendor/taco/display/TacoProDisplayExtension.cpp \
     source/vendor/taco/display/DisplayDeviceFactory.cpp \
     source/productionline/worker/WorkerBase.cpp \
     source/productionline/worker/BufferFillingWorkerFacade.cpp \

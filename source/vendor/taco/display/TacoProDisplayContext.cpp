@@ -1,4 +1,4 @@
-#include "vendor/taco/display/SharedDisplayContext.hpp"
+#include "vendor/taco/display/TacoProDisplayContext.hpp"
 #include "vendor/taco/display/OsdOverlay.hpp"
 #include "common/Logger.hpp"
 
@@ -38,7 +38,7 @@ namespace {
     }
 
     void computeGridSlots(int count, int screen_w, int screen_h,
-                          std::vector<SharedDisplayContext::ChannelLayout>& slots) {
+                          std::vector<TacoProDisplayContext::ChannelLayout>& slots) {
         int cols = static_cast<int>(std::ceil(std::sqrt(static_cast<double>(count))));
         int rows = (count + cols - 1) / cols;
         int cell_w = screen_w / cols;
@@ -51,7 +51,7 @@ namespace {
     }
 
     void computeMainSidebarSlots(int screen_w, int screen_h, float ratio,
-                                  std::vector<SharedDisplayContext::ChannelLayout>& slots) {
+                                  std::vector<TacoProDisplayContext::ChannelLayout>& slots) {
         int main_w = static_cast<int>(screen_w * ratio);
         int side_w = screen_w - main_w;
         int side_h = screen_h / 4;
@@ -71,14 +71,14 @@ struct tpsfb_dma_info {
 #define FB_IOCTL_SET_DMA_INFO _IOW('F', 7, struct tpsfb_dma_info)
 
 // === 单例静态成员 ===
-std::mutex SharedDisplayContext::s_acquire_mutex_;
-std::weak_ptr<SharedDisplayContext> SharedDisplayContext::s_instance_;
+std::mutex TacoProDisplayContext::s_acquire_mutex_;
+std::weak_ptr<TacoProDisplayContext> TacoProDisplayContext::s_instance_;
 
 // ============================================================
 // 单例获取
 // ============================================================
 
-std::shared_ptr<SharedDisplayContext> SharedDisplayContext::acquire(const TacoVOConfig& config) {
+std::shared_ptr<TacoProDisplayContext> TacoProDisplayContext::acquire(const TacoProDisplayExtension& config) {
     std::lock_guard<std::mutex> lock(s_acquire_mutex_);
 
     auto existing = s_instance_.lock();
@@ -86,7 +86,7 @@ std::shared_ptr<SharedDisplayContext> SharedDisplayContext::acquire(const TacoVO
         return existing;
     }
 
-    auto ctx = std::shared_ptr<SharedDisplayContext>(new SharedDisplayContext(config));
+    auto ctx = std::shared_ptr<TacoProDisplayContext>(new TacoProDisplayContext(config));
     if (!ctx->open()) {
         return nullptr;
     }
@@ -98,7 +98,7 @@ std::shared_ptr<SharedDisplayContext> SharedDisplayContext::acquire(const TacoVO
 // 构造 / 析构
 // ============================================================
 
-SharedDisplayContext::SharedDisplayContext(const TacoVOConfig& config)
+TacoProDisplayContext::TacoProDisplayContext(const TacoProDisplayExtension& config)
     : config_(config)
     , fd_(-1)
     , fb_index_(0)
@@ -111,11 +111,10 @@ SharedDisplayContext::SharedDisplayContext(const TacoVOConfig& config)
     , displayed_buf_(nullptr)
     , logger_(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Display.SharedContext")))
 {
-    int max_ch = config_.max_channels > 0 ? config_.max_channels : 64;
-    channels_.reserve(max_ch);
+    channels_.reserve(64);
 }
 
-SharedDisplayContext::~SharedDisplayContext() {
+TacoProDisplayContext::~TacoProDisplayContext() {
     close();
 }
 
@@ -123,7 +122,7 @@ SharedDisplayContext::~SharedDisplayContext() {
 // open / close（对齐 Worker 生命周期命名）
 // ============================================================
 
-bool SharedDisplayContext::open() {
+bool TacoProDisplayContext::open() {
     {
         FILE* f = fopen("/sys/devices/platform/soc/soc:dss@c9200000/dss-overlay1/enabled", "w");
         if (f) { fprintf(f, "0"); fclose(f); }
@@ -198,7 +197,7 @@ bool SharedDisplayContext::open() {
     }
 
     if (config_.osd_enable) {
-        osd_ = std::make_unique<OsdOverlay>(screen_width_, screen_height_, config_.max_channels);
+        osd_ = std::make_unique<OsdOverlay>(screen_width_, screen_height_, 64);
         OsdOverlay::Config osd_cfg;
         osd_cfg.refresh_fps = config_.osd_fps;
         osd_cfg.font_path   = config_.osd_font_path;
@@ -211,7 +210,7 @@ bool SharedDisplayContext::open() {
     }
 
     LOG4CPLUS_INFO_FMT(logger_,
-        "SharedDisplayContext opened: %dx%d, %dbpp, %d buffers, %dfps, view=%s, osd=%s",
+        "TacoProDisplayContext opened: %dx%d, %dbpp, %d buffers, %dfps, view=%s, osd=%s",
         screen_width_, screen_height_, bits_per_pixel_, buffer_count_, config_.target_fps,
         (view_type_ == ViewType::GRID ? "grid" : "main_sidebar"),
         osd_ ? "on" : "off");
@@ -221,7 +220,7 @@ bool SharedDisplayContext::open() {
     return true;
 }
 
-void SharedDisplayContext::close() {
+void TacoProDisplayContext::close() {
     if (osd_) {
         osd_->shutdown();
         osd_.reset();
@@ -262,14 +261,14 @@ void SharedDisplayContext::close() {
         fd_ = -1;
     }
 
-    LOG4CPLUS_INFO(logger_, "SharedDisplayContext closed");
+    LOG4CPLUS_INFO(logger_, "TacoProDisplayContext closed");
 }
 
 // ============================================================
 // Framebuffer 设备（对齐 Worker::open 中的设备初始化）
 // ============================================================
 
-bool SharedDisplayContext::openDevice() {
+bool TacoProDisplayContext::openDevice() {
     FILE* fp = fopen(kProcFb, "r");
     if (!fp) {
         LOG4CPLUS_ERROR_FMT(logger_, "Cannot open %s: %s", kProcFb, strerror(errno));
@@ -337,12 +336,12 @@ bool SharedDisplayContext::openDevice() {
 // BufferPool 创建（TACO 分配由 FramebufferAllocator 内部完成）
 // ============================================================
 
-bool SharedDisplayContext::createBufferPool() {
+bool TacoProDisplayContext::createBufferPool() {
     allocator_facade_ = std::make_unique<BufferAllocatorFacade>(
         BufferAllocatorFactory::AllocatorType::FRAMEBUFFER);
 
     fb_pool_id_ = allocator_facade_->allocatePoolWithBuffers(
-        buffer_count_, buffer_size_, "SharedDisplayContext_fb", "Display");
+        buffer_count_, buffer_size_, "TacoProDisplayContext_fb", "Display");
     if (fb_pool_id_ == 0) {
         LOG4CPLUS_ERROR(logger_, "Failed to create BufferPool");
         allocator_facade_.reset();
@@ -352,7 +351,7 @@ bool SharedDisplayContext::createBufferPool() {
     return true;
 }
 
-std::shared_ptr<BufferPool> SharedDisplayContext::getBufferPool() {
+std::shared_ptr<BufferPool> TacoProDisplayContext::getBufferPool() {
     if (fb_pool_id_ == 0) return nullptr;
     return BufferPoolRegistry::getInstance().getPool(fb_pool_id_).lock();
 }
@@ -361,15 +360,14 @@ std::shared_ptr<BufferPool> SharedDisplayContext::getBufferPool() {
 // 视图管理
 // ============================================================
 
-void SharedDisplayContext::createView() {
+void TacoProDisplayContext::createView() {
     if (config_.view_type == "main_sidebar") {
         view_type_ = ViewType::MAIN_SIDEBAR;
         computeMainSidebarSlots(screen_width_, screen_height_,
                                 config_.main_sidebar_ratio, view_slots_);
     } else {
         view_type_ = ViewType::GRID;
-        int grid_count = selectGridCount(
-            config_.max_channels > 0 ? config_.max_channels : 9);
+        int grid_count = selectGridCount(9);
         computeGridSlots(grid_count, screen_width_, screen_height_, view_slots_);
     }
 
@@ -381,8 +379,8 @@ void SharedDisplayContext::createView() {
         static_cast<int>(slot_assignment_.size()));
 }
 
-const SharedDisplayContext::ChannelLayout&
-SharedDisplayContext::resolveLayout(int channel_id) const {
+const TacoProDisplayContext::ChannelLayout&
+TacoProDisplayContext::resolveLayout(int channel_id) const {
     if (!slot_assignment_.empty()) {
         for (int i = 0; i < static_cast<int>(slot_assignment_.size()); ++i) {
             if (slot_assignment_[i] == channel_id) {
@@ -393,8 +391,8 @@ SharedDisplayContext::resolveLayout(int channel_id) const {
     return view_slots_.at(channel_id);
 }
 
-const SharedDisplayContext::ChannelLayout&
-SharedDisplayContext::getSlotLayout(int slot_index) const {
+const TacoProDisplayContext::ChannelLayout&
+TacoProDisplayContext::getSlotLayout(int slot_index) const {
     return view_slots_.at(slot_index);
 }
 
@@ -402,7 +400,7 @@ SharedDisplayContext::getSlotLayout(int slot_index) const {
 // 通道管理
 // ============================================================
 
-int SharedDisplayContext::registerChannel() {
+int TacoProDisplayContext::registerChannel() {
     std::lock_guard<std::mutex> lock(channel_mgmt_mutex_);
 
     int id = next_channel_id_++;
@@ -434,7 +432,7 @@ int SharedDisplayContext::registerChannel() {
     return id;
 }
 
-int SharedDisplayContext::registerChannel(const ChannelLayout& layout) {
+int TacoProDisplayContext::registerChannel(const ChannelLayout& layout) {
     std::lock_guard<std::mutex> lock(channel_mgmt_mutex_);
 
     int id = next_channel_id_++;
@@ -455,7 +453,7 @@ int SharedDisplayContext::registerChannel(const ChannelLayout& layout) {
     return id;
 }
 
-void SharedDisplayContext::unregisterChannel(int channel_id) {
+void TacoProDisplayContext::unregisterChannel(int channel_id) {
     {
         std::lock_guard<std::mutex> lock(channel_mgmt_mutex_);
         for (auto& ch : channels_) {
@@ -477,7 +475,7 @@ void SharedDisplayContext::unregisterChannel(int channel_id) {
 // 视图展示
 // ============================================================
 
-std::string SharedDisplayContext::getViewDiagram() const {
+std::string TacoProDisplayContext::getViewDiagram() const {
     if (view_slots_.empty()) return "(empty view)\n";
 
     if (view_type_ == ViewType::GRID) {
@@ -663,7 +661,7 @@ std::string SharedDisplayContext::getViewDiagram() const {
 // 通道写入（等待渲染线程开启新一轮，每通道每轮只写一次）
 // ============================================================
 
-bool SharedDisplayContext::channelWrite(int channel_id, Buffer* decoded) {
+bool TacoProDisplayContext::channelWrite(int channel_id, Buffer* decoded) {
     if (!decoded) return false;
 
     ChannelInfo* ch_info = nullptr;
@@ -749,7 +747,7 @@ bool SharedDisplayContext::channelWrite(int channel_id, Buffer* decoded) {
 // PP 硬件操作
 // ============================================================
 
-void SharedDisplayContext::ppResize(
+void TacoProDisplayContext::ppResize(
     Buffer* src, Buffer* dst,
     int dst_x, int dst_y, int dst_w, int dst_h,
     int src_width, int src_height,
@@ -881,7 +879,7 @@ void SharedDisplayContext::ppResize(
     ta_cv_image_destroy(&image_out);
 }
 
-void SharedDisplayContext::ppCopy(Buffer* src, Buffer* dst) {
+void TacoProDisplayContext::ppCopy(Buffer* src, Buffer* dst) {
     if (!src || !dst) {
         LOG4CPLUS_ERROR_FMT(logger_, "ppCopy: null buffer src=%p dst=%p",
             (void*)src, (void*)dst);
@@ -986,7 +984,7 @@ void SharedDisplayContext::ppCopy(Buffer* src, Buffer* dst) {
     ta_cv_image_destroy(&image_out);
 }
 
-void SharedDisplayContext::copyTemplateRegion(Buffer* dst, const ChannelLayout& layout) {
+void TacoProDisplayContext::copyTemplateRegion(Buffer* dst, const ChannelLayout& layout) {
     if (!template_buf_ || !dst) return;
 
     int out_format = TA_AV_PIX_FMT_NONE;
@@ -1111,14 +1109,14 @@ void SharedDisplayContext::copyTemplateRegion(Buffer* dst, const ChannelLayout& 
 // 渲染线程 & 显示定时器
 // ============================================================
 
-bool SharedDisplayContext::startThreads() {
+bool TacoProDisplayContext::startThreads() {
     int fps = config_.target_fps > 0 ? config_.target_fps : 30;
     int display_interval_ms = 1000 / fps;
     frame_timeout_ms_ = display_interval_ms * 2;
 
     running_ = true;
 
-    render_thread_ = std::thread(&SharedDisplayContext::renderThreadFunc, this);
+    render_thread_ = std::thread(&TacoProDisplayContext::renderThreadFunc, this);
 
     timer_.start();
     timer_id_ = timer_.scheduleRepeated(display_interval_ms,
@@ -1130,7 +1128,7 @@ bool SharedDisplayContext::startThreads() {
     return true;
 }
 
-void SharedDisplayContext::stopThreads() {
+void TacoProDisplayContext::stopThreads() {
     running_ = false;
 
     round_cv_.notify_all();
@@ -1152,7 +1150,7 @@ void SharedDisplayContext::stopThreads() {
     }
 }
 
-void SharedDisplayContext::renderThreadFunc() {
+void TacoProDisplayContext::renderThreadFunc() {
     LOG4CPLUS_DEBUG(logger_, "Render thread started");
     auto pool = getBufferPool();
     if (!pool) {
@@ -1258,7 +1256,7 @@ void SharedDisplayContext::renderThreadFunc() {
 // 显示定时器回调
 // ============================================================
 
-void SharedDisplayContext::onDisplayTick() {
+void TacoProDisplayContext::onDisplayTick() {
     if (!running_) return;
 
     auto pool = getBufferPool();

@@ -244,8 +244,22 @@ ConsumeResult BufferConsumerService::startProductionLine(
             return result;
         }
         
+        // 3.5 从 Worker 获取 codec_params/time_base 供消费者使用
+        // SINGLE 模式下 config 中的 codec_params 可能为 nullptr，
+        // 但 Worker 启动后已从数据源获取到有效值
+        WorkerConfig consumer_config = config;
+        auto worker_facade = producer.getWorkerFacade();
+        if (worker_facade) {
+            if (!consumer_config.data_source.codec_params) {
+                consumer_config.data_source.codec_params = worker_facade->getSourceCodecParameters();
+            }
+            if (consumer_config.data_source.time_base.num == 0) {
+                consumer_config.data_source.time_base = worker_facade->getTimeBase();
+            }
+        }
+        
         // 4. 创建消费策略
-        auto consumer = createConsumerFromFlags(consume_flags, config);
+        auto consumer = createConsumerFromFlags(consume_flags, consumer_config);
         if (!consumer) {
             result.success = false;
             result.error_message = "Failed to create consumer strategy";

@@ -37,6 +37,13 @@ DataSourceConfigBuilder& DataSourceConfigBuilder::setBufferCount(int count) {
     return *this;
 }
 
+DataSourceConfigBuilder& DataSourceConfigBuilder::setBufferCountIfNonZero(int count) {
+    if (count > 0) {
+        data_source_config_.buffer_count = count;
+    }
+    return *this;
+}
+
 DataSourceConfigBuilder& DataSourceConfigBuilder::setMaxFrames(int max_frames) {
     data_source_config_.max_frames = max_frames;
     return *this;

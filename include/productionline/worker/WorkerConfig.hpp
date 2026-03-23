@@ -10,6 +10,7 @@
 #include <functional>
 #include "common/Logger.hpp"
 #include "vendor/contracts/DecoderVendorExtension.hpp"
+#include "vendor/contracts/DisplayVendorExtension.hpp"
 #include "vendor/taco/decode/TacoDecoderConfig.hpp"
 
 // FFmpeg 头文件（用于 AVRational 和 AVCodecParameters）
@@ -155,60 +156,43 @@ struct WorkerConfig {
      * 
      * 用于配置 Worker 的数据源（RTSP 流、HTTP 流、本地文件等）及其相关参数。
      * 
-     * ⭐ v2.22 重构：将数据源相关配置从 DecoderConfig 移动到此处
-     * - buffer_mode: 数据源模式（Buffer/文件）
-     * - shared_packet_source: 共享的 Packet 数据源
-     * - codec_params: 编解码器参数（Buffer模式）
-     * - time_base: 时间基准（用于同步）
+     * 参数分为两类：
+     * 1. 【用户可设置】path, buffer_count, max_frames, loop — 通过命令行或 Builder 设置
+     * 2. 【内部参数】buffer_mode, codec_params, time_base, shared_packet_source, deferred_commit
+     *    — 由框架（MultiWorkerProductionLine / BufferConsumerService）自动设置，用户不应手动修改
      */
     struct DataSourceConfig {
         // ========================================
-        // 基础配置
+        // 【用户可设置】基础配置
         // ========================================
         std::string path;                     ///< 数据源路径/URL（RTSP/HTTP/文件等）
         int buffer_count = 0;                 ///< BufferPool 的 Buffer 数量（0=使用 Worker 默认值）
+        int max_frames = -1;                  ///< 最大读取帧数（-1=无限制）
+        bool loop = false;                    ///< true=文件播放结束后自动回到开头循环播放
         
         // ========================================
-        // 数据源模式配置（v2.22 从 DecoderConfig 移动）
+        // 【内部参数】框架自动设置，用户不应手动修改
         // ========================================
-        bool buffer_mode = false;             ///< true=从Buffer数据源获取packet, false=从文件数据源读取
-        const struct AVCodecParameters* codec_params = nullptr;  ///< Buffer模式下的编解码器参数（从Record Worker获取）
-        AVRational time_base = {0, 1};        ///< 时间基准（从Record Worker获取，用于同步）
         
-        // ⭐ v2.22 共享的 Packet 数据源（从 DecoderConfig 移动）
-        // 
-        // 使用场景：
-        // - 普通模式：nullptr（Worker 自己创建独立的 EncodedPacketSourceFromBuffer）
-        // - 共享模式：MultiWorkerProductionLine 创建唯一实例并传入
-        // 
-        // 优点：
-        // - Worker 仍然根据 config 创建 datasource（符合原始设计）
-        // - 不需要修改 Worker 接口（不需要 setPacketSource）
-        // - 使用基类指针 IEncodedPacketSource，支持多态
+        /// 数据源模式：true=从 BufferPool 获取 packet（MultiWorker 消费者），false=从文件/RTSP 读取
+        /// 由 MultiWorkerProductionLine::createConsumersForGroup() 自动设置
+        bool buffer_mode = false;
+        
+        /// Buffer 模式下的编解码器参数（从生产者 Worker 获取）
+        /// 由 MultiWorkerProductionLine 或 BufferConsumerService 自动填充
+        const struct AVCodecParameters* codec_params = nullptr;
+        
+        /// 时间基准（从生产者 Worker 获取，用于同步和文件写入）
+        /// 由 MultiWorkerProductionLine 或 BufferConsumerService 自动填充
+        AVRational time_base = {0, 1};
+        
+        /// 共享的 Packet 数据源（MultiWorkerProductionLine 创建并注入）
+        /// nullptr=Worker 自己创建独立实例，非空=使用共享实例（ONE_TO_MANY 零拷贝）
         std::shared_ptr<class IEncodedPacketSource> shared_packet_source = nullptr;
         
-        // ========================================
-        // 帧数限制（v2.23 新增）
-        // ========================================
-        int max_frames = -1;              ///< 最大读取帧数（-1=无限制）
-        
-        // ========================================
-        // 延迟提交模式（v2.24 新增）
-        // ========================================
-        /**
-         * @brief 是否延迟提交 Packet
-         * 
-         * - false（默认）：fillBuffer() 内部调用 commitEncodedPacket()
-         * - true：fillBuffer() 不调用 commit，由外部（MultiWorkerProductionLine）在帧同步后调用
-         * 
-         * 使用场景：启用 WorkerSyncCoordinator 帧同步时，需要延迟 commit
-         */
+        /// 延迟提交 Packet：由 MultiWorkerProductionLine 根据帧同步配置自动设置
+        /// false=fillBuffer() 内部 commit，true=由外部帧同步后 commit
         bool deferred_commit = false;
-        
-        // ========================================
-        // 循环播放（loop）
-        // ========================================
-        bool loop = false;                    ///< true=文件播放结束后自动回到开头循环播放
         
         DataSourceConfig() = default;
         DataSourceConfig(const DataSourceConfig&) = default;
@@ -226,7 +210,7 @@ struct WorkerConfig {
      * 用于配置目标显示设备（如 Framebuffer、显示器）的宽度、高度、bpp，供 BufferPool
      * 与显示链路对齐。**不等于** `consumer_type.display`：
      * - 本结构 `display`：设备侧分辨率与像素格式深度（解码产物如何落 Buffer）。
-     * - `consumer_type.display`：消费阶段是否执行 CONSUME_DISPLAY、设备 ID、TACO_VO 等。
+     * - `consumer_type.display`：消费阶段是否执行 CONSUME_DISPLAY、设备 ID、厂商扩展等。
      *
      * ⚠️ 注意：此处是显示设备分辨率，不是解码器输出分辨率；解码输出尺寸见 TacoConfig 缩放/裁剪。
      */
@@ -404,7 +388,7 @@ struct WorkerConfig {
      * | 成员 | 含义 |
      * |------|------|
      * | （本段标量） | 消费循环：`max_frames`、`timeout_ms`、`verbose` 等 |
-     * | `display` | CONSUME_DISPLAY：是否走显示消费、device_id、模式、taco_vo 等 |
+     * | `display` | CONSUME_DISPLAY：是否走显示消费、device_id、vendor 厂商扩展 |
      * | `save_raw` | CONSUME_SAVE_RAW：解码后 YUV/RGB 写文件 |
      * | `save_encoded` | CONSUME_SAVE_ENCODED：未解码 packet 写文件 |
      * | `npu_inference` | CONSUME_NPU_INFERENCE：NPU 模型推理 |
@@ -431,36 +415,38 @@ struct WorkerConfig {
         // ========================================
         // 显示消费类型（CONSUME_DISPLAY）
         // ========================================
-        struct DisplayType {
+        /**
+         * @brief 显示消费配置
+         *
+         * 通用壳（enable / device_id）+ 厂商扩展指针 vendor。
+         * 具体厂商参数在 TacoProDisplayExtension / TacoDisplayExtension 中。
+         * 拷贝时通过 vendor->clone() 深拷贝。
+         */
+        struct DisplayConsumerConfig {
             bool enable = false;          ///< 是否启用显示
             int device_id = 0;            ///< 显示设备 ID
 
-            enum DisplayMode {
-                TACO_VO = 1,              ///< taco-vo 视频输出管道（旧实现，支持多通道 + 硬件 CSC/Resize）
-                SHARED_FB = 2             ///< 共享 Framebuffer（SharedDisplayContext + BufferPool 多通道显示，默认）
-            };
-            DisplayMode mode = SHARED_FB;
+            /// 厂商专有参数；nullptr 表示未选择厂商
+            std::unique_ptr<IDisplayVendorExtension> vendor;
 
-            struct TacoVOConfig {
-                int target_fps = 30;          ///< 目标帧率（Device attr + Channel attr）
-                int screen_width = 1920;      ///< 屏幕/Layer 宽度（用于网格布局）
-                int screen_height = 1080;     ///< 屏幕/Layer 高度
-                int frame_width = 1920;       ///< 输入帧宽度
-                int frame_height = 1080;      ///< 输入帧高度
-                int frame_format = 23;        ///< TA_AV_PIX_FMT_NV12 = 23（帧像素格式，同时用于 layer attr）
-                int frame_pool_size = 4;      ///< 每通道 DMA 帧池大小
-                int max_channels = 9;         ///< 最大通道数（默认 3x3 九宫格）
-                std::string view_type = "grid";           ///< 视图类型："grid"（网格）或 "main_sidebar"（主+侧栏）
-                std::vector<int> slot_assignment;          ///< 通道→slot 映射，slot_assignment[slot]=channel_id（可选）
-                float main_sidebar_ratio = 0.75f;          ///< main_sidebar 模式下主画面宽度占比
-                bool osd_enable = false;      ///< 是否启用 OSD 叠加（图形层 overlay1）
-                int  osd_fps = 1;             ///< OSD 刷新频率（默认每秒刷新一次）
-                std::string osd_font_path = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf";
-                int  osd_font_size = 24;      ///< OSD 字体大小（像素）
-                TacoVOConfig() = default;
-            } taco_vo;
+            DisplayConsumerConfig() = default;
+            ~DisplayConsumerConfig() = default;
 
-            DisplayType() = default;
+            DisplayConsumerConfig(const DisplayConsumerConfig& o)
+                : enable(o.enable)
+                , device_id(o.device_id)
+                , vendor(o.vendor ? o.vendor->clone() : nullptr) {}
+
+            DisplayConsumerConfig& operator=(const DisplayConsumerConfig& o) {
+                if (this == &o) return *this;
+                enable = o.enable;
+                device_id = o.device_id;
+                vendor = o.vendor ? o.vendor->clone() : nullptr;
+                return *this;
+            }
+
+            DisplayConsumerConfig(DisplayConsumerConfig&&) noexcept = default;
+            DisplayConsumerConfig& operator=(DisplayConsumerConfig&&) noexcept = default;
         } display;
         
         // ========================================
@@ -688,6 +674,9 @@ public:
      * - Packet 录制：64
      */
     DataSourceConfigBuilder& setBufferCount(int count);
+    
+    /// count > 0 时才写入，避免覆盖工厂已设定的默认值（CLI 未指定时 count=0）
+    DataSourceConfigBuilder& setBufferCountIfNonZero(int count);
     
     /**
      * @brief 设置最大帧数限制

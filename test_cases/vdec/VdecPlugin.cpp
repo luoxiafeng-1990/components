@@ -150,6 +150,7 @@ void VdecPlugin::registerOptions(CLI::App& app) {
     app.add_flag("-v,--verbose", verbose_, "详细日志");
     app.add_option("-t,--threads", threads_, "并发路数 (启用 PARALLEL 模式)");
     app.add_flag("--loop", loop_, "循环播放");
+    ds_opts_.registerTo(app);
     app.add_option("positional", positional_args_, "测试名或输入文件路径");
 
     app.footer(
@@ -163,7 +164,7 @@ void VdecPlugin::registerOptions(CLI::App& app) {
         "  qa_cases vdec --psnr video.mp4\n"
         "  qa_cases vdec --threads 4 video.mp4\n"
         "  qa_cases vdec h264_1920x1080_30 video.mp4\n"
-        "  qa_cases vdec video.mp4 display --mode vo\n"
+        "  qa_cases vdec video.mp4 display --vendor taco\n"
         "  qa_cases vdec video.mp4 display npu --model m.nb\n"
     );
 }
@@ -173,6 +174,7 @@ void VdecPlugin::registerOptions(CLI::App& app) {
 // ========================================
 
 void VdecPlugin::applyTo(WorkerConfig& config) const {
+    ds_opts_.applyTo(config);
     config.data_source = DataSourceConfigBuilder(config.data_source)
         .setPathIfNonEmpty(input_path_)
         .setMaxFrames(max_frames_)
@@ -296,12 +298,6 @@ std::vector<WorkerConfig> VdecPlugin::buildPipelineConfigs(const WorkerConfig& s
         }
 
         WorkerConfig base = shared_config;
-        if (base.consumer_type.display.enable) {
-            int mc = base.consumer_type.display.taco_vo.max_channels;
-            if (mc > thread_count)
-                thread_count = mc;
-            base.consumer_type.display.taco_vo.max_channels = thread_count;
-        }
 
         std::vector<WorkerConfig> configs;
         for (int i = 0; i < thread_count; i++) {
@@ -340,10 +336,10 @@ std::vector<WorkerConfig> VdecPlugin::buildPipelineConfigs(const WorkerConfig& s
         .setLoop(shared_config.data_source.loop)
         .build();
 
-    // 显示多宫格：每路画面需要独立解码 worker（各注册一个 display channel）。仅 max_channels>1 时展开。
-    if (full_config.consumer_type.display.enable
-        && full_config.consumer_type.display.taco_vo.max_channels > 1) {
-        const int n = full_config.consumer_type.display.taco_vo.max_channels;
+    // 多路显示时由 parallel profile 决定线程数，不再从 display 配置读 max_channels
+    if (false) {
+        // 保留占位：未来若需要按线程数展开多路显示，在此处理
+        const int n = 1;
         std::vector<WorkerConfig> configs;
         for (int i = 0; i < n; i++) {
             WorkerConfig cfg;

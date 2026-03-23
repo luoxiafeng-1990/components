@@ -5,7 +5,7 @@
  * 架构：所有功能（vdec、pp、save、display、npu）均为 IOptionPlugin，
  * 地位平等，统一注册为子命令。用户可在一条命令中组合多个子命令：
  *
- *   ./qa_cases vdec --file video.mp4 display --display-mode vo npu --model m.nb
+ *   ./qa_cases vdec --file video.mp4 display --vendor taco npu --model m.nb
  *
  * 流程：
  *   1. 为每个插件创建独立子命令并注册选项
@@ -118,7 +118,9 @@ int main(int argc, char* argv[]) {
     }
 
     // ── 8. 从 config 推断执行模式，统一执行 ──
+    // 合并共享 config 与管线 config 的 flags，确保管线特有的标志（如 CONSUME_SAVE_ENCODED）不丢失
     uint32_t flags = test::ExecuteMode::buildConsumeFlags(config);
+    flags |= test::ExecuteMode::buildConsumeFlags(pipeline_configs[0]);
 
     // CHANNEL COMPARE
     if (config.consumer_type.compare.enable_channel_compare) {

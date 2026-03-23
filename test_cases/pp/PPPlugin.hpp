@@ -30,6 +30,7 @@
 
 #include "../common/IOptionPlugin.hpp"
 #include "../common/ExecuteMode.hpp"
+#include "../common/DataSourceOptions.hpp"
 #include "consumptionline/BufferConsumerService.hpp"
 #include "productionline/worker/WorkerConfig.hpp"
 
@@ -231,6 +232,7 @@ private:
     double min_psnr_ = -1.0;
     double min_ssim_ = -1.0;
     bool verbose_ = false;
+    DataSourceOptions ds_opts_;    ///< DataSource 横切选项
     std::vector<std::string> save_paths_;
     std::vector<int> save_frames_;
     int max_frames_ = 0;

@@ -156,6 +156,7 @@ void SavePlugin::registerOptions(CLI::App& app) {
     app.add_flag("-Y,--all-yuv", all_yuv_, "测试所有 10 种 YUV 格式");
 
     app.add_flag("-v,--verbose", verbose_, "详细日志");
+    ds_opts_.registerTo(app);
     app.add_option("positional", positional_args_, "测试名或输入源路径");
 
     app.footer(
@@ -174,6 +175,7 @@ void SavePlugin::registerOptions(CLI::App& app) {
 }
 
 void SavePlugin::applyTo(WorkerConfig& config) const {
+    ds_opts_.applyTo(config);
     config.data_source = DataSourceConfigBuilder(config.data_source)
         .setPathIfNonEmpty(input_path_)
         .build();

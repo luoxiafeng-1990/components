@@ -27,6 +27,7 @@
 
 #include "../common/IOptionPlugin.hpp"
 #include "../common/ExecuteMode.hpp"
+#include "../common/DataSourceOptions.hpp"
 #include "consumptionline/BufferConsumerService.hpp"
 #include "productionline/worker/WorkerConfig.hpp"
 
@@ -127,6 +128,7 @@ private:
     int threads_ = 0;              ///< 0 = 未指定
     int max_frames_ = -1;          ///< -1 = 无限制
     bool loop_ = false;
+    DataSourceOptions ds_opts_;    ///< DataSource 横切选项
 };
 
 } // namespace vdec

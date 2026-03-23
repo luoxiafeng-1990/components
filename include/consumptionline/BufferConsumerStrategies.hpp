@@ -69,13 +69,13 @@ private:
  */
 class DisplayConsumer : public IBufferConsumer {
 public:
-    using DisplayType = WorkerConfig::ConsumerTypeConfig::DisplayType;
+    using DisplayConsumerConfig = WorkerConfig::ConsumerTypeConfig::DisplayConsumerConfig;
 
     /**
      * @brief 构造函数
-     * @param config 显示类型配置（决定使用 Framebuffer 还是 taco-vo）
+     * @param config 显示消费配置（通过 vendor 决定使用哪种显示设备）
      */
-    explicit DisplayConsumer(const DisplayType& config);
+    explicit DisplayConsumer(const DisplayConsumerConfig& config);
     ~DisplayConsumer() override;
     
     bool initialize(const std::vector<Buffer*>& first_buffers) override;
@@ -85,7 +85,7 @@ public:
     bool shouldRetainBuffer() const override;
     
 private:
-    DisplayType config_;
+    DisplayConsumerConfig config_;
     std::unique_ptr<IDisplayDevice> display_;
     int success_count_ = 0;
     int failed_count_ = 0;

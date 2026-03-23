@@ -1,26 +1,26 @@
-#include "vendor/taco/display/TacoVOContext.hpp"
+#include "vendor/taco/display/TacoDisplayContext.hpp"
 
 #include <cstring>
 #include <cmath>
 #include <algorithm>
 #include <cstdlib>
 
-TacoVOContext::TacoVOContext(const TacoVOConfig& config)
+TacoDisplayContext::TacoDisplayContext(const TacoDisplayExtension& config)
     : config_(config)
     , logger_(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Display.TacoVO")))
 {
-    int max_ch = std::max(1, config_.max_channels);
+    int max_ch = 9;
     grid_cols_ = static_cast<int>(std::ceil(std::sqrt(max_ch)));
     grid_rows_ = static_cast<int>(std::ceil(static_cast<double>(max_ch) / grid_cols_));
     channels_.resize(max_ch);
 
     if (!initDevice()) {
-        LOG4CPLUS_ERROR(logger_, "TacoVOContext: device init failed");
+        LOG4CPLUS_ERROR(logger_, "TacoDisplayContext: device init failed");
         return;
     }
 
     if (!initLayer()) {
-        LOG4CPLUS_ERROR(logger_, "TacoVOContext: layer init failed");
+        LOG4CPLUS_ERROR(logger_, "TacoDisplayContext: layer init failed");
         return;
     }
 
@@ -31,22 +31,22 @@ TacoVOContext::TacoVOContext(const TacoVOConfig& config)
         int cx = (i % grid_cols_) * ch_w;
         int cy = (i / grid_cols_) * ch_h;
         if (!createChannel(i, cx, cy, ch_w, ch_h)) {
-            LOG4CPLUS_ERROR_FMT(logger_, "TacoVOContext: failed to create channel %d", i);
+            LOG4CPLUS_ERROR_FMT(logger_, "TacoDisplayContext: failed to create channel %d", i);
         }
     }
 
     int ret = ta_vo_layer_enable(layer_ctx_);
     if (ret != 0) {
-        LOG4CPLUS_ERROR_FMT(logger_, "TacoVOContext: ta_vo_layer_enable failed: %d", ret);
+        LOG4CPLUS_ERROR_FMT(logger_, "TacoDisplayContext: ta_vo_layer_enable failed: %d", ret);
     } else {
         layer_enabled_ = true;
-        LOG4CPLUS_INFO_FMT(logger_, "TacoVOContext: initialized (%dx%d, %d channels, %d fps, grid %dx%d)",
+        LOG4CPLUS_INFO_FMT(logger_, "TacoDisplayContext: initialized (%dx%d, %d channels, %d fps, grid %dx%d)",
                            config_.screen_width, config_.screen_height,
                            max_ch, config_.target_fps, grid_cols_, grid_rows_);
     }
 }
 
-TacoVOContext::~TacoVOContext() {
+TacoDisplayContext::~TacoDisplayContext() {
     for (auto& ch : channels_) {
         freeFramePool(ch);
         if (ch.chn_ctx) {
@@ -72,10 +72,10 @@ TacoVOContext::~TacoVOContext() {
         dev_ctx_ = nullptr;
     }
 
-    LOG4CPLUS_INFO(logger_, "TacoVOContext: destroyed");
+    LOG4CPLUS_INFO(logger_, "TacoDisplayContext: destroyed");
 }
 
-bool TacoVOContext::initDevice() {
+bool TacoDisplayContext::initDevice() {
     dev_ctx_ = ta_vo_dev_create(TA_VO_DEV_IDS);
     if (!dev_ctx_) {
         LOG4CPLUS_ERROR(logger_, "ta_vo_dev_create(TA_VO_DEV_IDS) failed");
@@ -95,7 +95,7 @@ bool TacoVOContext::initDevice() {
     return true;
 }
 
-bool TacoVOContext::initLayer() {
+bool TacoDisplayContext::initLayer() {
     layer_ctx_ = ta_vo_layer_create(TA_VO_LAYER_VIDEO_0);
     if (!layer_ctx_) {
         LOG4CPLUS_ERROR(logger_, "ta_vo_layer_create(TA_VO_LAYER_VIDEO_0) failed");
@@ -127,7 +127,7 @@ bool TacoVOContext::initLayer() {
     return true;
 }
 
-bool TacoVOContext::createChannel(int index, int ch_x, int ch_y, int ch_w, int ch_h) {
+bool TacoDisplayContext::createChannel(int index, int ch_x, int ch_y, int ch_w, int ch_h) {
     ta_vo_chn_ctx* chn_ctx = ta_vo_chn_create(static_cast<ta_vo_chn>(index));
     if (!chn_ctx) {
         LOG4CPLUS_ERROR_FMT(logger_, "ta_vo_chn_create(%d) failed", index);
@@ -163,7 +163,7 @@ bool TacoVOContext::createChannel(int index, int ch_x, int ch_y, int ch_w, int c
     return true;
 }
 
-int TacoVOContext::allocateChannel() {
+int TacoDisplayContext::allocateChannel() {
     std::lock_guard<std::mutex> lock(mutex_);
 
     if (next_channel_ >= static_cast<int>(channels_.size())) {
@@ -188,7 +188,7 @@ int TacoVOContext::allocateChannel() {
     return ch;
 }
 
-void TacoVOContext::releaseChannel(int channel_id) {
+void TacoDisplayContext::releaseChannel(int channel_id) {
     std::lock_guard<std::mutex> lock(mutex_);
 
     if (channel_id < 0 || channel_id >= static_cast<int>(channels_.size())) {
@@ -199,7 +199,7 @@ void TacoVOContext::releaseChannel(int channel_id) {
     LOG4CPLUS_DEBUG_FMT(logger_, "Channel %d frame pool released", channel_id);
 }
 
-bool TacoVOContext::allocateFramePool(ChannelState& ch) {
+bool TacoDisplayContext::allocateFramePool(ChannelState& ch) {
     size_t pool_size = static_cast<size_t>(config_.frame_pool_size);
     ch.frame_pool = std::make_unique<FrameSlot[]>(pool_size);
     ch.pool_size = pool_size;
@@ -258,7 +258,7 @@ bool TacoVOContext::allocateFramePool(ChannelState& ch) {
     return true;
 }
 
-void TacoVOContext::freeFramePool(ChannelState& ch) {
+void TacoDisplayContext::freeFramePool(ChannelState& ch) {
     for (size_t i = 0; i < ch.pool_size; i++) {
         auto& slot = ch.frame_pool[i];
         if (slot.virt_addr) {
@@ -278,7 +278,7 @@ void TacoVOContext::freeFramePool(ChannelState& ch) {
     ch.pool_size = 0;
 }
 
-TacoVOContext::FrameSlot* TacoVOContext::acquireFrameSlot(ChannelState& ch) {
+TacoDisplayContext::FrameSlot* TacoDisplayContext::acquireFrameSlot(ChannelState& ch) {
     for (size_t i = 0; i < ch.pool_size; i++) {
         auto& slot = ch.frame_pool[i];
         if (!slot.ever_sent) {
@@ -291,7 +291,7 @@ TacoVOContext::FrameSlot* TacoVOContext::acquireFrameSlot(ChannelState& ch) {
     return nullptr;
 }
 
-bool TacoVOContext::sendFrame(int channel_id, Buffer* buffer) {
+bool TacoDisplayContext::sendFrame(int channel_id, Buffer* buffer) {
     if (channel_id < 0 || channel_id >= static_cast<int>(channels_.size())) {
         return false;
     }

@@ -108,10 +108,10 @@ OSD 基于 DSS overlay1（`/dev/fb2`），使用 FreeType 渲染文字，叠加�
 
 1. **修改设备树**：将 overlay-1 的 `status` 改回 `"disabled"`（保留 1920×1080 分辨率），重编内核。开机后 overlay1 默认关闭。
 
-2. **代码保护**：在 `SharedDisplayContext::init()` 开头增加强制关闭 overlay1 的操作：
+2. **代码保护**：在 `TacoProDisplayContext::init()` 开头增加强制关闭 overlay1 的操作：
 
 ```cpp
-// SharedDisplayContext::init() 开头
+// TacoProDisplayContext::init() 开头
 FILE* f = fopen("/sys/devices/platform/soc/soc:dss@c9200000/dss-overlay1/enabled", "w");
 if (f) { fprintf(f, "0"); fclose(f); }
 ```
@@ -123,7 +123,7 @@ if (f) { fprintf(f, "0"); fclose(f); }
 | 文件 | 修改内容 |
 |------|----------|
 | `tps-ea65xx-mes20-v2.dts` | overlay-1 `status` 改为 `"disabled"` |
-| `SharedDisplayContext.cpp` | `init()` 开头强制写 `enabled=0` |
+| `TacoProDisplayContext.cpp` | `init()` 开头强制写 `enabled=0` |
 
 ---
 

@@ -20,7 +20,7 @@
 | 多通道并发写入 | N 个 `VideoProductionLine` 对应 N 个显示通道，每通道通过 PP 硬件并发写入同一个 framebuffer |
 | BufferPool 管理 framebuffer | 用组件系统的 `BufferPool`（FREE/FILLED 队列）管理 4 个 framebuffer 页，实现真正的多缓冲 |
 | 定时器驱动显示 | 固定帧率定时器触发翻页显示，显示节奏与通道解码速度解耦 |
-| 单次初始化/销毁 | DSS/USB-HDMI 设备的生命周期由 `SharedDisplayContext` 单例管理，不随通道数变化 |
+| 单次初始化/销毁 | DSS/USB-HDMI 设备的生命周期由 `TacoProDisplayContext` 单例管理，不随通道数变化 |
 | 测试层兼容 | 保持 `DisplayConsumer::consume(Buffer*)` 调用模式不变 |
 | 零帧丢失 | 通道写入失败时缓存帧，下一周期重试 |
 
@@ -42,7 +42,7 @@
          │ consume()              │ consume()              │ consume()
          ↓                        ↓                        ↓
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                        SharedDisplayContext（单例）                           │
+│                        TacoProDisplayContext（单例）                           │
 │                                                                             │
 │  ┌─────────────────────────────────────────────────────────────────────┐    │
 │  │  Framebuffer BufferPool（4 个 Buffer，DMA 物理连续内存）              │    │
@@ -82,14 +82,14 @@
 
 ## 3. 核心类设计
 
-### 3.1 SharedDisplayContext（单例 - 共享显示上下文）
+### 3.1 TacoProDisplayContext（单例 - 共享显示上下文）
 
 管理所有通道共享的显示资源。通过引用计数实现单次初始化/销毁。
 
 ```cpp
-class SharedDisplayContext {
+class TacoProDisplayContext {
 public:
-    static std::shared_ptr<SharedDisplayContext> acquire(const Config& config);
+    static std::shared_ptr<TacoProDisplayContext> acquire(const Config& config);
 
     // 通道注册/注销（引用计数）
     int  registerChannel(int channel_id, ChannelLayout layout);
@@ -149,7 +149,7 @@ private:
 
 ### 3.2 TacoVOFramebufferDevice（继承 LinuxFramebufferDevice）
 
-每个 `DisplayConsumer` 持有一个 `TacoVOFramebufferDevice` 实例，但所有实例共享同一个 `SharedDisplayContext`。
+每个 `DisplayConsumer` 持有一个 `TacoVOFramebufferDevice` 实例，但所有实例共享同一个 `TacoProDisplayContext`。
 
 ```cpp
 class TacoVOFramebufferDevice : public LinuxFramebufferDevice {
@@ -160,12 +160,12 @@ public:
     bool initialize(int device_index) override;
     void cleanup() override;
 
-    // displayBuffer 委托给 SharedDisplayContext::channelWrite
+    // displayBuffer 委托给 TacoProDisplayContext::channelWrite
     bool displayBuffer(Buffer* buffer) override;
 
 private:
     int                                    channel_id_;
-    std::shared_ptr<SharedDisplayContext>   context_;
+    std::shared_ptr<TacoProDisplayContext>   context_;
     TacoVOConfig                           config_;
 };
 ```
@@ -253,7 +253,7 @@ fb_memory_.phys_addr
 ```cpp
 // === 通道写入（多通道并发） ===
 
-bool SharedDisplayContext::channelWrite(int channel_id, Buffer* decoded_frame) {
+bool TacoProDisplayContext::channelWrite(int channel_id, Buffer* decoded_frame) {
     std::shared_lock<std::shared_mutex> lock(rw_mutex_);  // 共享锁
 
     // 定时器持有独占锁期间，render_buf_ 会被置为 nullptr
@@ -274,7 +274,7 @@ bool SharedDisplayContext::channelWrite(int channel_id, Buffer* decoded_frame) {
 ```cpp
 // === 定时器线程（周期触发，33ms @ 30fps） ===
 
-void SharedDisplayContext::timerThreadFunc() {
+void TacoProDisplayContext::timerThreadFunc() {
     while (running_) {
         // 阻塞等待 timerfd
         uint64_t expirations;
@@ -413,7 +413,7 @@ void pp_copy(Buffer* src, Buffer* dst) {
 独立线程负责将 FILLED 队列中的 buffer 送到 DSS 硬件显示。
 
 ```cpp
-void SharedDisplayContext::displayThreadFunc() {
+void TacoProDisplayContext::displayThreadFunc() {
     auto pool = getPool();
 
     while (running_) {
@@ -599,7 +599,7 @@ taco_PP0_internal_process_optimized()
 每个通道将解码帧缩放后写入 `render_buf_` 的指定区域：
 
 ```cpp
-void SharedDisplayContext::pp_resize(
+void TacoProDisplayContext::pp_resize(
     Buffer* decoded,         // 输入：解码帧（NV12，有物理地址）
     Buffer* render_buf,      // 输出：当前 framebuffer 页
     int dst_x, int dst_y,   // 目标区域左上角坐标
@@ -667,7 +667,7 @@ DisplayConsumer → DisplayDeviceFactory::create(TACO_VO)
     ↓
 TacoVOFramebufferDevice::initialize()
     ↓
-SharedDisplayContext::acquire()  ← 第一个调用时创建单例
+TacoProDisplayContext::acquire()  ← 第一个调用时创建单例
     ├── 打开 /dev/fbX
     ├── 查询硬件参数（width, height, bpp）
     ├── taco_sys_get_block → 分配 DMA 物理连续内存
@@ -677,7 +677,7 @@ SharedDisplayContext::acquire()  ← 第一个调用时创建单例
     ├── 启动定时器线程（timerfd, 30fps）
     └── 启动显示线程
     ↓
-SharedDisplayContext::registerChannel(channel_id, layout)
+TacoProDisplayContext::registerChannel(channel_id, layout)
     ├── 计算通道在屏幕上的坐标和尺寸
     └── 标记通道为 active
 ```
@@ -695,7 +695,7 @@ DisplayConsumer::consume(buffer)
     ↓
 TacoVOFramebufferDevice::displayBuffer(buffer)
     ↓
-SharedDisplayContext::channelWrite(channel_id, buffer)
+TacoProDisplayContext::channelWrite(channel_id, buffer)
     ├── shared_lock(rw_mutex_)
     ├── 检查 render_buf_ != nullptr
     ├── PP resize: 解码帧 → render_buf_ 子区域
@@ -715,9 +715,9 @@ DisplayConsumer::finalize()
     ↓
 TacoVOFramebufferDevice::cleanup()
     ↓
-SharedDisplayContext::unregisterChannel(channel_id)
+TacoProDisplayContext::unregisterChannel(channel_id)
     ↓
-引用计数减为 0 时 → SharedDisplayContext 析构
+引用计数减为 0 时 → TacoProDisplayContext 析构
     ├── running_ = false
     ├── 等待定时器线程退出
     ├── 等待显示线程退出
@@ -759,9 +759,9 @@ SharedDisplayContext::unregisterChannel(channel_id)
 
 | 文件（现行路径） | 变更类型 | 说明 |
 |------|---------|------|
-| `components/include/vendor/taco/display/SharedDisplayContext.hpp` | 实现 | 共享显示上下文单例 |
-| `components/source/vendor/taco/display/SharedDisplayContext.cpp` | 实现 | DMA 分配、BufferPool、timerfd、显示线程 |
-| `components/include/vendor/taco/display/SharedFramebufferDevice.hpp` | 实现 | `IDisplayDevice` 实现，委托 `SharedDisplayContext` |
+| `components/include/vendor/taco/display/TacoProDisplayContext.hpp` | 实现 | 共享显示上下文单例 |
+| `components/source/vendor/taco/display/TacoProDisplayContext.cpp` | 实现 | DMA 分配、BufferPool、timerfd、显示线程 |
+| `components/include/vendor/taco/display/SharedFramebufferDevice.hpp` | 实现 | `IDisplayDevice` 实现，委托 `TacoProDisplayContext` |
 | `components/source/vendor/taco/display/SharedFramebufferDevice.cpp` | 实现 | 同上 |
 | `components/include/vendor/contracts/IDisplayDevice.hpp` | 契约 | 显示设备抽象 |
 | `components/include/consumptionline/IBufferConsumer.hpp` | 实现 | 含 `shouldRetainBuffer()` 等 |
@@ -775,17 +775,17 @@ SharedDisplayContext::unregisterChannel(channel_id)
 
 | 原 taco-vo 功能 | 新方案实现 | 位置 |
 |----------------|-----------|------|
-| `ta_vo_create_dev` | `SharedDisplayContext::acquire()` 中 open /dev/fbX | SharedDisplayContext.cpp |
-| `ta_vo_create_layer` | 由 DSS sysfs 配置替代（overlay enable, pixel format） | SharedDisplayContext.cpp |
-| `ta_vo_create_channel` | `SharedDisplayContext::registerChannel()` | SharedDisplayContext.cpp |
-| `ta_vo_chn_send_frame` | `SharedDisplayContext::channelWrite()` (PP resize) | SharedDisplayContext.cpp |
-| `ta_vo_destroy_channel` | `SharedDisplayContext::unregisterChannel()` | SharedDisplayContext.cpp |
-| `ta_vo_destroy_layer/dev` | `SharedDisplayContext` 析构 | SharedDisplayContext.cpp |
-| DMA 内存分配 (`taco_sys_get_block`) | 保留，在 `SharedDisplayContext` 初始化时调用 | SharedDisplayContext.cpp |
-| `FB_IOCTL_SET_DMA_INFO` | 保留，在初始化时设置 DSS DMA 基地址 | SharedDisplayContext.cpp |
-| 帧发送 (`memcpy` → DMA buffer) | 替换为 PP 硬件 resize（零 CPU 拷贝） | SharedDisplayContext.cpp |
-| 前后 buffer 交替 | 替换为 BufferPool FREE/FILLED 队列 | SharedDisplayContext.cpp |
-| VSYNC 等待 | 保留在显示线程中 | SharedDisplayContext.cpp |
+| `ta_vo_create_dev` | `TacoProDisplayContext::acquire()` 中 open /dev/fbX | TacoProDisplayContext.cpp |
+| `ta_vo_create_layer` | 由 DSS sysfs 配置替代（overlay enable, pixel format） | TacoProDisplayContext.cpp |
+| `ta_vo_create_channel` | `TacoProDisplayContext::registerChannel()` | TacoProDisplayContext.cpp |
+| `ta_vo_chn_send_frame` | `TacoProDisplayContext::channelWrite()` (PP resize) | TacoProDisplayContext.cpp |
+| `ta_vo_destroy_channel` | `TacoProDisplayContext::unregisterChannel()` | TacoProDisplayContext.cpp |
+| `ta_vo_destroy_layer/dev` | `TacoProDisplayContext` 析构 | TacoProDisplayContext.cpp |
+| DMA 内存分配 (`taco_sys_get_block`) | 保留，在 `TacoProDisplayContext` 初始化时调用 | TacoProDisplayContext.cpp |
+| `FB_IOCTL_SET_DMA_INFO` | 保留，在初始化时设置 DSS DMA 基地址 | TacoProDisplayContext.cpp |
+| 帧发送 (`memcpy` → DMA buffer) | 替换为 PP 硬件 resize（零 CPU 拷贝） | TacoProDisplayContext.cpp |
+| 前后 buffer 交替 | 替换为 BufferPool FREE/FILLED 队列 | TacoProDisplayContext.cpp |
+| VSYNC 等待 | 保留在显示线程中 | TacoProDisplayContext.cpp |
 
 ---
 

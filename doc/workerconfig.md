@@ -345,7 +345,7 @@ TacoConfigBuilder()
 | 枚举值 | 含义 |
 |--------|------|
 | `TACO_VO` (1) | taco-vo 视频输出管道（支持多通道 + 硬件 CSC/Resize） |
-| `SHARED_FB` (2) | 共享 Framebuffer（SharedDisplayContext + BufferPool 多通道显示，默认） |
+| `SHARED_FB` (2) | 共享 Framebuffer（TacoProDisplayContext + BufferPool 多通道显示，默认） |
 
 **TacoVOConfig 配置**：
 

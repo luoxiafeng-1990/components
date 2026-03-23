@@ -1,7 +1,7 @@
-#ifndef TACO_VO_CONTEXT_HPP
-#define TACO_VO_CONTEXT_HPP
+#ifndef TACO_DISPLAY_CONTEXT_HPP
+#define TACO_DISPLAY_CONTEXT_HPP
 
-#include "productionline/worker/WorkerConfig.hpp"
+#include "vendor/taco/display/TacoDisplayExtension.hpp"
 #include "buffer/bufferpool/Buffer.hpp"
 
 #include <mutex>
@@ -21,7 +21,7 @@ extern "C" {
 }
 
 /**
- * TacoVOContext - taco-vo 共享资源的 RAII 容器
+ * TacoDisplayContext - taco-vo 共享资源的 RAII 容器
  *
  * 管理 taco-vo 的全局共享资源（device、layer），
  * 构造时初始化，析构时自动清理。
@@ -32,15 +32,13 @@ extern "C" {
  *
  * 线程安全：所有公共方法内部加锁。
  */
-class TacoVOContext {
+class TacoDisplayContext {
 public:
-    using TacoVOConfig = WorkerConfig::ConsumerTypeConfig::DisplayType::TacoVOConfig;
+    explicit TacoDisplayContext(const TacoDisplayExtension& config);
+    ~TacoDisplayContext();
 
-    explicit TacoVOContext(const TacoVOConfig& config);
-    ~TacoVOContext();
-
-    TacoVOContext(const TacoVOContext&) = delete;
-    TacoVOContext& operator=(const TacoVOContext&) = delete;
+    TacoDisplayContext(const TacoDisplayContext&) = delete;
+    TacoDisplayContext& operator=(const TacoDisplayContext&) = delete;
 
     /**
      * 分配一个通道（创建 channel + frame pool，绑定到 layer）
@@ -91,7 +89,7 @@ private:
     void freeFramePool(ChannelState& ch);
     FrameSlot* acquireFrameSlot(ChannelState& ch);
 
-    TacoVOConfig config_;
+    TacoDisplayExtension config_;
     std::mutex mutex_;
     int next_channel_ = 0;
 
@@ -107,4 +105,4 @@ private:
     log4cplus::Logger logger_;
 };
 
-#endif // TACO_VO_CONTEXT_HPP
+#endif // TACO_DISPLAY_CONTEXT_HPP

@@ -1,12 +1,12 @@
-#ifndef SHARED_DISPLAY_CONTEXT_HPP
-#define SHARED_DISPLAY_CONTEXT_HPP
+#ifndef TACO_PRO_DISPLAY_CONTEXT_HPP
+#define TACO_PRO_DISPLAY_CONTEXT_HPP
 
 #include "buffer/bufferpool/Buffer.hpp"
 #include "buffer/bufferpool/BufferPool.hpp"
 #include "buffer/BufferAllocatorFacade.hpp"
 #include "buffer/BufferAllocatorFactory.hpp"
 #include "buffer/bufferpool/BufferPoolRegistry.hpp"
-#include "productionline/worker/WorkerConfig.hpp"
+#include "vendor/taco/display/TacoProDisplayExtension.hpp"
 
 #include <shared_mutex>
 #include <condition_variable>
@@ -33,7 +33,7 @@ struct tpsfb_dma_info;
 class OsdOverlay;
 
 /**
- * SharedDisplayContext - 多通道共享显示上下文（单例模式）
+ * TacoProDisplayContext - 多通道共享显示上下文（单例模式）
  *
  * 核心职责：
  *   1. 通过 TACO 平台 API 独立分配每个 framebuffer 页的物理连续内存
@@ -55,20 +55,18 @@ class OsdOverlay;
  *   - 通过 acquire() 获取 shared_ptr（内部 weak_ptr 单例）
  *   - 第一个调用者创建，最后一个释放时自动销毁
  */
-class SharedDisplayContext {
+class TacoProDisplayContext {
 public:
-    using TacoVOConfig = WorkerConfig::ConsumerTypeConfig::DisplayType::TacoVOConfig;
-
     /**
      * 获取共享上下文实例（单例模式）
      * 第一个调用者创建实例，后续调用者复用
      */
-    static std::shared_ptr<SharedDisplayContext> acquire(const TacoVOConfig& config);
+    static std::shared_ptr<TacoProDisplayContext> acquire(const TacoProDisplayExtension& config);
 
-    ~SharedDisplayContext();
+    ~TacoProDisplayContext();
 
-    SharedDisplayContext(const SharedDisplayContext&) = delete;
-    SharedDisplayContext& operator=(const SharedDisplayContext&) = delete;
+    TacoProDisplayContext(const TacoProDisplayContext&) = delete;
+    TacoProDisplayContext& operator=(const TacoProDisplayContext&) = delete;
 
     struct ChannelLayout {
         int x;
@@ -121,7 +119,7 @@ public:
     std::string getViewDiagram() const;
 
 private:
-    explicit SharedDisplayContext(const TacoVOConfig& config);
+    explicit TacoProDisplayContext(const TacoProDisplayExtension& config);
     bool open();
     void close();
 
@@ -144,7 +142,7 @@ private:
     void onDisplayTick();
 
     // === 配置 ===
-    TacoVOConfig config_;
+    TacoProDisplayExtension config_;
 
     // === Framebuffer 设备 ===
     int fd_;
@@ -211,9 +209,9 @@ private:
 
     // === 单例 ===
     static std::mutex s_acquire_mutex_;
-    static std::weak_ptr<SharedDisplayContext> s_instance_;
+    static std::weak_ptr<TacoProDisplayContext> s_instance_;
 
     log4cplus::Logger logger_;
 };
 
-#endif // SHARED_DISPLAY_CONTEXT_HPP
+#endif // TACO_PRO_DISPLAY_CONTEXT_HPP

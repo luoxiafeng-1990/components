@@ -36,7 +36,7 @@ std::string CountConsumer::getStats() const {
 // DisplayConsumer 实现
 // ============================================================
 
-DisplayConsumer::DisplayConsumer(const DisplayType& config)
+DisplayConsumer::DisplayConsumer(const DisplayConsumerConfig& config)
     : config_(config)
     , display_(nullptr)
     , success_count_(0)
@@ -60,7 +60,11 @@ bool DisplayConsumer::initialize(const std::vector<Buffer*>& first_buffers) {
     }
     
     try {
-        display_ = DisplayDeviceFactory::create(config_);
+        if (!config_.vendor) {
+            LOG4CPLUS_ERROR(log4cplus::Logger::getRoot(), "DisplayConsumer: vendor is null");
+            return false;
+        }
+        display_ = DisplayDeviceFactory::create(*config_.vendor);
         if (!display_->initialize(config_.device_id)) {
             LOG4CPLUS_ERROR(log4cplus::Logger::getRoot(), "DisplayConsumer: Failed to initialize display device");
             return false;
@@ -68,9 +72,8 @@ bool DisplayConsumer::initialize(const std::vector<Buffer*>& first_buffers) {
         
         initialized_ = true;
         LOG4CPLUS_INFO_FMT(log4cplus::Logger::getRoot(), 
-            "DisplayConsumer: Initialized (mode=%s)",
-            config_.mode == DisplayType::TACO_VO ? "TACO_VO" :
-            config_.mode == DisplayType::SHARED_FB ? "SHARED_FB" : "FRAMEBUFFER");
+            "DisplayConsumer: Initialized (vendor=%s)",
+            config_.vendor->kind());
         return true;
     } catch (const std::exception& e) {
         LOG4CPLUS_ERROR_FMT(log4cplus::Logger::getRoot(), 

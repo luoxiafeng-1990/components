@@ -330,6 +330,7 @@ void PPPlugin::registerOptions(CLI::App& app) {
     app.add_option("-P,--min-psnr", min_psnr_, "PSNR 阈值");
     app.add_option("-M,--min-ssim", min_ssim_, "SSIM 阈值");
     app.add_flag("-v,--verbose", verbose_, "详细日志");
+    ds_opts_.registerTo(app);
     app.add_option("positional", positional_args_, "测试名或输入文件路径");
 
     app.footer(
@@ -361,6 +362,7 @@ void PPPlugin::applyTo(WorkerConfig& config) const {
         config.consumer_type.save_raw.max_frames_per_channel = save_frames_;
     if (max_frames_ != 0)
         config.consumer_type.max_frames = max_frames_;
+    ds_opts_.applyTo(config);
     config.data_source = DataSourceConfigBuilder(config.data_source)
         .setPathIfNonEmpty(input_path_)
         .setMaxFramesIfNonZero(max_frames_)

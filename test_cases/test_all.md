@@ -80,39 +80,39 @@ sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 "~/qa_cas
 ```bash
 # H.264 128x128
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "~/qa_cases vdec --codec h264 --resolution 128x128 --psnr --ssim --display /usr/data/ffmpeg/128x128.mp4"
+    "~/qa_cases vdec --codec h264 --resolution 128x128 --psnr --ssim display /usr/data/ffmpeg/128x128.mp4"
 
 # H.264 320x240
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "~/qa_cases vdec --codec h264 --resolution 320x240 --psnr --ssim --display /usr/data/ffmpeg/320x240.mp4"
+    "~/qa_cases vdec --codec h264 --resolution 320x240 --psnr --ssim display /usr/data/ffmpeg/320x240.mp4"
 
 # H.264 640x480
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "~/qa_cases vdec --codec h264 --resolution 640x480 --psnr --ssim --display /usr/data/ffmpeg/640x480.mp4"
+    "~/qa_cases vdec --codec h264 --resolution 640x480 --psnr --ssim display /usr/data/ffmpeg/640x480.mp4"
 
 # H.264 640x480 60fps
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "~/qa_cases vdec --codec h264 --resolution 640x480 --fps 60 --psnr --ssim --display /usr/data/ffmpeg/640x480_60fps.mp4"
+    "~/qa_cases vdec --codec h264 --resolution 640x480 --fps 60 --psnr --ssim display /usr/data/ffmpeg/640x480_60fps.mp4"
 
 # H.264 720p (1280x720)
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "~/qa_cases vdec --codec h264 --resolution 1280x720 --psnr --ssim --display /usr/data/ffmpeg/1280x720.mp4"
+    "~/qa_cases vdec --codec h264 --resolution 1280x720 --psnr --ssim display /usr/data/ffmpeg/1280x720.mp4"
 
 # H.264 1080p (1920x1080)
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "~/qa_cases vdec --codec h264 --resolution 1920x1080 --psnr --ssim --display /usr/data/ffmpeg/1920x1080.mp4"
+    "~/qa_cases vdec --codec h264 --resolution 1920x1080 --psnr --ssim display /usr/data/ffmpeg/1920x1080.mp4"
 
 # H.264 1080p 60fps
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "~/qa_cases vdec --codec h264 --resolution 1920x1080 --fps 60 --psnr --ssim --display /usr/data/ffmpeg/1920x1080_60fps.mp4"
+    "~/qa_cases vdec --codec h264 --resolution 1920x1080 --fps 60 --psnr --ssim display /usr/data/ffmpeg/1920x1080_60fps.mp4"
 
 # H.264 2560x1440
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "~/qa_cases vdec --codec h264 --resolution 2560x1440 --psnr --ssim --display /usr/data/ffmpeg/H264_2560_1440_24fps_10s.mp4"
+    "~/qa_cases vdec --codec h264 --resolution 2560x1440 --psnr --ssim display /usr/data/ffmpeg/H264_2560_1440_24fps_10s.mp4"
 
 # H.264 4K (3840x2160)
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "~/qa_cases vdec --codec h264 --resolution 3840x2160 --psnr --ssim --display /usr/data/ffmpeg/3840x2160.mp4"
+    "~/qa_cases vdec --codec h264 --resolution 3840x2160 --psnr --ssim display /usr/data/ffmpeg/3840x2160.mp4"
 ```
 
 ### 2.2 H.265/HEVC 解码测试
@@ -120,39 +120,39 @@ sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
 ```bash
 # H.265 128x128
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "~/qa_cases vdec --codec h265 --resolution 128x128 --psnr --ssim --display /usr/data/ffmpeg/128x128_hevc.mp4"
+    "~/qa_cases vdec --codec h265 --resolution 128x128 --psnr --ssim display /usr/data/ffmpeg/128x128_hevc.mp4"
 
 # H.265 320x240
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "~/qa_cases vdec --codec h265 --resolution 320x240 --psnr --ssim --display /usr/data/ffmpeg/320x240_hevc.mp4"
+    "~/qa_cases vdec --codec h265 --resolution 320x240 --psnr --ssim display /usr/data/ffmpeg/320x240_hevc.mp4"
 
 # H.265 640x480
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "~/qa_cases vdec --codec h265 --resolution 640x480 --psnr --ssim --display /usr/data/ffmpeg/640x480_hevc.mp4"
+    "~/qa_cases vdec --codec h265 --resolution 640x480 --psnr --ssim display /usr/data/ffmpeg/640x480_hevc.mp4"
 
 # H.265 640x480 60fps
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "~/qa_cases vdec --codec h265 --resolution 640x480 --fps 60 --psnr --ssim --display /usr/data/ffmpeg/640x480_hevc_60fps.mp4"
+    "~/qa_cases vdec --codec h265 --resolution 640x480 --fps 60 --psnr --ssim display /usr/data/ffmpeg/640x480_hevc_60fps.mp4"
 
 # H.265 720p (1280x720)
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "~/qa_cases vdec --codec h265 --resolution 1280x720 --psnr --ssim --display /usr/data/ffmpeg/1280x720_hevc.mp4"
+    "~/qa_cases vdec --codec h265 --resolution 1280x720 --psnr --ssim display /usr/data/ffmpeg/1280x720_hevc.mp4"
 
 # H.265 1080p (1920x1080)
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "~/qa_cases vdec --codec h265 --resolution 1920x1080 --psnr --ssim --display /usr/data/ffmpeg/1920x1080_hevc.mp4"
+    "~/qa_cases vdec --codec h265 --resolution 1920x1080 --psnr --ssim display /usr/data/ffmpeg/1920x1080_hevc.mp4"
 
 # H.265 1080p 60fps
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "~/qa_cases vdec --codec h265 --resolution 1920x1080 --fps 60 --psnr --ssim --display /usr/data/ffmpeg/1920x1080_hevc_60fps.mp4"
+    "~/qa_cases vdec --codec h265 --resolution 1920x1080 --fps 60 --psnr --ssim display /usr/data/ffmpeg/1920x1080_hevc_60fps.mp4"
 
 # H.265 2560x1440
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "~/qa_cases vdec --codec h265 --resolution 2560x1440 --psnr --ssim --display /usr/data/ffmpeg/H265_2560_1440_24fps_12s.mp4"
+    "~/qa_cases vdec --codec h265 --resolution 2560x1440 --psnr --ssim display /usr/data/ffmpeg/H265_2560_1440_24fps_12s.mp4"
 
 # H.265 4K (3840x2160)
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "~/qa_cases vdec --codec h265 --resolution 3840x2160 --psnr --ssim --display /usr/data/ffmpeg/3840x2160_hevc.mp4"
+    "~/qa_cases vdec --codec h265 --resolution 3840x2160 --psnr --ssim display /usr/data/ffmpeg/3840x2160_hevc.mp4"
 ```
 
 ### 2.3 MJPEG 解码测试
@@ -160,39 +160,39 @@ sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
 ```bash
 # MJPEG 128x128
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "~/qa_cases vdec --codec mjpeg --resolution 128x128 --psnr --ssim --display /usr/data/ffmpeg/128x128.jpg"
+    "~/qa_cases vdec --codec mjpeg --resolution 128x128 --psnr --ssim display /usr/data/ffmpeg/128x128.jpg"
 
 # MJPEG 320x240
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "~/qa_cases vdec --codec mjpeg --resolution 320x240 --psnr --ssim --display /usr/data/ffmpeg/320x240.jpg"
+    "~/qa_cases vdec --codec mjpeg --resolution 320x240 --psnr --ssim display /usr/data/ffmpeg/320x240.jpg"
 
 # MJPEG 640x480
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "~/qa_cases vdec --codec mjpeg --resolution 640x480 --psnr --ssim --display /usr/data/ffmpeg/640x480.jpg"
+    "~/qa_cases vdec --codec mjpeg --resolution 640x480 --psnr --ssim display /usr/data/ffmpeg/640x480.jpg"
 
 # MJPEG 640x480 60fps
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "~/qa_cases vdec --codec mjpeg --resolution 640x480 --fps 60 --psnr --ssim --display /usr/data/ffmpeg/640x480_60fps.mjpeg"
+    "~/qa_cases vdec --codec mjpeg --resolution 640x480 --fps 60 --psnr --ssim display /usr/data/ffmpeg/640x480_60fps.mjpeg"
 
 # MJPEG 720p (1280x720)
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "~/qa_cases vdec --codec mjpeg --resolution 1280x720 --psnr --ssim --display /usr/data/ffmpeg/1280x720.jpg"
+    "~/qa_cases vdec --codec mjpeg --resolution 1280x720 --psnr --ssim display /usr/data/ffmpeg/1280x720.jpg"
 
 # MJPEG 1080p (1920x1080)
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "~/qa_cases vdec --codec mjpeg --resolution 1920x1080 --psnr --ssim --display /usr/data/ffmpeg/1920x1080.jpg"
+    "~/qa_cases vdec --codec mjpeg --resolution 1920x1080 --psnr --ssim display /usr/data/ffmpeg/1920x1080.jpg"
 
 # MJPEG 1080p 60fps
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "~/qa_cases vdec --codec mjpeg --resolution 1920x1080 --fps 60 --psnr --ssim --display /usr/data/ffmpeg/1920x1080_60fps.mjpeg"
+    "~/qa_cases vdec --codec mjpeg --resolution 1920x1080 --fps 60 --psnr --ssim display /usr/data/ffmpeg/1920x1080_60fps.mjpeg"
 
 # MJPEG 2560x1440
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "~/qa_cases vdec --codec mjpeg --resolution 2560x1440 --psnr --ssim --display /usr/data/ffmpeg/2560x1440.jpg"
+    "~/qa_cases vdec --codec mjpeg --resolution 2560x1440 --psnr --ssim display /usr/data/ffmpeg/2560x1440.jpg"
 
 # MJPEG 4K (3840x2160)
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "~/qa_cases vdec --codec mjpeg --resolution 3840x2160 --psnr --ssim --display /usr/data/ffmpeg/3840x2160.jpg"
+    "~/qa_cases vdec --codec mjpeg --resolution 3840x2160 --psnr --ssim display /usr/data/ffmpeg/3840x2160.jpg"
 ```
 
 ### 2.4 软件解码测试
@@ -200,11 +200,11 @@ sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
 ```bash
 # 软件解码 H.264 1080p
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "~/qa_cases vdec --codec software --resolution 1920x1080 --psnr --ssim --display /usr/data/ffmpeg/1920x1080.mp4"
+    "~/qa_cases vdec --codec software --resolution 1920x1080 --psnr --ssim display /usr/data/ffmpeg/1920x1080.mp4"
 
 # 软件解码 H.265 1080p
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "~/qa_cases vdec --codec software --resolution 1920x1080 --psnr --ssim --display /usr/data/ffmpeg/1920x1080_hevc.mp4"
+    "~/qa_cases vdec --codec software --resolution 1920x1080 --psnr --ssim display /usr/data/ffmpeg/1920x1080_hevc.mp4"
 ```
 
 ### 2.5 RTSP 流解码测试
@@ -214,15 +214,15 @@ sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
 ```bash
 # RTSP H.264 720p
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "~/qa_cases vdec --codec h264 --resolution 1280x720 --psnr --ssim --display --rtsp rtsp://192.168.1.100/stream"
+    "~/qa_cases vdec --codec h264 --resolution 1280x720 --psnr --ssim --rtsp rtsp://192.168.1.100/stream"
 
 # RTSP H.264 1080p
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "~/qa_cases vdec --codec h264 --resolution 1920x1080 --psnr --ssim --display --rtsp rtsp://192.168.1.100/stream"
+    "~/qa_cases vdec --codec h264 --resolution 1920x1080 --psnr --ssim --rtsp rtsp://192.168.1.100/stream"
 
 # RTSP H.264 4K
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "~/qa_cases vdec --codec h264 --resolution 3840x2160 --psnr --ssim --display --rtsp rtsp://192.168.1.100/stream"
+    "~/qa_cases vdec --codec h264 --resolution 3840x2160 --psnr --ssim --rtsp rtsp://192.168.1.100/stream"
 ```
 
 **RTSP H.265 流测试**
@@ -230,15 +230,15 @@ sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
 ```bash
 # RTSP H.265 720p
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "~/qa_cases vdec --codec h265 --resolution 1280x720 --psnr --ssim --display --rtsp rtsp://192.168.1.100/stream"
+    "~/qa_cases vdec --codec h265 --resolution 1280x720 --psnr --ssim --rtsp rtsp://192.168.1.100/stream"
 
 # RTSP H.265 1080p
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "~/qa_cases vdec --codec h265 --resolution 1920x1080 --psnr --ssim --display --rtsp rtsp://192.168.1.100/stream"
+    "~/qa_cases vdec --codec h265 --resolution 1920x1080 --psnr --ssim --rtsp rtsp://192.168.1.100/stream"
 
 # RTSP H.265 4K
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "~/qa_cases vdec --codec h265 --resolution 3840x2160 --psnr --ssim --display --rtsp rtsp://192.168.1.100/stream"
+    "~/qa_cases vdec --codec h265 --resolution 3840x2160 --psnr --ssim --rtsp rtsp://192.168.1.100/stream"
 ```
 
 **RTSP MJPEG 流测试**
@@ -246,15 +246,15 @@ sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
 ```bash
 # RTSP MJPEG 1080p
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "~/qa_cases vdec --codec mjpeg --resolution 1920x1080 --psnr --ssim --display --rtsp rtsp://192.168.1.100/mjpeg_stream"
+    "~/qa_cases vdec --codec mjpeg --resolution 1920x1080 --psnr --ssim --rtsp rtsp://192.168.1.100/mjpeg_stream"
 
 # RTSP MJPEG 4K
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "~/qa_cases vdec --codec mjpeg --resolution 3840x2160 --psnr --ssim --display --rtsp rtsp://192.168.1.100/mjpeg_stream"
+    "~/qa_cases vdec --codec mjpeg --resolution 3840x2160 --psnr --ssim --rtsp rtsp://192.168.1.100/mjpeg_stream"
 
 # RTSP MJPEG 超高分辨率（32768x18432）
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "~/qa_cases vdec --codec mjpeg --resolution 32768x18432 --psnr --ssim --display --rtsp rtsp://192.168.1.100/mjpeg_ultrahd"
+    "~/qa_cases vdec --codec mjpeg --resolution 32768x18432 --psnr --ssim --rtsp rtsp://192.168.1.100/mjpeg_ultrahd"
 ```
 
 ### 2.6 多 Worker / 多线程测试（PARALLEL 模式）
@@ -284,7 +284,7 @@ sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
 
 # 16 路并发 + 显示
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "~/qa_cases vdec --threads 16 --display /usr/data/ffmpeg/1920x1080.mp4"
+    "~/qa_cases vdec --threads 16 display /usr/data/ffmpeg/1920x1080.mp4"
 
 # ========================================
 # 方式二：使用预定义测试名称（向后兼容）
@@ -292,23 +292,23 @@ sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
 
 # 多 Worker 测试 - HW+SW 同时解码 1080p
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "~/qa_cases vdec multi_worker --psnr --ssim --display /usr/data/ffmpeg/1920x1080.mp4"
+    "~/qa_cases vdec multi_worker --psnr --ssim display /usr/data/ffmpeg/1920x1080.mp4"
 
 # 多 Worker 测试 - HW+SW 同时解码 4K
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "~/qa_cases vdec multi_worker_4k --psnr --ssim --display /usr/data/ffmpeg/3840x2160.mp4"
+    "~/qa_cases vdec multi_worker_4k --psnr --ssim display /usr/data/ffmpeg/3840x2160.mp4"
 
 # 2 线程解码（预定义）
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "~/qa_cases vdec multithread_2 --psnr --ssim --display /usr/data/ffmpeg/1920x1080.mp4"
+    "~/qa_cases vdec multithread_2 --psnr --ssim display /usr/data/ffmpeg/1920x1080.mp4"
 
 # 4 线程解码（预定义）
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "~/qa_cases vdec multithread_4 --psnr --ssim --display /usr/data/ffmpeg/1920x1080.mp4"
+    "~/qa_cases vdec multithread_4 --psnr --ssim display /usr/data/ffmpeg/1920x1080.mp4"
 
 # 8 线程解码（预定义）
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "~/qa_cases vdec multithread_8 --psnr --ssim --display /usr/data/ffmpeg/1920x1080.mp4"
+    "~/qa_cases vdec multithread_8 --psnr --ssim display /usr/data/ffmpeg/1920x1080.mp4"
 ```
 
 **并发限制说明**:
@@ -334,11 +334,11 @@ sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
 
 # 启用显示输出 (输出到 framebuffer)
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "~/qa_cases vdec --codec h264 --resolution 1920x1080 --display /usr/data/ffmpeg/1920x1080.mp4"
+    "~/qa_cases vdec --codec h264 --resolution 1920x1080 display /usr/data/ffmpeg/1920x1080.mp4"
 
 # 显示 + 限制帧数
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "~/qa_cases vdec --codec h264 --resolution 1920x1080 --display --max-frames 300 /usr/data/ffmpeg/1920x1080.mp4"
+    "~/qa_cases vdec --codec h264 --resolution 1920x1080 --max-frames 300 display /usr/data/ffmpeg/1920x1080.mp4"
 
 # 详细日志模式
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
@@ -420,22 +420,22 @@ sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
 ### 2.9 显示视图（View）测试
 
 > 视图系统支持两种布局模式：`grid`（网格）和 `main_sidebar`（主+侧栏）。
-> 需配合 `--display --display-mode shared_fb` 使用。
+> 使用 `display` 子命令启用显示。默认 `--vendor tacopro`，可切换 `--vendor taco`。
 
 **Grid 网格视图测试**
 
 ```bash
-# Grid 4路 (2x2)，默认视图
+# Grid 4路 (2x2)，默认视图（vendor 默认 tacopro）
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "qa_cases vdec -f /usr/data/ffmpeg/1920x1080.mp4 -d --display-mode shared_fb --display-fps 25 --osd --osd-fps 1 -t 4 -c h264 --loop"
+    "qa_cases vdec -f /usr/data/ffmpeg/1920x1080.mp4 -c h264 -t 4 --loop display --fps 25 --osd --osd-fps 1"
 
 # Grid 9路 (3x3)
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "qa_cases vdec -f /usr/data/ffmpeg/1920x1080.mp4 -d --display-mode shared_fb --display-fps 25 --osd --osd-fps 1 -t 9 -c h264 --loop"
+    "qa_cases vdec -f /usr/data/ffmpeg/1920x1080.mp4 -c h264 -t 9 --loop display --fps 25 --osd --osd-fps 1"
 
 # Grid 16路 (4x4)
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "qa_cases vdec -f /usr/data/ffmpeg/1920x1080.mp4 -d --display-mode shared_fb --display-fps 25 --osd --osd-fps 1 -t 16 -c h264 --loop"
+    "qa_cases vdec -f /usr/data/ffmpeg/1920x1080.mp4 -c h264 -t 16 --loop display --fps 25 --osd --osd-fps 1"
 ```
 
 **Main+Sidebar 主+侧栏视图测试**
@@ -443,19 +443,19 @@ sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
 ```bash
 # Main+Sidebar 5路（默认映射：通道0为主画面，1-4为侧栏）
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "qa_cases vdec -f /usr/data/ffmpeg/1920x1080.mp4 -d --display-mode shared_fb --display-fps 25 --osd --osd-fps 1 -t 5 -c h264 --view-type main_sidebar --loop"
+    "qa_cases vdec -f /usr/data/ffmpeg/1920x1080.mp4 -c h264 -t 5 --loop display --fps 25 --osd --osd-fps 1 --view-type main_sidebar"
 
 # Main+Sidebar 自定义通道映射（通道1为主画面，侧栏依次为4,2,3,0）
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "qa_cases vdec -f /usr/data/ffmpeg/1920x1080.mp4 -d --display-mode shared_fb --display-fps 25 --osd --osd-fps 1 -t 5 -c h264 --view-type main_sidebar --slot-assignment 1,4,2,3,0 --loop"
+    "qa_cases vdec -f /usr/data/ffmpeg/1920x1080.mp4 -c h264 -t 5 --loop display --fps 25 --osd --osd-fps 1 --view-type main_sidebar --slot-assignment 1,4,2,3,0"
 
 # Main+Sidebar 自定义主画面宽度比例 (80%)
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "qa_cases vdec -f /usr/data/ffmpeg/1920x1080.mp4 -d --display-mode shared_fb --display-fps 25 --osd --osd-fps 1 -t 5 -c h264 --view-type main_sidebar --main-ratio 0.8 --loop"
+    "qa_cases vdec -f /usr/data/ffmpeg/1920x1080.mp4 -c h264 -t 5 --loop display --fps 25 --osd --osd-fps 1 --view-type main_sidebar --main-ratio 0.8"
 
 # Main+Sidebar 自定义映射 + 自定义宽度比例 (70%)
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "qa_cases vdec -f /usr/data/ffmpeg/1920x1080.mp4 -d --display-mode shared_fb --display-fps 25 --osd --osd-fps 1 -t 5 -c h264 --view-type main_sidebar --slot-assignment 2,0,1,3,4 --main-ratio 0.7 --loop"
+    "qa_cases vdec -f /usr/data/ffmpeg/1920x1080.mp4 -c h264 -t 5 --loop display --fps 25 --osd --osd-fps 1 --view-type main_sidebar --slot-assignment 2,0,1,3,4 --main-ratio 0.7"
 ```
 
 **视图参数说明**
@@ -479,27 +479,27 @@ sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
 ```bash
 # PP0 NV12 (YUV420 8-bit NV12)
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "~/qa_cases pp pp0_nv12 --psnr --ssim --display /usr/data/ffmpeg/1920x1080.mp4"
+    "~/qa_cases pp pp0_nv12 --psnr --ssim display /usr/data/ffmpeg/1920x1080.mp4"
 
 # PP0 NV21 (YUV420 8-bit NV21)
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "~/qa_cases pp pp0_nv21 --psnr --ssim --display /usr/data/ffmpeg/1920x1080.mp4"
+    "~/qa_cases pp pp0_nv21 --psnr --ssim display /usr/data/ffmpeg/1920x1080.mp4"
 
 # PP0 I420 (YUV420 planar)
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "~/qa_cases pp pp0_i420 --psnr --ssim --display /usr/data/ffmpeg/1920x1080.mp4"
+    "~/qa_cases pp pp0_i420 --psnr --ssim display /usr/data/ffmpeg/1920x1080.mp4"
 
 # PP0 YV12 (YUV420 planar, V before U)
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "~/qa_cases pp pp0_yv12 --psnr --ssim --display /usr/data/ffmpeg/1920x1080.mp4"
+    "~/qa_cases pp pp0_yv12 --psnr --ssim display /usr/data/ffmpeg/1920x1080.mp4"
 
 # PP0 YUV420 8-bit NV12（别名测试）
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "~/qa_cases pp pp0_yuv420_8bit_nv12 --psnr --ssim --display /usr/data/ffmpeg/1920x1080.mp4"
+    "~/qa_cases pp pp0_yuv420_8bit_nv12 --psnr --ssim display /usr/data/ffmpeg/1920x1080.mp4"
 
 # PP0 YUV420 8-bit NV21（别名测试）
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "~/qa_cases pp pp0_yuv420_8bit_nv21 --psnr --ssim --display /usr/data/ffmpeg/1920x1080.mp4"
+    "~/qa_cases pp pp0_yuv420_8bit_nv21 --psnr --ssim display /usr/data/ffmpeg/1920x1080.mp4"
 ```
 
 **YUV420 10-bit 格式测试（4 项）**
@@ -507,19 +507,19 @@ sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
 ```bash
 # PP0 P010 (YUV420 10-bit P010)
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "~/qa_cases pp pp0_p010 --psnr --ssim --display /usr/data/ffmpeg/1920x1080.mp4"
+    "~/qa_cases pp pp0_p010 --psnr --ssim display /usr/data/ffmpeg/1920x1080.mp4"
 
 # PP0 YUV420 NV12 P010（10-bit 变体）
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "~/qa_cases pp pp0_yuv420_nv12_p010 --psnr --ssim --display /usr/data/ffmpeg/1920x1080.mp4"
+    "~/qa_cases pp pp0_yuv420_nv12_p010 --psnr --ssim display /usr/data/ffmpeg/1920x1080.mp4"
 
 # PP0 YUV420 P010（10-bit）
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "~/qa_cases pp pp0_yuv420_p010 --psnr --ssim --display /usr/data/ffmpeg/1920x1080.mp4"
+    "~/qa_cases pp pp0_yuv420_p010 --psnr --ssim display /usr/data/ffmpeg/1920x1080.mp4"
 
 # PP0 YUV420 NV21 P010（10-bit 变体）
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "~/qa_cases pp pp0_yuv420_nv21_p010 --psnr --ssim --display /usr/data/ffmpeg/1920x1080.mp4"
+    "~/qa_cases pp pp0_yuv420_nv21_p010 --psnr --ssim display /usr/data/ffmpeg/1920x1080.mp4"
 ```
 
 **YUV422 格式测试（3 项）**
@@ -527,15 +527,15 @@ sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
 ```bash
 # PP0 NV16 (YUV422 semi-planar)
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "~/qa_cases pp pp0_nv16 --psnr --ssim --display /usr/data/ffmpeg/1920x1080.mp4"
+    "~/qa_cases pp pp0_nv16 --psnr --ssim display /usr/data/ffmpeg/1920x1080.mp4"
 
 # PP0 NV61 (YUV422 semi-planar, VU interleaved)
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "~/qa_cases pp pp0_nv61 --psnr --ssim --display /usr/data/ffmpeg/1920x1080.mp4"
+    "~/qa_cases pp pp0_nv61 --psnr --ssim display /usr/data/ffmpeg/1920x1080.mp4"
 
 # PP0 I422 (YUV422 planar)
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "~/qa_cases pp pp0_i422 --psnr --ssim --display /usr/data/ffmpeg/1920x1080.mp4"
+    "~/qa_cases pp pp0_i422 --psnr --ssim display /usr/data/ffmpeg/1920x1080.mp4"
 ```
 
 **YUV444 格式测试（2 项）**
@@ -543,11 +543,11 @@ sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
 ```bash
 # PP0 NV24 (YUV444 semi-planar)
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "~/qa_cases pp pp0_nv24 --psnr --ssim --display /usr/data/ffmpeg/1920x1080.mp4"
+    "~/qa_cases pp pp0_nv24 --psnr --ssim display /usr/data/ffmpeg/1920x1080.mp4"
 
 # PP0 I444 (YUV444 planar)
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "~/qa_cases pp pp0_i444 --psnr --ssim --display /usr/data/ffmpeg/1920x1080.mp4"
+    "~/qa_cases pp pp0_i444 --psnr --ssim display /usr/data/ffmpeg/1920x1080.mp4"
 ```
 
 ### 3.2 PP1 RGB 格式测试
@@ -557,43 +557,43 @@ sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
 ```bash
 # PP1 ARGB8888 (8-bit packed)
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "~/qa_cases pp pp1_argb888 --psnr --ssim --display /usr/data/ffmpeg/1920x1080.mp4"
+    "~/qa_cases pp pp1_argb888 --psnr --ssim display /usr/data/ffmpeg/1920x1080.mp4"
 
 # PP1 ABGR8888 (8-bit packed)
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "~/qa_cases pp pp1_abgr888 --psnr --ssim --display /usr/data/ffmpeg/1920x1080.mp4"
+    "~/qa_cases pp pp1_abgr888 --psnr --ssim display /usr/data/ffmpeg/1920x1080.mp4"
 
 # PP1 RGBA8888 (8-bit packed)
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "~/qa_cases pp pp1_rgba888 --psnr --ssim --display /usr/data/ffmpeg/1920x1080.mp4"
+    "~/qa_cases pp pp1_rgba888 --psnr --ssim display /usr/data/ffmpeg/1920x1080.mp4"
 
 # PP1 BGRA8888 (8-bit packed)
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "~/qa_cases pp pp1_bgra888 --psnr --ssim --display /usr/data/ffmpeg/1920x1080.mp4"
+    "~/qa_cases pp pp1_bgra888 --psnr --ssim display /usr/data/ffmpeg/1920x1080.mp4"
 
 # PP1 RGB888 (8-bit packed)
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "~/qa_cases pp pp1_rgb888 --psnr --ssim --display /usr/data/ffmpeg/1920x1080.mp4"
+    "~/qa_cases pp pp1_rgb888 --psnr --ssim display /usr/data/ffmpeg/1920x1080.mp4"
 
 # PP1 BGR888 (8-bit packed)
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "~/qa_cases pp pp1_bgr888 --psnr --ssim --display /usr/data/ffmpeg/1920x1080.mp4"
+    "~/qa_cases pp pp1_bgr888 --psnr --ssim display /usr/data/ffmpeg/1920x1080.mp4"
 
 # PP1 XRGB8888 (8-bit packed, X ignored)
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "~/qa_cases pp pp1_xrgb888 --psnr --ssim --display /usr/data/ffmpeg/1920x1080.mp4"
+    "~/qa_cases pp pp1_xrgb888 --psnr --ssim display /usr/data/ffmpeg/1920x1080.mp4"
 
 # PP1 XBGR8888 (8-bit packed, X ignored)
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "~/qa_cases pp pp1_xbgr888 --psnr --ssim --display /usr/data/ffmpeg/1920x1080.mp4"
+    "~/qa_cases pp pp1_xbgr888 --psnr --ssim display /usr/data/ffmpeg/1920x1080.mp4"
 
 # PP1 RGBX8888 (8-bit packed, X ignored)
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "~/qa_cases pp pp1_rgbx888 --psnr --ssim --display /usr/data/ffmpeg/1920x1080.mp4"
+    "~/qa_cases pp pp1_rgbx888 --psnr --ssim display /usr/data/ffmpeg/1920x1080.mp4"
 
 # PP1 BGRX8888 (8-bit packed, X ignored)
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "~/qa_cases pp pp1_bgrx888 --psnr --ssim --display /usr/data/ffmpeg/1920x1080.mp4"
+    "~/qa_cases pp pp1_bgrx888 --psnr --ssim display /usr/data/ffmpeg/1920x1080.mp4"
 ```
 
 **RGB 8-bit Planar 格式测试（3 项）**
@@ -601,15 +601,15 @@ sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
 ```bash
 # PP1 RGB888 Planar (8-bit planar)
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "~/qa_cases pp pp1_rgb888_planar --psnr --ssim --display /usr/data/ffmpeg/1920x1080.mp4"
+    "~/qa_cases pp pp1_rgb888_planar --psnr --ssim display /usr/data/ffmpeg/1920x1080.mp4"
 
 # PP1 BGR888 Planar (8-bit planar)
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "~/qa_cases pp pp1_bgr888_planar --psnr --ssim --display /usr/data/ffmpeg/1920x1080.mp4"
+    "~/qa_cases pp pp1_bgr888_planar --psnr --ssim display /usr/data/ffmpeg/1920x1080.mp4"
 
 # PP1 GBRP (GBR planar)
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "~/qa_cases pp pp1_gbrp --psnr --ssim --display /usr/data/ffmpeg/1920x1080.mp4"
+    "~/qa_cases pp pp1_gbrp --psnr --ssim display /usr/data/ffmpeg/1920x1080.mp4"
 ```
 
 **RGB 16-bit 格式测试（3 项）**
@@ -617,15 +617,15 @@ sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
 ```bash
 # PP1 R16G16B16 (16-bit per channel)
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "~/qa_cases pp pp1_r16g16b16 --psnr --ssim --display /usr/data/ffmpeg/1920x1080.mp4"
+    "~/qa_cases pp pp1_r16g16b16 --psnr --ssim display /usr/data/ffmpeg/1920x1080.mp4"
 
 # PP1 B16G16R16 (16-bit per channel)
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "~/qa_cases pp pp1_b16g16r16 --psnr --ssim --display /usr/data/ffmpeg/1920x1080.mp4"
+    "~/qa_cases pp pp1_b16g16r16 --psnr --ssim display /usr/data/ffmpeg/1920x1080.mp4"
 
 # PP1 RGB888 Planar 16-bit（16-bit planar 变体）
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "~/qa_cases pp pp1_rgb888_planar_16 --psnr --ssim --display /usr/data/ffmpeg/1920x1080.mp4"
+    "~/qa_cases pp pp1_rgb888_planar_16 --psnr --ssim display /usr/data/ffmpeg/1920x1080.mp4"
 ```
 
 **RGB 10-bit 格式测试（2 项）**
@@ -633,11 +633,11 @@ sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
 ```bash
 # PP1 ARGB2101010 (10-bit per channel)
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "~/qa_cases pp pp1_argb2101010 --psnr --ssim --display /usr/data/ffmpeg/1920x1080.mp4"
+    "~/qa_cases pp pp1_argb2101010 --psnr --ssim display /usr/data/ffmpeg/1920x1080.mp4"
 
 # PP1 ABGR2101010 (10-bit per channel)
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "~/qa_cases pp pp1_abgr2101010 --psnr --ssim --display /usr/data/ffmpeg/1920x1080.mp4"
+    "~/qa_cases pp pp1_abgr2101010 --psnr --ssim display /usr/data/ffmpeg/1920x1080.mp4"
 ```
 
 ### 3.3 PP1 YUV 格式测试
@@ -647,27 +647,27 @@ sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
 ```bash
 # PP1 NV12 (YUV420 8-bit NV12)
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "~/qa_cases pp pp1_nv12 --psnr --ssim --display /usr/data/ffmpeg/1920x1080.mp4"
+    "~/qa_cases pp pp1_nv12 --psnr --ssim display /usr/data/ffmpeg/1920x1080.mp4"
 
 # PP1 NV21 (YUV420 8-bit NV21)
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "~/qa_cases pp pp1_nv21 --psnr --ssim --display /usr/data/ffmpeg/1920x1080.mp4"
+    "~/qa_cases pp pp1_nv21 --psnr --ssim display /usr/data/ffmpeg/1920x1080.mp4"
 
 # PP1 I420 (YUV420 planar)
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "~/qa_cases pp pp1_i420 --psnr --ssim --display /usr/data/ffmpeg/1920x1080.mp4"
+    "~/qa_cases pp pp1_i420 --psnr --ssim display /usr/data/ffmpeg/1920x1080.mp4"
 
 # PP1 YV12 (YUV420 planar, V before U)
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "~/qa_cases pp pp1_yv12 --psnr --ssim --display /usr/data/ffmpeg/1920x1080.mp4"
+    "~/qa_cases pp pp1_yv12 --psnr --ssim display /usr/data/ffmpeg/1920x1080.mp4"
 
 # PP1 YUV420 8-bit NV12（别名测试）
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "~/qa_cases pp pp1_yuv420_8bit_nv12 --psnr --ssim --display /usr/data/ffmpeg/1920x1080.mp4"
+    "~/qa_cases pp pp1_yuv420_8bit_nv12 --psnr --ssim display /usr/data/ffmpeg/1920x1080.mp4"
 
 # PP1 YUV420 8-bit NV21（别名测试）
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "~/qa_cases pp pp1_yuv420_8bit_nv21 --psnr --ssim --display /usr/data/ffmpeg/1920x1080.mp4"
+    "~/qa_cases pp pp1_yuv420_8bit_nv21 --psnr --ssim display /usr/data/ffmpeg/1920x1080.mp4"
 ```
 
 **YUV420 10-bit 格式测试（4 项）**
@@ -675,19 +675,19 @@ sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
 ```bash
 # PP1 P010 (YUV420 10-bit P010)
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "~/qa_cases pp pp1_p010 --psnr --ssim --display /usr/data/ffmpeg/1920x1080.mp4"
+    "~/qa_cases pp pp1_p010 --psnr --ssim display /usr/data/ffmpeg/1920x1080.mp4"
 
 # PP1 YUV420 NV12 P010（10-bit 变体）
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "~/qa_cases pp pp1_yuv420_nv12_p010 --psnr --ssim --display /usr/data/ffmpeg/1920x1080.mp4"
+    "~/qa_cases pp pp1_yuv420_nv12_p010 --psnr --ssim display /usr/data/ffmpeg/1920x1080.mp4"
 
 # PP1 YUV420 P010（10-bit）
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "~/qa_cases pp pp1_yuv420_p010 --psnr --ssim --display /usr/data/ffmpeg/1920x1080.mp4"
+    "~/qa_cases pp pp1_yuv420_p010 --psnr --ssim display /usr/data/ffmpeg/1920x1080.mp4"
 
 # PP1 YUV420 NV21 P010（10-bit 变体）
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "~/qa_cases pp pp1_yuv420_nv21_p010 --psnr --ssim --display /usr/data/ffmpeg/1920x1080.mp4"
+    "~/qa_cases pp pp1_yuv420_nv21_p010 --psnr --ssim display /usr/data/ffmpeg/1920x1080.mp4"
 ```
 
 **YUV422 格式测试（3 项）**
@@ -695,15 +695,15 @@ sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
 ```bash
 # PP1 NV16 (YUV422 semi-planar)
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "~/qa_cases pp pp1_nv16 --psnr --ssim --display /usr/data/ffmpeg/1920x1080.mp4"
+    "~/qa_cases pp pp1_nv16 --psnr --ssim display /usr/data/ffmpeg/1920x1080.mp4"
 
 # PP1 NV61 (YUV422 semi-planar, VU interleaved)
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "~/qa_cases pp pp1_nv61 --psnr --ssim --display /usr/data/ffmpeg/1920x1080.mp4"
+    "~/qa_cases pp pp1_nv61 --psnr --ssim display /usr/data/ffmpeg/1920x1080.mp4"
 
 # PP1 I422 (YUV422 planar)
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "~/qa_cases pp pp1_i422 --psnr --ssim --display /usr/data/ffmpeg/1920x1080.mp4"
+    "~/qa_cases pp pp1_i422 --psnr --ssim display /usr/data/ffmpeg/1920x1080.mp4"
 ```
 
 **YUV444 格式测试（2 项）**
@@ -711,11 +711,11 @@ sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
 ```bash
 # PP1 NV24 (YUV444 semi-planar)
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "~/qa_cases pp pp1_nv24 --psnr --ssim --display /usr/data/ffmpeg/1920x1080.mp4"
+    "~/qa_cases pp pp1_nv24 --psnr --ssim display /usr/data/ffmpeg/1920x1080.mp4"
 
 # PP1 I444 (YUV444 planar)
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "~/qa_cases pp pp1_i444 --psnr --ssim --display /usr/data/ffmpeg/1920x1080.mp4"
+    "~/qa_cases pp pp1_i444 --psnr --ssim display /usr/data/ffmpeg/1920x1080.mp4"
 ```
 
 ### 3.4 Multi-PP 双通道测试
@@ -740,43 +740,43 @@ sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
 ```bash
 # Multi-PP T01: PP0=YUV420 NV12 8-bit, PP1=RGB888
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "~/qa_cases pp multi_pp_t01 --psnr --ssim --display /usr/data/ffmpeg/1920x1080.mp4"
+    "~/qa_cases pp multi_pp_t01 --psnr --ssim display /usr/data/ffmpeg/1920x1080.mp4"
 
 # Multi-PP T02: PP0=YUV420 NV12 8-bit, PP1=ARGB8888
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "~/qa_cases pp multi_pp_t02 --psnr --ssim --display /usr/data/ffmpeg/1920x1080.mp4"
+    "~/qa_cases pp multi_pp_t02 --psnr --ssim display /usr/data/ffmpeg/1920x1080.mp4"
 
 # Multi-PP T03: PP0=YUV420 NV21 8-bit, PP1=BGR888
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "~/qa_cases pp multi_pp_t03 --psnr --ssim --display /usr/data/ffmpeg/1920x1080.mp4"
+    "~/qa_cases pp multi_pp_t03 --psnr --ssim display /usr/data/ffmpeg/1920x1080.mp4"
 
 # Multi-PP T04: PP0=YUV420 NV12 8-bit, PP1=RGB888 (重复验证)
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "~/qa_cases pp multi_pp_t04 --psnr --ssim --display /usr/data/ffmpeg/1920x1080.mp4"
+    "~/qa_cases pp multi_pp_t04 --psnr --ssim display /usr/data/ffmpeg/1920x1080.mp4"
 
 # Multi-PP T05: PP0=YUV420 P010 10-bit, PP1=ARGB2101010 (10-bit RGB)
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "~/qa_cases pp multi_pp_t05 --psnr --ssim --display /usr/data/ffmpeg/1920x1080.mp4"
+    "~/qa_cases pp multi_pp_t05 --psnr --ssim display /usr/data/ffmpeg/1920x1080.mp4"
 
 # Multi-PP T06: PP0=YUV420 P010 10-bit, PP1=RGB161616 (16-bit RGB)
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "~/qa_cases pp multi_pp_t06 --psnr --ssim --display /usr/data/ffmpeg/1920x1080.mp4"
+    "~/qa_cases pp multi_pp_t06 --psnr --ssim display /usr/data/ffmpeg/1920x1080.mp4"
 
 # Multi-PP T07: PP0=YUV420 NV12 8-bit (YUV400模拟), PP1=RGB888
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "~/qa_cases pp multi_pp_t07 --psnr --ssim --display /usr/data/ffmpeg/1920x1080.mp4"
+    "~/qa_cases pp multi_pp_t07 --psnr --ssim display /usr/data/ffmpeg/1920x1080.mp4"
 
 # Multi-PP T09: PP0=YUV420 NV12 8-bit, PP1=RGB888 Planar
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "~/qa_cases pp multi_pp_t09 --psnr --ssim --display /usr/data/ffmpeg/1920x1080.mp4"
+    "~/qa_cases pp multi_pp_t09 --psnr --ssim display /usr/data/ffmpeg/1920x1080.mp4"
 
 # Multi-PP T10: PP0=YUV420 P010 10-bit (Tiled), PP1=ARGB8888
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "~/qa_cases pp multi_pp_t10 --psnr --ssim --display /usr/data/ffmpeg/1920x1080.mp4"
+    "~/qa_cases pp multi_pp_t10 --psnr --ssim display /usr/data/ffmpeg/1920x1080.mp4"
 
 # Multi-PP T11: PP0=YUV420 NV12 8-bit, PP1=YUV420 NV21 8-bit (双YUV输出)
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "~/qa_cases pp multi_pp_t11 --psnr --ssim --display /usr/data/ffmpeg/1920x1080.mp4"
+    "~/qa_cases pp multi_pp_t11 --psnr --ssim display /usr/data/ffmpeg/1920x1080.mp4"
 ```
 
 ### 3.5 Crop/Scale 测试
@@ -795,19 +795,19 @@ sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
 ```bash
 # Crop1: PP0 裁剪 4096x2160 -> 1920x1080 (4K to 1080p)
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "~/qa_cases pp multi_pp_crop1 --psnr --ssim --display /usr/data/ffmpeg/4096x2160.mp4"
+    "~/qa_cases pp multi_pp_crop1 --psnr --ssim display /usr/data/ffmpeg/4096x2160.mp4"
 
 # Crop2: PP0 裁剪 32768x32768 -> 1280x720 (超大分辨率 to 720p)
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "~/qa_cases pp multi_pp_crop2 --psnr --ssim --display /usr/data/ffmpeg/1920x1080.mp4"
+    "~/qa_cases pp multi_pp_crop2 --psnr --ssim display /usr/data/ffmpeg/1920x1080.mp4"
 
 # Crop3: PP1 裁剪 4096x2160 -> 1920x1080 (4K to 1080p, RGB)
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "~/qa_cases pp multi_pp_crop3 --psnr --ssim --display /usr/data/ffmpeg/4096x2160.mp4"
+    "~/qa_cases pp multi_pp_crop3 --psnr --ssim display /usr/data/ffmpeg/4096x2160.mp4"
 
 # Crop4: PP1 裁剪 32768x32768 -> 1280x720 (超大分辨率 to 720p, RGB)
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "~/qa_cases pp multi_pp_crop4 --psnr --ssim --display /usr/data/ffmpeg/1920x1080.mp4"
+    "~/qa_cases pp multi_pp_crop4 --psnr --ssim display /usr/data/ffmpeg/1920x1080.mp4"
 ```
 
 **缩放（Scale）测试（4 项）**
@@ -824,19 +824,19 @@ sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
 ```bash
 # Scale1: PP0 缩放 32768x32768 -> 256x256 (极端缩放)
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "~/qa_cases pp multi_pp_scale1 --psnr --ssim --display /usr/data/ffmpeg/1920x1080.mp4"
+    "~/qa_cases pp multi_pp_scale1 --psnr --ssim display /usr/data/ffmpeg/1920x1080.mp4"
 
 # Scale2: PP1 缩放 4096x2160 -> 128x128 (4K 缩放到小尺寸)
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "~/qa_cases pp multi_pp_scale2 --psnr --ssim --display /usr/data/ffmpeg/4096x2160.mp4"
+    "~/qa_cases pp multi_pp_scale2 --psnr --ssim display /usr/data/ffmpeg/4096x2160.mp4"
 
 # Scale3: 双通道缩放 (PP0+PP1) 32768x32768 -> 256x256
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "~/qa_cases pp multi_pp_scale3 --psnr --ssim --display /usr/data/ffmpeg/1920x1080.mp4"
+    "~/qa_cases pp multi_pp_scale3 --psnr --ssim display /usr/data/ffmpeg/1920x1080.mp4"
 
 # Scale4: 双通道缩放 (PP0+PP1) 4096x2160 -> 128x128
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "~/qa_cases pp multi_pp_scale4 --psnr --ssim --display /usr/data/ffmpeg/4096x2160.mp4"
+    "~/qa_cases pp multi_pp_scale4 --psnr --ssim display /usr/data/ffmpeg/4096x2160.mp4"
 ```
 
 **手动指定裁剪区域测试**
@@ -844,11 +844,11 @@ sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
 ```bash
 # 手动指定裁剪区域 (x,y,w,h)
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "~/qa_cases pp --channel 0 --format nv12 --crop 0,0,1920,1080 --resolution 1920x1080 --psnr --ssim --display /usr/data/ffmpeg/3840x2160.mp4"
+    "~/qa_cases pp --channel 0 --format nv12 --crop 0,0,1920,1080 --resolution 1920x1080 --psnr --ssim display /usr/data/ffmpeg/3840x2160.mp4"
 
 # 裁剪 + 缩放组合
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "~/qa_cases pp --channel 1 --format argb888 --crop 100,100,1720,880 --resolution 1280x720 --psnr --ssim --display /usr/data/ffmpeg/1920x1080.mp4"
+    "~/qa_cases pp --channel 1 --format argb888 --crop 100,100,1720,880 --resolution 1280x720 --psnr --ssim display /usr/data/ffmpeg/1920x1080.mp4"
 ```
 
 ### 3.6 PP 带参数测试
@@ -856,7 +856,7 @@ sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
 ```bash
 # PP 显示输出
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "~/qa_cases pp pp1_argb888 --display /usr/data/ffmpeg/1920x1080.mp4"
+    "~/qa_cases pp pp1_argb888 display /usr/data/ffmpeg/1920x1080.mp4"
 
 # PP 限制帧数
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
@@ -868,7 +868,7 @@ sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
 
 # PP 显示 + 限制帧数
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
-    "~/qa_cases pp pp1_argb888 --display --max-frames 300 /usr/data/ffmpeg/1920x1080.mp4"
+    "~/qa_cases pp pp1_argb888 --max-frames 300 display /usr/data/ffmpeg/1920x1080.mp4"
 
 # PP 详细日志模式（--verbose）
 sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.56.48 \
@@ -1171,7 +1171,7 @@ done
 | `-m, --max-frames <n>`    | 最大帧数 (-1=无限制)                               |
 | `-s, --save <n>`          | 保存帧数 (0=不保存, -1=全部)                         |
 | `-o, --output <path>`     | 输出文件路径                                      |
-| `-d, --display`           | 启用显示输出                                      |
+| `display` (子命令)          | 启用显示输出（作为子命令使用，支持 `--vendor` 等参数）           |
 | `-p, --psnr`              | 启用 PSNR 验证                                  |
 | `-S, --ssim`              | 启用 SSIM 验证                                  |
 | `-P, --min-psnr <n>`      | PSNR 阈值 (默认: 30.0 dB)                       |
@@ -1210,7 +1210,7 @@ done
 | `-s, --color-std <s>`    | 颜色标准 (bt601/bt709/bt2020) |
 | `-o, --output <path>`    | 输出文件路径                    |
 | `-n, --save <n>`         | 保存帧数                      |
-| `-d, --display`          | 启用显示输出                    |
+| `display` (子命令)         | 启用显示输出（作为子命令使用）          |
 | `-m, --max-frames <n>`   | 最大帧数                      |
 | `-v, --verbose`          | 详细日志                      |
 
@@ -1306,7 +1306,7 @@ PASS|SUCCESS|completed|finished
 | `--codec h264`           | `codec: h264` 或 `h264_taco`        | 验证编解码器选择正确   |
 | `--resolution 1920x1080` | `width: 1920, height: 1080`        | 验证分辨率设置正确    |
 | `--max-frames 100`       | `max_frames: 100` 且帧数≤100          | 验证帧数限制生效     |
-| `--display`              | `display: enabled` 或 `framebuffer` | 验证显示输出启用     |
+| `display` (子命令)         | `display: enabled` 或 `framebuffer` | 验证显示输出启用     |
 | `--psnr`                 | `PSNR` 计算结果                        | 验证 PSNR 验证启用 |
 | `--ssim`                 | `SSIM` 计算结果                        | 验证 SSIM 验证启用 |
 | `--save 10`              | `saved 10 frames` 或输出文件存在          | 验证帧保存功能      |

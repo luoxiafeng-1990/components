@@ -1,13 +1,23 @@
 #include "vendor/taco/display/DisplayDeviceFactory.hpp"
-#include "vendor/taco/display/TacoVODisplayDevice.hpp"
-#include "vendor/taco/display/SharedFramebufferDevice.hpp"
+#include "vendor/taco/display/TacoProDisplayDevice.hpp"
+#include "vendor/taco/display/TacoDisplayDevice.hpp"
 
-std::unique_ptr<IDisplayDevice> DisplayDeviceFactory::create(const DisplayType& config) {
-    switch (config.mode) {
-        case DisplayType::TACO_VO:
-            return std::make_unique<TacoVODisplayDevice>(config.taco_vo);
-        case DisplayType::SHARED_FB:
-        default:
-            return std::make_unique<SharedFramebufferDevice>(config.taco_vo);
+#include <cstring>
+#include <stdexcept>
+#include <string>
+
+std::unique_ptr<IDisplayDevice> DisplayDeviceFactory::create(const IDisplayVendorExtension& vendor) {
+    const char* k = vendor.kind();
+
+    if (std::strcmp(k, "tacopro") == 0) {
+        const auto& ext = static_cast<const TacoProDisplayExtension&>(vendor);
+        return std::make_unique<TacoProDisplayDevice>(ext);
     }
+
+    if (std::strcmp(k, "taco") == 0) {
+        const auto& ext = static_cast<const TacoDisplayExtension&>(vendor);
+        return std::make_unique<TacoDisplayDevice>(ext);
+    }
+
+    throw std::invalid_argument(std::string("DisplayDeviceFactory: unknown vendor '") + k + "'");
 }
