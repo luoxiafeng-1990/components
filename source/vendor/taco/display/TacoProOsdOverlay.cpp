@@ -1,4 +1,4 @@
-#include "vendor/taco/display/OsdOverlay.hpp"
+#include "vendor/taco/display/TacoProOsdOverlay.hpp"
 #include "common/Logger.hpp"
 
 #include <fcntl.h>
@@ -43,7 +43,7 @@ static void write_sysfs(const char* path, const char* value) {
 // 构造 / 析构
 // ============================================================
 
-OsdOverlay::OsdOverlay(int screen_width, int screen_height, int max_channels)
+TacoProOsdOverlay::TacoProOsdOverlay(int screen_width, int screen_height, int max_channels)
     : screen_width_(screen_width)
     , screen_height_(screen_height)
     , max_channels_(max_channels)
@@ -52,7 +52,7 @@ OsdOverlay::OsdOverlay(int screen_width, int screen_height, int max_channels)
     channels_.resize(max_channels);
 }
 
-OsdOverlay::~OsdOverlay() {
+TacoProOsdOverlay::~TacoProOsdOverlay() {
     shutdown();
 }
 
@@ -60,7 +60,7 @@ OsdOverlay::~OsdOverlay() {
 // 初始化 / 关闭
 // ============================================================
 
-bool OsdOverlay::init(const Config& config) {
+bool TacoProOsdOverlay::init(const Config& config) {
     config_ = config;
     frame_size_ = static_cast<size_t>(screen_width_) * screen_height_ * 4;
 
@@ -82,7 +82,7 @@ bool OsdOverlay::init(const Config& config) {
     return true;
 }
 
-void OsdOverlay::shutdown() {
+void TacoProOsdOverlay::shutdown() {
     if (timer_id_ != 0) {
         timer_.cancel(timer_id_);
         timer_id_ = 0;
@@ -118,7 +118,7 @@ void OsdOverlay::shutdown() {
 // 打开 fb 设备（查找 tpsfb0 对应的 fb 编号 +1 即为 overlay1）
 // ============================================================
 
-bool OsdOverlay::openFbDevice() {
+bool TacoProOsdOverlay::openFbDevice() {
     FILE* fp = fopen(PROC_FB, "r");
     if (!fp) {
         LOG4CPLUS_ERROR_FMT(logger_, "Cannot open %s: %s", PROC_FB, strerror(errno));
@@ -173,12 +173,12 @@ bool OsdOverlay::openFbDevice() {
 // BufferPool 创建（TACO 分配由 FramebufferAllocator 内部完成）
 // ============================================================
 
-bool OsdOverlay::createBufferPool() {
+bool TacoProOsdOverlay::createBufferPool() {
     allocator_ = std::make_unique<BufferAllocatorFacade>(
         BufferAllocatorFactory::AllocatorType::FRAMEBUFFER);
 
     pool_id_ = allocator_->allocatePoolWithBuffers(
-        BUFFER_COUNT, frame_size_, "OsdOverlay_fb", "Display");
+        BUFFER_COUNT, frame_size_, "TacoProOsdOverlay_fb", "Display");
     if (pool_id_ == 0) {
         LOG4CPLUS_ERROR(logger_, "Failed to create OSD BufferPool");
         allocator_.reset();
@@ -192,7 +192,7 @@ bool OsdOverlay::createBufferPool() {
 // DSS overlay1 配置
 // ============================================================
 
-bool OsdOverlay::setupDssOverlay1() {
+bool TacoProOsdOverlay::setupDssOverlay1() {
     write_sysfs(OVL1_PIX_FMT_PATH, "argb8888");
     write_sysfs(LCD_ALPHA_BLEND_PATH, "0");
     write_sysfs(LCD_TRANS_KEY_VALUE_PATH, "0");
@@ -226,7 +226,7 @@ bool OsdOverlay::setupDssOverlay1() {
 // FreeType 初始化
 // ============================================================
 
-bool OsdOverlay::initFreeType(const Config& config) {
+bool TacoProOsdOverlay::initFreeType(const Config& config) {
     FT_Error err = FT_Init_FreeType(&ft_lib_);
     if (err) {
         LOG4CPLUS_ERROR_FMT(logger_, "FT_Init_FreeType failed: %d", err);
@@ -254,7 +254,7 @@ bool OsdOverlay::initFreeType(const Config& config) {
     return true;
 }
 
-void OsdOverlay::cleanupFreeType() {
+void TacoProOsdOverlay::cleanupFreeType() {
     if (ft_face_) { FT_Done_Face(ft_face_); ft_face_ = nullptr; }
     if (ft_lib_) { FT_Done_FreeType(ft_lib_); ft_lib_ = nullptr; }
 }
@@ -263,7 +263,7 @@ void OsdOverlay::cleanupFreeType() {
 // 通道管理
 // ============================================================
 
-void OsdOverlay::registerChannel(int channel_id, int x, int y, int w, int h) {
+void TacoProOsdOverlay::registerChannel(int channel_id, int x, int y, int w, int h) {
     std::lock_guard<std::mutex> lock(channel_mutex_);
     if (channel_id < 0) return;
     if (channel_id >= static_cast<int>(channels_.size())) {
@@ -284,14 +284,14 @@ void OsdOverlay::registerChannel(int channel_id, int x, int y, int w, int h) {
         channel_id, x, y, w, h);
 }
 
-void OsdOverlay::unregisterChannel(int channel_id) {
+void TacoProOsdOverlay::unregisterChannel(int channel_id) {
     std::lock_guard<std::mutex> lock(channel_mutex_);
     if (channel_id >= 0 && channel_id < static_cast<int>(channels_.size())) {
         channels_[channel_id].active = false;
     }
 }
 
-void OsdOverlay::recordFrame(int channel_id) {
+void TacoProOsdOverlay::recordFrame(int channel_id) {
     if (channel_id >= 0 && channel_id < static_cast<int>(channels_.size())) {
         channels_[channel_id].frame_count.fetch_add(1, std::memory_order_relaxed);
     }
@@ -301,7 +301,7 @@ void OsdOverlay::recordFrame(int channel_id) {
 // 定时器回调
 // ============================================================
 
-void OsdOverlay::onTimerTick() {
+void TacoProOsdOverlay::onTimerTick() {
     int fps = config_.refresh_fps > 0 ? config_.refresh_fps : 1;
 
     {
@@ -321,7 +321,7 @@ void OsdOverlay::onTimerTick() {
 // OSD 渲染（acquireFree → 渲染 → submitFilled → acquireFilled → pan → releaseFilled旧页）
 // ============================================================
 
-void OsdOverlay::renderOsd() {
+void TacoProOsdOverlay::renderOsd() {
     auto pool = BufferPoolRegistry::getInstance().getPool(pool_id_).lock();
     if (!pool) return;
 
@@ -378,7 +378,7 @@ void OsdOverlay::renderOsd() {
 // 绘制函数
 // ============================================================
 
-void OsdOverlay::drawText(int x, int y, const std::string& text, uint32_t color, uint32_t* buf) {
+void TacoProOsdOverlay::drawText(int x, int y, const std::string& text, uint32_t color, uint32_t* buf) {
     if (!ft_face_ || !buf) return;
 
     int pen_x = x;
@@ -394,7 +394,7 @@ void OsdOverlay::drawText(int x, int y, const std::string& text, uint32_t color,
     }
 }
 
-void OsdOverlay::drawCharGlyph(int base_x, int base_y, FT_GlyphSlot glyph, uint32_t color, uint32_t* buf) {
+void TacoProOsdOverlay::drawCharGlyph(int base_x, int base_y, FT_GlyphSlot glyph, uint32_t color, uint32_t* buf) {
     if (!buf) return;
 
     FT_Bitmap& bmp = glyph->bitmap;

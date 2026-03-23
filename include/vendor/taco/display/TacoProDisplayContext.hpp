@@ -30,7 +30,7 @@ extern "C" {
 enum class ViewType { GRID, MAIN_SIDEBAR };
 
 struct tpsfb_dma_info;
-class OsdOverlay;
+class TacoProOsdOverlay;
 
 /**
  * TacoProDisplayContext - 多通道共享显示上下文（单例模式）
@@ -205,7 +205,7 @@ private:
     static constexpr int kMaxConsecutiveMisses = 90;
 
     // === OSD 叠加（可选，图形层 overlay1）===
-    std::unique_ptr<OsdOverlay> osd_;
+    std::unique_ptr<TacoProOsdOverlay> osd_;
 
     // === 单例 ===
     static std::mutex s_acquire_mutex_;

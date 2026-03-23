@@ -329,7 +329,7 @@ std::vector<WorkerConfig> SavePlugin::buildFramePipeline(const WorkerConfig& sha
         WorkerConfig config;
         if (!use_hardware_) {
             config = common::WorkerConfigFactory::createSoftwareDecode(
-                shared_config.data_source.path, width_, height_);
+                shared_config.data_source.path);
         } else if (static_cast<int>(f) >= 1000) {
             config = common::WorkerConfigFactory::createPP1RgbConfig(
                 shared_config.data_source.path, f, width_, height_);

@@ -136,7 +136,7 @@ void VdecPlugin::registerOptions(CLI::App& app) {
     app.add_flag("-l,--list", show_list_, "列出所有预定义测试");
     app.add_option("-f,--file", input_path_, "视频文件路径");
     app.add_option("-r,--rtsp", input_path_, "RTSP URL");
-    app.add_option("-c,--codec", params_.codec, "编解码格式 (h264|h265|mjpeg)");
+    app.add_option("-c,--codec", params_.codec, "编解码格式 (h264|h265|mjpeg|h264_taco|hevc_nvidia|...)");
     app.add_option("-D,--decoder", decoder_str_, "解码方式 (hw|sw, 默认: hw)");
     app.add_option("-W,--width", params_.width, "分辨率宽度");
     app.add_option("-H,--height", params_.height, "分辨率高度");
@@ -270,7 +270,7 @@ std::vector<WorkerConfig> VdecPlugin::buildPipelineConfigs(const WorkerConfig& s
     // COMPARE 模式：hw + sw 两组 config
     if (shared_config.consumer_type.compare.enable_psnr || shared_config.consumer_type.compare.enable_ssim) {
         auto hw_config = common::WorkerConfigFactory::createDecode(
-            shared_config.data_source.path, params.codec, params.width, params.height);
+            shared_config.data_source.path, params.codec);
         hw_config.consumer_type = shared_config.consumer_type;
         hw_config.consumer_type.performance.target_fps = params.fps;
         hw_config.data_source = DataSourceConfigBuilder(hw_config.data_source)
@@ -279,7 +279,7 @@ std::vector<WorkerConfig> VdecPlugin::buildPipelineConfigs(const WorkerConfig& s
             .build();
 
         auto sw_config = common::WorkerConfigFactory::createSoftwareDecode(
-            shared_config.data_source.path, params.width, params.height);
+            shared_config.data_source.path);
         sw_config.consumer_type.performance.target_fps = params.fps;
         sw_config.consumer_type.max_frames = shared_config.consumer_type.max_frames;
         sw_config.data_source = DataSourceConfigBuilder(sw_config.data_source)
@@ -304,10 +304,10 @@ std::vector<WorkerConfig> VdecPlugin::buildPipelineConfigs(const WorkerConfig& s
             WorkerConfig cfg;
             if (params.use_hardware) {
                 cfg = common::WorkerConfigFactory::createDecode(
-                    base.data_source.path, params.codec, params.width, params.height);
+                    base.data_source.path, params.codec);
             } else {
                 cfg = common::WorkerConfigFactory::createSoftwareDecode(
-                    base.data_source.path, params.width, params.height);
+                    base.data_source.path);
             }
             cfg.consumer_type = base.consumer_type;
             cfg.consumer_type.performance.target_fps = params.fps;
@@ -324,10 +324,10 @@ std::vector<WorkerConfig> VdecPlugin::buildPipelineConfigs(const WorkerConfig& s
     WorkerConfig full_config;
     if (params.use_hardware) {
         full_config = common::WorkerConfigFactory::createDecode(
-            shared_config.data_source.path, params.codec, params.width, params.height);
+            shared_config.data_source.path, params.codec);
     } else {
         full_config = common::WorkerConfigFactory::createSoftwareDecode(
-            shared_config.data_source.path, params.width, params.height);
+            shared_config.data_source.path);
     }
     full_config.consumer_type = shared_config.consumer_type;
     full_config.consumer_type.performance.target_fps = params.fps;
@@ -345,10 +345,10 @@ std::vector<WorkerConfig> VdecPlugin::buildPipelineConfigs(const WorkerConfig& s
             WorkerConfig cfg;
             if (params.use_hardware) {
                 cfg = common::WorkerConfigFactory::createDecode(
-                    shared_config.data_source.path, params.codec, params.width, params.height);
+                    shared_config.data_source.path, params.codec);
             } else {
                 cfg = common::WorkerConfigFactory::createSoftwareDecode(
-                    shared_config.data_source.path, params.width, params.height);
+                    shared_config.data_source.path);
             }
             cfg.consumer_type = full_config.consumer_type;
             cfg.consumer_type.performance.target_fps = params.fps;

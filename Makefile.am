@@ -8,7 +8,7 @@ libcomponents_la_SOURCES = \
     source/vendor/taco/display/TacoDisplayContext.cpp \
     source/vendor/taco/display/TacoDisplayDevice.cpp \
     source/vendor/taco/display/TacoDisplayExtension.cpp \
-    source/vendor/taco/display/OsdOverlay.cpp \
+    source/vendor/taco/display/TacoProOsdOverlay.cpp \
     source/vendor/taco/display/TacoProDisplayContext.cpp \
     source/vendor/taco/display/TacoProDisplayDevice.cpp \
     source/vendor/taco/display/TacoProDisplayExtension.cpp \

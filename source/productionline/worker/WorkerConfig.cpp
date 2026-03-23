@@ -357,11 +357,17 @@ DecoderConfigBuilder& DecoderConfigBuilder::setDecodeThreads(int threads) {
     return *this;
 }
 
-DecoderConfigBuilder& DecoderConfigBuilder::useTaco(std::string_view codec, const TacoConfig& taco_config) {
-    decoder_config_.name = std::string(codec) + "_taco";
+DecoderConfigBuilder& DecoderConfigBuilder::useVendor(
+        std::string_view codec,
+        std::unique_ptr<IDecoderVendorExtension> extension) {
+    decoder_config_.name = std::string(codec) + "_" + extension->kind();
     decoder_config_.enable_hardware = true;
-    decoder_config_.vendor = makeTacoDecoderExtension(taco_config);
+    decoder_config_.vendor = std::move(extension);
     return *this;
+}
+
+DecoderConfigBuilder& DecoderConfigBuilder::useTaco(std::string_view codec, const TacoConfig& taco_config) {
+    return useVendor(codec, makeTacoDecoderExtension(taco_config));
 }
 
 DecoderConfigBuilder& DecoderConfigBuilder::useSoftware() {

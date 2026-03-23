@@ -988,6 +988,24 @@ public:
      * DecoderConfigBuilder().useTaco("h264", tacoConfig).build()
      * @endcode
      */
+    /**
+     * @brief 通用厂商硬件解码
+     *
+     * 接受任意厂商的 IDecoderVendorExtension，自动设置解码器名称为
+     * codec + "_" + extension->kind()（ffmpeg 标准命名）。
+     *
+     * @param codec 编解码器类型（如 "h264"、"hevc"）
+     * @param extension 厂商扩展配置（所有权转移）
+     *
+     * 示例：
+     * @code
+     * auto ext = makeTacoDecoderExtension(tacoConfig);
+     * DecoderConfigBuilder().useVendor("h264", std::move(ext)).build()
+     * @endcode
+     */
+    DecoderConfigBuilder& useVendor(std::string_view codec,
+                                     std::unique_ptr<IDecoderVendorExtension> extension);
+
     DecoderConfigBuilder& useTaco(std::string_view codec, const TacoConfig& taco_config);
     
     /**

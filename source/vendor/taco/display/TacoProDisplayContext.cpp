@@ -1,5 +1,5 @@
 #include "vendor/taco/display/TacoProDisplayContext.hpp"
-#include "vendor/taco/display/OsdOverlay.hpp"
+#include "vendor/taco/display/TacoProOsdOverlay.hpp"
 #include "common/Logger.hpp"
 
 #include <fcntl.h>
@@ -197,8 +197,8 @@ bool TacoProDisplayContext::open() {
     }
 
     if (config_.osd_enable) {
-        osd_ = std::make_unique<OsdOverlay>(screen_width_, screen_height_, 64);
-        OsdOverlay::Config osd_cfg;
+        osd_ = std::make_unique<TacoProOsdOverlay>(screen_width_, screen_height_, 64);
+        TacoProOsdOverlay::Config osd_cfg;
         osd_cfg.refresh_fps = config_.osd_fps;
         osd_cfg.font_path   = config_.osd_font_path;
         osd_cfg.font_size   = config_.osd_font_size;

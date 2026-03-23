@@ -40,7 +40,7 @@ OSD 基于 DSS overlay1（`/dev/fb2`），使用 FreeType 渲染文字，叠加�
 | 文件 | 修改内容 |
 |------|----------|
 | `tps-ea65xx-mes20-8a-v3.dts` | overlay-1 分辨率改为 1920×1080 |
-| `OsdOverlay.cpp` / `setupDssOverlay1()` | alpha blending → colorkey 方案 |
+| `TacoProOsdOverlay.cpp` / `setupDssOverlay1()` | alpha blending → colorkey 方案 |
 
 ---
 
@@ -85,8 +85,8 @@ OSD 基于 DSS overlay1（`/dev/fb2`），使用 FreeType 渲染文字，叠加�
 
 | 文件 | 修改内容 |
 |------|----------|
-| `OsdOverlay.hpp` | 添加 BufferPool 成员，移除 shadow buffer |
-| `OsdOverlay.cpp` | `init()` 中创建 BufferPool；`renderOsd()` 改为 acquireFree → 渲染 → releaseFilled → FBIOPAN |
+| `TacoProOsdOverlay.hpp` | 添加 BufferPool 成员，移除 shadow buffer |
+| `TacoProOsdOverlay.cpp` | `init()` 中创建 BufferPool；`renderOsd()` 改为 acquireFree → 渲染 → releaseFilled → FBIOPAN |
 
 ---
 
@@ -135,7 +135,7 @@ if (f) { fprintf(f, "0"); fclose(f); }
 
 ### 根因
 
-`OsdOverlay::setupDssOverlay1()` 中的执行顺序存在**竞态条件**：
+`TacoProOsdOverlay::setupDssOverlay1()` 中的执行顺序存在**竞态条件**：
 
 ```
 原始顺序（有 bug）：
@@ -163,7 +163,7 @@ if (f) { fprintf(f, "0"); fclose(f); }
 
 | 文件 | 修改内容 |
 |------|----------|
-| `OsdOverlay.cpp` / `setupDssOverlay1()` | 将 `ioctl(SET_DMA_INFO)` 移到 `enabled=1` 之前 |
+| `TacoProOsdOverlay.cpp` / `setupDssOverlay1()` | 将 `ioctl(SET_DMA_INFO)` 移到 `enabled=1` 之前 |
 
 ---
 

@@ -8,91 +8,160 @@
  * - 不定义新的配置结构，直接返回 WorkerConfig
  * - 提供常用配置的快捷创建方法
  * - 复用现有的 Builder 模式
+ * - 职责分离：解码工厂只管 DataSource + Decoder + Global，
+ *   显示配置由 DisplayPlugin 负责
  * 
- * @version 3.1
+ * 厂商扩展：
+ * - 新增厂商只需在 vendorDecodeBuilders() 中注册一行
+ * - codec 参数支持 ffmpeg 标准命名（如 h264_taco, hevc_nvidia）
+ * 
+ * @version 4.1
  */
 
 #ifndef WORKER_CONFIG_FACTORY_HPP
 #define WORKER_CONFIG_FACTORY_HPP
 
 #include "productionline/worker/WorkerConfig.hpp"
+#include "vendor/contracts/DecoderVendorExtension.hpp"
+#include "vendor/taco/decode/TacoDecoderExtension.hpp"
+
+#include <functional>
+#include <memory>
+#include <stdexcept>
 #include <string>
+#include <unordered_map>
 
 namespace test {
 namespace common {
+
+/**
+ * @brief 解码器名称解析结果
+ *
+ * 将 ffmpeg 风格的解码器名称（如 "h264_taco"）拆分为 codec 和 vendor。
+ */
+struct DecoderSpec {
+    std::string codec;   ///< 编解码格式：h264, hevc, mjpeg
+    std::string vendor;  ///< 厂商标识：taco, nvidia 等；空串表示软件解码
+};
 
 /**
  * @brief WorkerConfig 快捷工厂
  * 
  * 使用示例：
  * @code
- * // 创建 H264 硬件解码配置
- * auto config = WorkerConfigFactory::createH264Decode("/path/to/video.mp4");
+ * // 默认厂商（taco）
+ * auto config = WorkerConfigFactory::createDecode("/path/to/video.mp4", "h264");
  * 
- * // 创建带测试参数的配置
- * auto config = WorkerConfigFactory::createH264Decode("/path/to/video.mp4")
- *     ConsumerTypeConfigBuilder().setConsumerMaxFrames(300).build()  // 并入 setConsumerTypeConfig
- *     .setSaveFrames(-1)
- *     .setTargetFps(30.0);
+ * // 显式指定厂商（ffmpeg 风格）
+ * auto config = WorkerConfigFactory::createDecode("/path/to/video.mp4", "h264_nvidia");
+ * 
+ * // 软件解码
+ * auto config = WorkerConfigFactory::createDecode("/path/to/video.mp4", "software");
  * @endcode
  */
 class WorkerConfigFactory {
 public:
+
     // ========================================
-    // 视频解码配置
+    // 厂商扩展注册
     // ========================================
-    
+
+    using VendorExtBuilder = std::function<std::unique_ptr<IDecoderVendorExtension>()>;
+
     /**
-     * @brief 创建 H264 硬件解码配置
-     * 
+     * @brief 厂商解码器扩展构建分发表
+     *
+     * 每个厂商注册一个 lambda，负责创建"基础解码"用的 VendorExtension。
+     * 新增厂商只需在此 map 中加一行。
+     */
+    static const std::unordered_map<std::string, VendorExtBuilder>& vendorDecodeBuilders() {
+        static const std::unordered_map<std::string, VendorExtBuilder> map = {
+            {"taco", []() -> std::unique_ptr<IDecoderVendorExtension> {
+                auto taco = TacoConfigBuilder().setChannels(true, false).build();
+                return makeTacoDecoderExtension(taco);
+            }},
+        };
+        return map;
+    }
+
+    // ========================================
+    // 解码器名称解析
+    // ========================================
+
+    /**
+     * @brief 解析 ffmpeg 风格解码器名称
+     *
+     * | 输入            | 结果                          |
+     * |-----------------|-------------------------------|
+     * | "h264"          | {codec: "h264", vendor: "taco"} (默认厂商) |
+     * | "h264_taco"     | {codec: "h264", vendor: "taco"} |
+     * | "hevc_nvidia"   | {codec: "hevc", vendor: "nvidia"} |
+     * | "software"/"sw" | {codec: "",     vendor: ""}     |
+     */
+    static DecoderSpec parseDecoderName(const std::string& decoder) {
+        if (decoder == "software" || decoder == "sw") {
+            return {"", ""};
+        }
+
+        static const std::unordered_map<std::string, std::string> aliases = {
+            {"avc", "h264"},   {"h264", "h264"},
+            {"hevc", "h265"},  {"h265", "h265"},
+            {"mjpeg", "mjpeg"},{"jpeg", "mjpeg"},
+        };
+
+        auto pos = decoder.rfind('_');
+        if (pos != std::string::npos) {
+            std::string raw_codec = decoder.substr(0, pos);
+            std::string vendor    = decoder.substr(pos + 1);
+
+            auto it = aliases.find(raw_codec);
+            return {it != aliases.end() ? it->second : raw_codec, vendor};
+        }
+
+        auto it = aliases.find(decoder);
+        return {it != aliases.end() ? it->second : decoder, "taco"};
+    }
+
+    // ========================================
+    // 通用解码配置（不含 Display，职责分离）
+    // ========================================
+
+    /**
+     * @brief 创建通用解码配置
+     *
+     * 仅设置 DataSource + Decoder + Global，不设置 Display 配置。
+     * 显示配置由 DisplayPlugin 独立负责。
+     *
      * @param path 视频文件路径或 RTSP URL
-     * @param width 显示宽度（默认 1920）
-     * @param height 显示高度（默认 1080）
-     * @return WorkerConfig 配置对象
+     * @param decoder 解码器名称 (h264, h264_taco, hevc_nvidia, software)
      */
-    static WorkerConfig createH264Decode(
+    static WorkerConfig createDecode(
         const std::string& path,
-        int width = 1920,
-        int height = 1080
+        const std::string& decoder
     ) {
-        auto taco = TacoConfigBuilder()
-            .setChannels(true, false)
-            .build();
-        
-        return WorkerConfigBuilder()
-            .setDataSourceConfig(
-                DataSourceConfigBuilder()
-                    .setPath(path)
-                    .setBufferCount(isRtspUrl(path) ? 8 : 128)
-                    .build()
-            )
-            .setDisplayConfig(
-                DisplayConfigBuilder()
-                    .setDisplayResolution(width, height)
-                    .setBitsPerPixel(32)
-                    .build()
-            )
-            .setDecoderConfig(
-                DecoderConfigBuilder()
-                    .useTaco("h264", taco)
-                    .build()
-            )
-            .setGlobalConfig(WorkerGlobalConfigBuilder().setWorkerType(WorkerType::FFMPEG_DECODE).build())
-            .build();
+        auto spec = parseDecoderName(decoder);
+
+        if (spec.vendor.empty()) {
+            return createSoftwareDecode(path);
+        }
+
+        return createHardwareDecode(path, spec);
     }
-    
+
     /**
-     * @brief 创建 H265/HEVC 硬件解码配置
+     * @brief 创建硬件解码配置（通用，厂商由 DecoderSpec 决定）
      */
-    static WorkerConfig createH265Decode(
+    static WorkerConfig createHardwareDecode(
         const std::string& path,
-        int width = 1920,
-        int height = 1080
+        const DecoderSpec& spec
     ) {
-        auto taco = TacoConfigBuilder()
-            .setChannels(true, false)
-            .build();
-        
+        const auto& builders = vendorDecodeBuilders();
+        auto it = builders.find(spec.vendor);
+        if (it == builders.end()) {
+            throw std::invalid_argument(
+                "WorkerConfigFactory: unknown decoder vendor '" + spec.vendor + "'");
+        }
+
         return WorkerConfigBuilder()
             .setDataSourceConfig(
                 DataSourceConfigBuilder()
@@ -100,74 +169,40 @@ public:
                     .setBufferCount(isRtspUrl(path) ? 8 : 128)
                     .build()
             )
-            .setDisplayConfig(
-                DisplayConfigBuilder()
-                    .setDisplayResolution(width, height)
-                    .setBitsPerPixel(32)
-                    .build()
-            )
             .setDecoderConfig(
                 DecoderConfigBuilder()
-                    .useTaco("hevc", taco)
+                    .useVendor(spec.codec, it->second())
                     .build()
             )
             .setGlobalConfig(WorkerGlobalConfigBuilder().setWorkerType(WorkerType::FFMPEG_DECODE).build())
             .build();
     }
-    
-    /**
-     * @brief 创建 MJPEG 硬件解码配置
-     */
-    static WorkerConfig createMjpegDecode(
-        const std::string& path,
-        int width = 1920,
-        int height = 1080
-    ) {
-        auto taco = TacoConfigBuilder()
-            .setChannels(true, false)
-            .build();
-        
-        return WorkerConfigBuilder()
-            .setDataSourceConfig(
-                DataSourceConfigBuilder()
-                    .setPath(path)
-                    .setBufferCount(isRtspUrl(path) ? 8 : 128)
-                    .build()
-            )
-            .setDisplayConfig(
-                DisplayConfigBuilder()
-                    .setDisplayResolution(width, height)
-                    .setBitsPerPixel(32)
-                    .build()
-            )
-            .setDecoderConfig(
-                DecoderConfigBuilder()
-                    .useTaco("mjpeg", taco)
-                    .build()
-            )
-            .setGlobalConfig(WorkerGlobalConfigBuilder().setWorkerType(WorkerType::FFMPEG_DECODE).build())
-            .build();
+
+    // ========================================
+    // 快捷方法（向后兼容，委托给 createHardwareDecode）
+    // ========================================
+
+    static WorkerConfig createH264Decode(const std::string& path) {
+        return createHardwareDecode(path, {"h264", "taco"});
     }
-    
+
+    static WorkerConfig createH265Decode(const std::string& path) {
+        return createHardwareDecode(path, {"h265", "taco"});
+    }
+
+    static WorkerConfig createMjpegDecode(const std::string& path) {
+        return createHardwareDecode(path, {"mjpeg", "taco"});
+    }
+
     /**
      * @brief 创建软件解码配置
      */
-    static WorkerConfig createSoftwareDecode(
-        const std::string& path,
-        int width = 1920,
-        int height = 1080
-    ) {
+    static WorkerConfig createSoftwareDecode(const std::string& path) {
         return WorkerConfigBuilder()
             .setDataSourceConfig(
                 DataSourceConfigBuilder()
                     .setPath(path)
                     .setBufferCount(128)
-                    .build()
-            )
-            .setDisplayConfig(
-                DisplayConfigBuilder()
-                    .setDisplayResolution(width, height)
-                    .setBitsPerPixel(32)
                     .build()
             )
             .setDecoderConfig(
@@ -178,58 +213,12 @@ public:
             .setGlobalConfig(WorkerGlobalConfigBuilder().setWorkerType(WorkerType::FFMPEG_DECODE).build())
             .build();
     }
-    
-    /**
-     * @brief 创建通用解码配置（根据解码器名称）
-     * 
-     * @param path 视频路径
-     * @param decoder 解码器名称 (h264_taco, hevc_taco, mjpeg_taco, software)
-     * @param width 显示宽度
-     * @param height 显示高度
-     */
-    static WorkerConfig createDecode(
-        const std::string& path,
-        const std::string& decoder,
-        int width = 1920,
-        int height = 1080
-    ) {
-        if (decoder == "software" || decoder == "sw") {
-            return createSoftwareDecode(path, width, height);
-        }
-        
-        // 解析解码器名称: codec_taco -> codec
-        std::string codec = decoder;
-        size_t pos = decoder.find("_taco");
-        if (pos != std::string::npos) {
-            codec = decoder.substr(0, pos);
-        }
-        
-        // 映射常见名称
-        if (codec == "h264" || codec == "avc") {
-            return createH264Decode(path, width, height);
-        } else if (codec == "h265" || codec == "hevc") {
-            return createH265Decode(path, width, height);
-        } else if (codec == "mjpeg" || codec == "jpeg") {
-            return createMjpegDecode(path, width, height);
-        }
-        
-        // 默认 H264
-        return createH264Decode(path, width, height);
-    }
-    
+
     // ========================================
     // PP（后处理）配置
+    // PP 的 width/height 是输出分辨率，属于解码后处理范畴
     // ========================================
     
-    /**
-     * @brief 创建 PP0（通道0）YUV 格式配置
-     * 
-     * @param path 视频路径
-     * @param format YUV 输出格式
-     * @param width 输出宽度
-     * @param height 输出高度
-     * @param color_std 颜色标准
-     */
     static WorkerConfig createPP0YuvConfig(
         const std::string& path,
         OutputFormat format,
@@ -250,12 +239,6 @@ public:
                     .setBufferCount(128)
                     .build()
             )
-            .setDisplayConfig(
-                DisplayConfigBuilder()
-                    .setDisplayResolution(width, height)
-                    .setBitsPerPixel(32)
-                    .build()
-            )
             .setDecoderConfig(
                 DecoderConfigBuilder()
                     .useTaco("h264", taco)
@@ -265,15 +248,6 @@ public:
             .build();
     }
     
-    /**
-     * @brief 创建 PP1（通道1）RGB 格式配置
-     * 
-     * @param path 视频路径
-     * @param format RGB 输出格式
-     * @param width 输出宽度
-     * @param height 输出高度
-     * @param color_std 颜色标准
-     */
     static WorkerConfig createPP1RgbConfig(
         const std::string& path,
         OutputFormat format,
@@ -294,12 +268,6 @@ public:
                     .setBufferCount(128)
                     .build()
             )
-            .setDisplayConfig(
-                DisplayConfigBuilder()
-                    .setDisplayResolution(width, height)
-                    .setBitsPerPixel(32)
-                    .build()
-            )
             .setDecoderConfig(
                 DecoderConfigBuilder()
                     .useTaco("h264", taco)
@@ -309,9 +277,6 @@ public:
             .build();
     }
     
-    /**
-     * @brief 创建 PP1（通道1）YUV 格式配置
-     */
     static WorkerConfig createPP1YuvConfig(
         const std::string& path,
         OutputFormat format,
@@ -332,12 +297,6 @@ public:
                     .setBufferCount(128)
                     .build()
             )
-            .setDisplayConfig(
-                DisplayConfigBuilder()
-                    .setDisplayResolution(width, height)
-                    .setBitsPerPixel(32)
-                    .build()
-            )
             .setDecoderConfig(
                 DecoderConfigBuilder()
                     .useTaco("h264", taco)
@@ -347,15 +306,6 @@ public:
             .build();
     }
     
-    /**
-     * @brief 创建 Multi-PP 配置（PP0 + PP1 同时输出）
-     * 
-     * @param path 视频路径
-     * @param pp0_format PP0 输出格式（YUV）
-     * @param pp1_format PP1 输出格式（RGB 或 YUV）
-     * @param width 输出宽度
-     * @param height 输出高度
-     */
     static WorkerConfig createMultiPPConfig(
         const std::string& path,
         OutputFormat pp0_format,
@@ -379,12 +329,6 @@ public:
                     .setBufferCount(128)
                     .build()
             )
-            .setDisplayConfig(
-                DisplayConfigBuilder()
-                    .setDisplayResolution(width, height)
-                    .setBitsPerPixel(32)
-                    .build()
-            )
             .setDecoderConfig(
                 DecoderConfigBuilder()
                     .useTaco("h264", taco)
@@ -394,17 +338,6 @@ public:
             .build();
     }
     
-    /**
-     * @brief 创建带裁剪的 PP 配置
-     * 
-     * @param path 视频路径
-     * @param crop_x 裁剪起始 X
-     * @param crop_y 裁剪起始 Y
-     * @param crop_w 裁剪宽度
-     * @param crop_h 裁剪高度
-     * @param scale_w 缩放后宽度
-     * @param scale_h 缩放后高度
-     */
     static WorkerConfig createCropConfig(
         const std::string& path,
         int crop_x, int crop_y, int crop_w, int crop_h,
@@ -423,12 +356,6 @@ public:
                     .setBufferCount(128)
                     .build()
             )
-            .setDisplayConfig(
-                DisplayConfigBuilder()
-                    .setDisplayResolution(scale_w, scale_h)
-                    .setBitsPerPixel(32)
-                    .build()
-            )
             .setDecoderConfig(
                 DecoderConfigBuilder()
                     .useTaco("h264", taco)
@@ -442,28 +369,15 @@ public:
     // RTSP 配置
     // ========================================
     
-    /**
-     * @brief 创建 RTSP 解码配置
-     * 
-     * @param rtsp_url RTSP URL
-     * @param decoder 解码器名称
-     * @param width 显示宽度
-     * @param height 显示高度
-     */
     static WorkerConfig createRtspDecode(
         const std::string& rtsp_url,
-        const std::string& decoder = "h264",
-        int width = 1920,
-        int height = 1080
+        const std::string& decoder = "h264"
     ) {
-        auto config = createDecode(rtsp_url, decoder, width, height);
-        config.data_source.buffer_count = 8; // RTSP 使用更小的缓冲区
+        auto config = createDecode(rtsp_url, decoder);
+        config.data_source.buffer_count = 8;
         return config;
     }
     
-    /**
-     * @brief 创建 RTSP 录制配置
-     */
     static WorkerConfig createRtspRecord(
         const std::string& rtsp_url,
         int buffer_count = 64
@@ -483,17 +397,11 @@ public:
     // 辅助方法
     // ========================================
     
-    /**
-     * @brief 检查是否是 RTSP URL
-     */
     static bool isRtspUrl(const std::string& path) {
         return path.find("rtsp://") == 0 || 
                path.find("rtsps://") == 0;
     }
     
-    /**
-     * @brief 检查是否是流媒体 URL
-     */
     static bool isStreamUrl(const std::string& path) {
         return path.find("rtsp://") == 0 ||
                path.find("rtsps://") == 0 ||

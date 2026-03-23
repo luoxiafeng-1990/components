@@ -1,5 +1,5 @@
-#ifndef OSD_OVERLAY_HPP
-#define OSD_OVERLAY_HPP
+#ifndef TACO_PRO_OSD_OVERLAY_HPP
+#define TACO_PRO_OSD_OVERLAY_HPP
 
 #include <string>
 #include <vector>
@@ -20,13 +20,13 @@
 #include "buffer/bufferpool/BufferPoolRegistry.hpp"
 
 /**
- * OsdOverlay - 图形层 OSD 叠加显示
+ * TacoProOsdOverlay - vendor=tacopro 图形层 OSD 叠加显示
  *
  * 在 DSS overlay1 上渲染通道号、时间戳、帧率等文字信息。
  * 使用 ARGB8888 格式，alpha=0 的区域完全透明，不遮挡视频层。
  * 通过 FramebufferAllocator + BufferPool 管理 DMA 缓冲页，每帧动态设置 DMA 基地址。
  */
-class OsdOverlay {
+class TacoProOsdOverlay {
 public:
     struct Config {
         int  refresh_fps = 1;
@@ -34,11 +34,11 @@ public:
         int  font_size = 24;
     };
 
-    OsdOverlay(int screen_width, int screen_height, int max_channels);
-    ~OsdOverlay();
+    TacoProOsdOverlay(int screen_width, int screen_height, int max_channels);
+    ~TacoProOsdOverlay();
 
-    OsdOverlay(const OsdOverlay&) = delete;
-    OsdOverlay& operator=(const OsdOverlay&) = delete;
+    TacoProOsdOverlay(const TacoProOsdOverlay&) = delete;
+    TacoProOsdOverlay& operator=(const TacoProOsdOverlay&) = delete;
 
     bool init(const Config& config);
     void shutdown();
@@ -108,4 +108,4 @@ private:
     log4cplus::Logger logger_;
 };
 
-#endif // OSD_OVERLAY_HPP
+#endif // TACO_PRO_OSD_OVERLAY_HPP

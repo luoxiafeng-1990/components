@@ -191,7 +191,7 @@ std::vector<WorkerConfig> WriterPlugin::buildPipelineConfigs(const WorkerConfig&
         WorkerConfig config;
         if (!p.use_hardware) {
             config = common::WorkerConfigFactory::createSoftwareDecode(
-                shared_config.data_source.path, p.width, p.height);
+                shared_config.data_source.path);
         } else if (static_cast<int>(fmt) >= 1000) {
             config = common::WorkerConfigFactory::createPP1RgbConfig(
                 shared_config.data_source.path, fmt, p.width, p.height);

@@ -477,7 +477,7 @@ std::vector<WorkerConfig> PPPlugin::buildPipelineConfigs(const WorkerConfig& sha
         sync_data_source_caps(hw_config, shared_config);
 
         auto sw_config = common::WorkerConfigFactory::createSoftwareDecode(
-            input_path_, params.width, params.height);
+            input_path_);
         sw_config.consumer_type = shared_config.consumer_type;
         sync_data_source_caps(sw_config, shared_config);
 
@@ -500,8 +500,7 @@ WorkerConfig PPPlugin::buildConfig(const std::string& path, const PPTestParams& 
     
     // 软件解码模式：不使用硬件 PP，直接解码
     if (!params.use_hardware) {
-        config = common::WorkerConfigFactory::createSoftwareDecode(
-            path, params.width, params.height);
+        config = common::WorkerConfigFactory::createSoftwareDecode(path);
         LOG4CPLUS_WARN(getLogger(), 
             "Software decode mode: Hardware PP features are not available");
         return config;
