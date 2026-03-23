@@ -215,6 +215,199 @@ public:
     }
 
     // ========================================
+    // 视频编码配置（YUV/RGB 文件 → 硬件/软件编码）
+    // ========================================
+    
+    /**
+     * @brief 创建 H.264 硬件编码配置（RawFrameSourceFromFile）
+     */
+    static WorkerConfig createH264Encode(
+        const std::string& input_path,
+        int output_width = 1920,
+        int output_height = 1080,
+        int bitrate_kbps = 4000,
+        double fps = 30.0,
+        int gop_size = 30,
+        int profile = 77,
+        int input_pix_fmt = 23)
+    {
+        WorkerConfig::EncoderConfig encoder_config;
+        encoder_config.name = std::optional<std::string>("h264_taco");
+        encoder_config.enable_hardware = true;
+        encoder_config.bit_rate = bitrate_kbps > 0 ? bitrate_kbps * 1000 : 0;
+        encoder_config.gop_size = gop_size;
+        encoder_config.framerate_num = static_cast<int>(fps);
+        encoder_config.framerate_den = 1;
+        encoder_config.input_pix_fmt = input_pix_fmt;
+        encoder_config.rc_mode = 1;
+        encoder_config.taco.profile = profile;
+        
+        WorkerConfig config = WorkerConfigBuilder()
+            .setDataSourceConfig(
+                DataSourceConfigBuilder()
+                    .setPath(input_path)
+                    .setBufferCount(32)
+                    .build()
+            )
+            .setDisplayConfig(
+                DisplayConfigBuilder()
+                    .setDisplayResolution(output_width, output_height)
+                    .setBitsPerPixel(32)
+                    .build()
+            )
+            .setWorkerType(WorkerType::FFMPEG_ENCODE)
+            .build();
+        config.encoder = encoder_config;
+        return config;
+    }
+    
+    static WorkerConfig createH265Encode(
+        const std::string& input_path,
+        int output_width = 1920,
+        int output_height = 1080,
+        int bitrate_kbps = 4000,
+        double fps = 30.0,
+        int gop_size = 30,
+        int profile = 1,
+        int input_pix_fmt = 23)
+    {
+        WorkerConfig::EncoderConfig encoder_config;
+        encoder_config.name = std::optional<std::string>("hevc_taco");
+        encoder_config.enable_hardware = true;
+        encoder_config.bit_rate = bitrate_kbps > 0 ? bitrate_kbps * 1000 : 0;
+        encoder_config.gop_size = gop_size;
+        encoder_config.framerate_num = static_cast<int>(fps);
+        encoder_config.framerate_den = 1;
+        encoder_config.input_pix_fmt = input_pix_fmt;
+        encoder_config.rc_mode = 1;
+        encoder_config.taco.profile = profile;
+        
+        WorkerConfig config = WorkerConfigBuilder()
+            .setDataSourceConfig(
+                DataSourceConfigBuilder()
+                    .setPath(input_path)
+                    .setBufferCount(32)
+                    .build()
+            )
+            .setDisplayConfig(
+                DisplayConfigBuilder()
+                    .setDisplayResolution(output_width, output_height)
+                    .setBitsPerPixel(32)
+                    .build()
+            )
+            .setWorkerType(WorkerType::FFMPEG_ENCODE)
+            .build();
+        config.encoder = encoder_config;
+        return config;
+    }
+    
+    static WorkerConfig createJpegEncode(
+        const std::string& input_path,
+        int output_width = 1920,
+        int output_height = 1080,
+        int quality = 80,
+        double fps = 25.0,
+        int input_pix_fmt = 23)
+    {
+        WorkerConfig::EncoderConfig encoder_config;
+        encoder_config.name = std::optional<std::string>("jpeg_taco");
+        encoder_config.enable_hardware = true;
+        encoder_config.framerate_num = static_cast<int>(fps);
+        encoder_config.framerate_den = 1;
+        encoder_config.input_pix_fmt = input_pix_fmt;
+        encoder_config.jpeg.quality = quality;
+        
+        WorkerConfig config = WorkerConfigBuilder()
+            .setDataSourceConfig(
+                DataSourceConfigBuilder()
+                    .setPath(input_path)
+                    .setBufferCount(32)
+                    .build()
+            )
+            .setDisplayConfig(
+                DisplayConfigBuilder()
+                    .setDisplayResolution(output_width, output_height)
+                    .setBitsPerPixel(32)
+                    .build()
+            )
+            .setWorkerType(WorkerType::FFMPEG_ENCODE)
+            .build();
+        config.encoder = encoder_config;
+        return config;
+    }
+    
+    static WorkerConfig createSoftwareEncode(
+        const std::string& input_path,
+        const std::string& codec,
+        int output_width = 1920,
+        int output_height = 1080,
+        int bitrate_kbps = 4000,
+        double fps = 30.0,
+        int gop_size = 30,
+        int input_pix_fmt = 23)
+    {
+        WorkerConfig::EncoderConfig encoder_config;
+        if (codec == "h264" || codec == "avc") {
+            encoder_config.name = std::optional<std::string>("libx264");
+        } else if (codec == "h265" || codec == "hevc") {
+            encoder_config.name = std::optional<std::string>("libx265");
+        } else {
+            encoder_config.name = std::optional<std::string>("libx264");
+        }
+        encoder_config.enable_hardware = false;
+        encoder_config.bit_rate = bitrate_kbps > 0 ? bitrate_kbps * 1000 : 0;
+        encoder_config.gop_size = gop_size;
+        encoder_config.framerate_num = static_cast<int>(fps);
+        encoder_config.framerate_den = 1;
+        encoder_config.input_pix_fmt = input_pix_fmt;
+        encoder_config.rc_mode = 1;
+        
+        WorkerConfig config = WorkerConfigBuilder()
+            .setDataSourceConfig(
+                DataSourceConfigBuilder()
+                    .setPath(input_path)
+                    .setBufferCount(32)
+                    .build()
+            )
+            .setDisplayConfig(
+                DisplayConfigBuilder()
+                    .setDisplayResolution(output_width, output_height)
+                    .setBitsPerPixel(32)
+                    .build()
+            )
+            .setWorkerType(WorkerType::FFMPEG_ENCODE)
+            .build();
+        config.encoder = encoder_config;
+        return config;
+    }
+    
+    static WorkerConfig createEncode(
+        const std::string& input_path,
+        const std::string& encoder,
+        int output_width = 1920,
+        int output_height = 1080,
+        int bitrate_kbps = 4000,
+        double fps = 30.0)
+    {
+        if (encoder == "h264_taco") {
+            return createH264Encode(input_path, output_width, output_height, bitrate_kbps, fps);
+        }
+        if (encoder == "hevc_taco" || encoder == "h265_taco") {
+            return createH265Encode(input_path, output_width, output_height, bitrate_kbps, fps);
+        }
+        if (encoder == "jpeg_taco") {
+            return createJpegEncode(input_path, output_width, output_height, 80, fps);
+        }
+        if (encoder == "libx264" || encoder == "sw_h264") {
+            return createSoftwareEncode(input_path, "h264", output_width, output_height, bitrate_kbps, fps);
+        }
+        if (encoder == "libx265" || encoder == "sw_h265") {
+            return createSoftwareEncode(input_path, "h265", output_width, output_height, bitrate_kbps, fps);
+        }
+        return createH264Encode(input_path, output_width, output_height, bitrate_kbps, fps);
+    }
+    
+    // ========================================
     // PP（后处理）配置
     // PP 的 width/height 是输出分辨率，属于解码后处理范畴
     // ========================================

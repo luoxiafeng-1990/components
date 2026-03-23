@@ -52,6 +52,8 @@ struct CompareCallbackContext {
     double min_psnr = 38.0;
     double min_ssim = 0.95;
     bool verbose = false;
+    /// 完整 compare 配置快照（strategy / enable_parallel / warn_* 等），供 BufferComparator::open 使用
+    WorkerConfig::ConsumerTypeConfig::CompareType compare_config_snapshot_{};
     
     // 统计计数器（原子，线程安全）
     std::atomic<int> total_frames{0};

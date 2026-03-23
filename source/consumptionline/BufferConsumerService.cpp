@@ -311,6 +311,66 @@ ConsumeResult BufferConsumerService::startProductionLine(
     return result;
 }
 
+ConsumeResult BufferConsumerService::consumeExternalPool(
+    std::shared_ptr<BufferPool> pool,
+    const WorkerConfig& config,
+    uint32_t consume_flags)
+{
+    ConsumeResult result;
+    auto start_time = std::chrono::steady_clock::now();
+    stop_requested_ = false;
+    running_.store(true);
+
+    if (!pool) {
+        result.success = false;
+        result.error_message = "consumeExternalPool: BufferPool is null";
+        running_.store(false);
+        return result;
+    }
+
+    try {
+        auto consumer = createConsumerFromFlags(consume_flags, config);
+        if (!consumer) {
+            result.success = false;
+            result.error_message = "Failed to create consumer strategy";
+            running_.store(false);
+            return result;
+        }
+
+        consumeLoop(pool, consumer, config.consumer_type, result);
+
+        LOG4CPLUS_DEBUG(logger_, "consumeExternalPool: draining remaining filled buffers...");
+        int drained_count = 0;
+        int drain_frame_index = result.frames_consumed;
+        Buffer* remaining = nullptr;
+        while ((remaining = pool->acquireFilled(false, 0)) != nullptr) {
+            std::vector<Buffer*> buffers = {remaining};
+            consumer->consume(buffers, drain_frame_index++);
+            result.frames_consumed++;
+            drained_count++;
+            pool->releaseFilled(remaining);
+        }
+        if (drained_count > 0) {
+            LOG4CPLUS_DEBUG_FMT(logger_, "consumeExternalPool: drained %d buffers", drained_count);
+        }
+
+        consumer->finalize();
+        result.success = true;
+    } catch (const std::exception& e) {
+        result.success = false;
+        result.error_message = std::string("consumeExternalPool exception: ") + e.what();
+        LOG4CPLUS_ERROR_FMT(logger_, "%s", result.error_message.c_str());
+    }
+
+    running_.store(false);
+    auto end_time = std::chrono::steady_clock::now();
+    result.duration_seconds = std::chrono::duration<double>(end_time - start_time).count();
+    if (result.duration_seconds > 0.0) {
+        result.average_fps = static_cast<double>(result.frames_consumed) / result.duration_seconds;
+    }
+    return result;
+}
+
 // ============================================================
 // PARALLEL 模式实现
 // ============================================================

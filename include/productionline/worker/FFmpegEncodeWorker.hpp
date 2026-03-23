@@ -12,6 +12,7 @@
 
 // FFmpeg 前向声明
 struct AVCodecContext;
+struct AVCodecParameters;
 struct AVFrame;
 struct AVPacket;
 struct AVDictionary;
@@ -159,6 +160,13 @@ private:
      * @return true 成功，false 失败
      */
     bool initializeEncoder();
+
+    /**
+     * @brief 从 codec_ctx 生成输出码流参数（供 MultiWorker / EncodedPacketSourceFromBuffer）
+     */
+    bool syncOutputCodecParameters();
+
+    void freeOutputCodecParameters();
     
     /**
      * @brief 配置 TACO 编码器参数
@@ -191,6 +199,17 @@ private:
     // 编码器上下文
     AVCodecContext* codec_ctx_ptr_;
     AVDictionary* codec_options_ptr_;
+
+    /// 编码器输出码流参数（avcodec_parameters_from_context，供下游解码订阅）
+    AVCodecParameters* out_codec_params_;
+
+    /**
+     * @brief 标记：out_codec_params_ 中 extradata 是否已就绪
+     *
+     * 一些硬件编码器（如 h264_taco）可能需要产生首个 packet 后才填充 SPS/PPS（extradata）。
+     * decoder 若在此之前初始化，可能拿不到关键参数集导致 0 frames。
+     */
+    bool codec_params_extradata_ready_;
     
     // 输出分辨率
     int output_width_;
@@ -213,6 +232,12 @@ private:
     // Buffer 模式状态（共享模式下使用）
     AVFrame* current_frame_ptr_;
     bool frame_acquired_;
+
+    /**
+     * 文件模式：复用单帧 AVFrame（与 backup 分支一致）。
+     * 避免每帧 av_frame_alloc + readRawFrame 内 av_frame_get_buffer 造成瞬时内存峰值与嵌入式 OOM。
+     */
+    AVFrame* input_frame_;
 };
 
 #endif // FFMPEG_ENCODE_WORKER_HPP

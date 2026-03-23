@@ -11,6 +11,7 @@
 extern "C" {
 #include <libavformat/avformat.h>
 #include <libavcodec/avcodec.h>
+#include <libavcodec/packet.h>
 #include <libavutil/imgutils.h>
 #include <libavutil/opt.h>
 #include <libavutil/pixdesc.h>
@@ -19,11 +20,13 @@ extern "C" {
 // ============ 构造/析构 ============
 
 FFmpegEncodeWorker::FFmpegEncodeWorker(const WorkerConfig& config)
-    : WorkerBase(BufferAllocatorFactory::AllocatorType::NORMAL, config)
+    : WorkerBase(BufferAllocatorFactory::AllocatorType::AVFRAME, config)
     , logger_(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Worker.Encode")))
     , frame_source_(nullptr)
     , codec_ctx_ptr_(nullptr)
     , codec_options_ptr_(nullptr)
+    , out_codec_params_(nullptr)
+    , codec_params_extradata_ready_(false)
     , output_width_(config.display.width)
     , output_height_(config.display.height)
     , use_hardware_encoder_(config.encoder.enable_hardware)
@@ -32,6 +35,7 @@ FFmpegEncodeWorker::FFmpegEncodeWorker(const WorkerConfig& config)
     , dropped_frames_(0)
     , current_frame_ptr_(nullptr)
     , frame_acquired_(false)
+    , input_frame_(nullptr)
 {
     LOG4CPLUS_DEBUG(logger_, "[EncodeWorker] 构造函数开始");
     
@@ -83,6 +87,9 @@ FFmpegEncodeWorker::~FFmpegEncodeWorker() {
     if (frame_source_ && frame_source_->isOpen()) {
         LOG4CPLUS_DEBUG(logger_, "[EncodeWorker] 关闭编码器和数据源...");
         close();
+    } else if (input_frame_) {
+        av_frame_free(&input_frame_);
+        input_frame_ = nullptr;
     }
     
     LOG4CPLUS_DEBUG(logger_, "[EncodeWorker] 🧹 析构函数完成");
@@ -140,6 +147,21 @@ bool FFmpegEncodeWorker::open() {
         frame_source_->close();
         return false;
     }
+
+    // 3.1 输出码流参数（MultiWorker：encoder → decoder 需 getCodecParameters() 非空）
+    if (!syncOutputCodecParameters()) {
+        LOG4CPLUS_ERROR(logger_, "[EncodeWorker] 同步输出 codec 参数失败");
+        if (codec_ctx_ptr_) {
+            avcodec_free_context(&codec_ctx_ptr_);
+            codec_ctx_ptr_ = nullptr;
+        }
+        frame_source_->close();
+        return false;
+    }
+
+    codec_params_extradata_ready_ = (out_codec_params_ &&
+        out_codec_params_->extradata &&
+        out_codec_params_->extradata_size > 0);
     
     // 4. 创建输出 BufferPool
     bool is_buffer_mode = worker_config_.data_source.buffer_mode;
@@ -161,6 +183,11 @@ bool FFmpegEncodeWorker::open() {
     
     if (pool_id == 0) {
         LOG4CPLUS_ERROR(logger_, "[EncodeWorker] 创建 BufferPool 失败");
+        freeOutputCodecParameters();
+        if (codec_ctx_ptr_) {
+            avcodec_free_context(&codec_ctx_ptr_);
+            codec_ctx_ptr_ = nullptr;
+        }
         frame_source_->close();
         return false;
     }
@@ -168,6 +195,11 @@ bool FFmpegEncodeWorker::open() {
     // 5. 注册 BufferPool
     if (!registerBufferPool(BufferPoolType::ENCODE_VIDEO_OUTPUT, pool_id)) {
         LOG4CPLUS_ERROR(logger_, "[EncodeWorker] 注册 BufferPool 失败");
+        freeOutputCodecParameters();
+        if (codec_ctx_ptr_) {
+            avcodec_free_context(&codec_ctx_ptr_);
+            codec_ctx_ptr_ = nullptr;
+        }
         frame_source_->close();
         return false;
     }
@@ -180,15 +212,38 @@ bool FFmpegEncodeWorker::open() {
     encoded_frames_ = 0;
     dropped_frames_ = 0;
     
-    // 7. 日志输出
-    LOG4CPLUS_INFO_FMT(logger_, "   Encoder: %s", codec_ctx_ptr_->codec->name);
-    LOG4CPLUS_INFO_FMT(logger_, "   Resolution: %dx%d", output_width_, output_height_);
+    // 7. 日志输出（与 FFmpegDecodeWorker::initializeDecoder 对齐：Codec / Stream / Output 分辨率）
+    LOG4CPLUS_INFO_FMT(logger_, "   Codec: %s", codec_ctx_ptr_->codec->name);
+    LOG4CPLUS_INFO_FMT(logger_, "   Stream resolution: %dx%d", getSourceWidth(), getSourceHeight());
+    LOG4CPLUS_INFO_FMT(logger_, "   Output resolution: %dx%d", output_width_, output_height_);
     LOG4CPLUS_INFO_FMT(logger_, "   Bitrate: %ld bps", codec_ctx_ptr_->bit_rate);
     LOG4CPLUS_INFO_FMT(logger_, "   GOP size: %d", codec_ctx_ptr_->gop_size);
-    LOG4CPLUS_INFO_FMT(logger_, "   Framerate: %d/%d", 
+    LOG4CPLUS_INFO_FMT(logger_, "   Framerate: %d/%d",
                       codec_ctx_ptr_->framerate.num, codec_ctx_ptr_->framerate.den);
     LOG4CPLUS_INFO_FMT(logger_, "   BufferPool: '%s' (ID: %lu, %d buffers)",
                       actual_pool_name.c_str(), pool_id, buffer_count);
+    
+    // 文件模式：仅分配 input_frame 壳子，buffer 在首帧 readRawFrame 时 Lazy 分配（backup 逻辑）
+    if (!worker_config_.data_source.buffer_mode && frame_source_) {
+        input_frame_ = av_frame_alloc();
+        if (!input_frame_) {
+            LOG4CPLUS_ERROR(logger_, "[EncodeWorker] 分配 input_frame 结构体失败");
+            unregisterBufferPool(BufferPoolType::ENCODE_VIDEO_OUTPUT);
+            allocator_facade_.destroyPool();
+            freeOutputCodecParameters();
+            if (codec_ctx_ptr_) {
+                avcodec_free_context(&codec_ctx_ptr_);
+                codec_ctx_ptr_ = nullptr;
+            }
+            frame_source_->close();
+            return false;
+        }
+        input_frame_->format = codec_ctx_ptr_->pix_fmt;
+        input_frame_->width  = output_width_;
+        input_frame_->height = output_height_;
+        LOG4CPLUS_DEBUG(logger_,
+            "[EncodeWorker] input_frame 已就绪，YUV buffer 延迟到首帧 readRawFrame（64 对齐由数据源分配）");
+    }
     
     return true;
 }
@@ -203,6 +258,11 @@ void FFmpegEncodeWorker::close() {
         
         LOG4CPLUS_INFO(logger_, "");
         LOG4CPLUS_INFO(logger_, "🛑 Closing encoder...");
+        
+        if (input_frame_) {
+            av_frame_free(&input_frame_);
+            input_frame_ = nullptr;
+        }
         
         // 清理缓存的 packet
         for (AVPacket* pkt : cached_packets_) {
@@ -263,6 +323,8 @@ void FFmpegEncodeWorker::close() {
             frame_source_->close();
         }
         
+        freeOutputCodecParameters();
+
         // 释放编码器
         if (codec_ctx_ptr_) {
             avcodec_free_context(&codec_ctx_ptr_);
@@ -280,8 +342,9 @@ void FFmpegEncodeWorker::close() {
     }
     
     LOG4CPLUS_DEBUG(logger_, "[EncodeWorker] 编码器已关闭");
-    LOG4CPLUS_INFO_FMT(logger_, "   Encoded frames: %d", encoded_frames_.load());
-    LOG4CPLUS_INFO_FMT(logger_, "   Dropped frames: %d", dropped_frames_.load());
+    // 与 FFmpegDecodeWorker::close() 一致：success=成功帧数 failed=失败帧数 skipped=丢弃/跳过计数
+    LOG4CPLUS_INFO_FMT(logger_, "   success=%d failed=%d skipped=%d",
+        encoded_frames_.load(), 0, dropped_frames_.load());
 }
 
 bool FFmpegEncodeWorker::isOpen() const {
@@ -402,14 +465,7 @@ const char* FFmpegEncodeWorker::getEncoderName() const {
 }
 
 const AVCodecParameters* FFmpegEncodeWorker::getCodecParameters() const {
-    if (!codec_ctx_ptr_) {
-        return nullptr;
-    }
-    
-    // 注意：这里需要动态分配 AVCodecParameters
-    // 但为了避免内存泄漏，我们返回 nullptr
-    // 调用者应该使用 avcodec_parameters_from_context() 自己获取
-    return nullptr;
+    return out_codec_params_;
 }
 
 AVRational FFmpegEncodeWorker::getTimeBase() const {
@@ -420,15 +476,25 @@ AVRational FFmpegEncodeWorker::getTimeBase() const {
 }
 
 void FFmpegEncodeWorker::printStats() const {
+    // 与 FFmpegDecodeWorker::printStats() 字段顺序与统计行格式一致
     LOG4CPLUS_INFO(logger_, "");
-    LOG4CPLUS_INFO(logger_, "[EncodeWorker] 📊 Statistics:");
-    LOG4CPLUS_INFO_FMT(logger_, "   Encoder: %s", getEncoderName());
-    LOG4CPLUS_INFO_FMT(logger_, "   Resolution: %dx%d", output_width_, output_height_);
-    LOG4CPLUS_INFO_FMT(logger_, "   Encoded frames: %d", encoded_frames_.load());
-    LOG4CPLUS_INFO_FMT(logger_, "   Dropped frames: %d", dropped_frames_.load());
-    
+    LOG4CPLUS_INFO(logger_, " 📊 Statistics:");
+    std::string path = getPath();
+    LOG4CPLUS_INFO_FMT(logger_, "    Codec: %s", getEncoderName());
+    LOG4CPLUS_INFO_FMT(logger_, "    Resolution: %dx%d → %dx%d",
+        getSourceWidth(), getSourceHeight(), output_width_, output_height_);
+    LOG4CPLUS_INFO_FMT(logger_, "    Source: %s", path.empty() ? "(Buffer mode)" : path.c_str());
+    LOG4CPLUS_INFO_FMT(logger_, "    success=%d failed=%d skipped=%d",
+        encoded_frames_.load(), 0, dropped_frames_.load());
+
+    SourceType type = getDataSourceType();
+    if (type == SourceType::FILE_SOURCE) {
+        LOG4CPLUS_INFO_FMT(logger_, "    Total frames: %d", getTotalFrames());
+        LOG4CPLUS_INFO_FMT(logger_, "    EOF: %s", isAtEnd() ? "YES" : "NO");
+    }
+
     uint64_t pool_id = getOutputBufferPoolId(BufferPoolType::ENCODE_VIDEO_OUTPUT);
-    LOG4CPLUS_INFO_FMT(logger_, "   BufferPool ID: %lu", pool_id);
+    LOG4CPLUS_INFO_FMT(logger_, "    BufferPool ID: %lu", pool_id);
 }
 
 // ============ 内部方法 ============
@@ -532,6 +598,38 @@ bool FFmpegEncodeWorker::initializeEncoder() {
     }
     
     LOG4CPLUS_DEBUG_FMT(logger_, "[EncodeWorker] 编码器初始化成功: %s", codec->name);
+    return true;
+}
+
+void FFmpegEncodeWorker::freeOutputCodecParameters() {
+    if (out_codec_params_) {
+        avcodec_parameters_free(&out_codec_params_);
+        out_codec_params_ = nullptr;
+    }
+}
+
+bool FFmpegEncodeWorker::syncOutputCodecParameters() {
+    if (!codec_ctx_ptr_) {
+        return false;
+    }
+
+    // 重要：不要反复 free/realloc out_codec_params_，
+    // 否则 MultiWorker 中持有该指针的解码侧可能拿到悬垂指针。
+    if (!out_codec_params_) {
+        out_codec_params_ = avcodec_parameters_alloc();
+        if (!out_codec_params_) {
+            LOG4CPLUS_ERROR(logger_, "[EncodeWorker] avcodec_parameters_alloc 失败");
+            return false;
+        }
+    }
+    int ret = avcodec_parameters_from_context(out_codec_params_, codec_ctx_ptr_);
+    if (ret < 0) {
+        char err_buf[AV_ERROR_MAX_STRING_SIZE];
+        av_strerror(ret, err_buf, sizeof(err_buf));
+        LOG4CPLUS_ERROR_FMT(logger_, "[EncodeWorker] avcodec_parameters_from_context 失败: %s", err_buf);
+        return false;
+    }
+    LOG4CPLUS_DEBUG(logger_, "[EncodeWorker] 已同步输出 AVCodecParameters（供下游解码订阅）");
     return true;
 }
 
@@ -665,16 +763,19 @@ FillResult FFmpegEncodeWorker::fillBuffer(int frame_index, Buffer* buffer) {
         return FillResult::success();
     }
     
-    // 步骤2：读取并发送帧到编码器
-    AVFrame* temp_frame = av_frame_alloc();
-    if (!temp_frame) {
-        LOG4CPLUS_ERROR(logger_, "[EncodeWorker] 分配临时帧失败");
-        return FillResult::fromCodec(CodecSendResult::allocFailed());
+    // 步骤2：读取并发送帧（文件模式复用 input_frame_，与 backup 一致，避免每帧 av_frame_get_buffer 峰值）
+    FillResult send_result = FillResult::success();
+    if (input_frame_) {
+        send_result = readAndSendFrame(input_frame_);
+    } else {
+        AVFrame* temp_frame = av_frame_alloc();
+        if (!temp_frame) {
+            LOG4CPLUS_ERROR(logger_, "[EncodeWorker] 分配临时帧失败");
+            return FillResult::fromCodec(CodecSendResult::allocFailed());
+        }
+        send_result = readAndSendFrame(temp_frame);
+        av_frame_free(&temp_frame);
     }
-    
-    FillResult send_result = readAndSendFrame(temp_frame);
-    av_frame_free(&temp_frame);
-    
     if (!send_result.ok()) {
         return send_result;
     }
@@ -733,6 +834,15 @@ FillResult FFmpegEncodeWorker::fillBuffer(int frame_index, Buffer* buffer) {
         av_packet_free(&first_pkt);
         
         fillBufferMetadataFromPacket(packet, buffer);
+
+        // 首个 packet 产生后，部分硬件编码器才会填充 extradata（SPS/PPS 等）。
+        // 让解码侧能够在 open() 阶段拿到完整 codecpar。
+        if (!codec_params_extradata_ready_) {
+            (void)syncOutputCodecParameters();
+            codec_params_extradata_ready_ = (out_codec_params_ &&
+                out_codec_params_->extradata &&
+                out_codec_params_->extradata_size > 0);
+        }
         return FillResult::success();
     }
     
