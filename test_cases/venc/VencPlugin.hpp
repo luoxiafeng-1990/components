@@ -5,8 +5,8 @@
  * PSNR/SSIM：-p/-S 写入 consumer_type.compare，单路编码时在 test_module_main 中
  * 走 runEncodeQualityCompare（源 YUV vs 编码→软解），与解码双路 COMPARE 区分。
  *
- * 显示：-d 启用 display 时走 runEncodeDecodeDisplay（编码→软件解码→显示解码输出池），
- * 因码流 buffer 不可直接上屏。
+ * 显示：与 vdec 一致，在命令行追加子命令 display（DisplayPlugin）启用上屏；
+ * test_module_main 在 encode + display.enable 时走 runEncodeDecodeDisplay（编码→软解→消费解码池）。
  */
 
 #ifndef VENC_PLUGIN_HPP
@@ -82,12 +82,6 @@ private:
     bool loop_ = false;
     bool verbose_ = false;
     int threads_ = 0;
-
-    bool enable_display_ = false;
-    std::string display_mode_str_ = "shared_fb";
-    int display_fps_ = 30;
-    bool osd_enable_ = false;
-    int osd_fps_ = 1;
 
     bool enable_psnr_ = false;
     bool enable_ssim_ = false;

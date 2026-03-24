@@ -689,12 +689,6 @@ void VencPlugin::registerOptions(CLI::App& app) {
     app.add_flag("-v,--verbose", verbose_, "详细日志");
     app.add_option("-t,--threads", threads_, "并行通道数 (PARALLEL 模式)");
 
-    app.add_flag("-d,--display", enable_display_, "启用显示");
-    app.add_option("--display-mode", display_mode_str_, "shared_fb | vo");
-    app.add_option("--display-fps", display_fps_, "显示刷新帧率");
-    app.add_flag("--osd", osd_enable_, "OSD");
-    app.add_option("--osd-fps", osd_fps_, "OSD 刷新频率");
-
     app.add_flag("-p,--psnr", enable_psnr_, "启用 PSNR：单路编码时对比源 YUV 与 编码→软解 输出");
     app.add_flag("-S,--ssim", enable_ssim_, "启用 SSIM（同上）");
     app.add_option("-M,--min-psnr", min_psnr_, "PSNR 阈值 (dB)，与 stress 脚本 -M 一致");
@@ -707,7 +701,9 @@ void VencPlugin::registerOptions(CLI::App& app) {
         "  qa_cases venc -l\n"
         "  qa_cases venc h264_1920x1080_60_8mbps /data/in.nv12\n"
         "  qa_cases venc -p -S -M 38 -N 0.95 h264_1920x1080_60_8mbps /data/in.nv12\n"
-        "  qa_cases venc -t 4 -o /tmp/o.mp4 h264_1920x1080_30_4mbps /data/in.nv12\n");
+        "  qa_cases venc -t 4 -o /tmp/o.mp4 h264_1920x1080_30_4mbps /data/in.nv12\n"
+        "  qa_cases venc h264_1920x1080_30_4mbps /data/in.nv12 display\n"
+        "  qa_cases venc h264_1920x1080_30_4mbps /data/in.nv12 display --vendor taco --fps 30\n");
 }
 
 void VencPlugin::applyTo(WorkerConfig& config) const {
@@ -720,18 +716,6 @@ void VencPlugin::applyTo(WorkerConfig& config) const {
     if (!encoded_output_path_.empty()) {
         config.consumer_type.save_encoded.enable = true;
         config.consumer_type.save_encoded.output_path = encoded_output_path_;
-    }
-
-    if (enable_display_) {
-        using DisplayMode = WorkerConfig::ConsumerTypeConfig::DisplayType::DisplayMode;
-        config.consumer_type.display.enable = true;
-        if (display_mode_str_ == "vo" || display_mode_str_ == "taco-vo")
-            config.consumer_type.display.mode = DisplayMode::TACO_VO;
-        else
-            config.consumer_type.display.mode = DisplayMode::SHARED_FB;
-        config.consumer_type.display.taco_vo.target_fps = display_fps_;
-        config.consumer_type.display.taco_vo.osd_enable = osd_enable_;
-        config.consumer_type.display.taco_vo.osd_fps = osd_fps_;
     }
 
     config.consumer_type.compare.enable_psnr = enable_psnr_;
@@ -1216,9 +1200,6 @@ consumer::ConsumeResult runEncodeDecodeDisplay(
 
     uint32_t flags = test::ExecuteMode::buildConsumeFlags(shared_cfg);
     WorkerConfig consume_cfg = shared_cfg;
-    // 使用 SHARED_FB：更符合 vdec 播放路径的默认假设
-    consume_cfg.consumer_type.display.mode =
-        WorkerConfig::ConsumerTypeConfig::DisplayType::DisplayMode::SHARED_FB;
     if (consume_cfg.consumer_type.max_timeout_count < 50) {
         consume_cfg.consumer_type.max_timeout_count = 50;
     }
