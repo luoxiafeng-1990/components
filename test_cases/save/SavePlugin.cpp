@@ -55,6 +55,10 @@ const std::vector<std::pair<OutputFormat, std::string>>& SavePlugin::getRgbForma
         {OutputFormat::RGB_BGRX888,       "BGRX8888 (BGR0)"},
         {OutputFormat::RGB_R16G16B16,     "RGB161616 (RGB48)"},
         {OutputFormat::RGB_B16G16R16,     "BGR161616 (BGR48)"},
+        {OutputFormat::RGB_A2R10G10B10,   "ARGB2101010"},
+        {OutputFormat::RGB_A2B10G10R10,   "ABGR2101010"},
+        {OutputFormat::RGB_R10G10B10A2,   "RGBA2101010"},
+        {OutputFormat::RGB_B10G10R10A2,   "BGRA2101010"},
     };
     return formats;
 }
@@ -115,6 +119,10 @@ const std::map<std::string, SavePlugin::FrameTestParams>& SavePlugin::getFrameTe
         {"rgb_bgrx888",     {OutputFormat::RGB_BGRX888,     "BGRX8888 (BGR0)"}},
         {"rgb_r16g16b16",   {OutputFormat::RGB_R16G16B16,   "RGB161616 (RGB48)"}},
         {"rgb_b16g16r16",   {OutputFormat::RGB_B16G16R16,   "BGR161616 (BGR48)"}},
+        {"rgb_argb2101010", {OutputFormat::RGB_A2R10G10B10,  "ARGB2101010"}},
+        {"rgb_abgr2101010", {OutputFormat::RGB_A2B10G10R10,  "ABGR2101010"}},
+        {"rgb_rgba2101010", {OutputFormat::RGB_R10G10B10A2,  "RGBA2101010"}},
+        {"rgb_bgra2101010", {OutputFormat::RGB_B10G10R10A2,  "BGRA2101010"}},
         // YUV 格式（10 个）
         {"yuv_nv12",        {OutputFormat::YUV_NV12,  "YUV420 NV12"}},
         {"yuv_nv21",        {OutputFormat::YUV_NV21,  "YUV420 NV21"}},

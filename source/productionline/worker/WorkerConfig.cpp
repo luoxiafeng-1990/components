@@ -155,7 +155,6 @@ TacoConfigBuilder& TacoConfigBuilder::setOutputFormat(
         taco_config_.ch1_rgb = is_rgb;
         
         if (is_rgb) {
-            // RGB 格式：需要映射回驱动的原始值
             taco_config_.ch1_rgb_format = mapEnumToRgbDriverValue(format);
             taco_config_.ch1_rgb_std = std_value;
         } else {
@@ -232,8 +231,11 @@ OutputFormat TacoConfigBuilder::mapFormatNameToEnum(std::string_view format_name
     if (format_name == "r16g16b16") return OutputFormat::RGB_R16G16B16;
     if (format_name == "b16g16r16") return OutputFormat::RGB_B16G16R16;
     if (format_name == "gbrp") return OutputFormat::RGB_GBRP;
+    if (format_name == "argb2101010" || format_name == "a2r10g10b10") return OutputFormat::RGB_A2R10G10B10;
+    if (format_name == "abgr2101010" || format_name == "a2b10g10r10") return OutputFormat::RGB_A2B10G10R10;
+    if (format_name == "rgba2101010" || format_name == "r10g10b10a2") return OutputFormat::RGB_R10G10B10A2;
+    if (format_name == "bgra2101010" || format_name == "b10g10r10a2") return OutputFormat::RGB_B10G10R10A2;
     
-    // 默认返回 YUV_AUTO
     return OutputFormat::YUV_AUTO;
 }
 
@@ -281,6 +283,10 @@ std::string_view TacoConfigBuilder::mapFormatEnumToName(OutputFormat format) {
         case OutputFormat::RGB_R16G16B16: return "r16g16b16";
         case OutputFormat::RGB_B16G16R16: return "b16g16r16";
         case OutputFormat::RGB_GBRP: return "gbrp";
+        case OutputFormat::RGB_A2R10G10B10: return "argb2101010";
+        case OutputFormat::RGB_A2B10G10R10: return "abgr2101010";
+        case OutputFormat::RGB_R10G10B10A2: return "rgba2101010";
+        case OutputFormat::RGB_B10G10R10A2: return "bgra2101010";
         
         default: return "unknown";
     }
@@ -301,22 +307,26 @@ std::string_view TacoConfigBuilder::mapColorStdEnumToName(ColorStandard std) {
 
 int TacoConfigBuilder::mapEnumToRgbDriverValue(OutputFormat format) {
     switch (format) {
+        case OutputFormat::RGB_RGB888: return 1;
+        case OutputFormat::RGB_RGB888_PLANAR: return 2;
+        case OutputFormat::RGB_BGR888: return 3;
+        case OutputFormat::RGB_BGR888_PLANAR: return 4;
+        case OutputFormat::RGB_R16G16B16: return 5;
+        case OutputFormat::RGB_B16G16R16: return 7;
         case OutputFormat::RGB_ARGB888: return 9;
         case OutputFormat::RGB_ABGR888: return 11;
         case OutputFormat::RGB_RGBA888: return 13;
         case OutputFormat::RGB_BGRA888: return 15;
-        case OutputFormat::RGB_RGB888: return 1;
-        case OutputFormat::RGB_BGR888: return 3;
+        case OutputFormat::RGB_RGBX888: return -1;  // 驱动不支持 RGBX
+        case OutputFormat::RGB_BGRX888: return -1;  // 驱动不支持 BGRX
+        case OutputFormat::RGB_A2R10G10B10: return 17;
+        case OutputFormat::RGB_A2B10G10R10: return 19;
+        case OutputFormat::RGB_R10G10B10A2: return 21;
+        case OutputFormat::RGB_B10G10R10A2: return 23;
         case OutputFormat::RGB_XRGB888: return 25;
         case OutputFormat::RGB_XBGR888: return 27;
-        case OutputFormat::RGB_RGBX888: return 21;
-        case OutputFormat::RGB_BGRX888: return 23;
-        case OutputFormat::RGB_RGB888_PLANAR: return 2;
-        case OutputFormat::RGB_BGR888_PLANAR: return 4;
-        case OutputFormat::RGB_R16G16B16: return 17;
-        case OutputFormat::RGB_B16G16R16: return 19;
         case OutputFormat::RGB_GBRP: return 28;
-        default: return 9; // 默认 ARGB888
+        default: return 9;
     }
 }
 

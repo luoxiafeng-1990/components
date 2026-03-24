@@ -104,13 +104,19 @@ enum class OutputFormat {
     RGB_BGR888 = 1005,       // BGR888 packed (驱动值: 3)
     RGB_XRGB888 = 1006,      // XRGB8888 packed (驱动值: 25)
     RGB_XBGR888 = 1007,      // XBGR8888 packed (驱动值: 27)
-    RGB_RGBX888 = 1008,      // RGBX8888 packed (驱动值: 21)
-    RGB_BGRX888 = 1009,      // BGRX8888 packed (驱动值: 23)
+    RGB_RGBX888 = 1008,      // RGBX8888 packed (TACO 驱动不支持，使用时将报错)
+    RGB_BGRX888 = 1009,      // BGRX8888 packed (TACO 驱动不支持，使用时将报错)
     RGB_RGB888_PLANAR = 1010,   // RGB888 planar (驱动值: 2)
     RGB_BGR888_PLANAR = 1011,   // BGR888 planar (驱动值: 4)
-    RGB_R16G16B16 = 1012,    // RGB 16-bit per channel (驱动值: 17)
-    RGB_B16G16R16 = 1013,    // BGR 16-bit per channel (驱动值: 19)
-    RGB_GBRP = 1014          // GBR planar (驱动值: 28)
+    RGB_R16G16B16 = 1012,    // RGB 16-bit per channel (驱动值: 5)
+    RGB_B16G16R16 = 1013,    // BGR 16-bit per channel (驱动值: 7)
+    RGB_GBRP = 1014,         // GBR planar (驱动值: 28)
+    
+    // 10-bit RGB 格式（2101010 / 10102）
+    RGB_A2R10G10B10 = 1015,  // ARGB2101010 packed (驱动值: 17)
+    RGB_A2B10G10R10 = 1016,  // ABGR2101010 packed (驱动值: 19)
+    RGB_R10G10B10A2 = 1017,  // RGBA2101010 packed (驱动值: 21)
+    RGB_B10G10R10A2 = 1018   // BGRA2101010 packed (驱动值: 23)
 };
 
 /**
@@ -1058,6 +1064,10 @@ private:
 class ConsumerTypeConfigBuilder {
 public:
     ConsumerTypeConfigBuilder() = default;
+
+    /// 从现有配置拷贝为起点，再链式 set* 只覆盖需要修改的字段（插件 applyTo 补丁场景）
+    explicit ConsumerTypeConfigBuilder(const WorkerConfig::ConsumerTypeConfig& seed)
+        : consumer_type_config_(seed) {}
 
     ConsumerTypeConfigBuilder& setConsumerMaxFrames(int frames);
     ConsumerTypeConfigBuilder& setVerbose(bool verbose);

@@ -524,22 +524,24 @@ double FFmpegDecodeWorker::getTacoChannelBytesPerPixel(int channel) const {
 
 OutputFormat FFmpegDecodeWorker::mapRgbDriverValueToEnum(int driver_value) {
     switch (driver_value) {
+        case 1:  return OutputFormat::RGB_RGB888;
+        case 2:  return OutputFormat::RGB_RGB888_PLANAR;
+        case 3:  return OutputFormat::RGB_BGR888;
+        case 4:  return OutputFormat::RGB_BGR888_PLANAR;
+        case 5:  return OutputFormat::RGB_R16G16B16;
+        case 7:  return OutputFormat::RGB_B16G16R16;
         case 9:  return OutputFormat::RGB_ARGB888;
         case 11: return OutputFormat::RGB_ABGR888;
         case 13: return OutputFormat::RGB_RGBA888;
         case 15: return OutputFormat::RGB_BGRA888;
-        case 1:  return OutputFormat::RGB_RGB888;
-        case 3:  return OutputFormat::RGB_BGR888;
+        case 17: return OutputFormat::RGB_A2R10G10B10;
+        case 19: return OutputFormat::RGB_A2B10G10R10;
+        case 21: return OutputFormat::RGB_R10G10B10A2;
+        case 23: return OutputFormat::RGB_B10G10R10A2;
         case 25: return OutputFormat::RGB_XRGB888;
         case 27: return OutputFormat::RGB_XBGR888;
-        case 21: return OutputFormat::RGB_RGBX888;
-        case 23: return OutputFormat::RGB_BGRX888;
-        case 2:  return OutputFormat::RGB_RGB888_PLANAR;
-        case 4:  return OutputFormat::RGB_BGR888_PLANAR;
-        case 17: return OutputFormat::RGB_R16G16B16;
-        case 19: return OutputFormat::RGB_B16G16R16;
         case 28: return OutputFormat::RGB_GBRP;
-        default: return OutputFormat::RGB_ARGB888;  // 默认值
+        default: return OutputFormat::RGB_ARGB888;
     }
 }
 
@@ -556,6 +558,13 @@ double FFmpegDecodeWorker::getBytesPerPixelFromFormat(OutputFormat format) {
         case OutputFormat::RGB_BGRX888:
             return 4.0;
         
+        // 10-bit RGB 2101010（4 字节/像素，32-bit packed）
+        case OutputFormat::RGB_A2R10G10B10:
+        case OutputFormat::RGB_A2B10G10R10:
+        case OutputFormat::RGB_R10G10B10A2:
+        case OutputFormat::RGB_B10G10R10A2:
+            return 4.0;
+        
         // 8-bit RGB 无 Alpha 通道（3 字节/像素）
         case OutputFormat::RGB_RGB888:
         case OutputFormat::RGB_BGR888:
@@ -570,7 +579,7 @@ double FFmpegDecodeWorker::getBytesPerPixelFromFormat(OutputFormat format) {
             return 6.0;
         
         default:
-            return 4.0;  // 默认 ARGB888
+            return 4.0;
     }
 }
 
@@ -1167,7 +1176,11 @@ bool FFmpegDecodeWorker::configureSpecialDecoder() {
     LOG4CPLUS_DEBUG_FMT(logger_, "    ch1_rgb=%d: %s", taco.ch1_rgb ? 1 : 0, 
            ret < 0 ? "FAILED" : "OK");
     
-    // ⭐ v2.17: 设置 RGB 格式（使用整型枚举）
+    if (taco.ch1_rgb && taco.ch1_rgb_format < 0) {
+        LOG4CPLUS_ERROR(logger_, "Unsupported RGB format for TACO driver (ch1_rgb_format=" 
+                        + std::to_string(taco.ch1_rgb_format) + ")");
+        return false;
+    }
     if (taco.ch1_rgb && taco.ch1_rgb_format > 0) {
         ret = av_opt_set_int(codec_ctx_ptr_->priv_data, "ch1_rgb_format", 
                              taco.ch1_rgb_format, 0);
