@@ -36,6 +36,7 @@ extern "C" {
 #include "opencv2/core.hpp"
 #include "opencv2/core/tacv.hpp"
 #include "opencv2/imgproc.hpp"
+#include "opencv2/imgcodecs.hpp"
 
 namespace consumer {
 
@@ -317,8 +318,8 @@ private:
     /// 优先顺序：getMat() → getAVFrame()+swscale → 原始 YUV 元数据
     cv::Mat bufferToMat(Buffer* buf) const;
 
-    /// 根据 config_.op_type 对 Mat 执行 resize 或 crop 变换
-    cv::Mat applyOpencvTransform(const cv::Mat& src) const;
+    /// 根据 config_.op_type 对 Mat 执行变换（包括 SAVE_LOAD_IMG）
+    cv::Mat applyOpencvTransform(const cv::Mat& src, int frame_index = -1) const;
 
     OpencvType config_;
     std::unique_ptr<productionline::io::BufferComparator> comparator_;

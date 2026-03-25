@@ -109,7 +109,7 @@ buildMultiWorkerConfigForCompare(
     group.consumer_configs.push_back(consumer_sw);
     
     // ========================================
-    // 3. 配置连接器（ONE_TO_MANY + 比较回调）
+    // 3. 配置连接器（ONE_TO_MANY + 回调）
     // ========================================
     ConnectorConfig connector;
     connector.mode = Connector::Mode::ONE_TO_MANY;
@@ -117,17 +117,43 @@ buildMultiWorkerConfigForCompare(
     connector.consumer_names.push_back("hw_decoder");
     connector.consumer_names.push_back("sw_decoder");
     connector.enable_frame_sync = true;
-    
-    // 创建比较上下文（从 configs[0] 获取比较配置）
-    auto compare_ctx = std::make_shared<CompareCallbackContext>();
-    compare_ctx->initFromCompareType(configs[0].consumer_type.compare);
-    compare_ctx->worker1_name = "hw_decoder";
-    compare_ctx->worker2_name = "sw_decoder";
-    
-    // 添加比较回调到 callback_chain
-    connector.callback_chain.push_back(
-        WorkerSyncCoordinator::createDefaultCompareCallback(compare_ctx.get()));
-    
+
+    const auto& consumer_type = configs[0].consumer_type;
+
+    // ⭐ 创建本地 logger（因为这是静态函数，没有 logger_ 成员）
+    auto logger = log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("consumer.BufferConsumerService"));
+
+    // 初始化 compare_ctx（在两个分支中都会使用）
+    std::shared_ptr<CompareCallbackContext> compare_ctx = nullptr;
+
+    // ⭐ 根据 consumer_type 的类型选择 callback
+    if (consumer_type.opencv.enable) {
+        // OpenCV 模式：执行 add/absdiff 等算术运算
+        LOG4CPLUS_INFO_FMT(logger,
+            "使用 OpenCV 模式，操作类型: %d",
+            static_cast<int>(consumer_type.opencv.op_type));
+
+        auto opencv_ctx = std::make_shared<OpenCVCallbackContext>();
+        opencv_ctx->config = consumer_type.opencv;
+        opencv_ctx->worker1_name = "hw_decoder";
+        opencv_ctx->worker2_name = "sw_decoder";
+
+        connector.callback_chain.push_back(
+            WorkerSyncCoordinator::createOpenCVCallback(opencv_ctx.get()));
+    }
+    else {
+        // Compare 模式：计算 PSNR/SSIM（保留现有逻辑）
+        LOG4CPLUS_INFO(logger, "使用 Compare 模式，计算 PSNR/SSIM");
+
+        compare_ctx = std::make_shared<CompareCallbackContext>();
+        compare_ctx->initFromCompareType(consumer_type.compare);
+        compare_ctx->worker1_name = "hw_decoder";
+        compare_ctx->worker2_name = "sw_decoder";
+
+        connector.callback_chain.push_back(
+            WorkerSyncCoordinator::createDefaultCompareCallback(compare_ctx.get()));
+    }
+
     group.connector_configs.push_back(connector);
     
     // ========================================

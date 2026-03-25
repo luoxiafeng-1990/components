@@ -116,6 +116,82 @@ struct CompareCallbackContext {
 };
 
 // ============================================================
+// OpenCV 回调上下文（用于多生产者 Buffer 算术运算）
+// ============================================================
+
+/**
+ * @brief OpenCV 回调上下文
+ *
+ * 用于 WorkerSyncCoordinator 的 callback_chain，
+ * 在多个 Worker 的 Buffer 上执行 OpenCV 算术运算（如 add、absdiff）。
+ *
+ * 使用方式：
+ * @code
+ * auto opencv_ctx = std::make_shared<OpenCVCallbackContext>();
+ * opencv_ctx->config = worker_config.consumer_type.opencv;
+ *
+ * connector_config.enable_frame_sync = true;
+ * connector_config.callback_chain.push_back(
+ *     WorkerSyncCoordinator::createOpenCVCallback(opencv_ctx.get()));
+ * @endcode
+ */
+struct OpenCVCallbackContext {
+    // OpenCV 配置（从 ConsumerTypeConfig.opencv 初始化）
+    WorkerConfig::ConsumerTypeConfig::OpencvType config;
+
+    // 统计计数器（原子，线程安全）
+    std::atomic<int> total_frames{0};
+    std::atomic<int> passed_frames{0};
+    std::atomic<int> failed_frames{0};
+
+    // 累计值（用于计算平均值）
+    std::atomic<double> psnr_sum{0.0};
+    std::atomic<double> ssim_sum{0.0};
+
+    // Worker 名称（用于日志和结果区分）
+    std::string worker1_name;
+    std::string worker2_name;
+
+    // ⭐ v2.28 优化：BufferComparator 作为成员，用于计算质量指标
+    std::unique_ptr<productionline::io::BufferComparator> comparator_;
+    bool comparator_opened_ = false;
+
+    OpenCVCallbackContext() = default;
+
+    // 析构函数：关闭 comparator
+    ~OpenCVCallbackContext();
+
+    // 禁止拷贝（因为有 atomic 成员和 unique_ptr）
+    OpenCVCallbackContext(const OpenCVCallbackContext&) = delete;
+    OpenCVCallbackContext& operator=(const OpenCVCallbackContext&) = delete;
+
+    /**
+     * @brief 打开 BufferComparator（用于计算结果的 PSNR/SSIM）
+     *
+     * @return true 打开成功
+     * @return false 打开失败
+     */
+    bool openComparator();
+
+    /**
+     * @brief 关闭 BufferComparator
+     */
+    void closeComparator();
+
+    // 获取平均 PSNR
+    double getAveragePsnr() const;
+
+    // 获取平均 SSIM
+    double getAverageSsim() const;
+
+    // 获取通过率
+    double getPassRate() const;
+
+    // 判断是否通过
+    bool isPassed() const;
+};
+
+// ============================================================
 // WorkerSyncCoordinator 类
 // ============================================================
 
@@ -209,28 +285,59 @@ public:
     
     /**
      * @brief 创建默认的比较回调
-     * 
+     *
      * @param context 比较上下文（用于累积统计结果）
      * @return CallbackChainItem 可添加到 ConnectorConfig.callback_chain
-     * 
+     *
      * 功能：
      * - 使用 BufferComparator 计算 PSNR/SSIM
      * - 将结果累积到 CompareCallbackContext 中
      * - 根据阈值判断是否通过
-     * 
+     *
      * 使用示例：
      * @code
      * auto compare_ctx = std::make_shared<CompareCallbackContext>();
      * compare_ctx->initFromCompareType(worker_config.consumer_type.compare);
-     * 
+     *
      * connector_config.enable_frame_sync = true;
      * connector_config.callback_chain.push_back(
      *     WorkerSyncCoordinator::createDefaultCompareCallback(compare_ctx.get()));
      * @endcode
-     * 
+     *
      * @note context 的生命周期需由调用者管理（推荐使用 shared_ptr）
      */
     static CallbackChainItem createDefaultCompareCallback(CompareCallbackContext* context);
+
+    /**
+     * @brief 创建 OpenCV 算术运算回调
+     *
+     * @param context OpenCV 上下文（用于累积统计结果）
+     * @return CallbackChainItem 可添加到 ConnectorConfig.callback_chain
+     *
+     * 功能：
+     * - 获取两个 Worker 的 Buffer 并转换为 cv::Mat
+     * - 执行指定的 OpenCV 算术运算（如 add、absdiff）
+     * - 计算结果的 PSNR/SSIM（如果启用）
+     * - 将统计结果累积到 OpenCVCallbackContext 中
+     *
+     * 支持的操作（OpencvType::OpType）：
+     * - ADD：两个 Mat 相加
+     * - ABSDIFF：两个 Mat 的绝对差
+     *
+     * 使用示例：
+     * @code
+     * auto opencv_ctx = std::make_shared<OpenCVCallbackContext>();
+     * opencv_ctx->config.op_type = OpencvType::OpType::ADD;
+     * opencv_ctx->config.enable_psnr = true;
+     *
+     * connector_config.enable_frame_sync = true;
+     * connector_config.callback_chain.push_back(
+     *     WorkerSyncCoordinator::createOpenCVCallback(opencv_ctx.get()));
+     * @endcode
+     *
+     * @note context 的生命周期需由调用者管理（推荐使用 shared_ptr）
+     */
+    static CallbackChainItem createOpenCVCallback(OpenCVCallbackContext* context);
     
 private:
     /**

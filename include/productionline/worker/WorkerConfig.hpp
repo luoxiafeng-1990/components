@@ -617,6 +617,14 @@ struct WorkerConfig {
             /// 操作类型：决定对 SW 参考帧施加哪种 OpenCV 变换
             enum class OpType {
                 NONE,         ///< 无操作，直接比较原始解码帧
+                SAVE_LOAD_IMG,///< 保存图片到文件再读取，与原始帧比较（SINGLE 模式）
+                ADD,          ///< cv::add 两个 Mat 相加（多生产者对比）
+                ABSDIFF,      ///< cv::absdiff 两个 Mat 绝对差（多生产者对比）
+                ADD_WEIGHTED, ///< cv::addWeighted 加权求和（多生产者对比）
+                BITWISE_AND,  ///< cv::bitwise_and 按位与（多生产者对比）
+                BITWISE_OR,   ///< cv::bitwise_or 按位或（多生产者对比）
+                BITWISE_XOR,  ///< cv::bitwise_xor 按位异或（多生产者对比）
+                BITWISE_NOT,  ///< cv::bitwise_not 按位非（单生产者）
                 RESIZE,       ///< cv::resize 缩放
                 CROP,         ///< ROI 裁剪（src(cv::Rect(...))）
                 ERODE,        ///< cv::erode 腐蚀

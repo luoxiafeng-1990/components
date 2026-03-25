@@ -286,6 +286,14 @@ public:
             else if (fields[0] == "split")       op = OpType::SPLIT;
             else if (fields[0] == "merge")       op = OpType::MERGE;
             else if (fields[0] == "cvtcolor")    op = OpType::CVTCOLOR;
+            else if (fields[0] == "add")         op = OpType::ADD;
+            else if (fields[0] == "absdiff")     op = OpType::ABSDIFF;
+            else if (fields[0] == "addweighted") op = OpType::ADD_WEIGHTED;
+            else if (fields[0] == "bitwiseand")  op = OpType::BITWISE_AND;
+            else if (fields[0] == "bitwiseor")   op = OpType::BITWISE_OR;
+            else if (fields[0] == "bitwisexor")  op = OpType::BITWISE_XOR;
+            else if (fields[0] == "bitwisenot")  op = OpType::BITWISE_NOT;
+            else if (fields[0] == "saveloadimg") op = OpType::SAVE_LOAD_IMG;
         }
 
         // 辅助函数：安全读取第 idx 个字段
@@ -366,6 +374,29 @@ public:
                 // 完整列表见 opencv2/imgproc.hpp
                 opencv.cvtcolor.code = getI(1, 40);   // 默认 CV_YUV2BGR_NV12
                 opencv.cvtcolor.dstCn = getI(2, 0);   // 0=自动
+            } else if (op == OpType::ADD || op == OpType::ABSDIFF ||
+                       op == OpType::ADD_WEIGHTED || op == OpType::BITWISE_AND ||
+                       op == OpType::BITWISE_OR || op == OpType::BITWISE_XOR ||
+                       op == OpType::BITWISE_NOT) {
+                // 多生产者算术/逻辑运算，不需要额外参数
+                // 通过 enable_psnr/enable_ssim 控制质量评估
+                if (fields.size() > 1 && fields[1] == "psnr") {
+                    opencv.enable_psnr = true;
+                    opencv.enable_ssim = false;
+                } else if (fields.size() > 1 && fields[1] == "ssim") {
+                    opencv.enable_psnr = false;
+                    opencv.enable_ssim = true;
+                }
+            } else if (op == OpType::SAVE_LOAD_IMG) {
+                // 图片保存/读取 I/O 测试，单生产者模式
+                // 通过 enable_psnr/enable_ssim 控制质量评估
+                if (fields.size() > 1 && fields[1] == "psnr") {
+                    opencv.enable_psnr = true;
+                    opencv.enable_ssim = false;
+                } else if (fields.size() > 1 && fields[1] == "ssim") {
+                    opencv.enable_psnr = false;
+                    opencv.enable_ssim = true;
+                }
             }
         }
 

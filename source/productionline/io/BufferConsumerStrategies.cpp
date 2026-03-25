@@ -12,6 +12,7 @@
 #include <sstream>
 #include <iomanip>
 #include <cstring>
+#include <cstdio>
 
 extern "C" {
 #include <libavutil/avutil.h>
@@ -680,10 +681,50 @@ bool OpencvConsumer::initialize(const std::vector<Buffer*>& first_buffers) {
     return true;
 }
 
-cv::Mat OpencvConsumer::applyOpencvTransform(const cv::Mat& src) const {
+cv::Mat OpencvConsumer::applyOpencvTransform(const cv::Mat& src, int frame_index) const {
     if (src.empty()) return src;
 
     switch (config_.op_type) {
+        case OpencvType::OpType::SAVE_LOAD_IMG: {
+            // 图片保存/读取 I/O 测试（使用固定文件名，反复删除创建）
+            const std::string temp_filename = "/tmp/opencv_test_frame.jpg";
+
+            try {
+                // 保存原始 Mat 为 JPEG 图片
+                LOG4CPLUS_INFO_FMT(log4cplus::Logger::getRoot(),
+                    "OpencvConsumer::applyOpencvTransform [frame %d] Saving to: %s",
+                    frame_index, temp_filename.c_str());
+
+                bool save_ok = cv::imwrite(temp_filename, src);
+                if (!save_ok) {
+                    LOG4CPLUS_WARN_FMT(log4cplus::Logger::getRoot(),
+                        "OpencvConsumer::applyOpencvTransform [frame %d] Failed to save image to %s",
+                        frame_index, temp_filename.c_str());
+                    return src;
+                }
+
+                // 读取刚才保存的图片
+                cv::Mat mat_loaded = cv::imread(temp_filename, cv::IMREAD_COLOR);
+                if (mat_loaded.empty()) {
+                    LOG4CPLUS_WARN_FMT(log4cplus::Logger::getRoot(),
+                        "OpencvConsumer::applyOpencvTransform [frame %d] Failed to load image from %s",
+                        frame_index, temp_filename.c_str());
+                    return src;
+                }
+
+                LOG4CPLUS_INFO_FMT(log4cplus::Logger::getRoot(),
+                    "OpencvConsumer::applyOpencvTransform [frame %d] Loaded from: %s (size=%dx%d channels=%d)",
+                    frame_index, temp_filename.c_str(),
+                    mat_loaded.cols, mat_loaded.rows, mat_loaded.channels());
+
+                return mat_loaded;
+            } catch (const std::exception& e) {
+                LOG4CPLUS_ERROR_FMT(log4cplus::Logger::getRoot(),
+                    "OpencvConsumer::applyOpencvTransform [frame %d] Exception in SAVE_LOAD_IMG: %s",
+                    frame_index, e.what());
+                return src;
+            }
+        }
         case OpencvType::OpType::RESIZE: {
             const auto& r = config_.resize;
             if (r.dst_width <= 0 && r.dst_height <= 0 && r.fx <= 0.0 && r.fy <= 0.0) {
@@ -1009,8 +1050,8 @@ bool OpencvConsumer::consume(const std::vector<Buffer*>& buffers, int frame_inde
 
         // 对两路施加同一 OpenCV 变换
         if (config_.op_type != OpencvType::OpType::NONE) {
-            mat_hw = applyOpencvTransform(mat_hw);
-            mat_sw = applyOpencvTransform(mat_sw);
+            mat_hw = applyOpencvTransform(mat_hw, frame_index);
+            mat_sw = applyOpencvTransform(mat_sw, frame_index);
 
             std::cout << matInfoToString(mat_hw) << std::endl;
             std::cout << matInfoToString(mat_sw) << std::endl;
@@ -1049,6 +1090,14 @@ void OpencvConsumer::finalize() {
     if (comparator_) {
         comparator_->close();
         comparator_->printSummary();
+    }
+
+    // 清理 SAVE_LOAD_IMG 操作的临时文件
+    if (config_.op_type == OpencvType::OpType::SAVE_LOAD_IMG) {
+        const std::string temp_filename = "/tmp/opencv_test_frame.jpg";
+        ::remove(temp_filename.c_str());
+        LOG4CPLUS_INFO_FMT(log4cplus::Logger::getRoot(),
+            "OpencvConsumer: Cleaned up temporary file: %s", temp_filename.c_str());
     }
 
     LOG4CPLUS_INFO_FMT(log4cplus::Logger::getRoot(),

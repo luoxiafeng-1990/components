@@ -125,6 +125,53 @@ const std::map<std::string, OpencvTestParams>& OpencvTestSuite::getPredefinedTes
         add("cv_cvtcolor_h265_1080p_30",     OpType::CVTCOLOR,     true, "cvtcolor_40");
         add("cv_cvtcolor_sw_h264_1080p_30",  OpType::CVTCOLOR,     false, "cvtcolor_40");
 
+        // ---- OpenCV ADD 算术运算测试（多生产者对比）----
+        // 注：ADD 操作在 COMPARE 模式中执行，对比 hw_decoder 和 sw_decoder 的输出
+        // hw_mat + sw_mat 的结果，然后计算与原始 buffer 的 PSNR/SSIM
+        add("cv_add_h264_hw_vs_sw_psnr_30",  OpType::ADD,   true,  "add_psnr");
+        add("cv_add_h264_hw_vs_sw_ssim_30",  OpType::ADD,   true,  "add_ssim");
+        add("cv_add_h265_hw_vs_sw_psnr_30",  OpType::ADD,   true,  "add_psnr");
+
+        // ---- OpenCV ABSDIFF 算术运算测试（多生产者对比）----
+        // 注：ABSDIFF 计算 hw 和 sw 解码输出的绝对差，用于检测两者的差异
+        // absdiff(hw_mat, sw_mat) 的结果，然后计算与原始 buffer 的 PSNR/SSIM
+        add("cv_absdiff_h264_hw_vs_sw_psnr_30",  OpType::ABSDIFF,   true,  "absdiff_psnr");
+        add("cv_absdiff_h264_hw_vs_sw_ssim_30",  OpType::ABSDIFF,   true,  "absdiff_ssim");
+        add("cv_absdiff_h265_hw_vs_sw_psnr_30",  OpType::ABSDIFF,   true,  "absdiff_psnr");
+
+        // ---- OpenCV ADD_WEIGHTED 加权求和测试（多生产者对比）----
+        // 注：addWeighted(hw, 0.5, sw, 0.5, 0) 计算两个解码器输出的加权平均
+        add("cv_addweighted_h264_hw_vs_sw_psnr_30",  OpType::ADD_WEIGHTED,  true,  "addweighted_psnr");
+        add("cv_addweighted_h264_hw_vs_sw_ssim_30",  OpType::ADD_WEIGHTED,  true,  "addweighted_ssim");
+        add("cv_addweighted_h265_hw_vs_sw_psnr_30",  OpType::ADD_WEIGHTED,  true,  "addweighted_psnr");
+
+        // ---- OpenCV BITWISE_AND 按位与测试（多生产者对比）----
+        // 注：bitwise_and(hw, sw) 计算两个解码器输出的按位与
+        add("cv_bitwiseand_h264_hw_vs_sw_psnr_30",  OpType::BITWISE_AND,  true,  "bitwiseand_psnr");
+        add("cv_bitwiseand_h264_hw_vs_sw_ssim_30",  OpType::BITWISE_AND,  true,  "bitwiseand_ssim");
+
+        // ---- OpenCV BITWISE_OR 按位或测试（多生产者对比）----
+        // 注：bitwise_or(hw, sw) 计算两个解码器输出的按位或
+        add("cv_bitwiseor_h264_hw_vs_sw_psnr_30",  OpType::BITWISE_OR,  true,  "bitwiseor_psnr");
+        add("cv_bitwiseor_h264_hw_vs_sw_ssim_30",  OpType::BITWISE_OR,  true,  "bitwiseor_ssim");
+
+        // ---- OpenCV BITWISE_XOR 按位异或测试（多生产者对比）----
+        // 注：bitwise_xor(hw, sw) 计算两个解码器输出的按位异或
+        add("cv_bitwisexor_h264_hw_vs_sw_psnr_30",  OpType::BITWISE_XOR,  true,  "bitwisexor_psnr");
+        add("cv_bitwisexor_h264_hw_vs_sw_ssim_30",  OpType::BITWISE_XOR,  true,  "bitwisexor_ssim");
+
+        // ---- OpenCV BITWISE_NOT 按位非测试（多生产者对比）----
+        // 注：bitwise_not(hw) 计算硬件解码器输出的按位非
+        add("cv_bitwisenot_h264_hw_vs_sw_psnr_30",  OpType::BITWISE_NOT,  true,  "bitwisenot_psnr");
+        add("cv_bitwisenot_h264_hw_vs_sw_ssim_30",  OpType::BITWISE_NOT,  true,  "bitwisenot_ssim");
+
+        // ---- OpenCV SAVE_LOAD_IMG 图片保存和读取测试（单生产者I/O测试）----
+        // 注：SAVE_LOAD_IMG 操作在 SINGLE 模式中执行，测试硬件解码器输出的图片保存/读取流程
+        // 硬件 Mat -> cv::imwrite -> cv::imread -> 与原始 Mat 比较
+        add("cv_saveloadimg_h264_hw_psnr_30",  OpType::SAVE_LOAD_IMG,  true,  "saveloadimg_psnr");
+        add("cv_saveloadimg_h264_hw_ssim_30",  OpType::SAVE_LOAD_IMG,  true,  "saveloadimg_ssim");
+        add("cv_saveloadimg_h265_hw_psnr_30",  OpType::SAVE_LOAD_IMG,  true,  "saveloadimg_psnr");
+
         return m;
     }();
     return tests;
@@ -150,14 +197,14 @@ int OpencvTestSuite::run(int argc, char* argv[]) {
         return 1;
     }
 
-    auto hw_config = common::WorkerConfigFactory::buildOpencvConfig(
-        config.data_source.path, params.params_str, params.use_hardware);
-
-    // 合并附加设置
-    hw_config.consumer_type.verbose  = config.consumer_type.verbose;
-    hw_config.data_source.max_frames = config.data_source.max_frames;
-
-    uint32_t flags = buildConsumeFlags(hw_config);
+    // 检测是否为多生产者算术/逻辑运算（需要 COMPARE 模式）
+    bool is_arithmetic_op = (params.opencv_op == OpencvTestParams::OpType::ADD ||
+                             params.opencv_op == OpencvTestParams::OpType::ABSDIFF ||
+                             params.opencv_op == OpencvTestParams::OpType::ADD_WEIGHTED ||
+                             params.opencv_op == OpencvTestParams::OpType::BITWISE_AND ||
+                             params.opencv_op == OpencvTestParams::OpType::BITWISE_OR ||
+                             params.opencv_op == OpencvTestParams::OpType::BITWISE_XOR ||
+                             params.opencv_op == OpencvTestParams::OpType::BITWISE_NOT);
 
     std::string filename = config.data_source.path;
     size_t pos = filename.find_last_of("/\\");
@@ -166,10 +213,43 @@ int OpencvTestSuite::run(int argc, char* argv[]) {
     }
     const std::string test_name = "Custom: " + filename;
 
-    auto result = runSingle(hw_config, flags, test_name);
-    consumer::BufferConsumerService::printResult(test_name, result);
+    if (is_arithmetic_op) {
+        // ⭐ ADD/ABSDIFF 需要两个解码器（hw 和 sw）进行对比
+        auto hw_config = common::WorkerConfigFactory::buildOpencvConfig(
+            config.data_source.path, params.params_str, true);  // hardware=true
+        auto sw_config = common::WorkerConfigFactory::buildOpencvConfig(
+            config.data_source.path, params.params_str, false); // hardware=false
 
-    return result.success ? 0 : 1;
+        // 合并附加设置
+        hw_config.consumer_type.verbose  = config.consumer_type.verbose;
+        hw_config.data_source.max_frames = config.data_source.max_frames;
+        sw_config.consumer_type.verbose  = config.consumer_type.verbose;
+        sw_config.data_source.max_frames = config.data_source.max_frames;
+
+        uint32_t flags = consumer::CONSUME_COUNT;
+        if (hw_config.consumer_type.opencv.enable) {
+            flags |= consumer::CONSUME_OPENCV;
+        }
+
+        auto result = runCompare({hw_config, sw_config}, flags, test_name);
+        consumer::BufferConsumerService::printResult(test_name, result);
+        return result.success ? 0 : 1;
+    } else {
+        // ⭐ 其他操作使用 SINGLE 模式
+        auto hw_config = common::WorkerConfigFactory::buildOpencvConfig(
+            config.data_source.path, params.params_str, params.use_hardware);
+
+        // 合并附加设置
+        hw_config.consumer_type.verbose  = config.consumer_type.verbose;
+        hw_config.data_source.max_frames = config.data_source.max_frames;
+
+        uint32_t flags = buildConsumeFlags(hw_config);
+
+        auto result = runSingle(hw_config, flags, test_name);
+        consumer::BufferConsumerService::printResult(test_name, result);
+
+        return result.success ? 0 : 1;
+    }
 }
 
 bool OpencvTestSuite::parseArgs(int argc, char* argv[], WorkerConfig& config, OpencvTestParams& params) {
@@ -286,11 +366,28 @@ bool OpencvTestSuite::parseArgs(int argc, char* argv[], WorkerConfig& config, Op
         params.opencv_op = OpencvTestParams::OpType::MERGE;
     } else if (case_str == "cvtcolor") {
         params.opencv_op = OpencvTestParams::OpType::CVTCOLOR;
+    } else if (case_str == "add") {
+        params.opencv_op = OpencvTestParams::OpType::ADD;
+    } else if (case_str == "absdiff") {
+        params.opencv_op = OpencvTestParams::OpType::ABSDIFF;
+    } else if (case_str == "addweighted") {
+        params.opencv_op = OpencvTestParams::OpType::ADD_WEIGHTED;
+    } else if (case_str == "bitwiseand") {
+        params.opencv_op = OpencvTestParams::OpType::BITWISE_AND;
+    } else if (case_str == "bitwiseor") {
+        params.opencv_op = OpencvTestParams::OpType::BITWISE_OR;
+    } else if (case_str == "bitwisexor") {
+        params.opencv_op = OpencvTestParams::OpType::BITWISE_XOR;
+    } else if (case_str == "bitwisenot") {
+        params.opencv_op = OpencvTestParams::OpType::BITWISE_NOT;
+    } else if (case_str == "saveloadimg") {
+        params.opencv_op = OpencvTestParams::OpType::SAVE_LOAD_IMG;
     } else {
         std::cerr << "Error: unknown --case '" << case_str
                   << "'. Valid: resize/crop/erode/dilate/open/close/"
                      "sobel/canny/laplacian/translate/rotate/perspective/"
-                     "line/rectangle/puttext/blur/threshold\n" << std::endl;
+                     "line/rectangle/puttext/blur/threshold/split/merge/cvtcolor/"
+                     "add/absdiff/addweighted/bitwiseand/bitwiseor/bitwisexor/bitwisenot/saveloadimg\n" << std::endl;
         return false;
     }
 
@@ -313,14 +410,42 @@ int OpencvTestSuite::runPredefinedTest(const std::string& test_name, const std::
     }
 
     const auto& params = it->second;
-    auto config = common::WorkerConfigFactory::buildOpencvConfig(
-        path, params.params_str, params.use_hardware);
 
-    uint32_t flags = buildConsumeFlags(config);
+    // 检测是否为多生产者算术/逻辑运算（需要 COMPARE 模式）
+    bool is_arithmetic_op = (params.opencv_op == OpencvTestParams::OpType::ADD ||
+                             params.opencv_op == OpencvTestParams::OpType::ABSDIFF ||
+                             params.opencv_op == OpencvTestParams::OpType::ADD_WEIGHTED ||
+                             params.opencv_op == OpencvTestParams::OpType::BITWISE_AND ||
+                             params.opencv_op == OpencvTestParams::OpType::BITWISE_OR ||
+                             params.opencv_op == OpencvTestParams::OpType::BITWISE_XOR ||
+                             params.opencv_op == OpencvTestParams::OpType::BITWISE_NOT);
 
-    auto result = runSingle(config, flags, test_name);
-    consumer::BufferConsumerService::printResult(test_name, result);
-    return result.success ? 0 : 1;
+    if (is_arithmetic_op) {
+        // ⭐ ADD/ABSDIFF 需要两个解码器（hw 和 sw）进行对比
+        auto hw_config = common::WorkerConfigFactory::buildOpencvConfig(
+            path, params.params_str, true);   // hardware=true
+        auto sw_config = common::WorkerConfigFactory::buildOpencvConfig(
+            path, params.params_str, false);  // hardware=false
+
+        uint32_t flags = consumer::CONSUME_COUNT;
+        if (hw_config.consumer_type.opencv.enable) {
+            flags |= consumer::CONSUME_OPENCV;
+        }
+
+        auto result = runCompare({hw_config, sw_config}, flags, test_name);
+        consumer::BufferConsumerService::printResult(test_name, result);
+        return result.success ? 0 : 1;
+    } else {
+        // ⭐ 其他操作使用 SINGLE 模式
+        auto config = common::WorkerConfigFactory::buildOpencvConfig(
+            path, params.params_str, params.use_hardware);
+
+        uint32_t flags = buildConsumeFlags(config);
+
+        auto result = runSingle(config, flags, test_name);
+        consumer::BufferConsumerService::printResult(test_name, result);
+        return result.success ? 0 : 1;
+    }
 }
 
 void OpencvTestSuite::printHelp() const {
