@@ -411,6 +411,24 @@ int TacoProDisplayContext::registerChannel() {
 
     int id = next_channel_id_++;
 
+    if (view_type_ == ViewType::GRID &&
+        id >= static_cast<int>(view_slots_.size())) {
+        int new_grid = selectGridCount(id + 1);
+        computeGridSlots(new_grid, screen_width_, screen_height_, view_slots_);
+
+        for (auto& existing : channels_) {
+            existing.layout = view_slots_.at(existing.channel_id);
+            if (osd_) {
+                osd_->registerChannel(existing.channel_id,
+                    existing.layout.x, existing.layout.y,
+                    existing.layout.w, existing.layout.h);
+            }
+        }
+
+        LOG4CPLUS_INFO_FMT(logger_,
+            "Grid expanded to %d slots for channel %d", new_grid, id);
+    }
+
     if (id >= static_cast<int>(view_slots_.size())) {
         LOG4CPLUS_ERROR_FMT(logger_,
             "Channel %d exceeds view slot count (%d)", id,
@@ -826,10 +844,6 @@ void TacoProDisplayContext::ppResize(
     dst_crop.start_y = dst_y;
     dst_crop.crop_w  = dst_w;
     dst_crop.crop_h  = dst_h;
-
-    LOG4CPLUS_DEBUG_FMT(logger_,
-        "ppResize(stitch): src=(%dx%d) -> dst=(%d,%d,%d,%d) blk_in=%u blk_out=%u",
-        src_width, src_height, dst_x, dst_y, dst_w, dst_h, src->id(), dst->id());
 
     ret = ta_cv_image_stitch(1, &image_in, image_out,
                              &dst_crop, &src_crop, TA_CV_INTER_LINEAR);
