@@ -385,12 +385,15 @@ BufferComparator::FormatInfo BufferComparator::analyzeFormat(Buffer* buffer) {
         info.num_planes = desc->nb_components;
         info.is_planar = !(desc->flags & AV_PIX_FMT_FLAG_RGB);
         
-        // YUV格式检测
+        // YUV格式检测（含 JPEG 全范围 YUVJ*，否则易误判为「不支持」导致 PSNR/SSIM 全 0）
         info.is_yuv = (info.format == AV_PIX_FMT_YUV420P ||
+                      info.format == AV_PIX_FMT_YUVJ420P ||
                       info.format == AV_PIX_FMT_NV12 ||
                       info.format == AV_PIX_FMT_NV21 ||
                       info.format == AV_PIX_FMT_YUV422P ||
+                      info.format == AV_PIX_FMT_YUVJ422P ||
                       info.format == AV_PIX_FMT_YUV444P ||
+                      info.format == AV_PIX_FMT_YUVJ444P ||
                       info.format == AV_PIX_FMT_YUV410P ||
                       info.format == AV_PIX_FMT_YUV411P ||
                       info.format == AV_PIX_FMT_P010LE ||
@@ -557,6 +560,16 @@ FrameCompareResult BufferComparator::compareYUV(
         passed_count_++;
         return result;
     }
+
+    // 未快速通过：先用 Y 分量填充 avg，保证 ENC_COMPARE 等能读到真实数值；
+    // FAST_ONLY 策略不会进入层2，此前此处未赋值会导致 psnr_avg/ssim_avg 恒为 0。
+    // AUTO_LAYERED / DEEP_ALWAYS 下层2 会用 YUV 加权结果覆盖。
+    if (config_.enable_psnr) {
+        result.psnr_avg = result.psnr_y;
+    }
+    if (config_.enable_ssim) {
+        result.ssim_avg = result.ssim_y;
+    }
     
     // ============================================================================
     // 层2：深度验证（U/V平面）
@@ -699,7 +712,7 @@ FrameCompareResult BufferComparator::compareYUV(
             // 日志在 compare() 返回前统一打印
         }
     } else {
-        // FAST_ONLY 模式
+        // FAST_ONLY 模式（avg 已在层1 后设为 Y 分量）
         result.level = FrameCompareResult::FAIL;
         result.passed = false;
         failed_count_++;
@@ -777,6 +790,13 @@ FrameCompareResult BufferComparator::compareRGB(
         result.ssim_avg = result.ssim_y;  // G → ssim_y
         passed_count_++;
         return result;
+    }
+
+    if (config_.enable_psnr) {
+        result.psnr_avg = result.psnr_y;
+    }
+    if (config_.enable_ssim) {
+        result.ssim_avg = result.ssim_y;
     }
     
     // ============================================================================

@@ -23,6 +23,7 @@
 #include "display/DisplayPlugin.hpp"
 #include "npu/NpuPlugin.hpp"
 #include "vdec/VdecPlugin.hpp"
+#include "venc/VencPlugin.hpp"
 #include "pp/PPPlugin.hpp"
 #include "save/SavePlugin.hpp"
 #include "common/Logger.hpp"
@@ -41,6 +42,7 @@ int main(int argc, char* argv[]) {
 
     // ── 1. 创建所有插件 ──
     auto vdec_plugin    = std::make_unique<test::vdec::VdecPlugin>();
+    auto venc_plugin    = std::make_unique<test::venc::VencPlugin>();
     auto pp_plugin      = std::make_unique<test::pp::PPPlugin>();
     auto save_plugin    = std::make_unique<test::save::SavePlugin>();
     auto display_plugin = std::make_unique<test::display::DisplayPlugin>();
@@ -60,6 +62,7 @@ int main(int argc, char* argv[]) {
     };
 
     register_plugin(vdec_plugin.get());
+    register_plugin(venc_plugin.get());
     register_plugin(pp_plugin.get());
     register_plugin(save_plugin.get());
     register_plugin(display_plugin.get());
@@ -129,9 +132,32 @@ int main(int argc, char* argv[]) {
         return result.success ? 0 : 1;
     }
 
-    // PARALLEL COMPARE (N 组 hw vs sw 并发对比)
     const bool compare_enabled = config.consumer_type.compare.enable_psnr
                               || config.consumer_type.compare.enable_ssim;
+
+    // 编码质量对比：单路 FFMPEG_ENCODE + PSNR/SSIM（源 YUV vs 编码→软解，非解码双路 COMPARE）
+    if (pipeline_configs.size() == 1
+        && pipeline_configs[0].worker_type == WorkerType::FFMPEG_ENCODE
+        && (config.consumer_type.compare.enable_psnr || config.consumer_type.compare.enable_ssim)) {
+        auto result = test::venc::runEncodeQualityCompare(
+            pipeline_configs[0], config, test_name + " (ENC_COMPARE)");
+        consumer::BufferConsumerService::printResult(test_name, result);
+        return result.success ? 0 : 1;
+    }
+
+    // 单路编码 + 显示：编码 -> 解码 -> 显示（码流不可直接显示）
+    if (pipeline_configs.size() == 1
+        && pipeline_configs[0].worker_type == WorkerType::FFMPEG_ENCODE
+        && config.consumer_type.display.enable
+        && !config.consumer_type.compare.enable_psnr
+        && !config.consumer_type.compare.enable_ssim) {
+        auto result = test::venc::runEncodeDecodeDisplay(
+            pipeline_configs[0], config, test_name);
+        consumer::BufferConsumerService::printResult(test_name, result);
+        return result.success ? 0 : 1;
+    }
+
+    // PARALLEL COMPARE (N 组 hw vs sw 并发对比)
     if (compare_enabled && pipeline_configs.size() > 2 && pipeline_configs.size() % 2 == 0)
     {
         const int groups = static_cast<int>(pipeline_configs.size()) / 2;

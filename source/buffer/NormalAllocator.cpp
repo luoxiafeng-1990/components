@@ -2,6 +2,9 @@
 #include "buffer/bufferpool/BufferPool.hpp"
 #include "buffer/bufferpool/BufferPoolRegistry.hpp"
 #include "common/Logger.hpp"
+extern "C" {
+#include <libavcodec/packet.h>
+}
 #include <cstdlib>
 #include <cstring>
 #include <stdio.h>
@@ -79,6 +82,13 @@ Buffer* NormalAllocator::createBuffer(uint32_t id, size_t size) {
 void NormalAllocator::deallocateBuffer(Buffer* buffer) {
     if (!buffer) {
         return;
+    }
+
+    // 0. FFmpegEncodeWorker 等会在 Normal Buffer 上挂 AVPacket（编码输出槽位）
+    if (buffer->getAVPacket()) {
+        AVPacket* pkt = buffer->getAVPacket();
+        av_packet_free(&pkt);
+        buffer->setAVPacket(nullptr);
     }
     
     // 1. 释放内存

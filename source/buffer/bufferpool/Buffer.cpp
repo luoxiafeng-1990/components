@@ -64,14 +64,16 @@ Buffer::Buffer(Buffer&& other) noexcept
 
 Buffer& Buffer::operator=(Buffer&& other) noexcept {
     if (this != &other) {
-        // 复制数据
+        // 复制数据（与移动构造函数一致，避免 avpacket_ 悬空/重复释放导致 double free）
         id_ = other.id_;
         virt_addr_ = other.virt_addr_;
         phys_addr_ = other.phys_addr_;
         size_ = other.size_;
+        used_size_ = other.used_size_;
         ownership_ = other.ownership_;
         state_.store(other.state_.load());           // atomic 赋值
         avframe_ = other.avframe_;                   // ⭐ v2.7新增：移动 AVFrame 指针
+        avpacket_ = other.avpacket_;                 // ⭐ 与移动构造对齐
         has_image_metadata_ = other.has_image_metadata_;
         width_ = other.width_;
         height_ = other.height_;
@@ -86,7 +88,9 @@ Buffer& Buffer::operator=(Buffer&& other) noexcept {
         other.virt_addr_ = nullptr;
         other.phys_addr_ = 0;
         other.size_ = 0;
+        other.used_size_ = 0;
         other.avframe_ = nullptr;                    // ⭐ v2.7新增：清空 AVFrame 指针
+        other.avpacket_ = nullptr;                 // ⭐ 与移动构造对齐
         other.has_image_metadata_ = false;
         other.pts_ = AV_NOPTS_VALUE;                 // ⭐ v2.26新增：清空 PTS
         other.validation_magic_ = 0;
