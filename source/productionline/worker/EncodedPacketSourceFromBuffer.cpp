@@ -428,16 +428,22 @@ PacketAcquireResult EncodedPacketSourceFromBuffer::acquireEncodedPacket(AVPacket
     // ⭐ v2.22 新增：获取或创建 Worker 状态
     WorkerState& state = worker_states_[worker_id];
     
-    // ⭐ v2.22 新增：检查是否已处理过当前版本
-    // 注意：检查 acquired_version，不管 has_acquired 状态
-    // 因为 commit 后 has_acquired 会被重置，但 acquired_version 保持
+    // ⭐ v2.41 修复：同版本状态机判定
+    // - has_committed=true：该版本已完成，返回 packetAlreadyProcessed
+    // - has_acquired=true：正在处理该版本，返回 packetAlreadyProcessed
+    // - has_acquired=false && has_committed=false：上次已取消，允许同版本重新 acquire（避免卡死）
     if (state.acquired_version == current_version) {
-        // ❌ 已处理过当前版本（无论是否已 commit），不能重复获取
-        LOG4CPLUS_DEBUG_FMT(logger_, 
-            "[Worker %p] acquireEncodedPacket: Already processed version %llu (has_acquired=%d, has_committed=%d)", 
-            worker_id, (unsigned long long)current_version, 
-            state.has_acquired, state.has_committed);
-        return Result::packetAlreadyProcessed();  // ⭐ v2.31：当前 packet 已处理过
+        if (state.has_committed || state.has_acquired) {
+            LOG4CPLUS_DEBUG_FMT(logger_,
+                "[Worker %p] acquireEncodedPacket: Already processed/in-flight version %llu (has_acquired=%d, has_committed=%d)",
+                worker_id, (unsigned long long)current_version,
+                state.has_acquired, state.has_committed);
+            return Result::packetAlreadyProcessed();
+        }
+        // 取消后重试：允许重新获取同一 version
+        LOG4CPLUS_DEBUG_FMT(logger_,
+            "[Worker %p] acquireEncodedPacket: Re-acquire cancelled version %llu",
+            worker_id, (unsigned long long)current_version);
     }
     
     // ✅ 新版本或首次获取，可以获取

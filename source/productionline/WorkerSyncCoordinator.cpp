@@ -1,5 +1,5 @@
 #include "productionline/WorkerSyncCoordinator.hpp"
-#include "productionline/io/BufferComparator.hpp"
+#include "consumptionline/BufferComparator.hpp"
 #include "buffer/bufferpool/Buffer.hpp"
 #include <log4cplus/loggingmacros.h>
 
@@ -10,6 +10,7 @@
 void CompareCallbackContext::initFromCompareType(
     const WorkerConfig::ConsumerTypeConfig::CompareType& compare_config
 ) {
+    compare_config_snapshot_ = compare_config;
     enable_psnr = compare_config.enable_psnr;
     enable_ssim = compare_config.enable_ssim;
     min_psnr = compare_config.min_psnr;
@@ -47,10 +48,10 @@ bool CompareCallbackContext::openComparator() {
     }
     
     // 创建 comparator
-    comparator_ = std::make_unique<productionline::io::BufferComparator>();
+    comparator_ = std::make_unique<consumptionline::io::BufferComparator>();
     
-    // 配置
-    productionline::io::CompareConfig config;
+    // 配置：使用完整快照，避免 strategy/enable_parallel 等回落到错误组合导致 avg 未写入
+    consumptionline::io::CompareConfig config = compare_config_snapshot_;
     config.enable_psnr = enable_psnr;
     config.enable_ssim = enable_ssim;
     config.min_psnr = min_psnr;
@@ -85,10 +86,10 @@ bool OpenCVCallbackContext::openComparator() {
     }
 
     // 创建 comparator
-    comparator_ = std::make_unique<productionline::io::BufferComparator>();
+    comparator_ = std::make_unique<consumptionline::io::BufferComparator>();
 
     // 配置
-    productionline::io::CompareConfig compare_config;
+    consumptionline::io::CompareConfig compare_config;
     compare_config.enable_psnr = config.enable_psnr;
     compare_config.enable_ssim = config.enable_ssim;
     compare_config.min_psnr = config.min_psnr;

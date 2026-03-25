@@ -31,14 +31,16 @@ struct AVPacket;
  * @example
  * // RTSP 流
  * auto config1 = WorkerConfigBuilder()
+ *     .setGlobalConfig(WorkerGlobalConfigBuilder()
+ *         .setWorkerType(WorkerType::FFMPEG_PACKET_RECORDER).build())
  *     .setDataSourceConfig(DataSourceConfigBuilder().setPath("rtsp://192.168.1.100/stream").build())
- *     .setWorkerType(WorkerType::FFMPEG_PACKET_RECORDER)
  *     .build();
  * 
  * // 本地文件
  * auto config2 = WorkerConfigBuilder()
+ *     .setGlobalConfig(WorkerGlobalConfigBuilder()
+ *         .setWorkerType(WorkerType::FFMPEG_PACKET_RECORDER).build())
  *     .setDataSourceConfig(DataSourceConfigBuilder().setPath("/data/video.mp4").build())
- *     .setWorkerType(WorkerType::FFMPEG_PACKET_RECORDER)
  *     .build();
  * 
  * // 在 ProductionLine 中运行

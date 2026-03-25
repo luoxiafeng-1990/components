@@ -17,7 +17,7 @@ class Buffer;
 // 这里只需要包含该头文件即可
 #include "productionline/worker/WorkerConfig.hpp"
 #include "productionline/worker/WorkerBase.hpp"  // for FillStatus, FillResult
-#include "productionline/io/BufferComparator.hpp"
+#include "consumptionline/BufferComparator.hpp"
 
 // ============================================================
 // 比较回调上下文（与 WorkerSyncCoordinator 配套使用）
@@ -52,6 +52,8 @@ struct CompareCallbackContext {
     double min_psnr = 38.0;
     double min_ssim = 0.95;
     bool verbose = false;
+    /// 完整 compare 配置快照（strategy / enable_parallel / warn_* 等），供 BufferComparator::open 使用
+    WorkerConfig::ConsumerTypeConfig::CompareType compare_config_snapshot_{};
     
     // 统计计数器（原子，线程安全）
     std::atomic<int> total_frames{0};
@@ -67,7 +69,7 @@ struct CompareCallbackContext {
         result_callback;
     
     // ⭐ v2.28 优化：BufferComparator 作为成员，避免每帧重复创建
-    std::unique_ptr<productionline::io::BufferComparator> comparator_;
+    std::unique_ptr<consumptionline::io::BufferComparator> comparator_;
     bool comparator_opened_ = false;
     
     CompareCallbackContext() = default;
@@ -153,7 +155,7 @@ struct OpenCVCallbackContext {
     std::string worker2_name;
 
     // ⭐ v2.28 优化：BufferComparator 作为成员，用于计算质量指标
-    std::unique_ptr<productionline::io::BufferComparator> comparator_;
+    std::unique_ptr<consumptionline::io::BufferComparator> comparator_;
     bool comparator_opened_ = false;
 
     OpenCVCallbackContext() = default;

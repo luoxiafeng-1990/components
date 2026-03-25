@@ -130,9 +130,9 @@ int RawFrameSourceFromFile::readRawFrame(AVFrame* frame) {
     frame->width = width_;
     frame->height = height_;
     
-    // 分配 AVFrame 内部缓冲区（如果还没分配）
+    // 分配 AVFrame 内部缓冲区（若尚未分配）。64 字节对齐以适配硬件编码器常见 stride（与 backup 一致）。
     if (!frame->data[0]) {
-        int ret = av_frame_get_buffer(frame, 0);
+        int ret = av_frame_get_buffer(frame, 64);
         if (ret < 0) {
             char err_buf[AV_ERROR_MAX_STRING_SIZE];
             av_strerror(ret, err_buf, sizeof(err_buf));
@@ -141,12 +141,12 @@ int RawFrameSourceFromFile::readRawFrame(AVFrame* frame) {
         }
     }
     
-    // 确保帧可写
+    // 确保帧可写（若被引用可能触发内部拷贝，内存不足时会失败）
     int ret = av_frame_make_writable(frame);
     if (ret < 0) {
         char err_buf[AV_ERROR_MAX_STRING_SIZE];
         av_strerror(ret, err_buf, sizeof(err_buf));
-        LOG4CPLUS_ERROR_FMT(logger_, "av_frame_make_writable 失败: %s", err_buf);
+        LOG4CPLUS_ERROR_FMT(logger_, "av_frame_make_writable 失败: %s (可能是内存不足或帧被引用)", err_buf);
         return ret;
     }
     

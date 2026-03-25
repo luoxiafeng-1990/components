@@ -106,7 +106,7 @@ public:
      * - worker_config_.data_source.path（文件路径或 RTSP URL）
      * - worker_config_.display.width/height/bits_per_pixel
      * - worker_config_.decoder.name（解码器名称）
-     * - worker_config_.decoder.taco（TACO 配置）
+     * - tacoDecoderConfig(worker_config_.decoder)（TACO 厂商扩展 vendor 内的 TacoConfig）
      * 
      * @return 成功返回 true
      */
@@ -259,6 +259,11 @@ private:
     // ============ v3.0 新增：Packet 状态管理（用于 Buffer 模式共享）============
     AVPacket* current_packet_ptr_;         // 当前持有的 packet 指针（Buffer 模式下使用）
     bool packet_acquired_;                 // 是否已获取 packet（Buffer 模式下使用）
+
+    // ============ vX：EOF 后 codec drain ============
+    // 当数据源（Acquire 层）报告 EOF 时，需要把解码器内部缓冲 drain 出来，
+    // 否则可能出现 0 帧解码成功但管线直接退出的问题。
+    bool flush_sent_;                     // EOF 后是否已对 codec 发送过 flush（send_packet(NULL)）
     
     // ============ 内部辅助方法 ============
     

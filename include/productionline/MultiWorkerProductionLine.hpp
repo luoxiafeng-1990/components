@@ -23,48 +23,6 @@
 #include <set>
 #include <unordered_map>
 
-// 第三方线程池库（需要下载 BS::thread_pool.hpp）
-// GitHub: https://github.com/bshoshany/thread-pool
-// 下载地址: https://raw.githubusercontent.com/bshoshany/thread-pool/master/include/BS_thread_pool.hpp
-// 放置位置: packages/components/include/third_party/BS_thread_pool.hpp
-// 
-// 如果文件不存在，请运行以下命令下载：
-// cd packages/components/include/third_party
-// wget https://raw.githubusercontent.com/bshoshany/thread-pool/master/include/BS_thread_pool.hpp
-
-// 检查文件是否存在
-#ifndef MULTI_WORKER_THREAD_POOL_INCLUDED
-#define MULTI_WORKER_THREAD_POOL_INCLUDED
-
-#ifdef __has_include
-    #if __has_include("third_party/include/BS_thread_pool.hpp")
-        #include "third_party/include/BS_thread_pool.hpp"
-        #define HAS_BS_THREAD_POOL 1
-    #else
-        #define HAS_BS_THREAD_POOL 0
-    #endif
-#else
-    #include "third_party/include/BS_thread_pool.hpp"
-    #define HAS_BS_THREAD_POOL 1
-#endif
-
-#if !HAS_BS_THREAD_POOL
-    // 如果文件不存在，先提供占位符类型定义（确保类型完整）
-    namespace BS {
-        class thread_pool {
-        public:
-            thread_pool(int) {}
-            template<typename F>
-            void push_task(F&&) {}
-            void wait() {}
-        };
-    }
-    // 然后报错（但类型已经定义，所以不会出现类型错误）
-    #error "BS_thread_pool.hpp not found! Please run: cd packages/components/include/third_party && ./download_bs_thread_pool.sh"
-#endif
-
-#endif // MULTI_WORKER_THREAD_POOL_INCLUDED
-
 // FFmpeg 头文件（用于 AVPacket 操作）
 extern "C" {
 #include <libavcodec/avcodec.h>
@@ -153,7 +111,7 @@ private:
 class MultiWorkerProductionLine : public VideoProductionLine {
 public:
     // ⭐ v2.20：配置结构已移动到 WorkerConfig.hpp
-    // 使用：ProducerConfig, ConsumerConfig, ConnectorConfig, WorkerGroup, MultiWorkerConfig
+    // 使用：ProducerConfig, ConsumerConfig, ConnectorConfig, WorkerGroupConfig, MultiWorkerConfig
     
     /**
      * @brief 构造函数

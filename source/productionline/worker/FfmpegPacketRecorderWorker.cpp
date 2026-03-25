@@ -304,8 +304,7 @@ FillResult FfmpegPacketRecorderWorker::fillBuffer(int frame_index, Buffer* buffe
     auto acquire_result = packet_source_->acquireEncodedPacket(packet, nullptr);
     
     if (!acquire_result.ok()) {
-        // v2.34 重构：直接透传给 FillResult
-        if (acquire_result.isError()) {
+        if (acquire_result.isError() && !acquire_result.isNonVideoPacket()) {
             LOG4CPLUS_WARN_FMT(logger_, "acquireEncodedPacket: %s",
                               acquire_result.statusString());
         }

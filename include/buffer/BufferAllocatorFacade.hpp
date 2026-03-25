@@ -115,6 +115,7 @@ public:
      * @param phys_addr 外部内存的物理地址（如果支持，否则为 0）
      * @param size 外部内存的大小（字节）
      * @param queue 注入到哪个队列（FREE 或 FILLED）
+     * @param custom_id 自定义 Buffer ID（0 = 自动分配，非零 = 使用指定值）
      * @return Buffer* 成功返回 buffer，失败返回 nullptr
      */
     Buffer* injectExternalBufferToPool(
@@ -122,7 +123,8 @@ public:
         void* virt_addr,
         uint64_t phys_addr,
         size_t size,
-        QueueType queue = QueueType::FREE
+        QueueType queue = QueueType::FREE,
+        uint32_t custom_id = 0
     );
     
     // ==================== v2.0 注意：已删除 getManagedBufferPool() ====================

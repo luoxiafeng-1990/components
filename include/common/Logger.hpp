@@ -109,8 +109,35 @@ namespace {
 }
 
 // ============================================
-// 日志初始化宏（在 main 函数开始时调用一次）
+// RAII 日志守卫（推荐：在 main 函数栈上构造）
 // ============================================
+
+/**
+ * @brief RAII 日志生命周期管理
+ *
+ * 构造时初始化 log4cplus 并加载配置，析构时自动 shutdown。
+ * 用法：在 main() 开头声明一个栈变量即可。
+ *
+ * @code
+ *   int main(int argc, char* argv[]) {
+ *       LoggerGuard logger_guard;
+ *       // ... 程序逻辑 ...
+ *   }  // 离开作用域时自动 shutdown，确保日志刷盘
+ * @endcode
+ */
+class LoggerGuard {
+public:
+    LoggerGuard() { initializeLogger(); }
+    ~LoggerGuard() = default;
+
+    LoggerGuard(const LoggerGuard&) = delete;
+    LoggerGuard& operator=(const LoggerGuard&) = delete;
+
+private:
+    log4cplus::Initializer initializer_;
+};
+
+// 向后兼容：保留宏供旧代码使用（新代码请使用 LoggerGuard）
 #define INIT_LOGGER() \
     do { \
         static log4cplus::Initializer initializer; \

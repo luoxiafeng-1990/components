@@ -5,17 +5,21 @@ AUTOMAKE_OPTIONS = foreign
 noinst_LTLIBRARIES = libcomponents.la
 
 libcomponents_la_SOURCES = \
-    source/display/LinuxFramebufferDevice.cpp \
-    source/display/TacoVOContext.cpp \
-    source/display/TacoVODisplayDevice.cpp \
-    source/display/SharedDisplayContext.cpp \
-    source/display/SharedFramebufferDevice.cpp \
-    source/display/OsdOverlay.cpp \
-    source/display/DisplayDeviceFactory.cpp \
+    source/vendor/taco/display/TacoDisplayContext.cpp \
+    source/vendor/taco/display/TacoDisplayDevice.cpp \
+    source/vendor/taco/display/TacoDisplayExtension.cpp \
+    source/vendor/taco/display/TacoProOsdOverlay.cpp \
+    source/vendor/taco/display/TacoProDisplayContext.cpp \
+    source/vendor/taco/display/TacoProDisplayDevice.cpp \
+    source/vendor/taco/display/TacoProDisplayExtension.cpp \
+    source/vendor/taco/display/DisplayDeviceFactory.cpp \
     source/productionline/worker/WorkerBase.cpp \
     source/productionline/worker/BufferFillingWorkerFacade.cpp \
     source/productionline/worker/BufferFillingWorkerFactory.cpp \
     source/productionline/worker/WorkerConfig.cpp \
+    source/vendor/contracts/DecoderVendorRegistry.cpp \
+    source/vendor/taco/decode/TacoDecoderExtension.cpp \
+    source/vendor/taco/decode/TacoDecoderPluginLoader.cpp \
     source/productionline/worker/FFmpegDecodeWorker.cpp \
     source/productionline/worker/FfmpegPacketRecorderWorker.cpp \
     source/productionline/worker/FFmpegEncodeWorker.cpp \
@@ -24,7 +28,7 @@ libcomponents_la_SOURCES = \
     source/productionline/worker/EncodedPacketSourceFromRtsp.cpp \
     source/productionline/worker/RawFrameSourceFromFile.cpp \
     source/productionline/worker/RawFrameSourceFromBuffer.cpp \
-    source/monitor/PerformanceMonitor.cpp \
+    source/common/PerformanceMonitor.cpp \
     source/common/Timer.cpp \
     source/common/GlobalThreadPool.cpp \
     source/buffer/bufferpool/Buffer.cpp \
@@ -40,10 +44,11 @@ libcomponents_la_SOURCES = \
     source/productionline/VideoProductionLine.cpp \
     source/productionline/MultiWorkerProductionLine.cpp \
     source/productionline/WorkerSyncCoordinator.cpp \
-    source/productionline/io/BufferWriter.cpp \
-    source/productionline/io/BufferComparator.cpp \
-    source/productionline/io/BufferConsumerStrategies.cpp \
-    source/productionline/io/BufferConsumerService.cpp
+    source/consumptionline/BufferWriter.cpp \
+    source/consumptionline/BufferComparator.cpp \
+    source/consumptionline/BufferConsumerStrategies.cpp \
+    source/consumptionline/BufferConsumerService.cpp \
+    source/consumptionline/inference/NpuInferenceConsumer.cpp
 
 # ========== 测试程序 ==========
 # 注意：display_test 已废弃（原 test_cases/dec/ 目录已重命名为 old_case/）
@@ -55,11 +60,11 @@ libcomponents_la_SOURCES = \
 # 1. Buildroot 会自动编译 log4cplus（已在 components.mk 中声明依赖）
 # 2. log4cplus 库位置：$(STAGING_DIR)/usr/lib/liblog4cplus-2.0.so.3.4.7
 # 3. 运行时需要目标系统有 log4cplus 动态库（Buildroot 会自动安装到 TARGET_DIR）
-COMMON_LIBS = -lpthread -luring -ltacosys -ltacovo -llog4cplus -lfreetype $(FFMPEG_LIBS) $(OPENCV_LIBS)
+COMMON_LIBS = -lpthread -luring -ltacosys -ltacovo -llog4cplus -lfreetype $(FFMPEG_LIBS) $(OPENCV_LIBS) $(NPU_LIBS)
 FFMPEG_LIBS = -lavformat -lavcodec -lavutil -lswscale
 OPENCV_LIBS = -ltacocv -lvx -lhwdec_jpeg -ltaco_ppvdec -lCLC -lOpenVX -lOpenVXU -lOpenCL -lSPIRV_viv -lCLC -lVSC -lGAL -lovxlib -lArchModelSw -lNNArchPerf -ldl \
         -lopencv_imgcodecs -lopencv_videoio -lopencv_core -lopencv_imgproc -lenc24 -lyuv -ljpeg
-
+NPU_LIBS = -lta_runtime -lVIPhal -lNBGlinker
 
 # display_test 主程序（已废弃，原 test_cases/dec/ 目录已重命名为 old_case/）
 # display_test_SOURCES = test_cases/dec/test.cpp
@@ -76,28 +81,26 @@ OPENCV_LIBS = -ltacocv -lvx -lhwdec_jpeg -ltaco_ppvdec -lCLC -lOpenVX -lOpenVXU 
 # google_test_LDFLAGS = 
 
 # ========== QA 测试程序（模块化测试入口）==========
-bin_PROGRAMS = qa_cases test_mat
+bin_PROGRAMS = qa_cases
 
 # ========== Mat(AVFrame*) 接口最小化测试 ==========
-test_mat_SOURCES = test_cases/opencv/test_mat_avframe.cpp
-test_mat_CPPFLAGS = $(AM_CPPFLAGS)
-test_mat_LDADD = $(FFMPEG_LIBS) $(OPENCV_LIBS)
-test_mat_LDFLAGS = -Wl,--allow-shlib-undefined
 qa_cases_SOURCES = \
     test_cases/test_module_main.cpp \
-    test_cases/common/ITestModule.cpp \
-    test_cases/vdec/VdecTestSuite.cpp \
-    test_cases/pp/PPTestSuite.cpp \
-    test_cases/record/RecordTestSuite.cpp \
-    test_cases/writer/WriterTestSuite.cpp \
-    test_cases/opencv/OpencvTestSuite.cpp
+    test_cases/common/ExecuteMode.cpp \
+    test_cases/vdec/VdecPlugin.cpp \
+    test_cases/pp/PPPlugin.cpp \
+    test_cases/save/SavePlugin.cpp \
+    test_cases/display/DisplayPlugin.cpp \
+    test_cases/npu/NpuPlugin.cpp \
+    test_cases/opencv/OpencvPlugin.cpp \
+    test_cases/venc/VencPlugin.cpp
 qa_cases_LDADD = libcomponents.la $(COMMON_LIBS)
 qa_cases_CPPFLAGS = -I$(top_srcdir)/test_cases $(AM_CPPFLAGS)
 qa_cases_LDFLAGS = -Wl,--allow-shlib-undefined
 
 # ========== 编译选项 ==========
-AM_CPPFLAGS = -I$(top_srcdir)/include $(OPENCV_INCLUDE) -I$(top_srcdir)/include/freetype2
 OPENCV_INCLUDE = -I$(STAGING_DIR)/usr/include/opencv4
+AM_CPPFLAGS = -I$(top_srcdir)/include $(OPENCV_INCLUDE) -I$(top_srcdir)/include/common/third_party/freetype2
 
 if DEBUG
 AM_CXXFLAGS = -g -O0 -Wall -std=c++17

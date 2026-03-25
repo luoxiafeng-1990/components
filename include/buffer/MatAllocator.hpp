@@ -36,7 +36,8 @@ public:
         void* virt_addr,
         uint64_t phys_addr,
         size_t size,
-        QueueType queue = QueueType::FREE
+        QueueType queue = QueueType::FREE,
+        uint32_t custom_id = 0
     ) override;
     
     bool removeBufferFromPool(uint64_t pool_id, Buffer* buffer) override;

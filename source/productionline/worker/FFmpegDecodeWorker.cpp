@@ -1,4 +1,5 @@
 #include "productionline/worker/FFmpegDecodeWorker.hpp"
+#include "vendor/taco/decode/TacoDecoderExtension.hpp"
 #include "productionline/worker/EncodedPacketSourceFromRtsp.hpp"
 #include "productionline/worker/EncodedPacketSourceFromBuffer.hpp"
 #include "productionline/worker/EncodedPacketSourceFromFile.hpp"
@@ -37,6 +38,7 @@ FFmpegDecodeWorker::FFmpegDecodeWorker(const WorkerConfig& config)
     , dropped_frames_(0)
     , current_packet_ptr_(nullptr)  // ⭐ v2.22 新增
     , packet_acquired_(false)       // ⭐ v2.22 新增
+    , flush_sent_(false)
 {
     LOG4CPLUS_DEBUG(logger_, " FFmpegDecodeWorker created with config");
     
@@ -142,6 +144,10 @@ bool FFmpegDecodeWorker::open() {
         LOG4CPLUS_ERROR(logger_, " Cannot open: packet source is nullptr. Worker must be created with WorkerConfig");
         return false;
     }
+
+    // 每次 open 都重新开始 EOF drain 状态
+    flush_sent_ = false;
+    cached_frames_.clear();
     
     // 从配置读取输出参数
     int width = worker_config_.display.width;
@@ -168,6 +174,26 @@ bool FFmpegDecodeWorker::open() {
         LOG4CPLUS_ERROR(logger_, " Failed to get codec parameters from packet source");
         packet_source_->close();
         return false;
+    }
+
+    // 对于 encode->decode->display 的 Buffer pipeline，某些硬件编码器的 H264 extradata
+    // 可能需要等到产生首个 packet 后才会填充（SPS/PPS）。
+    // decoder 若过早初始化，可能导致 receive_frame 永远 EAGAIN/EOF（最终 0 frames）。
+    if (is_buffer_mode && codecpar->extradata_size == 0) {
+        constexpr int kWaitMs = 3000;
+        constexpr int kSleepMs = 10;
+        int waited = 0;
+
+        LOG4CPLUS_INFO(logger_,
+            " Waiting for codec extradata (SPS/PPS) to be ready...");
+        while (waited < kWaitMs && codecpar->extradata_size == 0) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(kSleepMs));
+            waited += kSleepMs;
+        }
+
+        LOG4CPLUS_INFO_FMT(logger_,
+            " codec extradata wait done: size=%d bytes (waited=%dms)",
+            codecpar->extradata_size, waited);
     }
     
     // 3. 检查编解码器类型是否匹配
@@ -293,6 +319,8 @@ void FFmpegDecodeWorker::close() {
         
         LOG4CPLUS_INFO(logger_, "");
         LOG4CPLUS_INFO(logger_, "🛑 Closing video source...");
+
+        flush_sent_ = false;
         
         // ⭐ v2.32 修改：清理未提交的 packet（统一接口）
         if (packet_acquired_) {
@@ -325,8 +353,8 @@ void FFmpegDecodeWorker::close() {
     }
     
     LOG4CPLUS_DEBUG(logger_, " Video source closed");
-    LOG4CPLUS_INFO_FMT(logger_, "   Decoded frames: %d", decoded_frames_.load());
-    LOG4CPLUS_INFO_FMT(logger_, "   Dropped frames: %d", dropped_frames_.load());
+    LOG4CPLUS_INFO_FMT(logger_, "   success=%d failed=%d skipped=%d",
+        decoded_frames_.load(), 0, dropped_frames_.load());
 }
 
 bool FFmpegDecodeWorker::isOpen() const {
@@ -368,12 +396,26 @@ bool FFmpegDecodeWorker::seek(int frame_index) {
         return false;
     }
     
-    // 3. seek 成功后，清理解码器状态（flush内部缓冲区）
-    if (codec_ctx_ptr_) {
+    // 3. 清理缓存的解码帧和未提交的 packet
+    for (AVFrame* frame : cached_frames_) {
+        if (frame) av_frame_free(&frame);
+    }
+    cached_frames_.clear();
+
+    if (packet_acquired_) {
+        packet_source_->commitEncodedPacket(this);
+        packet_acquired_ = false;
+        current_packet_ptr_ = nullptr;
+    }
+
+    // 4. 重置解码器状态
+    //    软件解码器：调用 avcodec_flush_buffers 清空内部缓冲
+    //    硬件解码器（h264_taco）：跳过 flush，因为 taco 的 flush 回调会将通道
+    //    置为 STOPPED 状态（state=5）且不会重新启动，导致后续 send_packet 失败。
+    //    文件从 I 帧开始，解码器无需 flush 也能正确解码。
+    if (codec_ctx_ptr_ && !use_hardware_decoder_) {
         avcodec_flush_buffers(codec_ctx_ptr_);
     }
-    
-    // ⚠️ 注意：EOF 状态由数据源的 seek() 自动重置，不需要手动重置
     
     LOG4CPLUS_DEBUG_FMT(logger_, " Successfully seeked to frame %d", frame_index);
     return true;
@@ -509,22 +551,24 @@ double FFmpegDecodeWorker::getTacoChannelBytesPerPixel(int channel) const {
 
 OutputFormat FFmpegDecodeWorker::mapRgbDriverValueToEnum(int driver_value) {
     switch (driver_value) {
+        case 1:  return OutputFormat::RGB_RGB888;
+        case 2:  return OutputFormat::RGB_RGB888_PLANAR;
+        case 3:  return OutputFormat::RGB_BGR888;
+        case 4:  return OutputFormat::RGB_BGR888_PLANAR;
+        case 5:  return OutputFormat::RGB_R16G16B16;
+        case 7:  return OutputFormat::RGB_B16G16R16;
         case 9:  return OutputFormat::RGB_ARGB888;
         case 11: return OutputFormat::RGB_ABGR888;
         case 13: return OutputFormat::RGB_RGBA888;
         case 15: return OutputFormat::RGB_BGRA888;
-        case 1:  return OutputFormat::RGB_RGB888;
-        case 3:  return OutputFormat::RGB_BGR888;
+        case 17: return OutputFormat::RGB_A2R10G10B10;
+        case 19: return OutputFormat::RGB_A2B10G10R10;
+        case 21: return OutputFormat::RGB_R10G10B10A2;
+        case 23: return OutputFormat::RGB_B10G10R10A2;
         case 25: return OutputFormat::RGB_XRGB888;
         case 27: return OutputFormat::RGB_XBGR888;
-        case 21: return OutputFormat::RGB_RGBX888;
-        case 23: return OutputFormat::RGB_BGRX888;
-        case 2:  return OutputFormat::RGB_RGB888_PLANAR;
-        case 4:  return OutputFormat::RGB_BGR888_PLANAR;
-        case 17: return OutputFormat::RGB_R16G16B16;
-        case 19: return OutputFormat::RGB_B16G16R16;
         case 28: return OutputFormat::RGB_GBRP;
-        default: return OutputFormat::RGB_ARGB888;  // 默认值
+        default: return OutputFormat::RGB_ARGB888;
     }
 }
 
@@ -541,6 +585,13 @@ double FFmpegDecodeWorker::getBytesPerPixelFromFormat(OutputFormat format) {
         case OutputFormat::RGB_BGRX888:
             return 4.0;
         
+        // 10-bit RGB 2101010（4 字节/像素，32-bit packed）
+        case OutputFormat::RGB_A2R10G10B10:
+        case OutputFormat::RGB_A2B10G10R10:
+        case OutputFormat::RGB_R10G10B10A2:
+        case OutputFormat::RGB_B10G10R10A2:
+            return 4.0;
+        
         // 8-bit RGB 无 Alpha 通道（3 字节/像素）
         case OutputFormat::RGB_RGB888:
         case OutputFormat::RGB_BGR888:
@@ -555,7 +606,7 @@ double FFmpegDecodeWorker::getBytesPerPixelFromFormat(OutputFormat format) {
             return 6.0;
         
         default:
-            return 4.0;  // 默认 ARGB888
+            return 4.0;
     }
 }
 
@@ -778,6 +829,72 @@ FillResult FFmpegDecodeWorker::fillBuffer(int frame_index, Buffer* buffer) {
     // ========== 步骤2: 读取并发送 packet ==========
     FillResult send_result = readAndSendPacket(packet_ptr);
     if (!send_result.ok()) {
+        // Acquire 层 EOF：需要对 codec 做一次 drain，不能直接退出，否则会出现 0 frames 但管线结束。
+        if (send_result.isAcquireEof()) {
+            // 尝试 flush（send_packet(NULL)），但不因为 flush 失败就提前返回。
+            // taco/部分 codec 可能会打印 "no stream to decode, skip flush" 并返回错误，
+            // 但仍可能存在延迟帧需要通过 receive_frame drain 出来。
+            if (!flush_sent_) {
+                (void)avcodec_send_packet(codec_ctx_ptr_, nullptr);
+                flush_sent_ = true;
+            }
+
+            // ========== drain: receive_frame 直到拿到一帧或 EAGAIN/EOF ==========
+            bool decoded_at_least_one = false;
+            CodecSendResult receive_result = CodecSendResult::success();
+
+            while (true) {
+                AVFrame* temp_frame = av_frame_alloc();
+                if (!temp_frame) {
+                    receive_result = CodecSendResult::allocFailed();
+                    break;
+                }
+
+                int ret = avcodec_receive_frame(codec_ctx_ptr_, temp_frame);
+
+                if (ret == 0) {
+                    decoded_at_least_one = true;
+                    cached_frames_.push_back(temp_frame);
+                    continue;
+                }
+
+                // 失败：释放临时帧，映射错误码
+                av_frame_free(&temp_frame);
+
+                if (ret == AVERROR(EAGAIN)) {
+                    receive_result = CodecSendResult::eagain();
+                } else if (ret == AVERROR_EOF) {
+                    receive_result = CodecSendResult::eof();
+                } else if (ret == AVERROR(EINVAL)) {
+                    receive_result = CodecSendResult::invalidState();
+                } else {
+                    receive_result = CodecSendResult::receiveError();
+                }
+                break;
+            }
+
+            if (!decoded_at_least_one) {
+                // drain 阶段无帧：
+                // - 如果 codec 返回 EAGAIN，说明可能仍有“延迟帧”尚未准备好（尤其是硬件/部分 codec）
+                //   这里必须返回 eagain 触发 kRetry，让后续 fillBuffer 再次 drain。
+                // - 其余情况（如真正 flush 完成的 eof / 或其它错误）按 receive_result 原样返回。
+                return FillResult::fromCodec(receive_result);
+            }
+
+            // ========== 从缓存取第一帧填充 buffer ==========
+            if (cached_frames_.empty()) {
+                return FillResult::internalError();
+            }
+
+            AVFrame* first_frame = cached_frames_.front();
+            cached_frames_.erase(cached_frames_.begin());
+
+            av_frame_move_ref(buffer->getAVFrame(), first_frame);
+            av_frame_free(&first_frame);
+            fillBufferMetadataFromFrame(buffer->getAVFrame(), buffer);
+            return FillResult::success();
+        }
+
         return send_result;
     }
    
@@ -839,7 +956,13 @@ FillResult FFmpegDecodeWorker::fillBuffer(int frame_index, Buffer* buffer) {
         // - Buffer 共享模式：重置 Worker 状态，允许重试
         // - File/RTSP 模式：默认空实现，无需操作
         if (!worker_config_.data_source.deferred_commit) {
-            packet_source_->cancelEncodedPacket(this);
+            // 注意：当 receive_result 为 eagain 时，packet 已经被 avcodec_send_packet 消费；
+            // 共享模式必须 commit 以推进共享版本，否则 fetch 线程可能卡在同一 version。
+            if (receive_result.isEagain()) {
+                packet_source_->commitEncodedPacket(this);
+            } else {
+                packet_source_->cancelEncodedPacket(this);
+            }
         }
         packet_acquired_ = false;
         current_packet_ptr_ = nullptr;
@@ -914,27 +1037,22 @@ const char* FFmpegDecodeWorker::getCodecName() const {
 void FFmpegDecodeWorker::printStats() const {
     LOG4CPLUS_INFO(logger_, "");
     LOG4CPLUS_INFO(logger_, " 📊 Statistics:");
-    
-    // 1. 通用信息
     std::string path = packet_source_ ? packet_source_->getPath() : std::string();
-    LOG4CPLUS_INFO_FMT(logger_, "    Source: %s", path.empty() ? "(Buffer Mode)" : path.c_str());
     LOG4CPLUS_INFO_FMT(logger_, "    Codec: %s", getCodecName());
-    LOG4CPLUS_INFO_FMT(logger_, "    Resolution: %dx%d → %dx%d", getSourceWidth(), getSourceHeight(), output_width_, output_height_);
-    LOG4CPLUS_INFO_FMT(logger_, "    Decoded frames: %d", decoded_frames_.load());
-    
-    // 2. 根据数据源类型显示特定信息
+    LOG4CPLUS_INFO_FMT(logger_, "    Resolution: %dx%d → %dx%d",
+        getSourceWidth(), getSourceHeight(), output_width_, output_height_);
+    LOG4CPLUS_INFO_FMT(logger_, "    Source: %s", path.empty() ? "(Buffer mode)" : path.c_str());
+    LOG4CPLUS_INFO_FMT(logger_, "    success=%d failed=%d skipped=%d",
+        decoded_frames_.load(), 0, dropped_frames_.load());
+
     SourceType type = getDataSourceType();
     if (type == SourceType::FILE_SOURCE) {
         LOG4CPLUS_INFO_FMT(logger_, "    Total frames: %d", packet_source_ ? packet_source_->getTotalFrames() : -1);
         LOG4CPLUS_INFO_FMT(logger_, "    EOF: %s", packet_source_ && packet_source_->isAtEnd() ? "YES" : "NO");
     } else if (type == SourceType::NETWORK_SOURCE) {
         LOG4CPLUS_INFO_FMT(logger_, "    Connected: %s", isConnected() ? "Yes" : "No");
-        LOG4CPLUS_INFO_FMT(logger_, "    Dropped frames: %d", dropped_frames_.load());
-    } else if (type == SourceType::BUFFER_SOURCE) {
-        LOG4CPLUS_INFO_FMT(logger_, "    Dropped frames: %d", dropped_frames_.load());
     }
-    
-    // 3. BufferPool 信息（通用）
+
     uint64_t pool_id = getOutputBufferPoolId(BufferPoolType::DECODE_VIDEO_PRIMARY);
     LOG4CPLUS_INFO_FMT(logger_, "    BufferPool ID: %lu", pool_id);
 }
@@ -1058,8 +1176,12 @@ bool FFmpegDecodeWorker::configureSpecialDecoder() {
         return false;
     }
     
-    // 🎯 从 worker_config_ 获取 taco 配置（非 const，可能需要修改）
-    auto& taco = worker_config_.decoder.taco;
+    TacoConfig* taco_ptr = tacoDecoderConfig(worker_config_.decoder);
+    if (!taco_ptr) {
+        LOG4CPLUS_ERROR(logger_, " configureSpecialDecoder: no TACO vendor config (decoder.vendor)");
+        return false;
+    }
+    TacoConfig& taco = *taco_ptr;
     
     LOG4CPLUS_DEBUG_FMT(logger_, " Configuring h264_taco decoder options from config...");
     
@@ -1148,7 +1270,11 @@ bool FFmpegDecodeWorker::configureSpecialDecoder() {
     LOG4CPLUS_DEBUG_FMT(logger_, "    ch1_rgb=%d: %s", taco.ch1_rgb ? 1 : 0, 
            ret < 0 ? "FAILED" : "OK");
     
-    // ⭐ v2.17: 设置 RGB 格式（使用整型枚举）
+    if (taco.ch1_rgb && taco.ch1_rgb_format < 0) {
+        LOG4CPLUS_ERROR(logger_, "Unsupported RGB format for TACO driver (ch1_rgb_format=" 
+                        + std::to_string(taco.ch1_rgb_format) + ")");
+        return false;
+    }
     if (taco.ch1_rgb && taco.ch1_rgb_format > 0) {
         ret = av_opt_set_int(codec_ctx_ptr_->priv_data, "ch1_rgb_format", 
                              taco.ch1_rgb_format, 0);

@@ -1,4 +1,5 @@
 #include "productionline/worker/WorkerConfig.hpp"
+#include "vendor/taco/decode/TacoDecoderExtension.hpp"
 #include <stdexcept>
 
 // ============================================================
@@ -24,13 +25,64 @@ DataSourceConfigBuilder& DataSourceConfigBuilder::setPath(const std::string& pat
     return *this;
 }
 
+DataSourceConfigBuilder& DataSourceConfigBuilder::setPathIfNonEmpty(std::string_view path) {
+    if (!path.empty()) {
+        data_source_config_.path = std::string(path);
+    }
+    return *this;
+}
+
 DataSourceConfigBuilder& DataSourceConfigBuilder::setBufferCount(int count) {
     data_source_config_.buffer_count = count;
     return *this;
 }
 
+DataSourceConfigBuilder& DataSourceConfigBuilder::setBufferCountIfNonZero(int count) {
+    if (count > 0) {
+        data_source_config_.buffer_count = count;
+    }
+    return *this;
+}
+
 DataSourceConfigBuilder& DataSourceConfigBuilder::setMaxFrames(int max_frames) {
     data_source_config_.max_frames = max_frames;
+    return *this;
+}
+
+DataSourceConfigBuilder& DataSourceConfigBuilder::setMaxFramesIfNonZero(int max_frames) {
+    if (max_frames != 0) {
+        data_source_config_.max_frames = max_frames;
+    }
+    return *this;
+}
+
+DataSourceConfigBuilder& DataSourceConfigBuilder::setBufferMode(bool mode) {
+    data_source_config_.buffer_mode = mode;
+    return *this;
+}
+
+DataSourceConfigBuilder& DataSourceConfigBuilder::setCodecParams(const AVCodecParameters* params) {
+    data_source_config_.codec_params = params;
+    return *this;
+}
+
+DataSourceConfigBuilder& DataSourceConfigBuilder::setTimeBase(AVRational tb) {
+    data_source_config_.time_base = tb;
+    return *this;
+}
+
+DataSourceConfigBuilder& DataSourceConfigBuilder::setSharedPacketSource(std::shared_ptr<IEncodedPacketSource> source) {
+    data_source_config_.shared_packet_source = std::move(source);
+    return *this;
+}
+
+DataSourceConfigBuilder& DataSourceConfigBuilder::setDeferredCommit(bool deferred) {
+    data_source_config_.deferred_commit = deferred;
+    return *this;
+}
+
+DataSourceConfigBuilder& DataSourceConfigBuilder::setLoop(bool loop) {
+    data_source_config_.loop = loop;
     return *this;
 }
 
@@ -71,11 +123,6 @@ WorkerConfig::DisplayConfig DisplayConfigBuilder::build() const {
 // TacoConfigBuilder 实现
 // ============================================================
 
-TacoConfigBuilder& TacoConfigBuilder::setReorderDisable(bool disable) {
-    taco_config_.reorder_disable = disable;
-    return *this;
-}
-
 TacoConfigBuilder& TacoConfigBuilder::setChannels(bool ch0, bool ch1) {
     taco_config_.ch0_enable = ch0;
     taco_config_.ch1_enable = ch1;
@@ -108,7 +155,6 @@ TacoConfigBuilder& TacoConfigBuilder::setOutputFormat(
         taco_config_.ch1_rgb = is_rgb;
         
         if (is_rgb) {
-            // RGB 格式：需要映射回驱动的原始值
             taco_config_.ch1_rgb_format = mapEnumToRgbDriverValue(format);
             taco_config_.ch1_rgb_std = std_value;
         } else {
@@ -147,7 +193,7 @@ TacoConfigBuilder& TacoConfigBuilder::setScale(Channel ch, int width, int height
     return *this;
 }
 
-WorkerConfig::DecoderConfig::TacoConfig TacoConfigBuilder::build() const {
+TacoConfig TacoConfigBuilder::build() const {
     return taco_config_;
 }
 
@@ -185,8 +231,11 @@ OutputFormat TacoConfigBuilder::mapFormatNameToEnum(std::string_view format_name
     if (format_name == "r16g16b16") return OutputFormat::RGB_R16G16B16;
     if (format_name == "b16g16r16") return OutputFormat::RGB_B16G16R16;
     if (format_name == "gbrp") return OutputFormat::RGB_GBRP;
+    if (format_name == "argb2101010" || format_name == "a2r10g10b10") return OutputFormat::RGB_A2R10G10B10;
+    if (format_name == "abgr2101010" || format_name == "a2b10g10r10") return OutputFormat::RGB_A2B10G10R10;
+    if (format_name == "rgba2101010" || format_name == "r10g10b10a2") return OutputFormat::RGB_R10G10B10A2;
+    if (format_name == "bgra2101010" || format_name == "b10g10r10a2") return OutputFormat::RGB_B10G10R10A2;
     
-    // 默认返回 YUV_AUTO
     return OutputFormat::YUV_AUTO;
 }
 
@@ -234,6 +283,10 @@ std::string_view TacoConfigBuilder::mapFormatEnumToName(OutputFormat format) {
         case OutputFormat::RGB_R16G16B16: return "r16g16b16";
         case OutputFormat::RGB_B16G16R16: return "b16g16r16";
         case OutputFormat::RGB_GBRP: return "gbrp";
+        case OutputFormat::RGB_A2R10G10B10: return "argb2101010";
+        case OutputFormat::RGB_A2B10G10R10: return "abgr2101010";
+        case OutputFormat::RGB_R10G10B10A2: return "rgba2101010";
+        case OutputFormat::RGB_B10G10R10A2: return "bgra2101010";
         
         default: return "unknown";
     }
@@ -254,22 +307,26 @@ std::string_view TacoConfigBuilder::mapColorStdEnumToName(ColorStandard std) {
 
 int TacoConfigBuilder::mapEnumToRgbDriverValue(OutputFormat format) {
     switch (format) {
+        case OutputFormat::RGB_RGB888: return 1;
+        case OutputFormat::RGB_RGB888_PLANAR: return 2;
+        case OutputFormat::RGB_BGR888: return 3;
+        case OutputFormat::RGB_BGR888_PLANAR: return 4;
+        case OutputFormat::RGB_R16G16B16: return 5;
+        case OutputFormat::RGB_B16G16R16: return 7;
         case OutputFormat::RGB_ARGB888: return 9;
         case OutputFormat::RGB_ABGR888: return 11;
         case OutputFormat::RGB_RGBA888: return 13;
         case OutputFormat::RGB_BGRA888: return 15;
-        case OutputFormat::RGB_RGB888: return 1;
-        case OutputFormat::RGB_BGR888: return 3;
+        case OutputFormat::RGB_RGBX888: return -1;  // 驱动不支持 RGBX
+        case OutputFormat::RGB_BGRX888: return -1;  // 驱动不支持 BGRX
+        case OutputFormat::RGB_A2R10G10B10: return 17;
+        case OutputFormat::RGB_A2B10G10R10: return 19;
+        case OutputFormat::RGB_R10G10B10A2: return 21;
+        case OutputFormat::RGB_B10G10R10A2: return 23;
         case OutputFormat::RGB_XRGB888: return 25;
         case OutputFormat::RGB_XBGR888: return 27;
-        case OutputFormat::RGB_RGBX888: return 21;
-        case OutputFormat::RGB_BGRX888: return 23;
-        case OutputFormat::RGB_RGB888_PLANAR: return 2;
-        case OutputFormat::RGB_BGR888_PLANAR: return 4;
-        case OutputFormat::RGB_R16G16B16: return 17;
-        case OutputFormat::RGB_B16G16R16: return 19;
         case OutputFormat::RGB_GBRP: return 28;
-        default: return 9; // 默认 ARGB888
+        default: return 9;
     }
 }
 
@@ -288,11 +345,6 @@ DecoderConfigBuilder& DecoderConfigBuilder::setDecoderName(const char* name) {
     } else {
         decoder_config_.name = std::nullopt;
     }
-    return *this;
-}
-
-DecoderConfigBuilder& DecoderConfigBuilder::clearDecoderName() {
-    decoder_config_.name = std::nullopt;
     return *this;
 }
 
@@ -315,41 +367,23 @@ DecoderConfigBuilder& DecoderConfigBuilder::setDecodeThreads(int threads) {
     return *this;
 }
 
-DecoderConfigBuilder& DecoderConfigBuilder::useTaco(
-    std::string_view codec,
-    const WorkerConfig::DecoderConfig::TacoConfig& taco_config
-) {
-    // 拼接解码器名称：codec + "_taco"
-    decoder_config_.name = std::string(codec) + "_taco";
+DecoderConfigBuilder& DecoderConfigBuilder::useVendor(
+        std::string_view codec,
+        std::unique_ptr<IDecoderVendorExtension> extension) {
+    decoder_config_.name = std::string(codec) + "_" + extension->kind();
     decoder_config_.enable_hardware = true;
-    decoder_config_.taco = taco_config;
+    decoder_config_.vendor = std::move(extension);
     return *this;
+}
+
+DecoderConfigBuilder& DecoderConfigBuilder::useTaco(std::string_view codec, const TacoConfig& taco_config) {
+    return useVendor(codec, makeTacoDecoderExtension(taco_config));
 }
 
 DecoderConfigBuilder& DecoderConfigBuilder::useSoftware() {
     decoder_config_.name = std::nullopt;
     decoder_config_.enable_hardware = false;
-    return *this;
-}
-
-DecoderConfigBuilder& DecoderConfigBuilder::useCuvid(std::string_view codec) {
-    decoder_config_.name = std::string(codec) + "_cuvid";
-    decoder_config_.enable_hardware = true;
-    decoder_config_.hwaccel_device = "cuda";
-    return *this;
-}
-
-DecoderConfigBuilder& DecoderConfigBuilder::useQsv(std::string_view codec) {
-    decoder_config_.name = std::string(codec) + "_qsv";
-    decoder_config_.enable_hardware = true;
-    decoder_config_.hwaccel_device = "qsv";
-    return *this;
-}
-
-DecoderConfigBuilder& DecoderConfigBuilder::useVaapi(std::string_view codec) {
-    decoder_config_.name = std::string(codec) + "_vaapi";
-    decoder_config_.enable_hardware = true;
-    decoder_config_.hwaccel_device = "vaapi";
+    decoder_config_.vendor = nullptr;
     return *this;
 }
 
@@ -358,8 +392,118 @@ WorkerConfig::DecoderConfig DecoderConfigBuilder::build() const {
 }
 
 // ============================================================
+// WorkerGlobalConfigBuilder 实现
+// ============================================================
+
+WorkerGlobalConfigBuilder& WorkerGlobalConfigBuilder::setWorkerType(WorkerType type) {
+    global_config_.worker_type = type;
+    return *this;
+}
+
+WorkerGlobalConfigBuilder& WorkerGlobalConfigBuilder::setThreadPoolSize(int size) {
+    global_config_.thread_pool_size = size;
+    return *this;
+}
+
+WorkerConfig::GlobalConfig WorkerGlobalConfigBuilder::build() const {
+    return global_config_;
+}
+
+// ============================================================
+// ConsumerTypeConfigBuilder 实现
+// ============================================================
+
+ConsumerTypeConfigBuilder& ConsumerTypeConfigBuilder::setConsumerMaxFrames(int frames) {
+    consumer_type_config_.max_frames = frames;
+    return *this;
+}
+
+ConsumerTypeConfigBuilder& ConsumerTypeConfigBuilder::setVerbose(bool verbose) {
+    consumer_type_config_.verbose = verbose;
+    return *this;
+}
+
+ConsumerTypeConfigBuilder& ConsumerTypeConfigBuilder::enableDisplay(bool enable, int device_id) {
+    consumer_type_config_.display.enable = enable;
+    consumer_type_config_.display.device_id = device_id;
+    return *this;
+}
+
+ConsumerTypeConfigBuilder& ConsumerTypeConfigBuilder::enableSaveRaw(bool enable,
+                                                                    const std::string& output_path,
+                                                                    int max_frames) {
+    consumer_type_config_.save_raw.enable = enable;
+    consumer_type_config_.save_raw.setOutputPath(output_path);
+    consumer_type_config_.save_raw.max_frames_per_channel = {max_frames};
+    return *this;
+}
+
+ConsumerTypeConfigBuilder& ConsumerTypeConfigBuilder::enableSaveEncoded(bool enable,
+                                                                        const std::string& output_path) {
+    consumer_type_config_.save_encoded.enable = enable;
+    consumer_type_config_.save_encoded.output_path = output_path;
+    return *this;
+}
+
+ConsumerTypeConfigBuilder& ConsumerTypeConfigBuilder::enableCompare(bool enable,
+                                                                    double min_psnr,
+                                                                    double min_ssim) {
+    consumer_type_config_.compare.enable_psnr = enable;
+    consumer_type_config_.compare.enable_ssim = enable;
+    consumer_type_config_.compare.min_psnr = min_psnr;
+    consumer_type_config_.compare.min_ssim = min_ssim;
+    return *this;
+}
+
+ConsumerTypeConfigBuilder& ConsumerTypeConfigBuilder::enablePerformance(bool enable, double target_fps) {
+    consumer_type_config_.performance.enable = enable;
+    consumer_type_config_.performance.target_fps = target_fps;
+    return *this;
+}
+
+ConsumerTypeConfigBuilder& ConsumerTypeConfigBuilder::enableNpuInference(const std::string& model_path,
+                                                                       float conf_threshold,
+                                                                       float nms_threshold,
+                                                                       bool enable_draw) {
+    consumer_type_config_.npu_inference.enable = true;
+    consumer_type_config_.npu_inference.model_path = model_path;
+    consumer_type_config_.npu_inference.conf_threshold = conf_threshold;
+    consumer_type_config_.npu_inference.nms_threshold = nms_threshold;
+    consumer_type_config_.npu_inference.enable_draw = enable_draw;
+    return *this;
+}
+
+WorkerConfig::ConsumerTypeConfig ConsumerTypeConfigBuilder::build() const {
+    return consumer_type_config_;
+}
+
+// ============================================================
+// ConsumerTypeConfig::inheritCompanionSettings 实现
+// ============================================================
+
+void WorkerConfig::ConsumerTypeConfig::inheritCompanionSettings(const ConsumerTypeConfig& shared) {
+    if (shared.display.enable && !display.enable)
+        display = shared.display;
+
+    if (shared.npu_inference.enable && !npu_inference.enable)
+        npu_inference = shared.npu_inference;
+
+    if ((shared.compare.enable_psnr || shared.compare.enable_ssim)
+        && !compare.enable_psnr && !compare.enable_ssim)
+        compare = shared.compare;
+
+    if (shared.verbose)
+        verbose = true;
+}
+
+// ============================================================
 // WorkerConfigBuilder 实现
 // ============================================================
+
+WorkerConfigBuilder& WorkerConfigBuilder::setGlobalConfig(const WorkerConfig::GlobalConfig& global_config) {
+    worker_config_.global = global_config;
+    return *this;
+}
 
 WorkerConfigBuilder& WorkerConfigBuilder::setDataSourceConfig(const WorkerConfig::DataSourceConfig& data_source_config) {
     worker_config_.data_source = data_source_config;
@@ -376,71 +520,8 @@ WorkerConfigBuilder& WorkerConfigBuilder::setDecoderConfig(const WorkerConfig::D
     return *this;
 }
 
-WorkerConfigBuilder& WorkerConfigBuilder::setWorkerType(WorkerType type) {
-    worker_config_.worker_type = type;
-    return *this;
-}
-
-WorkerConfigBuilder& WorkerConfigBuilder::setThreadPoolSize(int size) {
-    worker_config_.thread_pool_size = size;
-    return *this;
-}
-
-// ========================================
-// 消费类型配置方法实现（v3.2 重构）
-// ========================================
-
 WorkerConfigBuilder& WorkerConfigBuilder::setConsumerTypeConfig(const WorkerConfig::ConsumerTypeConfig& consumer_type_config) {
     worker_config_.consumer_type = consumer_type_config;
-    return *this;
-}
-
-WorkerConfigBuilder& WorkerConfigBuilder::setMaxFrames(int frames) {
-    worker_config_.consumer_type.max_frames = frames;
-    return *this;
-}
-
-WorkerConfigBuilder& WorkerConfigBuilder::enableDisplay(bool enable, int device_id) {
-    worker_config_.consumer_type.display.enable = enable;
-    worker_config_.consumer_type.display.device_id = device_id;
-    return *this;
-}
-
-WorkerConfigBuilder& WorkerConfigBuilder::enableSaveRaw(bool enable, 
-                                                         const std::string& output_path,
-                                                         int max_frames) {
-    worker_config_.consumer_type.save_raw.enable = enable;
-    worker_config_.consumer_type.save_raw.setOutputPath(output_path);
-    worker_config_.consumer_type.save_raw.max_frames_per_channel = {max_frames};
-    return *this;
-}
-
-WorkerConfigBuilder& WorkerConfigBuilder::enableSaveEncoded(bool enable,
-                                                             const std::string& output_path) {
-    worker_config_.consumer_type.save_encoded.enable = enable;
-    worker_config_.consumer_type.save_encoded.output_path = output_path;
-    return *this;
-}
-
-WorkerConfigBuilder& WorkerConfigBuilder::enableCompare(bool enable, 
-                                                         double min_psnr, 
-                                                         double min_ssim) {
-    // enable 参数同时控制 PSNR 和 SSIM
-    worker_config_.consumer_type.compare.enable_psnr = enable;
-    worker_config_.consumer_type.compare.enable_ssim = enable;
-    worker_config_.consumer_type.compare.min_psnr = min_psnr;   // 通过阈值
-    worker_config_.consumer_type.compare.min_ssim = min_ssim;   // 通过阈值
-    return *this;
-}
-
-WorkerConfigBuilder& WorkerConfigBuilder::enablePerformance(bool enable, double target_fps) {
-    worker_config_.consumer_type.performance.enable = enable;
-    worker_config_.consumer_type.performance.target_fps = target_fps;
-    return *this;
-}
-
-WorkerConfigBuilder& WorkerConfigBuilder::setVerbose(bool verbose) {
-    worker_config_.consumer_type.verbose = verbose;
     return *this;
 }
 
