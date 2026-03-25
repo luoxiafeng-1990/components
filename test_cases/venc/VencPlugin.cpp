@@ -776,11 +776,6 @@ std::vector<WorkerConfig> VencPlugin::buildPipelineConfigs(const WorkerConfig& s
             thread_count = std::max(2, std::stoi(p.profile.substr(9)));
 
         WorkerConfig base = shared_config;
-        if (base.consumer_type.display.enable &&
-            (base.consumer_type.display.mode == WorkerConfig::ConsumerTypeConfig::DisplayType::TACO_VO ||
-             base.consumer_type.display.mode == WorkerConfig::ConsumerTypeConfig::DisplayType::SHARED_FB)) {
-            base.consumer_type.display.taco_vo.max_channels = thread_count;
-        }
 
         std::vector<std::string> out_paths;
         if (base.consumer_type.save_encoded.enable && !base.consumer_type.save_encoded.output_path.empty()) {
@@ -947,7 +942,7 @@ consumer::ConsumeResult runEncodeQualityCompare(
     ProducerConfig encode_producer;
     encode_producer.producer_name = "encoder";
     encode_producer.worker_config = encode_cfg;
-    encode_producer.worker_config.worker_type = WorkerType::FFMPEG_ENCODE;
+    encode_producer.worker_config.global.worker_type = WorkerType::FFMPEG_ENCODE;
     // 质量验证路径不需要显示，避免显示侧副作用
     encode_producer.worker_config.consumer_type.display.enable = false;
     group.producer_configs.push_back(encode_producer);
@@ -955,12 +950,12 @@ consumer::ConsumeResult runEncodeQualityCompare(
     ConsumerConfig decode_consumer;
     decode_consumer.consumer_name = "decoder";
     decode_consumer.worker_config = encode_cfg;
-    decode_consumer.worker_config.worker_type = WorkerType::FFMPEG_DECODE;
+    decode_consumer.worker_config.global.worker_type = WorkerType::FFMPEG_DECODE;
     decode_consumer.worker_config.data_source.buffer_mode = true;
     decode_consumer.worker_config.decoder.name = std::nullopt;
     decode_consumer.worker_config.decoder.enable_hardware = false;  // 软件解码用于与参考对比
     decode_consumer.worker_config.consumer_type.display.enable = false;
-    // 此 worker 不做“compare 消费策略”，compare 在 callback 里完成
+    // 此 worker 不做"compare 消费策略"，compare 在 callback 里完成
     decode_consumer.worker_config.consumer_type.compare.enable_psnr = false;
     decode_consumer.worker_config.consumer_type.compare.enable_ssim = false;
     group.consumer_configs.push_back(decode_consumer);
@@ -1034,7 +1029,7 @@ consumer::ConsumeResult runEncodeQualityCompare(
         WorkerSyncCoordinator::createDefaultCompareCallback(compare_ctx.get()) );
     // 用我们自己的 compare 逻辑覆盖 default_compare_callback 的工作：
     // - default callback 需要 reference/test 两路 buffer
-    // - 本场景只有 decoder 输出，所以我们改为“只注册一次自己的回调”
+    // - 本场景只有 decoder 输出，所以我们改为"只注册一次自己的回调"
     connector.callback_chain.clear();
     connector.callback_chain.push_back(
         CallbackChainItem(callback, &cb_ctx, "venc_encode_quality_callback"));
@@ -1073,7 +1068,7 @@ consumer::ConsumeResult runEncodeQualityCompare(
         return failResult(logger, "ENC_COMPARE", "Failed to lock decoded BufferPool");
     }
 
-    // 关键：callback 做 compare，但我们仍需“drain”释放 filled buffer，避免 decode worker 卡在 acquireFree
+    // 关键：callback 做 compare，但我们仍需"drain"释放 filled buffer，避免 decode worker 卡在 acquireFree
     int drained = 0;
     while (decoded_pool->isRunning() || decoded_pool->getFilledCount() > 0) {
         Buffer* buf = decoded_pool->acquireFilled(true, 200);
@@ -1143,16 +1138,16 @@ consumer::ConsumeResult runEncodeDecodeDisplay(
     ProducerConfig encode_producer;
     encode_producer.producer_name = "encoder";
     encode_producer.worker_config = encode_decode_cfg;
-    encode_producer.worker_config.worker_type = WorkerType::FFMPEG_ENCODE;
+    encode_producer.worker_config.global.worker_type = WorkerType::FFMPEG_ENCODE;
     group.producer_configs.push_back(encode_producer);
 
     ConsumerConfig decode_consumer;
     decode_consumer.consumer_name = "decoder";
     decode_consumer.worker_config = encode_decode_cfg;
-    decode_consumer.worker_config.worker_type = WorkerType::FFMPEG_DECODE;
+    decode_consumer.worker_config.global.worker_type = WorkerType::FFMPEG_DECODE;
     decode_consumer.worker_config.data_source.buffer_mode = true;
     decode_consumer.worker_config.decoder.name = std::nullopt;
-    // 为验证“硬件解码是否产不出帧”：display 路径改为软件解码。
+    // 为验证"硬件解码是否产不出帧"：display 路径改为软件解码。
     // 若软件解码有帧而硬件解码为 0 frames，则根因基本可定位到硬件解码的初始化/参数集缺失。
     decode_consumer.worker_config.decoder.enable_hardware = false;
     decode_consumer.worker_config.consumer_type.display.enable = false;

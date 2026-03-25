@@ -137,7 +137,7 @@ int main(int argc, char* argv[]) {
 
     // 编码质量对比：单路 FFMPEG_ENCODE + PSNR/SSIM（源 YUV vs 编码→软解，非解码双路 COMPARE）
     if (pipeline_configs.size() == 1
-        && pipeline_configs[0].worker_type == WorkerType::FFMPEG_ENCODE
+        && pipeline_configs[0].global.worker_type == WorkerType::FFMPEG_ENCODE
         && (config.consumer_type.compare.enable_psnr || config.consumer_type.compare.enable_ssim)) {
         auto result = test::venc::runEncodeQualityCompare(
             pipeline_configs[0], config, test_name + " (ENC_COMPARE)");
@@ -147,7 +147,7 @@ int main(int argc, char* argv[]) {
 
     // 单路编码 + 显示：编码 -> 解码 -> 显示（码流不可直接显示）
     if (pipeline_configs.size() == 1
-        && pipeline_configs[0].worker_type == WorkerType::FFMPEG_ENCODE
+        && pipeline_configs[0].global.worker_type == WorkerType::FFMPEG_ENCODE
         && config.consumer_type.display.enable
         && !config.consumer_type.compare.enable_psnr
         && !config.consumer_type.compare.enable_ssim) {

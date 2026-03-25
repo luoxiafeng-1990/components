@@ -14,6 +14,9 @@ extern "C" {
 #include <libavutil/dict.h>     // ⭐ v2.17新增：AVDictionary 定义（用于 metadata）
 }
 
+#include "opencv2/opencv.hpp"
+#include "opencv2/core/tacv.hpp"
+
 /**
  * @brief Buffer 元数据类
  * 
@@ -199,7 +202,11 @@ public:
      * @return AVPacket 指针，如果没有关联则返回 nullptr
      */
     AVPacket* getAVPacket() const { return avpacket_; }
+
+    void setMat(cv::Mat* mat) { mat_ = mat; }
     
+    cv::Mat* getMat() const { return mat_; }
+
     /**
      * @brief 更新虚拟地址（解码后更新为 frame->data[0]）
      * @param addr 新的虚拟地址
@@ -392,6 +399,7 @@ private:
     // ========== AVFrame 关联 ⭐ v2.7新增 ==========
     AVFrame* avframe_;               // 关联的 AVFrame 指针（引用，不拥有所有权）
     AVPacket* avpacket_;             // ⭐ v2.8新增：关联的 AVPacket 指针（引用，不拥有所有权）
+    cv::Mat* mat_;
     
     // ========== 图像元数据 ⭐ v2.6新增 ==========
     bool has_image_metadata_;        // 是否包含图像元数据

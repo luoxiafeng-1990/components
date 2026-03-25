@@ -71,6 +71,63 @@ void CompareCallbackContext::closeComparator() {
     }
 }
 
+// ============================================================
+// OpenCVCallbackContext 成员方法实现
+// ============================================================
+
+OpenCVCallbackContext::~OpenCVCallbackContext() {
+    closeComparator();
+}
+
+bool OpenCVCallbackContext::openComparator() {
+    // 如果已经打开，直接返回
+    if (comparator_opened_ && comparator_) {
+        return true;
+    }
+
+    // 创建 comparator
+    comparator_ = std::make_unique<consumptionline::io::BufferComparator>();
+
+    // 配置
+    consumptionline::io::CompareConfig compare_config;
+    compare_config.enable_psnr = config.enable_psnr;
+    compare_config.enable_ssim = config.enable_ssim;
+    compare_config.min_psnr = config.min_psnr;
+    compare_config.min_ssim = config.min_ssim;
+    compare_config.verbose = config.verbose;
+    compare_config.save_report = false;
+
+    // 打开
+    comparator_opened_ = comparator_->open(compare_config);
+    return comparator_opened_;
+}
+
+void OpenCVCallbackContext::closeComparator() {
+    if (comparator_ && comparator_opened_) {
+        comparator_->close();
+        comparator_opened_ = false;
+    }
+}
+
+double OpenCVCallbackContext::getAveragePsnr() const {
+    int count = total_frames.load();
+    return count > 0 ? psnr_sum.load() / count : 0.0;
+}
+
+double OpenCVCallbackContext::getAverageSsim() const {
+    int count = total_frames.load();
+    return count > 0 ? ssim_sum.load() / count : 0.0;
+}
+
+double OpenCVCallbackContext::getPassRate() const {
+    int count = total_frames.load();
+    return count > 0 ? 100.0 * passed_frames.load() / count : 0.0;
+}
+
+bool OpenCVCallbackContext::isPassed() const {
+    return failed_frames.load() == 0;
+}
+
 WorkerSyncCoordinator::WorkerSyncCoordinator(
     const std::vector<std::string>& worker_names,
     const CallbackChain& callback_chain
@@ -444,4 +501,221 @@ CallbackChainItem WorkerSyncCoordinator::createDefaultCompareCallback(
     };
     
     return CallbackChainItem(callback, context, "default_compare_callback");
+}
+
+// ============================================================
+// 静态工厂方法：创建 OpenCV 算术运算回调
+// ============================================================
+
+CallbackChainItem WorkerSyncCoordinator::createOpenCVCallback(
+    OpenCVCallbackContext* context
+) {
+    FrameSyncCallback callback = [](uint64_t frame_version,
+                                    const std::map<std::string, Buffer*>& worker_buffers,
+                                    void* ctx) -> bool {
+        auto* opencv_ctx = static_cast<OpenCVCallbackContext*>(ctx);
+        if (!opencv_ctx) {
+            return true;  // 无上下文，跳过处理
+        }
+
+        // 需要至少 2 个 Worker 的 Buffer 才能进行算术运算
+        if (worker_buffers.size() < 2) {
+            return true;
+        }
+
+        // 获取前两个 Buffer
+        auto it = worker_buffers.begin();
+        Buffer* buffer1 = it->second;
+        ++it;
+        Buffer* buffer2 = it->second;
+
+        if (!buffer1 || !buffer2) {
+            return true;
+        }
+
+        auto logger = log4cplus::Logger::getInstance(
+            LOG4CPLUS_TEXT("components.WorkerSyncCoordinator"));
+
+        try {
+            // 将 Buffer 转换为 cv::Mat
+            // 优先使用 getMat()，否则使用 getAVFrame()
+            cv::Mat mat1, mat2;
+
+            // 转换 buffer1
+            if (buffer1->getMat()) {
+                mat1 = *buffer1->getMat();
+            } else if (buffer1->getAVFrame()) {
+                mat1 = cv::Mat(buffer1->getAVFrame());
+            } else {
+                LOG4CPLUS_WARN_FMT(logger,
+                    "[Frame %llu] Buffer1 无法转换为 Mat",
+                    (unsigned long long)frame_version);
+                return true;
+            }
+
+            // 转换 buffer2
+            if (buffer2->getMat()) {
+                mat2 = *buffer2->getMat();
+            } else if (buffer2->getAVFrame()) {
+                mat2 = cv::Mat(buffer2->getAVFrame());
+            } else {
+                LOG4CPLUS_WARN_FMT(logger,
+                    "[Frame %llu] Buffer2 无法转换为 Mat",
+                    (unsigned long long)frame_version);
+                return true;
+            }
+
+            // 检查尺寸是否匹配
+            if (mat1.size() != mat2.size()) {
+                LOG4CPLUS_WARN_FMT(logger,
+                    "[Frame %llu] Mat 尺寸不匹配: (%d,%d) vs (%d,%d)",
+                    (unsigned long long)frame_version,
+                    mat1.cols, mat1.rows, mat2.cols, mat2.rows);
+                return true;
+            }
+
+            // 执行 OpenCV 算术运算
+            cv::Mat result;
+            std::string op_name;
+
+            switch (opencv_ctx->config.op_type) {
+                case WorkerConfig::ConsumerTypeConfig::OpencvType::OpType::ADD: {
+                    cv::add(mat1, mat2, result);
+                    op_name = "ADD";
+                    break;
+                }
+                case WorkerConfig::ConsumerTypeConfig::OpencvType::OpType::ABSDIFF: {
+                    cv::absdiff(mat1, mat2, result);
+                    op_name = "ABSDIFF";
+                    break;
+                }
+                case WorkerConfig::ConsumerTypeConfig::OpencvType::OpType::ADD_WEIGHTED: {
+                    // addWeighted(src1, alpha, src2, beta, gamma, dst)
+                    // 默认参数：alpha=0.5, beta=0.5, gamma=0
+                    double alpha = 0.5, beta = 0.5, gamma = 0.0;
+                    cv::addWeighted(mat1, alpha, mat2, beta, gamma, result);
+                    op_name = "ADD_WEIGHTED";
+                    break;
+                }
+                case WorkerConfig::ConsumerTypeConfig::OpencvType::OpType::BITWISE_AND: {
+                    cv::bitwise_and(mat1, mat2, result);
+                    op_name = "BITWISE_AND";
+                    break;
+                }
+                case WorkerConfig::ConsumerTypeConfig::OpencvType::OpType::BITWISE_OR: {
+                    cv::bitwise_or(mat1, mat2, result);
+                    op_name = "BITWISE_OR";
+                    break;
+                }
+                case WorkerConfig::ConsumerTypeConfig::OpencvType::OpType::BITWISE_XOR: {
+                    cv::bitwise_xor(mat1, mat2, result);
+                    op_name = "BITWISE_XOR";
+                    break;
+                }
+                case WorkerConfig::ConsumerTypeConfig::OpencvType::OpType::BITWISE_NOT: {
+                    // bitwise_not 是单操作数，只使用 mat1
+                    cv::bitwise_not(mat1, result);
+                    op_name = "BITWISE_NOT";
+                    break;
+                }
+                default: {
+                    LOG4CPLUS_WARN_FMT(logger,
+                        "[Frame %llu] OpenCV 操作类型 %d 未支持",
+                        (unsigned long long)frame_version,
+                        static_cast<int>(opencv_ctx->config.op_type));
+                    return true;
+                }
+            }
+
+            // 统计帧数
+            opencv_ctx->total_frames.fetch_add(1);
+
+            // 如果启用了 PSNR/SSIM 计算，使用原始 buffer 进行对比
+            if (opencv_ctx->config.enable_psnr || opencv_ctx->config.enable_ssim) {
+                // 打开 comparator（懒初始化）
+                if (!opencv_ctx->comparator_opened_) {
+                    if (!opencv_ctx->openComparator()) {
+                        LOG4CPLUS_WARN_FMT(logger,
+                            "[Frame %llu] 打开 BufferComparator 失败",
+                            (unsigned long long)frame_version);
+                        return true;
+                    }
+                }
+
+                // 对两个原始 Buffer 进行质量对比
+                auto cmp_result = opencv_ctx->comparator_->compare(buffer1, buffer2);
+
+                double psnr = cmp_result.psnr_avg;
+                double ssim = cmp_result.ssim_avg;
+
+                // 判断是否通过
+                bool psnr_ok = !opencv_ctx->config.enable_psnr ||
+                              (psnr >= opencv_ctx->config.min_psnr);
+                bool ssim_ok = !opencv_ctx->config.enable_ssim ||
+                              (ssim >= opencv_ctx->config.min_ssim);
+                bool passed = psnr_ok && ssim_ok;
+
+                // 更新统计
+                if (passed) {
+                    opencv_ctx->passed_frames.fetch_add(1);
+                } else {
+                    opencv_ctx->failed_frames.fetch_add(1);
+                }
+
+                // 累加 PSNR/SSIM
+                double old_psnr = opencv_ctx->psnr_sum.load();
+                while (!opencv_ctx->psnr_sum.compare_exchange_weak(old_psnr, old_psnr + psnr)) {}
+
+                double old_ssim = opencv_ctx->ssim_sum.load();
+                while (!opencv_ctx->ssim_sum.compare_exchange_weak(old_ssim, old_ssim + ssim)) {}
+
+                // 日志
+                if (!passed || opencv_ctx->config.verbose) {
+                    if (!passed) {
+                        LOG4CPLUS_WARN_FMT(logger,
+                            "[Frame %llu] OpenCV %s FAILED: PSNR=%.2f (min=%.2f), SSIM=%.4f (min=%.4f)",
+                            (unsigned long long)frame_version,
+                            op_name.c_str(),
+                            psnr, opencv_ctx->config.min_psnr,
+                            ssim, opencv_ctx->config.min_ssim);
+                    } else {
+                        LOG4CPLUS_DEBUG_FMT(logger,
+                            "[Frame %llu] OpenCV %s PASSED: PSNR=%.2f, SSIM=%.4f",
+                            (unsigned long long)frame_version,
+                            op_name.c_str(),
+                            psnr, ssim);
+                    }
+                }
+            } else {
+                // 仅统计成功，不进行质量评估
+                opencv_ctx->passed_frames.fetch_add(1);
+                if (opencv_ctx->config.verbose) {
+                    LOG4CPLUS_INFO_FMT(logger,
+                        "[Frame %llu] OpenCV %s 执行成功",
+                        (unsigned long long)frame_version,
+                        op_name.c_str());
+                }
+            }
+
+        } catch (const std::exception& e) {
+            auto logger = log4cplus::Logger::getInstance(
+                LOG4CPLUS_TEXT("components.WorkerSyncCoordinator"));
+            LOG4CPLUS_ERROR_FMT(logger,
+                "[Frame %llu] OpenCV 操作异常: %s",
+                (unsigned long long)frame_version,
+                e.what());
+            opencv_ctx->failed_frames.fetch_add(1);
+        } catch (...) {
+            auto logger = log4cplus::Logger::getInstance(
+                LOG4CPLUS_TEXT("components.WorkerSyncCoordinator"));
+            LOG4CPLUS_ERROR_FMT(logger,
+                "[Frame %llu] OpenCV 操作未知异常",
+                (unsigned long long)frame_version);
+            opencv_ctx->failed_frames.fetch_add(1);
+        }
+
+        return true;  // 操作结果不影响 Buffer 提交
+    };
+
+    return CallbackChainItem(callback, context, "opencv_arithmetic_callback");
 }

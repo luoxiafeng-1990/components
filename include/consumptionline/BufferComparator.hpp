@@ -6,6 +6,7 @@
 #include <vector>
 #include <atomic>
 #include <cstdio>
+#include "opencv2/core.hpp"
 
 // FFmpeg前向声明
 extern "C" {
@@ -208,6 +209,7 @@ private:
         bool is_yuv;
         bool is_rgb;
         bool is_planar;
+        bool is_mat = false;   // Buffer 中存储的是 cv::Mat（非 AVFrame）
         int num_planes;
         int width;
         int height;
@@ -356,7 +358,7 @@ private:
      */
     double calculateSSIM_RGB_B(Buffer* buf1, Buffer* buf2,
                               const FormatInfo& info1, const FormatInfo& info2);
-    
+
     // ========== 辅助方法 ==========
     
     /**
