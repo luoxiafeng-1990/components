@@ -67,13 +67,13 @@ std::unique_ptr<WorkerBase> BufferFillingWorkerFactory::createByType(WorkerType 
     switch (type) {
         case WorkerType::FFMPEG_DECODE:
             return std::make_unique<FFmpegDecodeWorker>(config);
-            
+
         case WorkerType::FFMPEG_PACKET_RECORDER:
             return std::make_unique<FfmpegPacketRecorderWorker>(config);
-            
+
         case WorkerType::FFMPEG_ENCODE:  // ⭐ v2.29 新增
             return std::make_unique<FFmpegEncodeWorker>(config);
-            
+
         case WorkerType::AUTO:
         default:
             return autoDetect(config);

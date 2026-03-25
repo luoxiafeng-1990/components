@@ -2,6 +2,7 @@
 #include "buffer/NormalAllocator.hpp"
 #include "buffer/AVFrameAllocator.hpp"
 #include "buffer/FramebufferAllocator.hpp"
+#include "buffer/MatAllocator.hpp"
 #include "common/Logger.hpp"
 #include <stdio.h>
 #include <string.h>
@@ -39,6 +40,10 @@ std::unique_ptr<BufferAllocatorBase> BufferAllocatorFactory::create(
         case AllocatorType::FRAMEBUFFER:
             LOG4CPLUS_DEBUG(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Allocator.Factory")), "创建FramebufferAllocator");
             return std::make_unique<FramebufferAllocator>();
+        
+        case AllocatorType::MAT:
+            LOG4CPLUS_DEBUG(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Allocator.Factory")), "创建MatAllocator");
+            return std::make_unique<MatAllocator>();
             
         default:
             LOG4CPLUS_WARN_FMT(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Allocator.Factory")), "Unknown type, using NormalAllocator");
@@ -81,6 +86,8 @@ std::unique_ptr<BufferAllocatorBase> BufferAllocatorFactory::createByName(
         return createByType(AllocatorType::AVFRAME, mem_type, alignment);
     } else if (strcmp(name, "framebuffer") == 0) {
         return createByType(AllocatorType::FRAMEBUFFER, mem_type, alignment);
+    } else if (strcmp(name, "mat") == 0) {
+        return createWithConfig(AllocatorType::MAT, mem_type, alignment);
     } else if (strcmp(name, "auto") == 0) {
         return createWithConfig(AllocatorType::AUTO, mem_type, alignment);
     }
@@ -95,6 +102,7 @@ const char* BufferAllocatorFactory::typeToString(AllocatorType type) {
         case AllocatorType::NORMAL:     return "NORMAL";
         case AllocatorType::AVFRAME:    return "AVFRAME";
         case AllocatorType::FRAMEBUFFER: return "FRAMEBUFFER";
+        case AllocatorType::MAT:        return "MAT";
         default:                         return "UNKNOWN";
     }
 }
@@ -120,6 +128,10 @@ std::unique_ptr<BufferAllocatorBase> BufferAllocatorFactory::createByType(
         case AllocatorType::FRAMEBUFFER:
             LOG4CPLUS_DEBUG(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Allocator.Factory")), "🏭 [BufferAllocatorFactory] Creating FramebufferAllocator");
             return std::make_unique<FramebufferAllocator>();
+        
+        case AllocatorType::MAT:
+            LOG4CPLUS_DEBUG(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Allocator.Factory")), "🏭 [BufferAllocatorFactory] Creating MatAllocator");
+            return std::make_unique<MatAllocator>();
             
         default:
             LOG4CPLUS_WARN(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Allocator.Factory")), "⚠️  [BufferAllocatorFactory] Warning: Unknown AllocatorType, using NormalAllocator");

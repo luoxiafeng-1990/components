@@ -112,7 +112,7 @@ buildMultiWorkerConfigForCompare(
     group.consumer_configs.push_back(consumer_sw);
     
     // ========================================
-    // 3. 配置连接器（ONE_TO_MANY + 比较回调）
+    // 3. 配置连接器（ONE_TO_MANY + 回调）
     // ========================================
     ConnectorConfig connector;
     connector.mode = Connector::Mode::ONE_TO_MANY;
@@ -120,17 +120,43 @@ buildMultiWorkerConfigForCompare(
     connector.consumer_names.push_back("hw_decoder");
     connector.consumer_names.push_back("sw_decoder");
     connector.enable_frame_sync = true;
-    
-    // 创建比较上下文（从 configs[0] 获取比较配置）
-    auto compare_ctx = std::make_shared<CompareCallbackContext>();
-    compare_ctx->initFromCompareType(configs[0].consumer_type.compare);
-    compare_ctx->worker1_name = "hw_decoder";
-    compare_ctx->worker2_name = "sw_decoder";
-    
-    // 添加比较回调到 callback_chain
-    connector.callback_chain.push_back(
-        WorkerSyncCoordinator::createDefaultCompareCallback(compare_ctx.get()));
-    
+
+    const auto& consumer_type = configs[0].consumer_type;
+
+    // ⭐ 创建本地 logger（因为这是静态函数，没有 logger_ 成员）
+    auto logger = log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("consumer.BufferConsumerService"));
+
+    // 初始化 compare_ctx（在两个分支中都会使用）
+    std::shared_ptr<CompareCallbackContext> compare_ctx = nullptr;
+
+    // ⭐ 根据 consumer_type 的类型选择 callback
+    if (consumer_type.opencv.enable) {
+        // OpenCV 模式：执行 add/absdiff 等算术运算
+        LOG4CPLUS_INFO_FMT(logger,
+            "使用 OpenCV 模式，操作类型: %d",
+            static_cast<int>(consumer_type.opencv.op_type));
+
+        auto opencv_ctx = std::make_shared<OpenCVCallbackContext>();
+        opencv_ctx->config = consumer_type.opencv;
+        opencv_ctx->worker1_name = "hw_decoder";
+        opencv_ctx->worker2_name = "sw_decoder";
+
+        connector.callback_chain.push_back(
+            WorkerSyncCoordinator::createOpenCVCallback(opencv_ctx.get()));
+    }
+    else {
+        // Compare 模式：计算 PSNR/SSIM（保留现有逻辑）
+        LOG4CPLUS_INFO(logger, "使用 Compare 模式，计算 PSNR/SSIM");
+
+        compare_ctx = std::make_shared<CompareCallbackContext>();
+        compare_ctx->initFromCompareType(consumer_type.compare);
+        compare_ctx->worker1_name = "hw_decoder";
+        compare_ctx->worker2_name = "sw_decoder";
+
+        connector.callback_chain.push_back(
+            WorkerSyncCoordinator::createDefaultCompareCallback(compare_ctx.get()));
+    }
+
     group.connector_configs.push_back(connector);
     
     // ========================================
@@ -311,6 +337,66 @@ ConsumeResult BufferConsumerService::startProductionLine(
     return result;
 }
 
+ConsumeResult BufferConsumerService::consumeExternalPool(
+    std::shared_ptr<BufferPool> pool,
+    const WorkerConfig& config,
+    uint32_t consume_flags)
+{
+    ConsumeResult result;
+    auto start_time = std::chrono::steady_clock::now();
+    stop_requested_ = false;
+    running_.store(true);
+
+    if (!pool) {
+        result.success = false;
+        result.error_message = "consumeExternalPool: BufferPool is null";
+        running_.store(false);
+        return result;
+    }
+
+    try {
+        auto consumer = createConsumerFromFlags(consume_flags, config);
+        if (!consumer) {
+            result.success = false;
+            result.error_message = "Failed to create consumer strategy";
+            running_.store(false);
+            return result;
+        }
+
+        consumeLoop(pool, consumer, config.consumer_type, result);
+
+        LOG4CPLUS_DEBUG(logger_, "consumeExternalPool: draining remaining filled buffers...");
+        int drained_count = 0;
+        int drain_frame_index = result.frames_consumed;
+        Buffer* remaining = nullptr;
+        while ((remaining = pool->acquireFilled(false, 0)) != nullptr) {
+            std::vector<Buffer*> buffers = {remaining};
+            consumer->consume(buffers, drain_frame_index++);
+            result.frames_consumed++;
+            drained_count++;
+            pool->releaseFilled(remaining);
+        }
+        if (drained_count > 0) {
+            LOG4CPLUS_DEBUG_FMT(logger_, "consumeExternalPool: drained %d buffers", drained_count);
+        }
+
+        consumer->finalize();
+        result.success = true;
+    } catch (const std::exception& e) {
+        result.success = false;
+        result.error_message = std::string("consumeExternalPool exception: ") + e.what();
+        LOG4CPLUS_ERROR_FMT(logger_, "%s", result.error_message.c_str());
+    }
+
+    running_.store(false);
+    auto end_time = std::chrono::steady_clock::now();
+    result.duration_seconds = std::chrono::duration<double>(end_time - start_time).count();
+    if (result.duration_seconds > 0.0) {
+        result.average_fps = static_cast<double>(result.frames_consumed) / result.duration_seconds;
+    }
+    return result;
+}
+
 // ============================================================
 // PARALLEL 模式实现
 // ============================================================
@@ -398,7 +484,10 @@ static uint32_t getConsumeFlagsFromConfig(const WorkerConfig::ConsumerTypeConfig
     if (config.count.enable) {
         flags |= CONSUME_COUNT;
     }
-    
+    if (config.opencv.enable) {
+        flags |= CONSUME_OPENCV;
+    }
+
     // 如果没有启用任何消费类型，默认启用 COUNT
     if (flags == 0) {
         flags = CONSUME_COUNT;
@@ -443,6 +532,12 @@ static std::shared_ptr<IBufferConsumer> createConsumerForWorker(
             codec_params,
             time_base));
     }
+
+    // 4. OpenCV 消费者（Buffer→Mat 转换 + PSNR/SSIM）
+    if (flags & CONSUME_OPENCV) {
+        consumers.push_back(std::make_shared<OpencvConsumer>(config.opencv));
+    }
+
     
     // 4. NPU 推理消费者
     if (flags & CONSUME_NPU_INFERENCE) {
@@ -760,13 +855,15 @@ std::shared_ptr<IBufferConsumer> BufferConsumerService::createConsumerFromFlags(
     if (flags & CONSUME_DISPLAY) type_count++;
     if (flags & CONSUME_SAVE_RAW) type_count++;
     if (flags & CONSUME_SAVE_ENCODED) type_count++;
+    if (flags & CONSUME_OPENCV) type_count++;
+
     if (flags & CONSUME_NPU_INFERENCE) type_count++;
     
     // 如果没有指定任何类型，默认使用 COUNT
     if (type_count == 0) {
         return std::make_shared<CountConsumer>();
     }
-    
+
     // 如果只有一种类型，直接创建
     if (type_count == 1) {
         if (flags & CONSUME_COUNT) {
@@ -788,6 +885,9 @@ std::shared_ptr<IBufferConsumer> BufferConsumerService::createConsumerFromFlags(
                 config.data_source.time_base
             );
         }
+        if (flags & CONSUME_OPENCV) {
+            return std::make_shared<OpencvConsumer>(config.consumer_type.opencv);
+        }
         if (flags & CONSUME_NPU_INFERENCE) {
             NpuInferenceConfig npu_cfg;
             npu_cfg.model_path     = config.consumer_type.npu_inference.model_path;
@@ -802,7 +902,7 @@ std::shared_ptr<IBufferConsumer> BufferConsumerService::createConsumerFromFlags(
             return std::make_shared<NpuInferenceConsumer>(npu_cfg);
         }
     }
-    
+
     // 多种类型叠加，使用 MultiConsumer
     // 顺序：NPU推理(画框) → Display(显示带框画面) → Save → Count
     auto multi = std::make_shared<MultiConsumer>();
@@ -838,6 +938,10 @@ std::shared_ptr<IBufferConsumer> BufferConsumerService::createConsumerFromFlags(
             config.data_source.time_base
         ));
     }
+    if (flags & CONSUME_OPENCV) {
+        multi->addStrategy(std::make_shared<OpencvConsumer>(config.consumer_type.opencv));
+    }
+
     
     // COUNT 放在最后
     multi->addStrategy(std::make_shared<CountConsumer>());
@@ -892,7 +996,7 @@ void BufferConsumerService::consumeLoop(
             }
             initialized = true;
         }
-        
+
         std::vector<Buffer*> buffers = {buffer};
         bool continue_consume = consumer->consume(buffers, frame_index);
         

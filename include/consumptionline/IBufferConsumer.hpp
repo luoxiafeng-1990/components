@@ -37,13 +37,14 @@ namespace consumer {
  * - CONSUME_DISPLAY | CONSUME_SAVE_RAW = 同时显示和保存
  */
 enum ConsumeTypeFlags : uint32_t {
-    CONSUME_NONE         = 0,         ///< 无消费（仅生产）
-    CONSUME_COUNT        = 1 << 0,    ///< 仅统计帧数（0x01）
-    CONSUME_DISPLAY      = 1 << 1,    ///< 显示输出（0x02）
-    CONSUME_SAVE_RAW     = 1 << 2,    ///< 保存原始 YUV/RGB（0x04）
-    CONSUME_SAVE_ENCODED = 1 << 3,    ///< 保存编码流（0x08）
-    CONSUME_CHANNEL_COMPARE = 1 << 4, ///< ⭐ v2.27：通道比较（0x10）
-    CONSUME_NPU_INFERENCE   = 1 << 5, ///< ⭐ v2.28：NPU 推理（0x20）
+    CONSUME_NONE            = 0,         ///< 无消费（仅生产）
+    CONSUME_COUNT           = 1 << 0,    ///< 仅统计帧数（0x01）
+    CONSUME_DISPLAY         = 1 << 1,    ///< 显示输出（0x02）
+    CONSUME_SAVE_RAW        = 1 << 2,    ///< 保存原始 YUV/RGB（0x04）
+    CONSUME_SAVE_ENCODED    = 1 << 3,    ///< 保存编码流（0x08）
+    CONSUME_CHANNEL_COMPARE = 1 << 4,    ///< ⭐ v2.27：通道比较（0x10）
+    CONSUME_OPENCV          = 1 << 5,    ///< OpenCV消费：Buffer→Mat转换并计算PSNR/SSIM（0x20）
+    CONSUME_NPU_INFERENCE   = 1 << 6, ///< ⭐ v2.28：NPU 推理（0x20）
 };
 
 /**

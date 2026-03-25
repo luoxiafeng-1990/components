@@ -38,6 +38,7 @@ libcomponents_la_SOURCES = \
     source/buffer/NormalAllocator.cpp \
     source/buffer/FramebufferAllocator.cpp \
     source/buffer/AVFrameAllocator.cpp \
+    source/buffer/MatAllocator.cpp \
     source/buffer/bufferpool/BufferPool.cpp \
     source/buffer/bufferpool/BufferPoolRegistry.cpp \
     source/productionline/VideoProductionLine.cpp \
@@ -59,7 +60,11 @@ libcomponents_la_SOURCES = \
 # 1. Buildroot 会自动编译 log4cplus（已在 components.mk 中声明依赖）
 # 2. log4cplus 库位置：$(STAGING_DIR)/usr/lib/liblog4cplus-2.0.so.3.4.7
 # 3. 运行时需要目标系统有 log4cplus 动态库（Buildroot 会自动安装到 TARGET_DIR）
-COMMON_LIBS = -lpthread -luring -lavformat -lavcodec -lavutil -lswscale -ltacosys -ltacovo -ltacocv -llog4cplus -lfreetype -lta_runtime -lVIPhal -lNBGlinker -lopencv_imgproc -lopencv_core -ldl
+COMMON_LIBS = -lpthread -luring -ltacosys -ltacovo -llog4cplus -lfreetype $(FFMPEG_LIBS) $(OPENCV_LIBS) $(NPU_LIBS)
+FFMPEG_LIBS = -lavformat -lavcodec -lavutil -lswscale
+OPENCV_LIBS = -ltacocv -lvx -lhwdec_jpeg -ltaco_ppvdec -lCLC -lOpenVX -lOpenVXU -lOpenCL -lSPIRV_viv -lCLC -lVSC -lGAL -lovxlib -lArchModelSw -lNNArchPerf -ldl \
+        -lopencv_imgcodecs -lopencv_videoio -lopencv_core -lopencv_imgproc -lenc24 -lyuv -ljpeg
+NPU_LIBS = -lta_runtime -lVIPhal -lNBGlinker
 
 # display_test 主程序（已废弃，原 test_cases/dec/ 目录已重命名为 old_case/）
 # display_test_SOURCES = test_cases/dec/test.cpp
@@ -77,6 +82,8 @@ COMMON_LIBS = -lpthread -luring -lavformat -lavcodec -lavutil -lswscale -ltacosy
 
 # ========== QA 测试程序（模块化测试入口）==========
 bin_PROGRAMS = qa_cases
+
+# ========== Mat(AVFrame*) 接口最小化测试 ==========
 qa_cases_SOURCES = \
     test_cases/test_module_main.cpp \
     test_cases/common/ExecuteMode.cpp \
@@ -84,13 +91,16 @@ qa_cases_SOURCES = \
     test_cases/pp/PPPlugin.cpp \
     test_cases/save/SavePlugin.cpp \
     test_cases/display/DisplayPlugin.cpp \
-    test_cases/npu/NpuPlugin.cpp
+    test_cases/npu/NpuPlugin.cpp \
+    test_cases/opencv/OpencvPlugin.cpp \
+    test_cases/venc/VencPlugin.cpp
 qa_cases_LDADD = libcomponents.la $(COMMON_LIBS)
 qa_cases_CPPFLAGS = -I$(top_srcdir)/test_cases $(AM_CPPFLAGS)
 qa_cases_LDFLAGS = -Wl,--allow-shlib-undefined
 
 # ========== 编译选项 ==========
-AM_CPPFLAGS = -I$(top_srcdir)/include -I$(top_srcdir)/include/common/third_party/freetype2
+OPENCV_INCLUDE = -I$(STAGING_DIR)/usr/include/opencv4
+AM_CPPFLAGS = -I$(top_srcdir)/include $(OPENCV_INCLUDE) -I$(top_srcdir)/include/common/third_party/freetype2
 
 if DEBUG
 AM_CXXFLAGS = -g -O0 -Wall -std=c++17

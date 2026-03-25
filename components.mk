@@ -11,7 +11,7 @@ COMPONENTS_INSTALL_STAGING = YES
 COMPONENTS_INSTALL_TARGET = YES
 COMPONENTS_AUTORECONF = YES
 COMPONENTS_LIBTOOL_PATCH = NO
-COMPONENTS_DEPENDENCIES = host-autoconf host-automake host-libtool liburing log4cplus taco-ffmpeg taco-vo taco-pipeline ta-runtime
+COMPONENTS_DEPENDENCIES = host-autoconf host-automake host-libtool liburing log4cplus taco-ffmpeg taco-vo taco-pipeline opencv unify-9200O ta-runtime
 
 COMPONENTS_CONF_ENV += \
 	LDFLAGS="$(TARGET_LDFLAGS) -L$(STAGING_DIR)/usr/local/lib -Wl,-rpath-link,$(TARGET_DIR)/usr/lib -Wl,-rpath-link,$(TARGET_DIR)/usr/local/lib"

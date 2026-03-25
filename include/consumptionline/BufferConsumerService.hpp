@@ -135,6 +135,17 @@ public:
         ExecuteMode mode,
         uint32_t consume_flags
     );
+
+    /**
+     * @brief 对外部已启动的生产线产生的 BufferPool 执行消费（如 MultiWorker 解码输出池 + 显示）
+     *
+     * 调用方负责在消费结束后停止生产线。本方法仅执行 acquire/consume/drain/finalize。
+     */
+    ConsumeResult consumeExternalPool(
+        std::shared_ptr<BufferPool> pool,
+        const WorkerConfig& config,
+        uint32_t consume_flags
+    );
     
     // ============================================================
     // 控制接口

@@ -457,6 +457,18 @@ bool MultiWorkerProductionLine::createConnectorsForGroup(WorkerGroupRuntime* gro
             }
             
             // 创建共享 EncodedPacketSourceFromBuffer
+            //
+            // 重要原因：
+            //  - 当前 `FFmpegDecodeWorker::readAndSendPacket()` 在 buffer_mode 下始终调用
+            //    `packet_source_->acquireEncodedPacket()`；
+            //  - 而 `EncodedPacketSourceFromBuffer::acquireEncodedPacket()` 只在 shared 模式可用，
+            //    非 shared（例如 v2.13 Pool/one-to-one）会直接返回 InvalidMode。
+            //
+            // 因此即使 subscriber_count=1，也必须创建并注入 shared_source，
+            // 否则会出现日志：
+            //   "acquireEncodedPacket() only supported in shared mode"
+            //
+            subscriber_count = std::max<size_t>(1, subscriber_count);
             auto shared_source = std::make_shared<EncodedPacketSourceFromBuffer>(codec_params, subscriber_count);
             
             // 设置源 BufferPool

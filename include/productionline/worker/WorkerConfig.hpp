@@ -55,7 +55,7 @@ using CallbackChain = std::vector<CallbackChainItem>;
 enum class WorkerType {
     AUTO,                   // 自动检测（默认）
     FFMPEG_DECODE,          // FFmpeg 解码 Worker（统一处理文件和 RTSP 流）
-    FFMPEG_PACKET_RECORDER, // FFmpeg Packet 录制器（支持 RTSP/文件/HTTP 等多种数据源）
+    FFMPEG_PACKET_RECORDER,  // FFmpeg Packet 录制器（支持 RTSP/文件/HTTP 等多种数据源）
     FFMPEG_ENCODE           // ⭐ v2.29 新增：FFmpeg 编码 Worker（H.264/H.265/JPEG 编码）
 };
 
@@ -608,6 +608,244 @@ struct WorkerConfig {
             bool enable = false;          ///< 是否启用统计
             CountType() = default;
         } count;
+
+        // ========================================
+        // OpenCV 消费类型（CONSUME_OPENCV）
+        // Buffer → cv::Mat 转换后执行指定操作，再计算 PSNR/SSIM
+        // ========================================
+        struct OpencvType {
+            bool enable = false;          ///< 是否启用 OpenCV 消费
+            bool enable_psnr = true;      ///< 是否计算 PSNR
+            bool enable_ssim = false;     ///< 是否计算 SSIM（计算量较大）
+            double min_psnr = 38.0;       ///< PSNR 通过阈值（dB，>= 此值为通过）
+            double min_ssim = 0.95;       ///< SSIM 通过阈值（>= 此值为通过）
+            bool verbose = false;         ///< 是否输出每帧详细日志
+
+            /// 操作类型：决定对 SW 参考帧施加哪种 OpenCV 变换
+            enum class OpType {
+                NONE,         ///< 无操作，直接比较原始解码帧
+                SAVE_LOAD_IMG,///< 保存图片到文件再读取，与原始帧比较（SINGLE 模式）
+                ADD,          ///< cv::add 两个 Mat 相加（多生产者对比）
+                ABSDIFF,      ///< cv::absdiff 两个 Mat 绝对差（多生产者对比）
+                ADD_WEIGHTED, ///< cv::addWeighted 加权求和（多生产者对比）
+                BITWISE_AND,  ///< cv::bitwise_and 按位与（多生产者对比）
+                BITWISE_OR,   ///< cv::bitwise_or 按位或（多生产者对比）
+                BITWISE_XOR,  ///< cv::bitwise_xor 按位异或（多生产者对比）
+                BITWISE_NOT,  ///< cv::bitwise_not 按位非（单生产者）
+                RESIZE,       ///< cv::resize 缩放
+                CROP,         ///< ROI 裁剪（src(cv::Rect(...))）
+                ERODE,        ///< cv::erode 腐蚀
+                DILATE,       ///< cv::dilate 膨胀
+                MORPH_OPEN,   ///< 开运算：先腐蚀后膨胀
+                MORPH_CLOSE,  ///< 闭运算：先膨胀后腐蚀
+                SOBEL,        ///< cv::Sobel 边缘检测
+                CANNY,        ///< cv::Canny 边缘检测
+                LAPLACIAN,    ///< cv::Laplacian 拉普拉斯边缘
+                TRANSLATE,    ///< cv::warpAffine 平移
+                ROTATE,       ///< cv::warpAffine 旋转
+                PERSPECTIVE,  ///< cv::warpPerspective 透视变换
+                DRAW_LINE,    ///< cv::line 画线
+                DRAW_RECT,    ///< cv::rectangle 画矩形
+                PUT_TEXT,     ///< cv::putText 绘文字
+                GAUSSIAN_BLUR,///< cv::GaussianBlur 高斯模糊
+                THRESHOLD,    ///< cv::threshold 二值化
+                SPLIT,        ///< cv::split 通道分离
+                MERGE,        ///< cv::merge 通道合并
+                CVTCOLOR,     ///< cv::cvtColor 颜色空间转换
+            };
+            OpType op_type = OpType::NONE;
+
+            // ----------------------------------------
+            // cv::resize 参数
+            //   cv::resize(src, dst, Size(dst_width, dst_height), fx, fy, interpolation)
+            // 注：dst_width/dst_height 与 fx/fy 二选一，另一组置 0
+            // interpolation 取值：
+            //   0 = cv::INTER_NEAREST
+            //   1 = cv::INTER_LINEAR  （默认）
+            //   2 = cv::INTER_CUBIC
+            //   3 = cv::INTER_AREA
+            //   4 = cv::INTER_LANCZOS4
+            // ----------------------------------------
+            struct Resize {
+                int    dst_width;    ///< 目标宽度（像素，0 = 由 fx 决定）
+                int    dst_height;    ///< 目标高度（像素，0 = 由 fy 决定）
+                double fx;  ///< 水平缩放因子（0 = 由 dst_width 决定）
+                double fy;  ///< 垂直缩放因子（0 = 由 dst_height 决定）
+                int    interpolation;    ///< 插值方法（默认 1 = INTER_LINEAR）
+                Resize() = default;
+            } resize;
+
+            // ----------------------------------------
+            // ROI 裁剪参数
+            //   cropped = src(cv::Rect(x, y, width, height))
+            // ----------------------------------------
+            struct Crop {
+                int x;  ///< 裁剪起始 X 坐标（像素）
+                int y;  ///< 裁剪起始 Y 坐标（像素）
+                int width;  ///< 裁剪区域宽度（像素）
+                int height;  ///< 裁剪区域高度（像素）
+                Crop() = default;
+            } crop;
+
+            // ----------------------------------------
+            // 形态学操作参数（erode / dilate / open / close）
+            //   cv::erode / cv::dilate / cv::morphologyEx
+            // kernel_shape 取值：
+            //   0 = cv::MORPH_RECT（默认）
+            //   1 = cv::MORPH_CROSS
+            //   2 = cv::MORPH_ELLIPSE
+            // ----------------------------------------
+            struct Morph {
+                int kernel_size  = 3;  ///< 结构元素边长（像素，需为奇数）
+                int kernel_shape = 0;  ///< 结构元素形状（MORPH_RECT=0）
+                int anchor_x     = -1; ///< 锚点 X（-1 = 中心）
+                int anchor_y     = -1; ///< 锚点 Y（-1 = 中心）
+                int iterations   = 1;  ///< 迭代次数
+                Morph() = default;
+            } morph;
+
+            // ----------------------------------------
+            // cv::Sobel 边缘检测参数
+            //   cv::Sobel(src, dst, CV_8U, dx, dy, ksize, scale, delta)
+            // ----------------------------------------
+            struct Sobel {
+                int    dx    = 1;   ///< X 方向导数阶数
+                int    dy    = 0;   ///< Y 方向导数阶数
+                int    ksize = 3;   ///< Sobel 核大小（1/3/5/7）
+                double scale = 1.0; ///< 缩放因子
+                double delta = 0.0; ///< 加到结果的偏移值
+                Sobel() = default;
+            } sobel;
+
+            // ----------------------------------------
+            // cv::Canny 边缘检测参数
+            // ----------------------------------------
+            struct Canny {
+                double threshold1    = 100.0; ///< 低阈值
+                double threshold2    = 200.0; ///< 高阈值
+                int    aperture_size = 3;     ///< Sobel 核大小（3/5/7）
+                Canny() = default;
+            } canny;
+
+            // ----------------------------------------
+            // cv::Laplacian 拉普拉斯边缘参数
+            // ----------------------------------------
+            struct Laplacian {
+                int    ksize = 1;   ///< 核大小（正奇数）
+                double scale = 1.0;
+                double delta = 0.0;
+                Laplacian() = default;
+            } laplacian;
+
+            // ----------------------------------------
+            // cv::warpAffine 平移参数
+            //   M = [1 0 tx; 0 1 ty]
+            // ----------------------------------------
+            struct Translate {
+                double tx = 0.0; ///< X 方向平移量（像素）
+                double ty = 0.0; ///< Y 方向平移量（像素）
+                Translate() = default;
+            } translate;
+
+            // ----------------------------------------
+            // cv::warpAffine 旋转参数
+            //   以图像中心旋转 angle 度
+            // ----------------------------------------
+            struct Rotate {
+                double angle = 0.0; ///< 旋转角度（度，逆时针为正）
+                double scale = 1.0; ///< 缩放因子
+                Rotate() = default;
+            } rotate;
+
+            // ----------------------------------------
+            // cv::warpPerspective 透视变换参数
+            //   使用简单的四角偏移生成透视矩阵
+            // ----------------------------------------
+            struct Perspective {
+                int offset = 50; ///< 右上角、左上角的透视偏移量（像素）
+                Perspective() = default;
+            } perspective;
+
+            // ----------------------------------------
+            // cv::line 画线参数
+            // ----------------------------------------
+            struct DrawLine {
+                int x1        = 0;   ///< 起点 X
+                int y1        = 0;   ///< 起点 Y
+                int x2        = 100; ///< 终点 X
+                int y2        = 100; ///< 终点 Y
+                int thickness = 2;   ///< 线宽（像素）
+                DrawLine() = default;
+            } draw_line;
+
+            // ----------------------------------------
+            // cv::rectangle 画矩形参数
+            // ----------------------------------------
+            struct DrawRect {
+                int x         = 100; ///< 左上角 X
+                int y         = 100; ///< 左上角 Y
+                int width     = 200; ///< 宽度
+                int height    = 200; ///< 高度
+                int thickness = 2;   ///< 线宽（-1=填充）
+                DrawRect() = default;
+            } draw_rect;
+
+            // ----------------------------------------
+            // cv::putText 绘文字参数
+            // ----------------------------------------
+            struct PutText {
+                int    x          = 10;  ///< 文字起始 X
+                int    y          = 50;  ///< 文字起始 Y（基线）
+                double font_scale = 1.0; ///< 字体缩放
+                int    thickness  = 2;   ///< 字体线宽
+                PutText() = default;
+            } put_text;
+
+            // ----------------------------------------
+            // cv::GaussianBlur 高斯模糊参数
+            // ----------------------------------------
+            struct GaussianBlur {
+                int    ksize   = 5;   ///< 核大小（正奇数）
+                double sigma_x = 0.0; ///< X 方向标准差（0=由 ksize 自动计算）
+                GaussianBlur() = default;
+            } gaussian_blur;
+
+            // ----------------------------------------
+            // cv::threshold 二值化参数
+            //   type 取值：0=THRESH_BINARY, 1=THRESH_BINARY_INV
+            //              2=THRESH_TRUNC, 3=THRESH_TOZERO, 4=THRESH_TOZERO_INV
+            // ----------------------------------------
+            struct Threshold {
+                double thresh = 128.0; ///< 阈值
+                double maxval = 255.0; ///< 最大值
+                int    type   = 0;     ///< 阈值类型（默认 THRESH_BINARY）
+                Threshold() = default;
+            } threshold;
+
+            // ----------------------------------------
+            // cv::split / cv::merge 通道分离合并参数
+            //   split: 将多通道图像分离为单通道平面
+            //   merge: 将多个单通道平面合并为多通道图像
+            // 注：测试逻辑为 mat -> split -> merge -> 与原始 mat 比较
+            // ----------------------------------------
+            struct SplitMerge {
+                int    channels = 3;     ///< 通道数（3=BGR, 4=BGRA）
+                SplitMerge() = default;
+            } split_merge;
+
+            // ----------------------------------------
+            // cv::cvtColor 颜色空间转换参数
+            //   cvtColor: 将图像从一种颜色空间转换到另一种
+            // 注：测试逻辑为 mat -> cvtColor -> 与软件 cvtColor 结果比较
+            // ----------------------------------------
+            struct ColorConvert {
+                int    code = 0;         ///< cv::ColorConversionCodes
+                int    dstCn = 0;        ///< 目标通道数（0=自动）
+                ColorConvert() = default;
+            } cvtcolor;
+
+            OpencvType() = default;
+        } opencv;
         
         /**
          * @brief 从 shared config 继承伴随消费者设置
