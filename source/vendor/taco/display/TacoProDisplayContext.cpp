@@ -175,13 +175,19 @@ bool TacoProDisplayContext::open() {
         return false;
     }
 
-    memset(tmpl_virt, 0, buffer_size_);
+    {
+        size_t y_plane_size  = static_cast<size_t>(screen_width_) * screen_height_;
+        size_t uv_plane_size = y_plane_size / 2;
+        uint8_t* p = static_cast<uint8_t*>(tmpl_virt);
+        memset(p, 0, y_plane_size);
+        memset(p + y_plane_size, 128, uv_plane_size);
+    }
     template_buf_ = std::make_unique<Buffer>(
         template_blk_id_, tmpl_virt, tmpl_phys, buffer_size_,
         Buffer::Ownership::EXTERNAL);
 
     LOG4CPLUS_INFO_FMT(logger_,
-        "Template frame allocated: blk_id=%u, phys=0x%llx, size=%zu",
+        "Template frame allocated: blk_id=%u, phys=0x%llx, size=%zu (NV12 Y=0 UV=128)",
         template_blk_id_, (unsigned long long)tmpl_phys, buffer_size_);
 
     if (!startThreads()) {
@@ -763,16 +769,6 @@ void TacoProDisplayContext::ppResize(
         return;
     }
 
-    int out_format = TA_AV_PIX_FMT_NONE;
-    if (bits_per_pixel_ == 32) {
-        out_format = TA_AV_PIX_FMT_ARGB;
-    } else if (bits_per_pixel_ == 24) {
-        out_format = TA_AV_PIX_FMT_RGB24;
-    } else {
-        out_format = TA_AV_PIX_FMT_NV12;
-    }
-
-    // === 构建输入 ta_avframe_t（不强制转换 AVFrame*，避免结构体偏移差异）===
     ta_avframe_t in_avframe;
     memset(&in_avframe, 0, sizeof(in_avframe));
     in_avframe.width  = avframe_in->width;
@@ -782,10 +778,8 @@ void TacoProDisplayContext::ppResize(
         in_avframe.data[i]     = avframe_in->data[i];
         in_avframe.linesize[i] = avframe_in->linesize[i];
     }
-    // 从 FFmpeg AVFrame 复制 metadata 指针（AVDictionary 与 TA_AVDictionary 布局一致）
     in_avframe.metadata = reinterpret_cast<TA_AVDictionary*>(avframe_in->metadata);
 
-    // === 构建输出 ta_avframe_t（buf->id() == blk_id，用于 PP 物理地址查找）===
     char blk_id_str[16];
     snprintf(blk_id_str, sizeof(blk_id_str), "%u", dst->id());
     TA_AVDictionaryEntry local_out_entry;
@@ -799,42 +793,9 @@ void TacoProDisplayContext::ppResize(
     memset(&out_avframe, 0, sizeof(out_avframe));
     out_avframe.width  = screen_width_;
     out_avframe.height = screen_height_;
-    out_avframe.format = out_format;
+    out_avframe.format = TA_AV_PIX_FMT_NV12;
     out_avframe.metadata = &local_out_dict;
     out_avframe.data[0] = static_cast<uint8_t*>(dst->getVirtualAddress());
-
-    ta_cv_resize_t resize_params = {};
-    resize_params.in_width  = src_width;
-    resize_params.in_height = src_height;
-    resize_params.out_width = dst_w;
-    resize_params.out_height = dst_h;
-    resize_params.start_x = 0;
-    resize_params.start_y = 0;
-
-    ta_cv_resize_image_t resize_attr = {};
-    resize_attr.resize_img_attr = &resize_params;
-    resize_attr.interpolation = 1;
-
-    if (out_format == TA_AV_PIX_FMT_NV12) {
-        resize_attr.y_offset = dst_y * screen_width_ + dst_x;
-        resize_attr.u_offset = screen_width_ * (screen_height_ - dst_y)
-                             + (screen_width_ / 2) * dst_y;
-        resize_attr.y_stride = screen_width_;
-        resize_attr.u_stride = screen_width_;
-    } else if (out_format == TA_AV_PIX_FMT_RGB24) {
-        resize_attr.y_offset = (dst_y * screen_width_ + dst_x) * 3;
-        resize_attr.u_offset = 0;
-        resize_attr.y_stride = screen_width_ * 3;
-        resize_attr.u_stride = screen_width_ * 3;
-    } else {
-        resize_attr.y_offset = (dst_y * screen_width_ + dst_x) * 4;
-        resize_attr.u_offset = 0;
-        resize_attr.y_stride = screen_width_ * 4;
-        resize_attr.u_stride = screen_width_ * 4;
-    }
-
-    int in_format = avframe_in->format;
-    bool both_nv12 = (in_format == TA_AV_PIX_FMT_NV12 && out_format == TA_AV_PIX_FMT_NV12);
 
     ta_image_t image_in = {};
     ta_image_t image_out = {};
@@ -854,25 +815,28 @@ void TacoProDisplayContext::ppResize(
         return;
     }
 
-    if (both_nv12) {
-        ret = ta_cv_image_resize(&resize_attr, image_in, image_out);
-        if (ret != 0) {
-            LOG4CPLUS_WARN_FMT(logger_,
-                "ppResize: ta_cv_image_resize failed: ret=%d", ret);
-        }
-    } else {
-        ta_cv_rect_t crop_rect = {};
-        crop_rect.crop_w = src_width;
-        crop_rect.crop_h = src_height;
-        crop_rect.start_x = 0;
-        crop_rect.start_y = 0;
+    ta_cv_rect_t src_crop = {};
+    src_crop.start_x = 0;
+    src_crop.start_y = 0;
+    src_crop.crop_w  = src_width;
+    src_crop.crop_h  = src_height;
 
-        ret = ta_cv_image_csc_convert_to(image_in, image_out, crop_rect,
-                                         &resize_attr, CSC_YCbCr2RGB_BT601);
-        if (ret != 0) {
-            LOG4CPLUS_WARN_FMT(logger_,
-                "ppResize: ta_cv_image_csc_convert_to failed: ret=%d", ret);
-        }
+    ta_cv_rect_t dst_crop = {};
+    dst_crop.start_x = dst_x;
+    dst_crop.start_y = dst_y;
+    dst_crop.crop_w  = dst_w;
+    dst_crop.crop_h  = dst_h;
+
+    LOG4CPLUS_DEBUG_FMT(logger_,
+        "ppResize(stitch): src=(%dx%d) -> dst=(%d,%d,%d,%d) blk_in=%u blk_out=%u",
+        src_width, src_height, dst_x, dst_y, dst_w, dst_h, src->id(), dst->id());
+
+    ret = ta_cv_image_stitch(1, &image_in, image_out,
+                             &dst_crop, &src_crop, TA_CV_INTER_LINEAR);
+    if (ret != 0) {
+        LOG4CPLUS_WARN_FMT(logger_,
+            "ppResize: ta_cv_image_stitch FAILED: ret=%d dst=(%d,%d,%d,%d) blk=%u",
+            ret, dst_x, dst_y, dst_w, dst_h, dst->id());
     }
 
     ta_cv_image_destroy(&image_in);
@@ -888,16 +852,6 @@ void TacoProDisplayContext::ppCopy(Buffer* src, Buffer* dst) {
 
     uint8_t* src_virt = static_cast<uint8_t*>(src->getVirtualAddress());
     uint8_t* dst_virt = static_cast<uint8_t*>(dst->getVirtualAddress());
-
-    int bytes_per_pixel = bits_per_pixel_ / 8;
-    int out_format = TA_AV_PIX_FMT_NONE;
-    if (bits_per_pixel_ == 32) {
-        out_format = TA_AV_PIX_FMT_ARGB;
-    } else if (bits_per_pixel_ == 24) {
-        out_format = TA_AV_PIX_FMT_RGB24;
-    } else {
-        out_format = TA_AV_PIX_FMT_NV12;
-    }
 
     char src_blk_str[16], dst_blk_str[16];
     snprintf(src_blk_str, sizeof(src_blk_str), "%u", src->id());
@@ -921,7 +875,7 @@ void TacoProDisplayContext::ppCopy(Buffer* src, Buffer* dst) {
     memset(&src_avframe, 0, sizeof(src_avframe));
     src_avframe.width  = screen_width_;
     src_avframe.height = screen_height_;
-    src_avframe.format = out_format;
+    src_avframe.format = TA_AV_PIX_FMT_NV12;
     src_avframe.metadata = &local_dict;
     src_avframe.data[0] = src_virt;
 
@@ -929,30 +883,9 @@ void TacoProDisplayContext::ppCopy(Buffer* src, Buffer* dst) {
     memset(&dst_avframe, 0, sizeof(dst_avframe));
     dst_avframe.width  = screen_width_;
     dst_avframe.height = screen_height_;
-    dst_avframe.format = out_format;
+    dst_avframe.format = TA_AV_PIX_FMT_NV12;
     dst_avframe.metadata = &local_dict2;
     dst_avframe.data[0] = dst_virt;
-
-    ta_cv_resize_t resize_params = {};
-    resize_params.in_width  = screen_width_;
-    resize_params.in_height = screen_height_;
-    resize_params.out_width = screen_width_;
-    resize_params.out_height = screen_height_;
-    resize_params.start_x = 0;
-    resize_params.start_y = 0;
-
-    ta_cv_resize_image_t resize_attr = {};
-    resize_attr.resize_img_attr = &resize_params;
-    resize_attr.interpolation = 1;
-
-    if (out_format == TA_AV_PIX_FMT_NV12) {
-        resize_attr.u_offset = screen_width_ * screen_height_;
-        resize_attr.y_stride = screen_width_;
-        resize_attr.u_stride = screen_width_;
-    } else {
-        resize_attr.y_stride = screen_width_ * bytes_per_pixel;
-        resize_attr.u_stride = screen_width_ * bytes_per_pixel;
-    }
 
     ta_image_t image_in = {};
     ta_image_t image_out = {};
@@ -960,7 +893,7 @@ void TacoProDisplayContext::ppCopy(Buffer* src, Buffer* dst) {
     tacv_status_t ret = ta_cv_image_create(0, 0, (ta_image_format_ext_t)0,
         (ta_image_data_format_ext_t)0, &image_in, &src_avframe);
     if (ret != 0) {
-        LOG4CPLUS_WARN_FMT(logger_, "ppCopy: ta_cv_image_create(input) failed: %d", ret);
+        LOG4CPLUS_WARN_FMT(logger_, "ppCopy: ta_cv_image_create(input) failed: %d, fallback to memcpy", ret);
         memcpy(dst_virt, src_virt, buffer_size_);
         return;
     }
@@ -968,15 +901,19 @@ void TacoProDisplayContext::ppCopy(Buffer* src, Buffer* dst) {
     ret = ta_cv_image_create(0, 0, (ta_image_format_ext_t)0,
         (ta_image_data_format_ext_t)0, &image_out, &dst_avframe);
     if (ret != 0) {
-        LOG4CPLUS_WARN_FMT(logger_, "ppCopy: ta_cv_image_create(output) failed: %d", ret);
+        LOG4CPLUS_WARN_FMT(logger_, "ppCopy: ta_cv_image_create(output) failed: %d, fallback to memcpy", ret);
         ta_cv_image_destroy(&image_in);
         memcpy(dst_virt, src_virt, buffer_size_);
         return;
     }
 
-    ret = ta_cv_image_resize(&resize_attr, image_in, image_out);
+    ta_cv_copy_to_t copy_attr = {};
+    copy_attr.start_x = 0;
+    copy_attr.start_y = 0;
+
+    ret = ta_cv_image_copy_to(image_in, image_out, copy_attr);
     if (ret != 0) {
-        LOG4CPLUS_WARN_FMT(logger_, "ppCopy: ta_cv_image_resize failed: ret=%d, fallback to memcpy", ret);
+        LOG4CPLUS_WARN_FMT(logger_, "ppCopy: ta_cv_image_copy_to failed: ret=%d, fallback to memcpy", ret);
         memcpy(dst_virt, src_virt, buffer_size_);
     }
 
@@ -987,16 +924,6 @@ void TacoProDisplayContext::ppCopy(Buffer* src, Buffer* dst) {
 void TacoProDisplayContext::copyTemplateRegion(Buffer* dst, const ChannelLayout& layout) {
     if (!template_buf_ || !dst) return;
 
-    int out_format = TA_AV_PIX_FMT_NONE;
-    if (bits_per_pixel_ == 32) {
-        out_format = TA_AV_PIX_FMT_ARGB;
-    } else if (bits_per_pixel_ == 24) {
-        out_format = TA_AV_PIX_FMT_RGB24;
-    } else {
-        out_format = TA_AV_PIX_FMT_NV12;
-    }
-
-    // 构建输入 ta_avframe_t（template_buf_ 区域作为源）
     char src_blk_str[16];
     snprintf(src_blk_str, sizeof(src_blk_str), "%u", template_blk_id_);
     TA_AVDictionaryEntry src_entry;
@@ -1008,27 +935,12 @@ void TacoProDisplayContext::copyTemplateRegion(Buffer* dst, const ChannelLayout&
 
     ta_avframe_t in_avframe;
     memset(&in_avframe, 0, sizeof(in_avframe));
-    in_avframe.width    = layout.w;
-    in_avframe.height   = layout.h;
-    in_avframe.format   = out_format;
+    in_avframe.width    = screen_width_;
+    in_avframe.height   = screen_height_;
+    in_avframe.format   = TA_AV_PIX_FMT_NV12;
     in_avframe.metadata = &src_dict;
+    in_avframe.data[0]  = static_cast<uint8_t*>(template_buf_->getVirtualAddress());
 
-    uint8_t* src_base = static_cast<uint8_t*>(template_buf_->getVirtualAddress());
-    if (!src_base) return;
-
-    if (out_format == TA_AV_PIX_FMT_NV12) {
-        in_avframe.data[0]     = src_base + layout.y * screen_width_ + layout.x;
-        in_avframe.linesize[0] = screen_width_;
-        in_avframe.data[1]     = src_base + screen_width_ * screen_height_
-                                 + (layout.y / 2) * screen_width_ + layout.x;
-        in_avframe.linesize[1] = screen_width_;
-    } else {
-        int bpp = bits_per_pixel_ / 8;
-        in_avframe.data[0]     = src_base + (layout.y * screen_width_ + layout.x) * bpp;
-        in_avframe.linesize[0] = screen_width_ * bpp;
-    }
-
-    // 构建输出 ta_avframe_t（dst buffer 的同一区域）
     char dst_blk_str[16];
     snprintf(dst_blk_str, sizeof(dst_blk_str), "%u", dst->id());
     TA_AVDictionaryEntry dst_entry;
@@ -1042,39 +954,9 @@ void TacoProDisplayContext::copyTemplateRegion(Buffer* dst, const ChannelLayout&
     memset(&out_avframe, 0, sizeof(out_avframe));
     out_avframe.width    = screen_width_;
     out_avframe.height   = screen_height_;
-    out_avframe.format   = out_format;
+    out_avframe.format   = TA_AV_PIX_FMT_NV12;
     out_avframe.metadata = &dst_dict;
     out_avframe.data[0]  = static_cast<uint8_t*>(dst->getVirtualAddress());
-
-    ta_cv_resize_t resize_params = {};
-    resize_params.in_width   = layout.w;
-    resize_params.in_height  = layout.h;
-    resize_params.out_width  = layout.w;
-    resize_params.out_height = layout.h;
-    resize_params.start_x    = 0;
-    resize_params.start_y    = 0;
-
-    ta_cv_resize_image_t resize_attr = {};
-    resize_attr.resize_img_attr = &resize_params;
-    resize_attr.interpolation   = 1;
-
-    if (out_format == TA_AV_PIX_FMT_NV12) {
-        resize_attr.y_offset = layout.y * screen_width_ + layout.x;
-        resize_attr.u_offset = screen_width_ * (screen_height_ - layout.y)
-                             + (screen_width_ / 2) * layout.y;
-        resize_attr.y_stride = screen_width_;
-        resize_attr.u_stride = screen_width_;
-    } else if (out_format == TA_AV_PIX_FMT_RGB24) {
-        resize_attr.y_offset = (layout.y * screen_width_ + layout.x) * 3;
-        resize_attr.u_offset = 0;
-        resize_attr.y_stride = screen_width_ * 3;
-        resize_attr.u_stride = screen_width_ * 3;
-    } else {
-        resize_attr.y_offset = (layout.y * screen_width_ + layout.x) * 4;
-        resize_attr.u_offset = 0;
-        resize_attr.y_stride = screen_width_ * 4;
-        resize_attr.u_stride = screen_width_ * 4;
-    }
 
     ta_image_t image_in = {}, image_out = {};
     tacv_status_t ret = ta_cv_image_create(0, 0, (ta_image_format_ext_t)0,
@@ -1094,10 +976,23 @@ void TacoProDisplayContext::copyTemplateRegion(Buffer* dst, const ChannelLayout&
         return;
     }
 
-    ret = ta_cv_image_resize(&resize_attr, image_in, image_out);
+    ta_cv_rect_t src_crop = {};
+    src_crop.start_x = layout.x;
+    src_crop.start_y = layout.y;
+    src_crop.crop_w  = layout.w;
+    src_crop.crop_h  = layout.h;
+
+    ta_cv_rect_t dst_crop = {};
+    dst_crop.start_x = layout.x;
+    dst_crop.start_y = layout.y;
+    dst_crop.crop_w  = layout.w;
+    dst_crop.crop_h  = layout.h;
+
+    ret = ta_cv_image_stitch(1, &image_in, image_out,
+                             &dst_crop, &src_crop, TA_CV_INTER_NONE);
     if (ret != 0) {
         LOG4CPLUS_WARN_FMT(logger_,
-            "copyTemplateRegion: ta_cv_image_resize failed: ret=%d (ch region %d,%d %dx%d)",
+            "copyTemplateRegion: ta_cv_image_stitch failed: ret=%d (ch region %d,%d %dx%d)",
             ret, layout.x, layout.y, layout.w, layout.h);
     }
 
