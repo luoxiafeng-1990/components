@@ -52,16 +52,18 @@ public:
     static const std::map<std::string, OpencvTestParams>& getPredefinedTests();
     static uint32_t buildConsumeFlags(const WorkerConfig& config);
 
-    // Legacy methods from old ITestModule interface (for backward compatibility)
-    int run(int argc, char* argv[]);
-    void printHelp() const;
-    std::vector<std::string> getTestNames() const;
-
 private:
-    std::string test_name_;
-    std::string file_path_;
+    std::string input_path_;
+    std::string case_str_;
+    std::string params_str_;
+    int max_frames_ = -1;
+    bool use_hardware_ = true;
+    bool enable_psnr_ = false;
+    bool enable_ssim_ = false;
+    bool verbose_ = false;
+    bool show_list_ = false;
+    std::vector<std::string> positional_args_;
     OpencvTestParams params_;
-    DataSourceOptions data_source_opts_;
 
     bool parseArgs(int argc, char* argv[], WorkerConfig& config, OpencvTestParams& params);
     int runPredefinedTest(const std::string& test_name, const std::string& path);

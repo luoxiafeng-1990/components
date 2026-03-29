@@ -182,284 +182,17 @@ const std::map<std::string, OpencvTestParams>& OpencvPlugin::getPredefinedTests(
     return tests;
 }
 
-std::vector<std::string> OpencvPlugin::getTestNames() const {
-    std::vector<std::string> names;
-    for (const auto& pair : getPredefinedTests()) {
-        names.push_back(pair.first);
-    }
-    return names;
-}
 
-// ========================================
-// ITestModule 接口实现
-// ========================================
 
-int OpencvPlugin::run(int argc, char* argv[]) {
-    WorkerConfig config;
-    OpencvTestParams params;
-
-    if (!parseArgs(argc, argv, config, params)) {
-        return 1;
-    }
-
-    // 检测是否为多生产者算术/逻辑运算（需要 COMPARE 模式）
-    bool is_arithmetic_op = (params.opencv_op == OpencvTestParams::OpType::ADD ||
-                             params.opencv_op == OpencvTestParams::OpType::ABSDIFF ||
-                             params.opencv_op == OpencvTestParams::OpType::ADD_WEIGHTED ||
-                             params.opencv_op == OpencvTestParams::OpType::BITWISE_AND ||
-                             params.opencv_op == OpencvTestParams::OpType::BITWISE_OR ||
-                             params.opencv_op == OpencvTestParams::OpType::BITWISE_XOR ||
-                             params.opencv_op == OpencvTestParams::OpType::BITWISE_NOT);
-
-    std::string filename = config.data_source.path;
-    size_t pos = filename.find_last_of("/\\");
-    if (pos != std::string::npos) {
-        filename = filename.substr(pos + 1);
-    }
-    const std::string test_name = "Custom: " + filename;
-
-    if (is_arithmetic_op) {
-        // ⭐ ADD/ABSDIFF 需要两个解码器（hw 和 sw）进行对比
-        auto hw_config = common::WorkerConfigFactory::buildOpencvConfig(
-            config.data_source.path, params.params_str, true);  // hardware=true
-        auto sw_config = common::WorkerConfigFactory::buildOpencvConfig(
-            config.data_source.path, params.params_str, false); // hardware=false
-
-        // 合并附加设置
-        hw_config.consumer_type.verbose  = config.consumer_type.verbose;
-        hw_config.data_source.max_frames = config.data_source.max_frames;
-        sw_config.consumer_type.verbose  = config.consumer_type.verbose;
-        sw_config.data_source.max_frames = config.data_source.max_frames;
-
-        uint32_t flags = consumer::CONSUME_COUNT;
-        if (hw_config.consumer_type.opencv.enable) {
-            flags |= consumer::CONSUME_OPENCV;
-        }
-
-        auto result = ExecuteMode::compare({hw_config, sw_config}, flags, test_name);
-        consumer::BufferConsumerService::printResult(test_name, result);
-        return result.success ? 0 : 1;
-    } else {
-        // ⭐ 其他操作使用 SINGLE 模式
-        auto hw_config = common::WorkerConfigFactory::buildOpencvConfig(
-            config.data_source.path, params.params_str, params.use_hardware);
-
-        // 合并附加设置
-        hw_config.consumer_type.verbose  = config.consumer_type.verbose;
-        hw_config.data_source.max_frames = config.data_source.max_frames;
-
-        uint32_t flags = buildConsumeFlags(hw_config);
-
-        auto result = ExecuteMode::single(hw_config, flags, test_name);
-        consumer::BufferConsumerService::printResult(test_name, result);
-
-        return result.success ? 0 : 1;
-    }
-}
-
-bool OpencvPlugin::parseArgs(int argc, char* argv[], WorkerConfig& config, OpencvTestParams& params) {
-    optind = 1;
-
-    static struct option long_options[] = {
-        {"help",       no_argument,       0, 'h'},
-        {"list",       no_argument,       0, 'l'},
-        {"input",      required_argument, 0, 'i'},
-        {"max_frames", required_argument, 0, 'm'},
-        {"verbose",    no_argument,       0, 'v'},
-        {"case",       required_argument, 0, 1001},
-        {"params",     required_argument, 0, 1002},
-        {0, 0, 0, 0}
-    };
-
-    std::string input_path;
-    std::string case_str;
-    std::string params_arg;
-
-    int opt;
-    while ((opt = getopt_long(argc, argv, "hli:m:v", long_options, nullptr)) != -1) {
-        switch (opt) {
-            case 'h':
-                printHelp();
-                return false;
-
-            case 'l':
-                listTests();
-                return false;
-
-            case 'i':
-                input_path = optarg;
-                break;
-
-            case 'm':
-                config.data_source.max_frames = std::stoi(optarg);
-                break;
-
-            case 'v':
-                config.consumer_type.verbose = true;
-                break;
-
-            case 1001:  // --case <resize|crop>
-                case_str = optarg;
-                break;
-
-            case 1002:  // --params <string>
-                params_arg = optarg;
-                break;
-
-            default:
-                printHelp();
-                return false;
-        }
-    }
-
-    // 处理剩余位置参数作为输入路径
-    for (int i = optind; i < argc; i++) {
-        if (input_path.empty()) {
-            input_path = argv[i];
-        }
-    }
-
-    if (input_path.empty()) {
-        std::cerr << "Error: No input file specified\n" << std::endl;
-        printHelp();
-        return false;
-    }
-
-    if (case_str.empty()) {
-        std::cerr << "Error: --case not specified (use 'resize' or 'crop')\n" << std::endl;
-        printHelp();
-        return false;
-    }
-
-    if (case_str == "resize") {
-        params.opencv_op = OpencvTestParams::OpType::RESIZE;
-    } else if (case_str == "crop") {
-        params.opencv_op = OpencvTestParams::OpType::CROP;
-    } else if (case_str == "erode") {
-        params.opencv_op = OpencvTestParams::OpType::ERODE;
-    } else if (case_str == "dilate") {
-        params.opencv_op = OpencvTestParams::OpType::DILATE;
-    } else if (case_str == "open") {
-        params.opencv_op = OpencvTestParams::OpType::MORPH_OPEN;
-    } else if (case_str == "close") {
-        params.opencv_op = OpencvTestParams::OpType::MORPH_CLOSE;
-    } else if (case_str == "sobel") {
-        params.opencv_op = OpencvTestParams::OpType::SOBEL;
-    } else if (case_str == "canny") {
-        params.opencv_op = OpencvTestParams::OpType::CANNY;
-    } else if (case_str == "laplacian") {
-        params.opencv_op = OpencvTestParams::OpType::LAPLACIAN;
-    } else if (case_str == "translate") {
-        params.opencv_op = OpencvTestParams::OpType::TRANSLATE;
-    } else if (case_str == "rotate") {
-        params.opencv_op = OpencvTestParams::OpType::ROTATE;
-    } else if (case_str == "perspective") {
-        params.opencv_op = OpencvTestParams::OpType::PERSPECTIVE;
-    } else if (case_str == "line") {
-        params.opencv_op = OpencvTestParams::OpType::DRAW_LINE;
-    } else if (case_str == "rectangle") {
-        params.opencv_op = OpencvTestParams::OpType::DRAW_RECT;
-    } else if (case_str == "puttext") {
-        params.opencv_op = OpencvTestParams::OpType::PUT_TEXT;
-    } else if (case_str == "blur") {
-        params.opencv_op = OpencvTestParams::OpType::GAUSSIAN_BLUR;
-    } else if (case_str == "threshold") {
-        params.opencv_op = OpencvTestParams::OpType::THRESHOLD;
-    } else if (case_str == "split") {
-        params.opencv_op = OpencvTestParams::OpType::SPLIT;
-    } else if (case_str == "merge") {
-        params.opencv_op = OpencvTestParams::OpType::MERGE;
-    } else if (case_str == "cvtcolor") {
-        params.opencv_op = OpencvTestParams::OpType::CVTCOLOR;
-    } else if (case_str == "add") {
-        params.opencv_op = OpencvTestParams::OpType::ADD;
-    } else if (case_str == "absdiff") {
-        params.opencv_op = OpencvTestParams::OpType::ABSDIFF;
-    } else if (case_str == "addweighted") {
-        params.opencv_op = OpencvTestParams::OpType::ADD_WEIGHTED;
-    } else if (case_str == "bitwiseand") {
-        params.opencv_op = OpencvTestParams::OpType::BITWISE_AND;
-    } else if (case_str == "bitwiseor") {
-        params.opencv_op = OpencvTestParams::OpType::BITWISE_OR;
-    } else if (case_str == "bitwisexor") {
-        params.opencv_op = OpencvTestParams::OpType::BITWISE_XOR;
-    } else if (case_str == "bitwisenot") {
-        params.opencv_op = OpencvTestParams::OpType::BITWISE_NOT;
-    } else if (case_str == "saveloadimg") {
-        params.opencv_op = OpencvTestParams::OpType::SAVE_LOAD_IMG;
-    } else {
-        std::cerr << "Error: unknown --case '" << case_str
-                  << "'. Valid: resize/crop/erode/dilate/open/close/"
-                     "sobel/canny/laplacian/translate/rotate/perspective/"
-                     "line/rectangle/puttext/blur/threshold/split/merge/cvtcolor/"
-                     "add/absdiff/addweighted/bitwiseand/bitwiseor/bitwisexor/bitwisenot/saveloadimg\n" << std::endl;
-        return false;
-    }
-
-    // 将 case 和 params 用 _ 拼接
-    params.params_str = case_str;
-    if (!params_arg.empty()) {
-        params.params_str += "_" + params_arg;
-    }
-
-    config.data_source.path = input_path;
-    return true;
-}
-
-int OpencvPlugin::runPredefinedTest(const std::string& test_name, const std::string& path) {
-    const auto& tests = getPredefinedTests();
-    auto it = tests.find(test_name);
-    if (it == tests.end()) {
-        LOG4CPLUS_ERROR_FMT(log4cplus::Logger::getRoot(), "Unknown test '%s'", test_name.c_str());
-        return 1;
-    }
-
-    const auto& params = it->second;
-
-    // 检测是否为多生产者算术/逻辑运算（需要 COMPARE 模式）
-    bool is_arithmetic_op = (params.opencv_op == OpencvTestParams::OpType::ADD ||
-                             params.opencv_op == OpencvTestParams::OpType::ABSDIFF ||
-                             params.opencv_op == OpencvTestParams::OpType::ADD_WEIGHTED ||
-                             params.opencv_op == OpencvTestParams::OpType::BITWISE_AND ||
-                             params.opencv_op == OpencvTestParams::OpType::BITWISE_OR ||
-                             params.opencv_op == OpencvTestParams::OpType::BITWISE_XOR ||
-                             params.opencv_op == OpencvTestParams::OpType::BITWISE_NOT);
-
-    if (is_arithmetic_op) {
-        // ⭐ ADD/ABSDIFF 需要两个解码器（hw 和 sw）进行对比
-        auto hw_config = common::WorkerConfigFactory::buildOpencvConfig(
-            path, params.params_str, true);   // hardware=true
-        auto sw_config = common::WorkerConfigFactory::buildOpencvConfig(
-            path, params.params_str, false);  // hardware=false
-
-        uint32_t flags = consumer::CONSUME_COUNT;
-        if (hw_config.consumer_type.opencv.enable) {
-            flags |= consumer::CONSUME_OPENCV;
-        }
-
-        auto result = ExecuteMode::compare({hw_config, sw_config}, flags, test_name);
-        consumer::BufferConsumerService::printResult(test_name, result);
-        return result.success ? 0 : 1;
-    } else {
-        // ⭐ 其他操作使用 SINGLE 模式
-        auto config = common::WorkerConfigFactory::buildOpencvConfig(
-            path, params.params_str, params.use_hardware);
-
-        uint32_t flags = buildConsumeFlags(config);
-
-        auto result = ExecuteMode::single(config, flags, test_name);
-        consumer::BufferConsumerService::printResult(test_name, result);
-        return result.success ? 0 : 1;
-    }
-}
-
-void OpencvPlugin::printHelp() const {
-    std::cout << "empty\n"
-              << std::endl;
-}
 
 void OpencvPlugin::listTests() const {
-    std::cout << "empty\n"
+    std::cout << "\nAvailable OpenCV tests:\n"
+              << "────────────────────────────────────────────────────────\n";
+    for (const auto& pair : getPredefinedTests()) {
+        std::cout << "  " << pair.first << "\n";
+    }
+    std::cout << "────────────────────────────────────────────────────────\n"
+              << "Total: " << getPredefinedTests().size() << " predefined tests\n"
               << std::endl;
 }
 
@@ -468,25 +201,100 @@ void OpencvPlugin::listTests() const {
 // ========================================
 
 void OpencvPlugin::registerOptions(CLI::App& app) {
-    // TODO: 实现 CLI11 选项注册
+    app.add_flag("-l,--list", show_list_, "列出所有预定义测试");
+    app.add_option("-f,--file", input_path_, "视频文件路径");
+    app.add_option("-c,--case", case_str_, "OpenCV 操作类型");
+    app.add_option("-p,--params", params_str_, "操作参数");
+    app.add_option("-m,--max-frames", max_frames_, "最大帧数");
+    app.add_flag("-D,--decoder", use_hardware_, "使用硬件解码 (默认: true)");
+    app.add_flag("-p,--psnr", enable_psnr_, "启用 PSNR 验证");
+    app.add_flag("-S,--ssim", enable_ssim_, "启用 SSIM 验证");
+    app.add_flag("-v,--verbose", verbose_, "详细日志");
+    app.add_option("positional", positional_args_, "测试名或输入文件路径");
 }
 
 void OpencvPlugin::applyTo(WorkerConfig& config) const {
-    // TODO: 将解析的参数应用到 WorkerConfig
+    config.data_source = DataSourceConfigBuilder(config.data_source)
+        .setPathIfNonEmpty(input_path_)
+        .setMaxFrames(max_frames_)
+        .build();
+    config.consumer_type.max_frames = max_frames_;
+    config.consumer_type.compare.enable_psnr = enable_psnr_;
+    config.consumer_type.compare.enable_ssim = enable_ssim_;
+    config.consumer_type.verbose = verbose_;
 }
 
 int OpencvPlugin::handlePreActions() {
-    // TODO: 实现预处理动作（如 --list）
-    return -1;  // -1 表示继续执行，>=0 表示退出
+    for (const auto& arg : positional_args_) {
+        const auto& tests = getPredefinedTests();
+        auto it = tests.find(arg);
+        if (it != tests.end()) {
+            params_ = it->second;
+            continue;
+        }
+        if (input_path_.empty()) {
+            input_path_ = arg;
+        }
+    }
+
+    if (show_list_) { listTests(); return 0; }
+    if (input_path_.empty()) {
+        std::cerr << "Error: No input file specified\n" << std::endl;
+        return 1;
+    }
+    return -1;
 }
 
 std::vector<WorkerConfig> OpencvPlugin::buildPipelineConfigs(const WorkerConfig& shared_config) {
-    // TODO: 构建管线配置
-    return {};
+    if (input_path_.empty()) return {};
+
+    bool is_arithmetic_op = (params_.opencv_op == OpencvTestParams::OpType::ADD ||
+                             params_.opencv_op == OpencvTestParams::OpType::ABSDIFF ||
+                             params_.opencv_op == OpencvTestParams::OpType::ADD_WEIGHTED ||
+                             params_.opencv_op == OpencvTestParams::OpType::BITWISE_AND ||
+                             params_.opencv_op == OpencvTestParams::OpType::BITWISE_OR ||
+                             params_.opencv_op == OpencvTestParams::OpType::BITWISE_XOR ||
+                             params_.opencv_op == OpencvTestParams::OpType::BITWISE_NOT);
+
+    const bool compare_enabled = shared_config.consumer_type.compare.enable_psnr
+                              || shared_config.consumer_type.compare.enable_ssim;
+
+    // COMPARE 模式：hw vs sw
+    if ((is_arithmetic_op || compare_enabled) && params_.use_hardware) {
+        auto hw_config = common::WorkerConfigFactory::buildOpencvConfig(
+            shared_config.data_source.path, params_.params_str, true);
+        auto sw_config = common::WorkerConfigFactory::buildOpencvConfig(
+            shared_config.data_source.path, params_.params_str, false);
+
+        hw_config.consumer_type = shared_config.consumer_type;
+        hw_config.data_source = DataSourceConfigBuilder(hw_config.data_source)
+            .setMaxFrames(shared_config.data_source.max_frames)
+            .build();
+
+        sw_config.consumer_type = shared_config.consumer_type;
+        sw_config.data_source = DataSourceConfigBuilder(sw_config.data_source)
+            .setMaxFrames(shared_config.data_source.max_frames)
+            .build();
+
+        return {hw_config, sw_config};
+    }
+
+    // SINGLE 模式
+    auto config = common::WorkerConfigFactory::buildOpencvConfig(
+        shared_config.data_source.path, params_.params_str, params_.use_hardware);
+    config.consumer_type = shared_config.consumer_type;
+    config.data_source = DataSourceConfigBuilder(config.data_source)
+        .setMaxFrames(shared_config.data_source.max_frames)
+        .build();
+
+    return {config};
 }
 
 std::string OpencvPlugin::getTestName() const {
-    return test_name_;
+    std::string filename = input_path_;
+    size_t pos = filename.find_last_of("/\\");
+    if (pos != std::string::npos) filename = filename.substr(pos + 1);
+    return "OpenCV: " + filename;
 }
 
 }
