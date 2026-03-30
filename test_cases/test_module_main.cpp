@@ -26,6 +26,7 @@
 #include "venc/VencPlugin.hpp"
 #include "pp/PPPlugin.hpp"
 #include "save/SavePlugin.hpp"
+#include "opencv/OpencvPlugin.hpp"
 #include "common/Logger.hpp"
 
 #include <iostream>
@@ -47,6 +48,7 @@ int main(int argc, char* argv[]) {
     auto save_plugin    = std::make_unique<test::save::SavePlugin>();
     auto display_plugin = std::make_unique<test::display::DisplayPlugin>();
     auto npu_plugin     = std::make_unique<test::npu::NpuPlugin>();
+    auto opencv_plugin  = std::make_unique<test::opencv::OpencvPlugin>();
 
     // ── 2. 统一注册：每个插件 = 一个子命令 ──
     struct PluginEntry {
@@ -67,6 +69,7 @@ int main(int argc, char* argv[]) {
     register_plugin(save_plugin.get());
     register_plugin(display_plugin.get());
     register_plugin(npu_plugin.get());
+    register_plugin(opencv_plugin.get());
 
     // ── 3. 解析命令行（支持多子命令） ──
     try {
