@@ -14,10 +14,12 @@
 #include "../common/DataSourceOptions.hpp"
 #include "consumptionline/BufferConsumerService.hpp"
 #include "productionline/worker/WorkerConfig.hpp"
+#include "productionline/WorkerSyncCoordinator.hpp"
 
 #include <string>
 #include <vector>
 #include <map>
+#include <memory>
 
 namespace test {
 namespace opencv {

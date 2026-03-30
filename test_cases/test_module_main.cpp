@@ -29,6 +29,8 @@
 #include "opencv/OpencvPlugin.hpp"
 #include "common/Logger.hpp"
 
+#include "productionline/WorkerSyncCoordinator.hpp"
+
 #include <iostream>
 #include <memory>
 #include <vector>
@@ -200,6 +202,28 @@ int main(int argc, char* argv[]) {
         return all_ok ? 0 : 1;
     }
 
+    // OpenCV 算术运算 (ADD, ABSDIFF, etc.) - 使用 OpenCV 回调
+    if (pipeline_configs.size() == 2 &&
+        pipeline_configs[0].consumer_type.opencv.enable &&
+        pipeline_configs[0].consumer_type.opencv.op_type != WorkerConfig::ConsumerTypeConfig::OpencvType::OpType::NONE) {
+        
+        std::cout<<"start opencv"<<std::endl;
+        // 设置 OpenCV 回调到两个 config
+        auto opencv_ctx = std::make_shared<OpenCVCallbackContext>();
+        opencv_ctx->config = pipeline_configs[0].consumer_type.opencv;
+        opencv_ctx->worker1_name = "hw_decoder";
+        opencv_ctx->worker2_name = "sw_decoder";
+
+        if (!opencv_ctx->openComparator()) {
+            std::cerr << "Error: Failed to open BufferComparator for OpenCV\n" << std::endl;
+            return 1;
+        }
+
+        auto result = test::ExecuteMode::compare(pipeline_configs, flags, test_name + " (OPENCV)");
+        consumer::BufferConsumerService::printResult(test_name, result);
+        return result.success ? 0 : 1;
+    }
+
     // COMPARE (PSNR/SSIM, 2 configs = hw vs sw)
     if (compare_enabled && pipeline_configs.size() == 2) {
         auto result = test::ExecuteMode::compare(pipeline_configs, flags, test_name + " (COMPARE)");
@@ -239,6 +263,7 @@ int main(int argc, char* argv[]) {
     }
 
     // SINGLE
+    std::cout << "start opencv end" <<std::endl;
     auto result = test::ExecuteMode::single(pipeline_configs[0], flags, test_name);
     consumer::BufferConsumerService::printResult(test_name, result);
     return result.success ? 0 : 1;

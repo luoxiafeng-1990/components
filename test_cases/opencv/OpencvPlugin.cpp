@@ -204,24 +204,14 @@ void OpencvPlugin::registerOptions(CLI::App& app) {
     app.add_flag("-l,--list", show_list_, "列出所有预定义测试");
     app.add_option("-f,--file", input_path_, "视频文件路径");
     app.add_option("-c,--case", case_str_, "OpenCV 操作类型");
-    app.add_option("-p,--params", params_str_, "操作参数");
+    app.add_option("--params", params_str_, "操作参数");
     app.add_option("-m,--max-frames", max_frames_, "最大帧数");
-    app.add_flag("-D,--decoder", use_hardware_, "使用硬件解码 (默认: true)");
     app.add_flag("-p,--psnr", enable_psnr_, "启用 PSNR 验证");
     app.add_flag("-S,--ssim", enable_ssim_, "启用 SSIM 验证");
-    app.add_flag("-v,--verbose", verbose_, "详细日志");
-    app.add_option("positional", positional_args_, "测试名或输入文件路径");
 }
 
 void OpencvPlugin::applyTo(WorkerConfig& config) const {
-    config.data_source = DataSourceConfigBuilder(config.data_source)
-        .setPathIfNonEmpty(input_path_)
-        .setMaxFrames(max_frames_)
-        .build();
-    config.consumer_type.max_frames = max_frames_;
-    config.consumer_type.compare.enable_psnr = enable_psnr_;
-    config.consumer_type.compare.enable_ssim = enable_ssim_;
-    config.consumer_type.verbose = verbose_;
+    ;
 }
 
 int OpencvPlugin::handlePreActions() {
@@ -248,46 +238,169 @@ int OpencvPlugin::handlePreActions() {
 std::vector<WorkerConfig> OpencvPlugin::buildPipelineConfigs(const WorkerConfig& shared_config) {
     if (input_path_.empty()) return {};
 
-    bool is_arithmetic_op = (params_.opencv_op == OpencvTestParams::OpType::ADD ||
-                             params_.opencv_op == OpencvTestParams::OpType::ABSDIFF ||
-                             params_.opencv_op == OpencvTestParams::OpType::ADD_WEIGHTED ||
-                             params_.opencv_op == OpencvTestParams::OpType::BITWISE_AND ||
-                             params_.opencv_op == OpencvTestParams::OpType::BITWISE_OR ||
-                             params_.opencv_op == OpencvTestParams::OpType::BITWISE_XOR ||
-                             params_.opencv_op == OpencvTestParams::OpType::BITWISE_NOT);
+    using OpType = WorkerConfig::ConsumerTypeConfig::OpencvType::OpType;
 
-    const bool compare_enabled = shared_config.consumer_type.compare.enable_psnr
-                              || shared_config.consumer_type.compare.enable_ssim;
+    // Use params_str from command line (or from predefined test params)
+    std::string op_params = params_str_.empty() ? params_.params_str : params_str_;
 
-    // COMPARE 模式：hw vs sw
+    // Parse params_str to get operation type and parameters
+    std::vector<std::string> fields;
+    std::istringstream ss(op_params);
+    std::string token;
+    while (std::getline(ss, token, '_')) {
+        fields.push_back(token);
+    }
+
+    // Use case_str from command line if provided, otherwise use first field
+    std::string op_name = case_str_.empty() ? (fields.empty() ? "" : fields[0]) : case_str_;
+
+    OpType op = OpType::NONE;
+    if (!op_name.empty()) {
+        if      (op_name == "resize")      op = OpType::RESIZE;
+        else if (op_name == "crop")        op = OpType::CROP;
+        else if (op_name == "erode")       op = OpType::ERODE;
+        else if (op_name == "dilate")      op = OpType::DILATE;
+        else if (op_name == "open")        op = OpType::MORPH_OPEN;
+        else if (op_name == "close")       op = OpType::MORPH_CLOSE;
+        else if (op_name == "sobel")       op = OpType::SOBEL;
+        else if (op_name == "canny")       op = OpType::CANNY;
+        else if (op_name == "laplacian")   op = OpType::LAPLACIAN;
+        else if (op_name == "translate")   op = OpType::TRANSLATE;
+        else if (op_name == "rotate")      op = OpType::ROTATE;
+        else if (op_name == "perspective") op = OpType::PERSPECTIVE;
+        else if (op_name == "line")        op = OpType::DRAW_LINE;
+        else if (op_name == "rectangle")   op = OpType::DRAW_RECT;
+        else if (op_name == "puttext")     op = OpType::PUT_TEXT;
+        else if (op_name == "blur")        op = OpType::GAUSSIAN_BLUR;
+        else if (op_name == "threshold")   op = OpType::THRESHOLD;
+        else if (op_name == "split")       op = OpType::SPLIT;
+        else if (op_name == "merge")       op = OpType::MERGE;
+        else if (op_name == "cvtcolor")    op = OpType::CVTCOLOR;
+        else if (op_name == "add")         op = OpType::ADD;
+        else if (op_name == "absdiff")     op = OpType::ABSDIFF;
+        else if (op_name == "addweighted") op = OpType::ADD_WEIGHTED;
+        else if (op_name == "bitwiseand")  op = OpType::BITWISE_AND;
+        else if (op_name == "bitwiseor")   op = OpType::BITWISE_OR;
+        else if (op_name == "bitwisexor")  op = OpType::BITWISE_XOR;
+        else if (op_name == "bitwisenot")  op = OpType::BITWISE_NOT;
+        else if (op_name == "saveloadimg") op = OpType::SAVE_LOAD_IMG;
+    }
+
+    auto getI = [&](size_t idx, int def) -> int {
+        return (idx < fields.size()) ? std::stoi(fields[idx]) : def;
+    };
+    auto getD = [&](size_t idx, double def) -> double {
+        return (idx < fields.size()) ? std::stod(fields[idx]) : def;
+    };
+
+    bool is_arithmetic_op = (op == OpType::ADD || op == OpType::ABSDIFF ||
+                             op == OpType::ADD_WEIGHTED || op == OpType::BITWISE_AND ||
+                             op == OpType::BITWISE_OR || op == OpType::BITWISE_XOR ||
+                             op == OpType::BITWISE_NOT);
+
+    const bool compare_enabled = enable_psnr_ || enable_ssim_;
+
+    auto buildConfig = [&](bool use_hw) -> WorkerConfig {
+        const std::string decoder = use_hw ? "h264" : "software";
+        auto config = common::WorkerConfigFactory::createDecode(input_path_, decoder);
+        config.consumer_type.compare.enable_psnr = enable_psnr_;
+        config.consumer_type.compare.min_psnr = 1.0;
+        config.consumer_type.compare.enable_ssim = enable_ssim_;
+        config.consumer_type.compare.min_ssim = 1.0;
+        config.consumer_type.max_frames = max_frames_;
+        config.consumer_type.verbose = verbose_;
+
+        auto& opencv = config.consumer_type.opencv;
+        if (op != OpType::NONE) {
+            opencv.enable = true;
+            opencv.op_type = op;
+            if (op == OpType::RESIZE) {
+                opencv.resize.dst_width = getI(1, 0);
+                opencv.resize.dst_height = getI(2, 0);
+                opencv.resize.fx = 0.0;
+                opencv.resize.fy = 0.0;
+                opencv.resize.interpolation = 1;
+            } else if (op == OpType::CROP) {
+                opencv.crop.x = 0;
+                opencv.crop.y = 0;
+                opencv.crop.width = getI(1, 0);
+                opencv.crop.height = getI(2, 0);
+            } else if (op == OpType::ERODE || op == OpType::DILATE ||
+                       op == OpType::MORPH_OPEN || op == OpType::MORPH_CLOSE) {
+                opencv.morph.kernel_size = getI(1, 3);
+                opencv.morph.iterations = getI(2, 1);
+            } else if (op == OpType::SOBEL) {
+                opencv.sobel.dx = getI(1, 1);
+                opencv.sobel.dy = getI(2, 0);
+                opencv.sobel.ksize = getI(3, 3);
+            } else if (op == OpType::CANNY) {
+                opencv.canny.threshold1 = getD(1, 100.0);
+                opencv.canny.threshold2 = getD(2, 200.0);
+            } else if (op == OpType::LAPLACIAN) {
+                opencv.laplacian.ksize = getI(1, 1);
+            } else if (op == OpType::TRANSLATE) {
+                opencv.translate.tx = getD(1, 0.0);
+                opencv.translate.ty = getD(2, 0.0);
+            } else if (op == OpType::ROTATE) {
+                opencv.rotate.angle = getD(1, 0.0);
+                opencv.rotate.scale = getD(2, 1.0);
+            } else if (op == OpType::PERSPECTIVE) {
+                opencv.perspective.offset = getI(1, 50);
+            } else if (op == OpType::DRAW_LINE) {
+                opencv.draw_line.x1 = getI(1, 0);
+                opencv.draw_line.y1 = getI(2, 0);
+                opencv.draw_line.x2 = getI(3, 100);
+                opencv.draw_line.y2 = getI(4, 100);
+            } else if (op == OpType::DRAW_RECT) {
+                opencv.draw_rect.x = getI(1, 100);
+                opencv.draw_rect.y = getI(2, 100);
+                opencv.draw_rect.width = getI(3, 200);
+                opencv.draw_rect.height = getI(4, 200);
+            } else if (op == OpType::PUT_TEXT) {
+                opencv.put_text.x = getI(1, 10);
+                opencv.put_text.y = getI(2, 50);
+            } else if (op == OpType::GAUSSIAN_BLUR) {
+                opencv.gaussian_blur.ksize = getI(1, 5);
+                opencv.gaussian_blur.sigma_x = getD(2, 0.0);
+            } else if (op == OpType::THRESHOLD) {
+                opencv.threshold.thresh = getD(1, 128.0);
+                opencv.threshold.maxval = getD(2, 255.0);
+            } else if (op == OpType::SPLIT || op == OpType::MERGE) {
+                opencv.split_merge.channels = getI(1, 3);
+            } else if (op == OpType::CVTCOLOR) {
+                opencv.cvtcolor.code = getI(1, 40);
+                opencv.cvtcolor.dstCn = getI(2, 0);
+            } else if (is_arithmetic_op) {
+                if (fields.size() > 1 && fields[1] == "psnr") {
+                    opencv.enable_psnr = true;
+                    opencv.enable_ssim = false;
+                } else if (fields.size() > 1 && fields[1] == "ssim") {
+                    opencv.enable_psnr = false;
+                    opencv.enable_ssim = true;
+                }
+            } else if (op == OpType::SAVE_LOAD_IMG) {
+                if (fields.size() > 1 && fields[1] == "psnr") {
+                    opencv.enable_psnr = true;
+                    opencv.enable_ssim = false;
+                } else if (fields.size() > 1 && fields[1] == "ssim") {
+                    opencv.enable_psnr = false;
+                    opencv.enable_ssim = true;
+                }
+            }
+        }
+        return config;
+    };
+
+    // COMPARE mode: hw vs sw
     if ((is_arithmetic_op || compare_enabled) && params_.use_hardware) {
-        auto hw_config = common::WorkerConfigFactory::buildOpencvConfig(
-            shared_config.data_source.path, params_.params_str, true);
-        auto sw_config = common::WorkerConfigFactory::buildOpencvConfig(
-            shared_config.data_source.path, params_.params_str, false);
-
-        hw_config.consumer_type = shared_config.consumer_type;
-        hw_config.data_source = DataSourceConfigBuilder(hw_config.data_source)
-            .setMaxFrames(shared_config.data_source.max_frames)
-            .build();
-
-        sw_config.consumer_type = shared_config.consumer_type;
-        sw_config.data_source = DataSourceConfigBuilder(sw_config.data_source)
-            .setMaxFrames(shared_config.data_source.max_frames)
-            .build();
-
+        std::cout << "two pictures" << std::endl;
+        auto hw_config = buildConfig(true);
+        auto sw_config = buildConfig(false);
         return {hw_config, sw_config};
     }
 
-    // SINGLE 模式
-    auto config = common::WorkerConfigFactory::buildOpencvConfig(
-        shared_config.data_source.path, params_.params_str, params_.use_hardware);
-    config.consumer_type = shared_config.consumer_type;
-    config.data_source = DataSourceConfigBuilder(config.data_source)
-        .setMaxFrames(shared_config.data_source.max_frames)
-        .build();
-
-    return {config};
+    // SINGLE mode
+    return {buildConfig(params_.use_hardware)};
 }
 
 std::string OpencvPlugin::getTestName() const {
