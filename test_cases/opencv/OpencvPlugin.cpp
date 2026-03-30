@@ -17,19 +17,6 @@ namespace opencv {
 using OpencvTestSuite = OpencvPlugin;
 
 // ========================================
-// 辅助函数：从 WorkerConfig 构建消费标志
-// ========================================
-uint32_t OpencvPlugin::buildConsumeFlags(const WorkerConfig& config) {
-    uint32_t flags = consumer::CONSUME_COUNT;  // 默认计数
-
-    if (config.consumer_type.opencv.enable) {
-        flags |= consumer::CONSUME_OPENCV;
-    }
-
-    return flags;
-}
-
-// ========================================
 // 预定义测试参数表
 // ========================================
 
@@ -309,6 +296,7 @@ std::vector<WorkerConfig> OpencvPlugin::buildPipelineConfigs(const WorkerConfig&
         config.consumer_type.compare.min_ssim = 1.0;
         config.consumer_type.max_frames = max_frames_;
         config.consumer_type.verbose = verbose_;
+        config.consumer_type.opencv.enable = true;
 
         auto& opencv = config.consumer_type.opencv;
         if (op != OpType::NONE) {

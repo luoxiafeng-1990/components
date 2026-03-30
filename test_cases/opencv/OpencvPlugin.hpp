@@ -52,7 +52,6 @@ public:
     std::string getTestName() const override;
 
     static const std::map<std::string, OpencvTestParams>& getPredefinedTests();
-    static uint32_t buildConsumeFlags(const WorkerConfig& config);
 
 private:
     std::string input_path_;

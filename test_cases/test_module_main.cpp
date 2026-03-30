@@ -220,7 +220,7 @@ int main(int argc, char* argv[]) {
             consumer::BufferConsumerService::printResult(test_name, result);
             return result.success ? 0 : 1;
         }
-        std::cout << "opencv single start" << std::endl;
+
         auto result = test::ExecuteMode::single(pipeline_configs[0], flags, test_name);
         consumer::BufferConsumerService::printResult(test_name, result);
         return result.success ? 0 : 1;
