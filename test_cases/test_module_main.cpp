@@ -29,6 +29,8 @@
 #include "opencv/OpencvPlugin.hpp"
 #include "common/Logger.hpp"
 
+#include "productionline/WorkerSyncCoordinator.hpp"
+
 #include <iostream>
 #include <memory>
 #include <vector>
@@ -198,6 +200,30 @@ int main(int argc, char* argv[]) {
         std::cout << "\n  Summary: " << (all_ok ? "ALL PASSED" : "SOME FAILED")
                   << " (" << total_frames << " total frames)\n";
         return all_ok ? 0 : 1;
+    }
+
+    // OpenCV 算术运算 (ADD, ABSDIFF, etc.)
+    if (pipeline_configs.size() >= 1 &&
+        pipeline_configs[0].consumer_type.opencv.enable) {
+
+        using OpType = WorkerConfig::ConsumerTypeConfig::OpencvType::OpType;
+        bool is_arithmetic_op = (pipeline_configs[0].consumer_type.opencv.op_type == OpType::ADD ||
+                                 pipeline_configs[0].consumer_type.opencv.op_type == OpType::ABSDIFF ||
+                                 pipeline_configs[0].consumer_type.opencv.op_type == OpType::ADD_WEIGHTED ||
+                                 pipeline_configs[0].consumer_type.opencv.op_type == OpType::BITWISE_AND ||
+                                 pipeline_configs[0].consumer_type.opencv.op_type == OpType::BITWISE_OR ||
+                                 pipeline_configs[0].consumer_type.opencv.op_type == OpType::BITWISE_XOR ||
+                                 pipeline_configs[0].consumer_type.opencv.op_type == OpType::BITWISE_NOT);
+
+        if ((is_arithmetic_op || compare_enabled) && pipeline_configs.size() == 2) {
+            auto result = test::ExecuteMode::compare(pipeline_configs, flags, test_name + " (OPENCV)");
+            consumer::BufferConsumerService::printResult(test_name, result);
+            return result.success ? 0 : 1;
+        }
+
+        auto result = test::ExecuteMode::single(pipeline_configs[0], flags, test_name);
+        consumer::BufferConsumerService::printResult(test_name, result);
+        return result.success ? 0 : 1;
     }
 
     // COMPARE (PSNR/SSIM, 2 configs = hw vs sw)

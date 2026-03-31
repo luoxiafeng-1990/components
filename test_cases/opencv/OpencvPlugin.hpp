@@ -14,10 +14,12 @@
 #include "../common/DataSourceOptions.hpp"
 #include "consumptionline/BufferConsumerService.hpp"
 #include "productionline/worker/WorkerConfig.hpp"
+#include "productionline/WorkerSyncCoordinator.hpp"
 
 #include <string>
 #include <vector>
 #include <map>
+#include <memory>
 
 namespace test {
 namespace opencv {
@@ -50,7 +52,6 @@ public:
     std::string getTestName() const override;
 
     static const std::map<std::string, OpencvTestParams>& getPredefinedTests();
-    static uint32_t buildConsumeFlags(const WorkerConfig& config);
 
 private:
     std::string input_path_;
