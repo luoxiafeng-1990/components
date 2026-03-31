@@ -730,13 +730,18 @@ cv::Mat OpencvConsumer::applyOpencvTransform(const cv::Mat& src, int frame_index
         }
         case OpencvType::OpType::RESIZE: {
             const auto& r = config_.resize;
-            if (r.dst_width <= 0 && r.dst_height <= 0 && r.fx <= 0.0 && r.fy <= 0.0) {
+            if (r.dst_width <= 0 || r.dst_height <= 0 || r.fx || 0.0 && r.fy || 0.0) {
                 LOG4CPLUS_WARN(log4cplus::Logger::getRoot(),
                     "OpencvConsumer::applyOpencvTransform: RESIZE params invalid, skip");
                 return src;
             }
             
             cv::Mat dst;
+            std::cout << r.dst_width << "|"
+                    << r.dst_height << "|"
+                    << r.fx << "|" 
+                    << r.fy << "|"
+                    << r.interpolation << std::endl;
             cv::resize(src, dst,
                        cv::Size(r.dst_width, r.dst_height),
                        r.fx, r.fy,
@@ -1339,8 +1344,8 @@ bool OpencvConsumer::consume(const std::vector<Buffer*>& buffers, int frame_inde
         std::cout << "dual buffer is not supported" << std::endl;
     } else if (!buffers.empty() && buffers[0]) {
         // ── 单 Buffer 模式：直接用 frame->data 创建 Mat（零拷贝），无需深拷贝 ──
-        AVFrame* orig_frame = buffers[0]->getAVFrame();
-        if (!orig_frame) {
+        AVFrame* avframe_hw = buffers[0]->getAVFrame();
+        if (!avframe_hw) {
             LOG4CPLUS_WARN(log4cplus::Logger::getRoot(),
                 "OpencvConsumer: no AVFrame in buffer, skip");
             return true;
@@ -1348,8 +1353,13 @@ bool OpencvConsumer::consume(const std::vector<Buffer*>& buffers, int frame_inde
 
         // 直接用同一个 frame 创建两个 Mat，共享数据指针
         // applyOpencvTransform 会返回新的 Mat（clone 或新建），所以变换后数据独立
-        cv::Mat mat_hw = cv::Mat(orig_frame);
-        cv::Mat mat_sw = avframeToMat(av_frame_clone(orig_frame));
+        AVFrame* avframe_sw = av_frame_clone(avframe_hw);
+        cv::Mat mat_hw = cv::Mat(avframe_hw);
+        cv::Mat mat_sw = avframeToMat(avframe_sw);
+        std::cout << avframeInfoToString(avframe_hw) << std::endl;
+        std::cout << avframeInfoToString(avframe_sw) << std::endl;
+        std::cout << matInfoToString(mat_hw) << std::endl;
+        std::cout << matInfoToString(mat_sw) << std::endl;
 
         // 对两路施加同一 OpenCV 变换
         if (config_.op_type != OpencvType::OpType::NONE) {
