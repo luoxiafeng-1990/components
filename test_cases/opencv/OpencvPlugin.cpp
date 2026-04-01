@@ -194,7 +194,8 @@ void OpencvPlugin::registerOptions(CLI::App& app) {
     app.add_option("--params", params_str_, "操作参数");
     app.add_option("-m,--max-frames", max_frames_, "最大帧数");
     app.add_flag("-p,--psnr", enable_psnr_, "启用 PSNR 验证");
-    app.add_flag("-S,--ssim", enable_ssim_, "启用 SSIM 验证");
+    app.add_flag("-s,--ssim", enable_ssim_, "启用 SSIM 验证");
+    app.add_flag("-v,--verbose", verbose_, "得分详细输出");
 }
 
 void OpencvPlugin::applyTo(WorkerConfig& config) const {
@@ -273,19 +274,10 @@ std::vector<WorkerConfig> OpencvPlugin::buildPipelineConfigs(const WorkerConfig&
         else if (op_name == "saveloadimg") op = OpType::SAVE_LOAD_IMG;
     }
 
-    auto getI = [&](size_t idx, int def) -> int {
-        return (idx < fields.size()) ? std::stoi(fields[idx]) : def;
-    };
-    auto getD = [&](size_t idx, double def) -> double {
-        return (idx < fields.size()) ? std::stod(fields[idx]) : def;
-    };
-
     bool is_arithmetic_op = (op == OpType::ADD || op == OpType::ABSDIFF ||
                              op == OpType::ADD_WEIGHTED || op == OpType::BITWISE_AND ||
                              op == OpType::BITWISE_OR || op == OpType::BITWISE_XOR ||
                              op == OpType::BITWISE_NOT);
-
-    const bool compare_enabled = enable_psnr_ || enable_ssim_;
 
     auto buildConfig = [&](bool use_hw) -> WorkerConfig {
         const std::string decoder = use_hw ? "h264" : "software";
@@ -294,94 +286,82 @@ std::vector<WorkerConfig> OpencvPlugin::buildPipelineConfigs(const WorkerConfig&
         config.consumer_type.compare.min_psnr = 1.0;
         config.consumer_type.compare.enable_ssim = enable_ssim_;
         config.consumer_type.compare.min_ssim = 1.0;
+        config.consumer_type.compare.verbose = verbose_;
         config.consumer_type.max_frames = max_frames_;
-        config.consumer_type.verbose = verbose_;
         config.consumer_type.opencv.enable = true;
+        std::cout << (enable_psnr_ ? "true" : "false") << std::endl;
 
         auto& opencv = config.consumer_type.opencv;
         if (op != OpType::NONE) {
             opencv.enable = true;
             opencv.op_type = op;
             if (op == OpType::RESIZE) {
-                opencv.resize.dst_width = getI(1, 0);
-                opencv.resize.dst_height = getI(2, 0);
+                opencv.resize.dst_width = std::stoi(fields.at(0));
+                opencv.resize.dst_height = std::stoi(fields.at(1));
                 opencv.resize.fx = 0.0;
                 opencv.resize.fy = 0.0;
                 opencv.resize.interpolation = 1;
             } else if (op == OpType::CROP) {
                 opencv.crop.x = 0;
                 opencv.crop.y = 0;
-                opencv.crop.width = getI(1, 0);
-                opencv.crop.height = getI(2, 0);
+                opencv.crop.width = std::stoi(fields.at(0));
+                opencv.crop.height = std::stoi(fields.at(1));
             } else if (op == OpType::ERODE || op == OpType::DILATE ||
                        op == OpType::MORPH_OPEN || op == OpType::MORPH_CLOSE) {
-                opencv.morph.kernel_size = getI(1, 3);
-                opencv.morph.iterations = getI(2, 1);
+                opencv.morph.kernel_size = std::stoi(fields.at(0));
+                opencv.morph.iterations = std::stoi(fields.at(1));
             } else if (op == OpType::SOBEL) {
-                opencv.sobel.dx = getI(1, 1);
-                opencv.sobel.dy = getI(2, 0);
-                opencv.sobel.ksize = getI(3, 3);
+                opencv.sobel.dx = std::stoi(fields.at(0));
+                opencv.sobel.dy = std::stoi(fields.at(1));
+                opencv.sobel.ksize = std::stoi(fields.at(2));
             } else if (op == OpType::CANNY) {
-                opencv.canny.threshold1 = getD(1, 100.0);
-                opencv.canny.threshold2 = getD(2, 200.0);
+                opencv.canny.threshold1 = std::stod(fields.at(0));
+                opencv.canny.threshold2 = std::stod(fields.at(1));
             } else if (op == OpType::LAPLACIAN) {
-                opencv.laplacian.ksize = getI(1, 1);
+                opencv.laplacian.ksize = std::stoi(fields.at(0));
             } else if (op == OpType::TRANSLATE) {
-                opencv.translate.tx = getD(1, 0.0);
-                opencv.translate.ty = getD(2, 0.0);
+                opencv.translate.tx = std::stod(fields.at(0));
+                opencv.translate.ty = std::stod(fields.at(1));
             } else if (op == OpType::ROTATE) {
-                opencv.rotate.angle = getD(1, 0.0);
-                opencv.rotate.scale = getD(2, 1.0);
+                opencv.rotate.angle = std::stod(fields.at(0));
+                opencv.rotate.scale = std::stod(fields.at(1));
             } else if (op == OpType::PERSPECTIVE) {
-                opencv.perspective.offset = getI(1, 50);
+                opencv.perspective.offset = std::stoi(fields.at(0));
             } else if (op == OpType::DRAW_LINE) {
-                opencv.draw_line.x1 = getI(1, 0);
-                opencv.draw_line.y1 = getI(2, 0);
-                opencv.draw_line.x2 = getI(3, 100);
-                opencv.draw_line.y2 = getI(4, 100);
+                opencv.draw_line.x1 = std::stoi(fields.at(0));
+                opencv.draw_line.y1 = std::stoi(fields.at(1));
+                opencv.draw_line.x2 = std::stoi(fields.at(2));
+                opencv.draw_line.y2 = std::stoi(fields.at(3));
             } else if (op == OpType::DRAW_RECT) {
-                opencv.draw_rect.x = getI(1, 100);
-                opencv.draw_rect.y = getI(2, 100);
-                opencv.draw_rect.width = getI(3, 200);
-                opencv.draw_rect.height = getI(4, 200);
+                opencv.draw_rect.x = std::stoi(fields.at(0));
+                opencv.draw_rect.y = std::stoi(fields.at(1));
+                opencv.draw_rect.width = std::stoi(fields.at(2));
+                opencv.draw_rect.height = std::stoi(fields.at(3));
             } else if (op == OpType::PUT_TEXT) {
-                opencv.put_text.x = getI(1, 10);
-                opencv.put_text.y = getI(2, 50);
+                opencv.put_text.x = std::stoi(fields.at(0));
+                opencv.put_text.y = std::stoi(fields.at(1));
             } else if (op == OpType::GAUSSIAN_BLUR) {
-                opencv.gaussian_blur.ksize = getI(1, 5);
-                opencv.gaussian_blur.sigma_x = getD(2, 0.0);
+                opencv.gaussian_blur.ksize = std::stoi(fields.at(0));
+                opencv.gaussian_blur.sigma_x = std::stod(fields.at(1));
             } else if (op == OpType::THRESHOLD) {
-                opencv.threshold.thresh = getD(1, 128.0);
-                opencv.threshold.maxval = getD(2, 255.0);
+                opencv.threshold.thresh = std::stod(fields.at(0));
+                opencv.threshold.maxval = std::stod(fields.at(1));
             } else if (op == OpType::SPLIT || op == OpType::MERGE) {
-                opencv.split_merge.channels = getI(1, 3);
+                opencv.split_merge.channels = std::stoi(fields.at(0));
             } else if (op == OpType::CVTCOLOR) {
-                opencv.cvtcolor.code = getI(1, 40);
-                opencv.cvtcolor.dstCn = getI(2, 0);
+                opencv.cvtcolor.code = std::stoi(fields.at(0));
+                opencv.cvtcolor.dstCn = std::stoi(fields.at(1));
             } else if (is_arithmetic_op) {
-                if (fields.size() > 1 && fields[1] == "psnr") {
-                    opencv.enable_psnr = true;
-                    opencv.enable_ssim = false;
-                } else if (fields.size() > 1 && fields[1] == "ssim") {
-                    opencv.enable_psnr = false;
-                    opencv.enable_ssim = true;
-                }
+                // To do
             } else if (op == OpType::SAVE_LOAD_IMG) {
-                if (fields.size() > 1 && fields[1] == "psnr") {
-                    opencv.enable_psnr = true;
-                    opencv.enable_ssim = false;
-                } else if (fields.size() > 1 && fields[1] == "ssim") {
-                    opencv.enable_psnr = false;
-                    opencv.enable_ssim = true;
-                }
+                // To do
             }
         }
         return config;
     };
 
     // COMPARE mode: hw vs sw
-    if ((is_arithmetic_op || compare_enabled) && params_.use_hardware) {
-        std::cout << "two pictures" << std::endl;
+    if ((is_arithmetic_op ) && params_.use_hardware) {
         auto hw_config = buildConfig(true);
         auto sw_config = buildConfig(false);
         return {hw_config, sw_config};

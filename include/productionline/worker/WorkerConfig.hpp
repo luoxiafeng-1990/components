@@ -615,11 +615,6 @@ struct WorkerConfig {
         // ========================================
         struct OpencvType {
             bool enable = false;          ///< 是否启用 OpenCV 消费
-            bool enable_psnr = true;      ///< 是否计算 PSNR
-            bool enable_ssim = false;     ///< 是否计算 SSIM（计算量较大）
-            double min_psnr = 38.0;       ///< PSNR 通过阈值（dB，>= 此值为通过）
-            double min_ssim = 0.95;       ///< SSIM 通过阈值（>= 此值为通过）
-            bool verbose = false;         ///< 是否输出每帧详细日志
 
             /// 操作类型：决定对 SW 参考帧施加哪种 OpenCV 变换
             enum class OpType {

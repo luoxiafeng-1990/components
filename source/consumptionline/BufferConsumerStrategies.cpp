@@ -641,8 +641,9 @@ std::string MultiConsumer::getStats() const {
 // OpencvConsumer 实现
 // ============================================================
 
-OpencvConsumer::OpencvConsumer(const OpencvType& config)
-    : config_(config)
+OpencvConsumer::OpencvConsumer(const OpencvType& opencv_config, const CompareType& compare_config)
+    : opencv_config_(opencv_config)
+    , compare_config_(compare_config)
     , comparator_(nullptr)
     , frames_processed_(0)
     , frames_compared_(0)
@@ -663,11 +664,11 @@ bool OpencvConsumer::initialize(const std::vector<Buffer*>& first_buffers) {
 
     // 构建 BufferComparator 配置
     consumptionline::io::CompareConfig cmp_cfg;
-    cmp_cfg.enable_psnr = config_.enable_psnr;
-    cmp_cfg.enable_ssim = config_.enable_ssim;
-    cmp_cfg.min_psnr    = config_.min_psnr;
-    cmp_cfg.min_ssim    = config_.min_ssim;
-    cmp_cfg.verbose     = config_.verbose;
+    cmp_cfg.enable_psnr = compare_config_.enable_psnr;
+    cmp_cfg.enable_ssim = compare_config_.enable_ssim;
+    cmp_cfg.min_psnr    = compare_config_.min_psnr;
+    cmp_cfg.min_ssim    = compare_config_.min_ssim;
+    cmp_cfg.verbose     = compare_config_.verbose;
 
     comparator_ = std::make_unique<consumptionline::io::BufferComparator>();
     if (!comparator_->open(cmp_cfg)) {
@@ -679,15 +680,15 @@ bool OpencvConsumer::initialize(const std::vector<Buffer*>& first_buffers) {
     initialized_ = true;
     LOG4CPLUS_INFO(log4cplus::Logger::getRoot(),
                    "OpencvConsumer: Initialized"
-                   " (psnr=" << (config_.enable_psnr ? "ON" : "OFF")
-                   << ", ssim=" << (config_.enable_ssim ? "ON" : "OFF") << ")");
+                   " (psnr=" << (compare_config_.enable_psnr ? "ON" : "OFF")
+                   << ", ssim=" << (compare_config_.enable_ssim ? "ON" : "OFF") << ")");
     return true;
 }
 
 cv::Mat OpencvConsumer::applyOpencvTransform(const cv::Mat& src, int frame_index) const {
     if (src.empty()) return src;
 
-    switch (config_.op_type) {
+    switch (opencv_config_.op_type) {
         case OpencvType::OpType::SAVE_LOAD_IMG: {
             // 图片保存/读取 I/O 测试（使用固定文件名，反复删除创建）
             const std::string temp_filename = "/tmp/opencv_test_frame.jpg";
@@ -729,8 +730,8 @@ cv::Mat OpencvConsumer::applyOpencvTransform(const cv::Mat& src, int frame_index
             }
         }
         case OpencvType::OpType::RESIZE: {
-            const auto& r = config_.resize;
-            if (r.dst_width <= 0 && r.dst_height <= 0 && r.fx <= 0.0 && r.fy <= 0.0) {
+            const auto& r = opencv_config_.resize;
+            if (r.dst_width <= 0 || r.dst_height <= 0 || r.fx <= 0.0 || r.fy <= 0.0) {
                 LOG4CPLUS_WARN(log4cplus::Logger::getRoot(),
                     "OpencvConsumer::applyOpencvTransform: RESIZE params invalid, skip");
                 return src;
@@ -744,7 +745,7 @@ cv::Mat OpencvConsumer::applyOpencvTransform(const cv::Mat& src, int frame_index
             return dst;
         }
         case OpencvType::OpType::CROP: {
-            const auto& c = config_.crop;
+            const auto& c = opencv_config_.crop;
             if (c.width <= 0 || c.height <= 0 ||
                 c.x < 0 || c.y < 0 ||
                 c.x + c.width > src.cols || c.y + c.height > src.rows) {
@@ -757,7 +758,7 @@ cv::Mat OpencvConsumer::applyOpencvTransform(const cv::Mat& src, int frame_index
             return src(cv::Rect(c.x, c.y, c.width, c.height)).clone();
         }
         case OpencvType::OpType::ERODE: {
-            const auto& m = config_.morph;
+            const auto& m = opencv_config_.morph;
             cv::Mat kernel = cv::getStructuringElement(
                 m.kernel_shape,
                 cv::Size(m.kernel_size, m.kernel_size));
@@ -768,7 +769,7 @@ cv::Mat OpencvConsumer::applyOpencvTransform(const cv::Mat& src, int frame_index
             return dst;
         }
         case OpencvType::OpType::DILATE: {
-            const auto& m = config_.morph;
+            const auto& m = opencv_config_.morph;
             cv::Mat kernel = cv::getStructuringElement(
                 m.kernel_shape,
                 cv::Size(m.kernel_size, m.kernel_size));
@@ -780,7 +781,7 @@ cv::Mat OpencvConsumer::applyOpencvTransform(const cv::Mat& src, int frame_index
         }
         case OpencvType::OpType::MORPH_OPEN: {
             // 开运算：先腐蚀后膨胀
-            const auto& m = config_.morph;
+            const auto& m = opencv_config_.morph;
             cv::Mat kernel = cv::getStructuringElement(
                 m.kernel_shape,
                 cv::Size(m.kernel_size, m.kernel_size));
@@ -795,7 +796,7 @@ cv::Mat OpencvConsumer::applyOpencvTransform(const cv::Mat& src, int frame_index
         }
         case OpencvType::OpType::MORPH_CLOSE: {
             // 闭运算：先膨胀后腐蚀
-            const auto& m = config_.morph;
+            const auto& m = opencv_config_.morph;
             cv::Mat kernel = cv::getStructuringElement(
                 m.kernel_shape,
                 cv::Size(m.kernel_size, m.kernel_size));
@@ -809,7 +810,7 @@ cv::Mat OpencvConsumer::applyOpencvTransform(const cv::Mat& src, int frame_index
             return dst;
         }
         case OpencvType::OpType::SOBEL: {
-            const auto& s = config_.sobel;
+            const auto& s = opencv_config_.sobel;
             int ksize = (s.ksize % 2 == 0) ? s.ksize + 1 : s.ksize;
             cv::Mat gray, dst;
             if (src.channels() != 1) cv::cvtColor(src, gray, cv::COLOR_BGR2GRAY);
@@ -818,7 +819,7 @@ cv::Mat OpencvConsumer::applyOpencvTransform(const cv::Mat& src, int frame_index
             return dst;
         }
         case OpencvType::OpType::CANNY: {
-            const auto& c = config_.canny;
+            const auto& c = opencv_config_.canny;
             cv::Mat gray, dst;
             if (src.channels() != 1) cv::cvtColor(src, gray, cv::COLOR_BGR2GRAY);
             else gray = src;
@@ -826,7 +827,7 @@ cv::Mat OpencvConsumer::applyOpencvTransform(const cv::Mat& src, int frame_index
             return dst;
         }
         case OpencvType::OpType::LAPLACIAN: {
-            const auto& l = config_.laplacian;
+            const auto& l = opencv_config_.laplacian;
             int ksize = (l.ksize % 2 == 0) ? l.ksize + 1 : l.ksize;
             cv::Mat gray, dst;
             if (src.channels() != 1) cv::cvtColor(src, gray, cv::COLOR_BGR2GRAY);
@@ -835,14 +836,14 @@ cv::Mat OpencvConsumer::applyOpencvTransform(const cv::Mat& src, int frame_index
             return dst;
         }
         case OpencvType::OpType::TRANSLATE: {
-            const auto& t = config_.translate;
+            const auto& t = opencv_config_.translate;
             cv::Mat M = (cv::Mat_<double>(2, 3) << 1, 0, t.tx, 0, 1, t.ty);
             cv::Mat dst;
             cv::warpAffine(src, dst, M, src.size());
             return dst;
         }
         case OpencvType::OpType::ROTATE: {
-            const auto& r = config_.rotate;
+            const auto& r = opencv_config_.rotate;
             cv::Point2f center(src.cols / 2.0f, src.rows / 2.0f);
             cv::Mat M = cv::getRotationMatrix2D(center, r.angle, r.scale);
             cv::Mat dst;
@@ -850,7 +851,7 @@ cv::Mat OpencvConsumer::applyOpencvTransform(const cv::Mat& src, int frame_index
             return dst;
         }
         case OpencvType::OpType::PERSPECTIVE: {
-            const auto& p = config_.perspective;
+            const auto& p = opencv_config_.perspective;
             int off = p.offset;
             cv::Point2f src_pts[4] = {
                 {0.f, 0.f},
@@ -870,7 +871,7 @@ cv::Mat OpencvConsumer::applyOpencvTransform(const cv::Mat& src, int frame_index
             return dst;
         }
         case OpencvType::OpType::DRAW_LINE: {
-            const auto& l = config_.draw_line;
+            const auto& l = opencv_config_.draw_line;
             cv::Mat dst = src.clone();
             cv::line(dst,
                      cv::Point(l.x1, l.y1),
@@ -880,7 +881,7 @@ cv::Mat OpencvConsumer::applyOpencvTransform(const cv::Mat& src, int frame_index
             return dst;
         }
         case OpencvType::OpType::DRAW_RECT: {
-            const auto& r = config_.draw_rect;
+            const auto& r = opencv_config_.draw_rect;
             cv::Mat dst = src.clone();
             cv::rectangle(dst,
                           cv::Rect(r.x, r.y, r.width, r.height),
@@ -889,7 +890,7 @@ cv::Mat OpencvConsumer::applyOpencvTransform(const cv::Mat& src, int frame_index
             return dst;
         }
         case OpencvType::OpType::PUT_TEXT: {
-            const auto& t = config_.put_text;
+            const auto& t = opencv_config_.put_text;
             cv::Mat dst = src.clone();
             cv::putText(dst, "Hello OpenCV",
                         cv::Point(t.x, t.y),
@@ -900,14 +901,14 @@ cv::Mat OpencvConsumer::applyOpencvTransform(const cv::Mat& src, int frame_index
             return dst;
         }
         case OpencvType::OpType::GAUSSIAN_BLUR: {
-            const auto& g = config_.gaussian_blur;
+            const auto& g = opencv_config_.gaussian_blur;
             int k = (g.ksize % 2 == 0) ? g.ksize + 1 : g.ksize;
             cv::Mat dst;
             cv::GaussianBlur(src, dst, cv::Size(k, k), g.sigma_x, g.sigma_x);
             return dst;
         }
         case OpencvType::OpType::THRESHOLD: {
-            const auto& t = config_.threshold;
+            const auto& t = opencv_config_.threshold;
             cv::Mat gray, dst;
             if (src.channels() != 1) cv::cvtColor(src, gray, cv::COLOR_BGR2GRAY);
             else gray = src;
@@ -925,7 +926,7 @@ cv::Mat OpencvConsumer::applyOpencvTransform(const cv::Mat& src, int frame_index
         }
         case OpencvType::OpType::CVTCOLOR: {
             // cvtColor 测试：颜色空间转换
-            const auto& c = config_.cvtcolor;
+            const auto& c = opencv_config_.cvtcolor;
             cv::Mat dst;
 
             // 对于 NV12 等 YUV 格式，需要特殊处理
@@ -1009,7 +1010,323 @@ std::string avframeInfoToString(const AVFrame* frame) {
     // 获取像素格式的字符串名称
     const char* pix_fmt_name = av_get_pix_fmt_name(pix_fmt);
 
-    return std::string(pix_fmt_name);    
+    return std::string(pix_fmt_name);
+}
+
+/**
+ * @brief 将 AVFrame 转换为 BGR cv::Mat（CV_8UC3）
+ *
+ * 支持 FFmpeg AVPixelFormat 定义的全部像素格式：
+ *  - YUV 420 半平面（NV12/NV21）、全平面（YUV420P/YV12）、10-bit 半平面（P010）
+ *  - YUV 422 半平面（NV16/NV61）、全平面（YUV422P）
+ *  - YUV 444 半平面（NV24）、全平面（YUV444P）
+ *  - Packed RGB 8-bit（ARGB/ABGR/RGBA/BGRA/RGB/BGR 及 X 填充变体）
+ *  - Planar RGB 8-bit（RGB888_PLANAR / BGR888_PLANAR / GBRP）
+ *  - 16-bit per channel Planar RGB（R16G16B16 / B16G16R16），输出降至 8-bit
+ *  - 10-bit Packed RGB（2101010 / 10102），输出降至 8-bit
+ *
+ * 多平面处理原则：
+ *  1. 逐行拷贝各平面（尊重 linesize stride）至独立的 cv::Mat
+ *  2. 通过 cv::merge() 合并通道，或拼装连续缓冲区后调用 cv::cvtColor
+ *
+ * @param frame  源 AVFrame（不可为空，data[] 指针必须有效）
+ * @return CV_8UC3 BGR 格式的 cv::Mat；出错时返回空 Mat
+ */
+static cv::Mat avframeToMat(const AVFrame* frame)
+{
+    if (!frame || !frame->data[0]) {
+        LOG4CPLUS_WARN(log4cplus::Logger::getRoot(),
+            "avframeToMat: null frame or data pointer");
+        return cv::Mat();
+    }
+
+    const int w = frame->width;
+    const int h = frame->height;
+
+    if (w <= 0 || h <= 0) {
+        LOG4CPLUS_WARN_FMT(log4cplus::Logger::getRoot(),
+            "avframeToMat: invalid frame dimensions %dx%d", w, h);
+        return cv::Mat();
+    }
+
+    // 使用 frame->format（AVPixelFormat 枚举）
+    const AVPixelFormat fmt = static_cast<AVPixelFormat>(frame->format);
+
+    // ─── 辅助 lambda：按行拷贝单通道 8-bit 平面（处理 linesize > cols 的 stride）
+    // rows × cols 个 uint8_t，cols = 平面有效宽度（字节数）
+    auto copyPlane8 = [](const uint8_t* src, int linesize,
+                         int rows, int cols) -> cv::Mat {
+        cv::Mat plane(rows, cols, CV_8UC1);
+        for (int r = 0; r < rows; ++r)
+            std::memcpy(plane.ptr(r),
+                        src + static_cast<ptrdiff_t>(r) * linesize,
+                        cols);
+        return plane;
+    };
+
+    // ─── 辅助 lambda：拷贝交错双通道（UV / VU）8-bit 平面 → CV_8UC2
+    // pairs_per_row = 水平方向像素对数（YUV420 为 w/2，YUV444 为 w）
+    auto copyPlaneUV8 = [](const uint8_t* src, int linesize,
+                           int rows, int pairs_per_row) -> cv::Mat {
+        cv::Mat plane(rows, pairs_per_row, CV_8UC2);
+        for (int r = 0; r < rows; ++r)
+            std::memcpy(plane.ptr(r),
+                        src + static_cast<ptrdiff_t>(r) * linesize,
+                        pairs_per_row * 2);
+        return plane;
+    };
+
+    cv::Mat bgr;
+
+    switch (fmt) {
+    // ══════════════════════════════════════════════════════════════════
+    // YUV 420 半平面：NV12（UV 交错）/ NV21（VU 交错）
+    // AV_PIX_FMT_NV12 / AV_PIX_FMT_NV21
+    // data[0] = Y  (h × w 字节)
+    // data[1] = UV or VU  (h/2 × w 字节)
+    // ══════════════════════════════════════════════════════════════════
+    case AV_PIX_FMT_NV12:
+    case AV_PIX_FMT_NV21: {
+        // 组装 OpenCV 需要的连续布局：前 h 行 = Y，后 h/2 行 = UV
+        cv::Mat yuv(h * 3 / 2, w, CV_8UC1);
+        for (int r = 0; r < h; ++r)
+            std::memcpy(yuv.ptr(r),
+                        frame->data[0] + static_cast<ptrdiff_t>(r) * frame->linesize[0],
+                        w);
+        for (int r = 0; r < h / 2; ++r)
+            std::memcpy(yuv.ptr(h + r),
+                        frame->data[1] + static_cast<ptrdiff_t>(r) * frame->linesize[1],
+                        w);
+        cv::cvtColor(yuv, bgr,
+            fmt == AV_PIX_FMT_NV12 ? cv::COLOR_YUV2BGR_NV12 : cv::COLOR_YUV2BGR_NV21);
+        break;
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    // YUV 420 全平面：I420（Y/U/V）/ YV12（Y/V/U，V 与 U 互换）
+    // AV_PIX_FMT_YUV420P / AV_PIX_FMT_YUVJ420P
+    // data[0] = Y  (h × w)
+    // data[1] = U(I420) 或 V(YV12)  (h/2 × w/2)
+    // data[2] = V(I420) 或 U(YV12)  (h/2 × w/2)
+    // OpenCV I420 布局：(h*3/2) × w — 前 h 行 Y，再 h/4 行 U，再 h/4 行 V
+    // ══════════════════════════════════════════════════════════════════
+    case AV_PIX_FMT_YUV420P:
+    case AV_PIX_FMT_YUVJ420P: {
+        const bool is_yuv420p = (fmt == AV_PIX_FMT_YUV420P);
+        const uint8_t* u_src = frame->data[1];
+        const uint8_t* v_src = frame->data[2];
+        const int u_ls = frame->linesize[1];
+        const int v_ls = frame->linesize[2];
+
+        cv::Mat yuv(h * 3 / 2, w, CV_8UC1);
+        // Y 平面
+        for (int r = 0; r < h; ++r)
+            std::memcpy(yuv.ptr(r),
+                        frame->data[0] + static_cast<ptrdiff_t>(r) * frame->linesize[0],
+                        w);
+        // U、V 平面：各 h/2 行 × w/2 列，连续写入 yuv[h] 之后
+        uint8_t* u_dst = yuv.ptr(h);
+        uint8_t* v_dst = u_dst + (h / 2) * (w / 2);
+        for (int r = 0; r < h / 2; ++r) {
+            std::memcpy(u_dst + r * (w / 2),
+                        u_src + static_cast<ptrdiff_t>(r) * u_ls, w / 2);
+            std::memcpy(v_dst + r * (w / 2),
+                        v_src + static_cast<ptrdiff_t>(r) * v_ls, w / 2);
+        }
+        cv::cvtColor(yuv, bgr, cv::COLOR_YUV2BGR_I420);
+        break;
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    // P010：10-bit YUV420 半平面（uint16 MSB 对齐，高 8-bit 有效）
+    // AV_PIX_FMT_P010LE / AV_PIX_FMT_P010BE
+    // 提取高 8 位后，按 NV12 路径转换
+    // ══════════════════════════════════════════════════════════════════
+    case AV_PIX_FMT_P010LE:
+    case AV_PIX_FMT_P010BE: {
+        cv::Mat yuv(h * 3 / 2, w, CV_8UC1);
+        // Y 平面（uint16 → uint8，取高 8 位）
+        for (int r = 0; r < h; ++r) {
+            const uint16_t* src16 = reinterpret_cast<const uint16_t*>(
+                frame->data[0] + static_cast<ptrdiff_t>(r) * frame->linesize[0]);
+            uint8_t* dst = yuv.ptr(r);
+            for (int c = 0; c < w; ++c)
+                dst[c] = static_cast<uint8_t>(src16[c] >> 8);
+        }
+        // UV 平面（uint16 → uint8）
+        for (int r = 0; r < h / 2; ++r) {
+            const uint16_t* src16 = reinterpret_cast<const uint16_t*>(
+                frame->data[1] + static_cast<ptrdiff_t>(r) * frame->linesize[1]);
+            uint8_t* dst = yuv.ptr(h + r);
+            for (int c = 0; c < w; ++c)
+                dst[c] = static_cast<uint8_t>(src16[c] >> 8);
+        }
+        cv::cvtColor(yuv, bgr, cv::COLOR_YUV2BGR_NV12);
+        break;
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    // YUV 422 全平面：YUV422P
+    // AV_PIX_FMT_YUV422P / AV_PIX_FMT_YUVJ422P
+    // data[0] = Y  (h × w)
+    // data[1] = U (Cb)  (h × w/2)
+    // data[2] = V (Cr)  (h × w/2)
+    // ══════════════════════════════════════════════════════════════════
+    case AV_PIX_FMT_YUV422P:
+    case AV_PIX_FMT_YUVJ422P: {
+        cv::Mat y_plane = copyPlane8(frame->data[0], frame->linesize[0], h, w);
+        cv::Mat u_half  = copyPlane8(frame->data[1], frame->linesize[1], h, w / 2);
+        cv::Mat v_half  = copyPlane8(frame->data[2], frame->linesize[2], h, w / 2);
+
+        cv::Mat u_full, v_full;
+        cv::resize(u_half, u_full, cv::Size(w, h), 0, 0, cv::INTER_LINEAR);
+        cv::resize(v_half, v_full, cv::Size(w, h), 0, 0, cv::INTER_LINEAR);
+
+        cv::Mat ycrcb;
+        cv::merge(std::vector<cv::Mat>{y_plane, v_full, u_full}, ycrcb);
+        cv::cvtColor(ycrcb, bgr, cv::COLOR_YCrCb2BGR);
+        break;
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    // YUV 444 半平面：YUV444P
+    // AV_PIX_FMT_YUV444P
+    // data[0] = Y, data[1] = U, data[2] = V
+    // ══════════════════════════════════════════════════════════════════
+    case AV_PIX_FMT_YUV444P:
+    case AV_PIX_FMT_YUVJ444P: {
+        cv::Mat y_plane = copyPlane8(frame->data[0], frame->linesize[0], h, w);
+        cv::Mat u_plane = copyPlane8(frame->data[1], frame->linesize[1], h, w);
+        cv::Mat v_plane = copyPlane8(frame->data[2], frame->linesize[2], h, w);
+
+        cv::Mat ycrcb;
+        cv::merge(std::vector<cv::Mat>{y_plane, v_plane, u_plane}, ycrcb);
+        cv::cvtColor(ycrcb, bgr, cv::COLOR_YCrCb2BGR);
+        break;
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    // Packed RGB 8-bit — 4 字节/像素（含 Alpha 或 X 填充通道）
+    // ══════════════════════════════════════════════════════════════════
+    case AV_PIX_FMT_BGRA:  // BGRA8888
+    case AV_PIX_FMT_BGR0:  // BGRX8888
+    {
+        // 内存布局 [B][G][R][A/X]：OpenCV CV_8UC4 原生，直接去 Alpha
+        cv::Mat raw = copyPlane8(frame->data[0], frame->linesize[0], h, w * 4);
+        cv::cvtColor(cv::Mat(h, w, CV_8UC4, raw.data), bgr, cv::COLOR_BGRA2BGR);
+        break;
+    }
+    case AV_PIX_FMT_RGBA:  // RGBA8888
+    case AV_PIX_FMT_RGB0:  // RGBX8888
+    {
+        // 内存布局 [R][G][B][A/X]
+        cv::Mat raw = copyPlane8(frame->data[0], frame->linesize[0], h, w * 4);
+        cv::cvtColor(cv::Mat(h, w, CV_8UC4, raw.data), bgr, cv::COLOR_RGBA2BGR);
+        break;
+    }
+    case AV_PIX_FMT_ARGB:  // ARGB8888
+    case AV_PIX_FMT_0RGB:  // XRGB8888
+    {
+        // 内存布局 [A/X][R][G][B]
+        // mixChannels 重排：ARGB(ch0=A,1=R,2=G,3=B) → BGRA(ch0=B,1=G,2=R,3=A)
+        cv::Mat raw = copyPlane8(frame->data[0], frame->linesize[0], h, w * 4);
+        cv::Mat src4(h, w, CV_8UC4, raw.data);
+        cv::Mat bgra(h, w, CV_8UC4);
+        const int mix[] = {3, 0,  2, 1,  1, 2,  0, 3};  // src_ch → dst_ch
+        cv::mixChannels(&src4, 1, &bgra, 1, mix, 4);
+        cv::cvtColor(bgra, bgr, cv::COLOR_BGRA2BGR);
+        break;
+    }
+    case AV_PIX_FMT_ABGR:  // ABGR8888
+    case AV_PIX_FMT_0BGR:  // XBGR8888
+    {
+        // 内存布局 [A/X][B][G][R]
+        // mixChannels 重排：ABGR(ch0=A,1=B,2=G,3=R) → BGRA(ch0=B,1=G,2=R,3=A)
+        cv::Mat raw = copyPlane8(frame->data[0], frame->linesize[0], h, w * 4);
+        cv::Mat src4(h, w, CV_8UC4, raw.data);
+        cv::Mat bgra(h, w, CV_8UC4);
+        const int mix[] = {1, 0,  2, 1,  3, 2,  0, 3};
+        cv::mixChannels(&src4, 1, &bgra, 1, mix, 4);
+        cv::cvtColor(bgra, bgr, cv::COLOR_BGRA2BGR);
+        break;
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    // Packed RGB 8-bit — 3 字节/像素
+    // ══════════════════════════════════════════════════════════════════
+    case AV_PIX_FMT_BGR24:  // BGR888
+    {
+        cv::Mat raw = copyPlane8(frame->data[0], frame->linesize[0], h, w * 3);
+        bgr = cv::Mat(h, w, CV_8UC3, raw.data).clone();
+        break;
+    }
+    case AV_PIX_FMT_RGB24:  // RGB888
+    {
+        cv::Mat raw = copyPlane8(frame->data[0], frame->linesize[0], h, w * 3);
+        cv::cvtColor(cv::Mat(h, w, CV_8UC3, raw.data), bgr, cv::COLOR_RGB2BGR);
+        break;
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    // Planar RGB 8-bit：逐平面拷贝后 cv::merge() 合并为 BGR
+    // ══════════════════════════════════════════════════════════════════
+    case AV_PIX_FMT_GBRP:  // GBR Planar
+    {
+        // AV_PIX_FMT_GBRP：data[0]=G  data[1]=B  data[2]=R
+        cv::Mat g = copyPlane8(frame->data[0], frame->linesize[0], h, w);
+        cv::Mat b = copyPlane8(frame->data[1], frame->linesize[1], h, w);
+        cv::Mat r = copyPlane8(frame->data[2], frame->linesize[2], h, w);
+        cv::merge(std::vector<cv::Mat>{b, g, r}, bgr);
+        break;
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    // 10-bit Packed RGB（2101010 / 10102）
+    // 每像素一个 uint32，各通道占 10 bit，取各通道高 8 位输出
+    // ══════════════════════════════════════════════════════════════════
+    case AV_PIX_FMT_RGBA64LE:
+    case AV_PIX_FMT_RGBA64BE:
+    case AV_PIX_FMT_BGRA64LE:
+    case AV_PIX_FMT_BGRA64BE:
+    {
+        // 处理 16-bit 每通道的 RGB
+        bgr.create(h, w, CV_8UC3);
+        for (int r = 0; r < h; ++r) {
+            const uint16_t* src16 = reinterpret_cast<const uint16_t*>(
+                frame->data[0] + static_cast<ptrdiff_t>(r) * frame->linesize[0]);
+            uint8_t* dst = bgr.ptr(r);
+            
+            for (int c = 0; c < w; ++c) {
+                uint8_t b, g, rb;
+                
+                if (fmt == AV_PIX_FMT_RGBA64LE || fmt == AV_PIX_FMT_RGBA64BE) {
+                    // R[0:15], G[16:31], B[32:47], A[48:63]
+                    rb = static_cast<uint8_t>(src16[c * 4 + 0] >> 8);  // R
+                    g  = static_cast<uint8_t>(src16[c * 4 + 1] >> 8);  // G
+                    b  = static_cast<uint8_t>(src16[c * 4 + 2] >> 8);  // B
+                } else { // AV_PIX_FMT_BGRA64LE or AV_PIX_FMT_BGRA64BE
+                    // B[0:15], G[16:31], R[32:47], A[48:63]
+                    b  = static_cast<uint8_t>(src16[c * 4 + 0] >> 8);  // B
+                    g  = static_cast<uint8_t>(src16[c * 4 + 1] >> 8);  // G
+                    rb = static_cast<uint8_t>(src16[c * 4 + 2] >> 8);  // R
+                }
+                
+                dst[c * 3 + 0] = b;
+                dst[c * 3 + 1] = g;
+                dst[c * 3 + 2] = rb;
+            }
+        }
+        break;
+    }
+
+    default:
+        LOG4CPLUS_WARN_FMT(log4cplus::Logger::getRoot(),
+            "avframeToMat: unsupported AVPixelFormat %d, returning empty Mat",
+            static_cast<int>(fmt));
+        break;
+    }
+
+    return bgr;
 }
 
 bool OpencvConsumer::consume(const std::vector<Buffer*>& buffers, int frame_index) {
@@ -1023,8 +1340,8 @@ bool OpencvConsumer::consume(const std::vector<Buffer*>& buffers, int frame_inde
         std::cout << "dual buffer is not supported" << std::endl;
     } else if (!buffers.empty() && buffers[0]) {
         // ── 单 Buffer 模式：直接用 frame->data 创建 Mat（零拷贝），无需深拷贝 ──
-        AVFrame* orig_frame = buffers[0]->getAVFrame();
-        if (!orig_frame) {
+        AVFrame* avframe_hw = buffers[0]->getAVFrame();
+        if (!avframe_hw) {
             LOG4CPLUS_WARN(log4cplus::Logger::getRoot(),
                 "OpencvConsumer: no AVFrame in buffer, skip");
             return true;
@@ -1032,32 +1349,16 @@ bool OpencvConsumer::consume(const std::vector<Buffer*>& buffers, int frame_inde
 
         // 直接用同一个 frame 创建两个 Mat，共享数据指针
         // applyOpencvTransform 会返回新的 Mat（clone 或新建），所以变换后数据独立
-        cv::Mat mat_hw = cv::Mat(orig_frame);
+        AVFrame* avframe_sw = av_frame_clone(avframe_hw);
+        cv::Mat mat_hw = cv::Mat(avframe_hw);
+        cv::Mat mat_sw = avframeToMat(avframe_sw);
 
-        std::cout << avframeInfoToString(orig_frame) << std::endl;
-
-        // 用 frame->data[0] 再创建一个 Mat（与 mat_hw 共享原始数据）
-        int type = CV_8UC1;
-        switch (orig_frame->format) {
-            case AV_PIX_FMT_BGR24:
-            case AV_PIX_FMT_RGB24:
-                type = CV_8UC3;
-                break;
-            case AV_PIX_FMT_BGRA:
-            case AV_PIX_FMT_RGBA:
-                type = CV_8UC4;
-                break;
-        }
-        cv::Mat mat_sw(orig_frame->height, orig_frame->width, type,
-                       orig_frame->data[0], orig_frame->linesize[0]);
-
+        cv::Mat mat_hw_bgr;
+        cv::cvtColor(mat_hw,mat_hw_bgr,cv::COLOR_YUV2BGR_NV12);
         // 对两路施加同一 OpenCV 变换
-        if (config_.op_type != OpencvType::OpType::NONE) {
-            mat_hw = applyOpencvTransform(mat_hw, frame_index);
+        if (opencv_config_.op_type != OpencvType::OpType::NONE) {
+            mat_hw = applyOpencvTransform(mat_hw_bgr, frame_index);
             mat_sw = applyOpencvTransform(mat_sw, frame_index);
-
-            std::cout << matInfoToString(mat_hw) << std::endl;
-            std::cout << matInfoToString(mat_sw) << std::endl;
         }
 
         // 临时 Buffer 包装 Mat；comparator 检测到 setMat 后走 is_mat 路径
@@ -1076,7 +1377,7 @@ bool OpencvConsumer::consume(const std::vector<Buffer*>& buffers, int frame_inde
         ssim_sum_ += result.ssim_avg;
         if (!result.passed) passed_ = false;
 
-        if (config_.verbose) {
+        if (compare_config_.verbose) {
             LOG4CPLUS_INFO_FMT(log4cplus::Logger::getRoot(),
                 "OpencvConsumer [frame %d] PSNR=%.2f dB  SSIM=%.4f  %s",
                 frame_index, result.psnr_avg, result.ssim_avg,
@@ -1096,7 +1397,7 @@ void OpencvConsumer::finalize() {
     }
 
     // 清理 SAVE_LOAD_IMG 操作的临时文件
-    if (config_.op_type == OpencvType::OpType::SAVE_LOAD_IMG) {
+    if (opencv_config_.op_type == OpencvType::OpType::SAVE_LOAD_IMG) {
         const std::string temp_filename = "/tmp/opencv_test_frame.jpg";
         ::remove(temp_filename.c_str());
         LOG4CPLUS_INFO_FMT(log4cplus::Logger::getRoot(),

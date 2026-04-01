@@ -88,14 +88,8 @@ bool OpenCVCallbackContext::openComparator() {
     // 创建 comparator
     comparator_ = std::make_unique<consumptionline::io::BufferComparator>();
 
-    // 配置
-    consumptionline::io::CompareConfig compare_config;
-    compare_config.enable_psnr = config.enable_psnr;
-    compare_config.enable_ssim = config.enable_ssim;
-    compare_config.min_psnr = config.min_psnr;
-    compare_config.min_ssim = config.min_ssim;
-    compare_config.verbose = config.verbose;
-    compare_config.save_report = false;
+    // 配置：使用 compare_config_snapshot_
+    consumptionline::io::CompareConfig compare_config = compare_config_snapshot_;
 
     // 打开
     comparator_opened_ = comparator_->open(compare_config);
@@ -631,7 +625,7 @@ CallbackChainItem WorkerSyncCoordinator::createOpenCVCallback(
             opencv_ctx->total_frames.fetch_add(1);
 
             // 如果启用了 PSNR/SSIM 计算，使用原始 buffer 进行对比
-            if (opencv_ctx->config.enable_psnr || opencv_ctx->config.enable_ssim) {
+            if (opencv_ctx->compare_config_snapshot_.enable_psnr || opencv_ctx->compare_config_snapshot_.enable_ssim) {
                 // 打开 comparator（懒初始化）
                 if (!opencv_ctx->comparator_opened_) {
                     if (!opencv_ctx->openComparator()) {
@@ -649,10 +643,10 @@ CallbackChainItem WorkerSyncCoordinator::createOpenCVCallback(
                 double ssim = cmp_result.ssim_avg;
 
                 // 判断是否通过
-                bool psnr_ok = !opencv_ctx->config.enable_psnr ||
-                              (psnr >= opencv_ctx->config.min_psnr);
-                bool ssim_ok = !opencv_ctx->config.enable_ssim ||
-                              (ssim >= opencv_ctx->config.min_ssim);
+                bool psnr_ok = !opencv_ctx->compare_config_snapshot_.enable_psnr ||
+                              (psnr >= opencv_ctx->compare_config_snapshot_.min_psnr);
+                bool ssim_ok = !opencv_ctx->compare_config_snapshot_.enable_ssim ||
+                              (ssim >= opencv_ctx->compare_config_snapshot_.min_ssim);
                 bool passed = psnr_ok && ssim_ok;
 
                 // 更新统计
@@ -670,14 +664,14 @@ CallbackChainItem WorkerSyncCoordinator::createOpenCVCallback(
                 while (!opencv_ctx->ssim_sum.compare_exchange_weak(old_ssim, old_ssim + ssim)) {}
 
                 // 日志
-                if (!passed || opencv_ctx->config.verbose) {
+                if (!passed || opencv_ctx->compare_config_snapshot_.verbose) {
                     if (!passed) {
                         LOG4CPLUS_WARN_FMT(logger,
                             "[Frame %llu] OpenCV %s FAILED: PSNR=%.2f (min=%.2f), SSIM=%.4f (min=%.4f)",
                             (unsigned long long)frame_version,
                             op_name.c_str(),
-                            psnr, opencv_ctx->config.min_psnr,
-                            ssim, opencv_ctx->config.min_ssim);
+                            psnr, opencv_ctx->compare_config_snapshot_.min_psnr,
+                            ssim, opencv_ctx->compare_config_snapshot_.min_ssim);
                     } else {
                         LOG4CPLUS_DEBUG_FMT(logger,
                             "[Frame %llu] OpenCV %s PASSED: PSNR=%.2f, SSIM=%.4f",
@@ -689,7 +683,7 @@ CallbackChainItem WorkerSyncCoordinator::createOpenCVCallback(
             } else {
                 // 仅统计成功，不进行质量评估
                 opencv_ctx->passed_frames.fetch_add(1);
-                if (opencv_ctx->config.verbose) {
+                if (opencv_ctx->compare_config_snapshot_.verbose) {
                     LOG4CPLUS_INFO_FMT(logger,
                         "[Frame %llu] OpenCV %s 执行成功",
                         (unsigned long long)frame_version,

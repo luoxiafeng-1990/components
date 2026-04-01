@@ -299,8 +299,9 @@ private:
 class OpencvConsumer : public IBufferConsumer {
 public:
     using OpencvType = WorkerConfig::ConsumerTypeConfig::OpencvType;
+    using CompareType = WorkerConfig::ConsumerTypeConfig::CompareType;
 
-    explicit OpencvConsumer(const OpencvType& config);
+    OpencvConsumer(const OpencvType& opencv_config, const CompareType& compare_config);
     ~OpencvConsumer() override;
 
     bool initialize(const std::vector<Buffer*>& first_buffers) override;
@@ -316,14 +317,11 @@ public:
     bool isPassed()         const;
 
 private:
-    /// 将单个 Buffer 转换为 BGR cv::Mat
-    /// 优先顺序：getMat() → getAVFrame()+swscale → 原始 YUV 元数据
     cv::Mat bufferToMat(Buffer* buf) const;
-
-    /// 根据 config_.op_type 对 Mat 执行变换（包括 SAVE_LOAD_IMG）
     cv::Mat applyOpencvTransform(const cv::Mat& src, int frame_index = -1) const;
 
-    OpencvType config_;
+    OpencvType opencv_config_;
+    CompareType compare_config_;
     std::unique_ptr<consumptionline::io::BufferComparator> comparator_;
 
     int    frames_processed_ = 0;
