@@ -194,7 +194,8 @@ void OpencvPlugin::registerOptions(CLI::App& app) {
     app.add_option("--params", params_str_, "操作参数");
     app.add_option("-m,--max-frames", max_frames_, "最大帧数");
     app.add_flag("-p,--psnr", enable_psnr_, "启用 PSNR 验证");
-    app.add_flag("-S,--ssim", enable_ssim_, "启用 SSIM 验证");
+    app.add_flag("-s,--ssim", enable_ssim_, "启用 SSIM 验证");
+    app.add_flag("-v,--verbose", verbose_, "得分详细输出");
 }
 
 void OpencvPlugin::applyTo(WorkerConfig& config) const {
@@ -278,8 +279,6 @@ std::vector<WorkerConfig> OpencvPlugin::buildPipelineConfigs(const WorkerConfig&
                              op == OpType::BITWISE_OR || op == OpType::BITWISE_XOR ||
                              op == OpType::BITWISE_NOT);
 
-    const bool compare_enabled = enable_psnr_ || enable_ssim_;
-
     auto buildConfig = [&](bool use_hw) -> WorkerConfig {
         const std::string decoder = use_hw ? "h264" : "software";
         auto config = common::WorkerConfigFactory::createDecode(input_path_, decoder);
@@ -287,9 +286,10 @@ std::vector<WorkerConfig> OpencvPlugin::buildPipelineConfigs(const WorkerConfig&
         config.consumer_type.compare.min_psnr = 1.0;
         config.consumer_type.compare.enable_ssim = enable_ssim_;
         config.consumer_type.compare.min_ssim = 1.0;
+        config.consumer_type.compare.verbose = verbose_;
         config.consumer_type.max_frames = max_frames_;
-        config.consumer_type.verbose = verbose_;
         config.consumer_type.opencv.enable = true;
+        std::cout << (enable_psnr_ ? "true" : "false") << std::endl;
 
         auto& opencv = config.consumer_type.opencv;
         if (op != OpType::NONE) {
@@ -352,28 +352,16 @@ std::vector<WorkerConfig> OpencvPlugin::buildPipelineConfigs(const WorkerConfig&
                 opencv.cvtcolor.code = std::stoi(fields.at(0));
                 opencv.cvtcolor.dstCn = std::stoi(fields.at(1));
             } else if (is_arithmetic_op) {
-                if (fields.size() > 1 && fields[1] == "psnr") {
-                    opencv.enable_psnr = true;
-                    opencv.enable_ssim = false;
-                } else if (fields.size() > 1 && fields[1] == "ssim") {
-                    opencv.enable_psnr = false;
-                    opencv.enable_ssim = true;
-                }
+                // To do
             } else if (op == OpType::SAVE_LOAD_IMG) {
-                if (fields.size() > 1 && fields[1] == "psnr") {
-                    opencv.enable_psnr = true;
-                    opencv.enable_ssim = false;
-                } else if (fields.size() > 1 && fields[1] == "ssim") {
-                    opencv.enable_psnr = false;
-                    opencv.enable_ssim = true;
-                }
+                // To do
             }
         }
         return config;
     };
 
     // COMPARE mode: hw vs sw
-    if ((is_arithmetic_op || compare_enabled) && params_.use_hardware) {
+    if ((is_arithmetic_op ) && params_.use_hardware) {
         auto hw_config = buildConfig(true);
         auto sw_config = buildConfig(false);
         return {hw_config, sw_config};

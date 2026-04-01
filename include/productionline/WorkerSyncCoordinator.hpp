@@ -141,6 +141,9 @@ struct OpenCVCallbackContext {
     // OpenCV 配置（从 ConsumerTypeConfig.opencv 初始化）
     WorkerConfig::ConsumerTypeConfig::OpencvType config;
 
+    // Compare 配置快照（用于 PSNR/SSIM/verbose）
+    WorkerConfig::ConsumerTypeConfig::CompareType compare_config_snapshot_{};
+
     // 统计计数器（原子，线程安全）
     std::atomic<int> total_frames{0};
     std::atomic<int> passed_frames{0};

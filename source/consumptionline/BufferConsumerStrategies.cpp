@@ -641,8 +641,9 @@ std::string MultiConsumer::getStats() const {
 // OpencvConsumer 实现
 // ============================================================
 
-OpencvConsumer::OpencvConsumer(const OpencvType& config)
-    : config_(config)
+OpencvConsumer::OpencvConsumer(const OpencvType& opencv_config, const CompareType& compare_config)
+    : opencv_config_(opencv_config)
+    , compare_config_(compare_config)
     , comparator_(nullptr)
     , frames_processed_(0)
     , frames_compared_(0)
@@ -663,11 +664,11 @@ bool OpencvConsumer::initialize(const std::vector<Buffer*>& first_buffers) {
 
     // 构建 BufferComparator 配置
     consumptionline::io::CompareConfig cmp_cfg;
-    cmp_cfg.enable_psnr = config_.enable_psnr;
-    cmp_cfg.enable_ssim = config_.enable_ssim;
-    cmp_cfg.min_psnr    = config_.min_psnr;
-    cmp_cfg.min_ssim    = config_.min_ssim;
-    cmp_cfg.verbose     = config_.verbose;
+    cmp_cfg.enable_psnr = compare_config_.enable_psnr;
+    cmp_cfg.enable_ssim = compare_config_.enable_ssim;
+    cmp_cfg.min_psnr    = compare_config_.min_psnr;
+    cmp_cfg.min_ssim    = compare_config_.min_ssim;
+    cmp_cfg.verbose     = compare_config_.verbose;
 
     comparator_ = std::make_unique<consumptionline::io::BufferComparator>();
     if (!comparator_->open(cmp_cfg)) {
@@ -679,15 +680,15 @@ bool OpencvConsumer::initialize(const std::vector<Buffer*>& first_buffers) {
     initialized_ = true;
     LOG4CPLUS_INFO(log4cplus::Logger::getRoot(),
                    "OpencvConsumer: Initialized"
-                   " (psnr=" << (config_.enable_psnr ? "ON" : "OFF")
-                   << ", ssim=" << (config_.enable_ssim ? "ON" : "OFF") << ")");
+                   " (psnr=" << (compare_config_.enable_psnr ? "ON" : "OFF")
+                   << ", ssim=" << (compare_config_.enable_ssim ? "ON" : "OFF") << ")");
     return true;
 }
 
 cv::Mat OpencvConsumer::applyOpencvTransform(const cv::Mat& src, int frame_index) const {
     if (src.empty()) return src;
 
-    switch (config_.op_type) {
+    switch (opencv_config_.op_type) {
         case OpencvType::OpType::SAVE_LOAD_IMG: {
             // 图片保存/读取 I/O 测试（使用固定文件名，反复删除创建）
             const std::string temp_filename = "/tmp/opencv_test_frame.jpg";
@@ -729,8 +730,8 @@ cv::Mat OpencvConsumer::applyOpencvTransform(const cv::Mat& src, int frame_index
             }
         }
         case OpencvType::OpType::RESIZE: {
-            const auto& r = config_.resize;
-            if (r.dst_width <= 0 || r.dst_height <= 0 || r.fx || 0.0 && r.fy || 0.0) {
+            const auto& r = opencv_config_.resize;
+            if (r.dst_width <= 0 || r.dst_height <= 0 || r.fx <= 0.0 || r.fy <= 0.0) {
                 LOG4CPLUS_WARN(log4cplus::Logger::getRoot(),
                     "OpencvConsumer::applyOpencvTransform: RESIZE params invalid, skip");
                 return src;
@@ -744,7 +745,7 @@ cv::Mat OpencvConsumer::applyOpencvTransform(const cv::Mat& src, int frame_index
             return dst;
         }
         case OpencvType::OpType::CROP: {
-            const auto& c = config_.crop;
+            const auto& c = opencv_config_.crop;
             if (c.width <= 0 || c.height <= 0 ||
                 c.x < 0 || c.y < 0 ||
                 c.x + c.width > src.cols || c.y + c.height > src.rows) {
@@ -757,7 +758,7 @@ cv::Mat OpencvConsumer::applyOpencvTransform(const cv::Mat& src, int frame_index
             return src(cv::Rect(c.x, c.y, c.width, c.height)).clone();
         }
         case OpencvType::OpType::ERODE: {
-            const auto& m = config_.morph;
+            const auto& m = opencv_config_.morph;
             cv::Mat kernel = cv::getStructuringElement(
                 m.kernel_shape,
                 cv::Size(m.kernel_size, m.kernel_size));
@@ -768,7 +769,7 @@ cv::Mat OpencvConsumer::applyOpencvTransform(const cv::Mat& src, int frame_index
             return dst;
         }
         case OpencvType::OpType::DILATE: {
-            const auto& m = config_.morph;
+            const auto& m = opencv_config_.morph;
             cv::Mat kernel = cv::getStructuringElement(
                 m.kernel_shape,
                 cv::Size(m.kernel_size, m.kernel_size));
@@ -780,7 +781,7 @@ cv::Mat OpencvConsumer::applyOpencvTransform(const cv::Mat& src, int frame_index
         }
         case OpencvType::OpType::MORPH_OPEN: {
             // 开运算：先腐蚀后膨胀
-            const auto& m = config_.morph;
+            const auto& m = opencv_config_.morph;
             cv::Mat kernel = cv::getStructuringElement(
                 m.kernel_shape,
                 cv::Size(m.kernel_size, m.kernel_size));
@@ -795,7 +796,7 @@ cv::Mat OpencvConsumer::applyOpencvTransform(const cv::Mat& src, int frame_index
         }
         case OpencvType::OpType::MORPH_CLOSE: {
             // 闭运算：先膨胀后腐蚀
-            const auto& m = config_.morph;
+            const auto& m = opencv_config_.morph;
             cv::Mat kernel = cv::getStructuringElement(
                 m.kernel_shape,
                 cv::Size(m.kernel_size, m.kernel_size));
@@ -809,7 +810,7 @@ cv::Mat OpencvConsumer::applyOpencvTransform(const cv::Mat& src, int frame_index
             return dst;
         }
         case OpencvType::OpType::SOBEL: {
-            const auto& s = config_.sobel;
+            const auto& s = opencv_config_.sobel;
             int ksize = (s.ksize % 2 == 0) ? s.ksize + 1 : s.ksize;
             cv::Mat gray, dst;
             if (src.channels() != 1) cv::cvtColor(src, gray, cv::COLOR_BGR2GRAY);
@@ -818,7 +819,7 @@ cv::Mat OpencvConsumer::applyOpencvTransform(const cv::Mat& src, int frame_index
             return dst;
         }
         case OpencvType::OpType::CANNY: {
-            const auto& c = config_.canny;
+            const auto& c = opencv_config_.canny;
             cv::Mat gray, dst;
             if (src.channels() != 1) cv::cvtColor(src, gray, cv::COLOR_BGR2GRAY);
             else gray = src;
@@ -826,7 +827,7 @@ cv::Mat OpencvConsumer::applyOpencvTransform(const cv::Mat& src, int frame_index
             return dst;
         }
         case OpencvType::OpType::LAPLACIAN: {
-            const auto& l = config_.laplacian;
+            const auto& l = opencv_config_.laplacian;
             int ksize = (l.ksize % 2 == 0) ? l.ksize + 1 : l.ksize;
             cv::Mat gray, dst;
             if (src.channels() != 1) cv::cvtColor(src, gray, cv::COLOR_BGR2GRAY);
@@ -835,14 +836,14 @@ cv::Mat OpencvConsumer::applyOpencvTransform(const cv::Mat& src, int frame_index
             return dst;
         }
         case OpencvType::OpType::TRANSLATE: {
-            const auto& t = config_.translate;
+            const auto& t = opencv_config_.translate;
             cv::Mat M = (cv::Mat_<double>(2, 3) << 1, 0, t.tx, 0, 1, t.ty);
             cv::Mat dst;
             cv::warpAffine(src, dst, M, src.size());
             return dst;
         }
         case OpencvType::OpType::ROTATE: {
-            const auto& r = config_.rotate;
+            const auto& r = opencv_config_.rotate;
             cv::Point2f center(src.cols / 2.0f, src.rows / 2.0f);
             cv::Mat M = cv::getRotationMatrix2D(center, r.angle, r.scale);
             cv::Mat dst;
@@ -850,7 +851,7 @@ cv::Mat OpencvConsumer::applyOpencvTransform(const cv::Mat& src, int frame_index
             return dst;
         }
         case OpencvType::OpType::PERSPECTIVE: {
-            const auto& p = config_.perspective;
+            const auto& p = opencv_config_.perspective;
             int off = p.offset;
             cv::Point2f src_pts[4] = {
                 {0.f, 0.f},
@@ -870,7 +871,7 @@ cv::Mat OpencvConsumer::applyOpencvTransform(const cv::Mat& src, int frame_index
             return dst;
         }
         case OpencvType::OpType::DRAW_LINE: {
-            const auto& l = config_.draw_line;
+            const auto& l = opencv_config_.draw_line;
             cv::Mat dst = src.clone();
             cv::line(dst,
                      cv::Point(l.x1, l.y1),
@@ -880,7 +881,7 @@ cv::Mat OpencvConsumer::applyOpencvTransform(const cv::Mat& src, int frame_index
             return dst;
         }
         case OpencvType::OpType::DRAW_RECT: {
-            const auto& r = config_.draw_rect;
+            const auto& r = opencv_config_.draw_rect;
             cv::Mat dst = src.clone();
             cv::rectangle(dst,
                           cv::Rect(r.x, r.y, r.width, r.height),
@@ -889,7 +890,7 @@ cv::Mat OpencvConsumer::applyOpencvTransform(const cv::Mat& src, int frame_index
             return dst;
         }
         case OpencvType::OpType::PUT_TEXT: {
-            const auto& t = config_.put_text;
+            const auto& t = opencv_config_.put_text;
             cv::Mat dst = src.clone();
             cv::putText(dst, "Hello OpenCV",
                         cv::Point(t.x, t.y),
@@ -900,14 +901,14 @@ cv::Mat OpencvConsumer::applyOpencvTransform(const cv::Mat& src, int frame_index
             return dst;
         }
         case OpencvType::OpType::GAUSSIAN_BLUR: {
-            const auto& g = config_.gaussian_blur;
+            const auto& g = opencv_config_.gaussian_blur;
             int k = (g.ksize % 2 == 0) ? g.ksize + 1 : g.ksize;
             cv::Mat dst;
             cv::GaussianBlur(src, dst, cv::Size(k, k), g.sigma_x, g.sigma_x);
             return dst;
         }
         case OpencvType::OpType::THRESHOLD: {
-            const auto& t = config_.threshold;
+            const auto& t = opencv_config_.threshold;
             cv::Mat gray, dst;
             if (src.channels() != 1) cv::cvtColor(src, gray, cv::COLOR_BGR2GRAY);
             else gray = src;
@@ -925,7 +926,7 @@ cv::Mat OpencvConsumer::applyOpencvTransform(const cv::Mat& src, int frame_index
         }
         case OpencvType::OpType::CVTCOLOR: {
             // cvtColor 测试：颜色空间转换
-            const auto& c = config_.cvtcolor;
+            const auto& c = opencv_config_.cvtcolor;
             cv::Mat dst;
 
             // 对于 NV12 等 YUV 格式，需要特殊处理
@@ -1355,7 +1356,7 @@ bool OpencvConsumer::consume(const std::vector<Buffer*>& buffers, int frame_inde
         cv::Mat mat_hw_bgr;
         cv::cvtColor(mat_hw,mat_hw_bgr,cv::COLOR_YUV2BGR_NV12);
         // 对两路施加同一 OpenCV 变换
-        if (config_.op_type != OpencvType::OpType::NONE) {
+        if (opencv_config_.op_type != OpencvType::OpType::NONE) {
             mat_hw = applyOpencvTransform(mat_hw_bgr, frame_index);
             mat_sw = applyOpencvTransform(mat_sw, frame_index);
         }
@@ -1376,7 +1377,7 @@ bool OpencvConsumer::consume(const std::vector<Buffer*>& buffers, int frame_inde
         ssim_sum_ += result.ssim_avg;
         if (!result.passed) passed_ = false;
 
-        if (config_.verbose) {
+        if (compare_config_.verbose) {
             LOG4CPLUS_INFO_FMT(log4cplus::Logger::getRoot(),
                 "OpencvConsumer [frame %d] PSNR=%.2f dB  SSIM=%.4f  %s",
                 frame_index, result.psnr_avg, result.ssim_avg,
@@ -1396,7 +1397,7 @@ void OpencvConsumer::finalize() {
     }
 
     // 清理 SAVE_LOAD_IMG 操作的临时文件
-    if (config_.op_type == OpencvType::OpType::SAVE_LOAD_IMG) {
+    if (opencv_config_.op_type == OpencvType::OpType::SAVE_LOAD_IMG) {
         const std::string temp_filename = "/tmp/opencv_test_frame.jpg";
         ::remove(temp_filename.c_str());
         LOG4CPLUS_INFO_FMT(log4cplus::Logger::getRoot(),

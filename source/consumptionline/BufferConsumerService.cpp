@@ -535,7 +535,7 @@ static std::shared_ptr<IBufferConsumer> createConsumerForWorker(
 
     // 4. OpenCV 消费者（Buffer→Mat 转换 + PSNR/SSIM）
     if (flags & CONSUME_OPENCV) {
-        consumers.push_back(std::make_shared<OpencvConsumer>(config.opencv));
+        consumers.push_back(std::make_shared<OpencvConsumer>(config.opencv, config.compare));
     }
 
     
@@ -886,7 +886,7 @@ std::shared_ptr<IBufferConsumer> BufferConsumerService::createConsumerFromFlags(
             );
         }
         if (flags & CONSUME_OPENCV) {
-            return std::make_shared<OpencvConsumer>(config.consumer_type.opencv);
+            return std::make_shared<OpencvConsumer>(config.consumer_type.opencv, config.consumer_type.compare);
         }
         if (flags & CONSUME_NPU_INFERENCE) {
             NpuInferenceConfig npu_cfg;
@@ -939,7 +939,7 @@ std::shared_ptr<IBufferConsumer> BufferConsumerService::createConsumerFromFlags(
         ));
     }
     if (flags & CONSUME_OPENCV) {
-        multi->addStrategy(std::make_shared<OpencvConsumer>(config.consumer_type.opencv));
+        multi->addStrategy(std::make_shared<OpencvConsumer>(config.consumer_type.opencv, config.consumer_type.compare));
     }
 
     
