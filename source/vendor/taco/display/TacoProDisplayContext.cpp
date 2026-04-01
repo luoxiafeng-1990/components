@@ -62,6 +62,36 @@ namespace {
             slots[1 + i] = {main_w, i * side_h, side_w, side_h};
         }
     }
+
+    inline ta_image_format_ext_t getTacoCvFormat(int av_format) {
+        switch (av_format) {
+            case 23: return FORMAT_NV12;       // AV_PIX_FMT_NV12
+            case 24: return FORMAT_NV21;       // AV_PIX_FMT_NV21
+            case 0:  return FORMAT_YUV420P;    // AV_PIX_FMT_YUV420P
+            case 2:  return FORMAT_RGB_PACKED; // AV_PIX_FMT_RGB24
+            case 3:  return FORMAT_BGR_PACKED; // AV_PIX_FMT_BGR24
+            default: return FORMAT_NV12;
+        }
+    }
+
+    inline int getBlkIdFromAVFrame(AVFrame* avframe, int fallback_id) {
+        if (avframe && avframe->metadata) {
+            auto meta = reinterpret_cast<TA_AVDictionary*>(avframe->metadata);
+            if (meta && meta->count > 0 && meta->elems) {
+                // To be safe, look for "pool_blk_id"
+                for (int i = 0; i < meta->count; ++i) {
+                    if (meta->elems[i].key && strcmp(meta->elems[i].key, "pool_blk_id") == 0) {
+                        int val = std::atoi(meta->elems[i].value);
+                        if (val > 0) return val;
+                    }
+                }
+                // Fallback to first element if not named correctly (as taco-vo does)
+                int val = std::atoi(meta->elems[0].value);
+                if (val > 0) return val;
+            }
+        }
+        return fallback_id;
+    }
 }
 
 struct tpsfb_dma_info {
@@ -787,49 +817,37 @@ void TacoProDisplayContext::ppResize(
         return;
     }
 
-    ta_avframe_t in_avframe;
-    memset(&in_avframe, 0, sizeof(in_avframe));
-    in_avframe.width  = avframe_in->width;
-    in_avframe.height = avframe_in->height;
-    in_avframe.format = avframe_in->format;
-    for (int i = 0; i < TA_AV_NUM_DATA_POINTERS; ++i) {
-        in_avframe.data[i]     = avframe_in->data[i];
-        in_avframe.linesize[i] = avframe_in->linesize[i];
+    int src_blk_id = getBlkIdFromAVFrame(avframe_in, src->id());
+    if (src_blk_id <= 0) {
+        LOG4CPLUS_WARN(logger_, "ppResize: could not resolve src dmabuf blk_id");
+        return;
     }
-    in_avframe.metadata = reinterpret_cast<TA_AVDictionary*>(avframe_in->metadata);
-
-    char blk_id_str[16];
-    snprintf(blk_id_str, sizeof(blk_id_str), "%u", dst->id());
-    TA_AVDictionaryEntry local_out_entry;
-    local_out_entry.key = const_cast<char*>("pool_blk_id");
-    local_out_entry.value = blk_id_str;
-    TA_AVDictionary local_out_dict;
-    local_out_dict.count = 1;
-    local_out_dict.elems = &local_out_entry;
-
-    ta_avframe_t out_avframe;
-    memset(&out_avframe, 0, sizeof(out_avframe));
-    out_avframe.width  = screen_width_;
-    out_avframe.height = screen_height_;
-    out_avframe.format = TA_AV_PIX_FMT_NV12;
-    out_avframe.metadata = &local_out_dict;
-    out_avframe.data[0] = static_cast<uint8_t*>(dst->getVirtualAddress());
 
     ta_image_t image_in = {};
     ta_image_t image_out = {};
 
-    tacv_status_t ret = ta_cv_image_create(0, 0, (ta_image_format_ext_t)0,
-        (ta_image_data_format_ext_t)0, &image_in, &in_avframe);
+    tacv_status_t ret = ta_cv_image_create_ext(
+        avframe_in->height,
+        avframe_in->width,
+        getTacoCvFormat(avframe_in->format),
+        &image_in,
+        src_blk_id
+    );
     if (ret != 0) {
-        LOG4CPLUS_WARN_FMT(logger_, "ppResize: ta_cv_image_create(input) failed: %d", ret);
+        LOG4CPLUS_WARN_FMT(logger_, "ppResize: ta_cv_image_create_ext(input) failed: %d", ret);
         return;
     }
 
-    ret = ta_cv_image_create(0, 0, (ta_image_format_ext_t)0,
-        (ta_image_data_format_ext_t)0, &image_out, &out_avframe);
+    ret = ta_cv_image_create_ext(
+        screen_height_,
+        screen_width_,
+        FORMAT_NV12,
+        &image_out,
+        dst->id()
+    );
     if (ret != 0) {
-        LOG4CPLUS_WARN_FMT(logger_, "ppResize: ta_cv_image_create(output) failed: %d", ret);
-        ta_cv_image_destroy(&image_in);
+        LOG4CPLUS_WARN_FMT(logger_, "ppResize: ta_cv_image_create_ext(output) failed: %d", ret);
+        ta_cv_image_destroy_ext(&image_in);
         return;
     }
 
@@ -853,8 +871,8 @@ void TacoProDisplayContext::ppResize(
             ret, dst_x, dst_y, dst_w, dst_h, dst->id());
     }
 
-    ta_cv_image_destroy(&image_in);
-    ta_cv_image_destroy(&image_out);
+    ta_cv_image_destroy_ext(&image_in);
+    ta_cv_image_destroy_ext(&image_out);
 }
 
 void TacoProDisplayContext::ppCopy(Buffer* src, Buffer* dst) {
@@ -864,59 +882,36 @@ void TacoProDisplayContext::ppCopy(Buffer* src, Buffer* dst) {
         return;
     }
 
-    uint8_t* src_virt = static_cast<uint8_t*>(src->getVirtualAddress());
-    uint8_t* dst_virt = static_cast<uint8_t*>(dst->getVirtualAddress());
-
-    char src_blk_str[16], dst_blk_str[16];
-    snprintf(src_blk_str, sizeof(src_blk_str), "%u", src->id());
-    snprintf(dst_blk_str, sizeof(dst_blk_str), "%u", dst->id());
-
-    TA_AVDictionaryEntry local_entry;
-    local_entry.key = const_cast<char*>("pool_blk_id");
-    local_entry.value = src_blk_str;
-    TA_AVDictionary local_dict;
-    local_dict.count = 1;
-    local_dict.elems = &local_entry;
-
-    TA_AVDictionaryEntry local_entry2;
-    local_entry2.key = const_cast<char*>("pool_blk_id");
-    local_entry2.value = dst_blk_str;
-    TA_AVDictionary local_dict2;
-    local_dict2.count = 1;
-    local_dict2.elems = &local_entry2;
-
-    ta_avframe_t src_avframe;
-    memset(&src_avframe, 0, sizeof(src_avframe));
-    src_avframe.width  = screen_width_;
-    src_avframe.height = screen_height_;
-    src_avframe.format = TA_AV_PIX_FMT_NV12;
-    src_avframe.metadata = &local_dict;
-    src_avframe.data[0] = src_virt;
-
-    ta_avframe_t dst_avframe;
-    memset(&dst_avframe, 0, sizeof(dst_avframe));
-    dst_avframe.width  = screen_width_;
-    dst_avframe.height = screen_height_;
-    dst_avframe.format = TA_AV_PIX_FMT_NV12;
-    dst_avframe.metadata = &local_dict2;
-    dst_avframe.data[0] = dst_virt;
-
     ta_image_t image_in = {};
     ta_image_t image_out = {};
 
-    tacv_status_t ret = ta_cv_image_create(0, 0, (ta_image_format_ext_t)0,
-        (ta_image_data_format_ext_t)0, &image_in, &src_avframe);
+    tacv_status_t ret = ta_cv_image_create_ext(
+        screen_height_,
+        screen_width_,
+        FORMAT_NV12,
+        &image_in,
+        src->id()
+    );
     if (ret != 0) {
-        LOG4CPLUS_WARN_FMT(logger_, "ppCopy: ta_cv_image_create(input) failed: %d, fallback to memcpy", ret);
+        LOG4CPLUS_WARN_FMT(logger_, "ppCopy: ta_cv_image_create_ext(input) failed: %d, fallback to memcpy", ret);
+        uint8_t* src_virt = static_cast<uint8_t*>(src->getVirtualAddress());
+        uint8_t* dst_virt = static_cast<uint8_t*>(dst->getVirtualAddress());
         memcpy(dst_virt, src_virt, buffer_size_);
         return;
     }
 
-    ret = ta_cv_image_create(0, 0, (ta_image_format_ext_t)0,
-        (ta_image_data_format_ext_t)0, &image_out, &dst_avframe);
+    ret = ta_cv_image_create_ext(
+        screen_height_,
+        screen_width_,
+        FORMAT_NV12,
+        &image_out,
+        dst->id()
+    );
     if (ret != 0) {
-        LOG4CPLUS_WARN_FMT(logger_, "ppCopy: ta_cv_image_create(output) failed: %d, fallback to memcpy", ret);
-        ta_cv_image_destroy(&image_in);
+        LOG4CPLUS_WARN_FMT(logger_, "ppCopy: ta_cv_image_create_ext(output) failed: %d, fallback to memcpy", ret);
+        ta_cv_image_destroy_ext(&image_in);
+        uint8_t* src_virt = static_cast<uint8_t*>(src->getVirtualAddress());
+        uint8_t* dst_virt = static_cast<uint8_t*>(dst->getVirtualAddress());
         memcpy(dst_virt, src_virt, buffer_size_);
         return;
     }
@@ -928,65 +923,43 @@ void TacoProDisplayContext::ppCopy(Buffer* src, Buffer* dst) {
     ret = ta_cv_image_copy_to(image_in, image_out, copy_attr);
     if (ret != 0) {
         LOG4CPLUS_WARN_FMT(logger_, "ppCopy: ta_cv_image_copy_to failed: ret=%d, fallback to memcpy", ret);
+        uint8_t* src_virt = static_cast<uint8_t*>(src->getVirtualAddress());
+        uint8_t* dst_virt = static_cast<uint8_t*>(dst->getVirtualAddress());
         memcpy(dst_virt, src_virt, buffer_size_);
     }
 
-    ta_cv_image_destroy(&image_in);
-    ta_cv_image_destroy(&image_out);
+    ta_cv_image_destroy_ext(&image_in);
+    ta_cv_image_destroy_ext(&image_out);
 }
 
 void TacoProDisplayContext::copyTemplateRegion(Buffer* dst, const ChannelLayout& layout) {
     if (!template_buf_ || !dst) return;
 
-    char src_blk_str[16];
-    snprintf(src_blk_str, sizeof(src_blk_str), "%u", template_blk_id_);
-    TA_AVDictionaryEntry src_entry;
-    src_entry.key   = const_cast<char*>("pool_blk_id");
-    src_entry.value = src_blk_str;
-    TA_AVDictionary src_dict;
-    src_dict.count = 1;
-    src_dict.elems = &src_entry;
-
-    ta_avframe_t in_avframe;
-    memset(&in_avframe, 0, sizeof(in_avframe));
-    in_avframe.width    = screen_width_;
-    in_avframe.height   = screen_height_;
-    in_avframe.format   = TA_AV_PIX_FMT_NV12;
-    in_avframe.metadata = &src_dict;
-    in_avframe.data[0]  = static_cast<uint8_t*>(template_buf_->getVirtualAddress());
-
-    char dst_blk_str[16];
-    snprintf(dst_blk_str, sizeof(dst_blk_str), "%u", dst->id());
-    TA_AVDictionaryEntry dst_entry;
-    dst_entry.key   = const_cast<char*>("pool_blk_id");
-    dst_entry.value = dst_blk_str;
-    TA_AVDictionary dst_dict;
-    dst_dict.count = 1;
-    dst_dict.elems = &dst_entry;
-
-    ta_avframe_t out_avframe;
-    memset(&out_avframe, 0, sizeof(out_avframe));
-    out_avframe.width    = screen_width_;
-    out_avframe.height   = screen_height_;
-    out_avframe.format   = TA_AV_PIX_FMT_NV12;
-    out_avframe.metadata = &dst_dict;
-    out_avframe.data[0]  = static_cast<uint8_t*>(dst->getVirtualAddress());
-
     ta_image_t image_in = {}, image_out = {};
-    tacv_status_t ret = ta_cv_image_create(0, 0, (ta_image_format_ext_t)0,
-        (ta_image_data_format_ext_t)0, &image_in, &in_avframe);
+    tacv_status_t ret = ta_cv_image_create_ext(
+        screen_height_,
+        screen_width_,
+        FORMAT_NV12,
+        &image_in,
+        template_blk_id_
+    );
     if (ret != 0) {
         LOG4CPLUS_WARN_FMT(logger_,
-            "copyTemplateRegion: ta_cv_image_create(input) failed: %d", ret);
+            "copyTemplateRegion: ta_cv_image_create_ext(input) failed: %d", ret);
         return;
     }
 
-    ret = ta_cv_image_create(0, 0, (ta_image_format_ext_t)0,
-        (ta_image_data_format_ext_t)0, &image_out, &out_avframe);
+    ret = ta_cv_image_create_ext(
+        screen_height_,
+        screen_width_,
+        FORMAT_NV12,
+        &image_out,
+        dst->id()
+    );
     if (ret != 0) {
         LOG4CPLUS_WARN_FMT(logger_,
-            "copyTemplateRegion: ta_cv_image_create(output) failed: %d", ret);
-        ta_cv_image_destroy(&image_in);
+            "copyTemplateRegion: ta_cv_image_create_ext(output) failed: %d", ret);
+        ta_cv_image_destroy_ext(&image_in);
         return;
     }
 
@@ -1010,8 +983,8 @@ void TacoProDisplayContext::copyTemplateRegion(Buffer* dst, const ChannelLayout&
             ret, layout.x, layout.y, layout.w, layout.h);
     }
 
-    ta_cv_image_destroy(&image_in);
-    ta_cv_image_destroy(&image_out);
+    ta_cv_image_destroy_ext(&image_in);
+    ta_cv_image_destroy_ext(&image_out);
 }
 
 // ============================================================
