@@ -737,11 +737,6 @@ cv::Mat OpencvConsumer::applyOpencvTransform(const cv::Mat& src, int frame_index
             }
             
             cv::Mat dst;
-            std::cout << r.dst_width << "|"
-                    << r.dst_height << "|"
-                    << r.fx << "|" 
-                    << r.fy << "|"
-                    << r.interpolation << std::endl;
             cv::resize(src, dst,
                        cv::Size(r.dst_width, r.dst_height),
                        r.fx, r.fy,
@@ -1356,18 +1351,13 @@ bool OpencvConsumer::consume(const std::vector<Buffer*>& buffers, int frame_inde
         AVFrame* avframe_sw = av_frame_clone(avframe_hw);
         cv::Mat mat_hw = cv::Mat(avframe_hw);
         cv::Mat mat_sw = avframeToMat(avframe_sw);
-        std::cout << avframeInfoToString(avframe_hw) << std::endl;
-        std::cout << avframeInfoToString(avframe_sw) << std::endl;
-        std::cout << matInfoToString(mat_hw) << std::endl;
-        std::cout << matInfoToString(mat_sw) << std::endl;
 
+        cv::Mat mat_hw_bgr;
+        cv::cvtColor(mat_hw,mat_hw_bgr,cv::COLOR_YUV2BGR_NV12);
         // 对两路施加同一 OpenCV 变换
         if (config_.op_type != OpencvType::OpType::NONE) {
-            mat_hw = applyOpencvTransform(mat_hw, frame_index);
+            mat_hw = applyOpencvTransform(mat_hw_bgr, frame_index);
             mat_sw = applyOpencvTransform(mat_sw, frame_index);
-
-            std::cout << matInfoToString(mat_hw) << std::endl;
-            std::cout << matInfoToString(mat_sw) << std::endl;
         }
 
         // 临时 Buffer 包装 Mat；comparator 检测到 setMat 后走 is_mat 路径

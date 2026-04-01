@@ -229,7 +229,6 @@ std::vector<WorkerConfig> OpencvPlugin::buildPipelineConfigs(const WorkerConfig&
 
     // Use params_str from command line (or from predefined test params)
     std::string op_params = params_str_.empty() ? params_.params_str : params_str_;
-    std::cout << op_params << std::endl;
 
     // Parse params_str to get operation type and parameters
     std::vector<std::string> fields;
@@ -237,7 +236,6 @@ std::vector<WorkerConfig> OpencvPlugin::buildPipelineConfigs(const WorkerConfig&
     std::string token;
     while (std::getline(ss, token, '_')) {
         fields.push_back(token);
-        std::cout << token << std::endl;
     }
 
     // Use case_str from command line if provided, otherwise use first field
@@ -300,7 +298,6 @@ std::vector<WorkerConfig> OpencvPlugin::buildPipelineConfigs(const WorkerConfig&
             if (op == OpType::RESIZE) {
                 opencv.resize.dst_width = std::stoi(fields.at(0));
                 opencv.resize.dst_height = std::stoi(fields.at(1));
-                std::cout << opencv.resize.dst_width << "|" << opencv.resize.dst_height << std::endl;
                 opencv.resize.fx = 0.0;
                 opencv.resize.fy = 0.0;
                 opencv.resize.interpolation = 1;
@@ -377,7 +374,6 @@ std::vector<WorkerConfig> OpencvPlugin::buildPipelineConfigs(const WorkerConfig&
 
     // COMPARE mode: hw vs sw
     if ((is_arithmetic_op || compare_enabled) && params_.use_hardware) {
-        std::cout << "two pictures" << std::endl;
         auto hw_config = buildConfig(true);
         auto sw_config = buildConfig(false);
         return {hw_config, sw_config};
