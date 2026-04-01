@@ -2,6 +2,8 @@
 
 #include "buffer/BufferAllocatorBase.hpp"
 #include <cstdlib>
+#include <log4cplus/logger.h>
+#include <log4cplus/loggingmacros.h>
 
 /**
  * @brief NormalAllocator - 普通内存分配器
@@ -75,7 +77,8 @@ public:
         void* virt_addr,
         uint64_t phys_addr,
         size_t size,
-        QueueType queue = QueueType::FREE
+        QueueType queue = QueueType::FREE,
+        uint32_t custom_id = 0
     ) override;
     
     /**
@@ -127,5 +130,8 @@ protected:
 private:
     BufferMemoryAllocatorType type_;
     size_t alignment_;
+    
+    // 日志器
+    log4cplus::Logger logger_;
 };
 

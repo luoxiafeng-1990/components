@@ -10,12 +10,12 @@
 BufferAllocatorFacade::BufferAllocatorFacade(
     BufferAllocatorFactory::AllocatorType type
 ) : type_(type) {
-    LOG_DEBUG_FMT("[BufferAllocatorFacade] 创建: 类型=%s", 
+    LOG4CPLUS_DEBUG_FMT(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Allocator.Facade")), "创建: 类型=%s", 
                   BufferAllocatorFactory::typeToString(type));
     // 使用 Factory 创建底层 Allocator
     allocator_base_uptr_ = BufferAllocatorFactory::create(type);
     if (!allocator_base_uptr_) {
-        LOG_ERROR_FMT("[BufferAllocatorFacade] 创建底层Allocator失败");
+        LOG4CPLUS_ERROR_FMT(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Allocator.Facade")), "创建底层Allocator失败");
     }
 }
 
@@ -32,7 +32,7 @@ BufferAllocatorFacade::~BufferAllocatorFacade() {
     // ~Worker() → ~allocator_facade_() → destroyPool() → 遍历所有 Pool → 
     // 遍历 Pool 中所有 Buffer → deallocateBuffer() → av_frame_free()
     
-    LOG_DEBUG("[BufferAllocatorFacade] 析构: 自动清理所有 Pool...");
+    LOG4CPLUS_DEBUG(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Allocator.Facade")), "析构: 自动清理所有 Pool...");
     
     if (allocator_base_uptr_) {
         // 调用底层 Allocator 的 destroyPool()
@@ -42,7 +42,7 @@ BufferAllocatorFacade::~BufferAllocatorFacade() {
     }
     
     // allocator_base_uptr_ 通过 unique_ptr 自动释放
-    LOG_DEBUG("[BufferAllocatorFacade] 析构完成");
+    LOG4CPLUS_DEBUG(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Allocator.Facade")), "析构完成");
 }
 
 // ============================================================================
@@ -56,7 +56,7 @@ uint64_t BufferAllocatorFacade::allocatePoolWithBuffers(
     const std::string& category
 ) {
     if (!allocator_base_uptr_) {
-        LOG_ERROR("[BufferAllocatorFacade] Allocator not initialized");
+        LOG4CPLUS_ERROR(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Allocator.Facade")), "Allocator not initialized");
         return 0;
     }
     
@@ -69,7 +69,7 @@ Buffer* BufferAllocatorFacade::injectBufferToPool(
     QueueType queue
 ) {
     if (!allocator_base_uptr_) {
-        LOG_ERROR("[BufferAllocatorFacade] Allocator not initialized");
+        LOG4CPLUS_ERROR(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Allocator.Facade")), "Allocator not initialized");
         return nullptr;
     }
     
@@ -81,19 +81,20 @@ Buffer* BufferAllocatorFacade::injectExternalBufferToPool(
     void* virt_addr,
     uint64_t phys_addr,
     size_t size,
-    QueueType queue
+    QueueType queue,
+    uint32_t custom_id
 ) {
     if (!allocator_base_uptr_) {
-        LOG_ERROR("[BufferAllocatorFacade] Allocator not initialized");
+        LOG4CPLUS_ERROR(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Allocator.Facade")), "Allocator not initialized");
         return nullptr;
     }
     
-    return allocator_base_uptr_->injectExternalBufferToPool(pool_id, virt_addr, phys_addr, size, queue);
+    return allocator_base_uptr_->injectExternalBufferToPool(pool_id, virt_addr, phys_addr, size, queue, custom_id);
 }
 
 bool BufferAllocatorFacade::removeBufferFromPool(uint64_t pool_id, Buffer* buffer) {
     if (!allocator_base_uptr_) {
-        LOG_ERROR("[BufferAllocatorFacade] Allocator not initialized");
+        LOG4CPLUS_ERROR(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Allocator.Facade")), "Allocator not initialized");
         return false;
     }
     
@@ -102,7 +103,7 @@ bool BufferAllocatorFacade::removeBufferFromPool(uint64_t pool_id, Buffer* buffe
 
 bool BufferAllocatorFacade::destroyPool() {
     if (!allocator_base_uptr_) {
-        LOG_ERROR("[BufferAllocatorFacade] Allocator not initialized");
+        LOG4CPLUS_ERROR(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Allocator.Facade")), "Allocator not initialized");
         return false;
     }
     

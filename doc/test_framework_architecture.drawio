@@ -1,0 +1,778 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mxfile host="app.diagrams.net" modified="2026-01-27T00:00:00.000Z" agent="Cursor" version="21.0.0" etag="test-framework-arch">
+  <diagram id="test-framework-class-diagram" name="类关系图">
+    <mxGraphModel dx="1200" dy="800" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1600" pageHeight="1200" math="0" shadow="0">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+        
+        <!-- 标题 -->
+        <mxCell id="title" value="Test Framework 类关系图 (v3.1)" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=24;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="500" y="20" width="400" height="40" as="geometry"/>
+        </mxCell>
+        
+        <!-- ========================================== -->
+        <!-- common 命名空间 - 核心接口和工具类 -->
+        <!-- ========================================== -->
+        <mxCell id="common-package" value="test::common" style="swimlane;fontStyle=1;align=center;verticalAlign=top;childLayout=stackLayout;horizontal=1;startSize=30;horizontalStack=0;resizeParent=1;resizeParentMax=0;resizeLast=0;collapsible=0;marginBottom=0;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+          <mxGeometry x="40" y="80" width="700" height="500" as="geometry"/>
+        </mxCell>
+        
+        <!-- ITestModule 接口 -->
+        <mxCell id="ITestModule" value="&lt;&lt;interface&gt;&gt;&#xa;ITestModule" style="swimlane;fontStyle=1;align=center;verticalAlign=top;childLayout=stackLayout;horizontal=1;startSize=40;horizontalStack=0;resizeParent=1;resizeParentMax=0;resizeLast=0;collapsible=0;marginBottom=0;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1">
+          <mxGeometry x="60" y="130" width="260" height="180" as="geometry"/>
+        </mxCell>
+        <mxCell id="ITestModule-attrs" value="# 测试模块必须实现的接口" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacingLeft=4;spacingRight=4;overflow=hidden;rotatable=0;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;fontStyle=2;fontColor=#666666;" vertex="1" parent="ITestModule">
+          <mxGeometry y="40" width="260" height="20" as="geometry"/>
+        </mxCell>
+        <mxCell id="ITestModule-sep1" value="" style="line;strokeWidth=1;fillColor=none;align=left;verticalAlign=middle;spacingTop=-1;spacingLeft=3;spacingRight=3;rotatable=0;labelPosition=right;points=[];portConstraint=eastwest;" vertex="1" parent="ITestModule">
+          <mxGeometry y="60" width="260" height="8" as="geometry"/>
+        </mxCell>
+        <mxCell id="ITestModule-methods" value="+ getName(): string&#xa;+ getDescription(): string&#xa;+ run(argc, argv): int&#xa;+ printHelp(): void&#xa;+ listTests(): void&#xa;+ getTestNames(): vector&lt;string&gt;" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacingLeft=4;spacingRight=4;overflow=hidden;rotatable=0;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;fontFamily=Courier New;" vertex="1" parent="ITestModule">
+          <mxGeometry y="68" width="260" height="112" as="geometry"/>
+        </mxCell>
+        
+        <!-- TestModuleRegistry 单例 -->
+        <mxCell id="TestModuleRegistry" value="TestModuleRegistry&#xa;«singleton»" style="swimlane;fontStyle=1;align=center;verticalAlign=top;childLayout=stackLayout;horizontal=1;startSize=40;horizontalStack=0;resizeParent=1;resizeParentMax=0;resizeLast=0;collapsible=0;marginBottom=0;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+          <mxGeometry x="60" y="340" width="260" height="180" as="geometry"/>
+        </mxCell>
+        <mxCell id="TestModuleRegistry-attrs" value="- modules_: map&lt;string, ITestModulePtr&gt;&#xa;- module_order_: vector&lt;string&gt;" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacingLeft=4;spacingRight=4;overflow=hidden;rotatable=0;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;fontFamily=Courier New;" vertex="1" parent="TestModuleRegistry">
+          <mxGeometry y="40" width="260" height="40" as="geometry"/>
+        </mxCell>
+        <mxCell id="TestModuleRegistry-sep" value="" style="line;strokeWidth=1;fillColor=none;align=left;verticalAlign=middle;spacingTop=-1;spacingLeft=3;spacingRight=3;rotatable=0;labelPosition=right;points=[];portConstraint=eastwest;" vertex="1" parent="TestModuleRegistry">
+          <mxGeometry y="80" width="260" height="8" as="geometry"/>
+        </mxCell>
+        <mxCell id="TestModuleRegistry-methods" value="+ getInstance(): TestModuleRegistry&amp;&#xa;+ registerModule(module): bool&#xa;+ getModule(name): ITestModulePtr&#xa;+ hasModule(name): bool&#xa;+ getModuleNames(): vector&lt;string&gt;&#xa;+ printGlobalHelp(prog_name): void&#xa;+ listModules(): void" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacingLeft=4;spacingRight=4;overflow=hidden;rotatable=0;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;fontFamily=Courier New;" vertex="1" parent="TestModuleRegistry">
+          <mxGeometry y="88" width="260" height="92" as="geometry"/>
+        </mxCell>
+        
+        <!-- TestExecutor 静态工具类 -->
+        <mxCell id="TestExecutor" value="TestExecutor" style="swimlane;fontStyle=1;align=center;verticalAlign=top;childLayout=stackLayout;horizontal=1;startSize=26;horizontalStack=0;resizeParent=1;resizeParentMax=0;resizeLast=0;collapsible=0;marginBottom=0;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="1">
+          <mxGeometry x="360" y="130" width="280" height="200" as="geometry"/>
+        </mxCell>
+        <mxCell id="TestExecutor-attrs" value="- g_running_: atomic&lt;bool&gt;&#xa;- g_interrupted_: atomic&lt;bool&gt;" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacingLeft=4;spacingRight=4;overflow=hidden;rotatable=0;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;fontFamily=Courier New;" vertex="1" parent="TestExecutor">
+          <mxGeometry y="26" width="280" height="40" as="geometry"/>
+        </mxCell>
+        <mxCell id="TestExecutor-sep" value="" style="line;strokeWidth=1;fillColor=none;align=left;verticalAlign=middle;spacingTop=-1;spacingLeft=3;spacingRight=3;rotatable=0;labelPosition=right;points=[];portConstraint=eastwest;" vertex="1" parent="TestExecutor">
+          <mxGeometry y="66" width="280" height="8" as="geometry"/>
+        </mxCell>
+        <mxCell id="TestExecutor-methods" value="+ runDecode(config): TestResult&#xa;+ runRecord(config, output, duration): TestResult&#xa;+ runPsnrValidation(hw, sw): TestResult&#xa;+ runMultiWorker(configs): TestResult&#xa;+ printResult(name, result): void&#xa;+ printHeader(name, config): void&#xa;+ setupSignalHandler(): void&#xa;+ isRunning(): bool&#xa;+ requestStop(): void" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacingLeft=4;spacingRight=4;overflow=hidden;rotatable=0;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;fontFamily=Courier New;" vertex="1" parent="TestExecutor">
+          <mxGeometry y="74" width="280" height="126" as="geometry"/>
+        </mxCell>
+        
+        <!-- TestResult 结构体 -->
+        <mxCell id="TestResult" value="TestResult" style="swimlane;fontStyle=1;align=center;verticalAlign=top;childLayout=stackLayout;horizontal=1;startSize=26;horizontalStack=0;resizeParent=1;resizeParentMax=0;resizeLast=0;collapsible=0;marginBottom=0;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="1">
+          <mxGeometry x="360" y="360" width="280" height="200" as="geometry"/>
+        </mxCell>
+        <mxCell id="TestResult-attrs" value="+ success: bool&#xa;+ frames_decoded: int&#xa;+ frames_saved: int&#xa;+ frames_displayed: int&#xa;+ packets_recorded: int64_t&#xa;+ bytes_recorded: int64_t&#xa;+ duration_seconds: double&#xa;+ average_fps: double&#xa;+ fps_passed: bool&#xa;+ psnr_passed: bool&#xa;+ psnr_average: double&#xa;+ ssim_passed: bool&#xa;+ ssim_average: double&#xa;+ output_file: string&#xa;+ error_message: string" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacingLeft=4;spacingRight=4;overflow=hidden;rotatable=0;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;fontFamily=Courier New;" vertex="1" parent="TestResult">
+          <mxGeometry y="26" width="280" height="174" as="geometry"/>
+        </mxCell>
+        
+        <!-- WorkerConfigFactory 工厂类 -->
+        <mxCell id="WorkerConfigFactory" value="WorkerConfigFactory" style="swimlane;fontStyle=1;align=center;verticalAlign=top;childLayout=stackLayout;horizontal=1;startSize=26;horizontalStack=0;resizeParent=1;resizeParentMax=0;resizeLast=0;collapsible=0;marginBottom=0;fillColor=#ffe6cc;strokeColor=#d79b00;" vertex="1" parent="1">
+          <mxGeometry x="680" y="130" width="300" height="240" as="geometry"/>
+        </mxCell>
+        <mxCell id="WorkerConfigFactory-desc" value="# 快捷配置工厂 - 简化测试代码" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacingLeft=4;spacingRight=4;overflow=hidden;rotatable=0;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;fontStyle=2;fontColor=#666666;" vertex="1" parent="WorkerConfigFactory">
+          <mxGeometry y="26" width="300" height="20" as="geometry"/>
+        </mxCell>
+        <mxCell id="WorkerConfigFactory-sep" value="" style="line;strokeWidth=1;fillColor=none;align=left;verticalAlign=middle;spacingTop=-1;spacingLeft=3;spacingRight=3;rotatable=0;labelPosition=right;points=[];portConstraint=eastwest;" vertex="1" parent="WorkerConfigFactory">
+          <mxGeometry y="46" width="300" height="8" as="geometry"/>
+        </mxCell>
+        <mxCell id="WorkerConfigFactory-methods" value="+ createH264Decode(path, w, h): WorkerConfig&#xa;+ createH265Decode(path, w, h): WorkerConfig&#xa;+ createMjpegDecode(path, w, h): WorkerConfig&#xa;+ createSoftwareDecode(path, w, h): WorkerConfig&#xa;+ createDecode(path, decoder, w, h): WorkerConfig&#xa;+ createPP0YuvConfig(...): WorkerConfig&#xa;+ createPP1RgbConfig(...): WorkerConfig&#xa;+ createPP1YuvConfig(...): WorkerConfig&#xa;+ createMultiPPConfig(...): WorkerConfig&#xa;+ createCropConfig(...): WorkerConfig&#xa;+ createRtspDecode(url, decoder, w, h): WorkerConfig&#xa;+ createRtspRecord(url, buffer_count): WorkerConfig&#xa;+ isRtspUrl(path): bool&#xa;+ isStreamUrl(path): bool" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacingLeft=4;spacingRight=4;overflow=hidden;rotatable=0;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;fontFamily=Courier New;" vertex="1" parent="WorkerConfigFactory">
+          <mxGeometry y="54" width="300" height="186" as="geometry"/>
+        </mxCell>
+        
+        <!-- ========================================== -->
+        <!-- 具体测试套件 -->
+        <!-- ========================================== -->
+        <mxCell id="suites-package" value="Test Suites（测试套件实现）" style="swimlane;fontStyle=1;align=center;verticalAlign=top;childLayout=stackLayout;horizontal=1;startSize=30;horizontalStack=0;resizeParent=1;resizeParentMax=0;resizeLast=0;collapsible=0;marginBottom=0;fillColor=#f5f5f5;strokeColor=#666666;" vertex="1" parent="1">
+          <mxGeometry x="40" y="620" width="940" height="320" as="geometry"/>
+        </mxCell>
+        
+        <!-- VdecTestSuite -->
+        <mxCell id="VdecTestSuite" value="VdecTestSuite" style="swimlane;fontStyle=1;align=center;verticalAlign=top;childLayout=stackLayout;horizontal=1;startSize=26;horizontalStack=0;resizeParent=1;resizeParentMax=0;resizeLast=0;collapsible=0;marginBottom=0;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1">
+          <mxGeometry x="60" y="670" width="200" height="160" as="geometry"/>
+        </mxCell>
+        <mxCell id="VdecTestSuite-desc" value="视频解码测试 (vdec)" style="text;strokeColor=none;fillColor=none;align=center;verticalAlign=top;spacingLeft=4;spacingRight=4;overflow=hidden;rotatable=0;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;fontStyle=2;fontColor=#666666;" vertex="1" parent="VdecTestSuite">
+          <mxGeometry y="26" width="200" height="20" as="geometry"/>
+        </mxCell>
+        <mxCell id="VdecTestSuite-sep" value="" style="line;strokeWidth=1;fillColor=none;align=left;verticalAlign=middle;spacingTop=-1;spacingLeft=3;spacingRight=3;rotatable=0;labelPosition=right;points=[];portConstraint=eastwest;" vertex="1" parent="VdecTestSuite">
+          <mxGeometry y="46" width="200" height="8" as="geometry"/>
+        </mxCell>
+        <mxCell id="VdecTestSuite-methods" value="+ runDecodeTest(path, params)&#xa;+ runQualityTest(path, params)&#xa;+ runMultiWorkerTest(path, params)&#xa;+ runMultithreadTest(path, params)&#xa;+ getPredefinedTests()" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacingLeft=4;spacingRight=4;overflow=hidden;rotatable=0;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;fontFamily=Courier New;" vertex="1" parent="VdecTestSuite">
+          <mxGeometry y="54" width="200" height="106" as="geometry"/>
+        </mxCell>
+        
+        <!-- PPTestSuite -->
+        <mxCell id="PPTestSuite" value="PPTestSuite" style="swimlane;fontStyle=1;align=center;verticalAlign=top;childLayout=stackLayout;horizontal=1;startSize=26;horizontalStack=0;resizeParent=1;resizeParentMax=0;resizeLast=0;collapsible=0;marginBottom=0;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1">
+          <mxGeometry x="280" y="670" width="200" height="160" as="geometry"/>
+        </mxCell>
+        <mxCell id="PPTestSuite-desc" value="后处理格式测试 (pp)" style="text;strokeColor=none;fillColor=none;align=center;verticalAlign=top;spacingLeft=4;spacingRight=4;overflow=hidden;rotatable=0;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;fontStyle=2;fontColor=#666666;" vertex="1" parent="PPTestSuite">
+          <mxGeometry y="26" width="200" height="20" as="geometry"/>
+        </mxCell>
+        <mxCell id="PPTestSuite-sep" value="" style="line;strokeWidth=1;fillColor=none;align=left;verticalAlign=middle;spacingTop=-1;spacingLeft=3;spacingRight=3;rotatable=0;labelPosition=right;points=[];portConstraint=eastwest;" vertex="1" parent="PPTestSuite">
+          <mxGeometry y="46" width="200" height="8" as="geometry"/>
+        </mxCell>
+        <mxCell id="PPTestSuite-methods" value="+ runPPTest(path, params)&#xa;+ runPP0Test(path, format)&#xa;+ runPP1Test(path, format)&#xa;+ runMultiPPTest(path, ...)&#xa;+ runCropScaleTest(path, ...)&#xa;+ getPredefinedTests()" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacingLeft=4;spacingRight=4;overflow=hidden;rotatable=0;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;fontFamily=Courier New;" vertex="1" parent="PPTestSuite">
+          <mxGeometry y="54" width="200" height="106" as="geometry"/>
+        </mxCell>
+        
+        <!-- RecordTestSuite -->
+        <mxCell id="RecordTestSuite" value="RecordTestSuite" style="swimlane;fontStyle=1;align=center;verticalAlign=top;childLayout=stackLayout;horizontal=1;startSize=26;horizontalStack=0;resizeParent=1;resizeParentMax=0;resizeLast=0;collapsible=0;marginBottom=0;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1">
+          <mxGeometry x="500" y="670" width="200" height="160" as="geometry"/>
+        </mxCell>
+        <mxCell id="RecordTestSuite-desc" value="录制测试 (record)" style="text;strokeColor=none;fillColor=none;align=center;verticalAlign=top;spacingLeft=4;spacingRight=4;overflow=hidden;rotatable=0;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;fontStyle=2;fontColor=#666666;" vertex="1" parent="RecordTestSuite">
+          <mxGeometry y="26" width="200" height="20" as="geometry"/>
+        </mxCell>
+        <mxCell id="RecordTestSuite-sep" value="" style="line;strokeWidth=1;fillColor=none;align=left;verticalAlign=middle;spacingTop=-1;spacingLeft=3;spacingRight=3;rotatable=0;labelPosition=right;points=[];portConstraint=eastwest;" vertex="1" parent="RecordTestSuite">
+          <mxGeometry y="46" width="200" height="8" as="geometry"/>
+        </mxCell>
+        <mxCell id="RecordTestSuite-methods" value="+ runRtspRecord(url, output)&#xa;+ runFileRecord(input, output)&#xa;+ runAllFormatsRecord(...)&#xa;+ getPredefinedTests()" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacingLeft=4;spacingRight=4;overflow=hidden;rotatable=0;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;fontFamily=Courier New;" vertex="1" parent="RecordTestSuite">
+          <mxGeometry y="54" width="200" height="106" as="geometry"/>
+        </mxCell>
+        
+        <!-- WriterTestSuite -->
+        <mxCell id="WriterTestSuite" value="WriterTestSuite" style="swimlane;fontStyle=1;align=center;verticalAlign=top;childLayout=stackLayout;horizontal=1;startSize=26;horizontalStack=0;resizeParent=1;resizeParentMax=0;resizeLast=0;collapsible=0;marginBottom=0;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1">
+          <mxGeometry x="720" y="670" width="200" height="160" as="geometry"/>
+        </mxCell>
+        <mxCell id="WriterTestSuite-desc" value="格式写入测试 (writer)" style="text;strokeColor=none;fillColor=none;align=center;verticalAlign=top;spacingLeft=4;spacingRight=4;overflow=hidden;rotatable=0;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;fontStyle=2;fontColor=#666666;" vertex="1" parent="WriterTestSuite">
+          <mxGeometry y="26" width="200" height="20" as="geometry"/>
+        </mxCell>
+        <mxCell id="WriterTestSuite-sep" value="" style="line;strokeWidth=1;fillColor=none;align=left;verticalAlign=middle;spacingTop=-1;spacingLeft=3;spacingRight=3;rotatable=0;labelPosition=right;points=[];portConstraint=eastwest;" vertex="1" parent="WriterTestSuite">
+          <mxGeometry y="46" width="200" height="8" as="geometry"/>
+        </mxCell>
+        <mxCell id="WriterTestSuite-methods" value="+ runWriterTest(input, params)&#xa;+ runAllRgbFormats(input)&#xa;+ runAllYuvFormats(input)&#xa;+ getPredefinedTests()" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacingLeft=4;spacingRight=4;overflow=hidden;rotatable=0;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;fontFamily=Courier New;" vertex="1" parent="WriterTestSuite">
+          <mxGeometry y="54" width="200" height="106" as="geometry"/>
+        </mxCell>
+        
+        <!-- ========================================== -->
+        <!-- 参数结构体 -->
+        <!-- ========================================== -->
+        <mxCell id="params-package" value="测试参数结构体" style="swimlane;fontStyle=1;align=center;verticalAlign=top;childLayout=stackLayout;horizontal=1;startSize=30;horizontalStack=0;resizeParent=1;resizeParentMax=0;resizeLast=0;collapsible=0;marginBottom=0;fillColor=#f5f5f5;strokeColor=#666666;" vertex="1" parent="1">
+          <mxGeometry x="60" y="860" width="860" height="100" as="geometry"/>
+        </mxCell>
+        
+        <!-- DecodeTestParams -->
+        <mxCell id="DecodeTestParams" value="DecodeTestParams&#xa;{codec, width, height, fps, profile}" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+          <mxGeometry x="80" y="900" width="180" height="40" as="geometry"/>
+        </mxCell>
+        
+        <!-- PPTestParams -->
+        <mxCell id="PPTestParams" value="PPTestParams&#xa;{channel, format, width, height, crop...}" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+          <mxGeometry x="280" y="900" width="180" height="40" as="geometry"/>
+        </mxCell>
+        
+        <!-- RecordTestParams -->
+        <mxCell id="RecordTestParams" value="RecordTestParams&#xa;{format, duration, max_size}" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+          <mxGeometry x="480" y="900" width="180" height="40" as="geometry"/>
+        </mxCell>
+        
+        <!-- WriterTestParams -->
+        <mxCell id="WriterTestParams" value="WriterTestParams&#xa;{format, width, height, save_frames}" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+          <mxGeometry x="680" y="900" width="180" height="40" as="geometry"/>
+        </mxCell>
+        
+        <!-- ========================================== -->
+        <!-- 关系连线 -->
+        <!-- ========================================== -->
+        
+        <!-- TestSuites 实现 ITestModule -->
+        <mxCell id="rel1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=0;dashed=1;strokeWidth=2;" edge="1" parent="1" source="VdecTestSuite" target="ITestModule">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="160" y="640"/>
+              <mxPoint x="190" y="640"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="rel1-label" value="«implements»" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];fontStyle=2;" vertex="1" connectable="0" parent="rel1">
+          <mxGeometry x="-0.3" y="1" relative="1" as="geometry">
+            <mxPoint x="30" y="-15" as="offset"/>
+          </mxGeometry>
+        </mxCell>
+        
+        <mxCell id="rel2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=0;dashed=1;strokeWidth=2;" edge="1" parent="1" source="PPTestSuite" target="ITestModule">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="380" y="640"/>
+              <mxPoint x="190" y="640"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        
+        <mxCell id="rel3" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=0;dashed=1;strokeWidth=2;" edge="1" parent="1" source="RecordTestSuite" target="ITestModule">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="600" y="640"/>
+              <mxPoint x="190" y="640"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        
+        <mxCell id="rel4" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=0;dashed=1;strokeWidth=2;" edge="1" parent="1" source="WriterTestSuite" target="ITestModule">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="820" y="640"/>
+              <mxPoint x="190" y="640"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        
+        <!-- Registry 管理 ITestModule -->
+        <mxCell id="rel5" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=diamond;endFill=1;strokeWidth=2;" edge="1" parent="1" source="TestModuleRegistry" target="ITestModule">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="rel5-label" value="manages *" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];" vertex="1" connectable="0" parent="rel5">
+          <mxGeometry x="-0.5" relative="1" as="geometry">
+            <mxPoint x="40" as="offset"/>
+          </mxGeometry>
+        </mxCell>
+        
+        <!-- TestExecutor 返回 TestResult -->
+        <mxCell id="rel6" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=open;endFill=0;strokeWidth=2;dashed=1;" edge="1" parent="1" source="TestExecutor" target="TestResult">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="rel6-label" value="«returns»" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];fontStyle=2;" vertex="1" connectable="0" parent="rel6">
+          <mxGeometry x="-0.3" relative="1" as="geometry">
+            <mxPoint as="offset"/>
+          </mxGeometry>
+        </mxCell>
+        
+        <!-- TestSuites 使用 TestExecutor -->
+        <mxCell id="rel7" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=open;endFill=0;strokeWidth=2;dashed=1;" edge="1" parent="1" source="VdecTestSuite" target="TestExecutor">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="160" y="640"/>
+              <mxPoint x="500" y="640"/>
+              <mxPoint x="500" y="400"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="rel7-label" value="«uses»" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];fontStyle=2;" vertex="1" connectable="0" parent="rel7">
+          <mxGeometry x="0.3" relative="1" as="geometry">
+            <mxPoint x="-65" y="-18" as="offset"/>
+          </mxGeometry>
+        </mxCell>
+        
+        <!-- TestSuites 使用 WorkerConfigFactory -->
+        <mxCell id="rel8" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=open;endFill=0;strokeWidth=2;dashed=1;" edge="1" parent="1" source="PPTestSuite" target="WorkerConfigFactory">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="380" y="600"/>
+              <mxPoint x="830" y="600"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="rel8-label" value="«uses»" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];fontStyle=2;" vertex="1" connectable="0" parent="rel8">
+          <mxGeometry x="0.5" relative="1" as="geometry">
+            <mxPoint x="-50" y="-15" as="offset"/>
+          </mxGeometry>
+        </mxCell>
+        
+        <!-- 外部依赖 -->
+        <mxCell id="ext-dep" value="External Dependencies" style="swimlane;fontStyle=1;align=center;verticalAlign=top;childLayout=stackLayout;horizontal=1;startSize=30;horizontalStack=0;resizeParent=1;resizeParentMax=0;resizeLast=0;collapsible=0;marginBottom=0;fillColor=#e6e6e6;strokeColor=#999999;" vertex="1" parent="1">
+          <mxGeometry x="1020" y="80" width="200" height="160" as="geometry"/>
+        </mxCell>
+        
+        <mxCell id="ext1" value="VideoProductionLine" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+          <mxGeometry x="1040" y="120" width="160" height="30" as="geometry"/>
+        </mxCell>
+        <mxCell id="ext2" value="BufferPool" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+          <mxGeometry x="1040" y="160" width="160" height="30" as="geometry"/>
+        </mxCell>
+        <mxCell id="ext3" value="BufferWriter" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+          <mxGeometry x="1040" y="200" width="160" height="30" as="geometry"/>
+        </mxCell>
+        
+        <!-- 使用外部依赖 -->
+        <mxCell id="rel9" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=open;endFill=0;strokeWidth=1;dashed=1;" edge="1" parent="1" source="TestExecutor" target="ext1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        
+        <!-- 图例 -->
+        <mxCell id="legend" value="图例" style="swimlane;fontStyle=1;align=center;verticalAlign=top;childLayout=stackLayout;horizontal=1;startSize=26;horizontalStack=0;resizeParent=1;resizeParentMax=0;resizeLast=0;collapsible=0;marginBottom=0;fillColor=#f5f5f5;strokeColor=#666666;" vertex="1" parent="1">
+          <mxGeometry x="1020" y="280" width="200" height="140" as="geometry"/>
+        </mxCell>
+        <mxCell id="legend1" value="接口 (Interface)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1">
+          <mxGeometry x="1030" y="310" width="80" height="20" as="geometry"/>
+        </mxCell>
+        <mxCell id="legend2" value="单例 (Singleton)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+          <mxGeometry x="1120" y="310" width="90" height="20" as="geometry"/>
+        </mxCell>
+        <mxCell id="legend3" value="工具类 (Utility)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="1">
+          <mxGeometry x="1030" y="340" width="80" height="20" as="geometry"/>
+        </mxCell>
+        <mxCell id="legend4" value="数据结构 (Struct)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="1">
+          <mxGeometry x="1120" y="340" width="90" height="20" as="geometry"/>
+        </mxCell>
+        <mxCell id="legend5" value="工厂 (Factory)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;" vertex="1" parent="1">
+          <mxGeometry x="1030" y="370" width="80" height="20" as="geometry"/>
+        </mxCell>
+        <mxCell id="legend6" value="参数 (Params)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+          <mxGeometry x="1120" y="370" width="90" height="20" as="geometry"/>
+        </mxCell>
+        
+      </root>
+    </mxGraphModel>
+  </diagram>
+  
+  <diagram id="test-framework-flow" name="执行流程图">
+    <mxGraphModel dx="1200" dy="900" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1400" pageHeight="1000" math="0" shadow="0">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+        
+        <!-- 标题 -->
+        <mxCell id="flow-title" value="Test Framework 执行流程图" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=24;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="450" y="20" width="400" height="40" as="geometry"/>
+        </mxCell>
+        
+        <!-- 用户命令 -->
+        <mxCell id="start" value="用户执行命令&#xa;./qa_cases &lt;module&gt; [options]" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="560" y="80" width="200" height="50" as="geometry"/>
+        </mxCell>
+        
+        <!-- main() -->
+        <mxCell id="main" value="main()&#xa;test_module_main.cpp" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+          <mxGeometry x="560" y="160" width="200" height="40" as="geometry"/>
+        </mxCell>
+        
+        <!-- 注册模块 -->
+        <mxCell id="register" value="registerModules()&#xa;注册所有测试套件到 Registry" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1">
+          <mxGeometry x="560" y="230" width="200" height="50" as="geometry"/>
+        </mxCell>
+        
+        <!-- 分支 - 参数解析 -->
+        <mxCell id="branch1" value="argc &lt; 2?" style="rhombus;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="1">
+          <mxGeometry x="600" y="310" width="120" height="60" as="geometry"/>
+        </mxCell>
+        
+        <!-- 显示帮助 -->
+        <mxCell id="help" value="printGlobalHelp()&#xa;显示所有模块列表" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="1">
+          <mxGeometry x="320" y="320" width="160" height="40" as="geometry"/>
+        </mxCell>
+        
+        <!-- 获取模块 -->
+        <mxCell id="getModule" value="registry.getModule(argv[1])&#xa;查找模块" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+          <mxGeometry x="560" y="400" width="200" height="40" as="geometry"/>
+        </mxCell>
+        
+        <!-- 分支 - 模块是否存在 -->
+        <mxCell id="branch2" value="module&#xa;exists?" style="rhombus;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="1">
+          <mxGeometry x="600" y="470" width="120" height="60" as="geometry"/>
+        </mxCell>
+        
+        <!-- 错误 -->
+        <mxCell id="error" value="Error: Unknown module&#xa;显示帮助并退出" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="1">
+          <mxGeometry x="320" y="480" width="160" height="40" as="geometry"/>
+        </mxCell>
+        
+        <!-- 调用模块 run -->
+        <mxCell id="moduleRun" value="module-&gt;run(argc-1, argv+1)&#xa;执行模块测试" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="560" y="560" width="200" height="40" as="geometry"/>
+        </mxCell>
+        
+        <!-- ========================================== -->
+        <!-- 模块内部执行流程 -->
+        <!-- ========================================== -->
+        <mxCell id="module-box" value="TestSuite 内部执行流程" style="swimlane;fontStyle=1;align=center;verticalAlign=top;childLayout=stackLayout;horizontal=1;startSize=30;horizontalStack=0;resizeParent=1;resizeParentMax=0;resizeLast=0;collapsible=0;marginBottom=0;fillColor=#f5f5f5;strokeColor=#666666;" vertex="1" parent="1">
+          <mxGeometry x="40" y="640" width="1240" height="340" as="geometry"/>
+        </mxCell>
+        
+        <!-- parseArgs -->
+        <mxCell id="parseArgs" value="parseArgs()&#xa;解析命令行参数" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+          <mxGeometry x="80" y="690" width="160" height="40" as="geometry"/>
+        </mxCell>
+        
+        <!-- 显示帮助 -->
+        <mxCell id="moduleHelp" value="-h/--help?" style="rhombus;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="1">
+          <mxGeometry x="280" y="680" width="100" height="60" as="geometry"/>
+        </mxCell>
+        
+        <mxCell id="printModuleHelp" value="printHelp()&#xa;显示模块帮助" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="1">
+          <mxGeometry x="280" y="770" width="100" height="40" as="geometry"/>
+        </mxCell>
+        
+        <!-- WorkerConfigFactory -->
+        <mxCell id="createConfig" value="WorkerConfigFactory&#xa;创建 WorkerConfig" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;" vertex="1" parent="1">
+          <mxGeometry x="420" y="690" width="160" height="40" as="geometry"/>
+        </mxCell>
+        
+        <!-- 设置消费参数 -->
+        <mxCell id="setConsumer" value="设置 ConsumerConfig&#xa;max_frames, target_fps, etc." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1">
+          <mxGeometry x="620" y="690" width="160" height="40" as="geometry"/>
+        </mxCell>
+        
+        <!-- TestExecutor -->
+        <mxCell id="executor" value="TestExecutor::runXxx()&#xa;执行测试" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="820" y="690" width="160" height="40" as="geometry"/>
+        </mxCell>
+        
+        <!-- TestExecutor 内部 -->
+        <mxCell id="exec-internal" value="TestExecutor 内部流程" style="swimlane;fontStyle=1;align=center;verticalAlign=top;childLayout=stackLayout;horizontal=1;startSize=26;horizontalStack=0;resizeParent=1;resizeParentMax=0;resizeLast=0;collapsible=0;marginBottom=0;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="1">
+          <mxGeometry x="80" y="780" width="900" height="180" as="geometry"/>
+        </mxCell>
+        
+        <mxCell id="step1" value="1. setupSignalHandler()&#xa;设置 Ctrl+C 处理" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1">
+          <mxGeometry x="100" y="820" width="140" height="40" as="geometry"/>
+        </mxCell>
+        
+        <mxCell id="step2" value="2. VideoProductionLine&#xa;启动解码/录制" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+          <mxGeometry x="260" y="820" width="140" height="40" as="geometry"/>
+        </mxCell>
+        
+        <mxCell id="step3" value="3. BufferPool.get()&#xa;获取输出缓冲池" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+          <mxGeometry x="420" y="820" width="140" height="40" as="geometry"/>
+        </mxCell>
+        
+        <mxCell id="step4" value="4. BufferConsumerService&#xa;消费帧数据" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;" vertex="1" parent="1">
+          <mxGeometry x="580" y="820" width="140" height="40" as="geometry"/>
+        </mxCell>
+        
+        <mxCell id="step5" value="5. 显示/保存/对比&#xa;处理每一帧" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="1">
+          <mxGeometry x="740" y="820" width="140" height="40" as="geometry"/>
+        </mxCell>
+        
+        <mxCell id="step6" value="6. 计算统计&#xa;FPS/PSNR/SSIM" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="1">
+          <mxGeometry x="100" y="880" width="140" height="40" as="geometry"/>
+        </mxCell>
+        
+        <mxCell id="step7" value="7. producer.stop()&#xa;停止生产线" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+          <mxGeometry x="260" y="880" width="140" height="40" as="geometry"/>
+        </mxCell>
+        
+        <mxCell id="step8" value="8. 返回 TestResult&#xa;测试结果" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+          <mxGeometry x="420" y="880" width="140" height="40" as="geometry"/>
+        </mxCell>
+        
+        <!-- 打印结果 -->
+        <mxCell id="printResult" value="TestExecutor::printResult()&#xa;打印测试结果" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+          <mxGeometry x="1020" y="690" width="160" height="40" as="geometry"/>
+        </mxCell>
+        
+        <!-- 返回 -->
+        <mxCell id="return" value="return result.success ? 0 : 1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="1">
+          <mxGeometry x="1020" y="880" width="160" height="40" as="geometry"/>
+        </mxCell>
+        
+        <!-- ========================================== -->
+        <!-- 连接线 -->
+        <!-- ========================================== -->
+        <mxCell id="arr1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic;endFill=1;" edge="1" parent="1" source="start" target="main">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        
+        <mxCell id="arr2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic;endFill=1;" edge="1" parent="1" source="main" target="register">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        
+        <mxCell id="arr3" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic;endFill=1;" edge="1" parent="1" source="register" target="branch1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        
+        <mxCell id="arr4" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic;endFill=1;" edge="1" parent="1" source="branch1" target="help">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="arr4-label" value="Yes" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];" vertex="1" connectable="0" parent="arr4">
+          <mxGeometry x="-0.3" relative="1" as="geometry">
+            <mxPoint as="offset"/>
+          </mxGeometry>
+        </mxCell>
+        
+        <mxCell id="arr5" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic;endFill=1;" edge="1" parent="1" source="branch1" target="getModule">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="arr5-label" value="No" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];" vertex="1" connectable="0" parent="arr5">
+          <mxGeometry x="-0.3" relative="1" as="geometry">
+            <mxPoint as="offset"/>
+          </mxGeometry>
+        </mxCell>
+        
+        <mxCell id="arr6" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic;endFill=1;" edge="1" parent="1" source="getModule" target="branch2">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        
+        <mxCell id="arr7" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic;endFill=1;" edge="1" parent="1" source="branch2" target="error">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="arr7-label" value="No" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];" vertex="1" connectable="0" parent="arr7">
+          <mxGeometry x="-0.3" relative="1" as="geometry">
+            <mxPoint as="offset"/>
+          </mxGeometry>
+        </mxCell>
+        
+        <mxCell id="arr8" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic;endFill=1;" edge="1" parent="1" source="branch2" target="moduleRun">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="arr8-label" value="Yes" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];" vertex="1" connectable="0" parent="arr8">
+          <mxGeometry x="-0.3" relative="1" as="geometry">
+            <mxPoint as="offset"/>
+          </mxGeometry>
+        </mxCell>
+        
+        <mxCell id="arr9" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic;endFill=1;" edge="1" parent="1" source="moduleRun" target="parseArgs">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="660" y="620"/>
+              <mxPoint x="160" y="620"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        
+        <!-- 模块内部流程连线 -->
+        <mxCell id="arr10" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic;endFill=1;" edge="1" parent="1" source="parseArgs" target="moduleHelp">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        
+        <mxCell id="arr11" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic;endFill=1;" edge="1" parent="1" source="moduleHelp" target="printModuleHelp">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="arr11-label" value="Yes" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];" vertex="1" connectable="0" parent="arr11">
+          <mxGeometry x="-0.3" relative="1" as="geometry">
+            <mxPoint as="offset"/>
+          </mxGeometry>
+        </mxCell>
+        
+        <mxCell id="arr12" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic;endFill=1;" edge="1" parent="1" source="moduleHelp" target="createConfig">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="arr12-label" value="No" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];" vertex="1" connectable="0" parent="arr12">
+          <mxGeometry x="-0.3" relative="1" as="geometry">
+            <mxPoint as="offset"/>
+          </mxGeometry>
+        </mxCell>
+        
+        <mxCell id="arr13" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic;endFill=1;" edge="1" parent="1" source="createConfig" target="setConsumer">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        
+        <mxCell id="arr14" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic;endFill=1;" edge="1" parent="1" source="setConsumer" target="executor">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        
+        <mxCell id="arr15" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic;endFill=1;" edge="1" parent="1" source="executor" target="printResult">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        
+        <!-- TestExecutor 内部连线 -->
+        <mxCell id="arr16" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic;endFill=1;" edge="1" parent="1" source="step1" target="step2">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="arr17" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic;endFill=1;" edge="1" parent="1" source="step2" target="step3">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="arr18" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic;endFill=1;" edge="1" parent="1" source="step3" target="step4">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="arr19" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic;endFill=1;" edge="1" parent="1" source="step4" target="step5">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="arr20" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic;endFill=1;" edge="1" parent="1" source="step5" target="step6">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="900" y="860"/>
+              <mxPoint x="900" y="870"/>
+              <mxPoint x="60" y="870"/>
+              <mxPoint x="60" y="900"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="arr21" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic;endFill=1;" edge="1" parent="1" source="step6" target="step7">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="arr22" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic;endFill=1;" edge="1" parent="1" source="step7" target="step8">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        
+        <mxCell id="arr23" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic;endFill=1;" edge="1" parent="1" source="printResult" target="return">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        
+      </root>
+    </mxGraphModel>
+  </diagram>
+  
+  <diagram id="test-framework-component" name="组件架构图">
+    <mxGraphModel dx="1200" dy="800" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1200" pageHeight="900" math="0" shadow="0">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+        
+        <!-- 标题 -->
+        <mxCell id="comp-title" value="Test Framework 组件架构图" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=24;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="400" y="20" width="400" height="40" as="geometry"/>
+        </mxCell>
+        
+        <!-- ========================================== -->
+        <!-- 用户层 -->
+        <!-- ========================================== -->
+        <mxCell id="user-layer" value="用户层 (User Layer)" style="swimlane;fontStyle=1;align=center;verticalAlign=top;childLayout=stackLayout;horizontal=1;startSize=30;horizontalStack=0;resizeParent=1;resizeParentMax=0;resizeLast=0;collapsible=0;marginBottom=0;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+          <mxGeometry x="40" y="80" width="1120" height="100" as="geometry"/>
+        </mxCell>
+        
+        <mxCell id="cli" value="命令行接口 (CLI)&#xa;./qa_cases &lt;module&gt; [options]" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1">
+          <mxGeometry x="440" y="120" width="320" height="40" as="geometry"/>
+        </mxCell>
+        
+        <!-- ========================================== -->
+        <!-- 框架层 -->
+        <!-- ========================================== -->
+        <mxCell id="framework-layer" value="框架层 (Framework Layer) - test::common" style="swimlane;fontStyle=1;align=center;verticalAlign=top;childLayout=stackLayout;horizontal=1;startSize=30;horizontalStack=0;resizeParent=1;resizeParentMax=0;resizeLast=0;collapsible=0;marginBottom=0;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+          <mxGeometry x="40" y="200" width="1120" height="200" as="geometry"/>
+        </mxCell>
+        
+        <mxCell id="registry-comp" value="TestModuleRegistry&#xa;(模块注册表单例)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="80" y="250" width="160" height="50" as="geometry"/>
+        </mxCell>
+        
+        <mxCell id="interface-comp" value="ITestModule&#xa;(测试模块接口)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="280" y="250" width="160" height="50" as="geometry"/>
+        </mxCell>
+        
+        <mxCell id="executor-comp" value="TestExecutor&#xa;(测试执行器)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="480" y="250" width="160" height="50" as="geometry"/>
+        </mxCell>
+        
+        <mxCell id="factory-comp" value="WorkerConfigFactory&#xa;(配置工厂)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="680" y="250" width="160" height="50" as="geometry"/>
+        </mxCell>
+        
+        <mxCell id="result-comp" value="TestResult&#xa;(测试结果)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="880" y="250" width="160" height="50" as="geometry"/>
+        </mxCell>
+        
+        <!-- 框架层说明 -->
+        <mxCell id="framework-desc" value="核心职责：&#xa;• 模块生命周期管理&#xa;• 命令行参数路由&#xa;• 测试执行抽象&#xa;• 配置简化" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacingLeft=4;spacingRight=4;overflow=hidden;rotatable=0;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;" vertex="1" parent="1">
+          <mxGeometry x="80" y="320" width="300" height="70" as="geometry"/>
+        </mxCell>
+        
+        <!-- ========================================== -->
+        <!-- 测试套件层 -->
+        <!-- ========================================== -->
+        <mxCell id="suite-layer" value="测试套件层 (Test Suite Layer)" style="swimlane;fontStyle=1;align=center;verticalAlign=top;childLayout=stackLayout;horizontal=1;startSize=30;horizontalStack=0;resizeParent=1;resizeParentMax=0;resizeLast=0;collapsible=0;marginBottom=0;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1">
+          <mxGeometry x="40" y="420" width="1120" height="140" as="geometry"/>
+        </mxCell>
+        
+        <mxCell id="vdec-comp" value="VdecTestSuite&#xa;(视频解码测试)&#xa;&#xa;• H.264/H.265/MJPEG&#xa;• PSNR/SSIM 质量验证&#xa;• 多 Worker 测试" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;align=left;spacingLeft=10;" vertex="1" parent="1">
+          <mxGeometry x="60" y="460" width="180" height="90" as="geometry"/>
+        </mxCell>
+        
+        <mxCell id="pp-comp" value="PPTestSuite&#xa;(后处理测试)&#xa;&#xa;• PP0/PP1 通道&#xa;• YUV/RGB 格式&#xa;• 裁剪缩放" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;align=left;spacingLeft=10;" vertex="1" parent="1">
+          <mxGeometry x="260" y="460" width="180" height="90" as="geometry"/>
+        </mxCell>
+        
+        <mxCell id="record-comp" value="RecordTestSuite&#xa;(录制测试)&#xa;&#xa;• RTSP 流录制&#xa;• 文件重封装&#xa;• 多格式输出" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;align=left;spacingLeft=10;" vertex="1" parent="1">
+          <mxGeometry x="460" y="460" width="180" height="90" as="geometry"/>
+        </mxCell>
+        
+        <mxCell id="writer-comp" value="WriterTestSuite&#xa;(格式写入测试)&#xa;&#xa;• 12 种 RGB 格式&#xa;• 15 种 YUV 格式&#xa;• BufferWriter" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;align=left;spacingLeft=10;" vertex="1" parent="1">
+          <mxGeometry x="660" y="460" width="180" height="90" as="geometry"/>
+        </mxCell>
+        
+        <mxCell id="future-comp" value="Future TestSuites&#xa;(未来扩展)&#xa;&#xa;• VencTestSuite&#xa;• DisplayTestSuite&#xa;• ..." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e6e6e6;strokeColor=#999999;align=left;spacingLeft=10;fontStyle=2" vertex="1" parent="1">
+          <mxGeometry x="860" y="460" width="180" height="90" as="geometry"/>
+        </mxCell>
+        
+        <!-- ========================================== -->
+        <!-- 基础设施层 -->
+        <!-- ========================================== -->
+        <mxCell id="infra-layer" value="基础设施层 (Infrastructure Layer) - productionline" style="swimlane;fontStyle=1;align=center;verticalAlign=top;childLayout=stackLayout;horizontal=1;startSize=30;horizontalStack=0;resizeParent=1;resizeParentMax=0;resizeLast=0;collapsible=0;marginBottom=0;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="1">
+          <mxGeometry x="40" y="580" width="1120" height="120" as="geometry"/>
+        </mxCell>
+        
+        <mxCell id="vpl-comp" value="VideoProductionLine&#xa;(视频生产线)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+          <mxGeometry x="80" y="620" width="160" height="50" as="geometry"/>
+        </mxCell>
+        
+        <mxCell id="mvpl-comp" value="MultiWorkerProductionLine&#xa;(多 Worker 生产线)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+          <mxGeometry x="260" y="620" width="180" height="50" as="geometry"/>
+        </mxCell>
+        
+        <mxCell id="pool-comp" value="BufferPool&#xa;(缓冲池)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+          <mxGeometry x="460" y="620" width="140" height="50" as="geometry"/>
+        </mxCell>
+        
+        <mxCell id="consumer-comp" value="BufferConsumerService&#xa;(缓冲消费服务)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;" vertex="1" parent="1">
+          <mxGeometry x="620" y="620" width="160" height="50" as="geometry"/>
+        </mxCell>
+        
+        <mxCell id="bwriter-comp" value="BufferWriter&#xa;(缓冲写入器)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="1">
+          <mxGeometry x="800" y="620" width="140" height="50" as="geometry"/>
+        </mxCell>
+        
+        <mxCell id="comparator-comp" value="BufferComparator&#xa;(质量对比器)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1">
+          <mxGeometry x="960" y="620" width="140" height="50" as="geometry"/>
+        </mxCell>
+        
+        <!-- ========================================== -->
+        <!-- 硬件层 -->
+        <!-- ========================================== -->
+        <mxCell id="hw-layer" value="硬件抽象层 (Hardware Abstraction Layer)" style="swimlane;fontStyle=1;align=center;verticalAlign=top;childLayout=stackLayout;horizontal=1;startSize=30;horizontalStack=0;resizeParent=1;resizeParentMax=0;resizeLast=0;collapsible=0;marginBottom=0;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="1">
+          <mxGeometry x="40" y="720" width="1120" height="80" as="geometry"/>
+        </mxCell>
+        
+        <mxCell id="taco-comp" value="TACO 硬件解码器" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;" vertex="1" parent="1">
+          <mxGeometry x="160" y="760" width="160" height="30" as="geometry"/>
+        </mxCell>
+        
+        <mxCell id="fb-comp" value="LinuxFramebuffer (显示)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;" vertex="1" parent="1">
+          <mxGeometry x="360" y="760" width="160" height="30" as="geometry"/>
+        </mxCell>
+        
+        <mxCell id="ffmpeg-comp" value="FFmpeg (软件解码)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;" vertex="1" parent="1">
+          <mxGeometry x="560" y="760" width="160" height="30" as="geometry"/>
+        </mxCell>
+        
+        <mxCell id="rtsp-comp" value="RTSP Client" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;" vertex="1" parent="1">
+          <mxGeometry x="760" y="760" width="160" height="30" as="geometry"/>
+        </mxCell>
+        
+        <!-- ========================================== -->
+        <!-- 连接线 -->
+        <!-- ========================================== -->
+        <mxCell id="conn1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic;endFill=1;strokeWidth=2;" edge="1" parent="1" source="cli" target="registry-comp">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        
+        <mxCell id="conn2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic;endFill=1;strokeWidth=2;" edge="1" parent="1" source="registry-comp" target="interface-comp">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        
+        <mxCell id="conn3" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic;endFill=1;strokeWidth=2;" edge="1" parent="1" source="interface-comp" target="vdec-comp">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        
+        <mxCell id="conn4" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic;endFill=1;strokeWidth=2;dashed=1;" edge="1" parent="1" source="vdec-comp" target="executor-comp">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="150" y="410"/>
+              <mxPoint x="560" y="410"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        
+        <mxCell id="conn5" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic;endFill=1;strokeWidth=2;dashed=1;" edge="1" parent="1" source="vdec-comp" target="factory-comp">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="150" y="410"/>
+              <mxPoint x="760" y="410"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        
+        <mxCell id="conn6" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic;endFill=1;strokeWidth=2;" edge="1" parent="1" source="executor-comp" target="vpl-comp">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        
+        <mxCell id="conn7" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic;endFill=1;strokeWidth=2;" edge="1" parent="1" source="executor-comp" target="pool-comp">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        
+        <mxCell id="conn8" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic;endFill=1;strokeWidth=2;" edge="1" parent="1" source="executor-comp" target="result-comp">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

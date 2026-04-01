@@ -6,14 +6,17 @@
 
 BufferFillingWorkerFacade::BufferFillingWorkerFacade(const WorkerConfig& config)
     : config_(config)
+    , logger_(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Worker.Facade")))
 {
     if (!worker_base_uptr_) {
+        LOG4CPLUS_DEBUG(logger_, "Factory create worker according to config");
         worker_base_uptr_ = BufferFillingWorkerFactory::create(config_);
     }
 }
 
 BufferFillingWorkerFacade::~BufferFillingWorkerFacade() {
     // worker_base_uptr_ 会自动调用析构函数（智能指针）
+    
 }
 
 // ============ Buffer填充方法 ============
@@ -24,7 +27,7 @@ const char* BufferFillingWorkerFacade::getWorkerType() const {
         return worker_base_uptr_->getWorkerType();
     }
     // Worker 未创建：返回 config_ 中设置的 worker_type
-    return BufferFillingWorkerFactory::typeToString(config_.worker_type);
+    return BufferFillingWorkerFactory::typeToString(config_.global.worker_type);
 }
 
 // ============ 文件操作（门面转发） ============
@@ -36,61 +39,30 @@ bool BufferFillingWorkerFacade::open() {
     }
     
     if (!worker_base_uptr_) {
-        LOG_ERROR("[Worker] ERROR: Failed to create worker");
+        LOG4CPLUS_ERROR(logger_, " ERROR: Failed to create worker");
         return false;
     }
     
-    // ⭐ v2.9新增：检查是否是 Buffer 模式
-    bool is_buffer_mode = config_.decoder.use_buffer_mode;
-    
-    if (is_buffer_mode) {
-        // Buffer 模式：不需要文件路径，直接调用 open(nullptr)
-        LOG_DEBUG("[Worker] BufferFillingWorkerFacade: Opening in Buffer mode (no file path needed)");
-        return worker_base_uptr_->open(nullptr);
-    }
-    
-    // 文件模式：从 config_ 获取所有参数
-    const std::string& file_path = config_.file.file_path;
-    int width = config_.display.width;
-    int height = config_.display.height;
-    int bits_per_pixel = config_.display.bits_per_pixel;
-    
-    if (file_path.empty()) {
-        LOG_ERROR("[Worker] ERROR: File path not set in config");
-        return false;
-    }
-    
-    const char* path = file_path.c_str();
-    
-    // 🎯 智能判断：根据Worker类型选择合适的open方法
-    // - 需要格式参数的Worker：FFMPEG_RTSP
-    //   （RTSP实时流需要明确指定输出格式）
-    // - 可以自动检测的Worker：FFMPEG_VIDEO_FILE
-    //   （本地编码视频文件有文件头，可以自动检测分辨率和格式）
-    
-    bool needs_format_params = (config_.worker_type == BufferFillingWorkerFactory::WorkerType::FFMPEG_RTSP);
-    
-    if (needs_format_params) {
-        // 需要格式参数的Worker（RTSP流）
-        if (width == 0 || height == 0 || bits_per_pixel == 0) {
-            LOG_ERROR_FMT("[Worker] ERROR: Worker type '%s' requires width, height, and bits_per_pixel in config!",
-                         BufferFillingWorkerFactory::typeToString(config_.worker_type));
-            return false;
-        }
-        LOG_DEBUG_FMT("[Worker] BufferFillingWorkerFacade: Opening video with format %dx%d@%dbpp",
-               width, height, bits_per_pixel);
-        return worker_base_uptr_->open(path, width, height, bits_per_pixel);
-    } else {
-        // 可以自动检测格式的Worker（本地编码视频文件）
-        LOG_DEBUG("[Worker] BufferFillingWorkerFacade: Opening encoded video file (auto-detect format)");
-        return worker_base_uptr_->open(path);
-    }
+    // ✅ 纯转发：WorkerBase::open() 会从 worker_config_.data_source.path 获取路径
+    // 子类的 open(const char* path) 会根据 path 是否为空自行判断模式
+    return worker_base_uptr_->open();
 }
 
 void BufferFillingWorkerFacade::close() {
     if (worker_base_uptr_) {
         worker_base_uptr_->close();
     }
+}
+bool BufferFillingWorkerFacade::setSourceBufferPool(std::weak_ptr<BufferPool> pool_weak) {
+    if (!worker_base_uptr_) {
+        LOG4CPLUS_ERROR(logger_, " ERROR: Worker not initialized");
+        return false;
+    }
+    
+    // ✅ 直接调用基类虚函数，自动多态分发
+    // 支持 Buffer 模式的 Worker（如 FFmpegDecodeWorker）
+    // 会重写此方法并返回 true，不支持的 Worker 会使用基类默认实现返回 false
+    return worker_base_uptr_->setSourceBufferPool(pool_weak);
 }
 
 bool BufferFillingWorkerFacade::isOpen() const {
@@ -99,10 +71,13 @@ bool BufferFillingWorkerFacade::isOpen() const {
 
 // ============ 核心功能：填充Buffer ============
 
-bool BufferFillingWorkerFacade::fillBuffer(int frame_index, Buffer* buffer) {
+/**
+ * v2.33 变更：返回类型从 bool 改为 FillResult
+ */
+FillResult BufferFillingWorkerFacade::fillBuffer(int frame_index, Buffer* buffer) {
     if (!worker_base_uptr_) {
-        LOG_ERROR("[Worker] ERROR: Worker not initialized");
-        return false;
+        LOG4CPLUS_ERROR(logger_, " ERROR: Worker not initialized");
+        return FillResult::notOpen();
     }
     return worker_base_uptr_->fillBuffer(frame_index, buffer);
 }
@@ -111,7 +86,7 @@ bool BufferFillingWorkerFacade::fillBuffer(int frame_index, Buffer* buffer) {
 
 bool BufferFillingWorkerFacade::seek(int frame_index) {
     if (!worker_base_uptr_) {
-        LOG_ERROR("[Worker] ERROR: Worker not initialized");
+        LOG4CPLUS_ERROR(logger_, " ERROR: Worker not initialized");
         return false;
     }
     return worker_base_uptr_->seek(frame_index);
@@ -119,7 +94,7 @@ bool BufferFillingWorkerFacade::seek(int frame_index) {
 
 bool BufferFillingWorkerFacade::seekToBegin() {
     if (!worker_base_uptr_) {
-        LOG_ERROR("[Worker] ERROR: Worker not initialized");
+        LOG4CPLUS_ERROR(logger_, " ERROR: Worker not initialized");
         return false;
     }
     return worker_base_uptr_->seekToBegin();
@@ -127,7 +102,7 @@ bool BufferFillingWorkerFacade::seekToBegin() {
 
 bool BufferFillingWorkerFacade::seekToEnd() {
     if (!worker_base_uptr_) {
-        LOG_ERROR("[Worker] ERROR: Worker not initialized");
+        LOG4CPLUS_ERROR(logger_, " ERROR: Worker not initialized");
         return false;
     }
     return worker_base_uptr_->seekToEnd();
@@ -135,7 +110,7 @@ bool BufferFillingWorkerFacade::seekToEnd() {
 
 bool BufferFillingWorkerFacade::skip(int frame_count) {
     if (!worker_base_uptr_) {
-        LOG_ERROR("[Worker] ERROR: Worker not initialized");
+        LOG4CPLUS_ERROR(logger_, " ERROR: Worker not initialized");
         return false;
     }
     return worker_base_uptr_->skip(frame_count);
@@ -159,20 +134,11 @@ long BufferFillingWorkerFacade::getFileSize() const {
     return worker_base_uptr_ ? worker_base_uptr_->getFileSize() : 0;
 }
 
-int BufferFillingWorkerFacade::getWidth() const {
-    return worker_base_uptr_ ? worker_base_uptr_->getWidth() : 0;
-}
-
-int BufferFillingWorkerFacade::getHeight() const {
-    return worker_base_uptr_ ? worker_base_uptr_->getHeight() : 0;
-}
-
-int BufferFillingWorkerFacade::getBytesPerPixel() const {
-    return worker_base_uptr_ ? worker_base_uptr_->getBytesPerPixel() : 0;
-}
-
-const char* BufferFillingWorkerFacade::getPath() const {
-    return worker_base_uptr_ ? worker_base_uptr_->getPath() : "";
+std::string BufferFillingWorkerFacade::getPath() const {
+    if (worker_base_uptr_) {
+        return worker_base_uptr_->getPath();
+    }
+    return std::string();
 }
 
 bool BufferFillingWorkerFacade::hasMoreFrames() const {
@@ -197,4 +163,48 @@ BufferPoolType BufferFillingWorkerFacade::getPrimaryBufferPoolType() {
         return worker_base_uptr_->getPrimaryBufferPoolType();
     }
     return BufferPoolType::DECODE_VIDEO_PRIMARY;  // 默认值
+}
+
+// ============ 数据源属性（v2.14）============
+
+int BufferFillingWorkerFacade::getSourceWidth() const {
+    return worker_base_uptr_ ? worker_base_uptr_->getSourceWidth() : 0;
+}
+
+int BufferFillingWorkerFacade::getSourceHeight() const {
+    return worker_base_uptr_ ? worker_base_uptr_->getSourceHeight() : 0;
+}
+
+AVPixelFormat BufferFillingWorkerFacade::getSourcePixelFormat() const {
+    return worker_base_uptr_ ? worker_base_uptr_->getSourcePixelFormat() : AV_PIX_FMT_NONE;
+}
+
+// ============ 编解码器参数和时间基获取（v2.14）============
+
+const struct AVCodecParameters* BufferFillingWorkerFacade::getSourceCodecParameters() const {
+    if (worker_base_uptr_) {
+        return worker_base_uptr_->getSourceCodecParameters();
+    }
+    return nullptr;
+}
+
+struct AVRational BufferFillingWorkerFacade::getTimeBase() const {
+    if (worker_base_uptr_) {
+        return worker_base_uptr_->getTimeBase();
+    }
+    return {1, 25};  // 默认 25fps
+}
+
+// ============ Worker 输出属性（v2.14）============
+
+int BufferFillingWorkerFacade::getOutputWidth() const {
+    return worker_base_uptr_ ? worker_base_uptr_->getOutputWidth() : 0;
+}
+
+int BufferFillingWorkerFacade::getOutputHeight() const {
+    return worker_base_uptr_ ? worker_base_uptr_->getOutputHeight() : 0;
+}
+
+double BufferFillingWorkerFacade::getOutputBytesPerPixel(int channel) const {
+    return worker_base_uptr_ ? worker_base_uptr_->getOutputBytesPerPixel(channel) : 0;
 }

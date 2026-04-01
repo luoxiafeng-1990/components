@@ -1,0 +1,48 @@
+/**
+ * @file NpuPlugin.cpp
+ * @brief NPU 推理插件实现
+ */
+
+#include "NpuPlugin.hpp"
+#include "../common/third_party/CLI11.hpp"
+
+namespace test {
+namespace npu {
+
+std::string NpuPlugin::getName() const {
+    return "npu";
+}
+
+std::string NpuPlugin::getDescription() const {
+    return "NPU 推理";
+}
+
+void NpuPlugin::registerOptions(CLI::App& app) {
+    app.add_option("--model,--model-path", model_path_, ".nb 模型文件路径")->required();
+    app.add_option("--conf-threshold", conf_threshold_, "置信度阈值 (默认: 0.25)");
+    app.add_option("--nms-threshold", nms_threshold_, "NMS IoU 阈值 (默认: 0.45)");
+    app.add_option("--npu-core", npu_core_index_, "NPU 核心索引 (默认: 0)");
+    app.add_flag("--physical-addr", use_physical_addr_, "使用物理地址零拷贝输入");
+    app.add_flag("--draw-detections", enable_draw_, "推理后在画面上绘制检测框");
+    app.add_option("--inference-interval", inference_interval_, "每 N 帧执行一次推理 (默认: 1)");
+}
+
+void NpuPlugin::applyTo(WorkerConfig& config) const {
+    config.consumer_type.npu_inference.enable             = true;
+    config.consumer_type.npu_inference.model_path         = model_path_;
+    config.consumer_type.npu_inference.conf_threshold     = conf_threshold_;
+    config.consumer_type.npu_inference.nms_threshold      = nms_threshold_;
+    config.consumer_type.npu_inference.npu_core_index     = npu_core_index_;
+    config.consumer_type.npu_inference.use_physical_addr  = use_physical_addr_;
+    config.consumer_type.npu_inference.enable_draw        = enable_draw_;
+    config.consumer_type.npu_inference.inference_interval = inference_interval_;
+
+    if (config.consumer_type.display.enable) {
+        config.consumer_type.npu_inference.enable_draw = true;
+        if (config.consumer_type.npu_inference.inference_interval <= 1)
+            config.consumer_type.npu_inference.inference_interval = 15;
+    }
+}
+
+} // namespace npu
+} // namespace test

@@ -16,12 +16,12 @@ BufferPoolRegistry& BufferPoolRegistry::getInstance() {
 
 uint64_t BufferPoolRegistry::registerPool(std::shared_ptr<BufferPool> pool, uint64_t allocator_id) {
     if (!pool) {
-        LOG_WARN("[Registry]  Error: Cannot register null BufferPool");
+        LOG4CPLUS_WARN(logger_, "[Registry]  Error: Cannot register null BufferPool");
         return 0;
     }
     
     if (allocator_id == 0) {
-        LOG_WARN("[Registry]  Error: Invalid allocator_id (0)");
+        LOG4CPLUS_WARN(logger_, "[Registry]  Error: Invalid allocator_id (0)");
         return 0;
     }
     
@@ -33,7 +33,7 @@ uint64_t BufferPoolRegistry::registerPool(std::shared_ptr<BufferPool> pool, uint
     
     // 检查名称是否已存在
     if (name_to_id_.find(name) != name_to_id_.end()) {
-        LOG_WARN_FMT("[Registry]  Warning: BufferPool name '%s' already exists, appending ID suffix", 
+        LOG4CPLUS_WARN_FMT(logger_, "[Registry]  Warning: BufferPool name '%s' already exists, appending ID suffix", 
                name.c_str());
     }
     
@@ -53,7 +53,7 @@ uint64_t BufferPoolRegistry::registerPool(std::shared_ptr<BufferPool> pool, uint
     pools_[id] = info;
     name_to_id_[name] = id;
     
-    LOG_DEBUG_FMT("[Registry] Pool registered: '%s' (ID: %lu, Allocator: %lu, Category: %s)",
+    LOG4CPLUS_DEBUG_FMT(logger_, "[Registry] Pool registered: '%s' (ID: %lu, Allocator: %lu, Category: %s)",
            name.c_str(), id, allocator_id, category.empty() ? "None" : category.c_str());
     
     return id;
@@ -64,7 +64,7 @@ void BufferPoolRegistry::unregisterPool(uint64_t id) {
     
     auto it = pools_.find(id);
     if (it == pools_.end()) {
-        LOG_WARN_FMT("[Registry]  Warning: Trying to unregister non-existent BufferPool (ID: %lu)", id);
+        LOG4CPLUS_WARN_FMT(logger_, "[Registry]  Warning: Trying to unregister non-existent BufferPool (ID: %lu)", id);
         return;
     }
     
@@ -76,7 +76,7 @@ void BufferPoolRegistry::unregisterPool(uint64_t id) {
     // 移除 Pool（v2.0: 释放 shared_ptr，引用计数 -1 → 0 → 触发 Pool 析构）
     pools_.erase(it);
     
-    LOG_DEBUG_FMT("[Registry] Pool unregistered: '%s' (ID: %lu)", name.c_str(), id);
+    LOG4CPLUS_DEBUG_FMT(logger_, "[Registry] Pool unregistered: '%s' (ID: %lu)", name.c_str(), id);
 }
 
 // ========== 公开接口实现 ==========
@@ -140,14 +140,14 @@ std::vector<uint64_t> BufferPoolRegistry::getPoolsByAllocator(uint64_t allocator
 void BufferPoolRegistry::printAllStats() const {
     std::lock_guard<std::mutex> lock(mutex_);
     
-    LOG_INFO("========================================");
-    LOG_INFO("📊 Global BufferPool Statistics");
-    LOG_INFO("========================================");
-    LOG_INFO_FMT("Total Pools: %zu", pools_.size());
+    LOG4CPLUS_INFO(logger_, "========================================");
+    LOG4CPLUS_INFO(logger_, "📊 Global BufferPool Statistics");
+    LOG4CPLUS_INFO(logger_, "========================================");
+    LOG4CPLUS_INFO_FMT(logger_, "Total Pools: %zu", pools_.size());
     
     if (pools_.empty()) {
-        LOG_INFO("   (No BufferPools registered)");
-        LOG_INFO("========================================");
+        LOG4CPLUS_INFO(logger_, "   (No BufferPools registered)");
+        LOG4CPLUS_INFO(logger_, "========================================");
         return;
     }
     
@@ -172,12 +172,12 @@ void BufferPoolRegistry::printAllStats() const {
                       std::localtime(&time_t_val));
         
         // 打印 Pool 信息
-        LOG_INFO_FMT("[%s] %s (ID: %lu)",
+        LOG4CPLUS_INFO_FMT(logger_, "[%s] %s (ID: %lu)",
                info.category.empty() ? "Uncategorized" : info.category.c_str(),
                info.name.c_str(),
                info.id);
         
-        LOG_INFO_FMT("   Buffers: %d total, %d free, %d filled",
+        LOG4CPLUS_INFO_FMT(logger_, "   Buffers: %d total, %d free, %d filled",
                pool->getTotalCount(),
                pool->getFreeCount(),
                pool->getFilledCount());
@@ -185,13 +185,13 @@ void BufferPoolRegistry::printAllStats() const {
         size_t pool_memory = pool->getTotalCount() * pool->getBufferSize();
         total_memory += pool_memory;
         
-        LOG_INFO_FMT("   Memory: %.2f MB", pool_memory / (1024.0 * 1024.0));
-        LOG_INFO_FMT("   Created: %s", time_buf);
+        LOG4CPLUS_INFO_FMT(logger_, "   Memory: %.2f MB", pool_memory / (1024.0 * 1024.0));
+        LOG4CPLUS_INFO_FMT(logger_, "   Created: %s", time_buf);
     }
     
-    LOG_INFO("========================================");
-    LOG_INFO_FMT("TOTAL MEMORY: %.2f MB", total_memory / (1024.0 * 1024.0));
-    LOG_INFO("========================================");
+    LOG4CPLUS_INFO(logger_, "========================================");
+    LOG4CPLUS_INFO_FMT(logger_, "TOTAL MEMORY: %.2f MB", total_memory / (1024.0 * 1024.0));
+    LOG4CPLUS_INFO(logger_, "========================================");
 }
 
 size_t BufferPoolRegistry::getTotalMemoryUsage() const {

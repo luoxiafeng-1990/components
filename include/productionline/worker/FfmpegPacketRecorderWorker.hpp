@@ -1,11 +1,13 @@
 #pragma once
 
 #include "productionline/worker/WorkerBase.hpp"
-#include "productionline/worker/IPacketSource.hpp"
+#include "productionline/worker/IEncodedPacketSource.hpp"
 #include <string>
 #include <atomic>
 #include <mutex>
 #include <memory>
+#include <log4cplus/logger.h>
+#include <log4cplus/loggingmacros.h>
 
 // Forward declarations
 struct AVPacket;
@@ -29,14 +31,16 @@ struct AVPacket;
  * @example
  * // RTSP 流
  * auto config1 = WorkerConfigBuilder()
+ *     .setGlobalConfig(WorkerGlobalConfigBuilder()
+ *         .setWorkerType(WorkerType::FFMPEG_PACKET_RECORDER).build())
  *     .setDataSourceConfig(DataSourceConfigBuilder().setPath("rtsp://192.168.1.100/stream").build())
- *     .setWorkerType(WorkerType::FFMPEG_PACKET_RECORDER)
  *     .build();
  * 
  * // 本地文件
  * auto config2 = WorkerConfigBuilder()
+ *     .setGlobalConfig(WorkerGlobalConfigBuilder()
+ *         .setWorkerType(WorkerType::FFMPEG_PACKET_RECORDER).build())
  *     .setDataSourceConfig(DataSourceConfigBuilder().setPath("/data/video.mp4").build())
- *     .setWorkerType(WorkerType::FFMPEG_PACKET_RECORDER)
  *     .build();
  * 
  * // 在 ProductionLine 中运行
@@ -72,16 +76,15 @@ public:
     virtual size_t getFrameSize() const override;
     virtual long getFileSize() const override;
     
-    virtual int getWidth() const override;
-    virtual int getHeight() const override;
-    virtual double getBytesPerPixel() const override;
-    virtual const char* getPath() const override;
+    std::string getPath() const override;
+    SourceType getDataSourceType() const override;
     
     virtual bool hasMoreFrames() const override;
     virtual bool isAtEnd() const override;
     
     // ============ WorkerBase 接口实现 ============
-    virtual bool fillBuffer(int frame_index, Buffer* buffer) override;
+    // v2.33 变更：返回类型从 bool 改为 FillResult
+    virtual FillResult fillBuffer(int frame_index, Buffer* buffer) override;
     
     /**
      * @brief 获取 Worker 类型名称
@@ -103,13 +106,31 @@ public:
      * @brief 获取编解码器参数（供BufferWriter使用）
      * @return 编解码器参数指针，如果未打开则返回nullptr
      */
-    const struct AVCodecParameters* getCodecParameters() const;
+    const AVCodecParameters* getCodecParameters() const override;
     
     /**
      * @brief 获取时间基（供BufferWriter使用）
      * @return 时间基
      */
-    struct AVRational getTimeBase() const;
+    struct AVRational getTimeBase() const override;
+    int getSourceWidth() const override;
+    int getSourceHeight() const override;
+    AVPixelFormat getSourcePixelFormat() const override;
+    
+    /**
+     * @brief 获取 Worker 输出宽度（Recorder不处理，等于数据源宽度）
+     */
+    int getOutputWidth() const override;
+    
+    /**
+     * @brief 获取 Worker 输出高度（Recorder不处理，等于数据源高度）
+     */
+    int getOutputHeight() const override;
+    
+    /**
+     * @brief 获取 Worker 输出每像素字节数（Recorder记录原始码流，返回0）
+     */
+    double getOutputBytesPerPixel(int channel = 0) const override;
 
 private:
     std::string getLastError() const;
@@ -120,11 +141,11 @@ private:
      * @param path 数据源路径（RTSP URL、文件路径等）
      * @return 数据源指针，失败返回 nullptr
      */
-    std::unique_ptr<IPacketSource> createPacketSource(const std::string& path);
+    std::unique_ptr<IEncodedPacketSource> createPacketSource(const std::string& path);
 
 private:
     // ============ v2.13 数据源抽象（支持自动选择） ============
-    std::unique_ptr<IPacketSource> packet_source_;  // 数据源（RTSP/文件/Buffer）
+    std::unique_ptr<IEncodedPacketSource> packet_source_;  // 数据源（RTSP/文件/Buffer）
     
     // 状态
     std::atomic<bool> is_open_;
@@ -136,4 +157,7 @@ private:
     
     // 互斥锁
     mutable std::recursive_mutex mutex_;
+    
+    // 日志器
+    log4cplus::Logger logger_;
 };

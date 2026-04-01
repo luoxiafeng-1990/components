@@ -1,6 +1,8 @@
 #include "productionline/VideoProductionLine.hpp"
+#include "vendor/contracts/DecoderConfigValidate.hpp"
 #include "buffer/bufferpool/BufferPoolRegistry.hpp"
 #include "common/Logger.hpp"
+#include "common/GlobalThreadPool.hpp"
 #include <stdio.h>
 #include <chrono>
 #include <string>
@@ -29,30 +31,28 @@ VideoProductionLine::VideoProductionLine(bool loop, int thread_count, bool enabl
     , last_error_()
     , start_time_()
     , monitor_(nullptr)
-    , log_prefix_("[VideoProductionLine]")
+    , log_prefix_("")
+    , logger_(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.VideoProductionLine")))
 {
-    // 获取logger
-    auto logger = log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components"));
-    
     // 打印生命周期开始
-    LOG4CPLUS_INFO(logger, log_prefix_ << " 创建: loop=" << (loop_ ? "true" : "false") 
+    LOG4CPLUS_INFO(logger_, "创建: loop=" << (loop_ ? "true" : "false") 
                    << ", threads=" << thread_count_);
     
     if (thread_count < 1) {
-        LOG4CPLUS_WARN(logger, log_prefix_ << " Invalid thread_count, using 1");
+        LOG4CPLUS_WARN(logger_, "Invalid thread_count, using 1");
         thread_count_ = 1;
     }
 }
 
 VideoProductionLine::~VideoProductionLine() {
     // 获取logger
-    auto logger = log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components"));
+    // logger_ 已在构造函数初始化
     
     // 打印生命周期结束
-    LOG4CPLUS_INFO(logger, "");
-    LOG4CPLUS_INFO(logger, log_prefix_ << " " << std::string(69, '='));
-    LOG4CPLUS_INFO(logger, log_prefix_ << " 析构: 已生产 " << produced_frames_.load() << " 帧, 跳过 " << skipped_frames_.load() << " 帧");
-    LOG4CPLUS_INFO(logger, log_prefix_ << " " << std::string(69, '='));
+    LOG4CPLUS_INFO(logger_, "");
+    LOG4CPLUS_INFO(logger_, "" << std::string(69, '='));
+    LOG4CPLUS_INFO(logger_, "析构: 已生产 " << produced_frames_.load() << " 帧, 跳过 " << skipped_frames_.load() << " 帧");
+    LOG4CPLUS_INFO(logger_, "" << std::string(69, '='));
     
     // 🔧 修复：无论 running_ 的状态如何，都必须确保所有线程被正确 join
     // 避免 std::thread 在 joinable 状态下被析构导致 std::terminate()
@@ -75,19 +75,28 @@ VideoProductionLine::~VideoProductionLine() {
 // ============================================================
 
 bool VideoProductionLine::start(const WorkerConfig& worker_config) {
-    auto logger = log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components"));
+    // logger_ 已在构造函数初始化
     
     // 检查是否已经在运行
     if (running_.load()) {
-        LOG4CPLUS_WARN(logger, log_prefix_ << " Already running");
+        LOG4CPLUS_WARN(logger_, "Already running");
         return false;
     }
+
+    {
+        std::string dec_err;
+        if (!validateDecoderConfig(worker_config.decoder, dec_err)) {
+            setError(dec_err);
+            return false;
+        }
+    }
     
-    LOG4CPLUS_INFO(logger, log_prefix_ << " BufferFillingWorkerFacade: " << worker_config.data_source.path);
+    // ⭐ 初始化全局线程池（从配置读取）
+    initializeGlobalThreadPool(worker_config.global.thread_pool_size);
     
     // 创建共享的 BufferFillingWorkerFacade 对象（v2.2：只传入完整配置）
     worker_facade_sptr_ = std::make_shared<BufferFillingWorkerFacade>(worker_config);
-    LOG4CPLUS_INFO(logger, log_prefix_ << " 启动Worker...");
+    LOG4CPLUS_INFO(logger_, "启动Worker...");
     
     // v2.2：简化的 open 接口（所有参数从 config 获取）
     if (!worker_facade_sptr_->open()) {
@@ -120,16 +129,16 @@ bool VideoProductionLine::start(const WorkerConfig& worker_config) {
         return false;
     }
     
-    LOG_INFO_FMT("Using %s pool (ID: %lu)", 
+    LOG4CPLUS_INFO_FMT(logger_, "Using %s pool (ID: %lu)", 
                  bufferPoolTypeToString(primary_type), working_buffer_pool_id_);
     
     total_frames_ = worker_facade_sptr_->getTotalFrames();
     size_t frame_size = worker_facade_sptr_->getFrameSize();
     
-    LOG4CPLUS_INFO(logger, log_prefix_ << " Worker已就绪: " << worker_facade_sptr_->getWorkerType());
-    LOG4CPLUS_INFO(logger, log_prefix_ << "   - 分辨率: " << worker_facade_sptr_->getWidth() << "x" << worker_facade_sptr_->getHeight());
-    LOG4CPLUS_INFO(logger, log_prefix_ << "   - 总帧数: " << total_frames_);
-    LOG4CPLUS_INFO(logger, log_prefix_ << "   - 帧大小: " << (frame_size / (1024.0 * 1024.0)) << " MB");
+    LOG4CPLUS_INFO(logger_, "Worker已就绪: " << worker_facade_sptr_->getWorkerType());
+    LOG4CPLUS_INFO(logger_, "  - 分辨率: " << worker_facade_sptr_->getOutputWidth() << "x" << worker_facade_sptr_->getOutputHeight());
+    LOG4CPLUS_INFO(logger_, "  - 总帧数: " << total_frames_);
+    LOG4CPLUS_INFO(logger_, "  - 帧大小: " << (frame_size / (1024.0 * 1024.0)) << " MB");
     
     // 重置状态
     running_.store(true);
@@ -142,21 +151,21 @@ bool VideoProductionLine::start(const WorkerConfig& worker_config) {
     if (enable_monitor_) {
         monitor_ = std::make_unique<PerformanceMonitor>();
         monitor_->setReportInterval(1000);
-        LOG4CPLUS_INFO(logger, log_prefix_ << "   - 性能监控: 已启用");
+        LOG4CPLUS_INFO(logger_, "  - 性能监控: 已启用");
     }
     
     // 启动生产者线程
     threads_.reserve(thread_count_);
     active_threads_.store(thread_count_);
     
-    LOG4CPLUS_INFO(logger, log_prefix_ << " 启动生产线: " << thread_count_ << " threads");
+    LOG4CPLUS_INFO(logger_, "启动生产线: " << thread_count_ << " threads");
     
     for (int i = 0; i < thread_count_; i++) {
         try {
             threads_.emplace_back(&VideoProductionLine::producerThreadFunc, this, i);
-            LOG4CPLUS_INFO(logger, log_prefix_ << "   - Thread #" << i << " started");
+            LOG4CPLUS_INFO(logger_, "  - Thread #" << i << " started");
         } catch (const std::exception& e) {
-            LOG4CPLUS_ERROR(logger, log_prefix_ << " Failed to start thread #" << i << ": " << e.what());
+            LOG4CPLUS_ERROR(logger_, "Failed to start thread #" << i << ": " << e.what());
             // 停止已启动的线程
             running_.store(false);
             active_threads_.store(0);  // 重置活跃线程计数
@@ -183,7 +192,7 @@ void VideoProductionLine::stop() {
         return;
     }
     
-    LOG_INFO("Stopping VideoProductionLine...");
+    LOG4CPLUS_INFO(logger_, "Stopping VideoProductionLine...");
     
     // 设置停止标志
     running_.store(false);
@@ -204,10 +213,10 @@ void VideoProductionLine::stop() {
         monitor_.reset();
     }
     
-    LOG_INFO("VideoProductionLine stopped");
-    LOG_INFO_FMT("Total produced: %d frames", produced_frames_.load());
-    LOG_INFO_FMT("Total skipped: %d frames", skipped_frames_.load());
-    LOG_INFO_FMT("Average FPS: %.2f", getAverageFPS());
+    LOG4CPLUS_INFO(logger_, "VideoProductionLine stopped");
+    LOG4CPLUS_INFO_FMT(logger_, "Total produced: %d frames", produced_frames_.load());
+    LOG4CPLUS_INFO_FMT(logger_, "Total skipped: %d frames", skipped_frames_.load());
+    LOG4CPLUS_INFO_FMT(logger_, "Average FPS: %.2f", getAverageFPS());
 }
 
 // ============================================================
@@ -239,7 +248,7 @@ std::string VideoProductionLine::getLastError() const {
 }
 
 void VideoProductionLine::printStats() const {
-    LOG_DEBUG_FMT("VideoProductionLine Statistics: Running: %s, Produced: %d, Skipped: %d, Total: %d, FPS: %.2f, Threads: %zu",
+    LOG4CPLUS_DEBUG_FMT(logger_, "VideoProductionLine Statistics: Running: %s, Produced: %d, Skipped: %d, Total: %d, FPS: %.2f, Threads: %zu",
                   running_.load() ? "Yes" : "No", produced_frames_.load(), skipped_frames_.load(), 
                   total_frames_, getAverageFPS(), threads_.size());
 }
@@ -283,108 +292,105 @@ void VideoProductionLine::producerThreadFunc(int thread_id) {
     // 从缓存的 weak_ptr 获取临时 shared_ptr（符合架构设计）
     auto pool_sptr = working_buffer_pool_weak_.lock();
     if (!pool_sptr) {
-        LOG_ERROR_FMT("Thread #%d: BufferPool not found or destroyed", thread_id);
+        LOG4CPLUS_ERROR_FMT(logger_, "Thread #%d: BufferPool not found or destroyed", thread_id);
         return;
     }
     
-    LOG_INFO_FMT("[VideoProductionLine] Thread #%d: Starting unified producer loop", thread_id);
-    LOG_INFO_FMT("[VideoProductionLine] Working BufferPool: '%s'", pool_sptr->getName().c_str());
+    LOG4CPLUS_INFO_FMT(logger_, "[VideoProductionLine] Thread #%d: Starting unified producer loop", thread_id);
+    LOG4CPLUS_INFO_FMT(logger_, "[VideoProductionLine] Working BufferPool: '%s'", pool_sptr->getName().c_str());
     
     int thread_produced = 0;
     int thread_skipped = 0;
     int consecutive_failures = 0;
+    int buffer_wait_count = 0;
+    bool stop_loop = false;  // 用于从 switch-case 内部退出外层 while
+
     if (monitor_) {
-        monitor_->start();  // 启动后Timer会自动触发周期性报告
+        monitor_->start();
     }
-    
-    while (running_.load()) {
-        // 获取下一个有效的帧索引（封装后的清晰接口）
-        auto frame_index_opt = getNextFrameIndex();
-        if (!frame_index_opt.has_value()) {
-            break;  // 无更多帧，退出循环
-        }
-        int frame_index = frame_index_opt.value();
-        
-        // 🎯 统一的流程：从工作 BufferPool 获取 buffer（使用临时 shared_ptr）
+
+    while (running_.load() && !stop_loop) {
+        // ── 步骤 1：获取空闲 buffer ──
         Buffer* buffer = nullptr;
         while (running_.load() && buffer == nullptr) {
             buffer = pool_sptr->acquireFree(true, 100);  // 100ms 超时
             if (buffer == nullptr && running_.load()) {
-                // 超时但仍在运行，继续等待
-                LOG_DEBUG_FMT("[VideoProductionLine][Thread #%d] Waiting for free buffer from pool '%s' (frame_index=%d)...", 
-                              thread_id, pool_sptr->getName().c_str(), frame_index);
-            }
-        }
-        
-        // 检查是否因为停止信号退出循环
-        if (!running_.load()) {
-            break;
-        }
-        
-        // 4. 🎯 统一的接口：调用 Worker 填充 buffer（使用fillBuffer）
-        // 使用 PerformanceMonitor 测量填充buffer的耗时
-        if (monitor_) {
-            monitor_->beginTiming("fill_buffer");
-        }
-        bool fill_success = worker_facade_sptr_->fillBuffer(frame_index, buffer);
-      
-        
-        // 5. 🎯 统一的处理：提交或归还
-        if (fill_success) {
-            // ✅ 填充成功：提交到 filled 队列（供消费者使用）
-            pool_sptr->submitFilled(buffer);
-            produced_frames_.fetch_add(1);
-            thread_produced++;
-            consecutive_failures = 0;  // 重置失败计数
-            if (monitor_) {
-                monitor_->endTiming("fill_buffer");
-            }
-        } else {
-            // ⚠️ 填充失败：检查 Worker 是否到达 EOF
-            if (worker_facade_sptr_->isAtEnd()) {
-                // Worker 到达 EOF
-                if (loop_) {
-                    // 🔧 修复：循环模式下，当 Worker 到达 EOF 时，重置 Worker
-                    // 这确保循环播放时 Worker 能够从文件开头重新开始读取
-                    LOG_DEBUG_FMT("[Thread #%d] Worker reached EOF in loop mode, resetting to begin (frame_index=%d)", 
-                                  thread_id, frame_index);
-                    if (worker_facade_sptr_->seekToBegin()) {
-                        // 重置成功：归还 buffer，重置失败计数，继续下一次循环
-                        // 注意：不增加 skipped_frames，因为这是正常的循环重置操作
-                        pool_sptr->releaseFree(buffer);
-                        consecutive_failures = 0;
-                    } else {
-                        LOG_ERROR_FMT("[Thread #%d] Failed to reset Worker to begin", thread_id);
-                        // 重置失败，按正常失败处理
-                        pool_sptr->releaseFree(buffer);
-                        skipped_frames_.fetch_add(1);
-                        thread_skipped++;
-                        consecutive_failures++;
-                    }
-                } else {
-                    // 🔧 修复：非循环模式下，Worker 到达 EOF 时应该停止循环
-                    LOG_DEBUG_FMT("[Thread #%d] Worker reached EOF in non-loop mode, stopping producer thread", 
-                                  thread_id);
-                    pool_sptr->releaseFree(buffer);
-                    // 停止循环，退出生产者线程
-                    break;
+                buffer_wait_count++;
+                if (buffer_wait_count % 100 == 1) {
+                    LOG4CPLUS_DEBUG_FMT(logger_,
+                        "[Thread #%d] Waiting for free buffer (pool='%s', produced=%d, wait=%d)",
+                        thread_id, pool_sptr->getName().c_str(), thread_produced, buffer_wait_count);
                 }
-            } else {
-                // 非 EOF 情况：正常处理失败（可能是损坏帧等其他错误）
+            }
+        }
+        if (!running_.load()) break;
+
+        // ── 步骤 2：填充 buffer（lambda 提供独立作用域，ScopedTiming 在 fillBuffer 返回后立即析构）──
+        FillResult result = [&]() -> FillResult {
+            ScopedTiming timing(monitor_.get(), "fill_buffer");
+            return worker_facade_sptr_->fillBuffer(thread_produced, buffer);
+        }();
+
+        // ── 步骤 3：根据行动指令处理结果（switch 强制穷举所有 case）──
+        switch (result.toAction()) {
+            case FillResult::ConsumerAction::kSubmit:
+                // ✅ 填充成功：提交 buffer
+                pool_sptr->submitFilled(buffer);
+                produced_frames_.fetch_add(1);
+                ++thread_produced;
+                consecutive_failures = 0;
+                break;
+
+            case FillResult::ConsumerAction::kSkip:
+                // ⏭ 跳过当前 packet（PacketAlreadyProcessed / NonVideoPacket / InvalidData）
                 pool_sptr->releaseFree(buffer);
-                skipped_frames_.fetch_add(1);
-                thread_skipped++;
-                // 🎯 累加连续失败次数（PerformanceMonitor的Timer会每2秒自动打印统计）
-                consecutive_failures++;
-                if (consecutive_failures > kMaxConsecutiveFailures) {
-                    LOG_ERROR_FMT("[Thread #%d] Failed to fill buffer %d times in a row, stopping producer thread", 
-                                  thread_id, kMaxConsecutiveFailures);
-                    break;
+                break;
+
+            case FillResult::ConsumerAction::kRetry:
+                // 🔄 重试当前操作（Again / TimedOut / CodecEagain）
+                pool_sptr->releaseFree(buffer);
+                break;
+
+            case FillResult::ConsumerAction::kTerminate:
+                // 🔚 终止：EOF 或不可恢复错误
+                pool_sptr->releaseFree(buffer);
+                // v2.36：用 isAtEnd()（权威）+  isEoFlush()（codec flush）两路联合判断干净退出
+                // isAtEnd() 覆盖：文件/流 EOF、Buffer pool 停止（含 window 期内的错误路径）
+                // isEoFlush() 覆盖：codec 内部 flush pipeline 清空
+                if (result.isEoFlush() || worker_facade_sptr_->isAtEnd()) {
+                    if (!loop_) {
+                        // 非循环模式：正常结束
+                        LOG4CPLUS_DEBUG_FMT(logger_,
+                            "[Thread #%d] data source exhausted in non-loop mode, stopping", thread_id);
+                        stop_loop = true;
+                        break;
+                    }
+                    // 循环模式：重置到文件开头
+                    LOG4CPLUS_DEBUG_FMT(logger_,
+                        "[Thread #%d] data source exhausted in loop mode, seeking to begin (produced=%d)",
+                        thread_id, thread_produced);
+                    if (worker_facade_sptr_->seekToBegin()) {
+                        consecutive_failures = 0;
+                        break;  // seekToBegin 成功，继续循环
+                    }
+                    // seekToBegin 失败：fall-through 到错误计数
+                    LOG4CPLUS_ERROR_FMT(logger_, "[Thread #%d] seekToBegin failed", thread_id);
+                } else {
+                    // 不可恢复错误：记录详情
+                    LOG4CPLUS_ERROR_FMT(logger_,
+                        "[Thread #%d] fillBuffer terminal error: [%s] %s",
+                        thread_id, errorSourceToString(result.source()), result.statusString());
                 }
-            }
-            if (monitor_) {
-                monitor_->endTiming("fill_buffer");
-            }
+                // ── 统一计数 + break 判断（覆盖：非循环EOF seekToBegin失败 / 真正错误）──
+                skipped_frames_.fetch_add(1);
+                ++thread_skipped;
+                if (++consecutive_failures > kMaxConsecutiveFailures) {
+                    LOG4CPLUS_ERROR_FMT(logger_,
+                        "[Thread #%d] %d consecutive failures, stopping producer thread",
+                        thread_id, kMaxConsecutiveFailures);
+                    stop_loop = true;
+                }
+                break;
         }
     }
     
@@ -396,9 +402,9 @@ void VideoProductionLine::producerThreadFunc(int thread_id) {
     if (monitor_) {
         monitor_->stop();
     }
-    
+    pool_sptr->shutdown();
     // 线程结束
-    LOG_INFO_FMT("Thread #%d finished: produced=%d, skipped=%d, final_consecutive_failures=%d",
+    LOG4CPLUS_INFO_FMT(logger_, "Thread #%d finished: produced=%d, skipped=%d, final_consecutive_failures=%d",
                  thread_id, thread_produced, thread_skipped, consecutive_failures);
     
     // 减少活跃线程计数
@@ -406,7 +412,7 @@ void VideoProductionLine::producerThreadFunc(int thread_id) {
     if (remaining == 0) {
         // 最后一个线程退出，设置 running_ 为 false
         running_.store(false);
-        LOG_INFO("All producer threads finished naturally, production line stopped");
+        LOG4CPLUS_INFO(logger_, "All producer threads finished naturally, production line stopped");
     }
 }
 
@@ -422,11 +428,47 @@ void VideoProductionLine::setError(const std::string& error_msg) {
         try {
             error_callback_(error_msg);
         } catch (...) {
-            LOG_WARN("Exception in error callback");
+            LOG4CPLUS_WARN(logger_, "Exception in error callback");
         }
     }
     
     // 打印到控制台
-    LOG_ERROR_FMT("VideoProductionLine Error: %s", error_msg.c_str());
+    LOG4CPLUS_ERROR_FMT(logger_, "VideoProductionLine Error: %s", error_msg.c_str());
 }
 
+// ============================================================
+// 全局资源初始化
+// ============================================================
+
+void VideoProductionLine::initializeGlobalThreadPool(int thread_pool_size) {
+    // 如果为 0，使用默认值 64
+    if (thread_pool_size == 0) {
+        thread_pool_size = 64;
+    }
+    
+    // 验证范围：必须 > 0 且 <= 128
+    if (thread_pool_size <= 0) {
+        LOG4CPLUS_WARN(logger_, "线程池大小必须 > 0，使用默认值 64");
+        thread_pool_size = 64;
+    } else if (thread_pool_size > 128) {
+        LOG4CPLUS_WARN(logger_, "线程池大小超过最大值 128，使用最大值 128");
+        thread_pool_size = 128;
+    }
+    
+    auto& global_pool = GlobalThreadPool::getInstance();
+    
+    // 检查线程池是否已初始化
+    if (global_pool.isInitialized()) {
+        int current_size = global_pool.getSize();
+        if (current_size != thread_pool_size) {
+            LOG4CPLUS_WARN(logger_, "全局线程池已初始化，使用现有大小: " << current_size 
+                           << "（请求大小: " << thread_pool_size << "）");
+        } else {
+            LOG4CPLUS_DEBUG(logger_, "全局线程池已初始化，大小匹配: " << current_size);
+        }
+    } else {
+        // 初始化全局线程池
+        global_pool.setSize(thread_pool_size);
+        LOG4CPLUS_INFO(logger_, "全局线程池已初始化 (size=" << thread_pool_size << ")");
+    }
+}

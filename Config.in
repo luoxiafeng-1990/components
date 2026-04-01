@@ -2,7 +2,7 @@ config BR2_PACKAGE_COMPONENTS
 	bool "components - Component Framework"
 	help
 	  Component framework provides a cross-platform abstraction layer
-	  for framebuffer display operations. Includes LinuxFramebufferDevice,
+	  for framebuffer display operations. Includes SharedFramebufferDevice,
 	  VideoFile management, BufferManager for multi-threaded buffer handling,
 	  and PerformanceMonitor for video playback testing.
 	  

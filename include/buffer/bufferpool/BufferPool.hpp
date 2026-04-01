@@ -9,6 +9,8 @@
 #include <condition_variable>
 #include <memory>
 #include <atomic>
+#include <log4cplus/logger.h>
+#include <log4cplus/loggingmacros.h>
 
 // 前向声明
 class BufferAllocatorBase;
@@ -271,7 +273,13 @@ public:
      * - 防止死锁
      */
     void shutdown();
-    
+
+    /**
+     * @brief 获取运行状态
+     * 
+     * @return true 运行中，false 已停止
+     */
+    bool isRunning() const { return running_.load(); }
     // ====== 调试接口 ======
     
     /**
@@ -369,4 +377,7 @@ private:
     
     // 日志前缀（用于清晰标识对象）
     std::string log_prefix_;
+    
+    // 日志器
+    log4cplus::Logger logger_;
 };

@@ -1,4 +1,6 @@
 #pragma once
+#include <log4cplus/logger.h>
+#include <log4cplus/loggingmacros.h>
 
 #include "BufferPool.hpp"
 #include <unordered_map>
@@ -149,7 +151,10 @@ public:
     
 private:
     // 私有构造函数（单例模式）
-    BufferPoolRegistry() = default;
+    BufferPoolRegistry() 
+        : logger_(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.BufferPool.Registry")))
+    {
+    }
     ~BufferPoolRegistry() = default;
     
     // ========== v2.0 新增：Allocator 友元访问 ==========
@@ -231,6 +236,9 @@ private:
     
     // ========== 友元声明 ==========
     friend class BufferAllocatorBase;    // v2.0 新增：Allocator 可以调用清理方法
+    
+    // 日志器
+    log4cplus::Logger logger_;
 };
 
 
