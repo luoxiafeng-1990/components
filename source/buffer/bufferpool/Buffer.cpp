@@ -208,11 +208,7 @@ void Buffer::freeBuffer() {
         av_packet_unref(avpacket_);
     }
 
-    // 3. 重置虚拟地址（因为 AVFrame 的数据已被清空）
-    // virt_addr_ 之前指向 frame->data[0]，现在 frame->data[0] 已被清空，所以重置为 nullptr
-    virt_addr_ = nullptr;
-
-    // 4. 清空图像元数据
+    // 3. 清空图像元数据
     has_image_metadata_ = false;
     width_ = 0;
     height_ = 0;

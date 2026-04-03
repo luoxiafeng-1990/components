@@ -47,19 +47,19 @@ TacoDisplayContext::TacoDisplayContext(const TacoDisplayExtension& config)
 }
 
 TacoDisplayContext::~TacoDisplayContext() {
+    if (layer_enabled_ && layer_ctx_) {
+        ta_vo_layer_disable(layer_ctx_);
+        layer_enabled_ = false;
+    }
+
     for (auto& ch : channels_) {
-        freeFramePool(ch);
         if (ch.chn_ctx) {
             ta_vo_chn_unbind_from_layer(ch.chn_ctx, layer_ctx_);
             ta_vo_chn_destroy(ch.chn_ctx);
             ch.chn_ctx = nullptr;
             ch.active = false;
         }
-    }
-
-    if (layer_enabled_ && layer_ctx_) {
-        ta_vo_layer_disable(layer_ctx_);
-        layer_enabled_ = false;
+        freeFramePool(ch);
     }
 
     if (layer_ctx_) {
@@ -195,8 +195,7 @@ void TacoDisplayContext::releaseChannel(int channel_id) {
         return;
     }
 
-    freeFramePool(channels_[channel_id]);
-    LOG4CPLUS_DEBUG_FMT(logger_, "Channel %d frame pool released", channel_id);
+    LOG4CPLUS_DEBUG_FMT(logger_, "Channel %d marked for release (deferred to destructor)", channel_id);
 }
 
 bool TacoDisplayContext::allocateFramePool(ChannelState& ch) {
