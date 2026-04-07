@@ -1,0 +1,803 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FFmpegDecodeWorker Architecture Animation</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+
+        body {
+            background: linear-gradient(135deg, #0f172a, #1e293b);
+            color: #e2e8f0;
+            min-height: 100vh;
+            padding: 2rem;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 3rem;
+            max-width: 1000px;
+        }
+
+        h1 {
+            font-size: 2.8rem;
+            margin-bottom: 1rem;
+            background: linear-gradient(90deg, #60a5fa, #38bdf8);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            text-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+        }
+
+        .subtitle {
+            font-size: 1.2rem;
+            color: #94a3b8;
+            margin-bottom: 1.5rem;
+        }
+
+        .description {
+            background: rgba(30, 41, 59, 0.7);
+            border-left: 4px solid #38bdf8;
+            padding: 1.5rem;
+            border-radius: 8px;
+            margin-bottom: 2rem;
+            max-width: 1000px;
+        }
+
+        .description h2 {
+            color: #38bdf8;
+            margin-bottom: 0.8rem;
+            font-size: 1.5rem;
+        }
+
+        .description p {
+            line-height: 1.6;
+            margin-bottom: 1rem;
+        }
+
+        .controls {
+            display: flex;
+            gap: 1rem;
+            margin-bottom: 2rem;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+
+        button {
+            background: linear-gradient(90deg, #3b82f6, #60a5fa);
+            color: white;
+            border: none;
+            padding: 0.8rem 1.8rem;
+            border-radius: 8px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 12px rgba(59, 130, 246, 0.4);
+        }
+
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 16px rgba(59, 130, 246, 0.5);
+        }
+
+        button:disabled {
+            background: #475569;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+
+        .animation-status {
+            background: rgba(30, 41, 59, 0.8);
+            padding: 1.2rem;
+            border-radius: 10px;
+            max-width: 1000px;
+            margin-bottom: 2rem;
+            border-left: 4px solid #10b981;
+        }
+
+        .status-title {
+            color: #10b981;
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+            font-size: 1.1rem;
+        }
+
+        .status-desc {
+            color: #cbd5e1;
+            line-height: 1.5;
+        }
+
+        /* Architecture Diagram */
+        .diagram-container {
+            position: relative;
+            width: 100%;
+            max-width: 1200px;
+            height: 800px;
+            margin-bottom: 3rem;
+            overflow: hidden;
+        }
+
+        /* SVG for connections */
+        .connections-svg {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 1;
+        }
+
+        .connection-path {
+            fill: none;
+            stroke: #475569;
+            stroke-width: 2;
+            stroke-dasharray: 5,5;
+            transition: stroke 0.5s ease;
+        }
+
+        .connection-path.active {
+            stroke: #38bdf8;
+            stroke-width: 3;
+            stroke-dasharray: none;
+            filter: drop-shadow(0 0 5px rgba(56, 189, 248, 0.7));
+        }
+
+        /* Nodes */
+        .node {
+            position: absolute;
+            width: 200px;
+            padding: 1rem;
+            background: rgba(30, 41, 59, 0.95);
+            border-radius: 12px;
+            border: 2px solid #475569;
+            box-shadow: 0 8px 20px rgba(0, 0, 0, 0.4);
+            transition: all 0.4s ease;
+            z-index: 2;
+        }
+
+        .node.highlight {
+            border-color: #38bdf8;
+            box-shadow: 0 0 25px rgba(56, 189, 248, 0.5);
+            transform: scale(1.05);
+        }
+
+        .node-title {
+            font-size: 1.1rem;
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+            color: #f1f5f9;
+        }
+
+        .node-desc {
+            font-size: 0.85rem;
+            color: #94a3b8;
+            line-height: 1.4;
+        }
+
+        .node-badge {
+            position: absolute;
+            top: -10px;
+            right: -10px;
+            background: #3b82f6;
+            color: white;
+            font-size: 0.7rem;
+            padding: 3px 8px;
+            border-radius: 12px;
+            font-weight: 600;
+        }
+
+        /* Specific node positions */
+        .node-worker {
+            top: 50px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 240px;
+            background: linear-gradient(135deg, #1e40af, #3b82f6);
+            border-color: #60a5fa;
+        }
+
+        .node-datasource {
+            top: 300px;
+            left: 10%;
+            background: rgba(59, 130, 246, 0.15);
+            border-color: #3b82f6;
+        }
+
+        .node-datasource-config {
+            top: 100px;
+            left: 10%;
+        }
+
+        .node-display-config {
+            top: 100px;
+            left: 30%;
+        }
+
+        .node-decoder-config {
+            top: 100px;
+            left: 50%;
+        }
+
+        .node-encoder-config {
+            top: 100px;
+            left: 70%;
+        }
+
+        .node-global-config {
+            top: 200px;
+            left: 80%;
+        }
+
+        .node-consumer-config {
+            top: 200px;
+            left: 10%;
+        }
+
+        .node-packet-source {
+            top: 400px;
+            left: 25%;
+            background: rgba(34, 197, 94, 0.15);
+            border-color: #22c55e;
+        }
+
+        .node-buffer-pool {
+            top: 400px;
+            left: 50%;
+            background: rgba(245, 158, 11, 0.15);
+            border-color: #f59e0b;
+        }
+
+        .node-codec-context {
+            top: 400px;
+            left: 75%;
+            background: rgba(239, 68, 68, 0.15);
+            border-color: #ef4444;
+        }
+
+        .node-allocator {
+            top: 550px;
+            left: 25%;
+        }
+
+        .node-logger {
+            top: 550px;
+            left: 50%;
+        }
+
+        .node-config {
+            top: 550px;
+            left: 75%;
+        }
+
+        /* Legend */
+        .legend {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 1.5rem;
+            justify-content: center;
+            margin-top: 2rem;
+            max-width: 1000px;
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .legend-color {
+            width: 20px;
+            height: 20px;
+            border-radius: 4px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+
+        .legend-text {
+            font-size: 0.9rem;
+            color: #94a3b8;
+        }
+
+        footer {
+            margin-top: 3rem;
+            text-align: center;
+            color: #64748b;
+            font-size: 0.9rem;
+            padding-top: 1.5rem;
+            border-top: 1px solid #334155;
+            max-width: 1000px;
+        }
+
+        @keyframes pulse {
+            0% { opacity: 0.6; }
+            50% { opacity: 1; }
+            100% { opacity: 0.6; }
+        }
+
+        .pulse {
+            animation: pulse 2s infinite;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>FFmpegDecodeWorker Architecture Animation</h1>
+        <div class="subtitle">Visualizing Worker components and DataSource peer relationships</div>
+        <div class="description">
+            <h2>Worker Architecture Overview</h2>
+            <p>This animation shows the detailed architecture of <strong>FFmpegDecodeWorker</strong>, highlighting the <strong>DataSource (packet_source_)</strong> and its peer components within the WorkerBase class and WorkerConfig.</p>
+            <p>The Worker is built on a layered architecture: <strong>WorkerBase</strong> provides common functionality, <strong>WorkerConfig</strong> contains all configuration parameters, and runtime components handle data flow from source to output buffers.</p>
+            <p>Click <strong>Start Animation</strong> to see the data flow through the components.</p>
+        </div>
+    </div>
+
+    <div class="controls">
+        <button id="startBtn">Start Animation</button>
+        <button id="resetBtn">Reset</button>
+        <button id="nextBtn">Next Step</button>
+        <button id="showAllBtn">Show All Connections</button>
+    </div>
+
+    <div class="animation-status">
+        <div class="status-title" id="statusTitle">Ready to Start</div>
+        <div class="status-desc" id="statusDesc">Click "Start Animation" to begin the visualization of FFmpegDecodeWorker architecture and data flow.</div>
+    </div>
+
+    <div class="diagram-container">
+        <!-- SVG for connections -->
+        <svg class="connections-svg" id="connectionsSvg">
+            <!-- Connections will be drawn by JavaScript -->
+        </svg>
+
+        <!-- Nodes -->
+        <div class="node node-worker" id="nodeWorker">
+            <div class="node-title">FFmpegDecodeWorker</div>
+            <div class="node-desc">Main worker class for decoding video using FFmpeg. Inherits from WorkerBase.</div>
+            <div class="node-badge">Worker</div>
+        </div>
+
+        <div class="node node-datasource" id="nodeDataSource">
+            <div class="node-title">DataSource (packet_source_)</div>
+            <div class="node-desc">std::shared_ptr&lt;IEncodedPacketSource&gt;. Provides encoded packets from file, RTSP, or buffer.</div>
+            <div class="node-badge">Member</div>
+        </div>
+
+        <div class="node node-datasource-config" id="nodeDataSourceConfig">
+            <div class="node-title">DataSourceConfig</div>
+            <div class="node-desc">path, buffer_mode, codec_params, shared_packet_source, etc.</div>
+            <div class="node-badge">Config</div>
+        </div>
+
+        <div class="node node-display-config" id="nodeDisplayConfig">
+            <div class="node-title">DisplayConfig</div>
+            <div class="node-desc">width, height, bits_per_pixel for output display.</div>
+            <div class="node-badge">Config</div>
+        </div>
+
+        <div class="node node-decoder-config" id="nodeDecoderConfig">
+            <div class="node-title">DecoderConfig</div>
+            <div class="node-desc">name, enable_hardware, vendor extension (TacoConfig).</div>
+            <div class="node-badge">Config</div>
+        </div>
+
+        <div class="node node-encoder-config" id="nodeEncoderConfig">
+            <div class="node-title">EncoderConfig</div>
+            <div class="node-desc">name, bit_rate, gop_size, input_pix_fmt (v2.29+).</div>
+            <div class="node-badge">Config</div>
+        </div>
+
+        <div class="node node-global-config" id="nodeGlobalConfig">
+            <div class="node-title">GlobalConfig</div>
+            <div class="node-desc">worker_type, thread_pool_size.</div>
+            <div class="node-badge">Config</div>
+        </div>
+
+        <div class="node node-consumer-config" id="nodeConsumerConfig">
+            <div class="node-title">ConsumerTypeConfig</div>
+            <div class="node-desc">display, save_raw, npu_inference, compare, etc.</div>
+            <div class="node-badge">Config</div>
+        </div>
+
+        <div class="node node-packet-source" id="nodePacketSource">
+            <div class="node-title">IEncodedPacketSource</div>
+            <div class="node-desc">Interface for encoded packet sources. Implemented by FromFile, FromRtsp, FromBuffer.</div>
+            <div class="node-badge">Interface</div>
+        </div>
+
+        <div class="node node-buffer-pool" id="nodeBufferPool">
+            <div class="node-title">BufferPool &amp; Map</div>
+            <div class="node-desc">buffer_pool_type_map_ tracks BufferPool IDs. allocator_facade_ manages allocation.</div>
+            <div class="node-badge">Runtime</div>
+        </div>
+
+        <div class="node node-codec-context" id="nodeCodecContext">
+            <div class="node-title">AVCodecContext</div>
+            <div class="node-desc">codec_ctx_ptr_ - FFmpeg decoder context. Initialized based on DecoderConfig.</div>
+            <div class="node-badge">Runtime</div>
+        </div>
+
+        <div class="node node-allocator" id="nodeAllocator">
+            <div class="node-title">AllocatorFacade</div>
+            <div class="node-desc">allocator_facade_ - creates and manages BufferPools for decoded frames.</div>
+            <div class="node-badge">Runtime</div>
+        </div>
+
+        <div class="node node-logger" id="nodeLogger">
+            <div class="node-title">Logger</div>
+            <div class="node-desc">logger_ - log4cplus logger for debugging and monitoring.</div>
+            <div class="node-badge">Runtime</div>
+        </div>
+
+        <div class="node node-config" id="nodeConfig">
+            <div class="node-title">WorkerConfig</div>
+            <div class="node-desc">Contains all config sub-structs: data_source, display, decoder, encoder, global, consumer_type.</div>
+            <div class="node-badge">Container</div>
+        </div>
+    </div>
+
+    <div class="legend">
+        <div class="legend-item">
+            <div class="legend-color" style="background: linear-gradient(135deg, #1e40af, #3b82f6);"></div>
+            <div class="legend-text">Worker Class</div>
+        </div>
+        <div class="legend-item">
+            <div class="legend-color" style="background: rgba(59, 130, 246, 0.15); border-color: #3b82f6;"></div>
+            <div class="legend-text">DataSource & Members</div>
+        </div>
+        <div class="legend-item">
+            <div class="legend-color" style="background: rgba(30, 41, 59, 0.95); border-color: #475569;"></div>
+            <div class="legend-text">Configuration</div>
+        </div>
+        <div class="legend-item">
+            <div class="legend-color" style="background: rgba(34, 197, 94, 0.15); border-color: #22c55e;"></div>
+            <div class="legend-text">Interfaces</div>
+        </div>
+        <div class="legend-item">
+            <div class="legend-color" style="background: rgba(245, 158, 11, 0.15); border-color: #f59e0b;"></div>
+            <div class="legend-text">Runtime Components</div>
+        </div>
+        <div class="legend-item">
+            <div class="legend-color" style="background: #475569;"></div>
+            <div class="legend-text">Connection (Inactive)</div>
+        </div>
+        <div class="legend-item">
+            <div class="legend-color" style="background: #38bdf8;"></div>
+            <div class="legend-text">Connection (Active)</div>
+        </div>
+    </div>
+
+    <footer>
+        <p>FFmpegDecodeWorker Architecture Visualization | Based on components/include/productionline/worker/</p>
+        <p>Shows DataSource (packet_source_) and its peer components within WorkerConfig and runtime.</p>
+        <p>Animation demonstrates data flow from configuration to runtime execution.</p>
+    </footer>
+
+    <script>
+        // Define nodes with their positions and connections
+        const nodes = [
+            { id: 'nodeWorker', title: 'FFmpegDecodeWorker', category: 'worker' },
+            { id: 'nodeDataSource', title: 'DataSource (packet_source_)', category: 'datasource' },
+            { id: 'nodeDataSourceConfig', title: 'DataSourceConfig', category: 'config' },
+            { id: 'nodeDisplayConfig', title: 'DisplayConfig', category: 'config' },
+            { id: 'nodeDecoderConfig', title: 'DecoderConfig', category: 'config' },
+            { id: 'nodeEncoderConfig', title: 'EncoderConfig', category: 'config' },
+            { id: 'nodeGlobalConfig', title: 'GlobalConfig', category: 'config' },
+            { id: 'nodeConsumerConfig', title: 'ConsumerTypeConfig', category: 'config' },
+            { id: 'nodePacketSource', title: 'IEncodedPacketSource', category: 'interface' },
+            { id: 'nodeBufferPool', title: 'BufferPool & Map', category: 'runtime' },
+            { id: 'nodeCodecContext', title: 'AVCodecContext', category: 'runtime' },
+            { id: 'nodeAllocator', title: 'AllocatorFacade', category: 'runtime' },
+            { id: 'nodeLogger', title: 'Logger', category: 'runtime' },
+            { id: 'nodeConfig', title: 'WorkerConfig', category: 'container' }
+        ];
+
+        // Define connections between nodes [from, to, description]
+        const connections = [
+            // Worker to its members
+            ['nodeWorker', 'nodeDataSource', 'Contains packet_source_ member'],
+            ['nodeWorker', 'nodeBufferPool', 'Contains buffer_pool_type_map_'],
+            ['nodeWorker', 'nodeCodecContext', 'Contains codec_ctx_ptr_'],
+            ['nodeWorker', 'nodeAllocator', 'Contains allocator_facade_'],
+            ['nodeWorker', 'nodeLogger', 'Contains logger_'],
+            ['nodeWorker', 'nodeConfig', 'Contains worker_config_'],
+
+            // Config relationships
+            ['nodeConfig', 'nodeDataSourceConfig', 'Contains DataSourceConfig'],
+            ['nodeConfig', 'nodeDisplayConfig', 'Contains DisplayConfig'],
+            ['nodeConfig', 'nodeDecoderConfig', 'Contains DecoderConfig'],
+            ['nodeConfig', 'nodeEncoderConfig', 'Contains EncoderConfig'],
+            ['nodeConfig', 'nodeGlobalConfig', 'Contains GlobalConfig'],
+            ['nodeConfig', 'nodeConsumerConfig', 'Contains ConsumerTypeConfig'],
+
+            // DataSource to its implementations
+            ['nodeDataSource', 'nodePacketSource', 'Points to IEncodedPacketSource'],
+
+            // Data flow
+            ['nodeDataSourceConfig', 'nodeDataSource', 'Configures data source'],
+            ['nodeDecoderConfig', 'nodeCodecContext', 'Configures decoder'],
+            ['nodeDisplayConfig', 'nodeBufferPool', 'Configures output resolution'],
+
+            // Runtime flow
+            ['nodePacketSource', 'nodeCodecContext', 'Provides encoded packets'],
+            ['nodeCodecContext', 'nodeBufferPool', 'Outputs decoded frames'],
+            ['nodeAllocator', 'nodeBufferPool', 'Manages buffer allocation']
+        ];
+
+        // Animation sequence - groups of nodes to highlight together
+        const animationSequence = [
+            {
+                title: "Worker Base Structure",
+                desc: "FFmpegDecodeWorker is the main class that inherits from WorkerBase and contains core members.",
+                nodes: ['nodeWorker', 'nodeDataSource', 'nodeBufferPool', 'nodeCodecContext', 'nodeAllocator', 'nodeLogger'],
+                connections: [0, 1, 2, 3, 4]
+            },
+            {
+                title: "Configuration Hierarchy",
+                desc: "WorkerConfig contains all configuration sub-structs: DataSourceConfig, DisplayConfig, DecoderConfig, EncoderConfig, GlobalConfig, and ConsumerTypeConfig.",
+                nodes: ['nodeConfig', 'nodeDataSourceConfig', 'nodeDisplayConfig', 'nodeDecoderConfig', 'nodeEncoderConfig', 'nodeGlobalConfig', 'nodeConsumerConfig'],
+                connections: [5, 6, 7, 8, 9, 10]
+            },
+            {
+                title: "DataSource and Its Interface",
+                desc: "The DataSource member (packet_source_) points to an IEncodedPacketSource interface, implemented by FromFile, FromRtsp, and FromBuffer concrete classes.",
+                nodes: ['nodeDataSource', 'nodePacketSource'],
+                connections: [11]
+            },
+            {
+                title: "Configuration to Runtime",
+                desc: "Configuration parameters flow to runtime components: DataSourceConfig configures the data source, DecoderConfig configures the AVCodecContext, DisplayConfig influences BufferPool allocation.",
+                nodes: ['nodeDataSourceConfig', 'nodeDecoderConfig', 'nodeDisplayConfig', 'nodeDataSource', 'nodeCodecContext', 'nodeBufferPool'],
+                connections: [12, 13, 14]
+            },
+            {
+                title: "Data Flow Pipeline",
+                desc: "Encoded packets flow from IEncodedPacketSource to AVCodecContext for decoding, then to BufferPool for output. AllocatorFacade manages buffer memory.",
+                nodes: ['nodePacketSource', 'nodeCodecContext', 'nodeBufferPool', 'nodeAllocator'],
+                connections: [15, 16, 17]
+            },
+            {
+                title: "Complete Architecture",
+                desc: "All components work together: Configuration drives initialization, runtime components process data, and buffers deliver decoded frames to consumers.",
+                nodes: nodes.map(n => n.id),
+                connections: Array.from({length: connections.length}, (_, i) => i)
+            }
+        ];
+
+        // State variables
+        let currentStep = 0;
+        let animationInterval = null;
+        let allConnectionsVisible = false;
+        const connectionElements = [];
+
+        // DOM elements
+        const startBtn = document.getElementById('startBtn');
+        const resetBtn = document.getElementById('resetBtn');
+        const nextBtn = document.getElementById('nextBtn');
+        const showAllBtn = document.getElementById('showAllBtn');
+        const statusTitle = document.getElementById('statusTitle');
+        const statusDesc = document.getElementById('statusDesc');
+        const svg = document.getElementById('connectionsSvg');
+
+        // Initialize
+        function init() {
+            drawConnections();
+            resetAll();
+            updateButtons();
+        }
+
+        // Draw connection lines in SVG
+        function drawConnections() {
+            svg.innerHTML = '';
+            connectionElements.length = 0;
+
+            connections.forEach((conn, index) => {
+                const fromEl = document.getElementById(conn[0]);
+                const toEl = document.getElementById(conn[1]);
+
+                if (!fromEl || !toEl) return;
+
+                const fromRect = fromEl.getBoundingClientRect();
+                const toRect = toEl.getBoundingClientRect();
+                const containerRect = svg.getBoundingClientRect();
+
+                // Calculate center points relative to SVG
+                const fromX = fromRect.left + fromRect.width / 2 - containerRect.left;
+                const fromY = fromRect.top + fromRect.height / 2 - containerRect.top;
+                const toX = toRect.left + toRect.width / 2 - containerRect.left;
+                const toY = toRect.top + toRect.height / 2 - containerRect.top;
+
+                // Create path
+                const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+
+                // Simple curved path
+                const dx = toX - fromX;
+                const dy = toY - fromY;
+                const midX = fromX + dx * 0.5;
+                const midY = fromY + dy * 0.5;
+
+                // Add some curvature for non-horizontal/vertical lines
+                const curvature = 20;
+                const ctrlX1 = fromX + dx * 0.5;
+                const ctrlY1 = fromY;
+                const ctrlX2 = toX - dx * 0.5;
+                const ctrlY2 = toY;
+
+                const pathData = `M ${fromX} ${fromY} C ${ctrlX1} ${ctrlY1}, ${ctrlX2} ${ctrlY2}, ${toX} ${toY}`;
+                path.setAttribute('d', pathData);
+                path.classList.add('connection-path');
+                path.dataset.index = index;
+
+                svg.appendChild(path);
+                connectionElements.push(path);
+            });
+        }
+
+        // Reset all highlights
+        function resetAll() {
+            // Reset nodes
+            nodes.forEach(node => {
+                const el = document.getElementById(node.id);
+                if (el) {
+                    el.classList.remove('highlight');
+                    el.classList.remove('pulse');
+                }
+            });
+
+            // Reset connections
+            connectionElements.forEach(conn => {
+                conn.classList.remove('active');
+            });
+
+            // Clear interval
+            if (animationInterval) {
+                clearInterval(animationInterval);
+                animationInterval = null;
+            }
+
+            currentStep = 0;
+            updateStatus(0);
+            allConnectionsVisible = false;
+            showAllBtn.textContent = 'Show All Connections';
+        }
+
+        // Update status display
+        function updateStatus(step) {
+            if (step >= 0 && step < animationSequence.length) {
+                statusTitle.textContent = animationSequence[step].title;
+                statusDesc.textContent = animationSequence[step].desc;
+            }
+        }
+
+        // Highlight specific nodes and connections
+        function highlightStep(step) {
+            // Reset all first
+            nodes.forEach(node => {
+                const el = document.getElementById(node.id);
+                if (el) {
+                    el.classList.remove('highlight');
+                    el.classList.remove('pulse');
+                }
+            });
+
+            connectionElements.forEach(conn => {
+                conn.classList.remove('active');
+            });
+
+            if (step < 0 || step >= animationSequence.length) return;
+
+            const stepData = animationSequence[step];
+
+            // Highlight nodes
+            stepData.nodes.forEach(nodeId => {
+                const el = document.getElementById(nodeId);
+                if (el) {
+                    el.classList.add('highlight');
+                    el.classList.add('pulse');
+                }
+            });
+
+            // Highlight connections
+            stepData.connections.forEach(connIndex => {
+                if (connIndex >= 0 && connIndex < connectionElements.length) {
+                    connectionElements[connIndex].classList.add('active');
+                }
+            });
+
+            updateStatus(step);
+        }
+
+        // Advance to next step
+        function nextStep() {
+            if (currentStep < animationSequence.length) {
+                highlightStep(currentStep);
+                currentStep++;
+
+                if (currentStep >= animationSequence.length) {
+                    // Animation complete
+                    if (animationInterval) {
+                        clearInterval(animationInterval);
+                        animationInterval = null;
+                    }
+                    statusTitle.textContent = "Animation Complete";
+                    statusDesc.textContent = "All architecture components and their relationships have been visualized. The FFmpegDecodeWorker integrates configuration, data sources, and runtime components to decode video efficiently.";
+                }
+            }
+            updateButtons();
+        }
+
+        // Start automatic animation
+        function startAnimation() {
+            resetAll();
+            currentStep = 0;
+
+            // Start interval
+            animationInterval = setInterval(() => {
+                nextStep();
+
+                if (currentStep >= animationSequence.length) {
+                    clearInterval(animationInterval);
+                    animationInterval = null;
+                    updateButtons();
+                }
+            }, 3000); // 3 seconds per step
+
+            // Highlight first step immediately
+            highlightStep(currentStep);
+            currentStep = 1;
+            updateButtons();
+        }
+
+        // Toggle all connections visibility
+        function toggleAllConnections() {
+            allConnectionsVisible = !allConnectionsVisible;
+
+            if (allConnectionsVisible) {
+                connectionElements.forEach(conn => {
+                    conn.classList.add('active');
+                });
+                showAllBtn.textContent = 'Hide All Connections';
+                statusTitle.textContent = "All Connections Visible";
+                statusDesc.textContent = "Showing all relationships between components. Click 'Hide All Connections' to return to animation mode.";
+            } else {
+                connectionElements.forEach(conn => {
+                    conn.classList.remove('active');
+                });
+                showAllBtn.textContent = 'Show All Connections';
+                resetAll();
+            }
+        }
+
+        // Update button states
+        function updateButtons() {
+            startBtn.disabled = animationInterval !== null;
+            nextBtn.disabled = currentStep >= animationSequence.length || animationInterval !== null;
+        }
+
+        // Event listeners
+        startBtn.addEventListener('click', startAnimation);
+        resetBtn.addEventListener('click', resetAll);
+        nextBtn.addEventListener('click', nextStep);
+        showAllBtn.addEventListener('click', toggleAllConnections);
+
+        // Handle window resize
+        window.addEventListener('resize', () => {
+            drawConnections();
+            if (currentStep > 0 && currentStep <= animationSequence.length) {
+                highlightStep(currentStep - 1);
+            }
+        });
+
+        // Initialize on load
+        window.addEventListener('load', init);
+    </script>
+</body>
+</html>

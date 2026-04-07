@@ -1,0 +1,393 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Worker 工厂流水线动画 —— 交互式</title>
+<style>
+:root{--bg:#0f172a;--card:#1e293b;--text:#e2e8f0;--dim:#94a3b8}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--text);font-family:'Segoe UI','Microsoft YaHei',sans-serif;min-height:100vh}
+h1{text-align:center;padding:.7rem;font-size:1.5rem;background:rgba(0,0,0,.3);
+   background-image:linear-gradient(90deg,#60a5fa,#38bdf8);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+
+/* Tabs */
+.tabs{display:flex;justify-content:center;background:#1e293b;border-bottom:2px solid #334155}
+.tab{padding:.6rem 1.3rem;cursor:pointer;font-weight:600;color:var(--dim);border-bottom:3px solid transparent;transition:.2s}
+.tab:hover{color:#fff}.tab.active{color:#38bdf8;border-bottom-color:#38bdf8}
+.page{display:none;padding:.8rem;max-width:1440px;margin:0 auto}.page.active{display:block}
+
+/* Controls */
+.ctrls{display:flex;justify-content:center;gap:.5rem;padding:.4rem;flex-wrap:wrap}
+.ctrls button{padding:.4rem 1rem;border:none;border-radius:6px;font-size:.82rem;font-weight:600;cursor:pointer;transition:.2s}
+.b-play{background:#22c55e;color:#fff}.b-next{background:#3b82f6;color:#fff}.b-reset{background:#ef4444;color:#fff}
+button:disabled{opacity:.3;cursor:not-allowed}
+
+/* Status */
+.status{background:rgba(0,0,0,.7);color:#fff;padding:8px 18px;border-radius:10px;text-align:center;margin:.5rem auto;max-width:1000px;backdrop-filter:blur(6px)}
+.status .t{color:#FFD700;font-weight:bold;font-size:1rem;margin-bottom:2px}
+.status .code{color:#81D4FA;font-family:monospace;font-size:.75rem;margin-top:3px;white-space:pre-wrap}
+
+/* Scene */
+.scene{position:relative;width:100%;height:620px;border-radius:12px;overflow:hidden;
+   background:linear-gradient(180deg,#E8F4FD 0% 35%,#D7CCC8 35% 39%,#BCAAA4 39% 100%);box-shadow:0 6px 24px rgba(0,0,0,.4)}
+
+/* Factory */
+.factory{position:absolute;left:50%;top:25px;transform:translateX(-50%);width:680px;height:250px;
+   background:linear-gradient(180deg,#8D6E63,#6D4C41);border-radius:8px 8px 0 0;border:3px solid #4E342E;z-index:2;opacity:0}
+.factory-roof{position:absolute;top:-32px;left:-12px;width:704px;height:40px;background:#C62828;clip-path:polygon(0 100%,4% 0,96% 0,100% 100%)}
+.factory-sign{position:absolute;top:10px;left:50%;transform:translateX(-50%);background:#FFF8DC;padding:4px 16px;border-radius:6px;font-size:.95rem;font-weight:bold;color:#333;border:2px solid #DAA520;white-space:nowrap}
+.fw{position:absolute;width:44px;height:36px;background:linear-gradient(135deg,#81D4FA,#B3E5FC);border:3px solid #4E342E;border-radius:3px}
+.chimney{position:absolute;width:28px;background:#616161;border-radius:4px 4px 0 0;bottom:100%}
+.smoke{position:absolute;width:14px;height:14px;background:rgba(200,200,200,.5);border-radius:50%;animation:smokeR 3s infinite ease-out}
+@keyframes smokeR{0%{transform:translateY(0) scale(1);opacity:.5}100%{transform:translateY(-55px) translateX(10px) scale(2);opacity:0}}
+.conveyor{position:absolute;height:22px;background:repeating-linear-gradient(90deg,#555 0 12px,#777 12px 24px);border:3px solid #424242;border-radius:11px;z-index:3;animation:cvM 1.4s linear infinite;opacity:0}
+@keyframes cvM{0%{background-position:0}100%{background-position:24px}}
+.cv-leg{position:absolute;width:5px;background:#424242;z-index:2;opacity:0}
+
+/* Dynamic elements */
+.el{position:absolute;z-index:10;opacity:0}
+.nametag{position:absolute;color:#fff;padding:2px 6px;border-radius:5px;font-size:.65rem;font-weight:bold;z-index:15;white-space:nowrap;opacity:0}
+.station{position:absolute;z-index:5;text-align:center;opacity:0}
+.st-label{font-size:.68rem;font-weight:bold;color:#333;background:rgba(255,255,255,.85);padding:2px 6px;border-radius:5px;display:inline-block;margin-top:1px;border:1px solid #ccc}
+@keyframes walkR{0%,100%{transform:translateY(0)}50%{transform:translateY(-3px)}}.walking{animation:walkR .35s steps(2) infinite}
+@keyframes floatY{0%,100%{transform:translateY(0)}50%{transform:translateY(-4px)}}.floating{animation:floatY 1.3s ease-in-out infinite}
+@keyframes glow{0%,100%{filter:drop-shadow(0 0 3px rgba(255,215,0,.2))}50%{filter:drop-shadow(0 0 12px rgba(255,215,0,.7))}}.glowing{animation:glow 1.3s ease-in-out infinite}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.3}}.blinking{animation:blink 1s infinite}
+@keyframes dash{to{stroke-dashoffset:-20}}.flowing{animation:dash 1s linear infinite}
+
+/* Mode selector */
+.mode-sel{display:flex;justify-content:center;gap:.8rem;margin:.5rem 0;flex-wrap:wrap}
+.mode-btn{padding:.6rem 1.2rem;border-radius:12px;border:3px solid #475569;background:var(--card);cursor:pointer;transition:.3s;text-align:center;min-width:160px}
+.mode-btn:hover{border-color:#94a3b8;transform:translateY(-2px)}
+.mode-btn.sel{transform:translateY(-3px);box-shadow:0 0 18px rgba(56,189,248,.4)}
+.mode-btn.file-sel{border-color:#f59e0b;background:rgba(245,158,11,.1)}
+.mode-btn.rtsp-sel{border-color:#22c55e;background:rgba(34,197,94,.1)}
+.mode-btn.buf-sel{border-color:#a855f7;background:rgba(168,85,247,.1)}
+.mode-btn .mb-icon{font-size:2rem}
+.mode-btn .mb-title{font-weight:bold;font-size:.85rem;margin-top:.2rem}
+.mode-btn .mb-sub{font-size:.65rem;color:var(--dim)}
+
+/* Config page cards */
+.config-scene{display:flex;flex-wrap:wrap;gap:1rem;justify-content:center}
+.cfg-card{background:var(--card);border-radius:12px;padding:.8rem;border:2px solid #334155;min-width:260px;max-width:360px;flex:1;transition:.4s;opacity:0;transform:translateY(20px)}
+.cfg-card.show{opacity:1;transform:translateY(0)}.cfg-card.highlight{border-color:#38bdf8;box-shadow:0 0 20px rgba(56,189,248,.4)}
+.cfg-title{font-size:1rem;font-weight:bold;color:#38bdf8;margin-bottom:.5rem;display:flex;align-items:center;gap:.3rem}
+.cfg-title .icon{font-size:1.2rem}
+.cfg-row{display:flex;justify-content:space-between;padding:.2rem 0;border-bottom:1px solid #334155;font-size:.78rem}.cfg-row:last-child{border-bottom:none}
+.cfg-key{color:var(--dim)}.cfg-val{color:#a5f3fc;font-family:monospace;font-weight:600}
+.cfg-badge{display:inline-block;padding:1px 6px;border-radius:8px;font-size:.6rem;font-weight:bold;margin-left:auto}
+
+/* DataSource page */
+.ds-container{display:flex;gap:1.2rem;justify-content:center;flex-wrap:wrap}
+.ds-card{background:var(--card);border-radius:14px;padding:1rem;border:3px solid #334155;width:360px;transition:.5s;opacity:0;transform:scale(.9)}
+.ds-card.show{opacity:1;transform:scale(1)}.ds-card.highlight{transform:scale(1.02)}
+.ds-card.file-mode{border-color:#f59e0b}.ds-card.rtsp-mode{border-color:#22c55e}.ds-card.buffer-mode{border-color:#a855f7}
+.ds-header{display:flex;align-items:center;gap:.5rem;margin-bottom:.6rem}
+.ds-icon{font-size:2.2rem}.ds-name{font-size:1.1rem;font-weight:bold}.ds-class{font-size:.7rem;color:var(--dim);font-family:monospace}
+.ds-detail{font-size:.78rem;line-height:1.5;color:#cbd5e1}
+.ds-code{background:rgba(0,0,0,.3);border-radius:6px;padding:.5rem;margin-top:.5rem;font-family:monospace;font-size:.68rem;color:#a5f3fc;line-height:1.4;white-space:pre-wrap}
+.ds-flow{margin-top:.6rem;padding:.4rem;background:rgba(0,0,0,.2);border-radius:6px}
+.ds-flow-step{display:flex;align-items:center;gap:.3rem;font-size:.72rem;padding:.15rem 0}
+.ds-flow-step .arrow{color:#38bdf8}.ds-flow-step .desc{color:#cbd5e1}
+
+/* Mode tags */
+.mode-tags{display:flex;gap:.4rem;justify-content:center;margin:.6rem 0;flex-wrap:wrap}
+.mode-tag{padding:.3rem .8rem;border-radius:16px;font-size:.75rem;font-weight:600;border:2px solid;cursor:pointer;transition:.3s}
+.mode-tag.single{border-color:#22c55e;color:#22c55e}.mode-tag.compare{border-color:#f59e0b;color:#f59e0b}.mode-tag.parallel{border-color:#3b82f6;color:#3b82f6}
+.mode-tag.active{color:#fff}.mode-tag.single.active{background:#22c55e}.mode-tag.compare.active{background:#f59e0b}.mode-tag.parallel.active{background:#3b82f6}
+
+.legend{display:flex;justify-content:center;flex-wrap:wrap;gap:.6rem;padding:.3rem;background:rgba(255,255,255,.03)}
+.legend-item{display:flex;align-items:center;gap:.2rem;font-size:.72rem;color:var(--dim)}
+</style>
+</head>
+<body>
+<h1>Worker 架构 —— 交互式工厂流水线动画</h1>
+<div class="tabs">
+<div class="tab active" onclick="switchPage(0)">📋 Config 配置</div>
+<div class="tab" onclick="switchPage(1)">📦 DataSource 模式</div>
+<div class="tab" onclick="switchPage(2)">🏭 交互式流水线</div>
+</div>
+
+<!-- ===== PAGE 0 ===== -->
+<div class="page active" id="page0">
+<div class="ctrls"><button class="b-play" onclick="p0Play()">▶ 播放</button><button class="b-next" id="p0Next" onclick="p0Next()">⏭ 下一步</button><button class="b-reset" onclick="p0Reset()">↺ 重置</button></div>
+<div class="status"><div class="t" id="p0T">WorkerConfig 配置组装过程</div><div id="p0D">展示 main() 中如何通过 Plugin + Builder 模式组装配置</div><div class="code" id="p0C">WorkerConfig config; plugin->applyTo(config);</div></div>
+<div class="config-scene" id="cfgScene">
+<div class="cfg-card" id="cfgDS"><div class="cfg-title"><span class="icon">📁</span> DataSourceConfig <span class="cfg-badge" style="background:#f59e0b;color:#000">data_source</span></div><div class="cfg-row"><span class="cfg-key">path</span><span class="cfg-val">"/data/video_1080p.mp4"</span></div><div class="cfg-row"><span class="cfg-key">buffer_count</span><span class="cfg-val">128</span></div><div class="cfg-row"><span class="cfg-key">max_frames</span><span class="cfg-val">-1</span></div><div class="cfg-row"><span class="cfg-key">loop</span><span class="cfg-val">false</span></div><div class="cfg-row"><span class="cfg-key">buffer_mode</span><span class="cfg-val" style="color:#64748b">false</span></div></div>
+<div class="cfg-card" id="cfgDec"><div class="cfg-title"><span class="icon">⚙️</span> DecoderConfig <span class="cfg-badge" style="background:#22c55e;color:#000">decoder</span></div><div class="cfg-row"><span class="cfg-key">name</span><span class="cfg-val">"h264_taco"</span></div><div class="cfg-row"><span class="cfg-key">enable_hardware</span><span class="cfg-val">true</span></div><div class="cfg-row"><span class="cfg-key">vendor</span><span class="cfg-val">TacoDecoderExtension</span></div><div class="cfg-row"><span class="cfg-key">  ch0: NV12</span><span class="cfg-val">1920×1080</span></div></div>
+<div class="cfg-card" id="cfgDisp"><div class="cfg-title"><span class="icon">🖥️</span> DisplayConfig <span class="cfg-badge" style="background:#3b82f6;color:#fff">display</span></div><div class="cfg-row"><span class="cfg-key">width × height</span><span class="cfg-val">1920 × 1080</span></div><div class="cfg-row"><span class="cfg-key">bits_per_pixel</span><span class="cfg-val">32 (ARGB)</span></div></div>
+<div class="cfg-card" id="cfgGlobal"><div class="cfg-title"><span class="icon">🌐</span> GlobalConfig <span class="cfg-badge" style="background:#a855f7;color:#fff">global</span></div><div class="cfg-row"><span class="cfg-key">worker_type</span><span class="cfg-val">FFMPEG_DECODE</span></div><div class="cfg-row"><span class="cfg-key">thread_pool_size</span><span class="cfg-val">64</span></div></div>
+<div class="cfg-card" id="cfgEnc"><div class="cfg-title"><span class="icon">🎬</span> EncoderConfig <span class="cfg-badge" style="background:#ef4444;color:#fff">encoder</span></div><div class="cfg-row"><span class="cfg-key">name</span><span class="cfg-val">"h264_taco"</span></div><div class="cfg-row"><span class="cfg-key">bit_rate</span><span class="cfg-val">4Mbps</span></div><div class="cfg-row"><span class="cfg-key">gop / rc_mode</span><span class="cfg-val">30 / VBR</span></div></div>
+<div class="cfg-card" id="cfgCons"><div class="cfg-title"><span class="icon">🎯</span> ConsumerTypeConfig <span class="cfg-badge" style="background:#ec4899;color:#fff">consumer_type</span></div><div class="cfg-row"><span class="cfg-key">display.enable</span><span class="cfg-val">true</span></div><div class="cfg-row"><span class="cfg-key">save_raw / npu</span><span class="cfg-val">false / false</span></div><div class="cfg-row"><span class="cfg-key">compare.psnr</span><span class="cfg-val">false</span></div></div>
+</div>
+<div style="margin-top:.8rem"><div style="text-align:center;color:#38bdf8;font-weight:bold;margin-bottom:.4rem">执行模式</div>
+<div class="mode-tags"><div class="mode-tag single" onclick="showMode('single')">SINGLE 单路</div><div class="mode-tag compare" onclick="showMode('compare')">COMPARE 对比</div><div class="mode-tag parallel" onclick="showMode('parallel')">PARALLEL 并行</div></div>
+<div class="status" id="modeDesc" style="max-width:760px"><div class="t" id="modeTitle">点击标签查看</div><div id="modeText"></div><div class="code" id="modeCode"></div></div></div>
+</div>
+
+<!-- ===== PAGE 1 ===== -->
+<div class="page" id="page1">
+<div class="ctrls"><button class="b-play" onclick="p1Play()">▶ 播放</button><button class="b-next" id="p1Next" onclick="p1Next()">⏭ 下一步</button><button class="b-reset" onclick="p1Reset()">↺ 重置</button></div>
+<div class="status"><div class="t" id="p1T">DataSource 三种模式</div><div id="p1D">FFmpegDecodeWorker 构造函数中根据配置创建不同 packet_source_</div><div class="code" id="p1C"></div></div>
+<div class="ds-container" id="dsScene">
+<div class="ds-card file-mode" id="dsFile"><div class="ds-header"><div class="ds-icon">📁</div><div><div class="ds-name" style="color:#f59e0b">文件模式</div><div class="ds-class">EncodedPacketSourceFromFile</div></div></div><div class="ds-detail">从本地视频文件逐包读取编码数据。buffer_count=128，适用于离线测试。</div><div class="ds-code">packet_source_ = make_shared&lt;FromFile&gt;(path, max_frames);</div><div class="ds-flow"><div class="ds-flow-step"><span class="arrow">📁</span><span class="desc">本地 .mp4 / .h264 文件</span></div><div class="ds-flow-step"><span class="arrow">→</span><span class="desc">avformat_open → av_read_frame 逐包</span></div><div class="ds-flow-step"><span class="arrow">→</span><span class="desc">acquireEncodedPacket() → AVPacket</span></div></div></div>
+<div class="ds-card rtsp-mode" id="dsRtsp"><div class="ds-header"><div class="ds-icon">📡</div><div><div class="ds-name" style="color:#22c55e">RTSP 网络流</div><div class="ds-class">EncodedPacketSourceFromRtsp</div></div></div><div class="ds-detail">从 RTSP 摄像头实时接收编码包。buffer_count=8 低延迟。</div><div class="ds-code">if (path.rfind("rtsp://",0)==0)
+  packet_source_ = make_shared&lt;FromRtsp&gt;(path);</div><div class="ds-flow"><div class="ds-flow-step"><span class="arrow">📹</span><span class="desc">摄像头 RTSP 服务器</span></div><div class="ds-flow-step"><span class="arrow">→</span><span class="desc">RTP 实时推送编码帧</span></div><div class="ds-flow-step"><span class="arrow">→</span><span class="desc">acquireEncodedPacket() → 实时 AVPacket</span></div></div></div>
+<div class="ds-card buffer-mode" id="dsBuf"><div class="ds-header"><div class="ds-icon">🔄</div><div><div class="ds-name" style="color:#a855f7">共享缓冲区</div><div class="ds-class">EncodedPacketSourceFromBuffer</div></div></div><div class="ds-detail">从上游 RecordWorker 的 BufferPool 零拷贝获取编码包。MultiWorker 级联场景。</div><div class="ds-code">packet_source_ = config.data_source.shared_packet_source;
+// 或 make_shared&lt;FromBuffer&gt;(codec_params);</div><div class="ds-flow"><div class="ds-flow-step"><span class="arrow">🔄</span><span class="desc">上游 Worker BufferPool</span></div><div class="ds-flow-step"><span class="arrow">→</span><span class="desc">zero-copy 读取 AVPacket</span></div><div class="ds-flow-step"><span class="arrow">→</span><span class="desc">acquireEncodedPacket() → 共享帧</span></div></div></div>
+</div></div>
+
+<!-- ===== PAGE 2: 交互式流水线 ===== -->
+<div class="page" id="page2">
+<div style="text-align:center;color:#38bdf8;font-weight:bold;margin-bottom:.3rem">选择数据源模式，观看对应的流水线动画</div>
+<div class="mode-sel" id="modeSel">
+<div class="mode-btn" id="selFile" onclick="selectMode('file')"><div class="mb-icon">📁</div><div class="mb-title">文件模式</div><div class="mb-sub">FromFile · buffer_count=128</div></div>
+<div class="mode-btn" id="selRtsp" onclick="selectMode('rtsp')"><div class="mb-icon">📹</div><div class="mb-title">RTSP 摄像头</div><div class="mb-sub">FromRtsp · buffer_count=8</div></div>
+<div class="mode-btn" id="selBuf" onclick="selectMode('buffer')"><div class="mb-icon">🔄</div><div class="mb-title">Buffer 级联</div><div class="mb-sub">FromBuffer · MultiWorker</div></div>
+</div>
+<div class="ctrls"><button class="b-play" id="p2PlayBtn" onclick="p2Play()">▶ 播放</button><button class="b-next" id="p2NextBtn" onclick="p2Next()">⏭ 下一步</button><button class="b-reset" onclick="p2Reset()">↺ 重置</button></div>
+<div class="status"><div class="t" id="p2T">请先选择数据源模式</div><div id="p2D">点击上方三种模式之一，然后播放动画</div><div class="code" id="p2C"></div></div>
+<div class="scene" id="S">
+<div class="factory" id="factory"><div class="factory-roof"></div><div class="factory-sign" id="fSign">🏭 Worker 解码工厂</div>
+<div class="fw" style="top:55px;left:25px"></div><div class="fw" style="top:55px;left:105px"></div><div class="fw" style="top:55px;right:105px"></div><div class="fw" style="top:55px;right:25px"></div>
+<div class="fw" style="top:125px;left:25px"></div><div class="fw" style="top:125px;left:105px"></div><div class="fw" style="top:125px;right:105px"></div><div class="fw" style="top:125px;right:25px"></div>
+<div class="chimney" style="left:80px;height:55px" id="chL"></div><div class="chimney" style="right:80px;height:42px" id="chR"></div></div>
+<div class="conveyor" id="cv1" style="top:275px;left:10px;width:320px"></div>
+<div class="conveyor" id="cv2" style="top:275px;left:370px;width:460px"></div>
+<div class="conveyor" id="cv3" style="top:275px;right:10px;width:160px"></div>
+<div class="cv-leg" id="cl1" style="top:285px;left:45px;height:28px"></div><div class="cv-leg" id="cl2" style="top:285px;left:170px;height:28px"></div>
+<div class="cv-leg" id="cl3" style="top:285px;left:290px;height:28px"></div><div class="cv-leg" id="cl4" style="top:285px;left:440px;height:28px"></div>
+<div class="cv-leg" id="cl5" style="top:285px;left:600px;height:28px"></div><div class="cv-leg" id="cl6" style="top:285px;left:760px;height:28px"></div>
+<div class="cv-leg" id="cl7" style="top:285px;right:60px;height:28px"></div>
+<svg id="lineSvg" style="position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:4"></svg>
+<div class="status" style="position:absolute;bottom:5px;left:50%;transform:translateX(-50%);max-width:92%;z-index:20"><div class="t" id="p2ST">等待选择</div><div id="p2SD"></div></div>
+</div>
+<div class="legend">
+<div class="legend-item">👷 Worker</div><div class="legend-item">📹 摄像头</div><div class="legend-item">📁 文件柜</div><div class="legend-item">🔄 上游Worker</div>
+<div class="legend-item">📦 编码包(Packet)</div><div class="legend-item">⚙️ 解码站</div><div class="legend-item">🎬 解码帧</div><div class="legend-item">🖥️ 消费者</div>
+</div></div>
+
+<script>
+function $(id){return document.getElementById(id)}
+function show(el,ms){el.style.transition=`opacity ${ms||400}ms,transform ${ms||400}ms`;el.style.opacity='1';el.style.transform='scale(1) translateY(0)'}
+function anim(el,p,ms){return new Promise(r=>{el.style.transition=`all ${ms}ms ease`;requestAnimationFrame(()=>{Object.assign(el.style,p);setTimeout(r,ms)})})}
+function switchPage(i){document.querySelectorAll('.page').forEach((p,j)=>p.classList.toggle('active',j===i));document.querySelectorAll('.tab').forEach((t,j)=>t.classList.toggle('active',j===i))}
+
+/* ===== PAGE 0 ===== */
+let p0S=-1,p0T=null;const cfgC=['cfgDS','cfgDec','cfgDisp','cfgGlobal','cfgEnc','cfgCons'];
+const p0Ss=[{t:'第1步：创建空 WorkerConfig',d:'所有字段默认值',c:'WorkerConfig config;',cards:[],hl:[]},{t:'第2步：DataSourceConfig',d:'VdecPlugin.applyTo → 设置 path/buffer_count/max_frames',c:'config.data_source = DataSourceConfigBuilder()\n  .setPath(path).setBufferCount(128).build();',cards:['cfgDS'],hl:['cfgDS']},{t:'第3步：DecoderConfig',d:'设置解码器 h264_taco + TacoConfig 通道/格式/缩放',c:'config.decoder = DecoderConfigBuilder()\n  .useTaco("h264", TacoConfigBuilder()\n    .setChannels(true,false)\n    .setOutputFormat(CH0,NV12)\n    .setScale(CH0,1920,1080).build()).build();',cards:['cfgDS','cfgDec'],hl:['cfgDec']},{t:'第4步：DisplayConfig',d:'显示设备分辨率 1920×1080，bpp=32',c:'config.display = DisplayConfigBuilder()\n  .setDisplayResolution(1920,1080)\n  .setBitsPerPixel(32).build();',cards:['cfgDS','cfgDec','cfgDisp'],hl:['cfgDisp']},{t:'第5步：GlobalConfig',d:'WorkerType=FFMPEG_DECODE, thread_pool=64',c:'config.global = WorkerGlobalConfigBuilder()\n  .setWorkerType(FFMPEG_DECODE).build();',cards:['cfgDS','cfgDec','cfgDisp','cfgGlobal'],hl:['cfgGlobal']},{t:'第6步：EncoderConfig',d:'编码场景专用：h264_taco / 4Mbps / GOP=30',c:'encoder.name="h264_taco"; encoder.bit_rate=4000000;',cards:['cfgDS','cfgDec','cfgDisp','cfgGlobal','cfgEnc'],hl:['cfgEnc']},{t:'第7步：ConsumerTypeConfig',d:'消费者能力：display/save_raw/npu/compare',c:'config.consumer_type.display.enable=true;',cards:cfgC,hl:['cfgCons']},{t:'✅ 配置完成！',d:'交给 Factory.create(config) 创建 Worker',c:'BufferFillingWorkerFactory::create(config);',cards:cfgC,hl:cfgC}];
+function p0Run(i){if(i<0||i>=p0Ss.length)return;const s=p0Ss[i];$('p0T').textContent=s.t;$('p0D').textContent=s.d;$('p0C').textContent=s.c;cfgC.forEach(id=>{$(id).classList.remove('highlight');if(!s.cards.includes(id))$(id).classList.remove('show')});s.cards.forEach(id=>$(id).classList.add('show'));s.hl.forEach(id=>$(id).classList.add('highlight'))}
+function p0Next(){if(p0T){clearInterval(p0T);p0T=null}p0S++;if(p0S>=p0Ss.length){p0S=p0Ss.length-1;return}p0Run(p0S);$('p0Next').disabled=p0S>=p0Ss.length-1}
+function p0Play(){if(p0T)return;if(p0S<0)p0Next();p0T=setInterval(()=>{p0S++;if(p0S>=p0Ss.length){clearInterval(p0T);p0T=null;return}p0Run(p0S);$('p0Next').disabled=p0S>=p0Ss.length-1},2200)}
+function p0Reset(){if(p0T){clearInterval(p0T);p0T=null}p0S=-1;cfgC.forEach(id=>$(id).classList.remove('show','highlight'));$('p0T').textContent='WorkerConfig 配置组装过程';$('p0D').textContent='展示 main() 中如何通过 Plugin + Builder 模式组装配置';$('p0C').textContent='WorkerConfig config; plugin->applyTo(config);';$('p0Next').disabled=false;document.querySelectorAll('.mode-tag').forEach(t=>t.classList.remove('active'))}
+function showMode(m){document.querySelectorAll('.mode-tag').forEach(t=>t.classList.remove('active'));document.querySelector('.mode-tag.'+m).classList.add('active');const I={single:{t:'SINGLE 单路解码',d:'1个Config + 无PSNR对比',c:'ExecuteMode::single(config, flags);\n./qa_cases vdec --file video.mp4 display'},compare:{t:'COMPARE HW vs SW',d:'2个Config + enable_psnr=true',c:'ExecuteMode::compare({hw_cfg, sw_cfg}, flags);\n./qa_cases vdec --preset h264_1080p --compare'},parallel:{t:'PARALLEL 多路并行',d:'N个Config同时启动',c:'ExecuteMode::parallel(configs, flags);\n./qa_cases pp --format nv12,nv21 --file video.mp4'}};const v=I[m];$('modeTitle').textContent=v.t;$('modeText').textContent=v.d;$('modeCode').textContent=v.c}
+
+/* ===== PAGE 1 ===== */
+let p1S=-1,p1T=null;const dsC=['dsFile','dsRtsp','dsBuf'];
+const p1Ss=[{t:'文件模式 (FromFile)',d:'path非空且非rtsp → buffer_count=128',c:'packet_source_ = make_shared<FromFile>(path);',show:['dsFile'],hl:'dsFile'},{t:'RTSP 模式 (FromRtsp)',d:'path以rtsp://开头 → buffer_count=8 低延迟',c:'packet_source_ = make_shared<FromRtsp>(path);',show:['dsFile','dsRtsp'],hl:'dsRtsp'},{t:'Buffer 模式 (FromBuffer)',d:'buffer_mode=true → 从上游Worker零拷贝获取',c:'packet_source_ = shared_packet_source;',show:dsC,hl:'dsBuf'}];
+function p1Run(i){if(i<0||i>=p1Ss.length)return;const s=p1Ss[i];$('p1T').textContent=s.t;$('p1D').textContent=s.d;$('p1C').textContent=s.c;dsC.forEach(id=>$(id).classList.remove('show','highlight'));s.show.forEach(id=>$(id).classList.add('show'));$(s.hl).classList.add('highlight')}
+function p1Next(){if(p1T){clearInterval(p1T);p1T=null}p1S++;if(p1S>=p1Ss.length){p1S=p1Ss.length-1;return}p1Run(p1S);$('p1Next').disabled=p1S>=p1Ss.length-1}
+function p1Play(){if(p1T)return;if(p1S<0)p1Next();p1T=setInterval(()=>{p1S++;if(p1S>=p1Ss.length){clearInterval(p1T);p1T=null;return}p1Run(p1S);$('p1Next').disabled=p1S>=p1Ss.length-1},3000)}
+function p1Reset(){if(p1T){clearInterval(p1T);p1T=null}p1S=-1;dsC.forEach(id=>$(id).classList.remove('show','highlight'));$('p1T').textContent='DataSource 三种模式';$('p1D').textContent='';$('p1C').textContent='';$('p1Next').disabled=false}
+
+/* ===== PAGE 2: 交互式流水线 ===== */
+let curMode=null,p2S=-1,p2Tm=null,dyn=[];
+const S=$('S');
+function addE(css,html,id){const el=document.createElement('div');el.className='el';if(id)el.id=id;el.style.cssText=css;if(html)el.innerHTML=html;S.appendChild(el);dyn.push(el);return el}
+function addN(css,txt){const el=document.createElement('div');el.className='nametag';el.style.cssText=css;el.textContent=txt;S.appendChild(el);dyn.push(el);return el}
+function addSt(css,html,id){const el=document.createElement('div');el.className='station';if(id)el.id=id;el.style.cssText=css;el.innerHTML=html;S.appendChild(el);dyn.push(el);return el}
+function mkSmk(ch){for(let i=0;i<3;i++){const s=document.createElement('div');s.className='smoke';s.style.cssText=`left:${ch.offsetLeft+220+5}px;top:${ch.offsetTop-5+25}px;animation-delay:${i}s`;S.appendChild(s);dyn.push(s)}}
+function p2St(t,d,c){$('p2T').textContent=t;$('p2D').textContent=d;$('p2C').textContent=c||'';$('p2ST').textContent=t;$('p2SD').textContent=d}
+
+function W(hat,bc){const lc={'#2196F3':'#1565C0','#FF5722':'#D84315','#9C27B0':'#6A1B9A','#00BCD4':'#00838F','#607D8B':'#455A64','#E91E63':'#C2185B','#795548':'#4E342E'}[bc||'#2196F3']||'#0D47A1';
+return `<svg width="46" height="62" viewBox="0 0 56 74"><ellipse cx="28" cy="13" rx="14" ry="9" fill="${hat}"/><rect x="14" y="11" width="28" height="5" rx="2" fill="${hat}"/><rect x="10" y="15" width="36" height="3" rx="1" fill="${hat}" opacity=".5"/><circle cx="28" cy="21" r="9" fill="#FFDAB9"/><circle cx="24" cy="19" r="1.8" fill="#333"/><circle cx="32" cy="19" r="1.8" fill="#333"/><path d="M23 24Q28 28 33 24" stroke="#333" stroke-width="1.3" fill="none"/><rect x="17" y="30" width="22" height="22" rx="4" fill="${bc||'#2196F3'}"/><rect x="20" y="37" width="6" height="5" rx="1" fill="${lc}"/><rect x="30" y="37" width="6" height="5" rx="1" fill="${lc}"/><rect x="15" y="45" width="26" height="3" rx="1" fill="#795548"/><rect x="8" y="32" width="9" height="5" rx="3" fill="#FFDAB9"/><rect x="39" y="32" width="9" height="5" rx="3" fill="#FFDAB9"/><rect x="19" y="52" width="7" height="13" rx="3" fill="${lc}"/><rect x="30" y="52" width="7" height="13" rx="3" fill="${lc}"/><rect x="17" y="63" width="11" height="5" rx="2" fill="#333"/><rect x="28" y="63" width="11" height="5" rx="2" fill="#333"/></svg>`}
+function Box(l){return `<svg width="40" height="34" viewBox="0 0 50 44"><rect x="3" y="5" width="44" height="34" rx="3" fill="#8B4513" stroke="#5C3317" stroke-width="2"/><line x1="3" y1="16" x2="47" y2="16" stroke="#5C3317" stroke-width="1"/><rect x="17" y="8" width="16" height="5" rx="1" fill="#FFD700" opacity=".8"/><text x="25" y="32" text-anchor="middle" font-size="7" font-weight="bold" fill="#fff">${l}</text></svg>`}
+function Frm(){return `<svg width="42" height="34" viewBox="0 0 52 44"><rect x="2" y="2" width="48" height="36" rx="3" fill="#E3F2FD" stroke="#2196F3" stroke-width="2"/><rect x="6" y="6" width="40" height="28" rx="2" fill="#90CAF9"/><polygon points="20,12 34,20 20,28" fill="#1565C0" opacity=".7"/></svg>`}
+function Stn(ico,bg,bd){return `<svg width="70" height="70" viewBox="0 0 84 84"><rect x="4" y="4" width="76" height="68" rx="8" fill="${bg}" stroke="${bd}" stroke-width="3"/><circle cx="42" cy="32" r="16" fill="none" stroke="rgba(255,255,255,.25)" stroke-width="2" stroke-dasharray="4 3"/><text x="42" y="40" text-anchor="middle" font-size="20">${ico}</text></svg>`}
+
+const svgCam=`<svg width="80" height="65" viewBox="0 0 100 80">
+<rect x="10" y="20" width="60" height="45" rx="6" fill="#333" stroke="#555" stroke-width="2"/>
+<circle cx="40" cy="42" r="14" fill="#1E88E5" stroke="#0D47A1" stroke-width="2"/>
+<circle cx="40" cy="42" r="8" fill="#0D47A1"/>
+<circle cx="40" cy="42" r="3" fill="#64B5F6"/>
+<rect x="60" y="30" width="25" height="20" rx="2" fill="#333" stroke="#555" stroke-width="2"/>
+<polygon points="85,35 98,28 98,62 85,55" fill="#555"/>
+<circle cx="18" cy="28" r="3" fill="#f44336" class="blinking"/>
+<rect x="15" y="15" width="20" height="6" rx="2" fill="#555"/>
+<rect x="30" y="8" width="4" height="10" fill="#777"/>
+</svg>`;
+
+const svgFileCab=`<svg width="70" height="70" viewBox="0 0 80 80">
+<rect x="10" y="5" width="60" height="70" rx="4" fill="#795548" stroke="#4E342E" stroke-width="2.5"/>
+<rect x="15" y="10" width="50" height="18" rx="2" fill="#8D6E63" stroke="#5D4037" stroke-width="1.5"/>
+<rect x="35" y="16" width="10" height="6" rx="1" fill="#FFD700"/>
+<rect x="15" y="32" width="50" height="18" rx="2" fill="#8D6E63" stroke="#5D4037" stroke-width="1.5"/>
+<rect x="35" y="38" width="10" height="6" rx="1" fill="#FFD700"/>
+<rect x="15" y="54" width="50" height="18" rx="2" fill="#A1887F" stroke="#5D4037" stroke-width="1.5"/>
+<rect x="35" y="60" width="10" height="6" rx="1" fill="#FFD700"/>
+<text x="40" y="66" text-anchor="middle" font-size="7" fill="#fff">.mp4</text>
+</svg>`;
+
+const svgUpstream=`<svg width="80" height="70" viewBox="0 0 90 80">
+<rect x="5" y="10" width="80" height="55" rx="8" fill="#7B1FA2" stroke="#4A148C" stroke-width="2.5"/>
+<text x="45" y="32" text-anchor="middle" font-size="9" fill="#fff" font-weight="bold">Record</text>
+<text x="45" y="44" text-anchor="middle" font-size="9" fill="#fff" font-weight="bold">Worker</text>
+<text x="45" y="58" text-anchor="middle" font-size="7" fill="#CE93D8">PacketRecorder</text>
+<circle cx="75" cy="18" r="4" fill="#4CAF50" class="blinking"/>
+</svg>`;
+
+function drawLine(x1,y1,x2,y2,color,dashed){
+    const svg=$('lineSvg');const ns='http://www.w3.org/2000/svg';
+    const line=document.createElementNS(ns,'line');
+    line.setAttribute('x1',x1);line.setAttribute('y1',y1);line.setAttribute('x2',x2);line.setAttribute('y2',y2);
+    line.setAttribute('stroke',color);line.setAttribute('stroke-width','3');
+    if(dashed){line.setAttribute('stroke-dasharray','8 4');line.classList.add('flowing')}
+    svg.appendChild(line);dyn.push(line);return line;
+}
+
+function selectMode(m){
+    curMode=m;p2Reset();
+    document.querySelectorAll('.mode-btn').forEach(b=>b.classList.remove('sel','file-sel','rtsp-sel','buf-sel'));
+    const btn=$({file:'selFile',rtsp:'selRtsp',buffer:'selBuf'}[m]);
+    btn.classList.add('sel',{file:'file-sel',rtsp:'rtsp-sel',buffer:'buf-sel'}[m]);
+    const info={file:{t:'📁 文件模式已选择',d:'点击播放：文件柜不断读取 Packet → Worker → 解码站 → BufferPool → 消费者'},
+        rtsp:{t:'📹 RTSP 摄像头模式已选择',d:'点击播放：摄像头实时推送编码包 → 网络传输 → Worker → 解码站 → BufferPool → 消费者'},
+        buffer:{t:'🔄 Buffer 级联模式已选择',d:'点击播放：上游 RecordWorker → 共享 BufferPool → 下游 DecodeWorker → 解码 → 消费者'}};
+    p2St(info[m].t,info[m].d,'');$('p2PlayBtn').disabled=false;$('p2NextBtn').disabled=false;
+}
+
+function getSteps(){
+    if(!curMode) return [];
+    const common_later=[
+        {t:'开工准备 (worker->open())',d:'打开数据源 → 初始化解码器 → 分配缓冲池',c:'packet_source_->open();\ninitializeDecoder(codecpar);\nallocatePoolWithBuffers(buffer_count);',
+         fn:async()=>{
+            ['cv1','cv2','cv3','cl1','cl2','cl3','cl4','cl5','cl6','cl7'].forEach(id=>{$(id).style.transition='opacity .5s';$(id).style.opacity='1'});
+            const s1=addSt('left:390px;top:170px',Stn('⚙️','#4CAF50','#2E7D32')+'<div class="st-label">解码站 Decoder</div>');show(s1);s1.classList.add('glowing');
+            const s2=addSt('left:600px;top:170px',Stn('📦','#FF9800','#E65100')+'<div class="st-label">BufferPool</div>');show(s2);s2.classList.add('glowing');
+            const aw=addE('left:620px;top:120px',W('#00BCD4','#00BCD4'));show(aw);aw.classList.add('floating');
+            addN('left:600px;top:115px;background:#00838F','🧱 Allocator');show(dyn[dyn.length-1]);
+            const lw=addE('left:770px;top:340px',W('#607D8B','#607D8B'));show(lw);lw.classList.add('floating');
+            addN('left:752px;top:408px;background:#455A64','📝 Logger');show(dyn[dyn.length-1]);
+        }},
+    ];
+    if(curMode==='file') return [
+        {t:'工厂建造 + 配置',d:'Factory.create(config) → FFmpegDecodeWorker',c:'worker_type=FFMPEG_DECODE\npath="/data/h264_1080p.mp4"\nbuffer_count=128',
+         fn:async()=>{$('factory').style.transition='opacity .8s';$('factory').style.opacity='1';$('fSign').textContent='🏭 FFmpegDecodeWorker';mkSmk($('chL'));mkSmk($('chR'))}},
+        {t:'数据源：文件柜 (FromFile)',d:'文件柜里存满了视频文件，Worker 从中逐包读取编码后的 Packet 数据',c:'packet_source_ = make_shared<FromFile>(\n  "/data/h264_1080p.mp4", max_frames);',
+         fn:async()=>{
+            const fc=addE('left:15px;top:190px',svgFileCab,'src');show(fc);
+            addN('left:8px;top:265px;background:#795548','📁 文件 /data/h264_1080p.mp4');show(dyn[dyn.length-1]);
+            const dsW=addE('left:25px;top:300px',W('#FF9800','#FF5722'),'dsWorker');show(dsW);dsW.classList.add('floating');
+            addN('left:5px;top:368px;background:#E65100','📦 DataSource 供应商');show(dyn[dyn.length-1]);
+            drawLine(55,260,55,300,'#f59e0b',true);
+        }},
+        {t:'Worker 上岗',d:'FFmpegDecodeWorker 构造完成，准备从文件柜取 Packet',c:'FFmpegDecodeWorker(config)\n  → packet_source_ = FromFile',
+         fn:async()=>{const w=addE('left:150px;top:320px',W('#FFD700','#2196F3'),'mainW');show(w);addN('left:130px;top:388px;background:#1565C0','👷 DecodeWorker');show(dyn[dyn.length-1]);w.classList.add('floating')}},
+        ...common_later,
+        {t:'流水线运转：从文件逐包读取 → 解码 → 输出',d:'Worker 从文件柜不断读取编码包(Packet)，送入解码站解码，成品帧进入 BufferPool',c:'while(running) {\n  pkt = packet_source_->acquireEncodedPacket();\n  avcodec_send_packet(ctx, pkt);\n  avcodec_receive_frame(ctx, frame);\n  bufferPool->commitBuffer(frame);\n}',
+         fn:async()=>{const w=$('mainW');if(!w)return;w.classList.remove('floating');w.classList.add('walking');
+            for(let r=0;r<4;r++){
+                const lbl=['PKT','PKT','PKT','PKT'][r];
+                const bx=addE(`left:50px;top:237px`,Box(lbl));bx.style.opacity='1';
+                await anim(bx,{top:'250px',left:'80px'},200);
+                await anim(w,{left:'80px',top:'305px'},300);
+                await anim(bx,{top:'242px',left:'115px'},100);
+                await anim(w,{left:'340px'},500);await anim(bx,{left:'400px',top:'242px'},500);
+                for(let j=0;j<2;j++){await anim(bx,{transform:'rotate(5deg)'},80);await anim(bx,{transform:'rotate(-5deg)'},80)}
+                bx.style.transition='opacity .2s';bx.style.opacity='0';
+                const fr=addE('left:400px;top:242px',Frm());fr.style.opacity='1';
+                await anim(fr,{left:'620px'},400);await anim(fr,{left:`${880+r*50}px`},350);
+            }
+            w.classList.remove('walking');w.classList.add('floating')}},
+        {t:'消费者取走成品',d:'BufferConsumerService 从 BufferPool 取出解码帧，执行 Display / SaveRaw / NPU',c:'consumer->consume(decoded_frame);',
+         fn:async()=>{const c=addE('right:15px;top:320px',W('#E91E63','#E91E63'));show(c);c.classList.add('floating');addN('right:5px;top:388px;background:#C2185B','🖥️ Consumer');show(dyn[dyn.length-1]);
+            addE('right:25px;top:200px;z-index:12',`<svg width="72" height="55" viewBox="0 0 90 70"><rect x="5" y="5" width="80" height="45" rx="5" fill="#212121" stroke="#424242" stroke-width="3"/><rect x="10" y="10" width="70" height="35" rx="2" fill="#1E88E5"/><polygon points="35,18 55,27 35,36" fill="#fff" opacity=".8"/><rect x="35" y="50" width="20" height="3" rx="1" fill="#616161"/><rect x="25" y="53" width="40" height="3" rx="1" fill="#757575"/></svg>`);show(dyn[dyn.length-1])}},
+    ];
+    if(curMode==='rtsp') return [
+        {t:'工厂建造 + 配置',d:'Factory.create(config) → FFmpegDecodeWorker (RTSP)',c:'worker_type=FFMPEG_DECODE\npath="rtsp://192.168.1.100/stream"\nbuffer_count=8',
+         fn:async()=>{$('factory').style.transition='opacity .8s';$('factory').style.opacity='1';$('fSign').textContent='🏭 FFmpegDecodeWorker (RTSP)';mkSmk($('chL'));mkSmk($('chR'))}},
+        {t:'数据源：摄像头 (FromRtsp)',d:'网络摄像头通过 RTSP 协议实时推送编码后的视频帧，Worker 实时接收',c:'path = "rtsp://192.168.1.100/stream";\npacket_source_ = make_shared<FromRtsp>(path);',
+         fn:async()=>{
+            const cam=addE('left:10px;top:135px',svgCam,'cam');show(cam);
+            addN('left:5px;top:200px;background:#1565C0','📹 摄像头 192.168.1.100');show(dyn[dyn.length-1]);
+            drawLine(90,170,180,250,'#22c55e',true);
+            drawLine(90,170,140,210,'#22c55e',true);
+            const dsW=addE('left:130px;top:300px',W('#22c55e','#FF5722'),'dsWorker');show(dsW);dsW.classList.add('floating');
+            addN('left:110px;top:368px;background:#2E7D32','📡 RTSP DataSource');show(dyn[dyn.length-1]);
+
+            const sigSvg=$('lineSvg');const ns='http://www.w3.org/2000/svg';
+            for(let i=0;i<3;i++){const c=document.createElementNS(ns,'circle');c.setAttribute('cx','90');c.setAttribute('cy','170');c.setAttribute('r',String(15+i*12));c.setAttribute('fill','none');c.setAttribute('stroke','#4CAF50');c.setAttribute('stroke-width','1.5');c.setAttribute('opacity',String(.5-i*.15));c.classList.add('blinking');c.style.animationDelay=i*.3+'s';sigSvg.appendChild(c);dyn.push(c)}
+        }},
+        {t:'Worker 上岗',d:'Worker 连接摄像头，开始接收实时编码帧',c:'FFmpegDecodeWorker(config)\n  → packet_source_ = FromRtsp("rtsp://...")',
+         fn:async()=>{const w=addE('left:210px;top:310px',W('#FFD700','#2196F3'),'mainW');show(w);addN('left:190px;top:378px;background:#1565C0','👷 DecodeWorker');show(dyn[dyn.length-1]);w.classList.add('floating')}},
+        ...common_later,
+        {t:'流水线运转：摄像头实时推送 → 解码 → 输出',d:'摄像头持续推送 RTP 编码包，Worker 实时接收并解码。低延迟模式 buffer_count=8',c:'while(running) {\n  // 从摄像头实时接收编码帧\n  pkt = packet_source_->acquireEncodedPacket();\n  avcodec_send_packet(ctx, pkt);\n  frame = avcodec_receive_frame(ctx);\n  bufferPool->commitBuffer(frame);\n}',
+         fn:async()=>{const w=$('mainW');if(!w)return;w.classList.remove('floating');w.classList.add('walking');
+            for(let r=0;r<4;r++){
+                const bx=addE('left:90px;top:185px',Box('RTP'));bx.style.opacity='1';
+                await anim(bx,{left:'165px',top:'245px'},400);
+                await anim(w,{left:'165px',top:'300px'},200);
+                await anim(bx,{left:'200px',top:'242px'},100);
+                await anim(w,{left:'340px'},450);await anim(bx,{left:'400px',top:'242px'},450);
+                for(let j=0;j<2;j++){await anim(bx,{transform:'rotate(5deg)'},80);await anim(bx,{transform:'rotate(-5deg)'},80)}
+                bx.style.transition='opacity .15s';bx.style.opacity='0';
+                const fr=addE('left:400px;top:242px',Frm());fr.style.opacity='1';
+                await anim(fr,{left:'620px'},350);await anim(fr,{left:`${880+r*50}px`},300);
+            }
+            w.classList.remove('walking');w.classList.add('floating')}},
+        {t:'消费者取走成品',d:'实时显示解码后的视频画面',c:'consumer->consume(decoded_frame);',
+         fn:async()=>{const c=addE('right:15px;top:320px',W('#E91E63','#E91E63'));show(c);c.classList.add('floating');addN('right:5px;top:388px;background:#C2185B','🖥️ Consumer');show(dyn[dyn.length-1]);
+            addE('right:25px;top:200px;z-index:12',`<svg width="72" height="55" viewBox="0 0 90 70"><rect x="5" y="5" width="80" height="45" rx="5" fill="#212121" stroke="#424242" stroke-width="3"/><rect x="10" y="10" width="70" height="35" rx="2" fill="#1E88E5"/><polygon points="35,18 55,27 35,36" fill="#fff" opacity=".8"/><rect x="35" y="50" width="20" height="3" rx="1" fill="#616161"/><rect x="25" y="53" width="40" height="3" rx="1" fill="#757575"/></svg>`);show(dyn[dyn.length-1])}},
+    ];
+    if(curMode==='buffer') return [
+        {t:'上游 RecordWorker 建造',d:'首先启动上游录制 Worker，它从 RTSP 摄像头获取编码包并写入共享 BufferPool',c:'// 上游 Worker\nworker_type = FFMPEG_PACKET_RECORDER\npath = "rtsp://192.168.1.100/stream"',
+         fn:async()=>{
+            const cam=addE('left:5px;top:90px',svgCam,'cam');show(cam);addN('left:0px;top:155px;background:#1565C0','📹 摄像头');show(dyn[dyn.length-1]);
+            const up=addE('left:10px;top:200px',svgUpstream,'upstream');show(up);addN('left:0px;top:275px;background:#7B1FA2','🔄 RecordWorker (上游)');show(dyn[dyn.length-1]);
+            drawLine(45,155,50,200,'#AB47BC',true);
+            const shPool=addSt('left:120px;top:170px',Stn('🔄','#9C27B0','#6A1B9A')+'<div class="st-label">共享 BufferPool</div>','shPool');show(shPool);shPool.classList.add('glowing');
+            drawLine(90,230,150,210,'#AB47BC',true);
+        }},
+        {t:'下游 DecodeWorker 建造 (Buffer 模式)',d:'下游 Worker 的 buffer_mode=true，直接从共享 BufferPool 零拷贝读取编码包',c:'config.data_source.buffer_mode = true;\nconfig.data_source.shared_packet_source = shared;\npacket_source_ = shared_packet_source;',
+         fn:async()=>{$('factory').style.transition='opacity .8s';$('factory').style.opacity='1';$('fSign').textContent='🏭 DecodeWorker (Buffer模式)';mkSmk($('chL'));mkSmk($('chR'));
+            drawLine(190,210,310,250,'#AB47BC',true);
+            const w=addE('left:220px;top:310px',W('#FFD700','#2196F3'),'mainW');show(w);addN('left:200px;top:378px;background:#1565C0','👷 DecodeWorker (下游)');show(dyn[dyn.length-1]);w.classList.add('floating');
+        }},
+        ...common_later,
+        {t:'流水线运转：上游录制 → 共享池 → 下游解码',d:'上游 RecordWorker 持续将摄像头 Packet 写入共享 BufferPool，下游 DecodeWorker 零拷贝读取并解码',c:'// 上游：录制写入共享 BufferPool\n// 下游：零拷贝读取\npkt = shared_packet_source->acquireEncodedPacket();\n// → avcodec → decoded frame',
+         fn:async()=>{const w=$('mainW');if(!w)return;w.classList.remove('floating');w.classList.add('walking');
+            for(let r=0;r<4;r++){
+                const bx=addE('left:50px;top:225px',Box('PKT'));bx.style.opacity='1';bx.style.cssText+='background:none';
+                await anim(bx,{left:'140px',top:'230px'},300);
+                await anim(bx,{left:'260px',top:'242px'},350);
+                await anim(w,{left:'260px',top:'300px'},200);
+                await anim(bx,{left:'290px'},80);
+                await anim(w,{left:'340px'},350);await anim(bx,{left:'400px',top:'242px'},350);
+                for(let j=0;j<2;j++){await anim(bx,{transform:'rotate(5deg)'},80);await anim(bx,{transform:'rotate(-5deg)'},80)}
+                bx.style.transition='opacity .15s';bx.style.opacity='0';
+                const fr=addE('left:400px;top:242px',Frm());fr.style.opacity='1';
+                await anim(fr,{left:'620px'},350);await anim(fr,{left:`${880+r*50}px`},300);
+            }
+            w.classList.remove('walking');w.classList.add('floating')}},
+        {t:'消费者取走成品',d:'从 BufferPool 取出解码帧进行显示/保存',c:'consumer->consume(decoded_frame);',
+         fn:async()=>{const c=addE('right:15px;top:320px',W('#E91E63','#E91E63'));show(c);c.classList.add('floating');addN('right:5px;top:388px;background:#C2185B','🖥️ Consumer');show(dyn[dyn.length-1]);
+            addE('right:25px;top:200px;z-index:12',`<svg width="72" height="55" viewBox="0 0 90 70"><rect x="5" y="5" width="80" height="45" rx="5" fill="#212121" stroke="#424242" stroke-width="3"/><rect x="10" y="10" width="70" height="35" rx="2" fill="#1E88E5"/><polygon points="35,18 55,27 35,36" fill="#fff" opacity=".8"/><rect x="35" y="50" width="20" height="3" rx="1" fill="#616161"/><rect x="25" y="53" width="40" height="3" rx="1" fill="#757575"/></svg>`);show(dyn[dyn.length-1])}},
+    ];
+    return [];
+}
+
+async function p2RunStep(i){const steps=getSteps();if(i<0||i>=steps.length)return;const s=steps[i];p2St(s.t,s.d,s.c);await s.fn()}
+async function p2Next(){if(!curMode){p2St('请先选择模式','点击上方三个按钮之一','');return}if(p2Tm){clearInterval(p2Tm);p2Tm=null}const steps=getSteps();p2S++;if(p2S>=steps.length){p2S=steps.length-1;return}$('p2NextBtn').disabled=true;await p2RunStep(p2S);$('p2NextBtn').disabled=p2S>=steps.length-1;$('p2PlayBtn').disabled=false}
+async function p2Play(){if(!curMode){p2St('请先选择模式','点击上方三个按钮之一','');return}if(p2Tm)return;$('p2PlayBtn').disabled=true;$('p2NextBtn').disabled=true;
+    async function tick(){const steps=getSteps();p2S++;if(p2S>=steps.length){clearInterval(p2Tm);p2Tm=null;$('p2PlayBtn').disabled=false;return}await p2RunStep(p2S);$('p2NextBtn').disabled=p2S>=steps.length-1}
+    if(p2S<0)await tick();p2Tm=setInterval(tick,3800)}
+function p2Reset(){if(p2Tm){clearInterval(p2Tm);p2Tm=null}p2S=-1;dyn.forEach(el=>{if(el.parentNode)el.parentNode.removeChild(el)});dyn=[];
+    $('lineSvg').innerHTML='';$('factory').style.opacity='0';$('fSign').textContent='🏭 Worker 解码工厂';
+    ['cv1','cv2','cv3','cl1','cl2','cl3','cl4','cl5','cl6','cl7'].forEach(id=>$(id).style.opacity='0');
+    if(curMode){const info={file:'📁 文件模式',rtsp:'📹 RTSP 摄像头',buffer:'🔄 Buffer 级联'};p2St(info[curMode]+' — 已重置','点击播放重新开始','')}
+    else p2St('请先选择数据源模式','点击上方三个按钮之一','');
+    $('p2PlayBtn').disabled=!curMode;$('p2NextBtn').disabled=!curMode}
+</script>
+</body>
+</html>
