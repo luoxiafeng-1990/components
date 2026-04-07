@@ -574,30 +574,41 @@ bool FFmpegEncodeWorker::initializeEncoder() {
     // 6. JPEG 编码器配置
     if (encoder_name_.find("jpeg") != std::string::npos ||
         encoder_name_.find("mjpeg") != std::string::npos) {
-        // 设置 JPEG 质量
         char quality_str[16];
         snprintf(quality_str, sizeof(quality_str), "%d", enc_config.jpeg.quality);
         av_dict_set(&codec_options_ptr_, "quality", quality_str, 0);
         
-        // JPEG 通常使用 YUVJ420P
-        if (codec_ctx_ptr_->pix_fmt == AV_PIX_FMT_YUV420P) {
-            codec_ctx_ptr_->pix_fmt = AV_PIX_FMT_YUVJ420P;
+        // 硬件 jpeg_taco 直接接受 NV12，软件 mjpeg 需要 YUVJ420P
+        bool is_hw_jpeg = (encoder_name_.find("taco") != std::string::npos);
+        if (!is_hw_jpeg) {
+            if (codec_ctx_ptr_->pix_fmt == AV_PIX_FMT_YUV420P ||
+                codec_ctx_ptr_->pix_fmt == AV_PIX_FMT_NV12 ||
+                codec_ctx_ptr_->pix_fmt == AV_PIX_FMT_NV21) {
+                codec_ctx_ptr_->pix_fmt = AV_PIX_FMT_YUVJ420P;
+            }
         }
     }
     
     // 7. 打开编码器
+    fprintf(stderr, "[EncodeWorker] avcodec_open2: codec=%s pix_fmt=%d(%s) %dx%d\n",
+            codec->name, codec_ctx_ptr_->pix_fmt,
+            av_get_pix_fmt_name(codec_ctx_ptr_->pix_fmt) ? av_get_pix_fmt_name(codec_ctx_ptr_->pix_fmt) : "?",
+            codec_ctx_ptr_->width, codec_ctx_ptr_->height);
+
     int ret = avcodec_open2(codec_ctx_ptr_, codec, 
                            codec_options_ptr_ ? &codec_options_ptr_ : nullptr);
     if (ret < 0) {
         char err_buf[AV_ERROR_MAX_STRING_SIZE];
         av_strerror(ret, err_buf, sizeof(err_buf));
         LOG4CPLUS_ERROR_FMT(logger_, "[EncodeWorker] 打开编码器失败: %s", err_buf);
+        fprintf(stderr, "[EncodeWorker] 打开编码器 '%s' 失败: %s\n", codec->name, err_buf);
         avcodec_free_context(&codec_ctx_ptr_);
         codec_ctx_ptr_ = nullptr;
         return false;
     }
     
     LOG4CPLUS_DEBUG_FMT(logger_, "[EncodeWorker] 编码器初始化成功: %s", codec->name);
+    fprintf(stderr, "[EncodeWorker] 编码器 '%s' 初始化成功\n", codec->name);
     return true;
 }
 
@@ -777,6 +788,7 @@ FillResult FFmpegEncodeWorker::fillBuffer(int frame_index, Buffer* buffer) {
         av_frame_free(&temp_frame);
     }
     if (!send_result.ok()) {
+        if (input_frame_) av_frame_unref(input_frame_);
         return send_result;
     }
     
@@ -823,6 +835,13 @@ FillResult FFmpegEncodeWorker::fillBuffer(int frame_index, Buffer* buffer) {
             receive_result = CodecSendResult::encodeError();
         }
         break;
+    }
+    
+    // 编码完成后释放 input_frame_ 对源帧 DMA buffer 的引用。
+    // readRawFrame → copyFrame 使用 av_frame_ref 共享了源帧的 DMA buffer，
+    // 若不 unref，硬件解码器将无法回收 DMA buffer，最终导致 MAX_BUFFERS 耗尽。
+    if (input_frame_) {
+        av_frame_unref(input_frame_);
     }
     
     // 步骤4：从缓存取第一个 packet 填充 buffer

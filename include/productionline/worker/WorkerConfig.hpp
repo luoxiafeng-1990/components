@@ -610,6 +610,25 @@ struct WorkerConfig {
         } count;
 
         // ========================================
+        // JPEG 编码消费类型（CONSUME_JPEG_ENCODE）v3.3 新增
+        // 将解码帧编码为 JPEG，通过命名管道输出（WebUI 预览）
+        // ========================================
+        struct JpegEncodeType {
+            bool enable = false;                          ///< 是否启用 JPEG 编码
+            std::string output_pipe;                      ///< FIFO 路径（空=不使用 FIFO）
+            int quality = 80;                             ///< JPEG 质量 1-100
+            int target_fps = 15;                          ///< 目标帧率（降帧）
+            std::string encoder_name = "jpeg_taco";       ///< 编码器名（jpeg_taco / mjpeg）
+
+            /// 内存回调模式：同进程内直接接收 JPEG 帧（webui_server 使用）
+            /// 与 output_pipe（FIFO 模式）可并存
+            using FrameCallback = std::function<void(const uint8_t* data, size_t size)>;
+            FrameCallback on_frame;
+
+            JpegEncodeType() = default;
+        } jpeg_encode;
+
+        // ========================================
         // OpenCV 消费类型（CONSUME_OPENCV）
         // Buffer → cv::Mat 转换后执行指定操作，再计算 PSNR/SSIM
         // ========================================

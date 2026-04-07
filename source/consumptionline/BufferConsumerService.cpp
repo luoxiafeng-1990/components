@@ -480,6 +480,9 @@ static uint32_t getConsumeFlagsFromConfig(const WorkerConfig::ConsumerTypeConfig
     if (config.npu_inference.enable) {
         flags |= CONSUME_NPU_INFERENCE;
     }
+    if (config.jpeg_encode.enable) {
+        flags |= CONSUME_JPEG_ENCODE;
+    }
     // 注：compare 是执行模式（ExecuteMode），不是消费类型
     if (config.count.enable) {
         flags |= CONSUME_COUNT;
@@ -554,7 +557,12 @@ static std::shared_ptr<IBufferConsumer> createConsumerForWorker(
         consumers.push_back(std::make_shared<NpuInferenceConsumer>(npu_config));
     }
     
-    // 5. 统计消费者（如果没有其他消费者或显式启用）
+    // 5. JPEG 编码消费者
+    if (flags & CONSUME_JPEG_ENCODE) {
+        consumers.push_back(std::make_shared<JpegEncodeConsumer>(config.jpeg_encode));
+    }
+    
+    // 6. 统计消费者（如果没有其他消费者或显式启用）
     if (consumers.empty() || (flags & CONSUME_COUNT)) {
         consumers.push_back(std::make_shared<CountConsumer>());
     }
@@ -858,6 +866,7 @@ std::shared_ptr<IBufferConsumer> BufferConsumerService::createConsumerFromFlags(
     if (flags & CONSUME_OPENCV) type_count++;
 
     if (flags & CONSUME_NPU_INFERENCE) type_count++;
+    if (flags & CONSUME_JPEG_ENCODE) type_count++;
     
     // 如果没有指定任何类型，默认使用 COUNT
     if (type_count == 0) {
@@ -901,10 +910,13 @@ std::shared_ptr<IBufferConsumer> BufferConsumerService::createConsumerFromFlags(
             npu_cfg.inference_interval = config.consumer_type.npu_inference.inference_interval;
             return std::make_shared<NpuInferenceConsumer>(npu_cfg);
         }
+        if (flags & CONSUME_JPEG_ENCODE) {
+            return std::make_shared<JpegEncodeConsumer>(config.consumer_type.jpeg_encode);
+        }
     }
 
     // 多种类型叠加，使用 MultiConsumer
-    // 顺序：NPU推理(画框) → Display(显示带框画面) → Save → Count
+    // 顺序：NPU推理(画框) → JpegEncode(编码带框画面) → Display → Save → Count
     auto multi = std::make_shared<MultiConsumer>();
     
     // NPU 推理必须在 Display 之前：先画框再显示
@@ -920,6 +932,11 @@ std::shared_ptr<IBufferConsumer> BufferConsumerService::createConsumerFromFlags(
         npu_cfg.enable_draw    = config.consumer_type.npu_inference.enable_draw;
         npu_cfg.inference_interval = config.consumer_type.npu_inference.inference_interval;
         multi->addStrategy(std::make_shared<NpuInferenceConsumer>(npu_cfg));
+    }
+    
+    // JPEG 编码在 NPU 之后（编码带框画面）、Display 之前
+    if (flags & CONSUME_JPEG_ENCODE) {
+        multi->addStrategy(std::make_shared<JpegEncodeConsumer>(config.consumer_type.jpeg_encode));
     }
     
     if (flags & CONSUME_DISPLAY) {

@@ -1,4 +1,6 @@
 #include "../include/WebServer.hpp"
+#include "common/Logger.hpp"
+
 #include <iostream>
 #include <csignal>
 #include <string>
@@ -8,7 +10,12 @@ static std::unique_ptr<webui::WebServer> g_server;
 
 static void signalHandler(int sig) {
     std::cout << "\n[WebUI] Received signal " << sig << ", shutting down..." << std::endl;
-    if (g_server) g_server->stop();
+    if (g_server) {
+        // 只停 HTTP 服务器，让 listen() 返回；
+        // Worker 清理在 listen() 返回后由析构函数完成，
+        // 不在信号处理函数中调用含 mutex 的操作（避免死锁）
+        g_server->stopHttpOnly();
+    }
 }
 
 static void printUsage(const char* prog) {
@@ -23,6 +30,8 @@ static void printUsage(const char* prog) {
 }
 
 int main(int argc, char* argv[]) {
+    LoggerGuard logger_guard;
+
     webui::ServerConfig cfg;
 
     for (int i = 1; i < argc; ++i) {
@@ -56,5 +65,13 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
+    // listen() 返回后（被 signal handler 的 stopHttpOnly() 中断），
+    // 在主线程安全地停止所有 Worker 和清理资源
+    std::cout << "[WebUI] Shutting down..." << std::endl;
+    g_server->stop();    // 停 preview 流 + HTTP + workers
+    std::cout << "[WebUI] All workers stopped." << std::endl;
+    g_server.reset();
+
+    std::cout << "[WebUI] Server stopped." << std::endl;
     return 0;
 }

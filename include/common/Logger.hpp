@@ -84,26 +84,18 @@ namespace {
             }
         }
         
-        // 如果没有找到配置文件，使用编程式默认配置
-        if (!config_loaded) {
-            // 创建 ConsoleAppender
+        // 确保 root logger 始终有至少一个 appender
+        // （config 文件可能不完整或未定义 root appender）
+        log4cplus::Logger root = log4cplus::Logger::getRoot();
+        if (!config_loaded || root.getAllAppenders().empty()) {
             log4cplus::SharedAppenderPtr appender(new log4cplus::ConsoleAppender());
-            
-            // 设置自定义 PatternLayout
-            // [%D{...}] - 时间戳（年-月-日 时:分:秒.毫秒）
-            // [%c] - Logger名称（显示完整层次路径，如 components.Worker.Rtsp），无固定宽度
-            // [%-5p] - 日志级别，左对齐，固定5字符宽度（保持对齐）
-            // %m%n - 消息内容 + 换行
             std::string pattern = "[%D{%Y-%m-%d %H:%M:%S.%q}] [%c] [%-5p] %m%n";
             std::unique_ptr<log4cplus::Layout> layout(new log4cplus::PatternLayout(pattern));
             appender->setLayout(std::move(layout));
-            
-            // 设置根 Logger
-            log4cplus::Logger root = log4cplus::Logger::getRoot();
             root.addAppender(appender);
-            root.setLogLevel(log4cplus::DEBUG_LOG_LEVEL);
-            
-            // 静默使用默认配置，不输出提示信息
+            if (!config_loaded) {
+                root.setLogLevel(log4cplus::DEBUG_LOG_LEVEL);
+            }
         }
     }
 }

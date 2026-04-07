@@ -24,6 +24,8 @@ RawFrameSourceFromBuffer::RawFrameSourceFromBuffer(int width,
     , pix_fmt_(pix_fmt)
     , is_open_(false)
     , current_frame_index_(0)
+    , is_direct_mode_(false)
+    , direct_frame_(nullptr)
     , is_shared_mode_(false)  // 普通模式
     , total_subscribers_(0)
     , remaining_subscribers_(0)
@@ -50,6 +52,8 @@ RawFrameSourceFromBuffer::RawFrameSourceFromBuffer(int width,
     , pix_fmt_(pix_fmt)
     , is_open_(false)
     , current_frame_index_(0)
+    , is_direct_mode_(false)
+    , direct_frame_(nullptr)
     , is_shared_mode_(true)  // 共享模式
     , total_subscribers_(subscriber_count)
     , remaining_subscribers_(0)
@@ -67,6 +71,38 @@ RawFrameSourceFromBuffer::RawFrameSourceFromBuffer(int width,
     }
     LOG4CPLUS_INFO_FMT(logger_, "⭐ 共享模式构造: %dx%d, pix_fmt=%d, subscribers=%zu",
                         width_, height_, pix_fmt_, subscriber_count);
+}
+
+RawFrameSourceFromBuffer::RawFrameSourceFromBuffer(int width,
+                                                     int height,
+                                                     AVPixelFormat pix_fmt,
+                                                     bool direct_mode)
+    : source_pool_weak_()
+    , width_(width)
+    , height_(height)
+    , pix_fmt_(pix_fmt)
+    , is_open_(false)
+    , current_frame_index_(0)
+    , is_direct_mode_(direct_mode)
+    , direct_frame_(nullptr)
+    , is_shared_mode_(false)
+    , total_subscribers_(0)
+    , remaining_subscribers_(0)
+    , current_buffer_(nullptr)
+    , mutex_()
+    , cv_subscribers_()
+    , cv_fetch_()
+    , cv_task_exit_()
+    , is_running_(false)
+    , fetch_task_running_(false)
+    , logger_(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.RawFrameSource.Buffer")))
+{
+    LOG4CPLUS_DEBUG_FMT(logger_, "构造函数（直接模式）: %dx%d, pix_fmt=%d",
+                        width_, height_, pix_fmt_);
+}
+
+void RawFrameSourceFromBuffer::setFrame(AVFrame* frame) {
+    direct_frame_ = frame;
 }
 
 RawFrameSourceFromBuffer::~RawFrameSourceFromBuffer() {
@@ -104,6 +140,14 @@ void RawFrameSourceFromBuffer::setSourceBufferPool(std::weak_ptr<BufferPool> poo
 bool RawFrameSourceFromBuffer::open() {
     if (is_open_.load(std::memory_order_acquire)) {
         return true;  // 已经打开
+    }
+    
+    // 直接模式：不需要 BufferPool
+    if (is_direct_mode_) {
+        is_open_.store(true, std::memory_order_release);
+        current_frame_index_.store(0, std::memory_order_release);
+        LOG4CPLUS_DEBUG(logger_, "打开成功（直接模式）");
+        return true;
     }
     
     // 验证源 BufferPool 是否有效
@@ -314,6 +358,19 @@ void RawFrameSourceFromBuffer::fetchTaskFunc() {
 int RawFrameSourceFromBuffer::readRawFrame(AVFrame* frame) {
     if (!is_open_.load(std::memory_order_acquire) || !frame) {
         return AVERROR(EINVAL);
+    }
+    
+    // ========== 直接模式 ==========
+    if (is_direct_mode_) {
+        if (!direct_frame_) {
+            return AVERROR(EAGAIN);
+        }
+        int ret = copyFrame(frame, direct_frame_);
+        direct_frame_ = nullptr;
+        if (ret >= 0) {
+            current_frame_index_.fetch_add(1, std::memory_order_relaxed);
+        }
+        return ret;
     }
     
     auto pool = source_pool_weak_.lock();
@@ -598,6 +655,10 @@ bool RawFrameSourceFromBuffer::hasMoreFrames() const {
 bool RawFrameSourceFromBuffer::isAtEnd() const {
     if (!is_open_.load(std::memory_order_acquire)) {
         return true;
+    }
+    
+    if (is_direct_mode_) {
+        return false;  // 直接模式由调用者控制生命周期
     }
     
     auto pool = source_pool_weak_.lock();

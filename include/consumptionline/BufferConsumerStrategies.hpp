@@ -7,6 +7,7 @@
  * - DisplayConsumer: 显示输出（Framebuffer）
  * - SaveRawConsumer: 保存原始 YUV/RGB
  * - SaveEncodedConsumer: 保存编码流
+ * - JpegEncodeConsumer: JPEG 编码预览（v3.3）
  * - MultiConsumer: 多策略组合
  * 
  * 注：PSNR/SSIM 比较功能已迁移至 WorkerSyncCoordinator::createDefaultCompareCallback
@@ -22,7 +23,10 @@
 #include "buffer/bufferpool/BufferPool.hpp"
 #include "vendor/contracts/IDisplayDevice.hpp"
 #include "vendor/taco/display/DisplayDeviceFactory.hpp"
+#include "productionline/worker/FFmpegEncodeWorker.hpp"
+#include "productionline/worker/RawFrameSourceFromBuffer.hpp"
 
+#include <log4cplus/logger.h>
 #include <memory>
 #include <atomic>
 #include <string>
@@ -330,6 +334,49 @@ private:
     double ssim_sum_         = 0.0;
     bool   passed_           = true;
     bool   initialized_      = false;
+};
+
+// ============================================================
+// JpegEncodeConsumer - JPEG 编码预览（v3.3）
+// ============================================================
+
+/**
+ * @brief JPEG 编码消费者
+ *
+ * 将解码帧编码为 JPEG 输出到命名管道（供 WebUI 预览）。
+ * 内部复用 FFmpegEncodeWorker（jpeg_taco / mjpeg），通过
+ * RawFrameSourceFromBuffer 直接模式桥接 consume() 与 fillBuffer()。
+ */
+class JpegEncodeConsumer : public IBufferConsumer {
+public:
+    using Config = WorkerConfig::ConsumerTypeConfig::JpegEncodeType;
+
+    explicit JpegEncodeConsumer(const Config& config);
+    ~JpegEncodeConsumer() override;
+
+    bool initialize(const std::vector<Buffer*>& first_buffers) override;
+    bool consume(const std::vector<Buffer*>& buffers, int frame_index) override;
+    void finalize() override;
+    std::string getStats() const override;
+
+private:
+    log4cplus::Logger logger_;
+    Config config_;
+    Config::FrameCallback on_frame_;   ///< 内存回调（同进程模式）
+
+    std::shared_ptr<RawFrameSourceFromBuffer> raw_source_;
+    std::unique_ptr<FFmpegEncodeWorker> encode_worker_;
+    std::shared_ptr<BufferPool> output_pool_;
+
+    int pipe_fd_ = -1;
+    int frame_interval_ = 1;
+
+    std::atomic<int> encoded_count_{0};
+    std::atomic<int> skipped_count_{0};
+    std::atomic<int> error_count_{0};
+
+    bool openPipe();
+    void writeToPipe(const uint8_t* data, int size);
 };
 
 // ============================================================

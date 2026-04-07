@@ -31,7 +31,11 @@ public:
     // 由 encode worker 回调注入 JPEG 帧
     void onJpegFrame(const std::string& worker_id, const uint8_t* data, size_t len);
 
+    // 请求停止所有流（让 streamMjpeg 循环退出）
+    void requestStop();
+
 private:
+    std::atomic<bool> stop_requested_{false};
     struct FrameBuffer {
         std::mutex mutex;
         std::vector<uint8_t> latest_frame;

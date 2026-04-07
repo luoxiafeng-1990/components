@@ -144,6 +144,9 @@ ApiResponse WorkerManager::start(const std::string& id) {
             "数据源不存在: " + rt->info.datasource_id);
     }
 
+    // JPEG_PREVIEW 消费者由前端 API 显式添加，不再自动注入。
+    // 用户通过 POST /api/workers/{id}/consumers {"type":"JPEG_PREVIEW"} 来启用预览。
+
     std::vector<ConsumerInfo> consumers;
     if (consumer_manager_) {
         consumers = consumer_manager_->getConsumersForWorker(id);

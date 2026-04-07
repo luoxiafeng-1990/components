@@ -48,6 +48,12 @@ class Buffer;
  * - MultiWorkerProductionLine 创建唯一的 RawFrameSourceFromBuffer 实例（共享模式）
  * - 所有消费者 Worker 持有同一个实例（shared_ptr）
  * - 每个 Worker 调用 acquireRawFrame() 获取帧指针，commitRawFrame() 完成处理
+ * 
+ * ⭐ 直接模式（v3.3 新增）：
+ * 功能：不走 BufferPool，由调用者通过 setFrame() 直接注入 AVFrame* 指针
+ * - JpegEncodeConsumer 在 consume() 中先 setFrame()，再触发 fillBuffer()
+ * - readRawFrame() 立即返回注入的帧，无阻塞
+ * - 用于在 IBufferConsumer 消费循环中同步复用 FFmpegEncodeWorker
  */
 class RawFrameSourceFromBuffer : public IRawFrameSource {
 public:
@@ -79,6 +85,22 @@ public:
                               size_t subscriber_count);
     
     /**
+     * @brief 构造函数（直接模式 - 用于 JpegEncodeConsumer 同步编码）
+     * @param width 帧宽度
+     * @param height 帧高度
+     * @param pix_fmt 像素格式
+     * @param direct_mode 必须为 true（区分与共享模式构造函数的重载）
+     *
+     * 说明：
+     * - 不使用 BufferPool，由调用者通过 setFrame() 注入帧
+     * - readRawFrame() 直接返回注入的帧，无阻塞
+     */
+    RawFrameSourceFromBuffer(int width,
+                              int height,
+                              AVPixelFormat pix_fmt,
+                              bool direct_mode);
+
+    /**
      * @brief 析构函数
      */
     ~RawFrameSourceFromBuffer() override;
@@ -94,6 +116,15 @@ public:
      * 说明：RawFrameSourceFromBuffer 会从这个 BufferPool 的 filled queue 获取数据
      */
     void setSourceBufferPool(std::weak_ptr<BufferPool> pool_weak);
+    
+    /**
+     * @brief 直接注入帧指针（直接模式专用）
+     * @param frame 要编码的 AVFrame 指针（不接管所有权）
+     *
+     * 在 consume() 中调用后，紧接着调用 FFmpegEncodeWorker::fillBuffer()，
+     * 内部的 readRawFrame() 会立即取走此帧。
+     */
+    void setFrame(AVFrame* frame);
     
     // ============ IRawFrameSource 接口实现 ============
     int readRawFrame(AVFrame* frame) override;
@@ -189,6 +220,10 @@ private:
     std::atomic<bool> is_open_;                    // 打开状态
     std::atomic<int> current_frame_index_;         // 当前帧索引
     
+    // ========== 模式标志 ==========
+    bool is_direct_mode_;                          // 是否为直接模式（v3.3）
+    AVFrame* direct_frame_;                        // 直接模式：注入的帧指针
+
     // ========== 共享模式成员 ==========
     bool is_shared_mode_;                          // 是否为共享模式
     size_t total_subscribers_;                     // 订阅者总数

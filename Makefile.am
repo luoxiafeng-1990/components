@@ -93,13 +93,16 @@ qa_cases_SOURCES = \
     test_cases/display/DisplayPlugin.cpp \
     test_cases/npu/NpuPlugin.cpp \
     test_cases/opencv/OpencvPlugin.cpp \
-    test_cases/venc/VencPlugin.cpp
+    test_cases/venc/VencPlugin.cpp \
+    test_cases/preview/PreviewPlugin.cpp
 qa_cases_LDADD = libcomponents.la $(COMMON_LIBS)
 qa_cases_CPPFLAGS = -I$(top_srcdir)/test_cases $(AM_CPPFLAGS)
 qa_cases_LDFLAGS = -Wl,--allow-shlib-undefined
 
 # ========== WebUI 服务器 ==========
-# webui_server 通过 subprocess 调用 qa_cases，不直接链接 libcomponents
+# webui_server 复用 qa_cases 的插件（VdecPlugin, DisplayPlugin 等），
+# 通过 CLI11 解析 API 参数 → 插件 applyTo → BufferConsumerService，
+# 与 qa_cases 走完全一致的配置路径。
 webui_server_SOURCES = \
     webui/backend/source/main.cpp \
     webui/backend/source/WebServer.cpp \
@@ -108,10 +111,19 @@ webui_server_SOURCES = \
     webui/backend/source/WorkerManager.cpp \
     webui/backend/source/ConsumerManager.cpp \
     webui/backend/source/PreviewService.cpp \
-    webui/backend/source/ComponentsBridge.cpp
-webui_server_LDADD = -lpthread
-webui_server_CPPFLAGS = -I$(top_srcdir)/webui/backend/include -I$(top_srcdir)/webui/backend/third_party
-webui_server_LDFLAGS =
+    webui/backend/source/ComponentsBridge.cpp \
+    test_cases/common/ExecuteMode.cpp \
+    test_cases/vdec/VdecPlugin.cpp \
+    test_cases/display/DisplayPlugin.cpp \
+    test_cases/npu/NpuPlugin.cpp \
+    test_cases/preview/PreviewPlugin.cpp \
+    test_cases/save/SavePlugin.cpp \
+    test_cases/pp/PPPlugin.cpp \
+    test_cases/opencv/OpencvPlugin.cpp \
+    test_cases/venc/VencPlugin.cpp
+webui_server_LDADD = libcomponents.la $(COMMON_LIBS)
+webui_server_CPPFLAGS = -I$(top_srcdir)/webui/backend/include -I$(top_srcdir)/webui/backend/third_party -I$(top_srcdir)/test_cases $(AM_CPPFLAGS)
+webui_server_LDFLAGS = -Wl,--allow-shlib-undefined
 
 # WebUI 前端静态文件安装到 /usr/local/share/webui/
 webuistaticdir = $(prefix)/share/webui

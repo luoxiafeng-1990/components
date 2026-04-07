@@ -2,16 +2,14 @@
 #define WEBUI_COMPONENTS_BRIDGE_HPP
 
 /**
- * @brief Components 桥接层 —— 通过 qa_cases 子进程调用组件库
+ * @brief Components 桥接层 —— 同进程调用 libcomponents
  *
- * 核心思路：WebUI 不再直接链接 libcomponents，而是将用户配置
- * 转换为 qa_cases 命令行参数，以子进程方式执行。
- * 
- * 优势：
- *   - qa_cases 已完美覆盖所有场景（解码、显示、保存、NPU 等）
- *   - 无需手动创建 vendor extension、codec_params 等复杂对象
- *   - 与 qa_cases 行为 100% 一致
- *   - webui_server 不再依赖 libcomponents 和硬件库
+ * 核心思路：webui_server 直接链接 libcomponents，在同一进程内
+ * 构造 WorkerConfig 并调用 BufferConsumerService。
+ * JPEG 预览帧通过内存回调直传 PreviewService，无需 IPC。
+ *
+ * 等价于 qa_cases 的 test_module_main.cpp，但以后台线程方式运行，
+ * 由 HTTP API 控制生命周期。
  */
 
 #include "ApiTypes.hpp"
@@ -25,21 +23,7 @@ namespace webui {
 class PreviewService;
 
 /**
- * @brief 将 WebUI 配置转换为 qa_cases 命令行参数
- */
-namespace bridge {
-
-    std::vector<std::string> buildQaCasesArgs(
-        const DataSourceInfo& ds,
-        const ApiDecoderConfig& decoder,
-        const std::vector<ConsumerInfo>& consumers);
-
-    std::string argsToString(const std::vector<std::string>& args);
-
-} // namespace bridge
-
-/**
- * @brief 单个 Worker 运行实例（管理 qa_cases 子进程）
+ * @brief 单个 Worker 运行实例（同进程内调用 libcomponents）
  */
 class ComponentsWorkerInstance {
 public:

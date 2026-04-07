@@ -6,6 +6,8 @@
 #include "consumptionline/BufferConsumerStrategies.hpp"
 #include "buffer/bufferpool/BufferPoolRegistry.hpp"
 #include "vendor/taco/display/DisplayDeviceFactory.hpp"
+#include "productionline/worker/FFmpegEncodeWorker.hpp"
+#include "productionline/worker/RawFrameSourceFromBuffer.hpp"
 
 #include <log4cplus/logger.h>
 #include <log4cplus/loggingmacros.h>
@@ -13,10 +15,18 @@
 #include <iomanip>
 #include <cstring>
 #include <cstdio>
+#include <cerrno>
+
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <arpa/inet.h>
 
 extern "C" {
 #include <libavutil/avutil.h>
 #include <libavutil/pixdesc.h>
+#include <libavutil/frame.h>
+#include <libavutil/pixfmt.h>
 }
 namespace consumer {
 
@@ -603,13 +613,20 @@ void MultiConsumer::addStrategy(std::shared_ptr<IBufferConsumer> strategy) {
 }
 
 bool MultiConsumer::initialize(const std::vector<Buffer*>& first_buffers) {
-    bool all_success = true;
-    for (auto& strategy : strategies_) {
-        if (!strategy->initialize(first_buffers)) {
-            all_success = false;
+    auto it = strategies_.begin();
+    while (it != strategies_.end()) {
+        if (!(*it)->initialize(first_buffers)) {
+            LOG4CPLUS_WARN_FMT(
+                log4cplus::Logger::getRoot(),
+                "MultiConsumer: sub-consumer initialize failed, removing (remaining: %zu)",
+                strategies_.size() - 1);
+            fprintf(stderr, "[WARN] MultiConsumer: sub-consumer initialize failed, removing\n");
+            it = strategies_.erase(it);
+        } else {
+            ++it;
         }
     }
-    return all_success;
+    return !strategies_.empty();
 }
 
 bool MultiConsumer::consume(const std::vector<Buffer*>& buffers, int frame_index) {
@@ -1435,6 +1452,254 @@ double OpencvConsumer::getAverageSsim() const {
 
 bool OpencvConsumer::isPassed() const {
     return passed_;
+}
+
+// ============================================================
+// JpegEncodeConsumer 实现（v3.3）
+// ============================================================
+
+JpegEncodeConsumer::JpegEncodeConsumer(const Config& config)
+    : logger_(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Consumer.JpegEncode")))
+    , config_(config)
+    , on_frame_(config.on_frame)
+{
+    LOG4CPLUS_DEBUG_FMT(logger_, "构造: encoder=%s quality=%d fps=%d pipe='%s' callback=%s",
+                        config_.encoder_name.c_str(), config_.quality,
+                        config_.target_fps, config_.output_pipe.c_str(),
+                        on_frame_ ? "YES" : "NO");
+}
+
+JpegEncodeConsumer::~JpegEncodeConsumer() {
+    finalize();
+}
+
+bool JpegEncodeConsumer::initialize(const std::vector<Buffer*>& first_buffers) {
+    if (first_buffers.empty() || !first_buffers[0]) {
+        fprintf(stderr, "[JpegEncodeConsumer] initialize: first_buffers 为空\n");
+        return false;
+    }
+
+    AVFrame* first_frame = first_buffers[0]->getAVFrame();
+    if (!first_frame || !first_frame->data[0]) {
+        fprintf(stderr, "[JpegEncodeConsumer] initialize: 首帧 AVFrame 无效\n");
+        return false;
+    }
+
+    int src_width  = first_frame->width;
+    int src_height = first_frame->height;
+    AVPixelFormat src_pix_fmt = static_cast<AVPixelFormat>(first_frame->format);
+
+    fprintf(stderr, "[JpegEncodeConsumer] 初始化: 源 %dx%d pix_fmt=%d(%s) encoder=%s\n",
+            src_width, src_height, src_pix_fmt,
+            av_get_pix_fmt_name(src_pix_fmt) ? av_get_pix_fmt_name(src_pix_fmt) : "?",
+            config_.encoder_name.c_str());
+
+    raw_source_ = std::make_shared<RawFrameSourceFromBuffer>(
+        src_width, src_height, src_pix_fmt, true /*direct_mode*/);
+
+    // 尝试列表：先用指定编码器，失败则 fallback
+    std::vector<std::string> encoder_candidates = { config_.encoder_name };
+    if (config_.encoder_name != "mjpeg") {
+        encoder_candidates.push_back("mjpeg");
+    }
+
+    bool opened = false;
+    for (const auto& enc_name : encoder_candidates) {
+        WorkerConfig enc_config;
+        enc_config.display.width  = src_width;
+        enc_config.display.height = src_height;
+        enc_config.encoder.name = enc_name;
+        enc_config.encoder.enable_hardware =
+            (enc_name.find("taco") != std::string::npos);
+        enc_config.encoder.input_pix_fmt = static_cast<int>(src_pix_fmt);
+        enc_config.encoder.jpeg.quality = config_.quality;
+        enc_config.encoder.framerate_num = config_.target_fps > 0 ? config_.target_fps : 15;
+        enc_config.encoder.framerate_den = 1;
+        enc_config.encoder.gop_size = 1;
+        enc_config.encoder.max_b_frames = 0;
+        enc_config.data_source.buffer_count = 4;
+
+        encode_worker_ = std::make_unique<FFmpegEncodeWorker>(enc_config);
+        encode_worker_->setFrameSource(raw_source_);
+
+        if (encode_worker_->open()) {
+            fprintf(stderr, "[JpegEncodeConsumer] 编码器 '%s' 打开成功\n", enc_name.c_str());
+            opened = true;
+            break;
+        }
+
+        fprintf(stderr, "[JpegEncodeConsumer] 编码器 '%s' 打开失败，尝试下一个...\n",
+                enc_name.c_str());
+        encode_worker_.reset();
+    }
+
+    if (!opened) {
+        fprintf(stderr, "[JpegEncodeConsumer] 所有编码器均失败，放弃 JPEG 编码\n");
+        raw_source_.reset();
+        return false;
+    }
+
+    uint64_t pool_id = encode_worker_->getOutputBufferPoolId(
+        BufferPoolType::ENCODE_VIDEO_OUTPUT);
+    if (pool_id == 0) {
+        LOG4CPLUS_ERROR(logger_, "获取编码输出 BufferPool 失败");
+        encode_worker_->close();
+        encode_worker_.reset();
+        raw_source_.reset();
+        return false;
+    }
+
+    auto pool_weak = BufferPoolRegistry::getInstance().getPool(pool_id);
+    output_pool_ = pool_weak.lock();
+    if (!output_pool_) {
+        LOG4CPLUS_ERROR(logger_, "编码输出 BufferPool 无效");
+        encode_worker_->close();
+        encode_worker_.reset();
+        raw_source_.reset();
+        return false;
+    }
+
+    if (config_.target_fps > 0 && config_.target_fps < 60) {
+        frame_interval_ = std::max(1, 30 / config_.target_fps);
+    }
+
+    if (!config_.output_pipe.empty()) {
+        if (!openPipe()) {
+            LOG4CPLUS_WARN_FMT(logger_, "打开 FIFO '%s' 失败，继续运行（无输出）",
+                               config_.output_pipe.c_str());
+        }
+    }
+
+    LOG4CPLUS_INFO_FMT(logger_, "初始化完成: encoder=%s interval=%d pool_id=%lu pipe_fd=%d",
+                       encode_worker_->getEncoderName(), frame_interval_,
+                       pool_id, pipe_fd_);
+    return true;
+}
+
+bool JpegEncodeConsumer::consume(const std::vector<Buffer*>& buffers, int frame_index) {
+    if (buffers.empty() || !buffers[0] || !encode_worker_ || !output_pool_) {
+        return true;
+    }
+
+    if (frame_interval_ > 1 && (frame_index % frame_interval_ != 0)) {
+        skipped_count_.fetch_add(1, std::memory_order_relaxed);
+        return true;
+    }
+
+    AVFrame* src_frame = buffers[0]->getAVFrame();
+    if (!src_frame || !src_frame->data[0]) {
+        return true;
+    }
+
+    raw_source_->setFrame(src_frame);
+
+    Buffer* out_buf = output_pool_->acquireFree(true, 100);
+    if (!out_buf) {
+        LOG4CPLUS_WARN(logger_, "acquireFree 超时");
+        error_count_.fetch_add(1, std::memory_order_relaxed);
+        return true;
+    }
+
+    FillResult result = encode_worker_->fillBuffer(frame_index, out_buf);
+
+    if (result.ok()) {
+        AVPacket* pkt = out_buf->getAVPacket();
+        if (pkt && pkt->data && pkt->size > 0) {
+            encoded_count_.fetch_add(1, std::memory_order_relaxed);
+
+            if (on_frame_) {
+                on_frame_(pkt->data, static_cast<size_t>(pkt->size));
+            }
+            if (pipe_fd_ >= 0) {
+                writeToPipe(pkt->data, pkt->size);
+            }
+        }
+    } else {
+        error_count_.fetch_add(1, std::memory_order_relaxed);
+    }
+
+    output_pool_->releaseFree(out_buf);
+
+    return true;
+}
+
+void JpegEncodeConsumer::finalize() {
+    if (encode_worker_) {
+        encode_worker_->close();
+        encode_worker_.reset();
+    }
+    raw_source_.reset();
+    output_pool_.reset();
+
+    if (pipe_fd_ >= 0) {
+        ::close(pipe_fd_);
+        pipe_fd_ = -1;
+    }
+
+    LOG4CPLUS_INFO_FMT(logger_, "finalize: encoded=%d skipped=%d errors=%d",
+                       encoded_count_.load(), skipped_count_.load(),
+                       error_count_.load());
+}
+
+std::string JpegEncodeConsumer::getStats() const {
+    return "JpegEncode: encoded=" + std::to_string(encoded_count_.load()) +
+           " skipped=" + std::to_string(skipped_count_.load()) +
+           " errors=" + std::to_string(error_count_.load());
+}
+
+bool JpegEncodeConsumer::openPipe() {
+    const char* path = config_.output_pipe.c_str();
+
+    struct stat st;
+    if (stat(path, &st) != 0) {
+        if (mkfifo(path, 0666) != 0) {
+            LOG4CPLUS_ERROR_FMT(logger_, "mkfifo('%s') 失败: %s",
+                               path, strerror(errno));
+            return false;
+        }
+    } else if (!S_ISFIFO(st.st_mode)) {
+        LOG4CPLUS_ERROR_FMT(logger_, "'%s' 存在但不是 FIFO", path);
+        return false;
+    }
+
+    pipe_fd_ = ::open(path, O_WRONLY | O_NONBLOCK);
+    if (pipe_fd_ < 0) {
+        if (errno == ENXIO) {
+            LOG4CPLUS_WARN_FMT(logger_, "FIFO '%s' 暂无读取端（ENXIO），稍后重试", path);
+        } else {
+            LOG4CPLUS_ERROR_FMT(logger_, "open('%s') 失败: %s", path, strerror(errno));
+        }
+        return false;
+    }
+
+    LOG4CPLUS_INFO_FMT(logger_, "FIFO '%s' 已打开 (fd=%d)", path, pipe_fd_);
+    return true;
+}
+
+void JpegEncodeConsumer::writeToPipe(const uint8_t* data, int size) {
+    if (pipe_fd_ < 0 || !data || size <= 0) return;
+
+    uint32_t net_size = htonl(static_cast<uint32_t>(size));
+    ssize_t written = ::write(pipe_fd_, &net_size, sizeof(net_size));
+    if (written != sizeof(net_size)) {
+        if (errno == EPIPE || errno == EAGAIN) {
+            return;
+        }
+        LOG4CPLUS_WARN_FMT(logger_, "写 FIFO 长度头失败: %s", strerror(errno));
+        return;
+    }
+
+    ssize_t total = 0;
+    while (total < size) {
+        written = ::write(pipe_fd_, data + total, size - total);
+        if (written < 0) {
+            if (errno == EAGAIN || errno == EINTR) continue;
+            if (errno == EPIPE) return;
+            LOG4CPLUS_WARN_FMT(logger_, "写 FIFO 数据失败: %s", strerror(errno));
+            return;
+        }
+        total += written;
+    }
 }
 
 } // namespace consumer

@@ -30,11 +30,15 @@ void PreviewService::onJpegFrame(const std::string& worker_id,
     fb.frame_seq++;
 }
 
+void PreviewService::requestStop() {
+    stop_requested_ = true;
+}
+
 void PreviewService::streamMjpeg(const std::string& worker_id, FrameCallback cb) {
     auto& fb = getOrCreateBuffer(worker_id);
     uint64_t last_seq = 0;
 
-    while (true) {
+    while (!stop_requested_.load(std::memory_order_relaxed)) {
         uint64_t cur_seq = fb.frame_seq.load();
         if (cur_seq > last_seq) {
             std::vector<uint8_t> frame;

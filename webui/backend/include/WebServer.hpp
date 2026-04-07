@@ -36,6 +36,7 @@ public:
 
     bool start();
     void stop();
+    void stopHttpOnly();
     void wait();
 
     bool isRunning() const { return running_.load(); }

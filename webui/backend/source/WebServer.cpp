@@ -76,9 +76,27 @@ bool WebServer::start() {
 }
 
 void WebServer::stop() {
-    if (running_) {
-        running_ = false;
+    running_ = false;
+    // 1. 先通知 PreviewService 停止所有流（解除 streamMjpeg 死循环）
+    if (preview_service_) {
+        preview_service_->requestStop();
+    }
+    // 2. 停止 HTTP 服务器（关闭连接，让 handler 线程退出）
+    if (server_) {
+        server_->stop();
+    }
+    // 3. 停止所有 Worker 线程
+    if (worker_manager_) {
         worker_manager_->stopAll();
+    }
+}
+
+void WebServer::stopHttpOnly() {
+    running_ = false;
+    if (preview_service_) {
+        preview_service_->requestStop();
+    }
+    if (server_) {
         server_->stop();
     }
 }

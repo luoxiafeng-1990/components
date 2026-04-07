@@ -31,6 +31,7 @@
 #include "pp/PPPlugin.hpp"
 #include "save/SavePlugin.hpp"
 #include "opencv/OpencvPlugin.hpp"
+#include "preview/PreviewPlugin.hpp"
 #include "common/Logger.hpp"
 
 #include "productionline/WorkerSyncCoordinator.hpp"
@@ -64,6 +65,7 @@ int main(int argc, char* argv[]) {
     auto display_plugin = std::make_unique<test::display::DisplayPlugin>();
     auto npu_plugin     = std::make_unique<test::npu::NpuPlugin>();
     auto opencv_plugin  = std::make_unique<test::opencv::OpencvPlugin>();
+    auto preview_plugin = std::make_unique<test::preview::PreviewPlugin>();
 
     // ── 2. 统一注册：每个插件 = 一个子命令 ──
     struct PluginEntry {
@@ -85,6 +87,7 @@ int main(int argc, char* argv[]) {
     register_plugin(display_plugin.get());
     register_plugin(npu_plugin.get());
     register_plugin(opencv_plugin.get());
+    register_plugin(preview_plugin.get());
 
     // ── 3. 解析命令行（支持多子命令） ──
     try {
