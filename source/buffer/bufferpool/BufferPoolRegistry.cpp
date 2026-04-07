@@ -68,7 +68,7 @@ void BufferPoolRegistry::unregisterPool(uint64_t id) {
         return;
     }
     
-    const std::string& name = it->second.name;
+    const std::string name = it->second.name;
     
     // 移除名称索引
     name_to_id_.erase(name);

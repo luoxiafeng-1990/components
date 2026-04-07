@@ -81,7 +81,7 @@ NPU_LIBS = -lta_runtime -lVIPhal -lNBGlinker
 # google_test_LDFLAGS = 
 
 # ========== QA 测试程序（模块化测试入口）==========
-bin_PROGRAMS = qa_cases
+bin_PROGRAMS = qa_cases webui_server
 
 # ========== Mat(AVFrame*) 接口最小化测试 ==========
 qa_cases_SOURCES = \
@@ -97,6 +97,33 @@ qa_cases_SOURCES = \
 qa_cases_LDADD = libcomponents.la $(COMMON_LIBS)
 qa_cases_CPPFLAGS = -I$(top_srcdir)/test_cases $(AM_CPPFLAGS)
 qa_cases_LDFLAGS = -Wl,--allow-shlib-undefined
+
+# ========== WebUI 服务器 ==========
+# webui_server 通过 subprocess 调用 qa_cases，不直接链接 libcomponents
+webui_server_SOURCES = \
+    webui/backend/source/main.cpp \
+    webui/backend/source/WebServer.cpp \
+    webui/backend/source/ConfigStore.cpp \
+    webui/backend/source/DataSourceManager.cpp \
+    webui/backend/source/WorkerManager.cpp \
+    webui/backend/source/ConsumerManager.cpp \
+    webui/backend/source/PreviewService.cpp \
+    webui/backend/source/ComponentsBridge.cpp
+webui_server_LDADD = -lpthread
+webui_server_CPPFLAGS = -I$(top_srcdir)/webui/backend/include -I$(top_srcdir)/webui/backend/third_party
+webui_server_LDFLAGS =
+
+# WebUI 前端静态文件安装到 /usr/local/share/webui/
+webuistaticdir = $(prefix)/share/webui
+dist_webuistatic_DATA =
+
+# 安装前端预构建产物（如果 dist/ 目录存在）
+install-data-local:
+	@if [ -d "$(top_srcdir)/webui/dist" ]; then \
+		$(MKDIR_P) "$(DESTDIR)$(webuistaticdir)"; \
+		cp -r $(top_srcdir)/webui/dist/* "$(DESTDIR)$(webuistaticdir)/"; \
+		echo "WebUI frontend installed to $(DESTDIR)$(webuistaticdir)"; \
+	fi
 
 # ========== 编译选项 ==========
 OPENCV_INCLUDE = -I$(STAGING_DIR)/usr/include/opencv4

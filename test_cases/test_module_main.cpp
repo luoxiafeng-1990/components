@@ -17,6 +17,10 @@
  * @version 8.0 - 插件一视同仁，支持多子命令组合
  */
 
+#ifdef HAVE_CONFIG_H
+#include <config.h>
+#endif
+
 #include "common/IOptionPlugin.hpp"
 #include "common/ExecuteMode.hpp"
 #include "common/third_party/CLI11.hpp"
@@ -40,7 +44,16 @@
 int main(int argc, char* argv[]) {
     LoggerGuard logger_guard;
 
-    CLI::App app{"qa_cases - 测试套件"};
+#ifdef PACKAGE_VERSION
+    const std::string version_str = PACKAGE_VERSION;
+#else
+    const std::string version_str = "unknown";
+#endif
+    const std::string version_detail = "qa_cases v" + version_str
+        + " (built " + __DATE__ + " " + __TIME__ + ")";
+
+    CLI::App app{"qa_cases - Component 测试套件 v" + version_str};
+    app.set_version_flag("-v,--version", version_detail, "显示版本号及编译时间并退出");
     app.require_subcommand(1, 0);
 
     // ── 1. 创建所有插件 ──

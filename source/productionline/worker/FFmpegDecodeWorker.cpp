@@ -409,12 +409,25 @@ bool FFmpegDecodeWorker::seek(int frame_index) {
     }
 
     // 4. 重置解码器状态
-    //    软件解码器：调用 avcodec_flush_buffers 清空内部缓冲
-    //    硬件解码器（h264_taco）：跳过 flush，因为 taco 的 flush 回调会将通道
-    //    置为 STOPPED 状态（state=5）且不会重新启动，导致后续 send_packet 失败。
-    //    文件从 I 帧开始，解码器无需 flush 也能正确解码。
+    bool was_draining = flush_sent_;
+    flush_sent_ = false;
+
     if (codec_ctx_ptr_ && !use_hardware_decoder_) {
+        // 软件解码器：avcodec_flush_buffers 清空内部缓冲并退出 draining mode
         avcodec_flush_buffers(codec_ctx_ptr_);
+    } else if (codec_ctx_ptr_ && use_hardware_decoder_ && was_draining) {
+        // 硬件解码器（h264_taco）在 draining mode（已发送过 NULL packet）：
+        //   avcodec_flush_buffers 会将 taco 通道置为 STOPPED（state=5）且不重启，
+        //   所以必须关闭并重建 codec context 来彻底重置解码器。
+        LOG4CPLUS_DEBUG(logger_, " Hardware decoder was in draining mode, re-initializing codec...");
+        const AVCodecParameters* codecpar = packet_source_->getCodecParameters();
+        avcodec_free_context(&codec_ctx_ptr_);
+        codec_ctx_ptr_ = nullptr;
+        if (!initializeDecoder(codecpar)) {
+            LOG4CPLUS_ERROR(logger_, " Failed to re-initialize hardware decoder after seek");
+            return false;
+        }
+        LOG4CPLUS_DEBUG(logger_, " Hardware decoder re-initialized successfully");
     }
     
     LOG4CPLUS_DEBUG_FMT(logger_, " Successfully seeked to frame %d", frame_index);

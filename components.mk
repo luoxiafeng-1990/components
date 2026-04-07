@@ -27,6 +27,11 @@ COMPONENTS_POST_CONFIGURE_HOOKS += COMPONENTS_PATCH_CPPFLAGS
 
 define COMPONENTS_INSTALL_TARGET_CMDS
 	$(INSTALL) -D -m 755 $(@D)/qa_cases $(TARGET_DIR)/usr/local/bin
+	$(INSTALL) -D -m 755 $(@D)/webui_server $(TARGET_DIR)/usr/local/bin
+	@if [ -d "$(@D)/webui/dist" ]; then \
+		mkdir -p $(TARGET_DIR)/usr/local/share/webui; \
+		cp -r $(@D)/webui/dist/* $(TARGET_DIR)/usr/local/share/webui/; \
+	fi
 endef
 
 $(eval $(autotools-package))

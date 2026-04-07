@@ -978,6 +978,11 @@ void BufferConsumerService::consumeLoop(
             if (!buffer) {
                 timeout_count++;
                 if (timeout_count >= config.max_timeout_count) {
+                    if (pool->isRunning()) {
+                        // Pool 仍活跃（生产者可能正在 seek/重置），继续等待
+                        timeout_count = 0;
+                        continue;
+                    }
                     LOG4CPLUS_DEBUG_FMT(logger_, "Max timeout count reached: %d", timeout_count);
                     break;
                 }
