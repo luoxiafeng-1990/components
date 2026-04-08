@@ -365,12 +365,17 @@ int RawFrameSourceFromBuffer::readRawFrame(AVFrame* frame) {
         if (!direct_frame_) {
             return AVERROR(EAGAIN);
         }
-        int ret = copyFrame(frame, direct_frame_);
+        // 直接传递源帧，不做 av_frame_ref，不增加引用计数。
+        // consume() 是同步调用，源帧在整个编码期间有效。
+        // 将 buf[] 置空，使 fillBuffer 末尾的 av_frame_unref 不会误减源帧引用计数。
+        av_frame_unref(frame);
+        *frame = *direct_frame_;
+        memset(frame->buf, 0, sizeof(frame->buf));
+        frame->extended_buf = nullptr;
+        frame->nb_extended_buf = 0;
         direct_frame_ = nullptr;
-        if (ret >= 0) {
-            current_frame_index_.fetch_add(1, std::memory_order_relaxed);
-        }
-        return ret;
+        current_frame_index_.fetch_add(1, std::memory_order_relaxed);
+        return 0;
     }
     
     auto pool = source_pool_weak_.lock();
