@@ -118,11 +118,12 @@ public:
     void setSourceBufferPool(std::weak_ptr<BufferPool> pool_weak);
     
     /**
-     * @brief 直接注入帧指针（直接模式专用）
+     * @brief 注入帧并阻塞等待编码完成（直接模式专用）
      * @param frame 要编码的 AVFrame 指针（不接管所有权）
      *
-     * 在 consume() 中调用后，紧接着调用 FFmpegEncodeWorker::fillBuffer()，
-     * 内部的 readRawFrame() 会立即取走此帧。
+     * 1. 存储帧指针，唤醒 readRawFrame 中等待的编码线程
+     * 2. 阻塞等待编码线程消费完成后才返回
+     * 3. 返回后调用者可以安全释放 buffer
      */
     void setFrame(AVFrame* frame);
     
@@ -220,9 +221,24 @@ private:
     std::atomic<bool> is_open_;                    // 打开状态
     std::atomic<int> current_frame_index_;         // 当前帧索引
     
-    // ========== 模式标志 ==========
-    bool is_direct_mode_;                          // 是否为直接模式（v3.3）
-    AVFrame* direct_frame_;                        // 直接模式：注入的帧指针
+    // ========== 直接模式成员（v3.4: 条件变量同步） ==========
+    bool is_direct_mode_;                          // 是否为直接模式
+    AVFrame* direct_frame_;                        // setFrame 注入的帧指针（待消费）
+    AVFrame* last_direct_frame_ = nullptr;         // readRawFrame 保存的当前帧（供编码器直接使用）
+    std::mutex direct_mutex_;                      // 直接模式互斥锁
+    std::condition_variable direct_cv_available_;   // 新帧可用（setFrame → readRawFrame）
+    std::condition_variable direct_cv_consumed_;    // 帧已消费（readRawFrame → setFrame）
+    bool direct_frame_pending_ = false;            // 有待确认消费的帧
+    bool direct_frame_consumed_ = false;           // 帧消费完成标志
+
+public:
+    /**
+     * @brief 获取直接模式下当前帧指针（readRawFrame 后有效）
+     * @return 消费者注入的原始 AVFrame 指针，非直接模式返回 nullptr
+     */
+    AVFrame* getDirectFrame() const { return is_direct_mode_ ? last_direct_frame_ : nullptr; }
+
+private:
 
     // ========== 共享模式成员 ==========
     bool is_shared_mode_;                          // 是否为共享模式

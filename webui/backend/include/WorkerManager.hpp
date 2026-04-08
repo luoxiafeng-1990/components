@@ -2,11 +2,14 @@
 #define WEBUI_WORKER_MANAGER_HPP
 
 #include "ApiTypes.hpp"
-#include "ComponentsBridge.hpp"
 #include <mutex>
 #include <unordered_map>
 #include <memory>
 #include <atomic>
+#include <thread>
+#include <chrono>
+
+namespace consumer { class BufferConsumerService; }
 
 namespace webui {
 
@@ -18,12 +21,6 @@ class PreviewService;
 struct WorkerRuntime {
     WorkerInfo info;
     std::atomic<WorkerState> state{WorkerState::CREATED};
-
-    std::unique_ptr<ComponentsWorkerInstance> instance;
-
-    ~WorkerRuntime() {
-        if (instance) instance->stop();
-    }
 };
 
 class WorkerManager {
@@ -64,6 +61,15 @@ private:
     void syncConsumersToManager(const std::string& worker_id,
                                 const std::vector<ConsumerInfo>& consumers);
 
+    /**
+     * @brief 重建 PARALLEL 服务
+     *
+     * 收集所有 state==RUNNING 的 worker 的 config，
+     * 停止旧服务，用新 config 集合启动 BufferConsumerService(PARALLEL)。
+     * 如果没有 RUNNING 的 worker，则只停止旧服务。
+     */
+    void restartParallelService();
+
     mutable std::mutex mutex_;
     std::unordered_map<std::string, std::unique_ptr<WorkerRuntime>> workers_;
     DataSourceManager& ds_manager_;
@@ -72,6 +78,16 @@ private:
     ConfigStore& config_store_;
     std::atomic<int> id_counter_{1};
     std::atomic<int> consumer_id_counter_{1};
+
+    // PARALLEL 服务（全局唯一）
+    std::unique_ptr<consumer::BufferConsumerService> parallel_service_;
+    std::thread service_thread_;
+    std::chrono::steady_clock::time_point service_start_time_;
+    std::atomic<bool> intentional_restart_{false};
+
+    // 延迟重启机制（debounce：批量 start 时只触发一次 restart）
+    std::atomic<int> restart_seq_{0};
+    void scheduleRestart();
 };
 
 } // namespace webui

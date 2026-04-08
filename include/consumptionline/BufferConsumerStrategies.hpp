@@ -31,6 +31,7 @@
 #include <atomic>
 #include <string>
 #include <vector>
+#include <thread>
 #include <map>
 
 extern "C" {
@@ -41,6 +42,8 @@ extern "C" {
 #include "opencv2/core/tacv.hpp"
 #include "opencv2/imgproc.hpp"
 #include "opencv2/imgcodecs.hpp"
+
+class VideoProductionLine;
 
 namespace consumer {
 
@@ -362,11 +365,15 @@ public:
 private:
     log4cplus::Logger logger_;
     Config config_;
-    Config::FrameCallback on_frame_;   ///< 内存回调（同进程模式）
+    Config::FrameCallback on_frame_;
 
     std::shared_ptr<RawFrameSourceFromBuffer> raw_source_;
-    std::unique_ptr<FFmpegEncodeWorker> encode_worker_;
-    std::shared_ptr<BufferPool> output_pool_;
+    std::unique_ptr<::VideoProductionLine> encode_pipeline_;
+    uint64_t encode_pool_id_ = 0;
+
+    std::thread reader_thread_;
+    std::atomic<bool> reader_running_{false};
+    void readerThreadFunc();
 
     int pipe_fd_ = -1;
     int frame_interval_ = 1;

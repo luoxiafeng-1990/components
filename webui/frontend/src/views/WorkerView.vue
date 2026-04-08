@@ -140,6 +140,9 @@
         <el-form-item label="硬件加速">
           <el-switch v-model="createForm.enable_hardware" />
         </el-form-item>
+        <el-form-item label="循环播放">
+          <el-switch v-model="createForm.loop" />
+        </el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="createDialogVisible = false">取消</el-button>
@@ -192,6 +195,10 @@
             <el-option value="FFMPEG_ENCODE" label="编码 (FFMPEG_ENCODE)" />
             <el-option value="FFMPEG_PACKET_RECORDER" label="录包 (FFMPEG_PACKET_RECORDER)" />
           </el-select>
+        </el-form-item>
+
+        <el-form-item label="循环播放">
+          <el-switch v-model="editForm.loop" />
         </el-form-item>
 
         <el-divider content-position="left">解码器参数</el-divider>
@@ -259,6 +266,7 @@ const createForm = reactive({
   datasource_id: '',
   worker_type: 'FFMPEG_DECODE',
   enable_hardware: true,
+  loop: true,
 })
 
 const consumerForm = reactive({
@@ -270,6 +278,7 @@ const editForm = reactive({
   name: '',
   datasource_id: '',
   worker_type: 'FFMPEG_DECODE',
+  loop: true,
   decoder: { name: '', enable_hardware: true, decode_threads: 0 } as Record<string, any>,
   consumers: [] as { type: string; config: Record<string, any>; configJson?: string }[],
 })
@@ -305,6 +314,7 @@ function showEditDialog(w: any) {
   editForm.name = w.name
   editForm.datasource_id = w.datasource_id
   editForm.worker_type = w.worker_type
+  editForm.loop = w.loop !== undefined ? w.loop : true
   editForm.decoder = { ...(w.decoder || { enable_hardware: true, decode_threads: 0 }) }
   editForm.consumers = (w.consumers_config || []).map((c: any) => ({
     type: c.type,
@@ -336,6 +346,7 @@ async function handleUpdate() {
       name: editForm.name,
       datasource_id: editForm.datasource_id,
       worker_type: editForm.worker_type,
+      loop: editForm.loop,
       decoder: editForm.decoder,
       consumers,
     })
@@ -391,6 +402,7 @@ async function handleCreate() {
       name: createForm.name,
       datasource_id: createForm.datasource_id,
       worker_type: createForm.worker_type,
+      loop: createForm.loop,
     })
     ElMessage.success('Worker 创建成功')
     createDialogVisible.value = false
@@ -480,19 +492,20 @@ async function handleBatchCommand(cmd: string) {
   if (cmd === 'startAll') {
     const targets = workers.filter(w => w.state === 'CREATED' || w.state === 'STOPPED' || w.state === 'ERROR')
     if (targets.length === 0) { ElMessage.info('没有可启动的 Worker'); return }
-    let ok = 0
-    for (const w of targets) {
-      try { await workerStore.start(w.id); ok++ } catch { /* skip */ }
-    }
+    const results = await Promise.allSettled(targets.map(w => workerStore.start(w.id)))
+    const ok = results.filter(r => r.status === 'fulfilled').length
     ElMessage.success(`已启动 ${ok}/${targets.length} 个 Worker`)
   } else if (cmd === 'stopAll') {
     const targets = workers.filter(w => w.state === 'RUNNING' || w.state === 'STARTING')
     if (targets.length === 0) { ElMessage.info('没有运行中的 Worker'); return }
-    let ok = 0
-    for (const w of targets) {
-      try { await workerStore.stop(w.id); ok++ } catch { /* skip */ }
+    try {
+      const { workerApi } = await import('../api')
+      await (workerApi as any).stopAll()
+    } catch {
+      await Promise.allSettled(targets.map(w => workerStore.stop(w.id)))
     }
-    ElMessage.success(`已停止 ${ok}/${targets.length} 个 Worker`)
+    await workerStore.fetchList()
+    ElMessage.success(`已停止 ${targets.length} 个 Worker`)
   } else if (cmd === 'deleteAll') {
     try {
       await ElMessageBox.confirm(
@@ -500,16 +513,18 @@ async function handleBatchCommand(cmd: string) {
         '批量删除', { type: 'warning', confirmButtonText: '全部删除', cancelButtonText: '取消' }
       )
     } catch { return }
-    // 先停止运行中的
     const running = workers.filter(w => w.state === 'RUNNING' || w.state === 'STARTING')
-    for (const w of running) {
-      try { await workerStore.stop(w.id) } catch { /* skip */ }
+    if (running.length > 0) {
+      try {
+        const { workerApi } = await import('../api')
+        await (workerApi as any).stopAll()
+      } catch {
+        await Promise.allSettled(running.map(w => workerStore.stop(w.id)))
+      }
     }
-    let ok = 0
     const ids = workers.map(w => w.id)
-    for (const id of ids) {
-      try { await workerStore.remove(id); ok++ } catch { /* skip */ }
-    }
+    const results = await Promise.allSettled(ids.map(id => workerStore.remove(id)))
+    const ok = results.filter(r => r.status === 'fulfilled').length
     ElMessage.success(`已删除 ${ok} 个 Worker`)
   }
 }

@@ -2,58 +2,38 @@
 #define WEBUI_COMPONENTS_BRIDGE_HPP
 
 /**
- * @brief Components 桥接层 —— 同进程调用 libcomponents
+ * @brief Components 桥接层 —— API 参数 → WorkerConfig 构建
  *
- * 核心思路：webui_server 直接链接 libcomponents，在同一进程内
- * 构造 WorkerConfig 并调用 BufferConsumerService。
- * JPEG 预览帧通过内存回调直传 PreviewService，无需 IPC。
- *
- * 等价于 qa_cases 的 test_module_main.cpp，但以后台线程方式运行，
- * 由 HTTP API 控制生命周期。
+ * 纯配置构建器：将 WebUI API 参数转换为 qa_cases 等价的 WorkerConfig，
+ * 由 WorkerManager 收集后统一交给 BufferConsumerService(PARALLEL) 执行。
  */
 
 #include "ApiTypes.hpp"
-#include <memory>
+#include "productionline/worker/WorkerConfig.hpp"
 #include <string>
 #include <vector>
-#include <functional>
 
 namespace webui {
 
 class PreviewService;
 
-/**
- * @brief 单个 Worker 运行实例（同进程内调用 libcomponents）
- */
-class ComponentsWorkerInstance {
-public:
-    using OutputCallback = std::function<void(const std::string& line)>;
-
-    ComponentsWorkerInstance();
-    ~ComponentsWorkerInstance();
-
-    bool start(const DataSourceInfo& ds,
-               const ApiDecoderConfig& decoder,
-               const std::vector<ConsumerInfo>& consumers,
-               PreviewService* preview_service,
-               const std::string& worker_id);
-
-    void stop();
-    bool isRunning() const;
-
-    int64_t getDecodedFrames() const;
-    int64_t getDroppedFrames() const;
-    double getFps() const;
-    double getUptimeSeconds() const;
-    std::string getLastOutput() const;
-    std::string getCommandLine() const;
-
-    void setOutputCallback(OutputCallback cb);
-
-private:
-    struct Impl;
-    std::unique_ptr<Impl> impl_;
+struct BuildResult {
+    bool success = false;
+    std::string error;
+    std::string description;
+    WorkerConfig config;
+    uint32_t flags = 0;
 };
+
+/**
+ * @brief 从 WebUI API 参数构建 WorkerConfig（与 qa_cases 完全一致的插件解析流程）
+ */
+BuildResult buildWorkerConfig(
+    const DataSourceInfo& ds,
+    const ApiDecoderConfig& decoder,
+    const std::vector<ConsumerInfo>& consumers,
+    PreviewService* preview_service,
+    const std::string& worker_id);
 
 } // namespace webui
 

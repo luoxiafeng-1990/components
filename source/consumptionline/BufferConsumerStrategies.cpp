@@ -8,6 +8,7 @@
 #include "vendor/taco/display/DisplayDeviceFactory.hpp"
 #include "productionline/worker/FFmpegEncodeWorker.hpp"
 #include "productionline/worker/RawFrameSourceFromBuffer.hpp"
+#include "productionline/VideoProductionLine.hpp"
 
 #include <log4cplus/logger.h>
 #include <log4cplus/loggingmacros.h>
@@ -1494,18 +1495,20 @@ bool JpegEncodeConsumer::initialize(const std::vector<Buffer*>& first_buffers) {
             av_get_pix_fmt_name(src_pix_fmt) ? av_get_pix_fmt_name(src_pix_fmt) : "?",
             config_.encoder_name.c_str());
 
+    // 1. 创建直接模式帧源（条件变量同步）
     raw_source_ = std::make_shared<RawFrameSourceFromBuffer>(
         src_width, src_height, src_pix_fmt, true /*direct_mode*/);
 
-    // 尝试列表：先用指定编码器，失败则 fallback
+    // 2. 尝试编码器列表，用 VideoProductionLine 组装
     std::vector<std::string> encoder_candidates = { config_.encoder_name };
     if (config_.encoder_name != "mjpeg") {
         encoder_candidates.push_back("mjpeg");
     }
 
-    bool opened = false;
+    bool started = false;
     for (const auto& enc_name : encoder_candidates) {
         WorkerConfig enc_config;
+        enc_config.global.worker_type = WorkerType::FFMPEG_ENCODE;
         enc_config.display.width  = src_width;
         enc_config.display.height = src_height;
         enc_config.encoder.name = enc_name;
@@ -1518,46 +1521,34 @@ bool JpegEncodeConsumer::initialize(const std::vector<Buffer*>& first_buffers) {
         enc_config.encoder.gop_size = 1;
         enc_config.encoder.max_b_frames = 0;
         enc_config.data_source.buffer_count = 4;
+        enc_config.data_source.max_frames = -1;
+        enc_config.data_source.shared_raw_frame_source = raw_source_;
 
-        encode_worker_ = std::make_unique<FFmpegEncodeWorker>(enc_config);
-        encode_worker_->setFrameSource(raw_source_);
+        encode_pipeline_ = std::make_unique<::VideoProductionLine>(
+            false /*no loop*/, 1 /*thread_count*/, false /*no monitor*/);
 
-        if (encode_worker_->open()) {
-            fprintf(stderr, "[JpegEncodeConsumer] 编码器 '%s' 打开成功\n", enc_name.c_str());
-            opened = true;
+        if (encode_pipeline_->start(enc_config)) {
+            encode_pool_id_ = encode_pipeline_->getWorkingBufferPoolId();
+            fprintf(stderr, "[JpegEncodeConsumer] 编码器 '%s' 生产线启动成功, pool_id=%lu\n",
+                    enc_name.c_str(), encode_pool_id_);
+            started = true;
             break;
         }
 
-        fprintf(stderr, "[JpegEncodeConsumer] 编码器 '%s' 打开失败，尝试下一个...\n",
+        fprintf(stderr, "[JpegEncodeConsumer] 编码器 '%s' 生产线启动失败，尝试下一个...\n",
                 enc_name.c_str());
-        encode_worker_.reset();
+        encode_pipeline_.reset();
     }
 
-    if (!opened) {
-        fprintf(stderr, "[JpegEncodeConsumer] 所有编码器均失败，放弃 JPEG 编码\n");
+    if (!started) {
+        fprintf(stderr, "[JpegEncodeConsumer] 所有编码器均失败\n");
         raw_source_.reset();
         return false;
     }
 
-    uint64_t pool_id = encode_worker_->getOutputBufferPoolId(
-        BufferPoolType::ENCODE_VIDEO_OUTPUT);
-    if (pool_id == 0) {
-        LOG4CPLUS_ERROR(logger_, "获取编码输出 BufferPool 失败");
-        encode_worker_->close();
-        encode_worker_.reset();
-        raw_source_.reset();
-        return false;
-    }
-
-    auto pool_weak = BufferPoolRegistry::getInstance().getPool(pool_id);
-    output_pool_ = pool_weak.lock();
-    if (!output_pool_) {
-        LOG4CPLUS_ERROR(logger_, "编码输出 BufferPool 无效");
-        encode_worker_->close();
-        encode_worker_.reset();
-        raw_source_.reset();
-        return false;
-    }
+    // 3. 启动读取线程：从编码 BufferPool 取 JPEG 数据，调用回调
+    reader_running_ = true;
+    reader_thread_ = std::thread(&JpegEncodeConsumer::readerThreadFunc, this);
 
     if (config_.target_fps > 0 && config_.target_fps < 60) {
         frame_interval_ = std::max(1, 30 / config_.target_fps);
@@ -1565,19 +1556,17 @@ bool JpegEncodeConsumer::initialize(const std::vector<Buffer*>& first_buffers) {
 
     if (!config_.output_pipe.empty()) {
         if (!openPipe()) {
-            LOG4CPLUS_WARN_FMT(logger_, "打开 FIFO '%s' 失败，继续运行（无输出）",
-                               config_.output_pipe.c_str());
+            LOG4CPLUS_WARN_FMT(logger_, "打开 FIFO '%s' 失败", config_.output_pipe.c_str());
         }
     }
 
-    LOG4CPLUS_INFO_FMT(logger_, "初始化完成: encoder=%s interval=%d pool_id=%lu pipe_fd=%d",
-                       encode_worker_->getEncoderName(), frame_interval_,
-                       pool_id, pipe_fd_);
+    LOG4CPLUS_INFO_FMT(logger_, "初始化完成: pool_id=%lu interval=%d",
+                       encode_pool_id_, frame_interval_);
     return true;
 }
 
 bool JpegEncodeConsumer::consume(const std::vector<Buffer*>& buffers, int frame_index) {
-    if (buffers.empty() || !buffers[0] || !encode_worker_ || !output_pool_) {
+    if (buffers.empty() || !buffers[0] || !raw_source_ || !encode_pipeline_) {
         return true;
     }
 
@@ -1591,45 +1580,35 @@ bool JpegEncodeConsumer::consume(const std::vector<Buffer*>& buffers, int frame_
         return true;
     }
 
+    // 注入帧并阻塞等待编码完成
+    // setFrame 内部：signal CV → 编码线程醒来编码 → 编码完成 → signal consumed → 返回
+    // 返回后 buffer 可以安全释放
     raw_source_->setFrame(src_frame);
-
-    Buffer* out_buf = output_pool_->acquireFree(true, 100);
-    if (!out_buf) {
-        LOG4CPLUS_WARN(logger_, "acquireFree 超时");
-        error_count_.fetch_add(1, std::memory_order_relaxed);
-        return true;
-    }
-
-    FillResult result = encode_worker_->fillBuffer(frame_index, out_buf);
-
-    if (result.ok()) {
-        AVPacket* pkt = out_buf->getAVPacket();
-        if (pkt && pkt->data && pkt->size > 0) {
-            encoded_count_.fetch_add(1, std::memory_order_relaxed);
-
-            if (on_frame_) {
-                on_frame_(pkt->data, static_cast<size_t>(pkt->size));
-            }
-            if (pipe_fd_ >= 0) {
-                writeToPipe(pkt->data, pkt->size);
-            }
-        }
-    } else {
-        error_count_.fetch_add(1, std::memory_order_relaxed);
-    }
-
-    output_pool_->releaseFree(out_buf);
 
     return true;
 }
 
 void JpegEncodeConsumer::finalize() {
-    if (encode_worker_) {
-        encode_worker_->close();
-        encode_worker_.reset();
+    // 1. 先让读取线程退出（它依赖 BufferPool，必须在 pipeline stop 之前退出）
+    reader_running_.store(false, std::memory_order_release);
+
+    // 2. 关闭帧源，唤醒编码线程中正在等待的 readRawFrame / setFrame
+    if (raw_source_) {
+        raw_source_->close();
     }
+
+    // 3. 等待读取线程退出（它在 acquireFilled 超时后检查 reader_running_ 并退出）
+    if (reader_thread_.joinable()) {
+        reader_thread_.join();
+    }
+
+    // 4. 停止生产线（内部 join 编码线程、close worker、注销 BufferPool）
+    if (encode_pipeline_) {
+        encode_pipeline_->stop();
+        encode_pipeline_.reset();
+    }
+
     raw_source_.reset();
-    output_pool_.reset();
 
     if (pipe_fd_ >= 0) {
         ::close(pipe_fd_);
@@ -1645,6 +1624,49 @@ std::string JpegEncodeConsumer::getStats() const {
     return "JpegEncode: encoded=" + std::to_string(encoded_count_.load()) +
            " skipped=" + std::to_string(skipped_count_.load()) +
            " errors=" + std::to_string(error_count_.load());
+}
+
+void JpegEncodeConsumer::readerThreadFunc() {
+    LOG4CPLUS_INFO_FMT(logger_, "编码输出读取线程启动, pool_id=%lu", encode_pool_id_);
+
+    auto pool_weak = BufferPoolRegistry::getInstance().getPool(encode_pool_id_);
+    auto pool = pool_weak.lock();
+    if (!pool) {
+        LOG4CPLUS_ERROR_FMT(logger_, "编码 BufferPool (id=%lu) 无效，读取线程退出", encode_pool_id_);
+        return;
+    }
+
+    LOG4CPLUS_INFO_FMT(logger_, "读取线程获得 pool '%s' (free=%d, filled=%d)",
+                       pool->getName().c_str(),
+                       pool->getFreeCount(), pool->getFilledCount());
+
+    int poll_count = 0;
+    while (reader_running_.load(std::memory_order_acquire)) {
+        Buffer* buf = pool->acquireFilled(true, 200);
+        poll_count++;
+        if (poll_count % 50 == 1) {
+            LOG4CPLUS_DEBUG_FMT(logger_, "读取线程 poll #%d: buf=%p free=%d filled=%d",
+                               poll_count, (void*)buf,
+                               pool->getFreeCount(), pool->getFilledCount());
+        }
+        if (!buf) continue;
+
+        AVPacket* pkt = buf->getAVPacket();
+        if (pkt && pkt->data && pkt->size > 0) {
+            encoded_count_.fetch_add(1, std::memory_order_relaxed);
+
+            if (on_frame_) {
+                on_frame_(pkt->data, static_cast<size_t>(pkt->size));
+            }
+            if (pipe_fd_ >= 0) {
+                writeToPipe(pkt->data, pkt->size);
+            }
+        }
+
+        pool->releaseFilled(buf);
+    }
+
+    LOG4CPLUS_INFO(logger_, "编码输出读取线程退出");
 }
 
 bool JpegEncodeConsumer::openPipe() {

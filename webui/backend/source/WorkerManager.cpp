@@ -3,6 +3,10 @@
 #include "../include/ConsumerManager.hpp"
 #include "../include/PreviewService.hpp"
 #include "../include/ConfigStore.hpp"
+#include "../include/ComponentsBridge.hpp"
+
+#include "consumptionline/BufferConsumerService.hpp"
+
 #include <atomic>
 #include <sstream>
 #include <iomanip>
@@ -18,6 +22,7 @@ WorkerManager::WorkerManager(DataSourceManager& ds_mgr, ConfigStore& store)
 }
 
 WorkerManager::~WorkerManager() {
+    restart_seq_ = -1;
     stopAll();
 }
 
@@ -50,13 +55,11 @@ void WorkerManager::loadFromStore() {
 
     std::lock_guard<std::mutex> lock(mutex_);
 
-    // 找到已有 ID 中最大的编号，确保后续 generateId() 不冲突
     int max_id = 0;
     for (auto& item : arr) {
         try {
             WorkerInfo info = item.get<WorkerInfo>();
 
-            // 跳过 datasource 不存在的 worker
             auto ds = ds_manager_.get(info.datasource_id);
             if (!ds.has_value()) {
                 std::cerr << "[WebUI] loadFromStore: 跳过 Worker '"
@@ -70,7 +73,6 @@ void WorkerManager::loadFromStore() {
             rt->info = std::move(info);
             rt->state = WorkerState::STOPPED;
 
-            // 解析 ID 编号
             if (rt->info.id.size() > 3 && rt->info.id.substr(0, 3) == "wk-") {
                 try {
                     int num = std::stoi(rt->info.id.substr(3));
@@ -90,7 +92,6 @@ void WorkerManager::loadFromStore() {
         }
     }
 
-    // 确保 generateId 计数器跳过已有编号
     if (max_id > 0) {
         int expected = id_counter_.load();
         while (expected < max_id + 1) {
@@ -134,13 +135,13 @@ ApiResponse WorkerManager::create(const json& body) {
     rt->info.datasource_id = ds_id;
     rt->info.datasource_name = ds->name;
     rt->info.worker_type = body.value("worker_type", "FFMPEG_DECODE");
+    rt->info.loop = body.value("loop", true);
     rt->info.created_at = nowISO8601();
 
     if (body.contains("decoder")) {
         rt->info.decoder = body["decoder"].get<ApiDecoderConfig>();
     }
 
-    // 解析 consumers 配置（可选）
     if (body.contains("consumers") && body["consumers"].is_array()) {
         for (auto& item : body["consumers"]) {
             ConsumerInfo ci;
@@ -197,7 +198,6 @@ ApiResponse WorkerManager::update(const std::string& id, const json& body) {
             return ApiResponse::error(ErrorCode::WORKER_DS_NOT_FOUND,
                 "数据源不存在: " + new_ds_id);
         }
-        // 释放旧数据源
         if (info.datasource_id != new_ds_id) {
             bool old_still_in_use = false;
             for (auto& [wid, w] : workers_) {
@@ -218,12 +218,14 @@ ApiResponse WorkerManager::update(const std::string& id, const json& body) {
     if (body.contains("worker_type")) {
         info.worker_type = body["worker_type"].get<std::string>();
     }
+    if (body.contains("loop")) {
+        info.loop = body["loop"].get<bool>();
+    }
 
     if (body.contains("decoder")) {
         info.decoder = body["decoder"].get<ApiDecoderConfig>();
     }
 
-    // 完整替换 consumers 配置
     if (body.contains("consumers") && body["consumers"].is_array()) {
         info.consumers_config.clear();
         for (auto& item : body["consumers"]) {
@@ -240,23 +242,18 @@ ApiResponse WorkerManager::update(const std::string& id, const json& body) {
     WorkerInfo info_copy = info;
     info_copy.state = it->second->state.load();
 
-    // 在锁内触发持久化（saveToStore 内部有自己的锁，需要先释放）
-    // 但 saveToStore 需要 mutex_，所以先收集数据
     json arr = json::array();
     for (auto& [_, rt] : workers_) {
         arr.push_back(rt->info);
     }
-
-    // 不能在持有 mutex_ 时调用 saveToStore（它也锁 mutex_）
-    // 改为直接写 ConfigStore
     config_store_.setWorkers(arr);
 
     return ApiResponse::ok(json(info_copy), "Worker 配置已更新");
 }
 
 ApiResponse WorkerManager::remove(const std::string& id) {
-    std::unique_ptr<ComponentsWorkerInstance> instance_to_stop;
     std::string ds_id;
+    bool was_running = false;
 
     {
         std::lock_guard<std::mutex> lock(mutex_);
@@ -266,9 +263,7 @@ ApiResponse WorkerManager::remove(const std::string& id) {
         }
 
         auto state = it->second->state.load();
-        if (state == WorkerState::RUNNING || state == WorkerState::STARTING) {
-            instance_to_stop = std::move(it->second->instance);
-        }
+        was_running = (state == WorkerState::RUNNING || state == WorkerState::STARTING);
 
         ds_id = it->second->info.datasource_id;
         workers_.erase(it);
@@ -285,8 +280,8 @@ ApiResponse WorkerManager::remove(const std::string& id) {
         }
     }
 
-    if (instance_to_stop) {
-        instance_to_stop->stop();
+    if (was_running) {
+        scheduleRestart();
     }
 
     saveToStore();
@@ -298,56 +293,39 @@ ApiResponse WorkerManager::remove(const std::string& id) {
 // ============================================================
 
 ApiResponse WorkerManager::start(const std::string& id) {
-    std::lock_guard<std::mutex> lock(mutex_);
-    auto it = workers_.find(id);
-    if (it == workers_.end()) {
-        return ApiResponse::error(ErrorCode::NOT_FOUND, "Worker 不存在: " + id);
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        auto it = workers_.find(id);
+        if (it == workers_.end()) {
+            return ApiResponse::error(ErrorCode::NOT_FOUND, "Worker 不存在: " + id);
+        }
+
+        auto state = it->second->state.load();
+        if (state == WorkerState::RUNNING) {
+            return ApiResponse::error(ErrorCode::WORKER_STATE_INVALID, "Worker 已在运行");
+        }
+
+        auto ds = ds_manager_.get(it->second->info.datasource_id);
+        if (!ds.has_value()) {
+            it->second->state = WorkerState::ERROR;
+            return ApiResponse::error(ErrorCode::WORKER_DS_NOT_FOUND,
+                "数据源不存在: " + it->second->info.datasource_id);
+        }
+
+        if (consumer_manager_) {
+            syncConsumersToManager(id, it->second->info.consumers_config);
+        }
+
+        it->second->state = WorkerState::RUNNING;
     }
 
-    auto state = it->second->state.load();
-    if (state == WorkerState::RUNNING) {
-        return ApiResponse::error(ErrorCode::WORKER_STATE_INVALID, "Worker 已在运行");
-    }
+    scheduleRestart();
 
-    auto& rt = it->second;
-
-    auto ds = ds_manager_.get(rt->info.datasource_id);
-    if (!ds.has_value()) {
-        rt->state = WorkerState::ERROR;
-        return ApiResponse::error(ErrorCode::WORKER_DS_NOT_FOUND,
-            "数据源不存在: " + rt->info.datasource_id);
-    }
-
-    // 从 WorkerInfo 自身获取消费者配置
-    std::vector<ConsumerInfo> consumers = rt->info.consumers_config;
-
-    // 同步到 ConsumerManager（供 status 等 API 查询）
-    if (consumer_manager_) {
-        syncConsumersToManager(id, consumers);
-    }
-
-    rt->state = WorkerState::STARTING;
-
-    rt->instance = std::make_unique<ComponentsWorkerInstance>();
-    bool ok = rt->instance->start(
-        ds.value(), rt->info.decoder, consumers, preview_service_, id);
-
-    if (!ok) {
-        rt->state = WorkerState::ERROR;
-        rt->instance.reset();
-        return ApiResponse::error(ErrorCode::WORKER_START_FAILED,
-            "Worker 启动失败，请检查数据源和解码器配置");
-    }
-
-    rt->state = WorkerState::RUNNING;
-    std::cout << "[WebUI] Worker " << id << " 已启动" << std::endl;
-
+    std::cout << "[WebUI] Worker " << id << " 已标记 RUNNING" << std::endl;
     return ApiResponse::ok(json{{"id", id}, {"state", "RUNNING"}}, "Worker 已启动");
 }
 
 ApiResponse WorkerManager::stop(const std::string& id) {
-    std::unique_ptr<ComponentsWorkerInstance> instance_to_stop;
-
     {
         std::lock_guard<std::mutex> lock(mutex_);
         auto it = workers_.find(id);
@@ -361,23 +339,32 @@ ApiResponse WorkerManager::stop(const std::string& id) {
                 "Worker 未在运行");
         }
 
-        it->second->state = WorkerState::STOPPING;
-        instance_to_stop = std::move(it->second->instance);
+        it->second->state = WorkerState::STOPPED;
     }
 
-    if (instance_to_stop) {
-        instance_to_stop->stop();
-    }
-
+    // 检查是否还有 RUNNING 的 worker，如果没有则直接停服务
+    bool any_running = false;
     {
         std::lock_guard<std::mutex> lock(mutex_);
-        auto it = workers_.find(id);
-        if (it != workers_.end()) {
-            it->second->state = WorkerState::STOPPED;
+        for (auto& [_, rt] : workers_) {
+            if (rt->state == WorkerState::RUNNING) { any_running = true; break; }
         }
     }
 
-    std::cout << "[WebUI] Worker " << id << " 已停止" << std::endl;
+    if (!any_running) {
+        // 没有剩余 RUNNING worker，直接停止服务（不走 debounce）
+        if (parallel_service_) {
+            parallel_service_->requestStop();
+        }
+        if (service_thread_.joinable()) {
+            service_thread_.join();
+        }
+        parallel_service_.reset();
+        std::cout << "[WebUI] 所有 Worker 已停止，PARALLEL 服务已关闭" << std::endl;
+    } else {
+        scheduleRestart();
+    }
+
     return ApiResponse::ok(json{{"id", id}, {"state", "STOPPED"}}, "Worker 已停止");
 }
 
@@ -393,13 +380,9 @@ ApiResponse WorkerManager::status(const std::string& id) const {
     ws.id = id;
     ws.state = rt->state.load();
 
-    if (rt->instance) {
-        ws.fps = rt->instance->getFps();
-        ws.decoded_frames = rt->instance->getDecodedFrames();
-        ws.dropped_frames = rt->instance->getDroppedFrames();
-        ws.uptime_seconds = rt->instance->getUptimeSeconds();
-        ws.command_line = rt->instance->getCommandLine();
-        ws.output = rt->instance->getLastOutput();
+    if (parallel_service_ && ws.state == WorkerState::RUNNING) {
+        auto elapsed = std::chrono::steady_clock::now() - service_start_time_;
+        ws.uptime_seconds = std::chrono::duration<double>(elapsed).count();
     }
 
     ws.consumers = rt->info.consumers_config;
@@ -420,29 +403,126 @@ WorkerState WorkerManager::getState(const std::string& id) const {
 }
 
 void WorkerManager::stopAll() {
-    std::vector<std::pair<std::string, std::unique_ptr<ComponentsWorkerInstance>>> to_stop;
-
     {
         std::lock_guard<std::mutex> lock(mutex_);
-        for (auto& [id, rt] : workers_) {
-            if (rt->instance) {
-                to_stop.emplace_back(id, std::move(rt->instance));
-                rt->state = WorkerState::STOPPING;
+        for (auto& [_, rt] : workers_) {
+            if (rt->state == WorkerState::RUNNING || rt->state == WorkerState::STARTING) {
+                rt->state = WorkerState::STOPPED;
             }
         }
     }
 
-    for (auto& [id, inst] : to_stop) {
-        std::cout << "[WebUI] 正在停止 Worker " << id << std::endl;
-        inst->stop();
+    // 停止 PARALLEL 服务
+    if (parallel_service_) {
+        std::cout << "[WebUI] 正在停止 PARALLEL 服务..." << std::endl;
+        parallel_service_->requestStop();
     }
+    if (service_thread_.joinable()) {
+        service_thread_.join();
+    }
+    parallel_service_.reset();
+    std::cout << "[WebUI] PARALLEL 服务已停止" << std::endl;
+}
+
+// ============================================================
+// PARALLEL 服务管理（核心）
+// ============================================================
+
+void WorkerManager::restartParallelService() {
+    // 1. 停止旧服务（标记为主动重启，不改 worker 状态）
+    intentional_restart_ = true;
+    if (parallel_service_) {
+        parallel_service_->requestStop();
+    }
+    if (service_thread_.joinable()) {
+        service_thread_.join();
+    }
+    parallel_service_.reset();
+    intentional_restart_ = false;
+
+    // 2. 收集所有 RUNNING 的 worker 的 config
+    std::vector<WorkerConfig> all_configs;
+    uint32_t flags = 0;
 
     {
         std::lock_guard<std::mutex> lock(mutex_);
         for (auto& [id, rt] : workers_) {
-            rt->state = WorkerState::STOPPED;
+            if (rt->state != WorkerState::RUNNING) continue;
+
+            auto ds = ds_manager_.get(rt->info.datasource_id);
+            if (!ds.has_value()) {
+                rt->state = WorkerState::ERROR;
+                continue;
+            }
+
+            auto ds_copy = ds.value();
+            ds_copy.loop = rt->info.loop;
+
+            auto br = buildWorkerConfig(
+                ds_copy, rt->info.decoder, rt->info.consumers_config,
+                preview_service_, id);
+
+            if (!br.success) {
+                std::cerr << "[WebUI] Worker " << id
+                          << " 配置构建失败: " << br.error << std::endl;
+                rt->state = WorkerState::ERROR;
+                continue;
+            }
+
+            flags |= br.flags;
+            all_configs.push_back(std::move(br.config));
+
+            std::cout << "[WebUI] Worker " << id
+                      << " 加入 PARALLEL: " << br.description << std::endl;
         }
     }
+
+    if (all_configs.empty()) {
+        std::cout << "[WebUI] 无 RUNNING 的 Worker，PARALLEL 服务不启动" << std::endl;
+        return;
+    }
+
+    // 3. 启动 PARALLEL 服务
+    std::cout << "[WebUI] 启动 PARALLEL 服务: " << all_configs.size()
+              << " 个 Worker, flags=0x" << std::hex << flags << std::dec << std::endl;
+
+    parallel_service_ = std::make_unique<consumer::BufferConsumerService>();
+    service_start_time_ = std::chrono::steady_clock::now();
+
+    service_thread_ = std::thread(
+        [this, configs = std::move(all_configs), flags]() {
+            auto result = parallel_service_->start(
+                configs, consumer::ExecuteMode::PARALLEL, flags);
+
+            std::cout << "[WebUI] PARALLEL 服务完成: "
+                      << (result.success ? "OK" : "FAILED")
+                      << " frames=" << result.frames_consumed
+                      << " fps=" << result.average_fps;
+            if (!result.error_message.empty())
+                std::cout << " error=" << result.error_message;
+            std::cout << std::endl;
+
+            // 只有自然结束（非主动重启）才标记 worker 为 STOPPED
+            if (!intentional_restart_.load()) {
+                std::lock_guard<std::mutex> lock(mutex_);
+                for (auto& [_, rt] : workers_) {
+                    if (rt->state == WorkerState::RUNNING) {
+                        rt->state = WorkerState::STOPPED;
+                    }
+                }
+            }
+        });
+}
+
+void WorkerManager::scheduleRestart() {
+    int seq = ++restart_seq_;
+
+    std::thread([this, seq]() {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1500));
+        if (restart_seq_.load() != seq) return;
+        std::cout << "[WebUI] Debounce 到期，执行 restartParallelService" << std::endl;
+        restartParallelService();
+    }).detach();
 }
 
 // ============================================================
@@ -469,7 +549,6 @@ ApiResponse WorkerManager::addConsumer(const std::string& worker_id, const json&
     it->second->info.consumers_config.push_back(ci);
     it->second->info.refreshConsumerNames();
 
-    // 持久化
     json arr = json::array();
     for (auto& [_, rt] : workers_) arr.push_back(rt->info);
     config_store_.setWorkers(arr);
@@ -540,8 +619,6 @@ ApiResponse WorkerManager::updateConsumer(const std::string& worker_id,
 void WorkerManager::syncConsumersToManager(const std::string& worker_id,
                                            const std::vector<ConsumerInfo>& consumers) {
     if (!consumer_manager_) return;
-    // 清除 ConsumerManager 中该 worker 的旧记录，重新添加
-    // 由于 ConsumerManager 没有 clear 方法，我们逐个移除再添加
     auto existing = consumer_manager_->getConsumersForWorker(worker_id);
     for (auto& c : existing) {
         consumer_manager_->removeConsumer(worker_id, c.id);

@@ -528,6 +528,12 @@ void WebServer::registerWorkerRoutes() {
             jsonResponse(res, worker_manager_->stop(req.matches[1]));
         });
 
+    server_->Post("/api/workers/stop-all",
+        [this](const httplib::Request&, httplib::Response& res) {
+            worker_manager_->stopAll();
+            jsonResponse(res, ApiResponse::ok(nullptr, "所有 Worker 已停止"));
+        });
+
     server_->Get(R"(/api/workers/([^/]+)/status)",
         [this](const httplib::Request& req, httplib::Response& res) {
             jsonResponse(res, worker_manager_->status(req.matches[1]));
@@ -633,6 +639,21 @@ void WebServer::registerPreviewRoutes() {
     server_->Get("/api/preview/grid", [this](const httplib::Request& req, httplib::Response& res) {
         std::string layout = req.has_param("layout") ? req.get_param_value("layout") : "3x3";
         jsonResponse(res, preview_service_->gridInfo(layout));
+    });
+
+    server_->Get("/api/preview/fps", [this](const httplib::Request&, httplib::Response& res) {
+        jsonResponse(res, ApiResponse::ok(json{{"fps", preview_service_->getTargetFps()}}));
+    });
+
+    server_->Post("/api/preview/fps", [this](const httplib::Request& req, httplib::Response& res) {
+        try {
+            auto body = json::parse(req.body);
+            int fps = body.value("fps", 15);
+            preview_service_->setTargetFps(fps);
+            jsonResponse(res, ApiResponse::ok(json{{"fps", fps}}, "帧率已设置"));
+        } catch (...) {
+            jsonResponse(res, 400, ApiResponse::error(ErrorCode::PARAM_ERROR, "参数错误"));
+        }
     });
 }
 

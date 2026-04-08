@@ -3,8 +3,10 @@
 
 #include "ApiTypes.hpp"
 #include <mutex>
+#include <condition_variable>
 #include <unordered_map>
 #include <vector>
+#include <deque>
 #include <atomic>
 #include <functional>
 
@@ -18,26 +20,36 @@ public:
     PreviewService(WorkerManager& wk_mgr, ConsumerManager& cs_mgr);
     ~PreviewService() = default;
 
-    // MJPEG 流输出回调: 调用者传入写回调, 服务持续推送 JPEG 帧
     using FrameCallback = std::function<bool(const uint8_t* data, size_t len)>;
+
+    /// MJPEG 流：按 target_fps 均匀推送，阻塞式等待新帧
     void streamMjpeg(const std::string& worker_id, FrameCallback cb);
 
-    // 单帧截图
+    /// 单帧截图：取最新帧
     std::vector<uint8_t> snapshot(const std::string& worker_id, int quality = 80);
 
-    // 获取多路预览布局信息
+    /// 布局信息
     ApiResponse gridInfo(const std::string& layout) const;
 
-    // 由 encode worker 回调注入 JPEG 帧
+    /// 编码回调注入帧
     void onJpegFrame(const std::string& worker_id, const uint8_t* data, size_t len);
 
-    // 请求停止所有流（让 streamMjpeg 循环退出）
     void requestStop();
+
+    /// 设置 MJPEG 流的目标帧率（全局）
+    void setTargetFps(int fps) { target_fps_ = fps > 0 ? fps : 15; }
+    int getTargetFps() const { return target_fps_; }
 
 private:
     std::atomic<bool> stop_requested_{false};
+    std::atomic<int> target_fps_{15};
+
+    static constexpr size_t MAX_QUEUE_SIZE = 8;
+
     struct FrameBuffer {
         std::mutex mutex;
+        std::condition_variable cv;
+        std::deque<std::vector<uint8_t>> frame_queue;
         std::vector<uint8_t> latest_frame;
         std::atomic<uint64_t> frame_seq{0};
     };

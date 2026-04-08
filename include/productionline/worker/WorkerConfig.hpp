@@ -196,6 +196,10 @@ struct WorkerConfig {
         /// nullptr=Worker 自己创建独立实例，非空=使用共享实例（ONE_TO_MANY 零拷贝）
         std::shared_ptr<class IEncodedPacketSource> shared_packet_source = nullptr;
         
+        /// 外部注入的原始帧源（用于编码 Worker 的直接模式）
+        /// nullptr=Worker 自己创建帧源，非空=使用注入的帧源（如 direct 模式的 RawFrameSourceFromBuffer）
+        std::shared_ptr<class IRawFrameSource> shared_raw_frame_source = nullptr;
+        
         /// 延迟提交 Packet：由 MultiWorkerProductionLine 根据帧同步配置自动设置
         /// false=fillBuffer() 内部 commit，true=由外部帧同步后 commit
         bool deferred_commit = false;

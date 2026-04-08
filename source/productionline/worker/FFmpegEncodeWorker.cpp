@@ -40,8 +40,10 @@ FFmpegEncodeWorker::FFmpegEncodeWorker(const WorkerConfig& config)
     LOG4CPLUS_DEBUG(logger_, "[EncodeWorker] 构造函数开始");
     
     // 根据配置创建帧数据源
-    if (config.data_source.buffer_mode) {
-        // Buffer 模式：从解码 Worker 的 BufferPool 获取帧
+    if (config.data_source.shared_raw_frame_source) {
+        frame_source_ = config.data_source.shared_raw_frame_source;
+        LOG4CPLUS_DEBUG(logger_, "[EncodeWorker] 使用外部注入的帧源（直接模式）");
+    } else if (config.data_source.buffer_mode) {
         frame_source_ = std::make_shared<RawFrameSourceFromBuffer>(
             config.display.width,
             config.display.height,
@@ -681,7 +683,6 @@ FillResult FFmpegEncodeWorker::readAndSendFrame(AVFrame* temp_frame) {
             LOG4CPLUS_DEBUG(logger_, "[EncodeWorker] 🔄 EOF 到达");
             return FillResult::fromAcquire(PacketAcquireResult::eof());
         } else if (ret == AVERROR(EAGAIN)) {
-            // readRawFrame 是数据源层 API，EAGAIN 归 Acquire 层
             return FillResult::fromAcquire(PacketAcquireResult::again());
         } else {
             char err_buf[AV_ERROR_MAX_STRING_SIZE];
@@ -691,24 +692,29 @@ FillResult FFmpegEncodeWorker::readAndSendFrame(AVFrame* temp_frame) {
         }
     }
     
-    // 设置 PTS
-    temp_frame->pts = encoded_frames_.load();
+    // 直接模式：消费者的 buffer 直接使用，不经过 temp_frame
+    AVFrame* encode_frame = temp_frame;
+    auto* buf_src = dynamic_cast<RawFrameSourceFromBuffer*>(frame_source_.get());
+    if (buf_src) {
+        AVFrame* df = buf_src->getDirectFrame();
+        if (df) encode_frame = df;
+    }
+    
+    encode_frame->pts = encoded_frames_.load();
     
     // 发送帧到编码器（Codec 层）
     using Result = CodecSendResult;
-    ret = avcodec_send_frame(codec_ctx_ptr_, temp_frame);
+    ret = avcodec_send_frame(codec_ctx_ptr_, encode_frame);
     
     if (ret == 0) {
         return FillResult::success();
     }
     
-    // 错误码映射
     if (ret == AVERROR_EOF)     return FillResult::fromCodec(Result::eof());
     if (ret == AVERROR(EAGAIN)) return FillResult::fromCodec(Result::eagain());
     if (ret == AVERROR(EINVAL)) return FillResult::fromCodec(Result::invalidState());
     if (ret == AVERROR(ENOMEM)) return FillResult::fromCodec(Result::allocFailed());
     
-    // 其他未识别错误
     char err_buf[AV_ERROR_MAX_STRING_SIZE];
     av_strerror(ret, err_buf, sizeof(err_buf));
     LOG4CPLUS_ERROR_FMT(logger_, "[EncodeWorker] avcodec_send_frame: encode error (ret=%d, %s)", 
@@ -837,9 +843,6 @@ FillResult FFmpegEncodeWorker::fillBuffer(int frame_index, Buffer* buffer) {
         break;
     }
     
-    // 编码完成后释放 input_frame_ 对源帧 DMA buffer 的引用。
-    // readRawFrame → copyFrame 使用 av_frame_ref 共享了源帧的 DMA buffer，
-    // 若不 unref，硬件解码器将无法回收 DMA buffer，最终导致 MAX_BUFFERS 耗尽。
     if (input_frame_) {
         av_frame_unref(input_frame_);
     }

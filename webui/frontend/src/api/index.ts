@@ -80,13 +80,14 @@ export interface WorkerStatus {
 
 export const workerApi = {
   list: () => api.get<{ code: number; data: Worker[] }>('/workers'),
-  create: (w: { name: string; datasource_id: string; worker_type?: string; decoder?: Partial<DecoderConfig>; consumers?: { type: string; config?: Record<string, any> }[] }) =>
+  create: (w: { name: string; datasource_id: string; worker_type?: string; loop?: boolean; decoder?: Partial<DecoderConfig>; consumers?: { type: string; config?: Record<string, any> }[] }) =>
     api.post('/workers', w),
   update: (id: string, w: Partial<{ name: string; datasource_id: string; worker_type: string; decoder: Partial<DecoderConfig>; consumers: { type: string; config?: Record<string, any> }[] }>) =>
     api.put(`/workers/${id}`, w),
   remove: (id: string) => api.delete(`/workers/${id}`),
   start: (id: string) => api.post(`/workers/${id}/start`),
   stop: (id: string) => api.post(`/workers/${id}/stop`),
+  stopAll: () => api.post('/workers/stop-all'),
   status: (id: string) => api.get<{ code: number; data: WorkerStatus }>(`/workers/${id}/status`),
 }
 

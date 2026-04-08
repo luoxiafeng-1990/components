@@ -215,6 +215,7 @@ struct WorkerInfo {
     std::string datasource_name;
     WorkerState state = WorkerState::CREATED;
     std::string worker_type = "FFMPEG_DECODE";
+    bool loop = true;
     ApiDecoderConfig decoder;
     std::string created_at;
     std::vector<ConsumerInfo> consumers_config;
@@ -236,6 +237,7 @@ inline void to_json(json& j, const WorkerInfo& w) {
         {"datasource_id", w.datasource_id},
         {"datasource_name", w.datasource_name},
         {"state", w.state}, {"worker_type", w.worker_type},
+        {"loop", w.loop},
         {"decoder", w.decoder}, {"created_at", w.created_at},
         {"consumers", w.consumers},
         {"consumers_config", w.consumers_config}
@@ -248,6 +250,7 @@ inline void from_json(const json& j, WorkerInfo& w) {
     if (j.contains("datasource_id"))   j.at("datasource_id").get_to(w.datasource_id);
     if (j.contains("datasource_name")) j.at("datasource_name").get_to(w.datasource_name);
     if (j.contains("worker_type"))     j.at("worker_type").get_to(w.worker_type);
+    if (j.contains("loop"))            j.at("loop").get_to(w.loop);
     if (j.contains("decoder"))         j.at("decoder").get_to(w.decoder);
     if (j.contains("created_at"))      j.at("created_at").get_to(w.created_at);
     if (j.contains("consumers_config"))

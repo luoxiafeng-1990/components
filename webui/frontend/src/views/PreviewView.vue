@@ -17,6 +17,15 @@
         </el-select>
 
         <el-button size="small" @click="refreshStreams" :icon="Refresh">刷新</el-button>
+
+        <span style="margin-left:12px;font-size:13px;color:#606266">帧率:</span>
+        <el-select v-model="previewFps" size="small" style="width:80px" @change="onFpsChange">
+          <el-option :value="5" label="5" />
+          <el-option :value="10" label="10" />
+          <el-option :value="15" label="15" />
+          <el-option :value="25" label="25" />
+          <el-option :value="30" label="30" />
+        </el-select>
       </div>
     </div>
 
@@ -54,15 +63,27 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onBeforeUnmount, reactive } from 'vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount, reactive, type Ref } from 'vue'
 import { Refresh, VideoCamera } from '@element-plus/icons-vue'
 import { useWorkerStore } from '../stores/worker'
 import { previewApi, type Worker } from '../api'
+import axios from 'axios'
 
 const workerStore = useWorkerStore()
 
 const layout = ref('3x3')
 const selectedWorker = ref('')
+const previewFps = ref(15)
+
+async function onFpsChange(fps: number) {
+  try {
+    await axios.post('/api/preview/fps', { fps })
+  } catch { /* ignore */ }
+  // 重启轮询定时器以应用新帧率
+  if (layout.value !== '1x1' && snapshotTimer) {
+    startSnapshotPolling()
+  }
+}
 
 const previewableWorkers = computed(() =>
   workerStore.workers.filter(w =>
@@ -85,24 +106,34 @@ const gridWorkers = computed(() => {
 // --- snapshot 轮询（宫格模式使用，规避浏览器 6 连接限制） ---
 const snapshotSrcs = reactive<Record<string, string>>({})
 let snapshotTimer: ReturnType<typeof setInterval> | null = null
-const SNAPSHOT_INTERVAL = 300 // ms per batch
 let snapshotBatchIdx = 0
-const BATCH_SIZE = 4 // 每次刷新 4 路，避免同时并发过多请求
+const BATCH_SIZE = 4
+
+const snapshotInterval = computed(() => {
+  const fps = previewFps.value
+  return Math.max(100, Math.round(1000 / fps))
+})
+
+function preloadAndSwap(workerId: string) {
+  const url = previewApi.snapshotUrl(workerId) + '&t=' + Date.now()
+  const img = new Image()
+  img.onload = () => { snapshotSrcs[workerId] = url }
+  img.onerror = () => { /* keep old frame on error */ }
+  img.src = url
+}
 
 function refreshSnapshots() {
   const workers = previewableWorkers.value
   if (workers.length === 0) return
-  const now = Date.now()
   if (workers.length <= BATCH_SIZE) {
     for (const w of workers) {
-      snapshotSrcs[w.id] = previewApi.snapshotUrl(w.id) + '&t=' + now
+      preloadAndSwap(w.id)
     }
   } else {
     const start = snapshotBatchIdx % workers.length
     for (let i = 0; i < BATCH_SIZE && i < workers.length; i++) {
       const idx = (start + i) % workers.length
-      const w = workers[idx]
-      snapshotSrcs[w.id] = previewApi.snapshotUrl(w.id) + '&t=' + now
+      preloadAndSwap(workers[idx].id)
     }
     snapshotBatchIdx = (start + BATCH_SIZE) % workers.length
   }
@@ -111,13 +142,10 @@ function refreshSnapshots() {
 function startSnapshotPolling() {
   stopSnapshotPolling()
   snapshotBatchIdx = 0
-  // 首次全量刷新
-  const workers = previewableWorkers.value
-  const now = Date.now()
-  for (const w of workers) {
-    snapshotSrcs[w.id] = previewApi.snapshotUrl(w.id) + '&t=' + now
+  for (const w of previewableWorkers.value) {
+    preloadAndSwap(w.id)
   }
-  snapshotTimer = setInterval(refreshSnapshots, SNAPSHOT_INTERVAL)
+  snapshotTimer = setInterval(refreshSnapshots, snapshotInterval.value)
 }
 
 function stopSnapshotPolling() {
@@ -158,29 +186,28 @@ function refreshStreams() {
   if (layout.value !== '1x1') refreshSnapshots()
 }
 
-function onImgError(e: Event) {
-  const img = e.target as HTMLImageElement
-  img.style.opacity = '0'
+function onImgError(_e: Event) {
+  // 预加载模式：加载失败时保留旧帧，不做处理
 }
 
-function onImgLoad(e: Event) {
-  const img = e.target as HTMLImageElement
-  img.style.opacity = '1'
+function onImgLoad(_e: Event) {
+  // 预加载模式：新帧加载完成后才替换 src，无需额外处理
 }
 
 function disconnectAllStreams() {
   stopSnapshotPolling()
-  const container = document.querySelector('.page-container')
-  if (!container) return
-  const imgs = container.querySelectorAll<HTMLImageElement>('img.preview-img')
-  imgs.forEach(img => {
-    img.src = ''
-    img.removeAttribute('src')
-  })
+  for (const key of Object.keys(snapshotSrcs)) {
+    delete snapshotSrcs[key]
+  }
+  selectedWorker.value = ''
 }
 
-onMounted(() => {
-  workerStore.fetchList()
+onMounted(async () => {
+  await workerStore.fetchList()
+  try {
+    const res = await axios.get('/api/preview/fps')
+    if (res.data?.data?.fps) previewFps.value = res.data.data.fps
+  } catch { /* ignore */ }
   if (layout.value !== '1x1') {
     startSnapshotPolling()
   }

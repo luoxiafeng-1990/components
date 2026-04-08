@@ -16,7 +16,7 @@ export const useWorkerStore = defineStore('worker', () => {
     }
   }
 
-  async function create(params: { name: string; datasource_id: string; worker_type?: string; consumers?: { type: string; config?: Record<string, any> }[] }) {
+  async function create(params: { name: string; datasource_id: string; worker_type?: string; loop?: boolean; consumers?: { type: string; config?: Record<string, any> }[] }) {
     await workerApi.create(params)
     await fetchList()
   }

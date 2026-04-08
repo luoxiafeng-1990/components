@@ -102,7 +102,15 @@ RawFrameSourceFromBuffer::RawFrameSourceFromBuffer(int width,
 }
 
 void RawFrameSourceFromBuffer::setFrame(AVFrame* frame) {
+    std::unique_lock<std::mutex> lock(direct_mutex_);
     direct_frame_ = frame;
+    direct_cv_available_.notify_one();
+
+    // 阻塞等待编码线程消费完成，保证 buffer 在编码期间不被释放
+    direct_cv_consumed_.wait(lock, [this] {
+        return direct_frame_consumed_ || !is_open_.load(std::memory_order_acquire);
+    });
+    direct_frame_consumed_ = false;
 }
 
 RawFrameSourceFromBuffer::~RawFrameSourceFromBuffer() {
@@ -205,6 +213,17 @@ void RawFrameSourceFromBuffer::close() {
         return;  // 已经关闭
     }
     
+    // 直接模式关闭：唤醒所有等待线程
+    if (is_direct_mode_) {
+        {
+            std::lock_guard<std::mutex> lock(direct_mutex_);
+            direct_frame_consumed_ = true;
+        }
+        direct_cv_available_.notify_all();
+        direct_cv_consumed_.notify_all();
+        LOG4CPLUS_DEBUG(logger_, "直接模式：已唤醒所有等待线程");
+    }
+
     // 共享模式关闭
     if (is_shared_mode_) {
         LOG4CPLUS_DEBUG(logger_, "========== 开始关闭流程 ==========");
@@ -360,20 +379,33 @@ int RawFrameSourceFromBuffer::readRawFrame(AVFrame* frame) {
         return AVERROR(EINVAL);
     }
     
-    // ========== 直接模式 ==========
+    // ========== 直接模式（条件变量同步） ==========
     if (is_direct_mode_) {
-        if (!direct_frame_) {
-            return AVERROR(EAGAIN);
+        std::unique_lock<std::mutex> lock(direct_mutex_);
+
+        // 通知上一帧已消费完成（首次调用时 pending=false，无操作）
+        if (direct_frame_pending_) {
+            direct_frame_pending_ = false;
+            direct_frame_consumed_ = true;
+            direct_cv_consumed_.notify_one();
         }
-        // 直接传递源帧，不做 av_frame_ref，不增加引用计数。
-        // consume() 是同步调用，源帧在整个编码期间有效。
-        // 将 buf[] 置空，使 fillBuffer 末尾的 av_frame_unref 不会误减源帧引用计数。
-        av_frame_unref(frame);
-        *frame = *direct_frame_;
-        memset(frame->buf, 0, sizeof(frame->buf));
-        frame->extended_buf = nullptr;
-        frame->nb_extended_buf = 0;
+
+        // 等待 setFrame 注入新帧
+        direct_cv_available_.wait(lock, [this] {
+            return direct_frame_ != nullptr || !is_open_.load(std::memory_order_acquire);
+        });
+
+        if (!is_open_.load(std::memory_order_acquire)) {
+            direct_frame_consumed_ = true;
+            direct_cv_consumed_.notify_one();
+            return AVERROR_EOF;
+        }
+
+        // 直接使用消费者的 buffer，不做任何拷贝
+        // 保存指针供 getDirectFrame() 返回，readAndSendFrame 直接用它编码
+        last_direct_frame_ = direct_frame_;
         direct_frame_ = nullptr;
+        direct_frame_pending_ = true;
         current_frame_index_.fetch_add(1, std::memory_order_relaxed);
         return 0;
     }
