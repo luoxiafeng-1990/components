@@ -28,12 +28,12 @@
           <el-tag size="small" type="success">LIVE</el-tag>
         </div>
         <img :src="streamUrl(selectedWorker)" class="preview-img"
-          @error="onImgError" alt="preview" />
+          @error="onImgError" @load="onImgLoad" alt="preview" />
       </div>
       <el-empty v-else description="请选择要预览的 Worker" />
     </div>
 
-    <!-- 多路宫格预览 -->
+    <!-- 多路宫格预览 (snapshot 轮询，规避浏览器并发连接限制) -->
     <div v-else class="preview-grid" :class="`grid-${layout}`">
       <div v-for="(w, i) in gridWorkers" :key="i" class="preview-cell">
         <template v-if="w">
@@ -41,8 +41,8 @@
             <span>{{ w.name }}</span>
             <el-tag size="small" type="success">LIVE</el-tag>
           </div>
-          <img :src="streamUrl(w.id)" class="preview-img"
-            @error="onImgError" alt="preview" />
+          <img :src="snapshotSrcs[w.id] || ''" class="preview-img"
+            @error="onImgError" @load="onImgLoad" alt="preview" />
         </template>
         <div v-else class="cell-empty">
           <el-icon :size="32" color="#ddd"><VideoCamera /></el-icon>
@@ -54,7 +54,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount, reactive } from 'vue'
 import { Refresh, VideoCamera } from '@element-plus/icons-vue'
 import { useWorkerStore } from '../stores/worker'
 import { previewApi, type Worker } from '../api'
@@ -66,7 +66,8 @@ const selectedWorker = ref('')
 
 const previewableWorkers = computed(() =>
   workerStore.workers.filter(w =>
-    w.consumers.includes('JPEG_PREVIEW') &&
+    (w.consumers?.includes('JPEG_PREVIEW') ||
+     w.consumers_config?.some((c: any) => c.type === 'JPEG_PREVIEW')) &&
     (w.state === 'RUNNING' || w.state === 'STARTING')
   )
 )
@@ -81,6 +82,65 @@ const gridWorkers = computed(() => {
   return result
 })
 
+// --- snapshot 轮询（宫格模式使用，规避浏览器 6 连接限制） ---
+const snapshotSrcs = reactive<Record<string, string>>({})
+let snapshotTimer: ReturnType<typeof setInterval> | null = null
+const SNAPSHOT_INTERVAL = 300 // ms per batch
+let snapshotBatchIdx = 0
+const BATCH_SIZE = 4 // 每次刷新 4 路，避免同时并发过多请求
+
+function refreshSnapshots() {
+  const workers = previewableWorkers.value
+  if (workers.length === 0) return
+  const now = Date.now()
+  if (workers.length <= BATCH_SIZE) {
+    for (const w of workers) {
+      snapshotSrcs[w.id] = previewApi.snapshotUrl(w.id) + '&t=' + now
+    }
+  } else {
+    const start = snapshotBatchIdx % workers.length
+    for (let i = 0; i < BATCH_SIZE && i < workers.length; i++) {
+      const idx = (start + i) % workers.length
+      const w = workers[idx]
+      snapshotSrcs[w.id] = previewApi.snapshotUrl(w.id) + '&t=' + now
+    }
+    snapshotBatchIdx = (start + BATCH_SIZE) % workers.length
+  }
+}
+
+function startSnapshotPolling() {
+  stopSnapshotPolling()
+  snapshotBatchIdx = 0
+  // 首次全量刷新
+  const workers = previewableWorkers.value
+  const now = Date.now()
+  for (const w of workers) {
+    snapshotSrcs[w.id] = previewApi.snapshotUrl(w.id) + '&t=' + now
+  }
+  snapshotTimer = setInterval(refreshSnapshots, SNAPSHOT_INTERVAL)
+}
+
+function stopSnapshotPolling() {
+  if (snapshotTimer) {
+    clearInterval(snapshotTimer)
+    snapshotTimer = null
+  }
+}
+
+// 1x1 用 MJPEG 流，宫格用 snapshot 轮询
+watch(layout, (val) => {
+  selectedWorker.value = ''
+  if (val === '1x1') {
+    stopSnapshotPolling()
+  } else {
+    startSnapshotPolling()
+  }
+}, { immediate: false })
+
+watch(previewableWorkers, () => {
+  if (layout.value !== '1x1') refreshSnapshots()
+})
+
 function streamUrl(workerId: string) {
   return previewApi.streamUrl(workerId) + '?t=' + Date.now()
 }
@@ -90,20 +150,44 @@ function getWorkerName(id: string) {
 }
 
 function onLayoutChange() {
-  selectedWorker.value = ''
+  // handled by watch(layout)
 }
 
 function refreshStreams() {
   workerStore.fetchList()
+  if (layout.value !== '1x1') refreshSnapshots()
 }
 
 function onImgError(e: Event) {
   const img = e.target as HTMLImageElement
-  img.style.display = 'none'
+  img.style.opacity = '0'
+}
+
+function onImgLoad(e: Event) {
+  const img = e.target as HTMLImageElement
+  img.style.opacity = '1'
+}
+
+function disconnectAllStreams() {
+  stopSnapshotPolling()
+  const container = document.querySelector('.page-container')
+  if (!container) return
+  const imgs = container.querySelectorAll<HTMLImageElement>('img.preview-img')
+  imgs.forEach(img => {
+    img.src = ''
+    img.removeAttribute('src')
+  })
 }
 
 onMounted(() => {
   workerStore.fetchList()
+  if (layout.value !== '1x1') {
+    startSnapshotPolling()
+  }
+})
+
+onBeforeUnmount(() => {
+  disconnectAllStreams()
 })
 </script>
 

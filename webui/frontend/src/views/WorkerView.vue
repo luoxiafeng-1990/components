@@ -2,9 +2,23 @@
   <div class="page-container">
     <div class="page-header">
       <h2>Worker 管理</h2>
-      <el-button type="primary" @click="showCreateDialog">
-        <el-icon><Plus /></el-icon> 创建 Worker
-      </el-button>
+      <div class="header-actions">
+        <el-dropdown trigger="click" @command="handleBatchCommand">
+          <el-button>
+            批量操作 <el-icon class="el-icon--right"><ArrowDown /></el-icon>
+          </el-button>
+          <template #dropdown>
+            <el-dropdown-menu>
+              <el-dropdown-item command="startAll" :icon="VideoPlay">启动全部</el-dropdown-item>
+              <el-dropdown-item command="stopAll" :icon="VideoPause">停止全部</el-dropdown-item>
+              <el-dropdown-item command="deleteAll" :icon="Delete" divided>删除全部</el-dropdown-item>
+            </el-dropdown-menu>
+          </template>
+        </el-dropdown>
+        <el-button type="primary" @click="showCreateDialog">
+          <el-icon><Plus /></el-icon> 创建 Worker
+        </el-button>
+      </div>
     </div>
 
     <div class="worker-list" v-loading="workerStore.loading">
@@ -19,7 +33,21 @@
               <el-tag type="info" size="small">{{ w.worker_type }}</el-tag>
             </div>
             <div class="worker-actions">
-              <el-button v-if="w.state === 'CREATED' || w.state === 'STOPPED'"
+              <el-button v-if="canEdit(w.state)"
+                size="small" @click="showEditDialog(w)" :icon="Edit">
+                编辑
+              </el-button>
+              <el-popover trigger="click" :width="220">
+                <template #reference>
+                  <el-button size="small" :icon="CopyDocument">复制</el-button>
+                </template>
+                <div style="display:flex;align-items:center;gap:8px">
+                  <span style="white-space:nowrap;font-size:13px">数量</span>
+                  <el-input-number v-model="duplicateCount" :min="1" :max="50" size="small" style="width:120px" />
+                  <el-button type="primary" size="small" @click="handleDuplicate(w, duplicateCount)">确定</el-button>
+                </div>
+              </el-popover>
+              <el-button v-if="canEdit(w.state)"
                 size="small" type="success" @click="handleStart(w.id)" :icon="VideoPlay">
                 启动
               </el-button>
@@ -69,10 +97,20 @@
           <el-divider content-position="left">消费者</el-divider>
           <div class="consumer-section">
             <div class="consumer-tags">
-              <el-tag v-for="c in w.consumers" :key="c" class="consumer-tag"
-                :type="consumerTagType(c)" closable @close="handleRemoveConsumerByType(w.id, c)">
-                {{ c }}
-              </el-tag>
+              <el-tooltip v-for="c in (w.consumers_config || [])" :key="c.id"
+                :content="formatConsumerConfig(c)" placement="top" :show-after="300">
+                <el-tag class="consumer-tag"
+                  :type="consumerTagType(c.type)" closable @close="handleRemoveConsumer(w.id, c.id)">
+                  {{ c.type }}
+                </el-tag>
+              </el-tooltip>
+              <!-- 旧版兼容：如果没有 consumers_config 则显示 consumers -->
+              <template v-if="!w.consumers_config || w.consumers_config.length === 0">
+                <el-tag v-for="c in w.consumers" :key="c" class="consumer-tag"
+                  :type="consumerTagType(c)" closable @close="handleRemoveConsumerByType(w.id, c)">
+                  {{ c }}
+                </el-tag>
+              </template>
               <el-button size="small" @click="showAddConsumerDialog(w.id)" :icon="Plus" circle />
             </div>
           </div>
@@ -110,12 +148,13 @@
     </el-dialog>
 
     <!-- 添加消费者对话框 -->
-    <el-dialog v-model="consumerDialogVisible" title="添加消费者" width="500px">
-      <el-form :model="consumerForm" label-width="100px">
+    <el-dialog v-model="consumerDialogVisible" title="添加消费者" width="560px">
+      <el-form :model="consumerForm" label-width="120px">
         <el-form-item label="消费类型" required>
-          <el-select v-model="consumerForm.type" placeholder="选择消费类型" style="width:100%">
+          <el-select v-model="consumerForm.type" placeholder="选择消费类型" style="width:100%"
+            @change="onConsumerTypeChange(consumerForm)">
             <el-option value="DISPLAY" label="HDMI 显示 (DISPLAY)" />
-            <el-option value="SAVE_RAW" label="保存原始数据 (SAVE_RAW)" />
+            <el-option value="SAVE_RAW" label="保存原始帧 (SAVE_RAW)" />
             <el-option value="SAVE_ENCODED" label="保存编码流 (SAVE_ENCODED)" />
             <el-option value="COMPARE" label="质量分析 (COMPARE)" />
             <el-option value="OPENCV" label="OpenCV (OPENCV)" />
@@ -125,98 +164,70 @@
           </el-select>
         </el-form-item>
 
-        <!-- DISPLAY 配置 -->
-        <template v-if="consumerForm.type === 'DISPLAY'">
-          <el-form-item label="显示厂商">
-            <el-select v-model="consumerForm.config.vendor" style="width:100%">
-              <el-option value="tacopro" label="TacoPro (默认)" />
-              <el-option value="taco" label="Taco" />
-            </el-select>
-          </el-form-item>
-          <el-form-item label="目标帧率">
-            <el-input-number v-model="consumerForm.config.target_fps" :min="1" :max="120" />
-          </el-form-item>
-          <el-form-item label="OSD 叠加">
-            <el-switch v-model="consumerForm.config.osd" />
-          </el-form-item>
-          <el-form-item label="视图类型">
-            <el-select v-model="consumerForm.config.view_type" style="width:100%">
-              <el-option value="grid" label="网格 (grid)" />
-              <el-option value="main_sidebar" label="主画面+侧栏 (main_sidebar)" />
-            </el-select>
-          </el-form-item>
-        </template>
-
-        <!-- SAVE_ENCODED 配置 -->
-        <template v-if="consumerForm.type === 'SAVE_ENCODED'">
-          <el-form-item label="输出路径">
-            <el-input v-model="consumerForm.config.output_path" placeholder="/data/output/record.mp4" />
-          </el-form-item>
-          <el-form-item label="格式">
-            <el-select v-model="consumerForm.config.format" style="width:100%">
-              <el-option value="mp4" label="MP4" />
-              <el-option value="mkv" label="MKV" />
-              <el-option value="ts" label="TS" />
-              <el-option value="flv" label="FLV" />
-            </el-select>
-          </el-form-item>
-          <el-form-item label="录制时长(秒)">
-            <el-input-number v-model="consumerForm.config.duration" :min="-1" placeholder="-1=无限制" />
-          </el-form-item>
-        </template>
-
-        <!-- NPU 配置 -->
-        <template v-if="consumerForm.type === 'NPU_INFERENCE'">
-          <el-form-item label="模型路径" required>
-            <el-input v-model="consumerForm.config.model_path" placeholder="/opt/models/yolov5.nb" />
-          </el-form-item>
-          <el-form-item label="置信度阈值">
-            <el-slider v-model="consumerForm.config.conf_threshold" :min="0" :max="1" :step="0.05" show-input />
-          </el-form-item>
-          <el-form-item label="NMS 阈值">
-            <el-slider v-model="consumerForm.config.nms_threshold" :min="0" :max="1" :step="0.05" show-input />
-          </el-form-item>
-          <el-form-item label="绘制检测框">
-            <el-switch v-model="consumerForm.config.draw" />
-          </el-form-item>
-        </template>
-
-        <!-- JPEG_PREVIEW 配置 -->
-        <template v-if="consumerForm.type === 'JPEG_PREVIEW'">
-          <el-form-item label="编码器">
-            <el-select v-model="consumerForm.config.encoder_name" style="width:100%">
-              <el-option value="jpeg_taco" label="jpeg_taco (硬件)" />
-              <el-option value="mjpeg" label="mjpeg (软件)" />
-            </el-select>
-          </el-form-item>
-          <el-form-item label="JPEG 质量">
-            <el-slider v-model="consumerForm.config.quality" :min="1" :max="100" show-input />
-          </el-form-item>
-          <el-form-item label="目标帧率">
-            <el-input-number v-model="consumerForm.config.target_fps" :min="1" :max="60" />
-          </el-form-item>
-        </template>
-
-        <!-- SAVE_RAW 配置 -->
-        <template v-if="consumerForm.type === 'SAVE_RAW'">
-          <el-form-item label="输出路径">
-            <el-input v-model="consumerForm.config.output_path_0" placeholder="/data/output/frame" />
-          </el-form-item>
-          <el-form-item label="像素格式">
-            <el-select v-model="consumerForm.config.format" style="width:100%">
-              <el-option value="nv12" label="NV12" />
-              <el-option value="rgb888" label="RGB888" />
-              <el-option value="nv21" label="NV21" />
-            </el-select>
-          </el-form-item>
-          <el-form-item label="保存帧数">
-            <el-input-number v-model="consumerForm.config.frames" :min="1" :max="10000" />
-          </el-form-item>
-        </template>
+        <!-- 动态渲染所有参数 -->
+        <consumer-config-fields :config="consumerForm.config" :type="consumerForm.type" />
       </el-form>
       <template #footer>
         <el-button @click="consumerDialogVisible = false">取消</el-button>
         <el-button type="primary" @click="handleAddConsumer">添加</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 编辑 Worker 对话框 -->
+    <el-dialog v-model="editDialogVisible" title="编辑 Worker" width="700px" top="5vh">
+      <el-scrollbar max-height="70vh">
+      <el-form :model="editForm" label-width="120px">
+        <el-form-item label="名称">
+          <el-input v-model="editForm.name" />
+        </el-form-item>
+        <el-form-item label="数据源">
+          <el-select v-model="editForm.datasource_id" style="width:100%">
+            <el-option v-for="ds in dsStore.datasources" :key="ds.id"
+              :label="`${ds.name} (${ds.type}: ${ds.path})`" :value="ds.id" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="Worker 类型">
+          <el-select v-model="editForm.worker_type" style="width:100%">
+            <el-option value="FFMPEG_DECODE" label="解码 (FFMPEG_DECODE)" />
+            <el-option value="FFMPEG_ENCODE" label="编码 (FFMPEG_ENCODE)" />
+            <el-option value="FFMPEG_PACKET_RECORDER" label="录包 (FFMPEG_PACKET_RECORDER)" />
+          </el-select>
+        </el-form-item>
+
+        <el-divider content-position="left">解码器参数</el-divider>
+        <el-form-item label="硬件加速">
+          <el-switch v-model="editForm.decoder.enable_hardware" />
+        </el-form-item>
+        <el-form-item label="解码器名称">
+          <el-input v-model="editForm.decoder.name" placeholder="自动检测（如 h264_taco）" />
+        </el-form-item>
+        <el-form-item label="解码线程数">
+          <el-input-number v-model="editForm.decoder.decode_threads" :min="0" :max="16" />
+        </el-form-item>
+
+        <el-divider content-position="left">消费者配置</el-divider>
+        <div v-for="(c, idx) in editForm.consumers" :key="idx" class="edit-consumer-item">
+          <div class="edit-consumer-header">
+            <el-select v-model="c.type" size="small" style="width:180px"
+              @change="onConsumerTypeChange(c)">
+              <el-option value="DISPLAY" label="DISPLAY" />
+              <el-option value="SAVE_RAW" label="SAVE_RAW" />
+              <el-option value="SAVE_ENCODED" label="SAVE_ENCODED" />
+              <el-option value="NPU_INFERENCE" label="NPU_INFERENCE" />
+              <el-option value="JPEG_PREVIEW" label="JPEG_PREVIEW" />
+              <el-option value="OPENCV" label="OPENCV" />
+              <el-option value="COUNT" label="COUNT" />
+            </el-select>
+            <el-button size="small" type="danger" text @click="editForm.consumers.splice(idx, 1)">移除</el-button>
+          </div>
+          <consumer-config-fields :config="c.config" :type="c.type" />
+        </div>
+        <el-button type="primary" text @click="showAddConsumerToEdit" :icon="Plus">添加消费者</el-button>
+      </el-form>
+      </el-scrollbar>
+      <template #footer>
+        <el-button @click="editDialogVisible = false">取消</el-button>
+        <el-button type="primary" @click="handleUpdate">保存</el-button>
       </template>
     </el-dialog>
   </div>
@@ -224,19 +235,23 @@
 
 <script setup lang="ts">
 import { ref, reactive, onMounted, onUnmounted } from 'vue'
-import { ElMessage } from 'element-plus'
-import { Plus, Delete, VideoPlay, VideoPause } from '@element-plus/icons-vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { Plus, Delete, Edit, VideoPlay, VideoPause, CopyDocument, ArrowDown } from '@element-plus/icons-vue'
 import { useWorkerStore } from '../stores/worker'
 import { useDataSourceStore } from '../stores/datasource'
 import { workerApi, consumerApi, type WorkerStatus } from '../api'
+import ConsumerConfigFields from '../components/ConsumerConfigFields.vue'
 
 const workerStore = useWorkerStore()
 const dsStore = useDataSourceStore()
 
 const createDialogVisible = ref(false)
 const consumerDialogVisible = ref(false)
+const editDialogVisible = ref(false)
 const currentWorkerId = ref('')
+const editingWorkerId = ref('')
 const workerStatuses = ref<Record<string, WorkerStatus>>({})
+const duplicateCount = ref(1)
 let statusTimer: ReturnType<typeof setInterval> | null = null
 
 const createForm = reactive({
@@ -248,18 +263,97 @@ const createForm = reactive({
 
 const consumerForm = reactive({
   type: '',
-  config: {
-    device_id: 0,
-    output_path: '',
-    output_path_0: '',
-    format: 'h264',
-    model_path: '',
-    threshold: 0.5,
-    encoder_name: 'jpeg_taco',
-    quality: 80,
-    target_fps: 15,
-  } as Record<string, any>,
+  config: {} as Record<string, any>,
 })
+
+const editForm = reactive({
+  name: '',
+  datasource_id: '',
+  worker_type: 'FFMPEG_DECODE',
+  decoder: { name: '', enable_hardware: true, decode_threads: 0 } as Record<string, any>,
+  consumers: [] as { type: string; config: Record<string, any>; configJson?: string }[],
+})
+
+const CONSUMER_DEFAULTS: Record<string, Record<string, any>> = {
+  DISPLAY: { vendor: 'tacopro', target_fps: 30, osd: false, osd_fps: 1, view_type: '', screen_width: 1920, screen_height: 1080, bpp: 32, frame_width: 1920, frame_height: 1080, slot_assignment: '', main_ratio: 0.75 },
+  NPU_INFERENCE: { model_path: '', conf_threshold: 0.25, nms_threshold: 0.45, npu_core: 0, physical_addr: false, draw: false, inference_interval: 1 },
+  JPEG_PREVIEW: { encoder_name: 'jpeg_taco', quality: 80, target_fps: 15 },
+  SAVE_RAW: { output_path: '', format: 'nv12', frames: 10, decoder: '' },
+  SAVE_ENCODED: { output_path: '', format: 'mp4', duration: -1 },
+  OPENCV: { case: '', params: '', max_frames: -1, psnr: false, ssim: false, verbose: false },
+  COMPARE: { psnr: false, ssim: false, min_psnr: 30, min_ssim: 0.95 },
+  COUNT: {},
+}
+
+function onConsumerTypeChange(form: { type: string; config: Record<string, any> }) {
+  const defaults = CONSUMER_DEFAULTS[form.type] || {}
+  form.config = { ...defaults }
+}
+
+function canEdit(state: string) {
+  return state === 'CREATED' || state === 'STOPPED' || state === 'ERROR'
+}
+
+function formatConsumerConfig(c: { type: string; config: Record<string, any> }) {
+  const entries = Object.entries(c.config || {})
+  if (entries.length === 0) return c.type
+  return entries.map(([k, v]) => `${k}: ${v}`).join(', ')
+}
+
+function showEditDialog(w: any) {
+  editingWorkerId.value = w.id
+  editForm.name = w.name
+  editForm.datasource_id = w.datasource_id
+  editForm.worker_type = w.worker_type
+  editForm.decoder = { ...(w.decoder || { enable_hardware: true, decode_threads: 0 }) }
+  editForm.consumers = (w.consumers_config || []).map((c: any) => ({
+    type: c.type,
+    config: { ...(c.config || {}) },
+    configJson: JSON.stringify(c.config || {}, null, 2),
+  }))
+  editDialogVisible.value = true
+}
+
+function showAddConsumerToEdit() {
+  editForm.consumers.push({
+    type: 'DISPLAY',
+    config: { ...CONSUMER_DEFAULTS['DISPLAY'] },
+    configJson: '{}',
+  })
+}
+
+async function handleUpdate() {
+  const consumers = editForm.consumers.map(c => {
+    const config = { ...c.config }
+    // 清理空值
+    for (const [k, v] of Object.entries(config)) {
+      if (v === '' || v === null || v === undefined) delete config[k]
+    }
+    return { type: c.type, config }
+  })
+  try {
+    await workerStore.update(editingWorkerId.value, {
+      name: editForm.name,
+      datasource_id: editForm.datasource_id,
+      worker_type: editForm.worker_type,
+      decoder: editForm.decoder,
+      consumers,
+    })
+    ElMessage.success('Worker 配置已更新')
+    editDialogVisible.value = false
+  } catch (e: any) {
+    ElMessage.error(e.message || '更新失败')
+  }
+}
+
+async function handleRemoveConsumer(workerId: string, consumerId: string) {
+  try {
+    await workerStore.removeConsumer(workerId, consumerId)
+    ElMessage.success('消费者已移除')
+  } catch (e: any) {
+    ElMessage.error(e.message)
+  }
+}
 
 function stateTagType(state: string) {
   switch (state) {
@@ -323,6 +417,50 @@ async function handleStop(id: string) {
   }
 }
 
+function nextWorkerIndex(): number {
+  let max = 0
+  for (const w of workerStore.workers) {
+    const m = w.name.match(/(\d+)\s*$/)
+    if (m) {
+      const n = parseInt(m[1], 10)
+      if (n > max) max = n
+    }
+  }
+  return max + 1
+}
+
+async function handleDuplicate(w: any, count: number) {
+  const consumers = (w.consumers_config || []).map((c: any) => ({
+    type: c.type,
+    config: { ...(c.config || {}) }
+  }))
+  // 去掉源名称末尾的数字部分，作为基础名
+  const baseName = w.name.replace(/\s*\d+\s*$/, '').trim() || 'Worker'
+  let seq = nextWorkerIndex()
+  let ok = 0, fail = 0
+  for (let i = 0; i < count; i++) {
+    try {
+      await workerApi.create({
+        name: `${baseName} ${seq++}`,
+        datasource_id: w.datasource_id,
+        worker_type: w.worker_type,
+        decoder: w.decoder ? { ...w.decoder } : undefined,
+        consumers,
+      })
+      ok++
+    } catch {
+      fail++
+    }
+  }
+  await workerStore.fetchList()
+  if (fail === 0) {
+    ElMessage.success(`已复制 ${ok} 个 Worker`)
+  } else {
+    ElMessage.warning(`成功 ${ok} 个，失败 ${fail} 个`)
+  }
+  duplicateCount.value = 1
+}
+
 async function handleDelete(id: string) {
   try {
     await workerStore.remove(id)
@@ -332,16 +470,54 @@ async function handleDelete(id: string) {
   }
 }
 
+async function handleBatchCommand(cmd: string) {
+  const workers = workerStore.workers
+  if (workers.length === 0) {
+    ElMessage.info('暂无 Worker')
+    return
+  }
+
+  if (cmd === 'startAll') {
+    const targets = workers.filter(w => w.state === 'CREATED' || w.state === 'STOPPED' || w.state === 'ERROR')
+    if (targets.length === 0) { ElMessage.info('没有可启动的 Worker'); return }
+    let ok = 0
+    for (const w of targets) {
+      try { await workerStore.start(w.id); ok++ } catch { /* skip */ }
+    }
+    ElMessage.success(`已启动 ${ok}/${targets.length} 个 Worker`)
+  } else if (cmd === 'stopAll') {
+    const targets = workers.filter(w => w.state === 'RUNNING' || w.state === 'STARTING')
+    if (targets.length === 0) { ElMessage.info('没有运行中的 Worker'); return }
+    let ok = 0
+    for (const w of targets) {
+      try { await workerStore.stop(w.id); ok++ } catch { /* skip */ }
+    }
+    ElMessage.success(`已停止 ${ok}/${targets.length} 个 Worker`)
+  } else if (cmd === 'deleteAll') {
+    try {
+      await ElMessageBox.confirm(
+        `确定删除全部 ${workers.length} 个 Worker？此操作不可撤销。`,
+        '批量删除', { type: 'warning', confirmButtonText: '全部删除', cancelButtonText: '取消' }
+      )
+    } catch { return }
+    // 先停止运行中的
+    const running = workers.filter(w => w.state === 'RUNNING' || w.state === 'STARTING')
+    for (const w of running) {
+      try { await workerStore.stop(w.id) } catch { /* skip */ }
+    }
+    let ok = 0
+    const ids = workers.map(w => w.id)
+    for (const id of ids) {
+      try { await workerStore.remove(id); ok++ } catch { /* skip */ }
+    }
+    ElMessage.success(`已删除 ${ok} 个 Worker`)
+  }
+}
+
 function showAddConsumerDialog(workerId: string) {
   currentWorkerId.value = workerId
   consumerForm.type = ''
-  consumerForm.config = {
-    vendor: 'tacopro', target_fps: 30, osd: false, view_type: 'grid',
-    output_path: '', output_path_0: '', format: 'h264',
-    model_path: '', conf_threshold: 0.25, nms_threshold: 0.45, draw: false,
-    encoder_name: 'jpeg_taco', quality: 80,
-    duration: -1, frames: 10,
-  }
+  consumerForm.config = {}
   consumerDialogVisible.value = true
 }
 
@@ -351,35 +527,10 @@ async function handleAddConsumer() {
     return
   }
 
-  const config: Record<string, any> = {}
-  switch (consumerForm.type) {
-    case 'DISPLAY':
-      config.vendor = consumerForm.config.vendor
-      config.target_fps = consumerForm.config.target_fps
-      if (consumerForm.config.osd) config.osd = true
-      if (consumerForm.config.view_type !== 'grid') config.view_type = consumerForm.config.view_type
-      break
-    case 'SAVE_RAW':
-      if (consumerForm.config.output_path_0) config.output_path = consumerForm.config.output_path_0
-      config.format = consumerForm.config.format
-      config.frames = consumerForm.config.frames
-      break
-    case 'SAVE_ENCODED':
-      if (consumerForm.config.output_path) config.output_path = consumerForm.config.output_path
-      config.format = consumerForm.config.format
-      if (consumerForm.config.duration > 0) config.duration = consumerForm.config.duration
-      break
-    case 'NPU_INFERENCE':
-      config.model_path = consumerForm.config.model_path
-      config.conf_threshold = consumerForm.config.conf_threshold
-      config.nms_threshold = consumerForm.config.nms_threshold
-      if (consumerForm.config.draw) config.draw = true
-      break
-    case 'JPEG_PREVIEW':
-      config.encoder_name = consumerForm.config.encoder_name
-      config.quality = consumerForm.config.quality
-      config.target_fps = consumerForm.config.target_fps
-      break
+  // 过滤掉空字符串和默认值，直接发送完整 config
+  const config = { ...consumerForm.config }
+  for (const [k, v] of Object.entries(config)) {
+    if (v === '' || v === null || v === undefined) delete config[k]
   }
 
   try {
@@ -404,25 +555,40 @@ async function handleRemoveConsumerByType(workerId: string, typeName: string) {
   }
 }
 
+let polling = false
 async function pollStatuses() {
-  for (const w of workerStore.workers) {
-    if (w.state === 'RUNNING') {
-      try {
-        const res = await workerApi.status(w.id)
-        workerStatuses.value[w.id] = res.data.data
-      } catch { /* ignore */ }
+  if (polling) return
+  polling = true
+  try {
+    const running = workerStore.workers.filter(w => w.state === 'RUNNING')
+    if (running.length === 0) return
+
+    const results = await Promise.allSettled(
+      running.map(w =>
+        workerApi.status(w.id)
+          .then(res => ({ id: w.id, data: res.data.data }))
+      )
+    )
+    for (const r of results) {
+      if (r.status === 'fulfilled') {
+        workerStatuses.value[r.value.id] = r.value.data
+      }
     }
+  } finally {
+    polling = false
   }
 }
 
-onMounted(() => {
-  workerStore.fetchList()
-  dsStore.fetchList()
-  statusTimer = setInterval(pollStatuses, 2000)
+onMounted(async () => {
+  await Promise.all([workerStore.fetchList(), dsStore.fetchList()])
+  statusTimer = setInterval(pollStatuses, 3000)
 })
 
 onUnmounted(() => {
-  if (statusTimer) clearInterval(statusTimer)
+  if (statusTimer) {
+    clearInterval(statusTimer)
+    statusTimer = null
+  }
 })
 </script>
 
@@ -437,6 +603,12 @@ onUnmounted(() => {
 }
 
 .page-header h2 { font-size: 20px; color: #303133; }
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
 
 .worker-list {
   display: flex;
@@ -486,6 +658,25 @@ onUnmounted(() => {
 }
 
 .consumer-tag { cursor: default; }
+
+.edit-consumer-item {
+  border: 1px solid #ebeef5;
+  border-radius: 6px;
+  padding: 12px;
+  margin-bottom: 12px;
+  background: #fafafa;
+}
+
+.edit-consumer-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.nested-form-item {
+  margin-bottom: 8px;
+}
 
 .command-line {
   background: #f5f7fa;

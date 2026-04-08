@@ -13,6 +13,10 @@
         text-color="#bbb"
         active-text-color="#409eff"
       >
+        <el-menu-item index="/system">
+          <el-icon><Platform /></el-icon>
+          <span>硬件信息</span>
+        </el-menu-item>
         <el-menu-item index="/datasources">
           <el-icon><FolderOpened /></el-icon>
           <span>数据源管理</span>
@@ -36,7 +40,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
-import { Monitor, FolderOpened, Setting, VideoCamera } from '@element-plus/icons-vue'
+import { Monitor, Platform, FolderOpened, Setting, VideoCamera } from '@element-plus/icons-vue'
 
 const route = useRoute()
 const currentRoute = computed(() => route.path)

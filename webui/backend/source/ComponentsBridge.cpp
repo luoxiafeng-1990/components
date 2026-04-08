@@ -39,6 +39,7 @@
 #include <sstream>
 #include <mutex>
 #include <deque>
+#include <unordered_map>
 
 namespace webui {
 
@@ -49,12 +50,120 @@ namespace webui {
 namespace {
 
 /**
+ * JSON config key → CLI 参数名映射。
+ * 当 JSON key 与 CLI 参数名不一致时（如下划线 vs 连字符），
+ * 需要在此映射表中注册。未映射的 key 自动转换：下划线 → 连字符。
+ */
+static const std::unordered_map<std::string, std::string> kKeyToCliFlag = {
+    // vdec 相关
+    {"target_fps",       "--fps"},
+    {"encoder_name",     "--encoder"},
+    {"model_path",       "--model"},
+    {"conf_threshold",   "--conf-threshold"},
+    {"nms_threshold",    "--nms-threshold"},
+    {"output_path",      "--output"},
+    {"view_type",        "--view-type"},
+    {"screen_width",     "--screen-width"},
+    {"screen_height",    "--screen-height"},
+    {"frame_width",      "--frame-width"},
+    {"frame_height",     "--frame-height"},
+    {"osd_fps",          "--osd-fps"},
+    {"slot_assignment",  "--slot-assignment"},
+    {"main_ratio",       "--main-ratio"},
+    {"npu_core",         "--npu-core"},
+    {"physical_addr",    "--physical-addr"},
+    {"draw_detections",  "--draw-detections"},
+    {"inference_interval", "--inference-interval"},
+    {"min_psnr",         "--min-psnr"},
+    {"min_ssim",         "--min-ssim"},
+    {"max_frames",       "--max-frames"},
+    {"buffer_count",     "--buffer-count"},
+    {"decode_threads",   "--threads"},
+    {"input_format",     "--input-format"},
+    {"color_std",        "--color-std"},
+    {"all_formats",      "--all-formats"},
+    {"all_rgb",          "--all-rgb"},
+    {"all_yuv",          "--all-yuv"},
+};
+
+/**
+ * ConsumerType → CLI 子命令名
+ */
+static const std::unordered_map<int, std::string> kConsumerTypeToSubcmd = {
+    {static_cast<int>(ConsumerType::DISPLAY),       "display"},
+    {static_cast<int>(ConsumerType::NPU_INFERENCE),  "npu"},
+    {static_cast<int>(ConsumerType::JPEG_PREVIEW),   "preview"},
+    {static_cast<int>(ConsumerType::SAVE_RAW),       "save"},
+    {static_cast<int>(ConsumerType::SAVE_ENCODED),   "save"},
+    {static_cast<int>(ConsumerType::OPENCV),         "opencv"},
+    {static_cast<int>(ConsumerType::COUNT),          ""},
+    {static_cast<int>(ConsumerType::COMPARE),        ""},
+};
+
+/**
+ * 将 JSON key 转为 CLI 参数名。
+ * 优先查映射表，否则自动将下划线替换为连字符加 -- 前缀。
+ */
+static std::string keyToFlag(const std::string& key) {
+    auto it = kKeyToCliFlag.find(key);
+    if (it != kKeyToCliFlag.end()) return it->second;
+    // 自动转换: target_fps → --target-fps
+    std::string flag = "--";
+    for (char ch : key) {
+        flag += (ch == '_') ? '-' : ch;
+    }
+    return flag;
+}
+
+/**
+ * 将 JSON config 中的所有 key-value 对转换为 CLI 参数追加到 args。
+ * - bool true  → --flag（无值）
+ * - bool false → 跳过
+ * - string     → --flag value
+ * - number     → --flag value
+ * - array      → --flag v1,v2,v3（逗号分隔）
+ * - null       → 跳过
+ */
+static void appendConfigAsFlags(std::vector<std::string>& args, const json& config) {
+    if (!config.is_object()) return;
+    for (auto& [key, val] : config.items()) {
+        if (val.is_null()) continue;
+        std::string flag = keyToFlag(key);
+
+        if (val.is_boolean()) {
+            if (val.get<bool>()) args.push_back(flag);
+        } else if (val.is_string()) {
+            auto s = val.get<std::string>();
+            if (!s.empty()) {
+                args.push_back(flag);
+                args.push_back(s);
+            }
+        } else if (val.is_number_integer()) {
+            args.push_back(flag);
+            args.push_back(std::to_string(val.get<int64_t>()));
+        } else if (val.is_number_float()) {
+            args.push_back(flag);
+            args.push_back(std::to_string(val.get<double>()));
+        } else if (val.is_array()) {
+            std::string joined;
+            for (size_t i = 0; i < val.size(); ++i) {
+                if (i > 0) joined += ",";
+                if (val[i].is_string()) joined += val[i].get<std::string>();
+                else joined += val[i].dump();
+            }
+            if (!joined.empty()) {
+                args.push_back(flag);
+                args.push_back(joined);
+            }
+        }
+    }
+}
+
+/**
  * 从 WebUI API 参数构造等效的 CLI 参数列表。
  *
- * 示例输出：
- *   {"webui", "vdec", "--file", "/path/to/video.mp4", "--max-frames", "300",
- *    "display", "--vendor", "tacopro", "--fps", "30",
- *    "preview", "--quality", "80"}
+ * 设计原则：config JSON 中的所有 key 自动透传为 CLI 参数，
+ * 不再逐个硬编码，确保与 qa_cases 插件系统的参数完全一致。
  */
 std::vector<std::string> buildCliArgs(
     const DataSourceInfo& ds,
@@ -93,93 +202,25 @@ std::vector<std::string> buildCliArgs(
         args.push_back(std::to_string(decoder.decode_threads));
     }
 
-    // ── 消费者子命令 ──
+    // ── 消费者子命令：通用透传 ──
     for (auto& c : consumers) {
-        switch (c.type) {
-            case ConsumerType::DISPLAY: {
-                args.push_back("display");
-                if (c.config.contains("vendor")) {
-                    args.push_back("--vendor");
-                    args.push_back(c.config["vendor"].get<std::string>());
-                }
-                if (c.config.contains("target_fps")) {
-                    args.push_back("--fps");
-                    args.push_back(std::to_string(c.config["target_fps"].get<int>()));
-                }
-                if (c.config.contains("osd") && c.config["osd"].get<bool>()) {
-                    args.push_back("--osd");
-                }
-                if (c.config.contains("view_type")) {
-                    args.push_back("--view-type");
-                    args.push_back(c.config["view_type"].get<std::string>());
-                }
-                if (c.config.contains("screen_width")) {
-                    args.push_back("--screen-width");
-                    args.push_back(std::to_string(c.config["screen_width"].get<int>()));
-                }
-                if (c.config.contains("screen_height")) {
-                    args.push_back("--screen-height");
-                    args.push_back(std::to_string(c.config["screen_height"].get<int>()));
-                }
-                break;
-            }
+        auto it = kConsumerTypeToSubcmd.find(static_cast<int>(c.type));
+        std::string subcmd;
+        if (it != kConsumerTypeToSubcmd.end()) subcmd = it->second;
 
-            case ConsumerType::NPU_INFERENCE: {
-                args.push_back("npu");
-                if (c.config.contains("model_path")) {
-                    args.push_back("--model");
-                    args.push_back(c.config["model_path"].get<std::string>());
-                }
-                if (c.config.contains("conf_threshold")) {
-                    args.push_back("--conf-threshold");
-                    args.push_back(std::to_string(c.config["conf_threshold"].get<float>()));
-                }
-                if (c.config.contains("nms_threshold")) {
-                    args.push_back("--nms-threshold");
-                    args.push_back(std::to_string(c.config["nms_threshold"].get<float>()));
-                }
-                if (c.config.contains("draw") && c.config["draw"].get<bool>()) {
-                    args.push_back("--draw-detections");
-                }
-                break;
-            }
+        if (subcmd.empty()) continue;
+        args.push_back(subcmd);
 
-            case ConsumerType::JPEG_PREVIEW: {
-                args.push_back("preview");
-                if (c.config.contains("quality")) {
-                    args.push_back("--quality");
-                    args.push_back(std::to_string(c.config["quality"].get<int>()));
-                }
-                if (c.config.contains("target_fps")) {
-                    args.push_back("--fps");
-                    args.push_back(std::to_string(c.config["target_fps"].get<int>()));
-                }
-                if (c.config.contains("encoder_name")) {
-                    args.push_back("--encoder");
-                    args.push_back(c.config["encoder_name"].get<std::string>());
-                }
-                break;
+        // 特殊处理：布尔 flag 的别名（draw → draw_detections, physical_addr）
+        json cfg = c.config;
+        if (c.type == ConsumerType::NPU_INFERENCE) {
+            if (cfg.contains("draw") && cfg["draw"].is_boolean()) {
+                cfg["draw_detections"] = cfg["draw"];
+                cfg.erase("draw");
             }
-
-            case ConsumerType::SAVE_RAW: {
-                args.push_back("save");
-                if (c.config.contains("output_path")) {
-                    args.push_back("--output");
-                    args.push_back(c.config["output_path"].get<std::string>());
-                }
-                if (c.config.contains("frames")) {
-                    args.push_back("--frames");
-                    args.push_back(std::to_string(c.config["frames"].get<int>()));
-                }
-                break;
-            }
-
-            case ConsumerType::SAVE_ENCODED:
-            case ConsumerType::COUNT:
-            case ConsumerType::COMPARE:
-            case ConsumerType::OPENCV:
-                break;
         }
+
+        appendConfigAsFlags(args, cfg);
     }
 
     return args;

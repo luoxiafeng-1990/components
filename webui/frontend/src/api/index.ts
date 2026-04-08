@@ -2,7 +2,7 @@ import axios from 'axios'
 
 const api = axios.create({
   baseURL: '/api',
-  timeout: 30000,
+  timeout: 8000,
   headers: { 'Content-Type': 'application/json' },
 })
 
@@ -62,6 +62,7 @@ export interface Worker {
   decoder: DecoderConfig
   created_at: string
   consumers: string[]
+  consumers_config: Consumer[]
 }
 
 export interface WorkerStatus {
@@ -79,8 +80,10 @@ export interface WorkerStatus {
 
 export const workerApi = {
   list: () => api.get<{ code: number; data: Worker[] }>('/workers'),
-  create: (w: { name: string; datasource_id: string; worker_type?: string; decoder?: Partial<DecoderConfig> }) =>
+  create: (w: { name: string; datasource_id: string; worker_type?: string; decoder?: Partial<DecoderConfig>; consumers?: { type: string; config?: Record<string, any> }[] }) =>
     api.post('/workers', w),
+  update: (id: string, w: Partial<{ name: string; datasource_id: string; worker_type: string; decoder: Partial<DecoderConfig>; consumers: { type: string; config?: Record<string, any> }[] }>) =>
+    api.put(`/workers/${id}`, w),
   remove: (id: string) => api.delete(`/workers/${id}`),
   start: (id: string) => api.post(`/workers/${id}/start`),
   stop: (id: string) => api.post(`/workers/${id}/stop`),
@@ -132,6 +135,50 @@ export const filesystemApi = {
     api.get<{ code: number; data: { current_path: string; parent_path: string; entries: FileEntry[] } }>(
       `/filesystem/browse?path=${encodeURIComponent(path)}&filter=${filter}`
     ),
+}
+
+// ===== System API =====
+
+export interface SystemInfo {
+  tps_version: string
+  kernel: string
+  arch: string
+  hostname: string
+  board_model: string
+  uptime_seconds: number
+  cpu_model: string
+  cpu_cores: string
+}
+
+export interface NetworkInterface {
+  name: string
+  ip: string
+  rx_bytes: number
+  tx_bytes: number
+  rx_rate_kbps: number
+  tx_rate_kbps: number
+  rx_packets: number
+  tx_packets: number
+  rx_errors: number
+  tx_errors: number
+}
+
+export interface SystemMetrics {
+  timestamp: string
+  cpu: { usage_percent: number; cores: number }
+  memory: {
+    total_mb: number; used_mb: number; free_mb: number
+    available_mb: number; buffers_mb: number; cached_mb: number
+    usage_percent: number
+  }
+  npu: { available: boolean; raw_output: string; usage_percent: number }
+  network: NetworkInterface[]
+  codec: { decode: Record<string, any>; encode: Record<string, any>; raw_output: string }
+}
+
+export const systemApi = {
+  info: () => api.get<{ code: number; data: SystemInfo }>('/system/info'),
+  metrics: () => api.get<{ code: number; data: SystemMetrics }>('/system/metrics'),
 }
 
 // ===== Config API =====

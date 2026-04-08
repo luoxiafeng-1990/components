@@ -8,6 +8,7 @@
 #include <iomanip>
 #include <chrono>
 #include <iostream>
+#include <algorithm>
 
 namespace webui {
 
@@ -28,15 +29,87 @@ void WorkerManager::setPreviewService(PreviewService* ps) {
     preview_service_ = ps;
 }
 
+// ============================================================
+// 持久化
+// ============================================================
+
+void WorkerManager::saveToStore() {
+    json arr = json::array();
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        for (auto& [_, rt] : workers_) {
+            arr.push_back(rt->info);
+        }
+    }
+    config_store_.setWorkers(arr);
+}
+
+void WorkerManager::loadFromStore() {
+    json arr = config_store_.getWorkers();
+    if (!arr.is_array()) return;
+
+    std::lock_guard<std::mutex> lock(mutex_);
+
+    // 找到已有 ID 中最大的编号，确保后续 generateId() 不冲突
+    int max_id = 0;
+    for (auto& item : arr) {
+        try {
+            WorkerInfo info = item.get<WorkerInfo>();
+
+            // 跳过 datasource 不存在的 worker
+            auto ds = ds_manager_.get(info.datasource_id);
+            if (!ds.has_value()) {
+                std::cerr << "[WebUI] loadFromStore: 跳过 Worker '"
+                          << info.id << "' (数据源 '" << info.datasource_id
+                          << "' 不存在)" << std::endl;
+                continue;
+            }
+            info.datasource_name = ds->name;
+
+            auto rt = std::make_unique<WorkerRuntime>();
+            rt->info = std::move(info);
+            rt->state = WorkerState::STOPPED;
+
+            // 解析 ID 编号
+            if (rt->info.id.size() > 3 && rt->info.id.substr(0, 3) == "wk-") {
+                try {
+                    int num = std::stoi(rt->info.id.substr(3));
+                    if (num > max_id) max_id = num;
+                } catch (...) {}
+            }
+
+            std::string id = rt->info.id;
+            ds_manager_.markInUse(rt->info.datasource_id, true);
+            workers_[id] = std::move(rt);
+
+            std::cout << "[WebUI] loadFromStore: 恢复 Worker '"
+                      << id << "'" << std::endl;
+        } catch (const std::exception& e) {
+            std::cerr << "[WebUI] loadFromStore: 解析失败: "
+                      << e.what() << std::endl;
+        }
+    }
+
+    // 确保 generateId 计数器跳过已有编号
+    if (max_id > 0) {
+        int expected = id_counter_.load();
+        while (expected < max_id + 1) {
+            if (id_counter_.compare_exchange_weak(expected, max_id + 1)) break;
+        }
+    }
+}
+
+// ============================================================
+// CRUD
+// ============================================================
+
 ApiResponse WorkerManager::list() const {
     std::lock_guard<std::mutex> lock(mutex_);
     json arr = json::array();
     for (auto& [_, rt] : workers_) {
         WorkerInfo info = rt->info;
         info.state = rt->state.load();
-        if (consumer_manager_) {
-            info.consumers = consumer_manager_->getConsumerTypeNames(info.id);
-        }
+        info.refreshConsumerNames();
         arr.push_back(info);
     }
     return ApiResponse::ok(arr);
@@ -67,24 +140,121 @@ ApiResponse WorkerManager::create(const json& body) {
         rt->info.decoder = body["decoder"].get<ApiDecoderConfig>();
     }
 
+    // 解析 consumers 配置（可选）
+    if (body.contains("consumers") && body["consumers"].is_array()) {
+        for (auto& item : body["consumers"]) {
+            ConsumerInfo ci;
+            ci.id = generateConsumerId();
+            ci.type = item["type"].get<ConsumerType>();
+            ci.config = item.value("config", json::object());
+            ci.state = "inactive";
+            rt->info.consumers_config.push_back(ci);
+        }
+    }
+    rt->info.refreshConsumerNames();
+
     rt->state = WorkerState::CREATED;
     std::string id = rt->info.id;
 
+    WorkerInfo info_copy;
     {
         std::lock_guard<std::mutex> lock(mutex_);
         workers_[id] = std::move(rt);
+        info_copy = workers_[id]->info;
+        info_copy.state = workers_[id]->state.load();
     }
 
     ds_manager_.markInUse(ds_id, true);
+    saveToStore();
 
-    auto& w = workers_[id];
-    WorkerInfo info_copy = w->info;
-    info_copy.state = w->state.load();
     return ApiResponse::ok(json(info_copy), "Worker 创建成功");
 }
 
+ApiResponse WorkerManager::update(const std::string& id, const json& body) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    auto it = workers_.find(id);
+    if (it == workers_.end()) {
+        return ApiResponse::error(ErrorCode::NOT_FOUND, "Worker 不存在: " + id);
+    }
+
+    auto state = it->second->state.load();
+    if (state == WorkerState::RUNNING || state == WorkerState::STARTING
+        || state == WorkerState::STOPPING) {
+        return ApiResponse::error(ErrorCode::WORKER_STATE_INVALID,
+            "Worker 正在运行中，请先停止再编辑");
+    }
+
+    auto& info = it->second->info;
+
+    if (body.contains("name")) {
+        info.name = body["name"].get<std::string>();
+    }
+
+    if (body.contains("datasource_id")) {
+        std::string new_ds_id = body["datasource_id"].get<std::string>();
+        auto ds = ds_manager_.get(new_ds_id);
+        if (!ds.has_value()) {
+            return ApiResponse::error(ErrorCode::WORKER_DS_NOT_FOUND,
+                "数据源不存在: " + new_ds_id);
+        }
+        // 释放旧数据源
+        if (info.datasource_id != new_ds_id) {
+            bool old_still_in_use = false;
+            for (auto& [wid, w] : workers_) {
+                if (wid != id && w->info.datasource_id == info.datasource_id) {
+                    old_still_in_use = true;
+                    break;
+                }
+            }
+            if (!old_still_in_use) {
+                ds_manager_.markInUse(info.datasource_id, false);
+            }
+            ds_manager_.markInUse(new_ds_id, true);
+        }
+        info.datasource_id = new_ds_id;
+        info.datasource_name = ds->name;
+    }
+
+    if (body.contains("worker_type")) {
+        info.worker_type = body["worker_type"].get<std::string>();
+    }
+
+    if (body.contains("decoder")) {
+        info.decoder = body["decoder"].get<ApiDecoderConfig>();
+    }
+
+    // 完整替换 consumers 配置
+    if (body.contains("consumers") && body["consumers"].is_array()) {
+        info.consumers_config.clear();
+        for (auto& item : body["consumers"]) {
+            ConsumerInfo ci;
+            ci.id = generateConsumerId();
+            ci.type = item["type"].get<ConsumerType>();
+            ci.config = item.value("config", json::object());
+            ci.state = "inactive";
+            info.consumers_config.push_back(ci);
+        }
+    }
+    info.refreshConsumerNames();
+
+    WorkerInfo info_copy = info;
+    info_copy.state = it->second->state.load();
+
+    // 在锁内触发持久化（saveToStore 内部有自己的锁，需要先释放）
+    // 但 saveToStore 需要 mutex_，所以先收集数据
+    json arr = json::array();
+    for (auto& [_, rt] : workers_) {
+        arr.push_back(rt->info);
+    }
+
+    // 不能在持有 mutex_ 时调用 saveToStore（它也锁 mutex_）
+    // 改为直接写 ConfigStore
+    config_store_.setWorkers(arr);
+
+    return ApiResponse::ok(json(info_copy), "Worker 配置已更新");
+}
+
 ApiResponse WorkerManager::remove(const std::string& id) {
-    // 先取出 instance（需要在锁外停止）
     std::unique_ptr<ComponentsWorkerInstance> instance_to_stop;
     std::string ds_id;
 
@@ -115,13 +285,17 @@ ApiResponse WorkerManager::remove(const std::string& id) {
         }
     }
 
-    // 在锁外停止 instance（可能阻塞等待 join）
     if (instance_to_stop) {
         instance_to_stop->stop();
     }
 
+    saveToStore();
     return ApiResponse::ok(nullptr, "Worker 已删除");
 }
+
+// ============================================================
+// 启动 / 停止
+// ============================================================
 
 ApiResponse WorkerManager::start(const std::string& id) {
     std::lock_guard<std::mutex> lock(mutex_);
@@ -144,12 +318,12 @@ ApiResponse WorkerManager::start(const std::string& id) {
             "数据源不存在: " + rt->info.datasource_id);
     }
 
-    // JPEG_PREVIEW 消费者由前端 API 显式添加，不再自动注入。
-    // 用户通过 POST /api/workers/{id}/consumers {"type":"JPEG_PREVIEW"} 来启用预览。
+    // 从 WorkerInfo 自身获取消费者配置
+    std::vector<ConsumerInfo> consumers = rt->info.consumers_config;
 
-    std::vector<ConsumerInfo> consumers;
+    // 同步到 ConsumerManager（供 status 等 API 查询）
     if (consumer_manager_) {
-        consumers = consumer_manager_->getConsumersForWorker(id);
+        syncConsumersToManager(id, consumers);
     }
 
     rt->state = WorkerState::STARTING;
@@ -172,7 +346,6 @@ ApiResponse WorkerManager::start(const std::string& id) {
 }
 
 ApiResponse WorkerManager::stop(const std::string& id) {
-    // 在锁内：找到 worker，设置状态，取走 instance 的所有权
     std::unique_ptr<ComponentsWorkerInstance> instance_to_stop;
 
     {
@@ -192,12 +365,10 @@ ApiResponse WorkerManager::stop(const std::string& id) {
         instance_to_stop = std::move(it->second->instance);
     }
 
-    // 在锁外停止（可能阻塞等 join，但不影响其他 API 请求）
     if (instance_to_stop) {
         instance_to_stop->stop();
     }
 
-    // 重新获取锁设置最终状态
     {
         std::lock_guard<std::mutex> lock(mutex_);
         auto it = workers_.find(id);
@@ -231,13 +402,7 @@ ApiResponse WorkerManager::status(const std::string& id) const {
         ws.output = rt->instance->getLastOutput();
     }
 
-    if (consumer_manager_) {
-        ws.consumers.clear();
-        auto clist = consumer_manager_->getConsumersForWorker(id);
-        for (auto& c : clist) {
-            ws.consumers.push_back(c);
-        }
-    }
+    ws.consumers = rt->info.consumers_config;
 
     return ApiResponse::ok(json(ws));
 }
@@ -255,7 +420,6 @@ WorkerState WorkerManager::getState(const std::string& id) const {
 }
 
 void WorkerManager::stopAll() {
-    // 取出所有 instance 的所有权
     std::vector<std::pair<std::string, std::unique_ptr<ComponentsWorkerInstance>>> to_stop;
 
     {
@@ -268,7 +432,6 @@ void WorkerManager::stopAll() {
         }
     }
 
-    // 在锁外逐个停止
     for (auto& [id, inst] : to_stop) {
         std::cout << "[WebUI] 正在停止 Worker " << id << std::endl;
         inst->stop();
@@ -282,10 +445,122 @@ void WorkerManager::stopAll() {
     }
 }
 
-std::string WorkerManager::generateId() const {
-    static std::atomic<int> counter{1};
+// ============================================================
+// Consumer 管理（操作 WorkerInfo.consumers_config）
+// ============================================================
+
+ApiResponse WorkerManager::addConsumer(const std::string& worker_id, const json& body) {
+    if (!body.contains("type")) {
+        return ApiResponse::error(ErrorCode::PARAM_ERROR, "必须提供 type 字段");
+    }
+
+    std::lock_guard<std::mutex> lock(mutex_);
+    auto it = workers_.find(worker_id);
+    if (it == workers_.end()) {
+        return ApiResponse::error(ErrorCode::NOT_FOUND, "Worker 不存在: " + worker_id);
+    }
+
+    ConsumerInfo ci;
+    ci.id = generateConsumerId();
+    ci.type = body["type"].get<ConsumerType>();
+    ci.config = body.value("config", json::object());
+    ci.state = "inactive";
+
+    it->second->info.consumers_config.push_back(ci);
+    it->second->info.refreshConsumerNames();
+
+    // 持久化
+    json arr = json::array();
+    for (auto& [_, rt] : workers_) arr.push_back(rt->info);
+    config_store_.setWorkers(arr);
+
+    return ApiResponse::ok(json(ci), "消费者添加成功");
+}
+
+ApiResponse WorkerManager::removeConsumer(const std::string& worker_id,
+                                          const std::string& consumer_id) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    auto it = workers_.find(worker_id);
+    if (it == workers_.end()) {
+        return ApiResponse::error(ErrorCode::NOT_FOUND, "Worker 不存在: " + worker_id);
+    }
+
+    auto& vec = it->second->info.consumers_config;
+    auto cit = std::find_if(vec.begin(), vec.end(),
+        [&](const ConsumerInfo& c) { return c.id == consumer_id; });
+
+    if (cit == vec.end()) {
+        return ApiResponse::error(ErrorCode::NOT_FOUND,
+            "消费者不存在: " + consumer_id);
+    }
+
+    vec.erase(cit);
+    it->second->info.refreshConsumerNames();
+
+    json arr = json::array();
+    for (auto& [_, rt] : workers_) arr.push_back(rt->info);
+    config_store_.setWorkers(arr);
+
+    return ApiResponse::ok(nullptr, "消费者已移除");
+}
+
+ApiResponse WorkerManager::updateConsumer(const std::string& worker_id,
+                                          const std::string& consumer_id,
+                                          const json& body) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    auto it = workers_.find(worker_id);
+    if (it == workers_.end()) {
+        return ApiResponse::error(ErrorCode::NOT_FOUND, "Worker 不存在: " + worker_id);
+    }
+
+    auto& vec = it->second->info.consumers_config;
+    auto cit = std::find_if(vec.begin(), vec.end(),
+        [&](const ConsumerInfo& c) { return c.id == consumer_id; });
+
+    if (cit == vec.end()) {
+        return ApiResponse::error(ErrorCode::NOT_FOUND,
+            "消费者不存在: " + consumer_id);
+    }
+
+    if (body.contains("config")) {
+        cit->config = body["config"];
+    }
+
+    json arr = json::array();
+    for (auto& [_, rt] : workers_) arr.push_back(rt->info);
+    config_store_.setWorkers(arr);
+
+    return ApiResponse::ok(json(*cit), "消费者配置已更新");
+}
+
+// ============================================================
+// 辅助方法
+// ============================================================
+
+void WorkerManager::syncConsumersToManager(const std::string& worker_id,
+                                           const std::vector<ConsumerInfo>& consumers) {
+    if (!consumer_manager_) return;
+    // 清除 ConsumerManager 中该 worker 的旧记录，重新添加
+    // 由于 ConsumerManager 没有 clear 方法，我们逐个移除再添加
+    auto existing = consumer_manager_->getConsumersForWorker(worker_id);
+    for (auto& c : existing) {
+        consumer_manager_->removeConsumer(worker_id, c.id);
+    }
+    for (auto& c : consumers) {
+        json body = {{"type", c.type}, {"config", c.config}};
+        consumer_manager_->addConsumer(worker_id, body);
+    }
+}
+
+std::string WorkerManager::generateId() {
     std::ostringstream oss;
-    oss << "wk-" << std::setfill('0') << std::setw(3) << counter++;
+    oss << "wk-" << std::setfill('0') << std::setw(3) << id_counter_++;
+    return oss.str();
+}
+
+std::string WorkerManager::generateConsumerId() {
+    std::ostringstream oss;
+    oss << "cs-" << std::setfill('0') << std::setw(3) << consumer_id_counter_++;
     return oss.str();
 }
 

@@ -157,41 +157,6 @@ inline void from_json(const json& j, ApiDecoderConfig& c) {
 }
 
 // ============================================================
-// Worker 模型
-// ============================================================
-
-struct WorkerInfo {
-    std::string id;
-    std::string name;
-    std::string datasource_id;
-    std::string datasource_name;
-    WorkerState state = WorkerState::CREATED;
-    std::string worker_type = "FFMPEG_DECODE";
-    ApiDecoderConfig decoder;
-    std::string created_at;
-    std::vector<std::string> consumers;
-};
-
-inline void to_json(json& j, const WorkerInfo& w) {
-    j = {
-        {"id", w.id}, {"name", w.name},
-        {"datasource_id", w.datasource_id},
-        {"datasource_name", w.datasource_name},
-        {"state", w.state}, {"worker_type", w.worker_type},
-        {"decoder", w.decoder}, {"created_at", w.created_at},
-        {"consumers", w.consumers}
-    };
-}
-
-inline void from_json(const json& j, WorkerInfo& w) {
-    if (j.contains("id"))              j.at("id").get_to(w.id);
-    if (j.contains("name"))            j.at("name").get_to(w.name);
-    if (j.contains("datasource_id"))   j.at("datasource_id").get_to(w.datasource_id);
-    if (j.contains("worker_type"))     j.at("worker_type").get_to(w.worker_type);
-    if (j.contains("decoder"))         j.at("decoder").get_to(w.decoder);
-}
-
-// ============================================================
 // 消费者类型
 // ============================================================
 
@@ -237,6 +202,57 @@ inline void from_json(const json& j, ConsumerInfo& c) {
     if (j.contains("type"))   j.at("type").get_to(c.type);
     if (j.contains("state"))  j.at("state").get_to(c.state);
     if (j.contains("config")) j.at("config").get_to(c.config);
+}
+
+// ============================================================
+// Worker 模型
+// ============================================================
+
+struct WorkerInfo {
+    std::string id;
+    std::string name;
+    std::string datasource_id;
+    std::string datasource_name;
+    WorkerState state = WorkerState::CREATED;
+    std::string worker_type = "FFMPEG_DECODE";
+    ApiDecoderConfig decoder;
+    std::string created_at;
+    std::vector<ConsumerInfo> consumers_config;
+
+    // 派生只读字段：消费者类型名列表（供 list API 展示）
+    std::vector<std::string> consumers;
+    void refreshConsumerNames() {
+        consumers.clear();
+        for (auto& c : consumers_config) {
+            json j = c.type;
+            consumers.push_back(j.get<std::string>());
+        }
+    }
+};
+
+inline void to_json(json& j, const WorkerInfo& w) {
+    j = {
+        {"id", w.id}, {"name", w.name},
+        {"datasource_id", w.datasource_id},
+        {"datasource_name", w.datasource_name},
+        {"state", w.state}, {"worker_type", w.worker_type},
+        {"decoder", w.decoder}, {"created_at", w.created_at},
+        {"consumers", w.consumers},
+        {"consumers_config", w.consumers_config}
+    };
+}
+
+inline void from_json(const json& j, WorkerInfo& w) {
+    if (j.contains("id"))              j.at("id").get_to(w.id);
+    if (j.contains("name"))            j.at("name").get_to(w.name);
+    if (j.contains("datasource_id"))   j.at("datasource_id").get_to(w.datasource_id);
+    if (j.contains("datasource_name")) j.at("datasource_name").get_to(w.datasource_name);
+    if (j.contains("worker_type"))     j.at("worker_type").get_to(w.worker_type);
+    if (j.contains("decoder"))         j.at("decoder").get_to(w.decoder);
+    if (j.contains("created_at"))      j.at("created_at").get_to(w.created_at);
+    if (j.contains("consumers_config"))
+        j.at("consumers_config").get_to(w.consumers_config);
+    w.refreshConsumerNames();
 }
 
 // ============================================================

@@ -5,7 +5,12 @@ const router = createRouter({
   routes: [
     {
       path: '/',
-      redirect: '/datasources',
+      redirect: '/system',
+    },
+    {
+      path: '/system',
+      name: 'System',
+      component: () => import('../views/SystemInfoView.vue'),
     },
     {
       path: '/datasources',

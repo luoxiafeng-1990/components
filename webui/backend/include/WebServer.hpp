@@ -43,6 +43,7 @@ public:
 
 private:
     void registerRoutes();
+    void registerSystemRoutes();
     void registerDataSourceRoutes();
     void registerWorkerRoutes();
     void registerConsumerRoutes();
