@@ -146,6 +146,7 @@ public:
      * @brief 获取编码器名称
      */
     const char* getEncoderName() const;
+    AVCodecContext* getCodecContext() const { return codec_ctx_ptr_; }
     
     /**
      * @brief 获取编解码器参数（用于 BufferWriter 等场景）

@@ -35,9 +35,9 @@ struct EncodeTestParams {
     int input_width = 1920;
     int input_height = 1080;
     double input_fps = 30.0;
+    double output_fps = 0.0;
     int output_width = 0;
     int output_height = 0;
-    double output_fps = 0.0;
     int jpeg_quality = 80;
     std::string predefined_name;
 

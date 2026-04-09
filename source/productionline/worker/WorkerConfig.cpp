@@ -1,6 +1,9 @@
 #include "productionline/worker/WorkerConfig.hpp"
 #include "vendor/taco/decode/TacoDecoderExtension.hpp"
 #include <stdexcept>
+#include <algorithm>
+#include <string>
+#include <cstdio>
 
 // ============================================================
 // DataSourceConfigBuilder 实现
@@ -202,40 +205,48 @@ TacoConfig TacoConfigBuilder::build() const {
 // ============================================================
 
 OutputFormat TacoConfigBuilder::mapFormatNameToEnum(std::string_view format_name) {
+    std::string name(format_name);
+    std::transform(name.begin(), name.end(), name.begin(),
+                   [](unsigned char c) { return std::tolower(c); });
+
     // YUV 格式
-    if (format_name == "auto" || format_name == "yuv_auto") return OutputFormat::YUV_AUTO;
-    if (format_name == "nv12") return OutputFormat::YUV_NV12;
-    if (format_name == "nv21") return OutputFormat::YUV_NV21;
-    if (format_name == "i420" || format_name == "yuv420p") return OutputFormat::YUV_I420;
-    if (format_name == "yv12") return OutputFormat::YUV_YV12;
-    if (format_name == "p010") return OutputFormat::YUV_P010;
-    if (format_name == "nv16") return OutputFormat::YUV_NV16;
-    if (format_name == "nv61") return OutputFormat::YUV_NV61;
-    if (format_name == "i422" || format_name == "yuv422p") return OutputFormat::YUV_I422;
-    if (format_name == "nv24") return OutputFormat::YUV_NV24;
-    if (format_name == "i444" || format_name == "yuv444p") return OutputFormat::YUV_I444;
-    
-    // RGB 格式
-    if (format_name == "argb888") return OutputFormat::RGB_ARGB888;
-    if (format_name == "abgr888") return OutputFormat::RGB_ABGR888;
-    if (format_name == "rgba888") return OutputFormat::RGB_RGBA888;
-    if (format_name == "bgra888") return OutputFormat::RGB_BGRA888;
-    if (format_name == "rgb888") return OutputFormat::RGB_RGB888;
-    if (format_name == "bgr888") return OutputFormat::RGB_BGR888;
-    if (format_name == "xrgb888") return OutputFormat::RGB_XRGB888;
-    if (format_name == "xbgr888") return OutputFormat::RGB_XBGR888;
-    if (format_name == "rgbx888") return OutputFormat::RGB_RGBX888;
-    if (format_name == "bgrx888") return OutputFormat::RGB_BGRX888;
-    if (format_name == "rgb888_planar") return OutputFormat::RGB_RGB888_PLANAR;
-    if (format_name == "bgr888_planar") return OutputFormat::RGB_BGR888_PLANAR;
-    if (format_name == "r16g16b16") return OutputFormat::RGB_R16G16B16;
-    if (format_name == "b16g16r16") return OutputFormat::RGB_B16G16R16;
-    if (format_name == "gbrp") return OutputFormat::RGB_GBRP;
-    if (format_name == "argb2101010" || format_name == "a2r10g10b10") return OutputFormat::RGB_A2R10G10B10;
-    if (format_name == "abgr2101010" || format_name == "a2b10g10r10") return OutputFormat::RGB_A2B10G10R10;
-    if (format_name == "rgba2101010" || format_name == "r10g10b10a2") return OutputFormat::RGB_R10G10B10A2;
-    if (format_name == "bgra2101010" || format_name == "b10g10r10a2") return OutputFormat::RGB_B10G10R10A2;
-    
+    if (name == "auto" || name == "yuv_auto") return OutputFormat::YUV_AUTO;
+    if (name == "nv12") return OutputFormat::YUV_NV12;
+    if (name == "nv21") return OutputFormat::YUV_NV21;
+    if (name == "i420" || name == "yuv420p") return OutputFormat::YUV_I420;
+    if (name == "yv12") return OutputFormat::YUV_YV12;
+    if (name == "p010") return OutputFormat::YUV_P010;
+    if (name == "nv16") return OutputFormat::YUV_NV16;
+    if (name == "nv61") return OutputFormat::YUV_NV61;
+    if (name == "i422" || name == "yuv422p") return OutputFormat::YUV_I422;
+    if (name == "nv24") return OutputFormat::YUV_NV24;
+    if (name == "i444" || name == "yuv444p") return OutputFormat::YUV_I444;
+
+    // RGB 格式（含 ffmpeg 风格别名）
+    if (name == "argb888" || name == "argb") return OutputFormat::RGB_ARGB888;
+    if (name == "abgr888" || name == "abgr") return OutputFormat::RGB_ABGR888;
+    if (name == "rgba888" || name == "rgba") return OutputFormat::RGB_RGBA888;
+    if (name == "bgra888" || name == "bgra") return OutputFormat::RGB_BGRA888;
+    if (name == "rgb888" || name == "rgb24") return OutputFormat::RGB_RGB888;
+    if (name == "bgr888" || name == "bgr24") return OutputFormat::RGB_BGR888;
+    if (name == "xrgb888" || name == "0rgb") return OutputFormat::RGB_XRGB888;
+    if (name == "xbgr888" || name == "0bgr") return OutputFormat::RGB_XBGR888;
+    if (name == "rgbx888" || name == "rgb0") return OutputFormat::RGB_RGBX888;
+    if (name == "bgrx888" || name == "bgr0") return OutputFormat::RGB_BGRX888;
+    if (name == "rgb888_planar") return OutputFormat::RGB_RGB888_PLANAR;
+    if (name == "bgr888_planar") return OutputFormat::RGB_BGR888_PLANAR;
+    if (name == "r16g16b16") return OutputFormat::RGB_R16G16B16;
+    if (name == "b16g16r16") return OutputFormat::RGB_B16G16R16;
+    if (name == "gbrp") return OutputFormat::RGB_GBRP;
+    if (name == "argb2101010" || name == "a2r10g10b10" || name == "rgbx101010" || name == "rgb101010")
+        return OutputFormat::RGB_A2R10G10B10;
+    if (name == "abgr2101010" || name == "a2b10g10r10" || name == "bgrx101010" || name == "bgr101010")
+        return OutputFormat::RGB_A2B10G10R10;
+    if (name == "rgba2101010" || name == "r10g10b10a2") return OutputFormat::RGB_R10G10B10A2;
+    if (name == "bgra2101010" || name == "b10g10r10a2") return OutputFormat::RGB_B10G10R10A2;
+
+    fprintf(stderr, "[WARN] mapFormatNameToEnum: unrecognized format \"%s\", fallback to YUV_AUTO\n",
+            std::string(format_name).c_str());
     return OutputFormat::YUV_AUTO;
 }
 

@@ -5,6 +5,8 @@
 
 #include "consumptionline/BufferConsumerStrategies.hpp"
 #include "buffer/bufferpool/BufferPoolRegistry.hpp"
+#include "buffer/BufferAllocatorFacade.hpp"
+#include "buffer/BufferAllocatorFactory.hpp"
 #include "vendor/taco/display/DisplayDeviceFactory.hpp"
 #include "productionline/worker/FFmpegEncodeWorker.hpp"
 #include "productionline/worker/RawFrameSourceFromBuffer.hpp"
@@ -1495,11 +1497,25 @@ bool JpegEncodeConsumer::initialize(const std::vector<Buffer*>& first_buffers) {
             av_get_pix_fmt_name(src_pix_fmt) ? av_get_pix_fmt_name(src_pix_fmt) : "?",
             config_.encoder_name.c_str());
 
-    // 1. 创建直接模式帧源（条件变量同步）
-    raw_source_ = std::make_shared<RawFrameSourceFromBuffer>(
-        src_width, src_height, src_pix_fmt, true /*direct_mode*/);
+    // 1. 创建编码输入 BufferPool（AVFrame 分配器）
+    {
+        size_t frame_size = static_cast<size_t>(src_width) * src_height * 3 / 2;
+        BufferAllocatorFacade allocator(
+            BufferAllocatorFactory::AllocatorType::AVFRAME);
+        input_pool_id_ = allocator.allocatePoolWithBuffers(
+            4, frame_size, "JpegEncodeInput", "ENCODE_INPUT");
+        if (input_pool_id_ == 0) {
+            LOG4CPLUS_ERROR(logger_, "创建编码输入 BufferPool 失败");
+            return false;
+        }
+        input_pool_ = BufferPoolRegistry::getInstance().getPool(input_pool_id_).lock();
+        if (!input_pool_) {
+            LOG4CPLUS_ERROR(logger_, "获取编码输入 BufferPool 失败");
+            return false;
+        }
+    }
 
-    // 2. 尝试编码器列表，用 VideoProductionLine 组装
+    // 2. 创建编码 Worker + VideoProductionLine（buffer 模式）
     std::vector<std::string> encoder_candidates = { config_.encoder_name };
     if (config_.encoder_name != "mjpeg") {
         encoder_candidates.push_back("mjpeg");
@@ -1521,32 +1537,37 @@ bool JpegEncodeConsumer::initialize(const std::vector<Buffer*>& first_buffers) {
         enc_config.encoder.gop_size = 1;
         enc_config.encoder.max_b_frames = 0;
         enc_config.data_source.buffer_count = 4;
-        enc_config.data_source.max_frames = -1;
-        enc_config.data_source.shared_raw_frame_source = raw_source_;
+        enc_config.data_source.buffer_mode = true;
 
         encode_pipeline_ = std::make_unique<::VideoProductionLine>(
-            false /*no loop*/, 1 /*thread_count*/, false /*no monitor*/);
+            false, 1, false);
 
         if (encode_pipeline_->start(enc_config)) {
+            // 关联编码输入 pool
+            auto facade = encode_pipeline_->getWorkerFacade();
+            if (facade) {
+                facade->setSourceBufferPool(
+                    BufferPoolRegistry::getInstance().getPool(input_pool_id_));
+            }
+
             encode_pool_id_ = encode_pipeline_->getWorkingBufferPoolId();
-            fprintf(stderr, "[JpegEncodeConsumer] 编码器 '%s' 生产线启动成功, pool_id=%lu\n",
-                    enc_name.c_str(), encode_pool_id_);
+            fprintf(stderr, "[JpegEncodeConsumer] 编码器 '%s' 启动成功 (BufferPool模式), "
+                    "input_pool=%lu, output_pool=%lu\n",
+                    enc_name.c_str(), input_pool_id_, encode_pool_id_);
             started = true;
             break;
         }
 
-        fprintf(stderr, "[JpegEncodeConsumer] 编码器 '%s' 生产线启动失败，尝试下一个...\n",
-                enc_name.c_str());
+        fprintf(stderr, "[JpegEncodeConsumer] 编码器 '%s' 启动失败\n", enc_name.c_str());
         encode_pipeline_.reset();
     }
 
     if (!started) {
         fprintf(stderr, "[JpegEncodeConsumer] 所有编码器均失败\n");
-        raw_source_.reset();
         return false;
     }
 
-    // 3. 启动读取线程：从编码 BufferPool 取 JPEG 数据，调用回调
+    // 3. 启动读取线程
     reader_running_ = true;
     reader_thread_ = std::thread(&JpegEncodeConsumer::readerThreadFunc, this);
 
@@ -1560,13 +1581,13 @@ bool JpegEncodeConsumer::initialize(const std::vector<Buffer*>& first_buffers) {
         }
     }
 
-    LOG4CPLUS_INFO_FMT(logger_, "初始化完成: pool_id=%lu interval=%d",
-                       encode_pool_id_, frame_interval_);
+    LOG4CPLUS_INFO_FMT(logger_, "初始化完成: input_pool=%lu output_pool=%lu interval=%d",
+                       input_pool_id_, encode_pool_id_, frame_interval_);
     return true;
 }
 
 bool JpegEncodeConsumer::consume(const std::vector<Buffer*>& buffers, int frame_index) {
-    if (buffers.empty() || !buffers[0] || !raw_source_ || !encode_pipeline_) {
+    if (buffers.empty() || !buffers[0] || !input_pool_ || !encode_pipeline_) {
         return true;
     }
 
@@ -1580,35 +1601,49 @@ bool JpegEncodeConsumer::consume(const std::vector<Buffer*>& buffers, int frame_
         return true;
     }
 
-    // 注入帧并阻塞等待编码完成
-    // setFrame 内部：signal CV → 编码线程醒来编码 → 编码完成 → signal consumed → 返回
-    // 返回后 buffer 可以安全释放
-    raw_source_->setFrame(src_frame);
+    // acquireFree: 取一个空闲 buffer（非阻塞，取不到就跳过）
+    Buffer* dst_buf = input_pool_->acquireFree(false, 0);
+    if (!dst_buf) {
+        skipped_count_.fetch_add(1, std::memory_order_relaxed);
+        return true;
+    }
 
+    // av_frame_ref: 引用计数共享解码 AVFrame（微秒级，零拷贝，保留完整 DMA 元数据）
+    AVFrame* dst_frame = dst_buf->getAVFrame();
+    if (dst_frame) {
+        av_frame_unref(dst_frame);
+        if (av_frame_ref(dst_frame, src_frame) < 0) {
+            input_pool_->releaseFree(dst_buf);
+            error_count_.fetch_add(1, std::memory_order_relaxed);
+            return true;
+        }
+    }
+
+    // submitFilled: 编码 Worker 的 readRawFrame 会 acquireFilled 取到这个 buffer
+    input_pool_->submitFilled(dst_buf);
     return true;
 }
 
 void JpegEncodeConsumer::finalize() {
-    // 1. 先让读取线程退出（它依赖 BufferPool，必须在 pipeline stop 之前退出）
     reader_running_.store(false, std::memory_order_release);
 
-    // 2. 关闭帧源，唤醒编码线程中正在等待的 readRawFrame / setFrame
-    if (raw_source_) {
-        raw_source_->close();
-    }
-
-    // 3. 等待读取线程退出（它在 acquireFilled 超时后检查 reader_running_ 并退出）
-    if (reader_thread_.joinable()) {
-        reader_thread_.join();
-    }
-
-    // 4. 停止生产线（内部 join 编码线程、close worker、注销 BufferPool）
     if (encode_pipeline_) {
         encode_pipeline_->stop();
         encode_pipeline_.reset();
     }
 
-    raw_source_.reset();
+    if (reader_thread_.joinable()) {
+        reader_thread_.join();
+    }
+
+    // 清理 input pool 中残留帧的引用
+    if (input_pool_) {
+        for (Buffer* buf : input_pool_->getAllManagedBuffers()) {
+            AVFrame* f = buf->getAVFrame();
+            if (f) av_frame_unref(f);
+        }
+        input_pool_.reset();
+    }
 
     if (pipe_fd_ >= 0) {
         ::close(pipe_fd_);

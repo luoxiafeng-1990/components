@@ -24,9 +24,11 @@ extern "C" {
 
 #include <cstring>
 #include <cstdint>
+#include <cstdio>
 #include <iostream>
 #include <sstream>
 #include <string>
+#include <algorithm>
 #include <functional>
 
 #include <chrono>
@@ -114,52 +116,40 @@ static int matrixBitrateKbps(int w, int h) {
 } // namespace
 
 int VencPlugin::parsePixelFormat(const std::string& format_str) {
-    if (format_str == "nv12" || format_str == "NV12")
-        return AV_PIX_FMT_NV12;
-    if (format_str == "nv21" || format_str == "NV21")
-        return AV_PIX_FMT_NV21;
-    if (format_str == "yuv420p" || format_str == "YUV420P")
-        return AV_PIX_FMT_YUV420P;
-    if (format_str == "yuvj420p" || format_str == "YUVJ420P")
-        return AV_PIX_FMT_YUVJ420P;
-    if (format_str == "yuyv422" || format_str == "YUYV422" || format_str == "yuyv")
-        return AV_PIX_FMT_YUYV422;
-    if (format_str == "yvyu" || format_str == "YVYU")
-        return AV_PIX_FMT_YVYU422;
-    if (format_str == "uyvy" || format_str == "UYVY")
-        return AV_PIX_FMT_UYVY422;
-    if (format_str == "rgb24" || format_str == "RGB24" || format_str == "rgb888")
-        return AV_PIX_FMT_RGB24;
-    if (format_str == "bgr24" || format_str == "BGR24" || format_str == "bgr888")
-        return AV_PIX_FMT_BGR24;
-    if (format_str == "argb" || format_str == "ARGB")
-        return AV_PIX_FMT_ARGB;
-    if (format_str == "bgra" || format_str == "BGRA")
-        return AV_PIX_FMT_BGRA;
-    if (format_str == "rgba" || format_str == "RGBA")
-        return AV_PIX_FMT_RGBA;
-    if (format_str == "abgr" || format_str == "ABGR")
-        return AV_PIX_FMT_ABGR;
-    if (format_str == "rgb0" || format_str == "RGB0" || format_str == "rgbx888")
-        return AV_PIX_FMT_RGB0;
-    if (format_str == "bgr0" || format_str == "BGR0" || format_str == "bgrx888")
-        return AV_PIX_FMT_BGR0;
-    if (format_str == "rgb565" || format_str == "RGB565")
-        return AV_PIX_FMT_RGB565LE;
-    if (format_str == "bgr565" || format_str == "BGR565")
-        return AV_PIX_FMT_BGR565LE;
-    if (format_str == "rgb555" || format_str == "RGB555")
-        return AV_PIX_FMT_RGB555LE;
-    if (format_str == "bgr555" || format_str == "BGR555")
-        return AV_PIX_FMT_BGR555LE;
+    std::string fmt(format_str);
+    std::transform(fmt.begin(), fmt.end(), fmt.begin(),
+                   [](unsigned char c) { return std::tolower(c); });
+
+    if (fmt == "nv12")        return AV_PIX_FMT_NV12;
+    if (fmt == "nv21")        return AV_PIX_FMT_NV21;
+    if (fmt == "yuv420p")     return AV_PIX_FMT_YUV420P;
+    if (fmt == "yuvj420p")    return AV_PIX_FMT_YUVJ420P;
+    if (fmt == "yuyv422" || fmt == "yuyv")   return AV_PIX_FMT_YUYV422;
+    if (fmt == "yvyu")        return AV_PIX_FMT_YVYU422;
+    if (fmt == "uyvy422" || fmt == "uyvy")   return AV_PIX_FMT_UYVY422;
+    if (fmt == "rgb24"  || fmt == "rgb888")  return AV_PIX_FMT_RGB24;
+    if (fmt == "bgr24"  || fmt == "bgr888")  return AV_PIX_FMT_BGR24;
+    if (fmt == "argb"   || fmt == "argb888") return AV_PIX_FMT_ARGB;
+    if (fmt == "bgra"   || fmt == "bgra888") return AV_PIX_FMT_BGRA;
+    if (fmt == "rgba"   || fmt == "rgba888") return AV_PIX_FMT_RGBA;
+    if (fmt == "abgr"   || fmt == "abgr888") return AV_PIX_FMT_ABGR;
+    if (fmt == "rgb0"   || fmt == "rgbx888") return AV_PIX_FMT_RGB0;
+    if (fmt == "bgr0"   || fmt == "bgrx888") return AV_PIX_FMT_BGR0;
+    if (fmt == "rgb565")      return AV_PIX_FMT_RGB565LE;
+    if (fmt == "bgr565")      return AV_PIX_FMT_BGR565LE;
+    if (fmt == "rgb555")      return AV_PIX_FMT_RGB555LE;
+    if (fmt == "bgr555")      return AV_PIX_FMT_BGR555LE;
 #if defined(AV_PIX_FMT_X2RGB10LE)
-    if (format_str == "x2rgb10le" || format_str == "rgbx101010" || format_str == "rgb101010")
+    if (fmt == "x2rgb10le" || fmt == "rgbx101010" || fmt == "rgb101010")
         return AV_PIX_FMT_X2RGB10LE;
 #endif
 #if defined(AV_PIX_FMT_X2BGR10LE)
-    if (format_str == "x2bgr10le" || format_str == "bgrx101010" || format_str == "bgr101010")
+    if (fmt == "x2bgr10le" || fmt == "bgrx101010" || fmt == "bgr101010")
         return AV_PIX_FMT_X2BGR10LE;
 #endif
+
+    fprintf(stderr, "[WARN] parsePixelFormat: unrecognized format \"%s\", fallback to NV12\n",
+            format_str.c_str());
     return AV_PIX_FMT_NV12;
 }
 
@@ -681,6 +671,7 @@ void VencPlugin::registerOptions(CLI::App& app) {
     app.add_option("-W,--width", params_.input_width, "输入宽度");
     app.add_option("-H,--height", params_.input_height, "输入高度");
     app.add_option("-F,--fps", params_.input_fps, "输入/编码帧率");
+    app.add_option("--output-fps", params_.output_fps, "输出帧率（默认跟随输入帧率）");
     app.add_option("-f,--input-format", params_.input_format, "输入像素格式 (默认 nv12)");
     app.add_option("-m,--max-frames", max_frames_, "最大帧数 (-1=不限制)");
     app.add_flag("--loop", loop_, "循环读取输入");

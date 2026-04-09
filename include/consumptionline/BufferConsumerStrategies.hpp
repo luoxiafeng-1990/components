@@ -346,9 +346,8 @@ private:
 /**
  * @brief JPEG 编码消费者
  *
- * 将解码帧编码为 JPEG 输出到命名管道（供 WebUI 预览）。
- * 内部复用 FFmpegEncodeWorker（jpeg_taco / mjpeg），通过
- * RawFrameSourceFromBuffer 直接模式桥接 consume() 与 fillBuffer()。
+ * consume() 通过 av_frame_ref（引用计数共享，微秒级）将解码帧提交到编码输入 BufferPool，
+ * 编码 Worker 在 VideoProductionLine 中以 buffer 模式独立从该 pool 读帧编码，不阻塞消费循环。
  */
 class JpegEncodeConsumer : public IBufferConsumer {
 public:
@@ -367,10 +366,15 @@ private:
     Config config_;
     Config::FrameCallback on_frame_;
 
-    std::shared_ptr<RawFrameSourceFromBuffer> raw_source_;
+    // 编码输入 BufferPool（AVFrame 壳，consume 端 submitFilled，编码 Worker 端 acquireFilled）
+    std::shared_ptr<BufferPool> input_pool_;
+    uint64_t input_pool_id_ = 0;
+
+    // 编码生产线（独立线程，buffer 模式从 input_pool 读帧编码）
     std::unique_ptr<::VideoProductionLine> encode_pipeline_;
     uint64_t encode_pool_id_ = 0;
 
+    // 编码输出读取线程
     std::thread reader_thread_;
     std::atomic<bool> reader_running_{false};
     void readerThreadFunc();
