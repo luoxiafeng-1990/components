@@ -553,6 +553,13 @@ bool FFmpegEncodeWorker::initializeEncoder() {
     codec_ctx_ptr_->width = output_width_;
     codec_ctx_ptr_->height = output_height_;
     codec_ctx_ptr_->bit_rate = enc_config.bit_rate;
+    // TACO：CQP 时 bit_rate 仅作 HRD/码控结构占位，不能为 0（易触发 H264EncSetRateCtrl -3）
+    if (enc_config.rc_mode == 2 && codec_ctx_ptr_->bit_rate <= 0) {
+        codec_ctx_ptr_->bit_rate = 4000000;
+        LOG4CPLUS_DEBUG_FMT(
+            logger_,
+            "[EncodeWorker] CQP：bit_rate 由 0 放宽为名义 4000000 bps（与 VencPlugin 预定义一致时可由上层的 EncoderConfig 传入）");
+    }
     codec_ctx_ptr_->gop_size = enc_config.gop_size;
     codec_ctx_ptr_->max_b_frames = enc_config.max_b_frames;
     codec_ctx_ptr_->time_base = {enc_config.framerate_den, enc_config.framerate_num};
@@ -560,10 +567,33 @@ bool FFmpegEncodeWorker::initializeEncoder() {
     codec_ctx_ptr_->pix_fmt = static_cast<AVPixelFormat>(enc_config.input_pix_fmt);
     
     // 4. 设置码率控制模式
+    // TACO h264_taco：rc-mode 走表达式求值，已注册的符号为 cbr / vbr 等；CQP 与
+    // WorkerConfig::encoder.rc_mode 数值一致，应使用枚举整型字符串 "2"，不可用 "cqp"（会报 Undefined constant 'cqp'）
     if (enc_config.rc_mode == 1) {  // VBR
         av_dict_set(&codec_options_ptr_, "rc-mode", "vbr", 0);
     } else if (enc_config.rc_mode == 0) {  // CBR
         av_dict_set(&codec_options_ptr_, "rc-mode", "cbr", 0);
+    } else if (enc_config.rc_mode == 2) {  // CQP
+        if (codec && strstr(codec->name, "taco")) {
+            av_dict_set(&codec_options_ptr_, "rc-mode", "2", 0);
+            int qp = enc_config.cqp_qp;
+            if (qp < 1) {
+                qp = 1;
+            }
+            if (qp > 51) {
+                qp = 51;
+            }
+            char qp_buf[16];
+            snprintf(qp_buf, sizeof(qp_buf), "%d", qp);
+            av_dict_set(&codec_options_ptr_, "qp", qp_buf, 0);
+            LOG4CPLUS_DEBUG_FMT(
+                logger_, "[EncodeWorker] TACO CQP: rc-mode=2 qp=%s", qp_buf);
+        } else {
+            LOG4CPLUS_WARN_FMT(
+                logger_,
+                "[EncodeWorker] rc_mode=CQP(2) 仅对 TACO 硬件编码器(h264_taco/hevc_taco)下发，当前 codec=%s，已跳过",
+                codec ? codec->name : "(null)");
+        }
     }
     
     // 5. TACO 编码器特定配置
@@ -647,21 +677,25 @@ bool FFmpegEncodeWorker::syncOutputCodecParameters() {
 }
 
 bool FFmpegEncodeWorker::configureTacoEncoder() {
-    if (!codec_ctx_ptr_ || !codec_ctx_ptr_->priv_data) {
+    if (!codec_ctx_ptr_) {
         return false;
     }
-    
+
     auto& taco_config = worker_config_.encoder.taco;
-    
-    // 设置 profile 和 level（如果指定）
+
+    // avcodec_open2 之前 priv_data 未就绪，TACO 私有选项须通过 options 字典传入，
+    // 与 rc-mode / qp 一致，否则 VencPlugin 中 taco.profile、taco.level 不会生效。
     if (taco_config.profile > 0) {
-        av_opt_set_int(codec_ctx_ptr_->priv_data, "profile", taco_config.profile, 0);
+        char buf[32];
+        snprintf(buf, sizeof(buf), "%d", taco_config.profile);
+        av_dict_set(&codec_options_ptr_, "profile", buf, 0);
     }
-    
     if (taco_config.level > 0) {
-        av_opt_set_int(codec_ctx_ptr_->priv_data, "level", taco_config.level, 0);
+        char buf[32];
+        snprintf(buf, sizeof(buf), "%d", taco_config.level);
+        av_dict_set(&codec_options_ptr_, "level", buf, 0);
     }
-    
+
     LOG4CPLUS_DEBUG(logger_, "[EncodeWorker] TACO 编码器配置完成");
     return true;
 }

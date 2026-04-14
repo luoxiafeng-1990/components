@@ -338,6 +338,12 @@ struct WorkerConfig {
          * - 2: CQP (固定 QP)
          */
         int rc_mode = 1;  // 默认 VBR
+        /**
+         * @brief CQP 模式下的量化参数（1–51，常见 23–28）
+         * @note 仅当 rc_mode == 2（CQP）且使用 h264_taco/hevc_taco 时，由 FFmpegEncodeWorker
+         *       以私有选项 `rc-mode=cqp` + `qp` 下发。
+         */
+        int cqp_qp = 28;
         
         // ========================================
         // TACO 编码器特定配置

@@ -52,20 +52,20 @@ static const SpecFmt kSpec21H264Formats[] = {
     {"nv21", "nv21"},
     {"yuyv422", "yuyv422"},
     {"uyvy422", "uyvy422"},
-    {"rgb444", "rgb888"},
-    {"bgr444", "bgr888"},
-    {"rgb555", "rgb555"},
-    {"bgr555", "bgr555"},
-    {"rgb565", "rgb565"},
+    {"rgb444", "rgb444le"},
+    {"bgr444", "bgr444le"},
+    {"rgb555", "rgb555le"},
+    {"bgr555", "bgr555le"},
+    {"rgb565", "rgb565le"},
 };
 
 /** §2.2 JPEG：在 §2.1 基础上增加 BGR565 / RGB888 / BGR888 / 10bit RGB */
 static const SpecFmt kSpec22JpegExtraFormats[] = {
-    {"bgr565", "bgr565"},
+    {"bgr565", "bgr565le"},
     {"rgb888", "rgb888"},
     {"bgr888", "bgr888"},
-    {"rgb101010", "rgb101010"},
-    {"bgr101010", "bgr101010"},
+    {"rgb101010", "rgb101010le"},
+    {"bgr101010", "bgr101010le"},
 };
 
 struct SpecRes {
@@ -80,11 +80,6 @@ static const SpecRes kSpec21Resolutions[] = {
     {640, 480, "640x480"},
     {1280, 720, "1280x720"},
     {1920, 1080, "1920x1080"},
-};
-
-/** H.265 在 §2.1 分辨率之外增加 4K（规格与产品矩阵常见要求） */
-static const SpecRes kSpecH265Extra4K[] = {
-    {3840, 2160, "3840x2160"},
 };
 
 static const SpecRes kSpec22JpegResolutions[] = {
@@ -178,6 +173,20 @@ WorkerConfig buildEncodeConfigInternal(const EncodeTestParams& params, const std
             }
             config = WorkerConfigFactory::createH264Encode(
                 yuv_path, output_width, output_height, br_kbps, fps, gop, prof, pix);
+            // 与 HEVC 分支一致：按分辨率/帧率设置 TACO level（供 FFmpeg 打开前经 options 下发）
+            if (!isParallelProfile(params.profile)) {
+                const int w = output_width;
+                const int h = output_height;
+                const double hfps = fps;
+                if (w <= 1280 && h <= 720 && hfps <= 30.0)
+                    config.encoder.taco.level = 120;
+                else if (w <= 1920 && h <= 1080 && hfps <= 30.0)
+                    config.encoder.taco.level = 150;
+                else if (w <= 1920 && h <= 1080 && hfps <= 60.0)
+                    config.encoder.taco.level = 153;
+                else
+                    config.encoder.taco.level = 150;
+            }
         } else {
             config = WorkerConfigFactory::createSoftwareEncode(
                 yuv_path, "h264", output_width, output_height, br_kbps, fps, gop, pix);
@@ -190,6 +199,13 @@ WorkerConfig buildEncodeConfigInternal(const EncodeTestParams& params, const std
     }
 
     config.encoder.rc_mode = params.rc_mode;
+    config.encoder.cqp_qp = params.cqp_qp;
+    // CQP 预定义常用 bitrate=0；TACO H264EncSetRateCtrl 在 bit_rate==0 时可能返回 -3，
+    // 需提供名义码率供 VBV/内核填充（画质仍由 cqp_qp 决定）
+    if (params.rc_mode == 2 && config.encoder.bit_rate <= 0) {
+        const int fallback_kbps = params.bitrate > 0 ? params.bitrate : 4000;
+        config.encoder.bit_rate = static_cast<int64_t>(fallback_kbps) * 1000;
+    }
     config.data_source.buffer_count = 8;
     config.data_source.buffer_mode = false;
     return config;
@@ -250,15 +266,6 @@ const std::map<std::string, EncodeTestParams>& VencPlugin::getPredefinedTests() 
         p.input_format = "nv12";
         p.input_width = 3840;
         p.input_height = 2160;
-        p.input_fps = 30.0;
-        return p;
-    }());
-
-    add("h265_1920x1080_30_4mbps", [&] {
-        EncodeTestParams p("h265", "main", 4000, 30, true);
-        p.input_format = "nv12";
-        p.input_width = 1920;
-        p.input_height = 1080;
         p.input_fps = 30.0;
         return p;
     }());
@@ -356,40 +363,7 @@ const std::map<std::string, EncodeTestParams>& VencPlugin::getPredefinedTests() 
         return p;
     }());
 
-    add("sw_h265_1920x1080_30", [&] {
-        EncodeTestParams p("h265", "main", 4000, 30, false);
-        p.input_format = "nv12";
-        p.input_width = 1920;
-        p.input_height = 1080;
-        p.input_fps = 30.0;
-        return p;
-    }());
-
     // ── 与备份 VencTestSuite 对齐的补充用例（码率/Profile/GOP/RC/并行等）──
-    add("h265_1280x720_30_2mbps", [&] {
-        EncodeTestParams p("h265", "main", 2000, 30, true);
-        p.input_format = "nv12";
-        p.input_width = 1280;
-        p.input_height = 720;
-        p.input_fps = 30.0;
-        return p;
-    }());
-    add("h265_1920x1080_30_8mbps", [&] {
-        EncodeTestParams p("h265", "main", 8000, 30, true);
-        p.input_format = "nv12";
-        p.input_width = 1920;
-        p.input_height = 1080;
-        p.input_fps = 30.0;
-        return p;
-    }());
-    add("h265_3840x2160_30_12mbps", [&] {
-        EncodeTestParams p("h265", "main", 12000, 30, true);
-        p.input_format = "nv12";
-        p.input_width = 3840;
-        p.input_height = 2160;
-        p.input_fps = 30.0;
-        return p;
-    }());
     add("jpeg_1920x1080_q90", [&] {
         EncodeTestParams p("jpeg", "", 0, 0, true);
         p.input_format = "nv12";
@@ -424,24 +398,8 @@ const std::map<std::string, EncodeTestParams>& VencPlugin::getPredefinedTests() 
         p.rc_mode = 1;
         return p;
     }());
-    add("h265_1920x1080_30_4mbps_main10", [&] {
-        EncodeTestParams p("h265", "main10", 4000, 30, true);
-        p.input_format = "nv12";
-        p.input_width = 1920;
-        p.input_height = 1080;
-        p.input_fps = 30.0;
-        return p;
-    }());
     add("h264_2560x1440_30_6mbps", [&] {
         EncodeTestParams p("h264", "main", 6000, 30, true);
-        p.input_format = "nv12";
-        p.input_width = 2560;
-        p.input_height = 1440;
-        p.input_fps = 30.0;
-        return p;
-    }());
-    add("h265_2560x1440_30_5mbps", [&] {
-        EncodeTestParams p("h265", "main", 5000, 30, true);
         p.input_format = "nv12";
         p.input_width = 2560;
         p.input_height = 1440;
@@ -471,32 +429,6 @@ const std::map<std::string, EncodeTestParams>& VencPlugin::getPredefinedTests() 
             const int br = matrixBitrateKbps(r.w, r.h);
             std::string name = std::string("spec21_h264_") + f.key + "_" + r.tag;
             EncodeTestParams p("h264", "main", br, 30, true);
-            p.input_format = f.input_format;
-            p.input_width = r.w;
-            p.input_height = r.h;
-            p.input_fps = 30.0;
-            add(name.c_str(), std::move(p));
-        }
-    }
-
-    // ── §2.1 扩展：H.265 同像素格式矩阵 + 4K（10×5 + 10×1）──
-    for (const auto& f : kSpec21H264Formats) {
-        for (const auto& r : kSpec21Resolutions) {
-            const int br = matrixBitrateKbps(r.w, r.h);
-            std::string name = std::string("spec21_h265_") + f.key + "_" + r.tag;
-            EncodeTestParams p("h265", "main", br, 30, true);
-            p.input_format = f.input_format;
-            p.input_width = r.w;
-            p.input_height = r.h;
-            p.input_fps = 30.0;
-            add(name.c_str(), std::move(p));
-        }
-    }
-    for (const auto& f : kSpec21H264Formats) {
-        for (const auto& r : kSpecH265Extra4K) {
-            const int br = matrixBitrateKbps(r.w, r.h);
-            std::string name = std::string("spec21_h265_") + f.key + "_" + r.tag;
-            EncodeTestParams p("h265", "main", br, 30, true);
             p.input_format = f.input_format;
             p.input_width = r.w;
             p.input_height = r.h;
@@ -545,8 +477,6 @@ const std::map<std::string, EncodeTestParams>& VencPlugin::getPredefinedTests() 
     addScale8192("h264", "1280x720", 1280, 720, 28000);
     addScale8192("h264", "1920x1080", 1920, 1080, 28000);
     addScale8192("h264", "2560x1440", 2560, 1440, 28000);
-    addScale8192("h265", "1920x1080", 1920, 1080, 28000);
-    addScale8192("h265", "1280x720", 1280, 720, 28000);
     addScale8192("jpeg", "96x32", 96, 32, 0);
     addScale8192("jpeg", "1280x720", 1280, 720, 0);
     addScale8192("jpeg", "1920x1080", 1920, 1080, 0);
@@ -626,9 +556,10 @@ EncodeTestParams VencPlugin::resolveParams() const {
 void VencPlugin::registerOptions(CLI::App& app) {
     app.add_flag("-l,--list", show_list_, "列出预定义编码测试");
     app.add_option("-i,--input", input_path_, "YUV/RGB 输入文件路径");
-    app.add_option("-c,--codec", params_.codec, "编码格式 h264|h265|jpeg");
+    app.add_option("-c,--codec", params_.codec, "编码格式 h264|jpeg");
     app.add_option("-P,--profile", params_.profile, "Profile (baseline|main|high|main10)");
     app.add_option("-b,--bitrate", params_.bitrate, "码率 (kbps)");
+    app.add_option("--cqp-qp", params_.cqp_qp, "CQP 模式量化参数 1–51（rc_mode=2 / 预定义 CQP 用例）");
     app.add_option("-g,--gop", params_.gop_size, "GOP 大小");
     app.add_option("-W,--width", params_.input_width, "输入宽度");
     app.add_option("-H,--height", params_.input_height, "输入高度");
