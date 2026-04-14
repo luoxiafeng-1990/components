@@ -135,6 +135,15 @@ enum class ColorStandard {
 };
 
 /**
+ * @brief 将像素格式名称字符串映射为 FFmpeg AVPixelFormat（int 形式）
+ * @param format_name 格式名称（不区分大小写，如 "nv12", "rgb24", "argb888"）
+ * @return AVPixelFormat 整数值，无法识别时 fallback 到 AV_PIX_FMT_NV12 (23)
+ *
+ * 统一入口：替代原 VencPlugin::parsePixelFormat，供编码器等需要 FFmpeg 标准枚举的场景使用。
+ */
+int mapPixFmtStringToAVPixFmt(std::string_view format_name);
+
+/**
  * @brief Worker 配置（完整版）
  * 
  * 设计理念：

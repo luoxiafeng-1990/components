@@ -115,44 +115,6 @@ static int matrixBitrateKbps(int w, int h) {
 
 } // namespace
 
-int VencPlugin::parsePixelFormat(const std::string& format_str) {
-    std::string fmt(format_str);
-    std::transform(fmt.begin(), fmt.end(), fmt.begin(),
-                   [](unsigned char c) { return std::tolower(c); });
-
-    if (fmt == "nv12")        return AV_PIX_FMT_NV12;
-    if (fmt == "nv21")        return AV_PIX_FMT_NV21;
-    if (fmt == "yuv420p")     return AV_PIX_FMT_YUV420P;
-    if (fmt == "yuvj420p")    return AV_PIX_FMT_YUVJ420P;
-    if (fmt == "yuyv422" || fmt == "yuyv")   return AV_PIX_FMT_YUYV422;
-    if (fmt == "yvyu")        return AV_PIX_FMT_YVYU422;
-    if (fmt == "uyvy422" || fmt == "uyvy")   return AV_PIX_FMT_UYVY422;
-    if (fmt == "rgb24"  || fmt == "rgb888")  return AV_PIX_FMT_RGB24;
-    if (fmt == "bgr24"  || fmt == "bgr888")  return AV_PIX_FMT_BGR24;
-    if (fmt == "argb"   || fmt == "argb888") return AV_PIX_FMT_ARGB;
-    if (fmt == "bgra"   || fmt == "bgra888") return AV_PIX_FMT_BGRA;
-    if (fmt == "rgba"   || fmt == "rgba888") return AV_PIX_FMT_RGBA;
-    if (fmt == "abgr"   || fmt == "abgr888") return AV_PIX_FMT_ABGR;
-    if (fmt == "rgb0"   || fmt == "rgbx888") return AV_PIX_FMT_RGB0;
-    if (fmt == "bgr0"   || fmt == "bgrx888") return AV_PIX_FMT_BGR0;
-    if (fmt == "rgb565")      return AV_PIX_FMT_RGB565LE;
-    if (fmt == "bgr565")      return AV_PIX_FMT_BGR565LE;
-    if (fmt == "rgb555")      return AV_PIX_FMT_RGB555LE;
-    if (fmt == "bgr555")      return AV_PIX_FMT_BGR555LE;
-#if defined(AV_PIX_FMT_X2RGB10LE)
-    if (fmt == "x2rgb10le" || fmt == "rgbx101010" || fmt == "rgb101010")
-        return AV_PIX_FMT_X2RGB10LE;
-#endif
-#if defined(AV_PIX_FMT_X2BGR10LE)
-    if (fmt == "x2bgr10le" || fmt == "bgrx101010" || fmt == "bgr101010")
-        return AV_PIX_FMT_X2BGR10LE;
-#endif
-
-    fprintf(stderr, "[WARN] parsePixelFormat: unrecognized format \"%s\", fallback to NV12\n",
-            format_str.c_str());
-    return AV_PIX_FMT_NV12;
-}
-
 static bool isParallelProfile(const std::string& pr) {
     return pr.size() >= 10 && pr.compare(0, 9, "parallel_") == 0;
 }
@@ -164,7 +126,7 @@ WorkerConfig buildEncodeConfigInternal(const EncodeTestParams& params, const std
     const int output_height = params.output_height > 0 ? params.output_height : params.input_height;
     const double fps = params.output_fps > 0 ? params.output_fps : params.input_fps;
     const int gop = params.gop_size > 0 ? params.gop_size : 30;
-    const int pix = VencPlugin::parsePixelFormat(params.input_format);
+    const int pix = mapPixFmtStringToAVPixFmt(params.input_format);
     const int br_kbps = params.bitrate > 0 ? params.bitrate : 0;
 
     const std::string& c = params.codec;

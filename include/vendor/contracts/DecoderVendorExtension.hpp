@@ -21,10 +21,24 @@ public:
 
     /// 启动前校验；失败时写入 err
     virtual bool validate(std::string& err) const;
+
+    /**
+     * @brief 获取指定通道的每像素字节数（厂商多通道硬件解码器专用）
+     * @param channel     通道编号（0 = 主通道，1 = 副通道，...）
+     * @param priv_data   AVCodecContext::priv_data（void* 避免在接口层引入 FFmpeg 头）
+     * @param pix_fmt     AVCodecContext::pix_fmt（int 形式）
+     * @return > 0.0 时为有效值；<= 0.0 表示该通道未启用或不支持，调用方应走通用路径
+     */
+    virtual double getChannelBytesPerPixel(int channel, void* priv_data, int pix_fmt) const;
 };
 
 inline bool IDecoderVendorExtension::validate(std::string& /*err*/) const {
     return true;
+}
+
+inline double IDecoderVendorExtension::getChannelBytesPerPixel(
+    int /*channel*/, void* /*priv_data*/, int /*pix_fmt*/) const {
+    return -1.0;
 }
 
 #endif

@@ -13,11 +13,11 @@
  */
 class DecoderVendorRegistry {
 public:
-    using Factory = std::function<std::unique_ptr<IDecoderVendorExtension>()>;
+    using Vendor = std::function<std::unique_ptr<IDecoderVendorExtension>()>;
 
     static DecoderVendorRegistry& instance();
 
-    void registerFactory(std::string kind, Factory f);
+    void registerVendor(std::string kind, Vendor f);
 
     std::unique_ptr<IDecoderVendorExtension> create(const std::string& kind) const;
 
@@ -25,7 +25,7 @@ private:
     DecoderVendorRegistry() = default;
 
     mutable std::mutex mu_;
-    std::unordered_map<std::string, Factory> factories_;
+    std::unordered_map<std::string, Vendor> factories_;
 };
 
 #endif

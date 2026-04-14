@@ -67,7 +67,6 @@ public:
     static const std::map<std::string, EncodeTestParams>& getPredefinedTests();
     /// 使用当前插件解析到的 input_path_ 构建编码配置（非 static，因依赖实例状态）
     WorkerConfig buildEncodeConfig(const EncodeTestParams& params);
-    static int parsePixelFormat(const std::string& format_str);
 
 private:
     EncodeTestParams resolveParams() const;

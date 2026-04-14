@@ -6,7 +6,26 @@ const api = axios.create({
   headers: { 'Content-Type': 'application/json' },
 })
 
+const slowApi = axios.create({
+  baseURL: '/api',
+  timeout: 60000,
+  headers: { 'Content-Type': 'application/json' },
+})
+
 api.interceptors.response.use(
+  (response) => {
+    const data = response.data
+    if (data.code !== undefined && data.code !== 0) {
+      return Promise.reject(new Error(data.message || '请求失败'))
+    }
+    return response
+  },
+  (error) => {
+    return Promise.reject(error)
+  }
+)
+
+slowApi.interceptors.response.use(
   (response) => {
     const data = response.data
     if (data.code !== undefined && data.code !== 0) {
@@ -166,7 +185,7 @@ export interface NetworkInterface {
 
 export interface SystemMetrics {
   timestamp: string
-  cpu: { usage_percent: number; cores: number }
+  cpu: { usage_percent: number; cores: number; per_core?: { core: number; usage_percent: number }[] }
   memory: {
     total_mb: number; used_mb: number; free_mb: number
     available_mb: number; buffers_mb: number; cached_mb: number
@@ -177,9 +196,39 @@ export interface SystemMetrics {
   codec: { decode: Record<string, any>; encode: Record<string, any>; raw_output: string }
 }
 
+const metricsApi = axios.create({
+  baseURL: '/api',
+  timeout: 15000,
+  headers: { 'Content-Type': 'application/json' },
+})
+
+metricsApi.interceptors.response.use(
+  (response) => {
+    const data = response.data
+    if (data.code !== undefined && data.code !== 0) {
+      return Promise.reject(new Error(data.message || '请求失败'))
+    }
+    return response
+  },
+  (error) => Promise.reject(error)
+)
+
 export const systemApi = {
   info: () => api.get<{ code: number; data: SystemInfo }>('/system/info'),
-  metrics: () => api.get<{ code: number; data: SystemMetrics }>('/system/metrics'),
+  metrics: () => metricsApi.get<{ code: number; data: SystemMetrics }>('/system/metrics'),
+  cpu: () => api.get('/system/cpu'),
+  memory: () => api.get('/system/memory'),
+  hwModule: (module: string) => api.get(`/system/hw/${module}`),
+  clocks: () => api.get('/system/clocks'),
+  interrupts: () => api.get('/system/interrupts'),
+  gpio: () => api.get('/system/gpio'),
+  debs: () => slowApi.get('/system/debs'),
+  installDeb: (pkg: string, version: string) =>
+    slowApi.post('/system/deb/install', { package: pkg, version }),
+  filesystem: () => api.get('/system/filesystem'),
+  aptSource: () => api.get('/system/apt-source'),
+  updateAptSource: (source: string) => slowApi.post('/system/apt-source', { source }),
+  dmaMem: () => api.get('/system/dma-memory'),
 }
 
 // ===== Config API =====

@@ -492,15 +492,16 @@ int FFmpegDecodeWorker::getOutputHeight() const {
 }
 
 double FFmpegDecodeWorker::getOutputBytesPerPixel(int channel) const {
-    // ========== 1. TACO 硬件解码器：从 priv_data 读取 PP 配置 ==========
+    // 1. 硬件解码器：通过厂商扩展多态获取（不依赖具体厂商名称）
     if (use_hardware_decoder_ && codec_ctx_ptr_ && codec_ctx_ptr_->priv_data &&
-        decoder_name_.find("taco") != std::string::npos) {
-        return getTacoChannelBytesPerPixel(channel);
+        worker_config_.decoder.vendor) {
+        double bpp = worker_config_.decoder.vendor->getChannelBytesPerPixel(
+            channel, codec_ctx_ptr_->priv_data, codec_ctx_ptr_->pix_fmt);
+        if (bpp > 0.0) return bpp;
     }
-    
-    // ========== 2. 通用平台（软件解码器等）==========
+
+    // 2. 通用平台（软件解码器等）
     if (channel == 0) {
-        // 从解码器实际输出格式获取
         if (codec_ctx_ptr_ && codec_ctx_ptr_->pix_fmt != AV_PIX_FMT_NONE) {
             const AVPixFmtDescriptor* desc = av_pix_fmt_desc_get(codec_ctx_ptr_->pix_fmt);
             if (desc) {
@@ -509,118 +510,8 @@ double FFmpegDecodeWorker::getOutputBytesPerPixel(int channel) const {
         }
         return 1.5;  // Fallback: YUV420
     }
-    
-    return 0.0;  // 其他通道不支持
-}
 
-// ============================================================================
-// TACO 辅助函数（多通道支持）
-// ============================================================================
-
-double FFmpegDecodeWorker::getTacoChannelBytesPerPixel(int channel) const {
-    int64_t value = 0;
-    
-    if (channel == 0) {
-        // 通道0：检查是否启用
-        if (av_opt_get_int(codec_ctx_ptr_->priv_data, "ch0_enable", 0, &value) < 0 || value == 0) {
-            return 0.0;  // 通道未启用
-        }
-        
-        // 通道0通常输出 YUV，从 codec_ctx_ptr_->pix_fmt 获取
-        if (codec_ctx_ptr_->pix_fmt != AV_PIX_FMT_NONE) {
-            const AVPixFmtDescriptor* desc = av_pix_fmt_desc_get(codec_ctx_ptr_->pix_fmt);
-            if (desc) {
-                return av_get_bits_per_pixel(desc) / 8.0;
-            }
-        }
-        return 1.5;  // Fallback: YUV420
-    }
-    
-    if (channel == 1) {
-        // 通道1：检查是否启用
-        if (av_opt_get_int(codec_ctx_ptr_->priv_data, "ch1_enable", 0, &value) < 0 || value == 0) {
-            return 0.0;  // 通道未启用
-        }
-        
-        // 检查是否是 RGB 模式
-        if (av_opt_get_int(codec_ctx_ptr_->priv_data, "ch1_rgb", 0, &value) < 0 || value == 0) {
-            // 不是 RGB，可能是 YUV
-            return 1.5;  // 假设 YUV420
-        }
-        
-        // 读取 RGB 格式枚举
-        int64_t rgb_format = 0;
-        if (av_opt_get_int(codec_ctx_ptr_->priv_data, "ch1_rgb_format", 0, &rgb_format) < 0) {
-            return 4.0;  // Fallback: ARGB888
-        }
-        
-        // 根据 RGB 格式枚举返回字节数
-        OutputFormat format = mapRgbDriverValueToEnum((int)rgb_format);
-        return getBytesPerPixelFromFormat(format);
-    }
-    
-    return 0.0;  // 无效通道
-}
-
-OutputFormat FFmpegDecodeWorker::mapRgbDriverValueToEnum(int driver_value) {
-    switch (driver_value) {
-        case 1:  return OutputFormat::RGB_RGB888;
-        case 2:  return OutputFormat::RGB_RGB888_PLANAR;
-        case 3:  return OutputFormat::RGB_BGR888;
-        case 4:  return OutputFormat::RGB_BGR888_PLANAR;
-        case 5:  return OutputFormat::RGB_R16G16B16;
-        case 7:  return OutputFormat::RGB_B16G16R16;
-        case 9:  return OutputFormat::RGB_ARGB888;
-        case 11: return OutputFormat::RGB_ABGR888;
-        case 13: return OutputFormat::RGB_RGBA888;
-        case 15: return OutputFormat::RGB_BGRA888;
-        case 17: return OutputFormat::RGB_A2R10G10B10;
-        case 19: return OutputFormat::RGB_A2B10G10R10;
-        case 21: return OutputFormat::RGB_R10G10B10A2;
-        case 23: return OutputFormat::RGB_B10G10R10A2;
-        case 25: return OutputFormat::RGB_XRGB888;
-        case 27: return OutputFormat::RGB_XBGR888;
-        case 28: return OutputFormat::RGB_GBRP;
-        default: return OutputFormat::RGB_ARGB888;
-    }
-}
-
-double FFmpegDecodeWorker::getBytesPerPixelFromFormat(OutputFormat format) {
-    switch (format) {
-        // 8-bit RGB 有 Alpha/X 通道（4 字节/像素）
-        case OutputFormat::RGB_ARGB888:
-        case OutputFormat::RGB_ABGR888:
-        case OutputFormat::RGB_RGBA888:
-        case OutputFormat::RGB_BGRA888:
-        case OutputFormat::RGB_XRGB888:
-        case OutputFormat::RGB_XBGR888:
-        case OutputFormat::RGB_RGBX888:
-        case OutputFormat::RGB_BGRX888:
-            return 4.0;
-        
-        // 10-bit RGB 2101010（4 字节/像素，32-bit packed）
-        case OutputFormat::RGB_A2R10G10B10:
-        case OutputFormat::RGB_A2B10G10R10:
-        case OutputFormat::RGB_R10G10B10A2:
-        case OutputFormat::RGB_B10G10R10A2:
-            return 4.0;
-        
-        // 8-bit RGB 无 Alpha 通道（3 字节/像素）
-        case OutputFormat::RGB_RGB888:
-        case OutputFormat::RGB_BGR888:
-        case OutputFormat::RGB_RGB888_PLANAR:
-        case OutputFormat::RGB_BGR888_PLANAR:
-        case OutputFormat::RGB_GBRP:
-            return 3.0;
-        
-        // 16-bit RGB（6 字节/像素）
-        case OutputFormat::RGB_R16G16B16:
-        case OutputFormat::RGB_B16G16R16:
-            return 6.0;
-        
-        default:
-            return 4.0;
-    }
+    return 0.0;
 }
 
 std::string FFmpegDecodeWorker::getPath() const {

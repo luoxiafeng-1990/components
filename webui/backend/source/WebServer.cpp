@@ -149,14 +149,18 @@ std::string execCommand(const char* cmd) {
     return result;
 }
 
+std::string execCommandWithTimeout(const char* cmd, int timeout_sec) {
+    std::ostringstream wrapped;
+    wrapped << "timeout " << timeout_sec << " bash -lc '" << cmd << "' 2>/dev/null";
+    return execCommand(wrapped.str().c_str());
+}
+
 json parseCpuUsage() {
-    // /proc/stat: cpu user nice system idle iowait irq softirq steal guest guest_nice
     std::ifstream stat("/proc/stat");
-    if (!stat.is_open()) return {{"usage_percent", 0}};
+    if (!stat.is_open()) return {{"usage_percent", 0}, {"cores", 0}, {"per_core", json::array()}};
 
     std::string line;
     std::getline(stat, line);
-    // cpu  user nice sys idle iowait irq softirq ...
     std::istringstream iss(line);
     std::string cpu_label;
     long long user, nice, sys, idle, iowait, irq, softirq, steal;
@@ -164,7 +168,6 @@ json parseCpuUsage() {
     long long total = user + nice + sys + idle + iowait + irq + softirq + steal;
     long long busy = total - idle - iowait;
 
-    // 为了计算瞬时 CPU 使用率，需要两次采样
     static long long prev_total = 0, prev_busy = 0;
     double usage = 0.0;
     if (prev_total > 0) {
@@ -175,8 +178,9 @@ json parseCpuUsage() {
     prev_total = total;
     prev_busy = busy;
 
-    // 每核使用率
+    static std::vector<std::pair<long long, long long>> prev_cores;
     json per_core = json::array();
+    int core_idx = 0;
     while (std::getline(stat, line)) {
         if (line.substr(0, 3) != "cpu") break;
         std::istringstream iss2(line);
@@ -185,13 +189,28 @@ json parseCpuUsage() {
         iss2 >> core_label >> cu >> cn >> cs >> ci >> cw >> cr >> cso >> cst;
         long long ct = cu + cn + cs + ci + cw + cr + cso + cst;
         long long cb = ct - ci - cw;
-        (void)cb; (void)ct;
-        per_core.push_back(core_label);
+
+        double core_usage = 0.0;
+        if (core_idx < static_cast<int>(prev_cores.size())) {
+            long long dct = ct - prev_cores[core_idx].first;
+            long long dcb = cb - prev_cores[core_idx].second;
+            if (dct > 0) core_usage = 100.0 * dcb / dct;
+            prev_cores[core_idx] = {ct, cb};
+        } else {
+            prev_cores.push_back({ct, cb});
+        }
+
+        per_core.push_back({
+            {"core", core_idx},
+            {"usage_percent", std::round(core_usage * 100) / 100}
+        });
+        core_idx++;
     }
 
     return {
         {"usage_percent", std::round(usage * 100) / 100},
-        {"cores", per_core.size()}
+        {"cores", per_core.size()},
+        {"per_core", per_core}
     };
 }
 
@@ -289,8 +308,8 @@ json parseNetworkInfo() {
 }
 
 json parseNpuUsage() {
-    // tps-smi 输出包含 NPU 使用率
-    std::string raw = execCommand("tps-smi 2>/dev/null");
+    // tps-smi 在部分板子上会进入交互界面，必须限制超时
+    std::string raw = execCommandWithTimeout("tps-smi", 1);
     json result = {
         {"available", !raw.empty()},
         {"raw_output", raw},
@@ -322,8 +341,8 @@ json parseNpuUsage() {
 }
 
 json parseCodecPerformance() {
-    // 从 tps-smi 或其他方式获取编解码性能信息
-    std::string codec_info = execCommand("tps-smi --codec 2>/dev/null");
+    // 优先走 /sys，tps-smi --codec 只做补充且需要超时保护
+    std::string codec_info = execCommandWithTimeout("tps-smi --codec", 1);
     json result = {
         {"decode", json::object()},
         {"encode", json::object()},
@@ -341,6 +360,398 @@ json parseCodecPerformance() {
         try { result["encode"]["fps"] = std::stod(enc_fps); } catch (...) {}
     }
 
+    return result;
+}
+
+std::string readFileAll(const std::string& path) {
+    std::ifstream f(path);
+    if (!f.is_open()) return "";
+    return std::string((std::istreambuf_iterator<char>(f)),
+                        std::istreambuf_iterator<char>());
+}
+
+std::string trimStr(const std::string& s) {
+    std::string r = s;
+    while (!r.empty() && (r.back() == '\n' || r.back() == '\r' || r.back() == ' ' || r.back() == '\0'))
+        r.pop_back();
+    while (!r.empty() && (r.front() == ' ' || r.front() == '\t'))
+        r.erase(r.begin());
+    return r;
+}
+
+json parseCpuInfoDetailed() {
+    json processors = json::array();
+    std::ifstream cpuinfo("/proc/cpuinfo");
+    if (!cpuinfo.is_open()) return {{"processors", processors}, {"count", 0}};
+
+    json proc = json::object();
+    std::string line;
+    while (std::getline(cpuinfo, line)) {
+        if (line.empty()) {
+            if (!proc.empty()) {
+                processors.push_back(proc);
+                proc = json::object();
+            }
+            continue;
+        }
+        auto colon = line.find(':');
+        if (colon == std::string::npos) continue;
+        std::string key = trimStr(line.substr(0, colon));
+        std::string val = trimStr(colon + 1 < line.size() ? line.substr(colon + 1) : "");
+        proc[key] = val;
+    }
+    if (!proc.empty()) processors.push_back(proc);
+
+    std::string freq = execCommand("cat /sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_cur_freq 2>/dev/null");
+    std::string max_freq = execCommand("cat /sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq 2>/dev/null");
+    std::string min_freq = execCommand("cat /sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_min_freq 2>/dev/null");
+
+    std::string dt = execCommand(
+        "if [ -d /sys/firmware/devicetree/base/cpus ]; then "
+        "for d in /sys/firmware/devicetree/base/cpus/cpu@*/; do "
+        "echo \"--- $(basename $d) ---\"; "
+        "[ -f $d/compatible ] && echo \"compatible: $(cat $d/compatible 2>/dev/null)\"; "
+        "[ -f $d/status ] && echo \"status: $(cat $d/status 2>/dev/null)\"; "
+        "[ -f \"$d/riscv,isa\" ] && echo \"isa: $(cat \"$d/riscv,isa\" 2>/dev/null)\"; "
+        "done; fi 2>/dev/null");
+    if (dt.empty()) {
+        std::string dtb = execCommand("ls /boot/firmware/*.dtb 2>/dev/null | head -1");
+        if (!dtb.empty())
+            dt = execCommand(("dtc -I dtb -O dts " + dtb + " 2>/dev/null | grep -A10 'cpus {' | head -30").c_str());
+    }
+
+    return {
+        {"processors", processors},
+        {"count", processors.size()},
+        {"cur_freq_khz", freq},
+        {"max_freq_khz", max_freq},
+        {"min_freq_khz", min_freq},
+        {"device_tree", dt}
+    };
+}
+
+json parseMemInfoDetailed() {
+    json fields = json::array();
+    std::ifstream meminfo("/proc/meminfo");
+    if (!meminfo.is_open()) return {{"fields", fields}};
+
+    std::string line;
+    while (std::getline(meminfo, line)) {
+        std::istringstream iss(line);
+        std::string key;
+        long long val = 0;
+        std::string unit;
+        iss >> key >> val >> unit;
+        if (!key.empty() && key.back() == ':') key.pop_back();
+        fields.push_back({{"name", key}, {"value", val}, {"unit", unit.empty() ? "" : unit}});
+    }
+
+    std::string swap = execCommand("swapon --show 2>/dev/null");
+    std::string dt_mem = execCommand(
+        "cat /sys/firmware/devicetree/base/memory*/device_type 2>/dev/null; "
+        "echo; cat /sys/firmware/devicetree/base/memory*/reg 2>/dev/null | xxd 2>/dev/null | head -5");
+
+    return {{"fields", fields}, {"swap", swap}, {"device_tree", dt_mem}};
+}
+
+json parseHwModule(const std::string& module) {
+    json result = json::object();
+
+    if (module == "npu") {
+        result["tps_smi"] = execCommand("tps-smi 2>/dev/null");
+        result["devices"] = execCommand("ls -la /dev/npu* /dev/accel* 2>/dev/null");
+        result["driver"] = execCommand(
+            "ls -la /sys/class/misc/npu* 2>/dev/null; "
+            "cat /sys/class/misc/npu*/uevent 2>/dev/null; "
+            "cat /sys/class/accel/*/device/uevent 2>/dev/null");
+        result["device_tree"] = execCommand(
+            "for f in /sys/firmware/devicetree/base/soc/npu*/compatible "
+            "/sys/firmware/devicetree/base/soc/*npu*/compatible "
+            "/sys/firmware/devicetree/base/npu*/compatible; do "
+            "[ -f \"$f\" ] && echo \"$(dirname $f): $(cat $f 2>/dev/null)\"; done 2>/dev/null");
+        if (result["device_tree"].get<std::string>().empty())
+            result["device_tree"] = execCommand(
+                "grep -rl 'npu' /sys/firmware/devicetree/base/soc/*/compatible 2>/dev/null | "
+                "while read f; do echo \"$(dirname $f): $(cat $f)\"; done 2>/dev/null");
+    }
+    else if (module == "encoder") {
+        result["vpu_info"] = execCommand(
+            "ls -la /sys/class/vpu/ 2>/dev/null; "
+            "for f in /sys/class/vpu/*/encode_fps; do [ -f \"$f\" ] && echo \"$f: $(cat $f)\"; done 2>/dev/null");
+        result["devices"] = execCommand("ls -la /dev/vpu* /dev/video* /dev/hantro* 2>/dev/null");
+        result["v4l2"] = execCommand("v4l2-ctl --list-devices 2>/dev/null");
+        result["driver"] = execCommand(
+            "for f in /sys/class/vpu/*/uevent; do [ -f \"$f\" ] && echo \"--- $f ---\" && cat $f; done 2>/dev/null; "
+            "for f in /sys/class/video4linux/*/name; do [ -f \"$f\" ] && echo \"$(dirname $f): $(cat $f)\"; done 2>/dev/null");
+        result["device_tree"] = execCommand(
+            "for f in /sys/firmware/devicetree/base/soc/*enc*/compatible "
+            "/sys/firmware/devicetree/base/soc/*vpu*/compatible "
+            "/sys/firmware/devicetree/base/soc/*hantro*/compatible; do "
+            "[ -f \"$f\" ] && echo \"$(dirname $f): $(cat $f 2>/dev/null)\"; done 2>/dev/null");
+    }
+    else if (module == "decoder") {
+        result["vpu_info"] = execCommand(
+            "ls -la /sys/class/vpu/ 2>/dev/null; "
+            "for f in /sys/class/vpu/*/decode_fps; do [ -f \"$f\" ] && echo \"$f: $(cat $f)\"; done 2>/dev/null");
+        result["devices"] = execCommand("ls -la /dev/vpu* /dev/video* /dev/hantro* 2>/dev/null");
+        result["v4l2"] = execCommand("v4l2-ctl --list-devices 2>/dev/null");
+        result["driver"] = execCommand(
+            "for f in /sys/class/vpu/*/uevent; do [ -f \"$f\" ] && echo \"--- $f ---\" && cat $f; done 2>/dev/null; "
+            "for f in /sys/class/video4linux/*/name; do [ -f \"$f\" ] && echo \"$(dirname $f): $(cat $f)\"; done 2>/dev/null");
+        result["device_tree"] = execCommand(
+            "for f in /sys/firmware/devicetree/base/soc/*dec*/compatible "
+            "/sys/firmware/devicetree/base/soc/*vpu*/compatible; do "
+            "[ -f \"$f\" ] && echo \"$(dirname $f): $(cat $f 2>/dev/null)\"; done 2>/dev/null");
+    }
+    else if (module == "pp") {
+        result["devices"] = execCommand(
+            "ls -la /dev/*pp* /sys/class/vpu/*pp* 2>/dev/null; "
+            "ls -la /dev/hantro* 2>/dev/null");
+        result["driver"] = execCommand(
+            "for f in /sys/class/vpu/*pp*/uevent; do [ -f \"$f\" ] && echo \"--- $f ---\" && cat $f; done 2>/dev/null");
+        result["device_tree"] = execCommand(
+            "for f in /sys/firmware/devicetree/base/soc/*pp*/compatible "
+            "/sys/firmware/devicetree/base/soc/*post*/compatible; do "
+            "[ -f \"$f\" ] && echo \"$(dirname $f): $(cat $f 2>/dev/null)\"; done 2>/dev/null");
+    }
+
+    if (result.contains("device_tree") && result["device_tree"].is_string()
+        && result["device_tree"].get<std::string>().empty()) {
+        std::string dtb = execCommand("ls /boot/firmware/*.dtb 2>/dev/null | head -1");
+        if (!dtb.empty())
+            result["device_tree_from_dtb"] = execCommand(
+                ("dtc -I dtb -O dts " + dtb + " 2>/dev/null | grep -A8 '" + module + "' | head -40").c_str());
+    }
+
+    return result;
+}
+
+json parseClockInfoDetailed() {
+    json result = json::object();
+
+    std::string clk_summary = execCommand("cat /sys/kernel/debug/clk/clk_summary 2>/dev/null");
+    result["clk_summary"] = clk_summary;
+
+    json clocks = json::array();
+    std::string clk_list = execCommand(
+        "if [ -d /sys/kernel/debug/clk ]; then "
+        "for d in /sys/kernel/debug/clk/*/; do "
+        "name=$(basename \"$d\"); "
+        "rate=$(cat \"$d/clk_rate\" 2>/dev/null); "
+        "enable=$(cat \"$d/clk_enable_count\" 2>/dev/null); "
+        "[ -n \"$rate\" ] && echo \"$name|$rate|$enable\"; "
+        "done; fi 2>/dev/null");
+
+    if (!clk_list.empty()) {
+        std::istringstream iss(clk_list);
+        std::string line;
+        while (std::getline(iss, line)) {
+            auto p1 = line.find('|');
+            if (p1 == std::string::npos) continue;
+            auto p2 = line.find('|', p1 + 1);
+            json clk = json::object();
+            clk["name"] = line.substr(0, p1);
+            clk["rate"] = (p2 != std::string::npos) ? line.substr(p1 + 1, p2 - p1 - 1) : line.substr(p1 + 1);
+            clk["enable_count"] = (p2 != std::string::npos) ? line.substr(p2 + 1) : "";
+            clocks.push_back(clk);
+        }
+    }
+    result["clocks"] = clocks;
+
+    return result;
+}
+
+json parseInterruptInfoDetailed() {
+    json result = json::object();
+    std::string raw = readFileAll("/proc/interrupts");
+    result["raw"] = raw;
+
+    json headers = json::array();
+    json interrupts = json::array();
+    std::istringstream iss(raw);
+    std::string line;
+
+    if (std::getline(iss, line)) {
+        std::istringstream hss(line);
+        std::string h;
+        while (hss >> h) headers.push_back(h);
+    }
+    result["cpu_headers"] = headers;
+
+    while (std::getline(iss, line)) {
+        if (line.empty()) continue;
+        json entry = json::object();
+        std::istringstream lss(line);
+        std::string irq_name;
+        lss >> irq_name;
+        if (!irq_name.empty() && irq_name.back() == ':') irq_name.pop_back();
+        entry["irq"] = irq_name;
+
+        json counts = json::array();
+        for (size_t i = 0; i < headers.size(); ++i) {
+            long long count = 0;
+            if (lss >> count) counts.push_back(count);
+            else break;
+        }
+        entry["counts"] = counts;
+
+        std::string rest;
+        std::getline(lss, rest);
+        entry["description"] = trimStr(rest);
+        interrupts.push_back(entry);
+    }
+    result["interrupts"] = interrupts;
+    return result;
+}
+
+json parseGpioInfoDetailed() {
+    json result = json::object();
+    result["debug_output"] = execCommand("cat /sys/kernel/debug/gpio 2>/dev/null");
+
+    json chips = json::array();
+    std::string chip_list = execCommand("ls -d /sys/class/gpio/gpiochip* 2>/dev/null");
+    if (!chip_list.empty()) {
+        std::istringstream iss(chip_list);
+        std::string chip_path;
+        while (std::getline(iss, chip_path)) {
+            chip_path = trimStr(chip_path);
+            if (chip_path.empty()) continue;
+            json chip = json::object();
+            chip["path"] = chip_path;
+            chip["label"] = trimStr(readFileAll(chip_path + "/label"));
+            chip["base"] = trimStr(readFileAll(chip_path + "/base"));
+            chip["ngpio"] = trimStr(readFileAll(chip_path + "/ngpio"));
+            chips.push_back(chip);
+        }
+    }
+    result["chips"] = chips;
+    result["gpioinfo"] = execCommand("gpioinfo 2>/dev/null | head -300");
+
+    result["device_tree"] = execCommand(
+        "for f in /sys/firmware/devicetree/base/soc/*gpio*/compatible "
+        "/sys/firmware/devicetree/base/soc/*pinctrl*/compatible; do "
+        "[ -f \"$f\" ] && echo \"$(dirname $f): $(cat $f 2>/dev/null)\"; done 2>/dev/null");
+    if (result["device_tree"].get<std::string>().empty()) {
+        std::string dtb = execCommand("ls /boot/firmware/*.dtb 2>/dev/null | head -1");
+        if (!dtb.empty())
+            result["device_tree"] = execCommand(
+                ("dtc -I dtb -O dts " + dtb + " 2>/dev/null | grep -B2 -A5 'gpio' | head -60").c_str());
+    }
+
+    return result;
+}
+
+json parseDebPackages() {
+    json result = json::object();
+
+    result["sources"] = execCommand(
+        "cat /etc/apt/sources.list 2>/dev/null; "
+        "echo '---'; "
+        "cat /etc/apt/sources.list.d/*.list 2>/dev/null");
+
+    std::string installed_raw = execCommand(
+        "dpkg-query -W -f '${Package}\\t${Version}\\t${Architecture}\\t${db:Status-Status}\\t${binary:Summary}\\n' 2>/dev/null");
+
+    json packages = json::object();
+    std::istringstream iss(installed_raw);
+    std::string line;
+    while (std::getline(iss, line)) {
+        if (line.empty()) continue;
+        std::string pkg, ver, arch, status, desc;
+        std::istringstream lss(line);
+        std::getline(lss, pkg, '\t');
+        std::getline(lss, ver, '\t');
+        std::getline(lss, arch, '\t');
+        std::getline(lss, status, '\t');
+        std::getline(lss, desc);
+
+        if (!packages.contains(pkg)) {
+            packages[pkg] = json::object();
+            packages[pkg]["versions"] = json::array();
+            packages[pkg]["description"] = desc;
+            packages[pkg]["arch"] = arch;
+        }
+        packages[pkg]["versions"].push_back({
+            {"version", ver},
+            {"status", status}
+        });
+    }
+
+    std::string apt_avail = execCommand(
+        "apt list --all-versions 2>/dev/null | tail -n +2");
+    if (!apt_avail.empty()) {
+        std::istringstream aiss(apt_avail);
+        while (std::getline(aiss, line)) {
+            if (line.empty()) continue;
+            auto slash = line.find('/');
+            if (slash == std::string::npos) continue;
+            std::string pkg = line.substr(0, slash);
+
+            auto space = line.find(' ', slash);
+            if (space == std::string::npos) continue;
+            std::string rest = line.substr(space + 1);
+            auto sp2 = rest.find(' ');
+            std::string ver = rest.substr(0, sp2);
+            bool is_installed = (line.find("[installed") != std::string::npos);
+
+            if (!packages.contains(pkg)) {
+                packages[pkg] = json::object();
+                packages[pkg]["versions"] = json::array();
+                packages[pkg]["description"] = "";
+                packages[pkg]["arch"] = "";
+            }
+
+            bool exists = false;
+            for (auto& v : packages[pkg]["versions"]) {
+                if (v["version"] == ver) { exists = true; break; }
+            }
+            if (!exists) {
+                packages[pkg]["versions"].push_back({
+                    {"version", ver},
+                    {"status", is_installed ? "installed" : "available"}
+                });
+            }
+        }
+    }
+
+    result["packages"] = packages;
+    return result;
+}
+
+json parseFilesystemInfo() {
+    json result = json::object();
+
+    // structured df output for charts
+    json partitions = json::array();
+    std::string df_raw = execCommand("df -BM --output=source,size,used,avail,pcent,target 2>/dev/null");
+    {
+        std::istringstream ss(df_raw);
+        std::string line;
+        std::getline(ss, line); // skip header
+        while (std::getline(ss, line)) {
+            if (line.empty()) continue;
+            std::istringstream ls(line);
+            std::string dev, sizeS, usedS, availS, pctS, mount;
+            ls >> dev >> sizeS >> usedS >> availS >> pctS;
+            std::getline(ls, mount);
+            while (!mount.empty() && mount[0] == ' ') mount.erase(mount.begin());
+            if (dev.find("/dev/") != 0 && dev != "tmpfs" && dev != "overlay") continue;
+            auto toMB = [](const std::string& s) -> long long {
+                std::string n;
+                for (char c : s) { if (c >= '0' && c <= '9') n += c; }
+                return n.empty() ? 0 : std::stoll(n);
+            };
+            int pct = 0;
+            for (char c : pctS) { if (c >= '0' && c <= '9') pct = pct * 10 + (c - '0'); }
+            partitions.push_back({
+                {"device", dev}, {"mount", mount},
+                {"size_mb", toMB(sizeS)}, {"used_mb", toMB(usedS)},
+                {"avail_mb", toMB(availS)}, {"percent", pct}
+            });
+        }
+    }
+    result["partitions"] = partitions;
+    result["lsblk"] = execCommand("lsblk -o NAME,SIZE,TYPE,MOUNTPOINT,FSTYPE 2>/dev/null");
     return result;
 }
 
@@ -403,6 +814,171 @@ void WebServer::registerSystemRoutes() {
             {"network", parseNetworkInfo()},
             {"codec", parseCodecPerformance()}
         };
+
+        auto r = ApiResponse::ok(data);
+        res.set_content(r.toJson().dump(), "application/json");
+    });
+
+    // ---- 详细 CPU 信息 ----
+    server_->Get("/api/system/cpu", [](const httplib::Request&, httplib::Response& res) {
+        auto r = ApiResponse::ok(parseCpuInfoDetailed());
+        res.set_content(r.toJson().dump(), "application/json");
+    });
+
+    // ---- 详细内存信息 ----
+    server_->Get("/api/system/memory", [](const httplib::Request&, httplib::Response& res) {
+        auto r = ApiResponse::ok(parseMemInfoDetailed());
+        res.set_content(r.toJson().dump(), "application/json");
+    });
+
+    // ---- 硬件模块信息 (NPU / encoder / decoder / PP) ----
+    server_->Get(R"(/api/system/hw/([^/]+))", [](const httplib::Request& req, httplib::Response& res) {
+        std::string module = req.matches[1];
+        if (module != "npu" && module != "encoder" && module != "decoder" && module != "pp") {
+            auto r = ApiResponse::error(ErrorCode::PARAM_ERROR, "未知模块: " + module);
+            res.status = 400;
+            res.set_content(r.toJson().dump(), "application/json");
+            return;
+        }
+        auto r = ApiResponse::ok(parseHwModule(module));
+        res.set_content(r.toJson().dump(), "application/json");
+    });
+
+    // ---- 时钟信息 ----
+    server_->Get("/api/system/clocks", [](const httplib::Request&, httplib::Response& res) {
+        auto r = ApiResponse::ok(parseClockInfoDetailed());
+        res.set_content(r.toJson().dump(), "application/json");
+    });
+
+    // ---- 中断信息 ----
+    server_->Get("/api/system/interrupts", [](const httplib::Request&, httplib::Response& res) {
+        auto r = ApiResponse::ok(parseInterruptInfoDetailed());
+        res.set_content(r.toJson().dump(), "application/json");
+    });
+
+    // ---- GPIO 信息 ----
+    server_->Get("/api/system/gpio", [](const httplib::Request&, httplib::Response& res) {
+        auto r = ApiResponse::ok(parseGpioInfoDetailed());
+        res.set_content(r.toJson().dump(), "application/json");
+    });
+
+    // ---- DEB 包列表 ----
+    server_->Get("/api/system/debs", [](const httplib::Request&, httplib::Response& res) {
+        auto r = ApiResponse::ok(parseDebPackages());
+        res.set_content(r.toJson().dump(), "application/json");
+    });
+
+    // ---- 安装 DEB 包 ----
+    server_->Post("/api/system/deb/install", [](const httplib::Request& req, httplib::Response& res) {
+        try {
+            auto body = json::parse(req.body);
+            std::string pkg = body.value("package", "");
+            std::string ver = body.value("version", "");
+            if (pkg.empty()) {
+                res.status = 400;
+                auto r = ApiResponse::error(ErrorCode::PARAM_ERROR, "package 参数必填");
+                res.set_content(r.toJson().dump(), "application/json");
+                return;
+            }
+
+            std::string cmd = "apt-get install -y " + pkg;
+            if (!ver.empty()) cmd += "=" + ver;
+            cmd += " 2>&1";
+            std::string output = execCommand(cmd.c_str());
+
+            std::string check = execCommand(
+                ("dpkg -s " + pkg + " 2>/dev/null | grep '^Status'").c_str());
+            bool success = check.find("install ok installed") != std::string::npos;
+
+            if (success) {
+                auto r = ApiResponse::ok({{"output", output}}, "安装成功");
+                res.set_content(r.toJson().dump(), "application/json");
+            } else {
+                auto r = ApiResponse::error(ErrorCode::INTERNAL_ERROR, "安装失败: " + output);
+                res.set_content(r.toJson().dump(), "application/json");
+            }
+        } catch (const json::parse_error&) {
+            res.status = 400;
+            auto r = ApiResponse::error(ErrorCode::PARAM_ERROR, "JSON 解析失败");
+            res.set_content(r.toJson().dump(), "application/json");
+        }
+    });
+
+    // ---- 文件系统信息 ----
+    server_->Get("/api/system/filesystem", [](const httplib::Request&, httplib::Response& res) {
+        auto r = ApiResponse::ok(parseFilesystemInfo());
+        res.set_content(r.toJson().dump(), "application/json");
+    });
+
+    // ---- 厂商 APT 数据源 ----
+    server_->Get("/api/system/apt-source", [](const httplib::Request&, httplib::Response& res) {
+        std::string content = execCommand("cat /etc/apt/sources.list 2>/dev/null");
+        if (content.empty()) {
+            content = "deb http://172.16.1.193:6520/ubuntu noble main\n"
+                      "deb https://mirrors.aliyun.com/ubuntu-ports noble main universe";
+        }
+        auto r = ApiResponse::ok({{"source", content}});
+        res.set_content(r.toJson().dump(), "application/json");
+    });
+
+    server_->Post("/api/system/apt-source", [](const httplib::Request& req, httplib::Response& res) {
+        try {
+            auto body = json::parse(req.body);
+            std::string source = body.value("source", "");
+            if (source.empty()) {
+                res.status = 400;
+                auto r = ApiResponse::error(ErrorCode::PARAM_ERROR, "source 参数必填");
+                res.set_content(r.toJson().dump(), "application/json");
+                return;
+            }
+
+            std::ofstream f("/etc/apt/sources.list");
+            if (!f.is_open()) {
+                auto r2 = ApiResponse::error(ErrorCode::PARAM_ERROR, "无法写入 /etc/apt/sources.list，请检查权限");
+                res.set_content(r2.toJson().dump(), "application/json");
+                return;
+            }
+            f << source << std::endl;
+            f.close();
+
+            std::string output = execCommand("apt-get update 2>&1");
+
+            json pkgs = parseDebPackages();
+
+            auto r = ApiResponse::ok({{"output", output}, {"packages", pkgs["packages"]}}, "数据源已更新，已获取可用包列表");
+            res.set_content(r.toJson().dump(), "application/json");
+        } catch (const json::parse_error&) {
+            res.status = 400;
+            auto r = ApiResponse::error(ErrorCode::PARAM_ERROR, "JSON 解析失败");
+            res.set_content(r.toJson().dump(), "application/json");
+        }
+    });
+
+    // ---- DMA / CMA 内存池 ----
+    server_->Get("/api/system/dma-memory", [](const httplib::Request&, httplib::Response& res) {
+        json data = json::object();
+
+        data["cma_total"] = execCommand("grep CmaTotal /proc/meminfo 2>/dev/null | awk '{print $2}'");
+        data["cma_free"] = execCommand("grep CmaFree /proc/meminfo 2>/dev/null | awk '{print $2}'");
+        data["dma_buf"] = execCommand("cat /sys/kernel/debug/dma_buf/bufinfo 2>/dev/null | head -60");
+
+        data["umap_list"] = execCommand("ls /proc/umap/ 2>/dev/null");
+        data["umap_media_mem"] = execCommand("cat /proc/umap/media-mem 2>/dev/null | head -40");
+
+        std::string smi = execCommand("tps-smi 2>/dev/null");
+        std::string mem_lines;
+        std::istringstream iss(smi);
+        std::string line;
+        while (std::getline(iss, line)) {
+            std::string lower = line;
+            std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+            if (lower.find("mem") != std::string::npos ||
+                lower.find("dma") != std::string::npos ||
+                lower.find("pool") != std::string::npos) {
+                mem_lines += line + "\n";
+            }
+        }
+        data["tps_smi_memory"] = mem_lines;
 
         auto r = ApiResponse::ok(data);
         res.set_content(r.toJson().dump(), "application/json");

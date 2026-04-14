@@ -5,7 +5,7 @@ DecoderVendorRegistry& DecoderVendorRegistry::instance() {
     return registry;
 }
 
-void DecoderVendorRegistry::registerFactory(std::string kind, Factory f) {
+void DecoderVendorRegistry::registerVendor(std::string kind, Vendor f) {
     std::lock_guard<std::mutex> lock(mu_);
     factories_[std::move(kind)] = std::move(f);
 }

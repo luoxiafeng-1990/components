@@ -20,6 +20,7 @@ libcomponents_la_SOURCES = \
     source/vendor/contracts/DecoderVendorRegistry.cpp \
     source/vendor/taco/decode/TacoDecoderExtension.cpp \
     source/vendor/taco/decode/TacoDecoderPluginLoader.cpp \
+    source/vendor/taco/decode/TacoConfigBuilder.cpp \
     source/productionline/worker/FFmpegDecodeWorker.cpp \
     source/productionline/worker/FfmpegPacketRecorderWorker.cpp \
     source/productionline/worker/FFmpegEncodeWorker.cpp \

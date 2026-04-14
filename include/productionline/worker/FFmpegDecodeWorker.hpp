@@ -324,28 +324,6 @@ private:
      */
     virtual bool extractHardwareAddressFromMetadata(struct AVFrame* frame, Buffer* buffer) override;
     
-    // ============ TACO 辅助函数（多通道支持）============
-    
-    /**
-     * @brief TACO 专用：从 codec priv_data 读取通道配置并计算字节数
-     * @param channel 通道编号
-     * @return 每像素字节数，0.0 表示通道未启用
-     */
-    double getTacoChannelBytesPerPixel(int channel) const;
-    
-    /**
-     * @brief 将 TACO RGB 驱动值映射为 OutputFormat 枚举
-     * @param driver_value TACO 驱动格式值（如 9=ARGB888）
-     * @return OutputFormat 枚举值
-     */
-    static OutputFormat mapRgbDriverValueToEnum(int driver_value);
-    
-    /**
-     * @brief 从 OutputFormat 计算每像素字节数
-     * @param format OutputFormat 枚举值
-     * @return 每像素字节数
-     */
-    static double getBytesPerPixelFromFormat(OutputFormat format);
 };
 
 #endif // FFMPEG_DECODE_WORKER_HPP
