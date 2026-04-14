@@ -52,6 +52,13 @@ export interface DataSource {
   loop: boolean
   created_at: string
   status: string
+  /** RTSP 模式下保存的多地址候选列表 */
+  rtsp_urls?: string[]
+}
+
+export interface RtspProbeItem {
+  url: string
+  playable: boolean
 }
 
 export const datasourceApi = {
@@ -60,6 +67,17 @@ export const datasourceApi = {
   update: (id: string, ds: Partial<DataSource>) => api.put(`/datasources/${id}`, ds),
   remove: (id: string) => api.delete(`/datasources/${id}`),
   probe: (id: string) => api.get(`/datasources/${id}/probe`),
+  /**
+   * 顺序探测多路 RTSP（服务器端每路最多约 95s 墙钟 + 10s 解码意图，axios 超时按路数拉长）
+   */
+  probeRtspUrls: (urls: string[]) =>
+    slowApi.post<{ code: number; data: RtspProbeItem[] }>(
+      '/datasources/rtsp-probe',
+      { urls },
+      {
+        timeout: Math.max(120_000, urls.length * 100_000 + 30_000),
+      }
+    ),
   previewUrl: (id: string) => `/api/datasources/${id}/preview`,
 }
 

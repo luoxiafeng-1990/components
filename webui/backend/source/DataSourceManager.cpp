@@ -2,12 +2,58 @@
 #include "../include/ConfigStore.hpp"
 #include <atomic>
 #include <chrono>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
 #include <iomanip>
 #include <sstream>
-#include <random>
 #include <filesystem>
+#include <sys/wait.h>
 
 namespace webui {
+
+namespace {
+
+std::string shellSingleQuote(const std::string& s) {
+    std::string out = "'";
+    for (char c : s) {
+        if (c == '\'') {
+            out += "'\\''";
+        } else {
+            out += c;
+        }
+    }
+    out += '\'';
+    return out;
+}
+
+/// 约定：在 WebUI 所在主机上对 RTSP 视频轨连续解码若干秒（人文标准「能正常播一小段」）；TCP，出错即失败
+constexpr int kRtspDecodeProbeSeconds = 10;
+/// 单路探测墙钟上限（秒）：防止 RTSP 握手/读流挂起时 ffmpeg 永不退出，拖死 HTTP 请求
+constexpr int kRtspProbeWallSeconds = 95;
+
+bool ffmpegRtspDecodeProbe(const std::string& url) {
+    std::ostringstream oss;
+    // timeout：GNU coreutils，超时返回 124，避免 RTSP 握手/读流挂起时 ffmpeg 永不退出、拖死 HTTP
+    oss << "timeout -k 10 " << kRtspProbeWallSeconds
+        << " ffmpeg -nostdin -hide_banner -loglevel error "
+        << "-rtsp_transport tcp -stimeout 8000000 "
+        << "-i " << shellSingleQuote(url) << " "
+        << "-t " << kRtspDecodeProbeSeconds << " "
+        << "-map 0:v:0 -an -sn -xerror "
+        << "-f null - "
+        << ">/dev/null 2>&1";
+    int st = std::system(oss.str().c_str());
+    if (st == -1) {
+        return false;
+    }
+    if (!WIFEXITED(st)) {
+        return false;
+    }
+    return WEXITSTATUS(st) == 0;
+}
+
+} // namespace
 
 DataSourceManager::DataSourceManager(ConfigStore& store)
     : config_store_(store)
@@ -42,6 +88,14 @@ ApiResponse DataSourceManager::add(const json& body) {
     if (body.contains("buffer_count")) ds.buffer_count = body["buffer_count"].get<int>();
     if (body.contains("max_frames"))   ds.max_frames = body["max_frames"].get<int>();
     if (body.contains("loop"))         ds.loop = body["loop"].get<bool>();
+    if (body.contains("rtsp_urls") && body["rtsp_urls"].is_array()) {
+        ds.rtsp_urls.clear();
+        for (const auto& item : body["rtsp_urls"]) {
+            if (item.is_string()) {
+                ds.rtsp_urls.push_back(item.get<std::string>());
+            }
+        }
+    }
     ds.created_at = nowISO8601();
     ds.status = "idle";
 
@@ -85,6 +139,14 @@ ApiResponse DataSourceManager::update(const std::string& id, const json& body) {
     if (body.contains("buffer_count")) ds.buffer_count = body["buffer_count"].get<int>();
     if (body.contains("max_frames"))   ds.max_frames = body["max_frames"].get<int>();
     if (body.contains("loop"))         ds.loop = body["loop"].get<bool>();
+    if (body.contains("rtsp_urls") && body["rtsp_urls"].is_array()) {
+        ds.rtsp_urls.clear();
+        for (const auto& item : body["rtsp_urls"]) {
+            if (item.is_string()) {
+                ds.rtsp_urls.push_back(item.get<std::string>());
+            }
+        }
+    }
 
     json arr = json::array();
     for (auto& [_, d] : datasources_) arr.push_back(d);
@@ -130,6 +192,23 @@ ApiResponse DataSourceManager::probe(const std::string& id) const {
     result.duration_seconds = -1.0;
 
     return ApiResponse::ok(json(result));
+}
+
+ApiResponse DataSourceManager::probeRtspUrls(const json& body) const {
+    if (!body.contains("urls") || !body["urls"].is_array()) {
+        return ApiResponse::error(ErrorCode::PARAM_ERROR, "必须提供 urls 数组");
+    }
+    json results = json::array();
+    for (const auto& u : body["urls"]) {
+        if (!u.is_string()) {
+            continue;
+        }
+        std::string url = u.get<std::string>();
+        // 顺序探测，避免多路同时连接占用设备连接数
+        bool playable = ffmpegRtspDecodeProbe(url);
+        results.push_back({{"url", url}, {"playable", playable}});
+    }
+    return ApiResponse::ok(results);
 }
 
 std::optional<DataSourceInfo> DataSourceManager::get(const std::string& id) const {

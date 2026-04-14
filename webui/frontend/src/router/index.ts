@@ -14,8 +14,17 @@ const router = createRouter({
     },
     {
       path: '/datasources',
-      name: 'DataSources',
+      redirect: '/datasources/add',
+    },
+    {
+      path: '/datasources/add',
+      name: 'DataSourcesAdd',
       component: () => import('../views/DataSourceView.vue'),
+    },
+    {
+      path: '/datasources/rtsp-verify',
+      name: 'DataSourcesRtspVerify',
+      component: () => import('../views/RtspVerifyView.vue'),
     },
     {
       path: '/workers',

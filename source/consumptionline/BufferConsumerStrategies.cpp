@@ -1544,9 +1544,9 @@ bool JpegEncodeConsumer::initialize(const std::vector<Buffer*>& first_buffers) {
 
         if (encode_pipeline_->start(enc_config)) {
             // 关联编码输入 pool
-            auto facade = encode_pipeline_->getWorkerFacade();
-            if (facade) {
-                facade->setSourceBufferPool(
+            auto worker = encode_pipeline_->getWorker();
+            if (worker) {
+                worker->setSourceBufferPool(
                     BufferPoolRegistry::getInstance().getPool(input_pool_id_));
             }
 

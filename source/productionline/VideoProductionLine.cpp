@@ -1,4 +1,5 @@
 #include "productionline/VideoProductionLine.hpp"
+#include "productionline/worker/BufferFillingWorkerFactory.hpp"
 #include "vendor/contracts/DecoderConfigValidate.hpp"
 #include "buffer/bufferpool/BufferPoolRegistry.hpp"
 #include "common/Logger.hpp"
@@ -14,7 +15,7 @@
 VideoProductionLine::VideoProductionLine(bool loop, int thread_count, bool enable_monitor)
     : working_buffer_pool_id_(0)
     , working_buffer_pool_weak_()
-    , worker_facade_sptr_(nullptr)
+    , worker_sptr_(nullptr)
     , threads_()
     , running_(false)
     , active_threads_(0)
@@ -94,26 +95,26 @@ bool VideoProductionLine::start(const WorkerConfig& worker_config) {
     // ⭐ 初始化全局线程池（从配置读取）
     initializeGlobalThreadPool(worker_config.global.thread_pool_size);
     
-    // 创建共享的 BufferFillingWorkerFacade 对象（v2.2：只传入完整配置）
-    worker_facade_sptr_ = std::make_shared<BufferFillingWorkerFacade>(worker_config);
+    // 通过 Factory 创建 Worker（自动注册到 WorkerRegistry）
+    worker_sptr_ = BufferFillingWorkerFactory::create(worker_config);
     LOG4CPLUS_INFO(logger_, "启动Worker...");
     
     // v2.2：简化的 open 接口（所有参数从 config 获取）
-    if (!worker_facade_sptr_->open()) {
+    if (!worker_sptr_->open()) {
         setError(std::string("Failed to open data source: ") + worker_config.data_source.path);
-        worker_facade_sptr_.reset();
+        worker_sptr_.reset();
         return false;
     }
     
     // v2.0: Worker必须在open()时自动创建BufferPool（通过调用Allocator）
     // v2.3: 从 Worker 获取它的主要 BufferPool 类型
-    BufferPoolType primary_type = worker_facade_sptr_->getPrimaryBufferPoolType();
+    BufferPoolType primary_type = worker_sptr_->getPrimaryBufferPoolType();
     
     // 使用主要类型获取 BufferPool ID
-    uint64_t worker_pool_id = worker_facade_sptr_->getOutputBufferPoolId(primary_type);
+    uint64_t worker_pool_id = worker_sptr_->getOutputBufferPoolId(primary_type);
     if (worker_pool_id == 0) {
         setError("Worker failed to create primary BufferPool");
-        worker_facade_sptr_.reset();
+        worker_sptr_.reset();
         return false;
     }
     
@@ -125,18 +126,18 @@ bool VideoProductionLine::start(const WorkerConfig& worker_config) {
     auto pool_sptr = working_buffer_pool_weak_.lock();
     if (!pool_sptr) {
         setError("Failed to get BufferPool from Registry");
-        worker_facade_sptr_.reset();
+        worker_sptr_.reset();
         return false;
     }
     
     LOG4CPLUS_INFO_FMT(logger_, "Using %s pool (ID: %lu)", 
                  bufferPoolTypeToString(primary_type), working_buffer_pool_id_);
     
-    total_frames_ = worker_facade_sptr_->getTotalFrames();
-    size_t frame_size = worker_facade_sptr_->getFrameSize();
+    total_frames_ = worker_sptr_->getTotalFrames();
+    size_t frame_size = worker_sptr_->getFrameSize();
     
-    LOG4CPLUS_INFO(logger_, "Worker已就绪: " << worker_facade_sptr_->getWorkerType());
-    LOG4CPLUS_INFO(logger_, "  - 分辨率: " << worker_facade_sptr_->getOutputWidth() << "x" << worker_facade_sptr_->getOutputHeight());
+    LOG4CPLUS_INFO(logger_, "Worker已就绪: " << worker_sptr_->getWorkerType());
+    LOG4CPLUS_INFO(logger_, "  - 分辨率: " << worker_sptr_->getOutputWidth() << "x" << worker_sptr_->getOutputHeight());
     LOG4CPLUS_INFO(logger_, "  - 总帧数: " << total_frames_);
     LOG4CPLUS_INFO(logger_, "  - 帧大小: " << (frame_size / (1024.0 * 1024.0)) << " MB");
     
@@ -175,7 +176,7 @@ bool VideoProductionLine::start(const WorkerConfig& worker_config) {
                 }
             }
             threads_.clear();
-            worker_facade_sptr_.reset();
+            worker_sptr_.reset();
             setError(std::string("Failed to start producer thread: ") + e.what());
             return false;
         }
@@ -328,7 +329,7 @@ void VideoProductionLine::producerThreadFunc(int thread_id) {
         // ── 步骤 2：填充 buffer（lambda 提供独立作用域，ScopedTiming 在 fillBuffer 返回后立即析构）──
         FillResult result = [&]() -> FillResult {
             ScopedTiming timing(monitor_.get(), "fill_buffer");
-            return worker_facade_sptr_->fillBuffer(thread_produced, buffer);
+            return worker_sptr_->fillBuffer(thread_produced, buffer);
         }();
 
         // ── 步骤 3：根据行动指令处理结果（switch 强制穷举所有 case）──
@@ -357,7 +358,7 @@ void VideoProductionLine::producerThreadFunc(int thread_id) {
                 // v2.36：用 isAtEnd()（权威）+  isEoFlush()（codec flush）两路联合判断干净退出
                 // isAtEnd() 覆盖：文件/流 EOF、Buffer pool 停止（含 window 期内的错误路径）
                 // isEoFlush() 覆盖：codec 内部 flush pipeline 清空
-                if (result.isEoFlush() || worker_facade_sptr_->isAtEnd()) {
+                if (result.isEoFlush() || worker_sptr_->isAtEnd()) {
                     if (!loop_) {
                         // 非循环模式：正常结束
                         LOG4CPLUS_DEBUG_FMT(logger_,
@@ -369,7 +370,7 @@ void VideoProductionLine::producerThreadFunc(int thread_id) {
                     LOG4CPLUS_DEBUG_FMT(logger_,
                         "[Thread #%d] data source exhausted in loop mode, seeking to begin (produced=%d)",
                         thread_id, thread_produced);
-                    if (worker_facade_sptr_->seekToBegin()) {
+                    if (worker_sptr_->seekToBegin()) {
                         consecutive_failures = 0;
                         break;  // seekToBegin 成功，继续循环
                     }

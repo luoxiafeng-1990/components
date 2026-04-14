@@ -1,7 +1,7 @@
 #pragma once
 
 #include "productionline/VideoProductionLine.hpp"
-#include "productionline/worker/BufferFillingWorkerFacade.hpp"
+#include "productionline/worker/WorkerBase.hpp"
 #include "productionline/worker/WorkerConfig.hpp"
 #include "productionline/WorkerSyncCoordinator.hpp"
 #include "buffer/bufferpool/BufferPool.hpp"
@@ -220,7 +220,7 @@ private:
         // 消费者信息
         struct ConsumerInfo {
             std::string consumer_name;
-            std::shared_ptr<BufferFillingWorkerFacade> worker;
+            std::shared_ptr<WorkerBase> worker;
             uint64_t buffer_pool_id{0};
             std::weak_ptr<BufferPool> buffer_pool_weak;
         };

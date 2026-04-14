@@ -20,6 +20,8 @@ public:
     ApiResponse update(const std::string& id, const json& body);
     ApiResponse remove(const std::string& id);
     ApiResponse probe(const std::string& id) const;
+    /// 顺序探测多个 RTSP：在服务端用 ffmpeg 对视频轨解码约 10 秒，成功则 playable（避免并发占满摄像头连接数）
+    ApiResponse probeRtspUrls(const json& body) const;
 
     // 供 WorkerManager 查询
     std::optional<DataSourceInfo> get(const std::string& id) const;

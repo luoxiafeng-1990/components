@@ -84,6 +84,8 @@ struct DataSourceInfo {
     bool loop = false;
     std::string created_at;
     std::string status = "idle";   // idle | recording | in_use
+    /// RTSP 模式下由用户维护的候选地址列表（多行输入保存），用于下拉展示与复测
+    std::vector<std::string> rtsp_urls;
 };
 
 inline void to_json(json& j, const DataSourceInfo& ds) {
@@ -93,6 +95,9 @@ inline void to_json(json& j, const DataSourceInfo& ds) {
         {"max_frames", ds.max_frames}, {"loop", ds.loop},
         {"created_at", ds.created_at}, {"status", ds.status}
     };
+    if (!ds.rtsp_urls.empty()) {
+        j["rtsp_urls"] = ds.rtsp_urls;
+    }
 }
 
 inline void from_json(const json& j, DataSourceInfo& ds) {
@@ -105,6 +110,14 @@ inline void from_json(const json& j, DataSourceInfo& ds) {
     if (j.contains("loop"))         j.at("loop").get_to(ds.loop);
     if (j.contains("created_at"))   j.at("created_at").get_to(ds.created_at);
     if (j.contains("status"))       j.at("status").get_to(ds.status);
+    if (j.contains("rtsp_urls") && j["rtsp_urls"].is_array()) {
+        ds.rtsp_urls.clear();
+        for (const auto& item : j["rtsp_urls"]) {
+            if (item.is_string()) {
+                ds.rtsp_urls.push_back(item.get<std::string>());
+            }
+        }
+    }
 }
 
 // ============================================================

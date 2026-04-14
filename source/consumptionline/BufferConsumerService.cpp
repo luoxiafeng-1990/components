@@ -274,13 +274,13 @@ ConsumeResult BufferConsumerService::startProductionLine(
         // SINGLE 模式下 config 中的 codec_params 可能为 nullptr，
         // 但 Worker 启动后已从数据源获取到有效值
         WorkerConfig consumer_config = config;
-        auto worker_facade = producer.getWorkerFacade();
-        if (worker_facade) {
+        auto worker = producer.getWorker();
+        if (worker) {
             if (!consumer_config.data_source.codec_params) {
-                consumer_config.data_source.codec_params = worker_facade->getSourceCodecParameters();
+                consumer_config.data_source.codec_params = worker->getSourceCodecParameters();
             }
             if (consumer_config.data_source.time_base.num == 0) {
-                consumer_config.data_source.time_base = worker_facade->getTimeBase();
+                consumer_config.data_source.time_base = worker->getTimeBase();
             }
         }
         

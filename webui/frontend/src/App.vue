@@ -7,6 +7,7 @@
       </div>
       <el-menu
         :default-active="currentRoute"
+        :default-openeds="['/datasources']"
         router
         class="app-menu"
         background-color="#1d1e1f"
@@ -17,10 +18,14 @@
           <el-icon><Platform /></el-icon>
           <span>硬件信息</span>
         </el-menu-item>
-        <el-menu-item index="/datasources">
-          <el-icon><FolderOpened /></el-icon>
-          <span>数据源管理</span>
-        </el-menu-item>
+        <el-sub-menu index="/datasources">
+          <template #title>
+            <el-icon><FolderOpened /></el-icon>
+            <span>数据源管理</span>
+          </template>
+          <el-menu-item index="/datasources/add">添加数据源</el-menu-item>
+          <el-menu-item index="/datasources/rtsp-verify">验证 RTSP 数据源</el-menu-item>
+        </el-sub-menu>
         <el-menu-item index="/workers">
           <el-icon><Setting /></el-icon>
           <span>Worker 管理</span>

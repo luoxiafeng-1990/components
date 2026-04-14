@@ -1,8 +1,9 @@
 #include "productionline/worker/BufferFillingWorkerFactory.hpp"
+#include "productionline/worker/WorkerRegistry.hpp"
 #include "common/Logger.hpp"
 #include "productionline/worker/FFmpegDecodeWorker.hpp"
 #include "productionline/worker/FfmpegPacketRecorderWorker.hpp"
-#include "productionline/worker/FFmpegEncodeWorker.hpp"  // ⭐ v2.29 新增
+#include "productionline/worker/FFmpegEncodeWorker.hpp"
 #include <stdlib.h>
 #include <string.h>
 
@@ -11,31 +12,43 @@ log4cplus::Logger BufferFillingWorkerFactory::logger_ =
 
 // ============ 公共接口 ============
 
-std::unique_ptr<WorkerBase> BufferFillingWorkerFactory::create(const WorkerConfig& config) {
+std::shared_ptr<WorkerBase> BufferFillingWorkerFactory::create(const WorkerConfig& config) {
     auto type = config.global.worker_type;
-    // 1️⃣ 用户显式指定（最高优先级）
+    std::unique_ptr<WorkerBase> worker;
+
     if (type != WorkerType::AUTO) {
         LOG4CPLUS_DEBUG_FMT(logger_, "User specified type: %s", typeToString(type));
-        return createByType(type, config);
+        worker = createByType(type, config);
+    } else {
+        WorkerType env_type = getTypeFromEnvironment();
+        if (env_type != WorkerType::AUTO) {
+            LOG4CPLUS_DEBUG_FMT(logger_, "Type from environment: %s", typeToString(env_type));
+            worker = createByType(env_type, config);
+        } else {
+            WorkerType config_type = getTypeFromConfig();
+            if (config_type != WorkerType::AUTO) {
+                LOG4CPLUS_DEBUG_FMT(logger_, "Type from config: %s", typeToString(config_type));
+                worker = createByType(config_type, config);
+            } else {
+                LOG4CPLUS_DEBUG(logger_, "Auto-detecting best worker type...");
+                worker = autoDetect(config);
+            }
+        }
     }
-    
-    // 2️⃣ 环境变量配置
-    WorkerType env_type = getTypeFromEnvironment();
-    if (env_type != WorkerType::AUTO) {
-        LOG4CPLUS_DEBUG_FMT(logger_, "Type from environment: %s", typeToString(env_type));
-        return createByType(env_type, config);
+
+    if (!worker) {
+        LOG4CPLUS_ERROR(logger_, "Failed to create Worker");
+        return nullptr;
     }
-    
-    // 3️⃣ 配置文件
-    WorkerType config_type = getTypeFromConfig();
-    if (config_type != WorkerType::AUTO) {
-        LOG4CPLUS_DEBUG_FMT(logger_, "Type from config: %s", typeToString(config_type));
-        return createByType(config_type, config);
-    }
-    
-    // 4️⃣ 自动检测
-    LOG4CPLUS_DEBUG(logger_, "Auto-detecting best worker type...");
-    return autoDetect(config);
+
+    // unique_ptr → shared_ptr，自动注册到 WorkerRegistry
+    std::shared_ptr<WorkerBase> shared_worker(std::move(worker));
+    uint64_t worker_id = WorkerRegistry::getInstance().registerWorker(shared_worker);
+
+    LOG4CPLUS_INFO_FMT(logger_, "Worker created and registered: type='%s', registry_id=%lu",
+           shared_worker->getWorkerType(), worker_id);
+
+    return shared_worker;
 }
 
 BufferFillingWorkerFactory::WorkerType BufferFillingWorkerFactory::getRecommendedType() {

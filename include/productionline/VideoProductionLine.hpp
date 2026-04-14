@@ -1,7 +1,8 @@
 #pragma once
 
 #include "buffer/bufferpool/BufferPool.hpp"
-#include "productionline/worker/BufferFillingWorkerFacade.hpp"
+#include "productionline/worker/WorkerBase.hpp"
+#include "productionline/worker/BufferFillingWorkerFactory.hpp"
 #include "productionline/worker/WorkerConfig.hpp"
 #include "common/PerformanceMonitor.hpp"
 #include "common/GlobalThreadPool.hpp"
@@ -118,13 +119,13 @@ public:
     uint64_t getWorkingBufferPoolId() const { return working_buffer_pool_id_; }
     
     /**
-     * @brief 获取Worker Facade
-     * @return Worker Facade的shared_ptr，如果未启动则返回nullptr
+     * @brief 获取 Worker（直接返回 WorkerBase 多态指针）
+     * @return Worker 的 shared_ptr，如果未启动则返回 nullptr
      * 
-     * @note 用于获取Worker的配置信息（如编解码器参数）
+     * @note 用于获取 Worker 的配置信息（如编解码器参数）
      */
-    std::shared_ptr<BufferFillingWorkerFacade> getWorkerFacade() const {
-        return worker_facade_sptr_;
+    std::shared_ptr<WorkerBase> getWorker() const {
+        return worker_sptr_;
     }
     
     // ========== 错误处理 ==========
@@ -203,8 +204,8 @@ protected:
      */
     std::weak_ptr<BufferPool> working_buffer_pool_weak_;
     
-    // Worker Facade（多线程共享）
-    std::shared_ptr<BufferFillingWorkerFacade> worker_facade_sptr_;
+    // Worker（多线程共享，与 WorkerRegistry 共享所有权）
+    std::shared_ptr<WorkerBase> worker_sptr_;
     
     // 线程管理
     std::vector<std::thread> threads_;

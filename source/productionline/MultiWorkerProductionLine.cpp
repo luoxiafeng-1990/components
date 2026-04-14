@@ -1,4 +1,5 @@
 #include "productionline/MultiWorkerProductionLine.hpp"
+#include "productionline/worker/BufferFillingWorkerFactory.hpp"
 #include "productionline/worker/FfmpegPacketRecorderWorker.hpp"
 #include "productionline/worker/EncodedPacketSourceFromBuffer.hpp"
 #include "buffer/bufferpool/BufferPoolRegistry.hpp"
@@ -418,9 +419,9 @@ bool MultiWorkerProductionLine::createConnectorsForGroup(WorkerGroupRuntime* gro
             
             const AVCodecParameters* codec_params = nullptr;
             if (producer_info->producer_line) {
-                auto worker_facade = producer_info->producer_line->getWorkerFacade();
-                if (worker_facade) {
-                    codec_params = worker_facade->getSourceCodecParameters();
+                auto worker = producer_info->producer_line->getWorker();
+                if (worker) {
+                    codec_params = worker->getSourceCodecParameters();
                 }
             }
             
@@ -575,10 +576,10 @@ bool MultiWorkerProductionLine::createConsumersForGroup(WorkerGroupRuntime* grou
             const AVCodecParameters* codec_params = nullptr;
             AVRational time_base = {1, 25};
             if (producer_info->producer_line) {
-                auto worker_facade = producer_info->producer_line->getWorkerFacade();
-                if (worker_facade) {
-                    codec_params = worker_facade->getSourceCodecParameters();
-                    time_base = worker_facade->getTimeBase();
+                auto worker = producer_info->producer_line->getWorker();
+                if (worker) {
+                    codec_params = worker->getSourceCodecParameters();
+                    time_base = worker->getTimeBase();
                 }
             }
             
@@ -594,8 +595,8 @@ bool MultiWorkerProductionLine::createConsumersForGroup(WorkerGroupRuntime* grou
                            << producer_info->producer_name << "' 获取 codec_params");
         }
         
-        // 4.3.3 创建消费者 Worker（构造函数根据 config 创建 packet_source）
-        auto consumer_worker = std::make_shared<BufferFillingWorkerFacade>(consumer_config);
+        // 4.3.3 通过 Factory 创建消费者 Worker（自动注册到 WorkerRegistry）
+        auto consumer_worker = BufferFillingWorkerFactory::create(consumer_config);
         
         // 4.3.4 如果是普通模式，设置 BufferPool
         if (!shared_source && producer_info) {
@@ -877,7 +878,7 @@ bool MultiWorkerProductionLine::performFrameSync(
     
     // 帧同步完成后，调用 commit 释放 packet
     // 所有 Worker 一起 commit，确保 fetchTaskFunc 不会提前被唤醒
-    shared_source->commitEncodedPacket(consumer_info->worker->getWorkerBase());
+    shared_source->commitEncodedPacket(consumer_info->worker.get());
     
     if (!sync_result && buffer != nullptr) {
         LOG4CPLUS_WARN(logger_, "[Worker '" << consumer_name 

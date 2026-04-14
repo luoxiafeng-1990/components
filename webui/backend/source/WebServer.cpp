@@ -20,6 +20,53 @@
 
 namespace webui {
 
+namespace {
+
+/// M3U #EXTINF 标题中避免逗号/换行破坏解析
+std::string sanitizeM3uTitle(const std::string& name) {
+    std::string out;
+    out.reserve(name.size());
+    for (char c : name) {
+        if (c == '\n' || c == '\r' || c == ',') {
+            out += ' ';
+        } else {
+            out += c;
+        }
+    }
+    return out;
+}
+
+std::string safeAttachmentFileStem(const std::string& name) {
+    std::string s = sanitizeM3uTitle(name);
+    for (auto& c : s) {
+        if (c == '/' || c == '\\' || c == '"' || c == '<' || c == '>' || c == ':' || c == '*' || c == '?') {
+            c = '_';
+        }
+    }
+    while (!s.empty() && s.front() == ' ') {
+        s.erase(s.begin());
+    }
+    while (!s.empty() && s.back() == ' ') {
+        s.pop_back();
+    }
+    return s.empty() ? std::string("stream") : s;
+}
+
+/// 与 RTSP 探测一致优先 RTP-over-RTSP(TCP)；预览 m3u 给 VLC 常用缓冲
+std::string buildRtspVlcPlaylist(const std::string& name, const std::string& url) {
+    const std::string title = sanitizeM3uTitle(name);
+    std::ostringstream oss;
+    oss << "#EXTM3U\n"
+        << "#EXTINF:-1," << title << "\n"
+        << "#EXTVLCOPT:network-caching=1200\n"
+        // 与 ffprobe -rtsp_transport tcp 对齐；: 前缀为 VLC 模块选项写法
+        << "#EXTVLCOPT: :rtsp-tcp\n"
+        << url << "\n";
+    return oss.str();
+}
+
+}  // namespace
+
 // ============================================================
 // 构造 / 析构
 // ============================================================
@@ -1003,6 +1050,15 @@ void WebServer::registerDataSourceRoutes() {
         }
     });
 
+    server_->Post("/api/datasources/rtsp-probe", [this](const httplib::Request& req, httplib::Response& res) {
+        try {
+            auto body = json::parse(req.body);
+            jsonResponse(res, ds_manager_->probeRtspUrls(body));
+        } catch (const json::parse_error&) {
+            jsonResponse(res, 400, ApiResponse::error(ErrorCode::PARAM_ERROR, "JSON 解析失败"));
+        }
+    });
+
     server_->Put(R"(/api/datasources/([^/]+))",
         [this](const httplib::Request& req, httplib::Response& res) {
             try {
@@ -1033,10 +1089,10 @@ void WebServer::registerDataSourceRoutes() {
             }
 
             if (ds->type == DataSourceType::RTSP) {
-                std::string m3u = "#EXTM3U\n#EXTINF:-1," + ds->name + "\n" + ds->path + "\n";
+                std::string m3u = buildRtspVlcPlaylist(ds->name, ds->path);
                 res.set_content(m3u, "audio/x-mpegurl");
                 res.set_header("Content-Disposition",
-                    "attachment; filename=\"" + ds->name + ".m3u\"");
+                    "attachment; filename=\"" + safeAttachmentFileStem(ds->name) + ".m3u\"");
             } else if (ds->type == DataSourceType::FILE) {
                 if (!std::filesystem::exists(ds->path)) {
                     jsonResponse(res, 404, ApiResponse::error(ErrorCode::DATASOURCE_UNAVAILABLE, "文件不存在"));

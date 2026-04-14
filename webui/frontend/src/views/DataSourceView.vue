@@ -1,7 +1,7 @@
 <template>
   <div class="page-container">
     <div class="page-header">
-      <h2>数据源管理</h2>
+      <h2>添加数据源</h2>
       <div class="header-actions">
         <el-button type="primary" @click="showAddDialog">
           <el-icon><Plus /></el-icon> 添加数据源
@@ -65,10 +65,50 @@
             <el-radio-button value="BUFFER">Buffer 模式</el-radio-button>
           </el-radio-group>
         </el-form-item>
-        <el-form-item label="路径/地址" prop="path">
+
+        <template v-if="form.type === 'RTSP'">
+          <el-alert type="info" :closable="false" show-icon class="rtsp-hint-alert">
+            <template #title>
+              候选 RTSP 地址请在侧栏「验证 RTSP 数据源」中填写、保存并可选执行「检测可用性」。
+            </template>
+            <router-link class="rtsp-hint-link" to="/datasources/rtsp-verify">打开验证页面</router-link>
+          </el-alert>
+          <el-form-item label="路径/地址" prop="path">
+            <el-select
+              v-model="form.path"
+              filterable
+              allow-create
+              default-first-option
+              placeholder="含本机列表与已创建 RTSP 占用的地址"
+              class="rtsp-path-select"
+            >
+              <el-option
+                v-for="u in rtspSelectOptions"
+                :key="u"
+                :label="u"
+                :value="u"
+              >
+                <span class="rtsp-option-row">
+                  <span
+                    class="rtsp-dot"
+                    :class="{
+                      ok: rtspDotGreen(u),
+                      full: rtspDotRed(u),
+                      bad: rtspDotProbeFailed(u),
+                      idle: rtspDotUnknown(u),
+                    }"
+                  />
+                  <span class="rtsp-url-text">{{ u }}</span>
+                  <span v-if="isUrlUsedByCreatedDatasource(u)" class="rtsp-selected-tag">已选</span>
+                </span>
+              </el-option>
+            </el-select>
+          </el-form-item>
+        </template>
+        <el-form-item v-else label="路径/地址" prop="path">
           <div class="path-input">
             <el-input v-model="form.path"
-              :placeholder="form.type === 'RTSP' ? 'rtsp://192.168.1.100:554/stream' : '/data/videos/test.mp4'" />
+              :placeholder="form.type === 'BUFFER' ? 'BUFFER 模式路径' : '/data/videos/test.mp4'" />
             <el-button v-if="form.type === 'FILE'" @click="showFileBrowser = true" :icon="FolderOpened">
               浏览
             </el-button>
@@ -98,28 +138,42 @@
     </el-dialog>
 
     <!-- VLC 提示 -->
-    <el-dialog v-model="vlcTipVisible" title="RTSP 预览" width="400px">
-      <div class="vlc-tip">
-        <el-icon :size="48" color="#409eff"><VideoCamera /></el-icon>
-        <p>RTSP 流将通过 VLC 播放器打开</p>
-        <p class="vlc-hint">请确保已安装 <a href="https://www.videolan.org/" target="_blank">VLC 播放器</a></p>
+    <el-dialog v-model="vlcTipVisible" title="RTSP 预览" width="480px">
+      <div class="vlc-tip vlc-tip--block">
+        <div class="vlc-tip-icon">
+          <el-icon :size="40" color="#409eff"><VideoCamera /></el-icon>
+        </div>
+        <p>将下载一个 <code>.m3u</code> 播放列表，用本机 VLC 打开该文件即可拉流（与网页探测一致时，列表内已带 TCP 等选项）。</p>
+        <p class="vlc-hint">
+          「绿色圆点」表示：运行 Web 的服务器上已对该 RTSP 连续解码约 {{ RTSP_DECODE_PROBE_SECONDS }} 秒无报错。若本机 VLC 仍失败，多为 PC 与摄像机网络与服务器不同。
+        </p>
+        <p class="vlc-hint">请确保已安装 <a href="https://www.videolan.org/" target="_blank">VLC 播放器</a>。</p>
         <p class="vlc-url">{{ previewRtspUrl }}</p>
+        <el-button size="small" @click="copyPreviewRtspUrl">复制 RTSP 地址</el-button>
       </div>
       <template #footer>
         <el-button @click="vlcTipVisible = false">取消</el-button>
-        <el-button type="primary" @click="openVlcStream">打开 VLC</el-button>
+        <el-button type="primary" @click="openVlcStream">下载 .m3u</el-button>
       </template>
     </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, reactive } from 'vue'
+import { ref, onMounted, reactive, watch, computed } from 'vue'
 import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
 import { Plus, Edit, Delete, VideoPlay, FolderOpened, CircleCheck, CircleClose, VideoCamera } from '@element-plus/icons-vue'
 import { useDataSourceStore } from '../stores/datasource'
 import { datasourceApi, type DataSource } from '../api'
 import FileBrowser from '../components/FileBrowser.vue'
+import {
+  RTSP_MAX_CONCURRENT_PER_URL,
+  RTSP_DECODE_PROBE_SECONDS,
+  normalizeRtspUrl,
+  parseRtspLines,
+  loadRtspUrlsFromStorage,
+  loadRtspProbeCacheFromStorage,
+} from '../utils/rtspCandidates'
 
 const store = useDataSourceStore()
 
@@ -130,6 +184,13 @@ const formRef = ref<FormInstance>()
 const showFileBrowser = ref(false)
 const vlcTipVisible = ref(false)
 const previewRtspUrl = ref('')
+/** 与「打开 VLC」配套，避免仅靠 path 匹配错行 */
+const previewRowId = ref('')
+
+/** 与「验证 RTSP 数据源」页共用 localStorage；打开对话框时递增以刷新下拉候选 */
+const rtspListRevision = ref(0)
+/** url -> 是否在服务器上通过约 10s 解码探测；未探测为 undefined */
+const rtspPlayable = ref<Record<string, boolean | undefined>>({})
 
 const form = reactive({
   name: '',
@@ -138,6 +199,125 @@ const form = reactive({
   buffer_count: 0,
   max_frames: -1,
   loop: false,
+})
+
+/**
+ * 已有 RTSP 数据源里，有多少条把该 URL 作为 path（每条约占一路连接）。
+ * 编辑当前数据源时排除 editId，避免把自己算作「已占用」，便于判断能否继续用原地址。
+ */
+function occupiedSlotsExcludingEdit(url: string): number {
+  const u = normalizeRtspUrl(url)
+  const exclude = isEdit.value ? editId.value : ''
+  return store.datasources.filter(
+    (d) =>
+      d.type === 'RTSP' &&
+      normalizeRtspUrl(d.path) === u &&
+      d.id !== exclude
+  ).length
+}
+
+/** 至少有一个已创建的数据源将该 URL 作为路径（含正在编辑的这条） */
+function isUrlUsedByCreatedDatasource(url: string): boolean {
+  const u = normalizeRtspUrl(url)
+  return store.datasources.some(
+    (d) => d.type === 'RTSP' && normalizeRtspUrl(d.path) === u
+  )
+}
+
+function probePlayableRaw(url: string): boolean | undefined {
+  return rtspPlayable.value[normalizeRtspUrl(url)]
+}
+
+/** 绿色：缓存中探测可达，且当前仍有空闲连接槽 */
+function rtspDotGreen(url: string): boolean {
+  if (probePlayableRaw(url) !== true) return false
+  return occupiedSlotsExcludingEdit(url) < RTSP_MAX_CONCURRENT_PER_URL
+}
+
+/** 红色：缓存中探测可达，但当前已无空闲槽（不能再拉一路） */
+function rtspDotRed(url: string): boolean {
+  if (probePlayableRaw(url) !== true) return false
+  return occupiedSlotsExcludingEdit(url) >= RTSP_MAX_CONCURRENT_PER_URL
+}
+
+/** 灰色：已探测且流不可达 */
+function rtspDotProbeFailed(url: string): boolean {
+  return probePlayableRaw(url) === false
+}
+
+/** 浅灰：尚未探测过（无缓存） */
+function rtspDotUnknown(url: string): boolean {
+  return probePlayableRaw(url) === undefined
+}
+
+/** 按 created_at 取最近创建的一条名称，在其基础上递增数字后缀，避免与已有名称重复 */
+function suggestNextDatasourceName(list: DataSource[]): string {
+  const names = new Set(list.map((d) => d.name))
+  if (list.length === 0) {
+    return '数据源1'
+  }
+  const sorted = [...list].sort(
+    (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+  )
+  const lastName = sorted[0].name
+
+  const m = lastName.match(/^(.*?)(\d+)$/)
+  if (m) {
+    const prefix = m[1]
+    const digits = m[2]
+    const width = digits.length
+    let n = parseInt(digits, 10) + 1
+    for (let guard = 0; guard < 10000; guard++) {
+      const numStr = String(n).padStart(Math.max(width, String(n).length), '0')
+      const candidate = prefix + numStr
+      if (!names.has(candidate)) return candidate
+      n++
+    }
+  }
+
+  let k = 2
+  for (let guard = 0; guard < 10000; guard++) {
+    const candidate = `${lastName}${k}`
+    if (!names.has(candidate)) return candidate
+    k++
+  }
+  return `${lastName}_${Date.now()}`
+}
+
+/**
+ * 下拉项 = 「验证 RTSP 数据源」页保存的候选地址 + 已创建 RTSP 数据源的 path
+ */
+const rtspSelectOptions = computed(() => {
+  rtspListRevision.value
+  const seen = new Set<string>()
+  const out: string[] = []
+
+  function pushUrl(raw: string) {
+    const n = normalizeRtspUrl(raw)
+    if (!n || seen.has(n)) return
+    seen.add(n)
+    out.push(n)
+  }
+
+  for (const line of parseRtspLines(loadRtspUrlsFromStorage())) {
+    pushUrl(line)
+  }
+  for (const d of store.datasources) {
+    if (d.type === 'RTSP' && d.path) {
+      pushUrl(d.path)
+    }
+  }
+  if (form.path) {
+    pushUrl(form.path)
+  }
+  return out
+})
+
+/** 打开添加/编辑对话框时：刷新候选列表（与验证页 localStorage 同步）与探测结果缓存 */
+watch(dialogVisible, (open) => {
+  if (!open) return
+  rtspListRevision.value++
+  rtspPlayable.value = loadRtspProbeCacheFromStorage()
 })
 
 const formRules: FormRules = {
@@ -158,7 +338,15 @@ function typeTagColor(type: string) {
 function showAddDialog() {
   isEdit.value = false
   editId.value = ''
-  Object.assign(form, { name: '', type: 'FILE', path: '', buffer_count: 0, max_frames: -1, loop: false })
+  const nextName = suggestNextDatasourceName(store.datasources)
+  Object.assign(form, {
+    name: nextName,
+    type: 'FILE',
+    path: '',
+    buffer_count: 0,
+    max_frames: -1,
+    loop: false,
+  })
   dialogVisible.value = true
 }
 
@@ -176,14 +364,30 @@ function handleEdit(row: DataSource) {
   dialogVisible.value = true
 }
 
+function buildSubmitPayload() {
+  const base: Partial<DataSource> = {
+    name: form.name,
+    type: form.type,
+    path: form.path,
+    buffer_count: form.buffer_count,
+    max_frames: form.max_frames,
+    loop: form.loop,
+  }
+  if (form.type === 'RTSP') {
+    base.rtsp_urls = parseRtspLines(loadRtspUrlsFromStorage())
+  }
+  return base
+}
+
 async function handleSubmit() {
   try {
     await formRef.value?.validate()
+    const payload = buildSubmitPayload()
     if (isEdit.value) {
-      await store.update(editId.value, { ...form })
+      await store.update(editId.value, payload)
       ElMessage.success('数据源更新成功')
     } else {
-      await store.add({ ...form })
+      await store.add(payload)
       ElMessage.success('数据源添加成功')
     }
     dialogVisible.value = false
@@ -204,6 +408,7 @@ async function handleDelete(id: string) {
 function handlePreview(row: DataSource) {
   if (row.type === 'RTSP') {
     previewRtspUrl.value = row.path
+    previewRowId.value = row.id
     vlcTipVisible.value = true
   } else if (row.type === 'FILE') {
     const url = datasourceApi.previewUrl(row.id)
@@ -213,13 +418,28 @@ function handlePreview(row: DataSource) {
   }
 }
 
+async function copyPreviewRtspUrl() {
+  try {
+    await navigator.clipboard.writeText(previewRtspUrl.value)
+    ElMessage.success('已复制 RTSP 地址')
+  } catch {
+    ElMessage.error('复制失败，请手动选中地址复制')
+  }
+}
+
 function openVlcStream() {
-  const url = datasourceApi.previewUrl(
-    store.datasources.find(d => d.path === previewRtspUrl.value)?.id || ''
-  )
+  const id = previewRowId.value
+  if (!id) {
+    ElMessage.error('无法定位数据源，请从列表中重新点击预览')
+    return
+  }
+  const url = datasourceApi.previewUrl(id)
+  const row = store.datasources.find(d => d.id === id)
+  const stem = (row?.name || 'stream').replace(/[/\\"<>:*|?]/g, '_').trim() || 'stream'
   const link = document.createElement('a')
   link.href = url
-  link.download = 'stream.m3u'
+  link.download = `${stem}.m3u`
+  link.rel = 'noopener'
   link.click()
   vlcTipVisible.value = false
 }
@@ -271,14 +491,31 @@ onMounted(() => {
   font-size: 12px;
 }
 
+.rtsp-hint-alert {
+  margin-bottom: 12px;
+}
+
+.rtsp-hint-link {
+  font-weight: 500;
+}
+
 .vlc-tip {
+  padding: 8px 0 16px;
+}
+
+.vlc-tip--block {
+  text-align: left;
+}
+
+.vlc-tip-icon {
   text-align: center;
-  padding: 20px;
+  margin-bottom: 12px;
 }
 
 .vlc-tip p {
   margin: 12px 0;
   color: #606266;
+  line-height: 1.55;
 }
 
 .vlc-hint {
@@ -296,5 +533,63 @@ onMounted(() => {
   padding: 8px 12px;
   border-radius: 4px;
   word-break: break-all;
+}
+
+.rtsp-path-select {
+  width: 100%;
+}
+
+.rtsp-option-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+}
+
+.rtsp-selected-tag {
+  flex-shrink: 0;
+  margin-left: auto;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--el-color-primary);
+  border: 1px solid var(--el-color-primary-light-5);
+  border-radius: 4px;
+  padding: 1px 8px;
+  background: var(--el-color-primary-light-9);
+}
+
+.rtsp-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #c0c4cc;
+  flex-shrink: 0;
+}
+
+.rtsp-dot.ok {
+  background: #67c23a;
+}
+
+.rtsp-dot.bad {
+  background: #c0c4cc;
+}
+
+.rtsp-dot.full {
+  background: #f56c6c;
+}
+
+.rtsp-dot.idle {
+  background: #e4e7ed;
+}
+
+.rtsp-url-text {
+  flex: 1;
+  min-width: 0;
+  font-family: ui-monospace, monospace;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 </style>

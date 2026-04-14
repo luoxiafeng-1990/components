@@ -14,8 +14,8 @@ libcomponents_la_SOURCES = \
     source/vendor/taco/display/TacoProDisplayExtension.cpp \
     source/vendor/taco/display/DisplayDeviceFactory.cpp \
     source/productionline/worker/WorkerBase.cpp \
-    source/productionline/worker/BufferFillingWorkerFacade.cpp \
     source/productionline/worker/BufferFillingWorkerFactory.cpp \
+    source/productionline/worker/WorkerRegistry.cpp \
     source/productionline/worker/WorkerConfig.cpp \
     source/vendor/contracts/DecoderVendorRegistry.cpp \
     source/vendor/taco/decode/TacoDecoderExtension.cpp \
