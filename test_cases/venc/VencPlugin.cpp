@@ -206,6 +206,12 @@ WorkerConfig buildEncodeConfigInternal(const EncodeTestParams& params, const std
         const int fallback_kbps = params.bitrate > 0 ? params.bitrate : 4000;
         config.encoder.bit_rate = static_cast<int64_t>(fallback_kbps) * 1000;
     }
+    // 大图缩放（如 spec24）：裸文件按 input 分辨率读，编码输出为 output（见 FFmpegEncodeWorker swscale）
+    if (output_width > 0 && output_height > 0
+        && (params.input_width != output_width || params.input_height != output_height)) {
+        config.data_source.raw_frame_width = params.input_width;
+        config.data_source.raw_frame_height = params.input_height;
+    }
     config.data_source.buffer_count = 8;
     config.data_source.buffer_mode = false;
     return config;

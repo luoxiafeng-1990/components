@@ -93,6 +93,12 @@ DataSourceConfigBuilder& DataSourceConfigBuilder::setLoop(bool loop) {
     return *this;
 }
 
+DataSourceConfigBuilder& DataSourceConfigBuilder::setRawFrameDimensions(int width, int height) {
+    data_source_config_.raw_frame_width = width;
+    data_source_config_.raw_frame_height = height;
+    return *this;
+}
+
 WorkerConfig::DataSourceConfig DataSourceConfigBuilder::build() const {
     return data_source_config_;
 }
