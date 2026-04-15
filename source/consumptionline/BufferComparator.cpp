@@ -416,6 +416,7 @@ BufferComparator::FormatInfo BufferComparator::analyzeFormat(Buffer* buffer) {
         info.is_planar = !(desc->flags & AV_PIX_FMT_FLAG_RGB);
         
         // YUV格式检测（含 JPEG 全范围 YUVJ*，否则易误判为「不支持」导致 PSNR/SSIM 全 0）
+        // 含 packed 422（yuyv422 / uyvy422 等）：否则 is_yuv/is_rgb 皆 false，compareAuto 落入 Unsupported
         info.is_yuv = (info.format == AV_PIX_FMT_YUV420P ||
                       info.format == AV_PIX_FMT_YUVJ420P ||
                       info.format == AV_PIX_FMT_NV12 ||
@@ -427,7 +428,10 @@ BufferComparator::FormatInfo BufferComparator::analyzeFormat(Buffer* buffer) {
                       info.format == AV_PIX_FMT_YUV410P ||
                       info.format == AV_PIX_FMT_YUV411P ||
                       info.format == AV_PIX_FMT_P010LE ||
-                      info.format == AV_PIX_FMT_P016LE);
+                      info.format == AV_PIX_FMT_P016LE ||
+                      info.format == AV_PIX_FMT_YUYV422 ||
+                      info.format == AV_PIX_FMT_UYVY422 ||
+                      info.format == AV_PIX_FMT_YVYU422);
         
         // RGB格式检测
         info.is_rgb = (desc->flags & AV_PIX_FMT_FLAG_RGB) != 0;
@@ -489,8 +493,16 @@ FrameCompareResult BufferComparator::compareAuto(
                 LOG_WARN("  YUV formats differ, will convert if needed");
             }
         }
-        
-        // 尝试直接对比（如果都是planar YUV）
+
+        // packed 422（yuyv/uyvy）与 NV12/YUV420P 等混用时，不能直接 compareYUV（plane0 语义不同）；
+        // 与 compareMixed 尾部「双路转 YUV420P」一致。
+        if (ref_info.format != test_info.format) {
+            if (config_.verbose && compare_count_.load() == 1) {
+                LOG_DEBUG("[BufferComparator] Strategy: YUV_FAMILY → compareMixed (YUV420P)");
+            }
+            return compareMixed(ref_buffer, ref_info, test_buffer, test_info);
+        }
+
         return compareYUV(ref_buffer, ref_info, test_buffer, test_info);
     }
     

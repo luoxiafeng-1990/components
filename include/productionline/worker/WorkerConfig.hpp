@@ -175,6 +175,14 @@ struct WorkerConfig {
         int buffer_count = 0;                 ///< BufferPool 的 Buffer 数量（0=使用 Worker 默认值）
         int max_frames = -1;                  ///< 最大读取帧数（-1=无限制）
         bool loop = false;                    ///< true=文件播放结束后自动回到开头循环播放
+
+        /**
+         * 裸 YUV/RGB 文件的单帧分辨率（仅文件模式 RawFrameSourceFromFile 使用）。
+         * 为 0 时表示与 display（编码输出）分辨率一致。
+         * 非 0 且与 display 不同时，编码前由 FFmpegEncodeWorker 用 swscale 缩放到编码分辨率。
+         */
+        int raw_frame_width = 0;
+        int raw_frame_height = 0;
         
         // ========================================
         // 【内部参数】框架自动设置，用户不应手动修改
@@ -992,6 +1000,9 @@ public:
      * @param loop true=文件播放结束后自动回到开头循环播放
      */
     DataSourceConfigBuilder& setLoop(bool loop);
+
+    /// 裸 YUV 单帧宽高（>0 时用于文件读帧；与编码输出 display 可不同，编码前缩放）
+    DataSourceConfigBuilder& setRawFrameDimensions(int width, int height);
     
     WorkerConfig::DataSourceConfig build() const;
     
