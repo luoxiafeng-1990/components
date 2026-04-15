@@ -50,13 +50,14 @@ static const SpecFmt kSpec21H264Formats[] = {
     {"yuv420p", "yuv420p"},
     {"nv12", "nv12"},
     {"nv21", "nv21"},
-    {"yuyv422", "yuyv422"},
-    {"uyvy422", "uyvy422"},
+    {"yuyv422", "yuyv422le"},
+    {"uyvy422", "uyvy422le"},
     {"rgb444", "rgb444le"},
     {"bgr444", "bgr444le"},
     {"rgb555", "rgb555le"},
     {"bgr555", "bgr555le"},
     {"rgb565", "rgb565le"},
+
 };
 
 /** §2.2 JPEG：在 §2.1 基础上增加 BGR565 / RGB888 / BGR888 / 10bit RGB */
