@@ -15,6 +15,7 @@ extern "C" {
 #include <libavutil/imgutils.h>
 #include <libavutil/opt.h>
 #include <libavutil/pixdesc.h>
+#include <libswscale/swscale.h>
 }
 
 // ============ 构造/析构 ============
@@ -51,11 +52,17 @@ FFmpegEncodeWorker::FFmpegEncodeWorker(const WorkerConfig& config)
         );
         LOG4CPLUS_DEBUG(logger_, "[EncodeWorker] 创建 RawFrameSourceFromBuffer（Buffer 模式）");
     } else if (!config.data_source.path.empty()) {
-        // 文件模式：从 YUV 文件读取帧
+        // 文件模式：从 YUV 文件读取帧（可与编码输出分辨率不同，读帧用 raw_*，编码前 swscale）
+        int fw = config.display.width;
+        int fh = config.display.height;
+        if (config.data_source.raw_frame_width > 0 && config.data_source.raw_frame_height > 0) {
+            fw = config.data_source.raw_frame_width;
+            fh = config.data_source.raw_frame_height;
+        }
         frame_source_ = std::make_shared<RawFrameSourceFromFile>(
             config.data_source.path,
-            config.display.width,
-            config.display.height,
+            fw,
+            fh,
             static_cast<AVPixelFormat>(config.encoder.input_pix_fmt)
         );
         LOG4CPLUS_DEBUG_FMT(logger_, "[EncodeWorker] 创建 RawFrameSourceFromFile: '%s'",
@@ -64,6 +71,14 @@ FFmpegEncodeWorker::FFmpegEncodeWorker(const WorkerConfig& config)
         LOG4CPLUS_WARN(logger_, "[EncodeWorker] 未指定数据源，需要后续调用 setSourceBufferPool");
     }
     
+    if (frame_source_ && !config.data_source.buffer_mode && !config.data_source.path.empty()) {
+        const int sw = frame_source_->getFrameWidth();
+        const int sh = frame_source_->getFrameHeight();
+        if (output_width_ > 0 && output_height_ > 0 && (sw != output_width_ || sh != output_height_)) {
+            input_scale_needed_ = true;
+        }
+    }
+
     LOG4CPLUS_DEBUG(logger_, "[EncodeWorker] 构造函数完成");
 }
 
@@ -241,10 +256,81 @@ bool FFmpegEncodeWorker::open() {
             return false;
         }
         input_frame_->format = codec_ctx_ptr_->pix_fmt;
-        input_frame_->width  = output_width_;
-        input_frame_->height = output_height_;
+        if (input_scale_needed_) {
+            input_frame_->width  = frame_source_->getFrameWidth();
+            input_frame_->height = frame_source_->getFrameHeight();
+        } else {
+            input_frame_->width  = output_width_;
+            input_frame_->height = output_height_;
+        }
         LOG4CPLUS_DEBUG(logger_,
             "[EncodeWorker] input_frame 已就绪，YUV buffer 延迟到首帧 readRawFrame（64 对齐由数据源分配）");
+
+        if (input_scale_needed_) {
+            scaled_frame_ = av_frame_alloc();
+            if (!scaled_frame_) {
+                LOG4CPLUS_ERROR(logger_, "[EncodeWorker] 分配 scaled_frame 失败");
+                av_frame_free(&input_frame_);
+                input_frame_ = nullptr;
+                unregisterBufferPool(BufferPoolType::ENCODE_VIDEO_OUTPUT);
+                allocator_facade_.destroyPool();
+                freeOutputCodecParameters();
+                avcodec_free_context(&codec_ctx_ptr_);
+                codec_ctx_ptr_ = nullptr;
+                frame_source_->close();
+                return false;
+            }
+            scaled_frame_->format = codec_ctx_ptr_->pix_fmt;
+            scaled_frame_->width  = output_width_;
+            scaled_frame_->height = output_height_;
+            if (av_frame_get_buffer(scaled_frame_, 64) < 0) {
+                LOG4CPLUS_ERROR(logger_, "[EncodeWorker] scaled_frame av_frame_get_buffer 失败");
+                av_frame_free(&scaled_frame_);
+                scaled_frame_ = nullptr;
+                av_frame_free(&input_frame_);
+                input_frame_ = nullptr;
+                unregisterBufferPool(BufferPoolType::ENCODE_VIDEO_OUTPUT);
+                allocator_facade_.destroyPool();
+                freeOutputCodecParameters();
+                avcodec_free_context(&codec_ctx_ptr_);
+                codec_ctx_ptr_ = nullptr;
+                frame_source_->close();
+                return false;
+            }
+            const AVPixelFormat src_pf =
+                static_cast<AVPixelFormat>(worker_config_.encoder.input_pix_fmt);
+            sws_ctx_ = sws_getContext(
+                frame_source_->getFrameWidth(),
+                frame_source_->getFrameHeight(),
+                src_pf,
+                output_width_,
+                output_height_,
+                codec_ctx_ptr_->pix_fmt,
+                SWS_BILINEAR,
+                nullptr,
+                nullptr,
+                nullptr);
+            if (!sws_ctx_) {
+                LOG4CPLUS_ERROR(logger_, "[EncodeWorker] sws_getContext 失败（编码前缩放）");
+                av_frame_free(&scaled_frame_);
+                scaled_frame_ = nullptr;
+                av_frame_free(&input_frame_);
+                input_frame_ = nullptr;
+                unregisterBufferPool(BufferPoolType::ENCODE_VIDEO_OUTPUT);
+                allocator_facade_.destroyPool();
+                freeOutputCodecParameters();
+                avcodec_free_context(&codec_ctx_ptr_);
+                codec_ctx_ptr_ = nullptr;
+                frame_source_->close();
+                return false;
+            }
+            LOG4CPLUS_INFO_FMT(logger_,
+                "[EncodeWorker] 编码前缩放: %dx%d -> %dx%d",
+                frame_source_->getFrameWidth(),
+                frame_source_->getFrameHeight(),
+                output_width_,
+                output_height_);
+        }
     }
     
     return true;
@@ -261,6 +347,14 @@ void FFmpegEncodeWorker::close() {
         LOG4CPLUS_INFO(logger_, "");
         LOG4CPLUS_INFO(logger_, "🛑 Closing encoder...");
         
+        if (scaled_frame_) {
+            av_frame_free(&scaled_frame_);
+            scaled_frame_ = nullptr;
+        }
+        if (sws_ctx_) {
+            sws_freeContext(sws_ctx_);
+            sws_ctx_ = nullptr;
+        }
         if (input_frame_) {
             av_frame_free(&input_frame_);
             input_frame_ = nullptr;
@@ -553,6 +647,13 @@ bool FFmpegEncodeWorker::initializeEncoder() {
     codec_ctx_ptr_->width = output_width_;
     codec_ctx_ptr_->height = output_height_;
     codec_ctx_ptr_->bit_rate = enc_config.bit_rate;
+    // TACO：CQP 时 bit_rate 仅作 HRD/码控结构占位，不能为 0（易触发 H264EncSetRateCtrl -3）
+    if (enc_config.rc_mode == 2 && codec_ctx_ptr_->bit_rate <= 0) {
+        codec_ctx_ptr_->bit_rate = 4000000;
+        LOG4CPLUS_DEBUG_FMT(
+            logger_,
+            "[EncodeWorker] CQP：bit_rate 由 0 放宽为名义 4000000 bps（与 VencPlugin 预定义一致时可由上层的 EncoderConfig 传入）");
+    }
     codec_ctx_ptr_->gop_size = enc_config.gop_size;
     codec_ctx_ptr_->max_b_frames = enc_config.max_b_frames;
     codec_ctx_ptr_->time_base = {enc_config.framerate_den, enc_config.framerate_num};
@@ -560,10 +661,33 @@ bool FFmpegEncodeWorker::initializeEncoder() {
     codec_ctx_ptr_->pix_fmt = static_cast<AVPixelFormat>(enc_config.input_pix_fmt);
     
     // 4. 设置码率控制模式
+    // TACO h264_taco：rc-mode 走表达式求值，已注册的符号为 cbr / vbr 等；CQP 与
+    // WorkerConfig::encoder.rc_mode 数值一致，应使用枚举整型字符串 "2"，不可用 "cqp"（会报 Undefined constant 'cqp'）
     if (enc_config.rc_mode == 1) {  // VBR
         av_dict_set(&codec_options_ptr_, "rc-mode", "vbr", 0);
     } else if (enc_config.rc_mode == 0) {  // CBR
         av_dict_set(&codec_options_ptr_, "rc-mode", "cbr", 0);
+    } else if (enc_config.rc_mode == 2) {  // CQP
+        if (codec && strstr(codec->name, "taco")) {
+            av_dict_set(&codec_options_ptr_, "rc-mode", "2", 0);
+            int qp = enc_config.cqp_qp;
+            if (qp < 1) {
+                qp = 1;
+            }
+            if (qp > 51) {
+                qp = 51;
+            }
+            char qp_buf[16];
+            snprintf(qp_buf, sizeof(qp_buf), "%d", qp);
+            av_dict_set(&codec_options_ptr_, "qp", qp_buf, 0);
+            LOG4CPLUS_DEBUG_FMT(
+                logger_, "[EncodeWorker] TACO CQP: rc-mode=2 qp=%s", qp_buf);
+        } else {
+            LOG4CPLUS_WARN_FMT(
+                logger_,
+                "[EncodeWorker] rc_mode=CQP(2) 仅对 TACO 硬件编码器(h264_taco/hevc_taco)下发，当前 codec=%s，已跳过",
+                codec ? codec->name : "(null)");
+        }
     }
     
     // 5. TACO 编码器特定配置
@@ -647,21 +771,25 @@ bool FFmpegEncodeWorker::syncOutputCodecParameters() {
 }
 
 bool FFmpegEncodeWorker::configureTacoEncoder() {
-    if (!codec_ctx_ptr_ || !codec_ctx_ptr_->priv_data) {
+    if (!codec_ctx_ptr_) {
         return false;
     }
-    
+
     auto& taco_config = worker_config_.encoder.taco;
-    
-    // 设置 profile 和 level（如果指定）
+
+    // avcodec_open2 之前 priv_data 未就绪，TACO 私有选项须通过 options 字典传入，
+    // 与 rc-mode / qp 一致，否则 VencPlugin 中 taco.profile、taco.level 不会生效。
     if (taco_config.profile > 0) {
-        av_opt_set_int(codec_ctx_ptr_->priv_data, "profile", taco_config.profile, 0);
+        char buf[32];
+        snprintf(buf, sizeof(buf), "%d", taco_config.profile);
+        av_dict_set(&codec_options_ptr_, "profile", buf, 0);
     }
-    
     if (taco_config.level > 0) {
-        av_opt_set_int(codec_ctx_ptr_->priv_data, "level", taco_config.level, 0);
+        char buf[32];
+        snprintf(buf, sizeof(buf), "%d", taco_config.level);
+        av_dict_set(&codec_options_ptr_, "level", buf, 0);
     }
-    
+
     LOG4CPLUS_DEBUG(logger_, "[EncodeWorker] TACO 编码器配置完成");
     return true;
 }
@@ -700,11 +828,28 @@ FillResult FFmpegEncodeWorker::readAndSendFrame(AVFrame* temp_frame) {
         if (df) encode_frame = df;
     }
     
-    encode_frame->pts = encoded_frames_.load();
-    
     // 发送帧到编码器（Codec 层）
     using Result = CodecSendResult;
-    ret = avcodec_send_frame(codec_ctx_ptr_, encode_frame);
+    if (input_scale_needed_ && scaled_frame_ && sws_ctx_) {
+        const int src_h = frame_source_->getFrameHeight();
+        const int lines = sws_scale(
+            sws_ctx_,
+            encode_frame->data,
+            encode_frame->linesize,
+            0,
+            src_h,
+            scaled_frame_->data,
+            scaled_frame_->linesize);
+        if (lines <= 0) {
+            LOG4CPLUS_ERROR_FMT(logger_, "[EncodeWorker] sws_scale 失败 (lines=%d)", lines);
+            return FillResult::fromCodec(Result::encodeError());
+        }
+        scaled_frame_->pts = encoded_frames_.load();
+        ret = avcodec_send_frame(codec_ctx_ptr_, scaled_frame_);
+    } else {
+        encode_frame->pts = encoded_frames_.load();
+        ret = avcodec_send_frame(codec_ctx_ptr_, encode_frame);
+    }
     
     if (ret == 0) {
         return FillResult::success();

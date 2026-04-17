@@ -31,6 +31,8 @@ struct EncodeTestParams {
     int gop_size = 30;
     bool use_hardware = true;
     int rc_mode = 1;
+    /** CQP 量化参数（rc_mode=2），默认 28 */
+    int cqp_qp = 28;
     std::string input_format = "nv12";
     int input_width = 1920;
     int input_height = 1080;

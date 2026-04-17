@@ -16,6 +16,7 @@ struct AVCodecParameters;
 struct AVFrame;
 struct AVPacket;
 struct AVDictionary;
+struct SwsContext;
 
 /**
  * @brief FFmpegEncodeWorker - FFmpeg 编码 Worker
@@ -249,6 +250,11 @@ private:
      * 避免每帧 av_frame_alloc + readRawFrame 内 av_frame_get_buffer 造成瞬时内存峰值与嵌入式 OOM。
      */
     AVFrame* input_frame_;
+
+    /// 源分辨率与编码分辨率不一致时，readRawFrame → swscale → 编码
+    bool input_scale_needed_ = false;
+    SwsContext* sws_ctx_ = nullptr;
+    AVFrame* scaled_frame_ = nullptr;
 };
 
 #endif // FFMPEG_ENCODE_WORKER_HPP
