@@ -1,4 +1,6 @@
-#include "productionline/worker/WorkerConfig.hpp"
+#include "productionline/worker/config/ConfigBuilders.hpp"
+#include "productionline/worker/config/MultiWorkerConfig.hpp"
+#include "productionline/worker/config/WorkerConfigs.hpp"
 #include "vendor/taco/decode/TacoDecoderExtension.hpp"
 #include <algorithm>
 #include <string>
@@ -17,7 +19,7 @@ TacoConfigBuilder& TacoConfigBuilder::setChannels(bool ch0, bool ch1) {
 TacoConfigBuilder& TacoConfigBuilder::setOutputFormat(
     Channel ch,
     OutputFormat format,
-    ColorStandard std
+    TacoColorSpace std
 ) {
     int format_value = static_cast<int>(format);
     int std_value = static_cast<int>(std);
@@ -132,17 +134,16 @@ OutputFormat TacoConfigBuilder::mapFormatNameToEnum(std::string_view format_name
     return OutputFormat::YUV_AUTO;
 }
 
-ColorStandard TacoConfigBuilder::mapColorStdNameToEnum(std::string_view std_name) {
-    if (std_name == "none") return ColorStandard::NONE;
-    if (std_name == "bt601") return ColorStandard::BT601;
-    if (std_name == "bt601_l" || std_name == "bt601_limited") return ColorStandard::BT601_LIMITED;
-    if (std_name == "bt709") return ColorStandard::BT709;
-    if (std_name == "bt709_l" || std_name == "bt709_limited") return ColorStandard::BT709_LIMITED;
-    if (std_name == "bt2020") return ColorStandard::BT2020;
-    if (std_name == "bt2020_l" || std_name == "bt2020_limited") return ColorStandard::BT2020_LIMITED;
+TacoColorSpace TacoConfigBuilder::mapColorStdNameToEnum(std::string_view std_name) {
+    if (std_name == "none") return TacoColorSpace::NONE;
+    if (std_name == "bt601") return TacoColorSpace::BT601_FULL;
+    if (std_name == "bt601_l" || std_name == "bt601_limited") return TacoColorSpace::BT601_LIMITED;
+    if (std_name == "bt709") return TacoColorSpace::BT709_FULL;
+    if (std_name == "bt709_l" || std_name == "bt709_limited") return TacoColorSpace::BT709_LIMITED;
+    if (std_name == "bt2020") return TacoColorSpace::BT2020_FULL;
+    if (std_name == "bt2020_l" || std_name == "bt2020_limited") return TacoColorSpace::BT2020_LIMITED;
     
-    // 默认返回 BT601
-    return ColorStandard::BT601;
+    return TacoColorSpace::BT601_FULL;
 }
 
 std::string_view TacoConfigBuilder::mapFormatEnumToName(OutputFormat format) {
@@ -185,15 +186,15 @@ std::string_view TacoConfigBuilder::mapFormatEnumToName(OutputFormat format) {
     }
 }
 
-std::string_view TacoConfigBuilder::mapColorStdEnumToName(ColorStandard std) {
+std::string_view TacoConfigBuilder::mapColorStdEnumToName(TacoColorSpace std) {
     switch (std) {
-        case ColorStandard::NONE: return "none";
-        case ColorStandard::BT601: return "bt601";
-        case ColorStandard::BT601_LIMITED: return "bt601_limited";
-        case ColorStandard::BT709: return "bt709";
-        case ColorStandard::BT709_LIMITED: return "bt709_limited";
-        case ColorStandard::BT2020: return "bt2020";
-        case ColorStandard::BT2020_LIMITED: return "bt2020_limited";
+        case TacoColorSpace::NONE: return "none";
+        case TacoColorSpace::BT601_FULL: return "bt601";
+        case TacoColorSpace::BT601_LIMITED: return "bt601_limited";
+        case TacoColorSpace::BT709_FULL: return "bt709";
+        case TacoColorSpace::BT709_LIMITED: return "bt709_limited";
+        case TacoColorSpace::BT2020_FULL: return "bt2020";
+        case TacoColorSpace::BT2020_LIMITED: return "bt2020_limited";
         default: return "unknown";
     }
 }

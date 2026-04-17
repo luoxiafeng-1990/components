@@ -9,6 +9,7 @@
 #include "../common/WorkerConfigFactory.hpp"
 #include "../common/third_party/CLI11.hpp"
 #include "consumptionline/BufferConsumerService.hpp"
+#include "consumptionline/config/ConsumerTypeConfigBuilder.hpp"
 
 #include <iostream>
 #include <log4cplus/logger.h>
@@ -145,7 +146,9 @@ void WriterPlugin::applyTo(WorkerConfig& config) const {
         .setPathIfNonEmpty(input_path_)
         .build();
     if (verbose_)
-        config.consumer_type.verbose = true;
+        config.consumer_type = ConsumerTypeConfigBuilder(config.consumer_type)
+            .setVerbose(true)
+            .build();
 }
 
 int WriterPlugin::handlePreActions() {
@@ -207,11 +210,15 @@ std::vector<WorkerConfig> WriterPlugin::buildPipelineConfigs(const WorkerConfig&
             config = common::WorkerConfigFactory::createPP0YuvConfig(
                 shared_config.data_source.path, fmt, p.width, p.height);
         }
-        config.consumer_type.save_raw.enable = true;
-        config.consumer_type.save_raw.max_frames_per_channel = {p.save_frames};
-        config.consumer_type.save_raw.setOutputPath(out_path.empty()
-            ? "/tmp/writer_" + desc + ".raw" : out_path);
-        config.consumer_type.verbose = shared_config.consumer_type.verbose;
+        config.consumer_type = ConsumerTypeConfigBuilder(config.consumer_type)
+            .setSaveRawConfig(SaveRawConfigBuilder()
+                .setEnable(true)
+                .setMaxFramesPerChannel({p.save_frames})
+                .setOutputPaths({out_path.empty()
+                    ? "/tmp/writer_" + desc + ".raw" : out_path})
+                .build())
+            .setVerbose(shared_config.consumer_type.verbose)
+            .build();
         return config;
     };
 

@@ -5,6 +5,7 @@
 
 #include "NpuPlugin.hpp"
 #include "../common/third_party/CLI11.hpp"
+#include "consumptionline/config/ConsumerTypeConfigBuilder.hpp"
 
 namespace test {
 namespace npu {
@@ -28,20 +29,25 @@ void NpuPlugin::registerOptions(CLI::App& app) {
 }
 
 void NpuPlugin::applyTo(WorkerConfig& config) const {
-    config.consumer_type.npu_inference.enable             = true;
-    config.consumer_type.npu_inference.model_path         = model_path_;
-    config.consumer_type.npu_inference.conf_threshold     = conf_threshold_;
-    config.consumer_type.npu_inference.nms_threshold      = nms_threshold_;
-    config.consumer_type.npu_inference.npu_core_index     = npu_core_index_;
-    config.consumer_type.npu_inference.use_physical_addr  = use_physical_addr_;
-    config.consumer_type.npu_inference.enable_draw        = enable_draw_;
-    config.consumer_type.npu_inference.inference_interval = inference_interval_;
+    auto npu_builder = NpuInferenceConfigBuilder(config.consumer_type.npu_inference)
+        .setEnable(true)
+        .setModelPath(model_path_)
+        .setConfThreshold(conf_threshold_)
+        .setNmsThreshold(nms_threshold_)
+        .setNpuCoreIndex(npu_core_index_)
+        .setUsePhysicalAddr(use_physical_addr_)
+        .setEnableDraw(enable_draw_)
+        .setInferenceInterval(inference_interval_);
 
     if (config.consumer_type.display.enable) {
-        config.consumer_type.npu_inference.enable_draw = true;
-        if (config.consumer_type.npu_inference.inference_interval <= 1)
-            config.consumer_type.npu_inference.inference_interval = 15;
+        npu_builder.setEnableDraw(true);
+        if (inference_interval_ <= 1)
+            npu_builder.setInferenceInterval(15);
     }
+
+    config.consumer_type = ConsumerTypeConfigBuilder(config.consumer_type)
+        .setNpuInferenceConfig(npu_builder.build())
+        .build();
 }
 
 } // namespace npu

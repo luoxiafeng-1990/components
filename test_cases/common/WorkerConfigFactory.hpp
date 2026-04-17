@@ -21,9 +21,12 @@
 #ifndef WORKER_CONFIG_FACTORY_HPP
 #define WORKER_CONFIG_FACTORY_HPP
 
-#include "productionline/worker/WorkerConfig.hpp"
+#include "productionline/worker/config/ConfigBuilders.hpp"
+#include "productionline/worker/config/MultiWorkerConfig.hpp"
+#include "productionline/worker/config/WorkerConfigs.hpp"
 #include "vendor/contracts/DecoderVendorExtension.hpp"
 #include "vendor/taco/decode/TacoDecoderExtension.hpp"
+#include "vendor/taco/encode/TacoEncoderExtension.hpp"
 
 #include <functional>
 #include <memory>
@@ -240,7 +243,9 @@ public:
         encoder_config.framerate_den = 1;
         encoder_config.input_pix_fmt = input_pix_fmt;
         encoder_config.rc_mode = 1;
-        encoder_config.taco.profile = profile;
+        encoder_config.width = output_width;
+        encoder_config.height = output_height;
+        encoder_config.vendor = makeTacoEncoderExtension(profile, 0);
         
         WorkerConfig config = WorkerConfigBuilder()
             .setDataSourceConfig(
@@ -249,15 +254,9 @@ public:
                     .setBufferCount(32)
                     .build()
             )
-            .setDisplayConfig(
-                DisplayConfigBuilder()
-                    .setDisplayResolution(output_width, output_height)
-                    .setBitsPerPixel(32)
-                    .build()
-            )
+            .setEncoderConfig(encoder_config)
             .setGlobalConfig(WorkerGlobalConfigBuilder().setWorkerType(WorkerType::FFMPEG_ENCODE).build())
             .build();
-        config.encoder = encoder_config;
         return config;
     }
     
@@ -280,7 +279,9 @@ public:
         encoder_config.framerate_den = 1;
         encoder_config.input_pix_fmt = input_pix_fmt;
         encoder_config.rc_mode = 1;
-        encoder_config.taco.profile = profile;
+        encoder_config.width = output_width;
+        encoder_config.height = output_height;
+        encoder_config.vendor = makeTacoEncoderExtension(profile, 0);
         
         WorkerConfig config = WorkerConfigBuilder()
             .setDataSourceConfig(
@@ -289,15 +290,9 @@ public:
                     .setBufferCount(32)
                     .build()
             )
-            .setDisplayConfig(
-                DisplayConfigBuilder()
-                    .setDisplayResolution(output_width, output_height)
-                    .setBitsPerPixel(32)
-                    .build()
-            )
+            .setEncoderConfig(encoder_config)
             .setGlobalConfig(WorkerGlobalConfigBuilder().setWorkerType(WorkerType::FFMPEG_ENCODE).build())
             .build();
-        config.encoder = encoder_config;
         return config;
     }
     
@@ -316,6 +311,8 @@ public:
         encoder_config.framerate_den = 1;
         encoder_config.input_pix_fmt = input_pix_fmt;
         encoder_config.jpeg.quality = quality;
+        encoder_config.width = output_width;
+        encoder_config.height = output_height;
         
         WorkerConfig config = WorkerConfigBuilder()
             .setDataSourceConfig(
@@ -324,15 +321,9 @@ public:
                     .setBufferCount(32)
                     .build()
             )
-            .setDisplayConfig(
-                DisplayConfigBuilder()
-                    .setDisplayResolution(output_width, output_height)
-                    .setBitsPerPixel(32)
-                    .build()
-            )
+            .setEncoderConfig(encoder_config)
             .setGlobalConfig(WorkerGlobalConfigBuilder().setWorkerType(WorkerType::FFMPEG_ENCODE).build())
             .build();
-        config.encoder = encoder_config;
         return config;
     }
     
@@ -362,6 +353,9 @@ public:
         encoder_config.input_pix_fmt = input_pix_fmt;
         encoder_config.rc_mode = 1;
         
+        encoder_config.width = output_width;
+        encoder_config.height = output_height;
+        
         WorkerConfig config = WorkerConfigBuilder()
             .setDataSourceConfig(
                 DataSourceConfigBuilder()
@@ -369,15 +363,9 @@ public:
                     .setBufferCount(32)
                     .build()
             )
-            .setDisplayConfig(
-                DisplayConfigBuilder()
-                    .setDisplayResolution(output_width, output_height)
-                    .setBitsPerPixel(32)
-                    .build()
-            )
+            .setEncoderConfig(encoder_config)
             .setGlobalConfig(WorkerGlobalConfigBuilder().setWorkerType(WorkerType::FFMPEG_ENCODE).build())
             .build();
-        config.encoder = encoder_config;
         return config;
     }
     
@@ -418,7 +406,7 @@ public:
         OutputFormat format,
         int width = 1920,
         int height = 1080,
-        ColorStandard color_std = ColorStandard::BT601
+        TacoColorSpace color_std = TacoColorSpace::BT601_FULL
     ) {
         auto taco = TacoConfigBuilder()
             .setChannels(true, false)
@@ -447,7 +435,7 @@ public:
         OutputFormat format,
         int width = 1920,
         int height = 1080,
-        ColorStandard color_std = ColorStandard::BT601
+        TacoColorSpace color_std = TacoColorSpace::BT601_FULL
     ) {
         auto taco = TacoConfigBuilder()
             .setChannels(false, true)
@@ -476,7 +464,7 @@ public:
         OutputFormat format,
         int width = 1920,
         int height = 1080,
-        ColorStandard color_std = ColorStandard::BT601
+        TacoColorSpace color_std = TacoColorSpace::BT601_FULL
     ) {
         auto taco = TacoConfigBuilder()
             .setChannels(false, true)
@@ -506,7 +494,7 @@ public:
         OutputFormat pp1_format,
         int width = 1920,
         int height = 1080,
-        ColorStandard color_std = ColorStandard::BT601
+        TacoColorSpace color_std = TacoColorSpace::BT601_FULL
     ) {
         auto taco = TacoConfigBuilder()
             .setChannels(true, true)

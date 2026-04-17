@@ -1,0 +1,20 @@
+{
+  "configurations": [
+    {
+      "name": "components (本地浏览)",
+      "includePath": [
+        "${workspaceFolder}/include",
+        "${workspaceFolder}/include/common/third_party/freetype2",
+        "${workspaceFolder}/test_cases",
+        "${workspaceFolder}/webui/backend/include",
+        "${workspaceFolder}/webui/backend/third_party"
+      ],
+      "defines": [],
+      "cStandard": "c17",
+      "cppStandard": "c++17",
+      "intelliSenseMode": "linux-gcc-x64",
+      "compilerPath": "/usr/bin/g++"
+    }
+  ],
+  "version": 4
+}

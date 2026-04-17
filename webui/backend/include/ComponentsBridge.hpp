@@ -9,7 +9,8 @@
  */
 
 #include "ApiTypes.hpp"
-#include "productionline/worker/WorkerConfig.hpp"
+#include "productionline/worker/config/MultiWorkerConfig.hpp"
+#include "productionline/worker/config/WorkerConfigs.hpp"
 #include <string>
 #include <vector>
 

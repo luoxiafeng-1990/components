@@ -59,6 +59,18 @@ double TacoDecoderExtension::getChannelBytesPerPixel(
     return 0.0;
 }
 
+int TacoDecoderExtension::getOutputWidth(int channel) const {
+    if (channel == 0) return config.ch0_scale_width;
+    if (channel == 1) return config.ch1_scale_width;
+    return 0;
+}
+
+int TacoDecoderExtension::getOutputHeight(int channel) const {
+    if (channel == 0) return config.ch0_scale_height;
+    if (channel == 1) return config.ch1_scale_height;
+    return 0;
+}
+
 TacoDecoderExtension* tacoVendorExtension(WorkerConfig::DecoderConfig& d) {
     if (!d.vendor) {
         return nullptr;

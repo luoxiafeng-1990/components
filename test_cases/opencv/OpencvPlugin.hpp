@@ -13,8 +13,10 @@
 #include "../common/ExecuteMode.hpp"
 #include "../common/DataSourceOptions.hpp"
 #include "consumptionline/BufferConsumerService.hpp"
-#include "productionline/worker/WorkerConfig.hpp"
-#include "productionline/WorkerSyncCoordinator.hpp"
+#include "consumptionline/config/ConsumerTypeConfig.hpp"
+#include "productionline/worker/config/MultiWorkerConfig.hpp"
+#include "productionline/worker/config/WorkerConfigs.hpp"
+#include "productionline/line/WorkerSyncCoordinator.hpp"
 
 #include <string>
 #include <vector>

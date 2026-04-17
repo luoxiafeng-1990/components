@@ -27,7 +27,9 @@
 #ifndef DATA_SOURCE_OPTIONS_HPP
 #define DATA_SOURCE_OPTIONS_HPP
 
-#include "productionline/worker/WorkerConfig.hpp"
+#include "productionline/worker/config/ConfigBuilders.hpp"
+#include "productionline/worker/config/MultiWorkerConfig.hpp"
+#include "productionline/worker/config/WorkerConfigs.hpp"
 #include "third_party/CLI11.hpp"
 
 namespace test {

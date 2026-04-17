@@ -9,6 +9,7 @@
 #include "../common/WorkerConfigFactory.hpp"
 #include "consumptionline/BufferConsumerService.hpp"
 #include "../common/third_party/CLI11.hpp"
+#include "consumptionline/config/ConsumerTypeConfigBuilder.hpp"
 
 #include <iostream>
 #include <sstream>
@@ -93,7 +94,9 @@ void RecordPlugin::applyTo(WorkerConfig& config) const {
         .setPathIfNonEmpty(input_path_)
         .build();
     if (verbose_)
-        config.consumer_type.verbose = true;
+        config.consumer_type = ConsumerTypeConfigBuilder(config.consumer_type)
+            .setVerbose(true)
+            .build();
 }
 
 int RecordPlugin::handlePreActions() {
@@ -142,9 +145,13 @@ std::vector<WorkerConfig> RecordPlugin::buildPipelineConfigs(const WorkerConfig&
         }
 
         auto config = common::WorkerConfigFactory::createRtspRecord(shared_config.data_source.path);
-        config.consumer_type.save_encoded.output_path = output;
-        config.consumer_type.save_encoded.enable = true;
-        config.consumer_type.max_duration_seconds = params_.duration;
+        config.consumer_type = ConsumerTypeConfigBuilder(config.consumer_type)
+            .setSaveEncodedConfig(SaveEncodedConfigBuilder()
+                .setEnable(true)
+                .setOutputPath(output)
+                .build())
+            .setMaxDurationSeconds(params_.duration)
+            .build();
         return config;
     };
 

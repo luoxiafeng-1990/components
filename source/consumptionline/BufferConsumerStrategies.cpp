@@ -8,9 +8,9 @@
 #include "buffer/BufferAllocatorFacade.hpp"
 #include "buffer/BufferAllocatorFactory.hpp"
 #include "vendor/taco/display/DisplayDeviceFactory.hpp"
-#include "productionline/worker/FFmpegEncodeWorker.hpp"
-#include "productionline/worker/RawFrameSourceFromBuffer.hpp"
-#include "productionline/VideoProductionLine.hpp"
+#include "productionline/worker/core/FFmpegEncodeWorker.hpp"
+#include "productionline/worker/datasource/RawFrameSourceFromBuffer.hpp"
+#include "productionline/line/VideoProductionLine.hpp"
 
 #include <log4cplus/logger.h>
 #include <log4cplus/loggingmacros.h>
@@ -1525,8 +1525,8 @@ bool JpegEncodeConsumer::initialize(const std::vector<Buffer*>& first_buffers) {
     for (const auto& enc_name : encoder_candidates) {
         WorkerConfig enc_config;
         enc_config.global.worker_type = WorkerType::FFMPEG_ENCODE;
-        enc_config.display.width  = src_width;
-        enc_config.display.height = src_height;
+        enc_config.encoder.width  = src_width;
+        enc_config.encoder.height = src_height;
         enc_config.encoder.name = enc_name;
         enc_config.encoder.enable_hardware =
             (enc_name.find("taco") != std::string::npos);

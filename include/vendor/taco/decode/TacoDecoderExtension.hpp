@@ -3,7 +3,8 @@
 
 #include "vendor/contracts/DecoderVendorExtension.hpp"
 #include "vendor/taco/decode/TacoDecoderConfig.hpp"
-#include "productionline/worker/WorkerConfig.hpp"
+#include "productionline/worker/config/MultiWorkerConfig.hpp"
+#include "productionline/worker/config/WorkerConfigs.hpp"
 #include <cstring>
 #include <memory>
 
@@ -18,6 +19,9 @@ public:
     bool validate(std::string& err) const override;
 
     double getChannelBytesPerPixel(int channel, void* priv_data, int pix_fmt) const override;
+
+    int getOutputWidth(int channel = 0) const override;
+    int getOutputHeight(int channel = 0) const override;
 
     // ========================================
     // Taco 厂商专属映射（从 TacoConfigBuilder / FFmpegDecodeWorker 迁入）

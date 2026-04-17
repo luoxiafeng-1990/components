@@ -19,7 +19,8 @@
 
 #include <string>
 #include <vector>
-#include "productionline/worker/WorkerConfig.hpp"
+#include "productionline/worker/config/MultiWorkerConfig.hpp"
+#include "productionline/worker/config/WorkerConfigs.hpp"
 
 namespace CLI { class App; }
 

@@ -1,7 +1,9 @@
 #pragma once
 
 #include "buffer/bufferpool/Buffer.hpp"
-#include "productionline/worker/WorkerConfig.hpp"
+#include "consumptionline/config/ConsumerTypeConfig.hpp"
+#include "productionline/worker/config/MultiWorkerConfig.hpp"
+#include "productionline/worker/config/WorkerConfigs.hpp"
 #include <string>
 #include <vector>
 #include <atomic>

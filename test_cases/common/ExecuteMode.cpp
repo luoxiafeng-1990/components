@@ -4,7 +4,7 @@
  */
 
 #include "ExecuteMode.hpp"
-#include "productionline/VideoProductionLine.hpp"
+#include "productionline/line/VideoProductionLine.hpp"
 #include "consumptionline/BufferConsumerStrategies.hpp"
 #include "buffer/bufferpool/BufferPoolRegistry.hpp"
 #include <log4cplus/logger.h>
@@ -60,7 +60,8 @@ consumer::ConsumeResult ExecuteMode::compare(
             }
             if (flags & consumer::CONSUME_SAVE_RAW) {
                 LOG4CPLUS_INFO_FMT(logger, "  Save:       enabled to %s (stacked)",
-                                  configs[0].consumer_type.save_raw.getOutputPath().c_str());
+                                  configs[0].consumer_type.save_raw.output_paths.empty()
+                                      ? "" : configs[0].consumer_type.save_raw.output_paths[0].c_str());
             }
         }
         LOG4CPLUS_INFO(logger, "═══════════════════════════════════════════════════════");

@@ -34,7 +34,7 @@
 #include "preview/PreviewPlugin.hpp"
 #include "common/Logger.hpp"
 
-#include "productionline/WorkerSyncCoordinator.hpp"
+#include "productionline/line/WorkerSyncCoordinator.hpp"
 
 #include <iostream>
 #include <memory>

@@ -1,7 +1,8 @@
 #ifndef DECODER_CONFIG_VALIDATE_HPP
 #define DECODER_CONFIG_VALIDATE_HPP
 
-#include "productionline/worker/WorkerConfig.hpp"
+#include "productionline/worker/config/MultiWorkerConfig.hpp"
+#include "productionline/worker/config/WorkerConfigs.hpp"
 #include <string>
 
 /// 校验 DecoderConfig 通用字段 + vendor 扩展（若有）

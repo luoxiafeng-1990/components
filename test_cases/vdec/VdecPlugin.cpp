@@ -8,6 +8,7 @@
 #include "VdecPlugin.hpp"
 #include "../common/WorkerConfigFactory.hpp"
 #include "consumptionline/BufferConsumerService.hpp"
+#include "consumptionline/config/ConsumerTypeConfigBuilder.hpp"
 
 #include "../common/third_party/CLI11.hpp"
 
@@ -180,20 +181,17 @@ void VdecPlugin::applyTo(WorkerConfig& config) const {
         .setMaxFrames(max_frames_)
         .setLoop(loop_)
         .build();
-    // 与数据源读帧上限一致：消费循环使用同一上限（-1=无限制）
-    config.consumer_type.max_frames = max_frames_;
-    
-    // compare 设置
-    config.consumer_type.compare.enable_psnr = enable_psnr_;
-    config.consumer_type.compare.enable_ssim = enable_ssim_;
-    if (min_psnr_ > 0.0) {
-        config.consumer_type.compare.min_psnr = min_psnr_;
-    }
-    if (min_ssim_ > 0.0) {
-        config.consumer_type.compare.min_ssim = min_ssim_;
-    }
-    
-    config.consumer_type.verbose = verbose_;
+    auto compare_builder = CompareConfigBuilder(config.consumer_type.compare)
+        .setEnablePsnr(enable_psnr_)
+        .setEnableSsim(enable_ssim_);
+    if (min_psnr_ > 0.0) compare_builder.setMinPsnr(min_psnr_);
+    if (min_ssim_ > 0.0) compare_builder.setMinSsim(min_ssim_);
+
+    config.consumer_type = ConsumerTypeConfigBuilder(config.consumer_type)
+        .setMaxFrames(max_frames_)
+        .setCompareConfig(compare_builder.build())
+        .setVerbose(verbose_)
+        .build();
 }
 
 // ========================================
@@ -284,8 +282,11 @@ std::vector<WorkerConfig> VdecPlugin::buildPipelineConfigs(const WorkerConfig& s
         auto cfg = use_hw
             ? common::WorkerConfigFactory::createDecode(shared_config.data_source.path, params.codec)
             : common::WorkerConfigFactory::createSoftwareDecode(shared_config.data_source.path);
-        cfg.consumer_type = shared_config.consumer_type;
-        cfg.consumer_type.performance.target_fps = params.fps;
+        cfg.consumer_type = ConsumerTypeConfigBuilder(shared_config.consumer_type)
+            .setPerformanceConfig(PerformanceConfigBuilder(shared_config.consumer_type.performance)
+                .setTargetFps(params.fps)
+                .build())
+            .build();
         cfg.data_source = DataSourceConfigBuilder(cfg.data_source)
             .setMaxFrames(shared_config.data_source.max_frames)
             .setLoop(shared_config.data_source.loop)

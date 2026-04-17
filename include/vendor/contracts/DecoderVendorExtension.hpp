@@ -30,6 +30,18 @@ public:
      * @return > 0.0 时为有效值；<= 0.0 表示该通道未启用或不支持，调用方应走通用路径
      */
     virtual double getChannelBytesPerPixel(int channel, void* priv_data, int pix_fmt) const;
+
+    /**
+     * @brief 获取指定通道的 PP 输出宽度
+     * @return > 0 时为有效值；0 表示未配置，调用方应使用源分辨率
+     */
+    virtual int getOutputWidth(int channel = 0) const;
+
+    /**
+     * @brief 获取指定通道的 PP 输出高度
+     * @return > 0 时为有效值；0 表示未配置，调用方应使用源分辨率
+     */
+    virtual int getOutputHeight(int channel = 0) const;
 };
 
 inline bool IDecoderVendorExtension::validate(std::string& /*err*/) const {
@@ -39,6 +51,14 @@ inline bool IDecoderVendorExtension::validate(std::string& /*err*/) const {
 inline double IDecoderVendorExtension::getChannelBytesPerPixel(
     int /*channel*/, void* /*priv_data*/, int /*pix_fmt*/) const {
     return -1.0;
+}
+
+inline int IDecoderVendorExtension::getOutputWidth(int /*channel*/) const {
+    return 0;
+}
+
+inline int IDecoderVendorExtension::getOutputHeight(int /*channel*/) const {
+    return 0;
 }
 
 #endif

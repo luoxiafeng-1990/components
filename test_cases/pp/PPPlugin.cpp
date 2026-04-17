@@ -108,8 +108,8 @@ WorkerConfig::DecoderConfig PPPlugin::buildTacoDecoder() const {
     auto channels = channel_str_.empty() ? std::vector<int>{0} : parseChannels(channel_str_);
     auto formats = parseFormats(format_str_);
     auto color_std = TacoConfigBuilder::mapColorStdNameToEnum(color_std_str_);
-    int w = config_.display.width > 0 ? config_.display.width : 1920;
-    int h = config_.display.height > 0 ? config_.display.height : 1080;
+    int w = pp_width_ > 0 ? pp_width_ : 1920;
+    int h = pp_height_ > 0 ? pp_height_ : 1080;
 
     auto taco = TacoConfigBuilder();
 
@@ -153,21 +153,21 @@ const std::map<std::string, WorkerConfig>& PPPlugin::getPredefinedTests() {
         // ════════════════════════════════════════════════════════════════════
         // PP0 YUV 格式（15 种，对应 lfl 分支 test_decode.cpp 定义）
         // ════════════════════════════════════════════════════════════════════
-        {"pp0_yuv400_p010",       F::createPP0YuvConfig("", OutputFormat::YUV_P010, 1920, 1080, ColorStandard::BT2020)},
-        {"pp0_yuv400_i010",       F::createPP0YuvConfig("", OutputFormat::YUV_P010, 1920, 1080, ColorStandard::BT2020)},
-        {"pp0_yuv400_l010",       F::createPP0YuvConfig("", OutputFormat::YUV_P010, 1920, 1080, ColorStandard::BT2020)},
-        {"pp0_yuv400_pack10",     F::createPP0YuvConfig("", OutputFormat::YUV_P010, 1920, 1080, ColorStandard::BT2020)},
-        {"pp0_yuv400_8bit",       F::createPP0YuvConfig("", OutputFormat::YUV_NV12, 1920, 1080, ColorStandard::BT601)},
-        {"pp0_yuv420_nv12_p010",  F::createPP0YuvConfig("", OutputFormat::YUV_P010, 1920, 1080, ColorStandard::BT2020)},
-        {"pp0_yuv420_nv12_i010",  F::createPP0YuvConfig("", OutputFormat::YUV_P010, 1920, 1080, ColorStandard::BT2020)},
-        {"pp0_yuv420_nv12_l010",  F::createPP0YuvConfig("", OutputFormat::YUV_P010, 1920, 1080, ColorStandard::BT2020)},
-        {"pp0_yuv420_nv12_pack10",F::createPP0YuvConfig("", OutputFormat::YUV_P010, 1920, 1080, ColorStandard::BT2020)},
-        {"pp0_yuv420_8bit_nv12",  F::createPP0YuvConfig("", OutputFormat::YUV_NV12, 1920, 1080, ColorStandard::BT601)},
-        {"pp0_yuv420_nv21_p010_tiled", F::createPP0YuvConfig("", OutputFormat::YUV_P010, 1920, 1080, ColorStandard::BT2020)},
-        {"pp0_yuv420_nv21_i011",  F::createPP0YuvConfig("", OutputFormat::YUV_P010, 1920, 1080, ColorStandard::BT2020)},
-        {"pp0_yuv420_nv21_l010",  F::createPP0YuvConfig("", OutputFormat::YUV_P010, 1920, 1080, ColorStandard::BT2020)},
-        {"pp0_yuv420_p010",       F::createPP0YuvConfig("", OutputFormat::YUV_P010, 1920, 1080, ColorStandard::BT2020)},
-        {"pp0_yuv420_8bit_nv21",  F::createPP0YuvConfig("", OutputFormat::YUV_NV21, 1920, 1080, ColorStandard::BT601)},
+        {"pp0_yuv400_p010",       F::createPP0YuvConfig("", OutputFormat::YUV_P010, 1920, 1080, TacoColorSpace::BT2020_FULL)},
+        {"pp0_yuv400_i010",       F::createPP0YuvConfig("", OutputFormat::YUV_P010, 1920, 1080, TacoColorSpace::BT2020_FULL)},
+        {"pp0_yuv400_l010",       F::createPP0YuvConfig("", OutputFormat::YUV_P010, 1920, 1080, TacoColorSpace::BT2020_FULL)},
+        {"pp0_yuv400_pack10",     F::createPP0YuvConfig("", OutputFormat::YUV_P010, 1920, 1080, TacoColorSpace::BT2020_FULL)},
+        {"pp0_yuv400_8bit",       F::createPP0YuvConfig("", OutputFormat::YUV_NV12, 1920, 1080, TacoColorSpace::BT601_FULL)},
+        {"pp0_yuv420_nv12_p010",  F::createPP0YuvConfig("", OutputFormat::YUV_P010, 1920, 1080, TacoColorSpace::BT2020_FULL)},
+        {"pp0_yuv420_nv12_i010",  F::createPP0YuvConfig("", OutputFormat::YUV_P010, 1920, 1080, TacoColorSpace::BT2020_FULL)},
+        {"pp0_yuv420_nv12_l010",  F::createPP0YuvConfig("", OutputFormat::YUV_P010, 1920, 1080, TacoColorSpace::BT2020_FULL)},
+        {"pp0_yuv420_nv12_pack10",F::createPP0YuvConfig("", OutputFormat::YUV_P010, 1920, 1080, TacoColorSpace::BT2020_FULL)},
+        {"pp0_yuv420_8bit_nv12",  F::createPP0YuvConfig("", OutputFormat::YUV_NV12, 1920, 1080, TacoColorSpace::BT601_FULL)},
+        {"pp0_yuv420_nv21_p010_tiled", F::createPP0YuvConfig("", OutputFormat::YUV_P010, 1920, 1080, TacoColorSpace::BT2020_FULL)},
+        {"pp0_yuv420_nv21_i011",  F::createPP0YuvConfig("", OutputFormat::YUV_P010, 1920, 1080, TacoColorSpace::BT2020_FULL)},
+        {"pp0_yuv420_nv21_l010",  F::createPP0YuvConfig("", OutputFormat::YUV_P010, 1920, 1080, TacoColorSpace::BT2020_FULL)},
+        {"pp0_yuv420_p010",       F::createPP0YuvConfig("", OutputFormat::YUV_P010, 1920, 1080, TacoColorSpace::BT2020_FULL)},
+        {"pp0_yuv420_8bit_nv21",  F::createPP0YuvConfig("", OutputFormat::YUV_NV21, 1920, 1080, TacoColorSpace::BT601_FULL)},
 
         // 便捷别名
         {"pp0_nv12",              F::createPP0YuvConfig("", OutputFormat::YUV_NV12, 1920, 1080)},
@@ -184,25 +184,25 @@ const std::map<std::string, WorkerConfig>& PPPlugin::getPredefinedTests() {
         // ════════════════════════════════════════════════════════════════════
         // PP1 RGB 格式（18 种）
         // ════════════════════════════════════════════════════════════════════
-        {"pp1_argb2101010",       F::createPP1RgbConfig("", OutputFormat::RGB_A2R10G10B10, 1920, 1080, ColorStandard::BT601)},
-        {"pp1_abgr2101010",       F::createPP1RgbConfig("", OutputFormat::RGB_A2B10G10R10, 1920, 1080, ColorStandard::BT601)},
-        {"pp1_bgra2101010",       F::createPP1RgbConfig("", OutputFormat::RGB_B10G10R10A2, 1920, 1080, ColorStandard::BT601)},
-        {"pp1_rgba2101010",       F::createPP1RgbConfig("", OutputFormat::RGB_R10G10B10A2, 1920, 1080, ColorStandard::BT601)},
-        {"pp1_abgr8888",          F::createPP1RgbConfig("", OutputFormat::RGB_ABGR888, 1920, 1080, ColorStandard::BT601)},
-        {"pp1_argb8888",          F::createPP1RgbConfig("", OutputFormat::RGB_ARGB888, 1920, 1080, ColorStandard::BT601)},
-        {"pp1_bgr888",            F::createPP1RgbConfig("", OutputFormat::RGB_BGR888, 1920, 1080, ColorStandard::BT601)},
-        {"pp1_bgra8888",          F::createPP1RgbConfig("", OutputFormat::RGB_BGRA888, 1920, 1080, ColorStandard::BT601)},
-        {"pp1_bgrx8888",          F::createPP1RgbConfig("", OutputFormat::RGB_BGRX888, 1920, 1080, ColorStandard::BT601)},
-        {"pp1_rgb888",            F::createPP1RgbConfig("", OutputFormat::RGB_RGB888, 1920, 1080, ColorStandard::BT601)},
-        {"pp1_rgba8888",          F::createPP1RgbConfig("", OutputFormat::RGB_RGBA888, 1920, 1080, ColorStandard::BT601)},
-        {"pp1_rgbx8888",          F::createPP1RgbConfig("", OutputFormat::RGB_RGBX888, 1920, 1080, ColorStandard::BT601)},
-        {"pp1_xrgb8888",          F::createPP1RgbConfig("", OutputFormat::RGB_XRGB888, 1920, 1080, ColorStandard::BT601)},
-        {"pp1_xbgr8888",          F::createPP1RgbConfig("", OutputFormat::RGB_XBGR888, 1920, 1080, ColorStandard::BT601)},
-        {"pp1_rgb888_planar",     F::createPP1RgbConfig("", OutputFormat::RGB_RGB888_PLANAR, 1920, 1080, ColorStandard::BT601)},
-        {"pp1_bgr888_planar",     F::createPP1RgbConfig("", OutputFormat::RGB_BGR888_PLANAR, 1920, 1080, ColorStandard::BT601)},
-        {"pp1_rgb161616",         F::createPP1RgbConfig("", OutputFormat::RGB_R16G16B16, 1920, 1080, ColorStandard::BT601)},
-        {"pp1_bgr161616",         F::createPP1RgbConfig("", OutputFormat::RGB_B16G16R16, 1920, 1080, ColorStandard::BT601)},
-        {"pp1_rgb161616_planar",  F::createPP1RgbConfig("", OutputFormat::RGB_GBRP, 1920, 1080, ColorStandard::BT601)},
+        {"pp1_argb2101010",       F::createPP1RgbConfig("", OutputFormat::RGB_A2R10G10B10, 1920, 1080, TacoColorSpace::BT601_FULL)},
+        {"pp1_abgr2101010",       F::createPP1RgbConfig("", OutputFormat::RGB_A2B10G10R10, 1920, 1080, TacoColorSpace::BT601_FULL)},
+        {"pp1_bgra2101010",       F::createPP1RgbConfig("", OutputFormat::RGB_B10G10R10A2, 1920, 1080, TacoColorSpace::BT601_FULL)},
+        {"pp1_rgba2101010",       F::createPP1RgbConfig("", OutputFormat::RGB_R10G10B10A2, 1920, 1080, TacoColorSpace::BT601_FULL)},
+        {"pp1_abgr8888",          F::createPP1RgbConfig("", OutputFormat::RGB_ABGR888, 1920, 1080, TacoColorSpace::BT601_FULL)},
+        {"pp1_argb8888",          F::createPP1RgbConfig("", OutputFormat::RGB_ARGB888, 1920, 1080, TacoColorSpace::BT601_FULL)},
+        {"pp1_bgr888",            F::createPP1RgbConfig("", OutputFormat::RGB_BGR888, 1920, 1080, TacoColorSpace::BT601_FULL)},
+        {"pp1_bgra8888",          F::createPP1RgbConfig("", OutputFormat::RGB_BGRA888, 1920, 1080, TacoColorSpace::BT601_FULL)},
+        {"pp1_bgrx8888",          F::createPP1RgbConfig("", OutputFormat::RGB_BGRX888, 1920, 1080, TacoColorSpace::BT601_FULL)},
+        {"pp1_rgb888",            F::createPP1RgbConfig("", OutputFormat::RGB_RGB888, 1920, 1080, TacoColorSpace::BT601_FULL)},
+        {"pp1_rgba8888",          F::createPP1RgbConfig("", OutputFormat::RGB_RGBA888, 1920, 1080, TacoColorSpace::BT601_FULL)},
+        {"pp1_rgbx8888",          F::createPP1RgbConfig("", OutputFormat::RGB_RGBX888, 1920, 1080, TacoColorSpace::BT601_FULL)},
+        {"pp1_xrgb8888",          F::createPP1RgbConfig("", OutputFormat::RGB_XRGB888, 1920, 1080, TacoColorSpace::BT601_FULL)},
+        {"pp1_xbgr8888",          F::createPP1RgbConfig("", OutputFormat::RGB_XBGR888, 1920, 1080, TacoColorSpace::BT601_FULL)},
+        {"pp1_rgb888_planar",     F::createPP1RgbConfig("", OutputFormat::RGB_RGB888_PLANAR, 1920, 1080, TacoColorSpace::BT601_FULL)},
+        {"pp1_bgr888_planar",     F::createPP1RgbConfig("", OutputFormat::RGB_BGR888_PLANAR, 1920, 1080, TacoColorSpace::BT601_FULL)},
+        {"pp1_rgb161616",         F::createPP1RgbConfig("", OutputFormat::RGB_R16G16B16, 1920, 1080, TacoColorSpace::BT601_FULL)},
+        {"pp1_bgr161616",         F::createPP1RgbConfig("", OutputFormat::RGB_B16G16R16, 1920, 1080, TacoColorSpace::BT601_FULL)},
+        {"pp1_rgb161616_planar",  F::createPP1RgbConfig("", OutputFormat::RGB_GBRP, 1920, 1080, TacoColorSpace::BT601_FULL)},
 
         // PP1 RGB 便捷别名
         {"pp1_argb888",           F::createPP1RgbConfig("", OutputFormat::RGB_ARGB888, 1920, 1080)},
@@ -216,22 +216,22 @@ const std::map<std::string, WorkerConfig>& PPPlugin::getPredefinedTests() {
         // ════════════════════════════════════════════════════════════════════
         // PP1 YUV 格式（16 种）
         // ════════════════════════════════════════════════════════════════════
-        {"pp1_yuv400_p010",       F::createPP1YuvConfig("", OutputFormat::YUV_P010, 1920, 1080, ColorStandard::BT2020)},
-        {"pp1_yuv400_i010",       F::createPP1YuvConfig("", OutputFormat::YUV_P010, 1920, 1080, ColorStandard::BT2020)},
-        {"pp1_yuv400_l010",       F::createPP1YuvConfig("", OutputFormat::YUV_P010, 1920, 1080, ColorStandard::BT2020)},
-        {"pp1_yuv400_pack10",     F::createPP1YuvConfig("", OutputFormat::YUV_P010, 1920, 1080, ColorStandard::BT2020)},
-        {"pp1_yuv400_8bit",       F::createPP1YuvConfig("", OutputFormat::YUV_NV12, 1920, 1080, ColorStandard::BT601)},
-        {"pp1_yuv420_nv12_p010",  F::createPP1YuvConfig("", OutputFormat::YUV_P010, 1920, 1080, ColorStandard::BT2020)},
-        {"pp1_yuv420_nv12_i010",  F::createPP1YuvConfig("", OutputFormat::YUV_P010, 1920, 1080, ColorStandard::BT2020)},
-        {"pp1_yuv420_nv12_l010",  F::createPP1YuvConfig("", OutputFormat::YUV_P010, 1920, 1080, ColorStandard::BT2020)},
-        {"pp1_yuv420_nv12_pack10",F::createPP1YuvConfig("", OutputFormat::YUV_P010, 1920, 1080, ColorStandard::BT2020)},
-        {"pp1_yuv420_8bit_nv12",  F::createPP1YuvConfig("", OutputFormat::YUV_NV12, 1920, 1080, ColorStandard::BT601)},
-        {"pp1_yuv420_nv21_p010_tiled", F::createPP1YuvConfig("", OutputFormat::YUV_P010, 1920, 1080, ColorStandard::BT2020)},
-        {"pp1_yuv420_nv21_i011",  F::createPP1YuvConfig("", OutputFormat::YUV_P010, 1920, 1080, ColorStandard::BT2020)},
-        {"pp1_yuv420_nv21_l010",  F::createPP1YuvConfig("", OutputFormat::YUV_P010, 1920, 1080, ColorStandard::BT2020)},
-        {"pp1_yuv420_p010",       F::createPP1YuvConfig("", OutputFormat::YUV_P010, 1920, 1080, ColorStandard::BT2020)},
-        {"pp1_yuv420_8bit_nv21",  F::createPP1YuvConfig("", OutputFormat::YUV_NV21, 1920, 1080, ColorStandard::BT601)},
-        {"pp1_yuv420_nv21_p010",  F::createPP1YuvConfig("", OutputFormat::YUV_P010, 1920, 1080, ColorStandard::BT2020)},
+        {"pp1_yuv400_p010",       F::createPP1YuvConfig("", OutputFormat::YUV_P010, 1920, 1080, TacoColorSpace::BT2020_FULL)},
+        {"pp1_yuv400_i010",       F::createPP1YuvConfig("", OutputFormat::YUV_P010, 1920, 1080, TacoColorSpace::BT2020_FULL)},
+        {"pp1_yuv400_l010",       F::createPP1YuvConfig("", OutputFormat::YUV_P010, 1920, 1080, TacoColorSpace::BT2020_FULL)},
+        {"pp1_yuv400_pack10",     F::createPP1YuvConfig("", OutputFormat::YUV_P010, 1920, 1080, TacoColorSpace::BT2020_FULL)},
+        {"pp1_yuv400_8bit",       F::createPP1YuvConfig("", OutputFormat::YUV_NV12, 1920, 1080, TacoColorSpace::BT601_FULL)},
+        {"pp1_yuv420_nv12_p010",  F::createPP1YuvConfig("", OutputFormat::YUV_P010, 1920, 1080, TacoColorSpace::BT2020_FULL)},
+        {"pp1_yuv420_nv12_i010",  F::createPP1YuvConfig("", OutputFormat::YUV_P010, 1920, 1080, TacoColorSpace::BT2020_FULL)},
+        {"pp1_yuv420_nv12_l010",  F::createPP1YuvConfig("", OutputFormat::YUV_P010, 1920, 1080, TacoColorSpace::BT2020_FULL)},
+        {"pp1_yuv420_nv12_pack10",F::createPP1YuvConfig("", OutputFormat::YUV_P010, 1920, 1080, TacoColorSpace::BT2020_FULL)},
+        {"pp1_yuv420_8bit_nv12",  F::createPP1YuvConfig("", OutputFormat::YUV_NV12, 1920, 1080, TacoColorSpace::BT601_FULL)},
+        {"pp1_yuv420_nv21_p010_tiled", F::createPP1YuvConfig("", OutputFormat::YUV_P010, 1920, 1080, TacoColorSpace::BT2020_FULL)},
+        {"pp1_yuv420_nv21_i011",  F::createPP1YuvConfig("", OutputFormat::YUV_P010, 1920, 1080, TacoColorSpace::BT2020_FULL)},
+        {"pp1_yuv420_nv21_l010",  F::createPP1YuvConfig("", OutputFormat::YUV_P010, 1920, 1080, TacoColorSpace::BT2020_FULL)},
+        {"pp1_yuv420_p010",       F::createPP1YuvConfig("", OutputFormat::YUV_P010, 1920, 1080, TacoColorSpace::BT2020_FULL)},
+        {"pp1_yuv420_8bit_nv21",  F::createPP1YuvConfig("", OutputFormat::YUV_NV21, 1920, 1080, TacoColorSpace::BT601_FULL)},
+        {"pp1_yuv420_nv21_p010",  F::createPP1YuvConfig("", OutputFormat::YUV_P010, 1920, 1080, TacoColorSpace::BT2020_FULL)},
 
         // PP1 YUV 便捷别名
         {"pp1_nv12",              F::createPP1YuvConfig("", OutputFormat::YUV_NV12, 1920, 1080)},
@@ -266,28 +266,28 @@ const std::map<std::string, WorkerConfig>& PPPlugin::getPredefinedTests() {
         {"multi_pp_crop2",  F::createCropConfig("", 0, 0, 32768, 32768, 1280, 720)},
         {"multi_pp_crop3",  F::createCropConfig("", 0, 0, 4096, 2160, 1920, 1080)},
         {"multi_pp_crop4",  F::createCropConfig("", 0, 0, 32768, 32768, 1280, 720)},
-        {"multi_pp_scale1", F::createPP0YuvConfig("", OutputFormat::YUV_NV12, 256, 256, ColorStandard::BT709)},
-        {"multi_pp_scale2", F::createPP1YuvConfig("", OutputFormat::YUV_NV12, 128, 128, ColorStandard::BT709)},
-        {"multi_pp_scale3", F::createMultiPPConfig("", OutputFormat::YUV_NV12, OutputFormat::YUV_NV12, 256, 256, ColorStandard::BT709)},
-        {"multi_pp_scale4", F::createMultiPPConfig("", OutputFormat::YUV_NV12, OutputFormat::YUV_NV12, 128, 128, ColorStandard::BT709)},
+        {"multi_pp_scale1", F::createPP0YuvConfig("", OutputFormat::YUV_NV12, 256, 256, TacoColorSpace::BT709_FULL)},
+        {"multi_pp_scale2", F::createPP1YuvConfig("", OutputFormat::YUV_NV12, 128, 128, TacoColorSpace::BT709_FULL)},
+        {"multi_pp_scale3", F::createMultiPPConfig("", OutputFormat::YUV_NV12, OutputFormat::YUV_NV12, 256, 256, TacoColorSpace::BT709_FULL)},
+        {"multi_pp_scale4", F::createMultiPPConfig("", OutputFormat::YUV_NV12, OutputFormat::YUV_NV12, 128, 128, TacoColorSpace::BT709_FULL)},
 
         // ════════════════════════════════════════════════════════════════════
         // ZYW 新增测试 - PP Crop 测试（带分辨率）
         // ════════════════════════════════════════════════════════════════════
         {"pp0_720p_crop",           F::createCropConfig("", 0, 0, 1280, 720, 1280, 720)},
         {"pp0_1080p_crop",          F::createCropConfig("", 0, 0, 1920, 1080, 1920, 1080)},
-        {"pp1_720p_rgb_crop",       F::createPP1RgbConfig("", OutputFormat::RGB_RGB888, 1280, 720, ColorStandard::BT709)},
-        {"pp1_1080p_rgb_crop",      F::createPP1RgbConfig("", OutputFormat::RGB_RGB888, 1920, 1080, ColorStandard::BT709)},
-        {"pp1_720p_yuv_crop",       F::createPP1YuvConfig("", OutputFormat::YUV_NV12, 1280, 720, ColorStandard::BT709)},
-        {"pp1_1080p_yuv_crop",      F::createPP1YuvConfig("", OutputFormat::YUV_NV12, 1920, 1080, ColorStandard::BT709)},
+        {"pp1_720p_rgb_crop",       F::createPP1RgbConfig("", OutputFormat::RGB_RGB888, 1280, 720, TacoColorSpace::BT709_FULL)},
+        {"pp1_1080p_rgb_crop",      F::createPP1RgbConfig("", OutputFormat::RGB_RGB888, 1920, 1080, TacoColorSpace::BT709_FULL)},
+        {"pp1_720p_yuv_crop",       F::createPP1YuvConfig("", OutputFormat::YUV_NV12, 1280, 720, TacoColorSpace::BT709_FULL)},
+        {"pp1_1080p_yuv_crop",      F::createPP1YuvConfig("", OutputFormat::YUV_NV12, 1920, 1080, TacoColorSpace::BT709_FULL)},
 
         // ════════════════════════════════════════════════════════════════════
         // ZYW 新增测试 - Multi-PP 扩展测试
         // ════════════════════════════════════════════════════════════════════
         {"multi_pp",                F::createMultiPPConfig("", OutputFormat::YUV_NV12, OutputFormat::RGB_RGB888, 1920, 1080)},
-        {"multi_pp_crop",           F::createMultiPPConfig("", OutputFormat::YUV_NV12, OutputFormat::RGB_RGB888, 1920, 1080, ColorStandard::BT709)},
-        {"multi_pp_scale",          F::createMultiPPConfig("", OutputFormat::YUV_NV12, OutputFormat::RGB_RGB888, 960, 540, ColorStandard::BT709)},
-        {"multi_pp_crop_scale",     F::createMultiPPConfig("", OutputFormat::YUV_NV12, OutputFormat::RGB_RGB888, 960, 540, ColorStandard::BT709)},
+        {"multi_pp_crop",           F::createMultiPPConfig("", OutputFormat::YUV_NV12, OutputFormat::RGB_RGB888, 1920, 1080, TacoColorSpace::BT709_FULL)},
+        {"multi_pp_scale",          F::createMultiPPConfig("", OutputFormat::YUV_NV12, OutputFormat::RGB_RGB888, 960, 540, TacoColorSpace::BT709_FULL)},
+        {"multi_pp_crop_scale",     F::createMultiPPConfig("", OutputFormat::YUV_NV12, OutputFormat::RGB_RGB888, 960, 540, TacoColorSpace::BT709_FULL)},
 
         // ════════════════════════════════════════════════════════════════════
         // ZYW 新增测试 - PP0 带分辨率的格式测试
@@ -314,8 +314,8 @@ const std::map<std::string, WorkerConfig>& PPPlugin::getPredefinedTests() {
         // ════════════════════════════════════════════════════════════════════
         // ZYW 新增测试 - Scale 带输出分辨率
         // ════════════════════════════════════════════════════════════════════
-        {"scale_720p_512x288",      F::createPP0YuvConfig("", OutputFormat::YUV_NV12, 512, 288, ColorStandard::BT709)},
-        {"scale_1080p_800x450",     F::createPP0YuvConfig("", OutputFormat::YUV_NV12, 800, 450, ColorStandard::BT709)},
+        {"scale_720p_512x288",      F::createPP0YuvConfig("", OutputFormat::YUV_NV12, 512, 288, TacoColorSpace::BT709_FULL)},
+        {"scale_1080p_800x450",     F::createPP0YuvConfig("", OutputFormat::YUV_NV12, 800, 450, TacoColorSpace::BT709_FULL)},
 
         // ════════════════════════════════════════════════════════════════════
         // ZYW 新增测试 - H265 PP0/PP1 格式测试
@@ -351,9 +351,9 @@ void PPPlugin::registerOptions(CLI::App& app) {
     app.add_flag("!--software", config_.decoder.enable_hardware,
                  "使用软件解码（默认硬件）");
 
-    // ── 直接绑定到 config_.display（宽高，也供厂商 Builder 使用）──
-    app.add_option("-W,--width", config_.display.width, "输出宽度");
-    app.add_option("-H,--height", config_.display.height, "输出高度");
+    // ── PP 输出分辨率（供各厂商 Builder 使用）──
+    app.add_option("-W,--width", pp_width_, "PP 输出宽度");
+    app.add_option("-H,--height", pp_height_, "PP 输出高度");
 
     // ── 直接绑定到 config_.consumer_type.compare ──
     app.add_flag("-p,--psnr", config_.consumer_type.compare.enable_psnr, "启用 PSNR 验证");
@@ -400,19 +400,31 @@ void PPPlugin::applyTo(WorkerConfig& config) const {
     auto ct_builder = ConsumerTypeConfigBuilder(config.consumer_type);
 
     if (config_.consumer_type.compare.enable_psnr || config_.consumer_type.compare.enable_ssim) {
-        ct_builder.enableCompare(true,
-                                 config_.consumer_type.compare.min_psnr,
-                                 config_.consumer_type.compare.min_ssim);
+        ct_builder.setCompareConfig(
+            CompareConfigBuilder(config.consumer_type.compare)
+                .setEnablePsnr(true)
+                .setEnableSsim(true)
+                .setMinPsnr(config_.consumer_type.compare.min_psnr)
+                .setMinSsim(config_.consumer_type.compare.min_ssim)
+                .build());
     }
     if (config_.consumer_type.verbose) {
         ct_builder.setVerbose(true);
     }
     if (!config_.consumer_type.save_raw.output_paths.empty()) {
-        ct_builder.enableSaveRaw(true,
-                                 config_.consumer_type.save_raw.output_paths[0]);
+        std::vector<int> mfc = config_.consumer_type.save_raw.max_frames_per_channel;
+        if (mfc.size() != config_.consumer_type.save_raw.output_paths.size()) {
+            mfc.assign(config_.consumer_type.save_raw.output_paths.size(), -1);
+        }
+        ct_builder.setSaveRawConfig(
+            SaveRawConfigBuilder(config.consumer_type.save_raw)
+                .setEnable(true)
+                .setOutputPaths(config_.consumer_type.save_raw.output_paths)
+                .setMaxFramesPerChannel(mfc)
+                .build());
     }
     if (config_.data_source.max_frames != -1) {
-        ct_builder.setConsumerMaxFrames(config_.data_source.max_frames);
+        ct_builder.setMaxFrames(config_.data_source.max_frames);
     }
 
     config.consumer_type = ct_builder.build();
@@ -427,15 +439,12 @@ void PPPlugin::applyTo(WorkerConfig& config) const {
 }
 
 int PPPlugin::handlePreActions() {
-    // resolution_str_ 便捷写法 → config_.display（通过 Builder）
+    // resolution_str_ 便捷写法 → pp_width_ / pp_height_
     if (!resolution_str_.empty()) {
         size_t pos = resolution_str_.find('x');
         if (pos != std::string::npos) {
-            config_.display = DisplayConfigBuilder()
-                .setDisplayResolution(
-                    std::stoi(resolution_str_.substr(0, pos)),
-                    std::stoi(resolution_str_.substr(pos + 1)))
-                .build();
+            pp_width_  = std::stoi(resolution_str_.substr(0, pos));
+            pp_height_ = std::stoi(resolution_str_.substr(pos + 1));
         }
     }
 
@@ -454,7 +463,7 @@ int PPPlugin::handlePreActions() {
                         .build()
                 )
                 .setDecoderConfig(preset.decoder)
-                .setDisplayConfig(preset.display)
+                .setEncoderConfig(preset.encoder)
                 .setConsumerTypeConfig(
                     ConsumerTypeConfigBuilder(config_.consumer_type)
                         .build()
@@ -481,8 +490,8 @@ int PPPlugin::handlePreActions() {
 std::string PPPlugin::getTestName() const {
     auto channels = channel_str_.empty() ? std::vector<int>{0} : parseChannels(channel_str_);
     auto formats = parseFormats(format_str_);
-    int w = config_.display.width > 0 ? config_.display.width : 1920;
-    int h = config_.display.height > 0 ? config_.display.height : 1080;
+    int w = pp_width_ > 0 ? pp_width_ : 1920;
+    int h = pp_height_ > 0 ? pp_height_ : 1080;
 
     std::ostringstream test_name;
     for (size_t i = 0; i < channels.size(); ++i) {
@@ -541,15 +550,9 @@ std::vector<WorkerConfig> PPPlugin::buildPipelineConfigs(const WorkerConfig& sha
         .setPath(config_.data_source.path)
         .build();
 
-    int w = config_.display.width > 0 ? config_.display.width : 1920;
-    int h = config_.display.height > 0 ? config_.display.height : 1080;
-
     auto full_config = WorkerConfigBuilder()
         .setDataSourceConfig(data_source)
         .setDecoderConfig(decoder)
-        .setDisplayConfig(
-            DisplayConfigBuilder().setDisplayResolution(w, h).build()
-        )
         .setConsumerTypeConfig(shared_config.consumer_type)
         .setGlobalConfig(
             WorkerGlobalConfigBuilder().setWorkerType(WorkerType::FFMPEG_DECODE).build()
@@ -562,9 +565,13 @@ std::vector<WorkerConfig> PPPlugin::buildPipelineConfigs(const WorkerConfig& sha
          shared_config.consumer_type.compare.enable_ssim)
         && channels.size() >= 2) {
         full_config.consumer_type = ConsumerTypeConfigBuilder(full_config.consumer_type)
-            .enableCompare(true,
-                           full_config.consumer_type.compare.min_psnr,
-                           full_config.consumer_type.compare.min_ssim)
+            .setCompareConfig(
+                CompareConfigBuilder(full_config.consumer_type.compare)
+                    .setEnablePsnr(true)
+                    .setEnableSsim(true)
+                    .setMinPsnr(full_config.consumer_type.compare.min_psnr)
+                    .setMinSsim(full_config.consumer_type.compare.min_ssim)
+                    .build())
             .build();
         return {full_config};
     }

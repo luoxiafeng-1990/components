@@ -7,6 +7,7 @@
 #include "../common/WorkerConfigFactory.hpp"
 #include "../common/third_party/CLI11.hpp"
 #include "consumptionline/BufferConsumerService.hpp"
+#include "consumptionline/config/ConsumerTypeConfigBuilder.hpp"
 
 #include <iostream>
 #include <sstream>
@@ -188,7 +189,9 @@ void SavePlugin::applyTo(WorkerConfig& config) const {
         .setPathIfNonEmpty(input_path_)
         .build();
     if (verbose_)
-        config.consumer_type.verbose = true;
+        config.consumer_type = ConsumerTypeConfigBuilder(config.consumer_type)
+            .setVerbose(true)
+            .build();
 }
 
 int SavePlugin::handlePreActions() {
@@ -305,9 +308,13 @@ std::vector<WorkerConfig> SavePlugin::buildStreamPipeline(const WorkerConfig& sh
             output += "." + fmt;
 
         auto config = common::WorkerConfigFactory::createRtspRecord(shared_config.data_source.path);
-        config.consumer_type.save_encoded.output_path = output;
-        config.consumer_type.save_encoded.enable = true;
-        config.consumer_type.max_duration_seconds = duration_;
+        config.consumer_type = ConsumerTypeConfigBuilder(config.consumer_type)
+            .setSaveEncodedConfig(SaveEncodedConfigBuilder()
+                .setEnable(true)
+                .setOutputPath(output)
+                .build())
+            .setMaxDurationSeconds(duration_)
+            .build();
         return config;
     };
 
@@ -345,11 +352,15 @@ std::vector<WorkerConfig> SavePlugin::buildFramePipeline(const WorkerConfig& sha
             config = common::WorkerConfigFactory::createPP0YuvConfig(
                 shared_config.data_source.path, f, width_, height_);
         }
-        config.consumer_type.save_raw.enable = true;
-        config.consumer_type.save_raw.max_frames_per_channel = {frames};
-        config.consumer_type.save_raw.setOutputPath(out_path.empty()
-            ? "/tmp/save_frame_" + desc + ".raw" : out_path);
-        config.consumer_type.verbose = shared_config.consumer_type.verbose;
+        config.consumer_type = ConsumerTypeConfigBuilder(config.consumer_type)
+            .setSaveRawConfig(SaveRawConfigBuilder()
+                .setEnable(true)
+                .setMaxFramesPerChannel({frames})
+                .setOutputPaths({out_path.empty()
+                    ? "/tmp/save_frame_" + desc + ".raw" : out_path})
+                .build())
+            .setVerbose(shared_config.consumer_type.verbose)
+            .build();
         return config;
     };
 

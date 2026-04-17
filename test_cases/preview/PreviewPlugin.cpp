@@ -5,6 +5,7 @@
 
 #include "PreviewPlugin.hpp"
 #include "../common/third_party/CLI11.hpp"
+#include "consumptionline/config/ConsumerTypeConfigBuilder.hpp"
 
 namespace test {
 namespace preview {
@@ -28,11 +29,15 @@ void PreviewPlugin::registerOptions(CLI::App& app) {
 }
 
 void PreviewPlugin::applyTo(WorkerConfig& config) const {
-    config.consumer_type.jpeg_encode.enable       = true;
-    config.consumer_type.jpeg_encode.output_pipe   = output_pipe_;
-    config.consumer_type.jpeg_encode.quality        = quality_;
-    config.consumer_type.jpeg_encode.target_fps     = target_fps_;
-    config.consumer_type.jpeg_encode.encoder_name   = encoder_name_;
+    config.consumer_type = ConsumerTypeConfigBuilder(config.consumer_type)
+        .setJpegEncodeConfig(JpegEncodeConfigBuilder()
+            .setEnable(true)
+            .setOutputPipe(output_pipe_)
+            .setQuality(quality_)
+            .setTargetFps(target_fps_)
+            .setEncoderName(encoder_name_)
+            .build())
+        .build();
 }
 
 } // namespace preview

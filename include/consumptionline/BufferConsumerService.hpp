@@ -23,8 +23,10 @@
 
 #include "consumptionline/IBufferConsumer.hpp"
 #include "consumptionline/BufferConsumerStrategies.hpp"
-#include "productionline/worker/WorkerConfig.hpp"
-#include "productionline/VideoProductionLine.hpp"
+#include "consumptionline/config/ConsumerTypeConfig.hpp"
+#include "productionline/worker/config/MultiWorkerConfig.hpp"
+#include "productionline/worker/config/WorkerConfigs.hpp"
+#include "productionline/line/VideoProductionLine.hpp"
 #include "buffer/bufferpool/BufferPool.hpp"
 #include "common/GlobalThreadPool.hpp"
 #include "common/Logger.hpp"

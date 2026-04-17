@@ -2,6 +2,7 @@
 #include "../common/WorkerConfigFactory.hpp"
 #include "../common/ExecuteMode.hpp"
 #include "consumptionline/BufferConsumerService.hpp"
+#include "consumptionline/config/ConsumerTypeConfigBuilder.hpp"
 #include "../common/third_party/CLI11.hpp"
 
 #include <iostream>
@@ -282,81 +283,121 @@ std::vector<WorkerConfig> OpencvPlugin::buildPipelineConfigs(const WorkerConfig&
     auto buildConfig = [&](bool use_hw) -> WorkerConfig {
         const std::string decoder = use_hw ? "h264" : "software";
         auto config = common::WorkerConfigFactory::createDecode(input_path_, decoder);
-        config.consumer_type.compare.enable_psnr = enable_psnr_;
-        config.consumer_type.compare.min_psnr = 1.0;
-        config.consumer_type.compare.enable_ssim = enable_ssim_;
-        config.consumer_type.compare.min_ssim = 1.0;
-        config.consumer_type.compare.verbose = verbose_;
-        config.consumer_type.max_frames = max_frames_;
-        config.consumer_type.opencv.enable = true;
+
+        auto compare_cfg = CompareConfigBuilder()
+            .setEnablePsnr(enable_psnr_)
+            .setMinPsnr(1.0)
+            .setEnableSsim(enable_ssim_)
+            .setMinSsim(1.0)
+            .setVerbose(verbose_)
+            .build();
+
+        auto opencv_builder = OpencvConfigBuilder()
+            .setEnable(true);
         std::cout << (enable_psnr_ ? "true" : "false") << std::endl;
 
-        auto& opencv = config.consumer_type.opencv;
         if (op != OpType::NONE) {
-            opencv.enable = true;
-            opencv.op_type = op;
+            opencv_builder.setEnable(true).setOpType(op);
             if (op == OpType::RESIZE) {
-                opencv.resize.dst_width = std::stoi(fields.at(0));
-                opencv.resize.dst_height = std::stoi(fields.at(1));
-                opencv.resize.fx = 0.0;
-                opencv.resize.fy = 0.0;
-                opencv.resize.interpolation = 1;
+                ConsumerTypeConfig::OpencvType::Resize r;
+                r.dst_width = std::stoi(fields.at(0));
+                r.dst_height = std::stoi(fields.at(1));
+                r.fx = 0.0;
+                r.fy = 0.0;
+                r.interpolation = 1;
+                opencv_builder.setResize(r);
             } else if (op == OpType::CROP) {
-                opencv.crop.x = 0;
-                opencv.crop.y = 0;
-                opencv.crop.width = std::stoi(fields.at(0));
-                opencv.crop.height = std::stoi(fields.at(1));
+                ConsumerTypeConfig::OpencvType::Crop c;
+                c.x = 0; c.y = 0;
+                c.width = std::stoi(fields.at(0));
+                c.height = std::stoi(fields.at(1));
+                opencv_builder.setCrop(c);
             } else if (op == OpType::ERODE || op == OpType::DILATE ||
                        op == OpType::MORPH_OPEN || op == OpType::MORPH_CLOSE) {
-                opencv.morph.kernel_size = std::stoi(fields.at(0));
-                opencv.morph.iterations = std::stoi(fields.at(1));
+                ConsumerTypeConfig::OpencvType::Morph m;
+                m.kernel_size = std::stoi(fields.at(0));
+                m.iterations = std::stoi(fields.at(1));
+                opencv_builder.setMorph(m);
             } else if (op == OpType::SOBEL) {
-                opencv.sobel.dx = std::stoi(fields.at(0));
-                opencv.sobel.dy = std::stoi(fields.at(1));
-                opencv.sobel.ksize = std::stoi(fields.at(2));
+                ConsumerTypeConfig::OpencvType::Sobel s;
+                s.dx = std::stoi(fields.at(0));
+                s.dy = std::stoi(fields.at(1));
+                s.ksize = std::stoi(fields.at(2));
+                opencv_builder.setSobel(s);
             } else if (op == OpType::CANNY) {
-                opencv.canny.threshold1 = std::stod(fields.at(0));
-                opencv.canny.threshold2 = std::stod(fields.at(1));
+                ConsumerTypeConfig::OpencvType::Canny c;
+                c.threshold1 = std::stod(fields.at(0));
+                c.threshold2 = std::stod(fields.at(1));
+                opencv_builder.setCanny(c);
             } else if (op == OpType::LAPLACIAN) {
-                opencv.laplacian.ksize = std::stoi(fields.at(0));
+                ConsumerTypeConfig::OpencvType::Laplacian l;
+                l.ksize = std::stoi(fields.at(0));
+                opencv_builder.setLaplacian(l);
             } else if (op == OpType::TRANSLATE) {
-                opencv.translate.tx = std::stod(fields.at(0));
-                opencv.translate.ty = std::stod(fields.at(1));
+                ConsumerTypeConfig::OpencvType::Translate t;
+                t.tx = std::stod(fields.at(0));
+                t.ty = std::stod(fields.at(1));
+                opencv_builder.setTranslate(t);
             } else if (op == OpType::ROTATE) {
-                opencv.rotate.angle = std::stod(fields.at(0));
-                opencv.rotate.scale = std::stod(fields.at(1));
+                ConsumerTypeConfig::OpencvType::Rotate r;
+                r.angle = std::stod(fields.at(0));
+                r.scale = std::stod(fields.at(1));
+                opencv_builder.setRotate(r);
             } else if (op == OpType::PERSPECTIVE) {
-                opencv.perspective.offset = std::stoi(fields.at(0));
+                ConsumerTypeConfig::OpencvType::Perspective p;
+                p.offset = std::stoi(fields.at(0));
+                opencv_builder.setPerspective(p);
             } else if (op == OpType::DRAW_LINE) {
-                opencv.draw_line.x1 = std::stoi(fields.at(0));
-                opencv.draw_line.y1 = std::stoi(fields.at(1));
-                opencv.draw_line.x2 = std::stoi(fields.at(2));
-                opencv.draw_line.y2 = std::stoi(fields.at(3));
+                ConsumerTypeConfig::OpencvType::DrawLine d;
+                d.x1 = std::stoi(fields.at(0));
+                d.y1 = std::stoi(fields.at(1));
+                d.x2 = std::stoi(fields.at(2));
+                d.y2 = std::stoi(fields.at(3));
+                opencv_builder.setDrawLine(d);
             } else if (op == OpType::DRAW_RECT) {
-                opencv.draw_rect.x = std::stoi(fields.at(0));
-                opencv.draw_rect.y = std::stoi(fields.at(1));
-                opencv.draw_rect.width = std::stoi(fields.at(2));
-                opencv.draw_rect.height = std::stoi(fields.at(3));
+                ConsumerTypeConfig::OpencvType::DrawRect d;
+                d.x = std::stoi(fields.at(0));
+                d.y = std::stoi(fields.at(1));
+                d.width = std::stoi(fields.at(2));
+                d.height = std::stoi(fields.at(3));
+                opencv_builder.setDrawRect(d);
             } else if (op == OpType::PUT_TEXT) {
-                opencv.put_text.x = std::stoi(fields.at(0));
-                opencv.put_text.y = std::stoi(fields.at(1));
+                ConsumerTypeConfig::OpencvType::PutText pt;
+                pt.x = std::stoi(fields.at(0));
+                pt.y = std::stoi(fields.at(1));
+                opencv_builder.setPutText(pt);
             } else if (op == OpType::GAUSSIAN_BLUR) {
-                opencv.gaussian_blur.ksize = std::stoi(fields.at(0));
-                opencv.gaussian_blur.sigma_x = std::stod(fields.at(1));
+                ConsumerTypeConfig::OpencvType::GaussianBlur g;
+                g.ksize = std::stoi(fields.at(0));
+                g.sigma_x = std::stod(fields.at(1));
+                opencv_builder.setGaussianBlur(g);
             } else if (op == OpType::THRESHOLD) {
-                opencv.threshold.thresh = std::stod(fields.at(0));
-                opencv.threshold.maxval = std::stod(fields.at(1));
+                ConsumerTypeConfig::OpencvType::Threshold th;
+                th.thresh = std::stod(fields.at(0));
+                th.maxval = std::stod(fields.at(1));
+                opencv_builder.setThreshold(th);
             } else if (op == OpType::SPLIT || op == OpType::MERGE) {
-                opencv.split_merge.channels = std::stoi(fields.at(0));
+                ConsumerTypeConfig::OpencvType::SplitMerge sm;
+                sm.channels = std::stoi(fields.at(0));
+                opencv_builder.setSplitMerge(sm);
             } else if (op == OpType::CVTCOLOR) {
-                opencv.cvtcolor.code = std::stoi(fields.at(0));
-                opencv.cvtcolor.dstCn = std::stoi(fields.at(1));
+                ConsumerTypeConfig::OpencvType::ColorConvert cc;
+                cc.code = std::stoi(fields.at(0));
+                cc.dstCn = std::stoi(fields.at(1));
+                opencv_builder.setCvtColor(cc);
             } else if (is_arithmetic_op) {
                 // To do
             } else if (op == OpType::SAVE_LOAD_IMG) {
                 // To do
             }
         }
+
+        config.consumer_type = ConsumerTypeConfigBuilder(config.consumer_type)
+            .setCompareConfig(compare_cfg)
+            .setMaxFrames(max_frames_)
+            .setOpencvConfig(opencv_builder.build())
+            .build();
+
         return config;
     };
 

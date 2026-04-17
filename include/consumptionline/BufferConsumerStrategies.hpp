@@ -19,12 +19,14 @@
 #include "consumptionline/IBufferConsumer.hpp"
 #include "consumptionline/BufferWriter.hpp"
 #include "consumptionline/BufferComparator.hpp"
-#include "productionline/worker/WorkerConfig.hpp"
+#include "consumptionline/config/ConsumerTypeConfig.hpp"
+#include "productionline/worker/config/MultiWorkerConfig.hpp"
+#include "productionline/worker/config/WorkerConfigs.hpp"
 #include "buffer/bufferpool/BufferPool.hpp"
 #include "vendor/contracts/IDisplayDevice.hpp"
 #include "vendor/taco/display/DisplayDeviceFactory.hpp"
-#include "productionline/worker/FFmpegEncodeWorker.hpp"
-#include "productionline/worker/RawFrameSourceFromBuffer.hpp"
+#include "productionline/worker/core/FFmpegEncodeWorker.hpp"
+#include "productionline/worker/datasource/RawFrameSourceFromBuffer.hpp"
 
 #include <log4cplus/logger.h>
 #include <memory>

@@ -4,8 +4,9 @@
  */
 
 #include "consumptionline/BufferConsumerService.hpp"
-#include "productionline/MultiWorkerProductionLine.hpp"
-#include "productionline/WorkerSyncCoordinator.hpp"
+#include "productionline/worker/config/ConfigBuilders.hpp"
+#include "productionline/line/MultiWorkerProductionLine.hpp"
+#include "productionline/line/WorkerSyncCoordinator.hpp"
 #include "common/GlobalThreadPool.hpp"
 #include "buffer/bufferpool/BufferPoolRegistry.hpp"
 #include "consumptionline/inference/NpuInferenceConsumer.hpp"
@@ -419,7 +420,7 @@ ConsumeResult BufferConsumerService::startProductionLinesParallel(
             WorkerConfig cfg_copy = configs[idx];
             LOG4CPLUS_DEBUG_FMT(logger_, "PARALLEL worker[%zu] save_raw.output_paths[0]=%s",
                 idx, cfg_copy.consumer_type.save_raw.output_paths.empty()
-                    ? "(none)" : cfg_copy.consumer_type.save_raw.getOutputPath(0).c_str());
+                    ? "(none)" : cfg_copy.consumer_type.save_raw.output_paths[0].c_str());
             auto future = thread_pool.submit_task([this, cfg_copy, consume_flags]() {
                 return startProductionLine(cfg_copy, consume_flags);
             });
@@ -1111,8 +1112,10 @@ void BufferConsumerService::printHeader(const std::string& test_name, const Work
     }
     if (config.consumer_type.save_raw.enable) {
         LOG4CPLUS_INFO_FMT(logger, "  Save Raw:        to %s (max %d frames/channel)", 
-            config.consumer_type.save_raw.getOutputPath(0).c_str(),
-            config.consumer_type.save_raw.getMaxFrames(0));
+            config.consumer_type.save_raw.output_paths.empty()
+                ? "" : config.consumer_type.save_raw.output_paths[0].c_str(),
+            config.consumer_type.save_raw.max_frames_per_channel.empty()
+                ? -1 : config.consumer_type.save_raw.max_frames_per_channel[0]);
     }
     if (config.consumer_type.save_encoded.enable) {
         LOG4CPLUS_INFO_FMT(logger, "  Save Encoded:    to %s", 

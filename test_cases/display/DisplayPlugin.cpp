@@ -11,6 +11,7 @@
 #include "../common/third_party/CLI11.hpp"
 #include "vendor/taco/display/TacoProDisplayExtension.hpp"
 #include "vendor/taco/display/TacoDisplayExtension.hpp"
+#include "consumptionline/config/ConsumerTypeConfigBuilder.hpp"
 
 #include <stdexcept>
 
@@ -65,15 +66,18 @@ void DisplayPlugin::registerOptions(CLI::App& app) {
 // ========================================
 
 void DisplayPlugin::applyTo(WorkerConfig& config) const {
-    config.consumer_type.display.enable = true;
-
     const auto& builders = vendorBuilders();
     auto it = builders.find(vendor_str_);
     if (it == builders.end()) {
         throw std::invalid_argument(
             "DisplayPlugin: unknown vendor '" + vendor_str_ + "'");
     }
-    config.consumer_type.display.vendor = (this->*(it->second))();
+    config.consumer_type = ConsumerTypeConfigBuilder(config.consumer_type)
+        .setDisplayConfig(DisplayConsumerConfigBuilder(config.consumer_type.display)
+            .setEnable(true)
+            .setVendor((this->*(it->second))())
+            .build())
+        .build();
 }
 
 // ========================================

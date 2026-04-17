@@ -13,22 +13,27 @@ libcomponents_la_SOURCES = \
     source/vendor/taco/display/TacoProDisplayDevice.cpp \
     source/vendor/taco/display/TacoProDisplayExtension.cpp \
     source/vendor/taco/display/DisplayDeviceFactory.cpp \
-    source/productionline/worker/WorkerBase.cpp \
-    source/productionline/worker/BufferFillingWorkerFactory.cpp \
-    source/productionline/worker/WorkerRegistry.cpp \
-    source/productionline/worker/WorkerConfig.cpp \
+    source/productionline/worker/base/WorkerBase.cpp \
+    source/productionline/worker/base/BufferFillingWorkerFactory.cpp \
+    source/productionline/worker/base/WorkerRegistry.cpp \
+    source/productionline/worker/base/ComponentTopology.cpp \
+    source/productionline/worker/config/WorkerConfig.cpp \
+    source/productionline/worker/config/Connector.cpp \
+    source/productionline/worker/config/ConsumerTypeConfig.cpp \
+    source/consumptionline/config/ConsumerTypeConfigBuilder.cpp \
     source/vendor/contracts/DecoderVendorRegistry.cpp \
     source/vendor/taco/decode/TacoDecoderExtension.cpp \
     source/vendor/taco/decode/TacoDecoderPluginLoader.cpp \
     source/vendor/taco/decode/TacoConfigBuilder.cpp \
-    source/productionline/worker/FFmpegDecodeWorker.cpp \
-    source/productionline/worker/FfmpegPacketRecorderWorker.cpp \
-    source/productionline/worker/FFmpegEncodeWorker.cpp \
-    source/productionline/worker/EncodedPacketSourceFromFile.cpp \
-    source/productionline/worker/EncodedPacketSourceFromBuffer.cpp \
-    source/productionline/worker/EncodedPacketSourceFromRtsp.cpp \
-    source/productionline/worker/RawFrameSourceFromFile.cpp \
-    source/productionline/worker/RawFrameSourceFromBuffer.cpp \
+    source/vendor/taco/encode/TacoEncoderExtension.cpp \
+    source/productionline/worker/core/FFmpegDecodeWorker.cpp \
+    source/productionline/worker/core/FfmpegPacketRecorderWorker.cpp \
+    source/productionline/worker/core/FFmpegEncodeWorker.cpp \
+    source/productionline/worker/datasource/EncodedPacketSourceFromFile.cpp \
+    source/productionline/worker/datasource/EncodedPacketSourceFromBuffer.cpp \
+    source/productionline/worker/datasource/EncodedPacketSourceFromRtsp.cpp \
+    source/productionline/worker/datasource/RawFrameSourceFromFile.cpp \
+    source/productionline/worker/datasource/RawFrameSourceFromBuffer.cpp \
     source/common/PerformanceMonitor.cpp \
     source/common/Timer.cpp \
     source/common/GlobalThreadPool.cpp \
@@ -42,9 +47,9 @@ libcomponents_la_SOURCES = \
     source/buffer/MatAllocator.cpp \
     source/buffer/bufferpool/BufferPool.cpp \
     source/buffer/bufferpool/BufferPoolRegistry.cpp \
-    source/productionline/VideoProductionLine.cpp \
-    source/productionline/MultiWorkerProductionLine.cpp \
-    source/productionline/WorkerSyncCoordinator.cpp \
+    source/productionline/line/VideoProductionLine.cpp \
+    source/productionline/line/MultiWorkerProductionLine.cpp \
+    source/productionline/line/WorkerSyncCoordinator.cpp \
     source/consumptionline/BufferWriter.cpp \
     source/consumptionline/BufferComparator.cpp \
     source/consumptionline/BufferConsumerStrategies.cpp \

@@ -33,7 +33,9 @@
 #include "../common/IOptionPlugin.hpp"
 #include "../common/DataSourceOptions.hpp"
 #include "consumptionline/BufferConsumerService.hpp"
-#include "productionline/worker/WorkerConfig.hpp"
+#include "productionline/worker/config/ConfigBuilders.hpp"
+#include "productionline/worker/config/MultiWorkerConfig.hpp"
+#include "productionline/worker/config/WorkerConfigs.hpp"
 
 #include <string>
 #include <vector>
@@ -130,6 +132,8 @@ private:
     // CLI 便捷入口
     // ========================================
     std::string resolution_str_;           ///< "1920x1080" 便捷写法
+    int pp_width_ = 0;                    ///< PP 输出宽度（0=默认1920）
+    int pp_height_ = 0;                   ///< PP 输出高度（0=默认1080）
     
     // ========================================
     // 控制变量（非配置数据）

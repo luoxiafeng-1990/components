@@ -28,7 +28,8 @@
 #include "../common/IOptionPlugin.hpp"
 #include "../common/ExecuteMode.hpp"
 #include "consumptionline/BufferConsumerService.hpp"
-#include "productionline/worker/WorkerConfig.hpp"
+#include "productionline/worker/config/MultiWorkerConfig.hpp"
+#include "productionline/worker/config/WorkerConfigs.hpp"
 
 #include <string>
 #include <vector>

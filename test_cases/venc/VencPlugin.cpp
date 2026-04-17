@@ -7,11 +7,14 @@
 
 #include "../common/third_party/CLI11.hpp"
 #include "../common/WorkerConfigFactory.hpp"
+#include "vendor/taco/encode/TacoEncoderExtension.hpp"
 
 #include "consumptionline/BufferConsumerService.hpp"
-#include "productionline/MultiWorkerProductionLine.hpp"
-#include "productionline/WorkerSyncCoordinator.hpp"
-#include "productionline/worker/RawFrameSourceFromFile.hpp"
+#include "consumptionline/config/ConsumerTypeConfigBuilder.hpp"
+#include "productionline/line/MultiWorkerProductionLine.hpp"
+#include "productionline/line/WorkerSyncCoordinator.hpp"
+#include "productionline/worker/config/FrameSyncTypes.hpp"
+#include "productionline/worker/datasource/RawFrameSourceFromFile.hpp"
 #include "buffer/bufferpool/BufferPoolRegistry.hpp"
 #include "buffer/bufferpool/Buffer.hpp"
 
@@ -111,6 +114,44 @@ static int matrixBitrateKbps(int w, int h) {
 
 } // namespace
 
+static int mapPixFmtStringToAVPixFmt(std::string_view format_name) {
+    std::string fmt(format_name);
+    std::transform(fmt.begin(), fmt.end(), fmt.begin(),
+                   [](unsigned char c) { return std::tolower(c); });
+
+    if (fmt == "nv12")        return AV_PIX_FMT_NV12;
+    if (fmt == "nv21")        return AV_PIX_FMT_NV21;
+    if (fmt == "yuv420p")     return AV_PIX_FMT_YUV420P;
+    if (fmt == "yuvj420p")    return AV_PIX_FMT_YUVJ420P;
+    if (fmt == "yuyv422" || fmt == "yuyv")   return AV_PIX_FMT_YUYV422;
+    if (fmt == "yvyu")        return AV_PIX_FMT_YVYU422;
+    if (fmt == "uyvy422" || fmt == "uyvy")   return AV_PIX_FMT_UYVY422;
+    if (fmt == "rgb24"  || fmt == "rgb888")  return AV_PIX_FMT_RGB24;
+    if (fmt == "bgr24"  || fmt == "bgr888")  return AV_PIX_FMT_BGR24;
+    if (fmt == "argb"   || fmt == "argb888") return AV_PIX_FMT_ARGB;
+    if (fmt == "bgra"   || fmt == "bgra888") return AV_PIX_FMT_BGRA;
+    if (fmt == "rgba"   || fmt == "rgba888") return AV_PIX_FMT_RGBA;
+    if (fmt == "abgr"   || fmt == "abgr888") return AV_PIX_FMT_ABGR;
+    if (fmt == "rgb0"   || fmt == "rgbx888") return AV_PIX_FMT_RGB0;
+    if (fmt == "bgr0"   || fmt == "bgrx888") return AV_PIX_FMT_BGR0;
+    if (fmt == "rgb565")      return AV_PIX_FMT_RGB565LE;
+    if (fmt == "bgr565")      return AV_PIX_FMT_BGR565LE;
+    if (fmt == "rgb555")      return AV_PIX_FMT_RGB555LE;
+    if (fmt == "bgr555")      return AV_PIX_FMT_BGR555LE;
+#if defined(AV_PIX_FMT_X2RGB10LE)
+    if (fmt == "x2rgb10le" || fmt == "rgbx101010" || fmt == "rgb101010")
+        return AV_PIX_FMT_X2RGB10LE;
+#endif
+#if defined(AV_PIX_FMT_X2BGR10LE)
+    if (fmt == "x2bgr10le" || fmt == "bgrx101010" || fmt == "bgr101010")
+        return AV_PIX_FMT_X2BGR10LE;
+#endif
+
+    fprintf(stderr, "[WARN] mapPixFmtStringToAVPixFmt: unrecognized format \"%s\", fallback to NV12\n",
+            std::string(format_name).c_str());
+    return AV_PIX_FMT_NV12;
+}
+
 static bool isParallelProfile(const std::string& pr) {
     return pr.size() >= 10 && pr.compare(0, 9, "parallel_") == 0;
 }
@@ -145,17 +186,20 @@ WorkerConfig buildEncodeConfigInternal(const EncodeTestParams& params, const std
             config = WorkerConfigFactory::createH265Encode(
                 yuv_path, output_width, output_height, br_kbps, fps, gop, prof, pix);
             if (!isParallelProfile(params.profile)) {
-                const int w = output_width;
-                const int h = output_height;
-                const double hfps = fps;
-                if (w <= 1280 && h <= 720 && hfps <= 30.0)
-                    config.encoder.taco.level = 120;
-                else if (w <= 1920 && h <= 1080 && hfps <= 30.0)
-                    config.encoder.taco.level = 150;
-                else if (w <= 1920 && h <= 1080 && hfps <= 60.0)
-                    config.encoder.taco.level = 153;
-                else
-                    config.encoder.taco.level = 150;
+                auto* ext = dynamic_cast<TacoEncoderExtension*>(config.encoder.vendor.get());
+                if (ext) {
+                    const int w = output_width;
+                    const int h = output_height;
+                    const double hfps = fps;
+                    if (w <= 1280 && h <= 720 && hfps <= 30.0)
+                        ext->level = 120;
+                    else if (w <= 1920 && h <= 1080 && hfps <= 30.0)
+                        ext->level = 150;
+                    else if (w <= 1920 && h <= 1080 && hfps <= 60.0)
+                        ext->level = 153;
+                    else
+                        ext->level = 150;
+                }
             }
         } else {
             config = WorkerConfigFactory::createSoftwareEncode(
@@ -195,8 +239,7 @@ WorkerConfig buildEncodeConfigInternal(const EncodeTestParams& params, const std
     }
 
     if (isParallelProfile(params.profile)) {
-        config.encoder.taco.profile = 0;
-        config.encoder.taco.level = 0;
+        config.encoder.vendor = makeTacoEncoderExtension(0, 0);
     }
 
     config.encoder.rc_mode = params.rc_mode;
@@ -602,21 +645,25 @@ void VencPlugin::applyTo(WorkerConfig& config) const {
         config.data_source.path = input_path_;
     config.data_source.max_frames = max_frames_;
     config.data_source.loop = loop_;
-    config.consumer_type.verbose = verbose_;
+
+    auto ct_builder = ConsumerTypeConfigBuilder(config.consumer_type)
+        .setVerbose(verbose_);
 
     if (!encoded_output_path_.empty()) {
-        config.consumer_type.save_encoded.enable = true;
-        config.consumer_type.save_encoded.output_path = encoded_output_path_;
+        ct_builder.setSaveEncodedConfig(SaveEncodedConfigBuilder()
+            .setEnable(true)
+            .setOutputPath(encoded_output_path_)
+            .build());
     }
 
-    config.consumer_type.compare.enable_psnr = enable_psnr_;
-    config.consumer_type.compare.enable_ssim = enable_ssim_;
-    if (min_psnr_ > 0.0) {
-        config.consumer_type.compare.min_psnr = min_psnr_;
-    }
-    if (min_ssim_ > 0.0) {
-        config.consumer_type.compare.min_ssim = min_ssim_;
-    }
+    auto compare_builder = CompareConfigBuilder(config.consumer_type.compare)
+        .setEnablePsnr(enable_psnr_)
+        .setEnableSsim(enable_ssim_);
+    if (min_psnr_ > 0.0) compare_builder.setMinPsnr(min_psnr_);
+    if (min_ssim_ > 0.0) compare_builder.setMinSsim(min_ssim_);
+    ct_builder.setCompareConfig(compare_builder.build());
+
+    config.consumer_type = ct_builder.build();
 }
 
 int VencPlugin::handlePreActions() {
@@ -686,25 +733,34 @@ std::vector<WorkerConfig> VencPlugin::buildPipelineConfigs(const WorkerConfig& s
         std::vector<WorkerConfig> configs;
         for (int i = 0; i < thread_count; i++) {
             WorkerConfig cfg = buildEncodeConfigInternal(p, shared_config.data_source.path);
-            cfg.consumer_type = base.consumer_type;
             cfg.data_source.max_frames = base.data_source.max_frames;
             cfg.data_source.loop = base.data_source.loop;
+
+            auto ct_builder = ConsumerTypeConfigBuilder(base.consumer_type)
+                .setPerformanceConfig(PerformanceConfigBuilder(base.consumer_type.performance)
+                    .setTargetFps(p.input_fps)
+                    .build());
             if (!out_paths.empty()) {
-                cfg.consumer_type.save_encoded.enable = true;
-                cfg.consumer_type.save_encoded.output_path =
-                    (static_cast<size_t>(i) < out_paths.size()) ? out_paths[static_cast<size_t>(i)] : out_paths[0];
+                ct_builder.setSaveEncodedConfig(SaveEncodedConfigBuilder()
+                    .setEnable(true)
+                    .setOutputPath(
+                        (static_cast<size_t>(i) < out_paths.size()) ? out_paths[static_cast<size_t>(i)] : out_paths[0])
+                    .build());
             }
-            cfg.consumer_type.performance.target_fps = p.input_fps;
+            cfg.consumer_type = ct_builder.build();
             configs.push_back(std::move(cfg));
         }
         return configs;
     }
 
     WorkerConfig full = buildEncodeConfigInternal(p, shared_config.data_source.path);
-    full.consumer_type = shared_config.consumer_type;
+    full.consumer_type = ConsumerTypeConfigBuilder(shared_config.consumer_type)
+        .setPerformanceConfig(PerformanceConfigBuilder(shared_config.consumer_type.performance)
+            .setTargetFps(p.input_fps)
+            .build())
+        .build();
     full.data_source.max_frames = shared_config.data_source.max_frames;
     full.data_source.loop = shared_config.data_source.loop;
-    full.consumer_type.performance.target_fps = p.input_fps;
     return {full};
 }
 
@@ -775,8 +831,8 @@ consumer::ConsumeResult runEncodeQualityCompare(
         LOG4CPLUS_INFO(logger, "═══════════════════════════════════════════════════════");
     }
 
-    const int ref_width = encode_cfg.display.width;
-    const int ref_height = encode_cfg.display.height;
+    const int ref_width = encode_cfg.encoder.width;
+    const int ref_height = encode_cfg.encoder.height;
     const AVPixelFormat ref_pix_fmt =
         static_cast<AVPixelFormat>(encode_cfg.encoder.input_pix_fmt);
 
@@ -835,7 +891,11 @@ consumer::ConsumeResult runEncodeQualityCompare(
     encode_producer.worker_config = encode_cfg;
     encode_producer.worker_config.global.worker_type = WorkerType::FFMPEG_ENCODE;
     // 质量验证路径不需要显示，避免显示侧副作用
-    encode_producer.worker_config.consumer_type.display.enable = false;
+    encode_producer.worker_config.consumer_type = ConsumerTypeConfigBuilder(encode_producer.worker_config.consumer_type)
+        .setDisplayConfig(DisplayConsumerConfigBuilder(encode_producer.worker_config.consumer_type.display)
+            .setEnable(false)
+            .build())
+        .build();
     group.producer_configs.push_back(encode_producer);
 
     ConsumerConfig decode_consumer;
@@ -845,10 +905,15 @@ consumer::ConsumeResult runEncodeQualityCompare(
     decode_consumer.worker_config.data_source.buffer_mode = true;
     decode_consumer.worker_config.decoder.name = std::nullopt;
     decode_consumer.worker_config.decoder.enable_hardware = false;  // 软件解码用于与参考对比
-    decode_consumer.worker_config.consumer_type.display.enable = false;
-    // 此 worker 不做"compare 消费策略"，compare 在 callback 里完成
-    decode_consumer.worker_config.consumer_type.compare.enable_psnr = false;
-    decode_consumer.worker_config.consumer_type.compare.enable_ssim = false;
+    decode_consumer.worker_config.consumer_type = ConsumerTypeConfigBuilder(decode_consumer.worker_config.consumer_type)
+        .setDisplayConfig(DisplayConsumerConfigBuilder(decode_consumer.worker_config.consumer_type.display)
+            .setEnable(false)
+            .build())
+        .setCompareConfig(CompareConfigBuilder(decode_consumer.worker_config.consumer_type.compare)
+            .setEnablePsnr(false)
+            .setEnableSsim(false)
+            .build())
+        .build();
     group.consumer_configs.push_back(decode_consumer);
 
     ConnectorConfig connector;
@@ -1020,8 +1085,12 @@ consumer::ConsumeResult runEncodeDecodeDisplay(
     }
 
     WorkerConfig encode_decode_cfg = encode_cfg;
-    encode_decode_cfg.consumer_type.compare.enable_psnr = false;
-    encode_decode_cfg.consumer_type.compare.enable_ssim = false;
+    encode_decode_cfg.consumer_type = ConsumerTypeConfigBuilder(encode_decode_cfg.consumer_type)
+        .setCompareConfig(CompareConfigBuilder(encode_decode_cfg.consumer_type.compare)
+            .setEnablePsnr(false)
+            .setEnableSsim(false)
+            .build())
+        .build();
 
     MultiWorkerConfig multi_config;
     WorkerGroupConfig group("encode_decode_display_group");
@@ -1041,9 +1110,13 @@ consumer::ConsumeResult runEncodeDecodeDisplay(
     // 为验证"硬件解码是否产不出帧"：display 路径改为软件解码。
     // 若软件解码有帧而硬件解码为 0 frames，则根因基本可定位到硬件解码的初始化/参数集缺失。
     decode_consumer.worker_config.decoder.enable_hardware = false;
-    decode_consumer.worker_config.consumer_type.display.enable = false;
-    decode_consumer.worker_config.consumer_type.save_raw = encode_decode_cfg.consumer_type.save_raw;
-    decode_consumer.worker_config.consumer_type.save_encoded = encode_decode_cfg.consumer_type.save_encoded;
+    decode_consumer.worker_config.consumer_type = ConsumerTypeConfigBuilder(decode_consumer.worker_config.consumer_type)
+        .setDisplayConfig(DisplayConsumerConfigBuilder(decode_consumer.worker_config.consumer_type.display)
+            .setEnable(false)
+            .build())
+        .setSaveRawConfig(encode_decode_cfg.consumer_type.save_raw)
+        .setSaveEncodedConfig(encode_decode_cfg.consumer_type.save_encoded)
+        .build();
     group.consumer_configs.push_back(decode_consumer);
 
     ConnectorConfig decode_connector;
@@ -1087,7 +1160,9 @@ consumer::ConsumeResult runEncodeDecodeDisplay(
     uint32_t flags = test::ExecuteMode::buildConsumeFlags(shared_cfg);
     WorkerConfig consume_cfg = shared_cfg;
     if (consume_cfg.consumer_type.max_timeout_count < 50) {
-        consume_cfg.consumer_type.max_timeout_count = 50;
+        consume_cfg.consumer_type = ConsumerTypeConfigBuilder(consume_cfg.consumer_type)
+            .setMaxTimeoutCount(50)
+            .build();
     }
 
     consumer::BufferConsumerService service;
