@@ -7,7 +7,7 @@
 #include <cstring>
 
 extern "C" {
-#include "taco_sys_api.h"
+#include "ta_sys_api.h"
 }
 
 static std::unordered_map<Buffer*, BufferAllocatorBase*> framebuffer_buffer_ownership_;

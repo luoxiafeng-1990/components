@@ -104,13 +104,11 @@ bool TacoDisplayContext::initLayer() {
 
     ta_vo_layer_attr layer_attr;
     std::memset(&layer_attr, 0, sizeof(layer_attr));
-    layer_attr.priority = 0;
-    layer_attr.rect.pos.x = 0;
-    layer_attr.rect.pos.y = 0;
-    layer_attr.rect.size.width = static_cast<unsigned int>(config_.screen_width);
-    layer_attr.rect.size.height = static_cast<unsigned int>(config_.screen_height);
+    layer_attr.width = config_.screen_width;
+    layer_attr.height = config_.screen_height;
     layer_attr.format = config_.frame_format;
     layer_attr.use_av_frame = 1;
+    layer_attr.fps = config_.target_fps;
 
     int ret = ta_vo_layer_bind_to_dev(layer_ctx_, dev_ctx_);
     if (ret != 0) {
@@ -136,10 +134,10 @@ bool TacoDisplayContext::createChannel(int index, int ch_x, int ch_y, int ch_w, 
 
     ta_vo_chn_attr chn_attr;
     std::memset(&chn_attr, 0, sizeof(chn_attr));
-    chn_attr.rect.pos.x = static_cast<unsigned int>(ch_x);
-    chn_attr.rect.pos.y = static_cast<unsigned int>(ch_y);
-    chn_attr.rect.size.width = static_cast<unsigned int>(ch_w);
-    chn_attr.rect.size.height = static_cast<unsigned int>(ch_h);
+    chn_attr.x = ch_x;
+    chn_attr.y = ch_y;
+    chn_attr.width = ch_w;
+    chn_attr.height = ch_h;
     chn_attr.fps = config_.target_fps;
 
     int ret = ta_vo_chn_set_attr(chn_ctx, &chn_attr);
@@ -283,7 +281,7 @@ TacoDisplayContext::FrameSlot* TacoDisplayContext::acquireFrameSlot(ChannelState
         if (!slot.ever_sent) {
             return &slot;
         }
-        if (ta_vo_chn_get_frame_status(ch.chn_ctx, slot.vo_frame) == TA_VO_CHN_FRAME_STATUS_IDLE) {
+        if (ta_vo_chn_get_status(ch.chn_ctx) == TA_VO_CHN_STATUS_IDLE) {
             return &slot;
         }
     }

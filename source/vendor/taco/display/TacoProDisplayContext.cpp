@@ -15,7 +15,7 @@
 #include <algorithm>
 
 extern "C" {
-#include "taco_sys_api.h"
+#include "ta_sys_api.h"
 }
 
 namespace {
