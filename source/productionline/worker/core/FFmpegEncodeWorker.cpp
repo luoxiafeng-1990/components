@@ -53,8 +53,8 @@ FFmpegEncodeWorker::FFmpegEncodeWorker(const WorkerConfig& config)
         LOG4CPLUS_DEBUG(logger_, "[EncodeWorker] 创建 RawFrameSourceFromBuffer（Buffer 模式）");
     } else if (!config.data_source.path.empty()) {
         // 文件模式：从 YUV 文件读取帧（可与编码输出分辨率不同，读帧用 raw_*，编码前 swscale）
-        int fw = config.display.width;
-        int fh = config.display.height;
+        int fw = config.encoder.width;
+        int fh = config.encoder.height;
         if (config.data_source.raw_frame_width > 0 && config.data_source.raw_frame_height > 0) {
             fw = config.data_source.raw_frame_width;
             fh = config.data_source.raw_frame_height;

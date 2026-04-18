@@ -58,6 +58,8 @@ struct WorkerConfig {
         int buffer_count = 0;                 ///< BufferPool 的 Buffer 数量（0=使用 Worker 默认值）
         int max_frames = -1;                  ///< 最大读取帧数（-1=无限制）
         bool loop = false;                    ///< true=文件播放结束后自动回到开头循环播放
+        int raw_frame_width = 0;              ///< 裸帧（YUV）文件的实际宽度（用于 swscale 缩放场景）
+        int raw_frame_height = 0;             ///< 裸帧（YUV）文件的实际高度（用于 swscale 缩放场景）
         
         // 【内部参数】框架自动设置，用户不应手动修改
         bool buffer_mode = false;
@@ -128,6 +130,7 @@ struct WorkerConfig {
         
         int input_pix_fmt = 23;  // AV_PIX_FMT_NV12
         int rc_mode = 1;         // VBR
+        int cqp_qp = 0;         ///< CQP 模式下的 QP 值（0=由编码器决定）
         
         struct JpegConfig {
             int quality = 80;

@@ -223,14 +223,14 @@ WorkerConfig buildEncodeConfigInternal(const EncodeTestParams& params, const std
                 const int w = output_width;
                 const int h = output_height;
                 const double hfps = fps;
+                int lvl = 150;
                 if (w <= 1280 && h <= 720 && hfps <= 30.0)
-                    config.encoder.taco.level = 120;
+                    lvl = 120;
                 else if (w <= 1920 && h <= 1080 && hfps <= 30.0)
-                    config.encoder.taco.level = 150;
+                    lvl = 150;
                 else if (w <= 1920 && h <= 1080 && hfps <= 60.0)
-                    config.encoder.taco.level = 153;
-                else
-                    config.encoder.taco.level = 150;
+                    lvl = 153;
+                config.encoder.vendor = makeTacoEncoderExtension(0, lvl);
             }
         } else {
             config = WorkerConfigFactory::createSoftwareEncode(

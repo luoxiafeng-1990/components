@@ -5,6 +5,7 @@
 
 #include "consumptionline/BufferConsumerService.hpp"
 #include "productionline/worker/config/ConfigBuilders.hpp"
+#include "consumptionline/config/ConsumerTypeConfigBuilder.hpp"
 #include "productionline/line/MultiWorkerProductionLine.hpp"
 #include "productionline/line/WorkerSyncCoordinator.hpp"
 #include "common/GlobalThreadPool.hpp"
@@ -86,15 +87,22 @@ buildMultiWorkerConfigForCompare(
     ConsumerConfig consumer_hw;
     consumer_hw.consumer_name = "hw_decoder";
     consumer_hw.worker_config = configs[0];
-    // 合并外部 flags 到 consumer_type
-    if (flags & CONSUME_DISPLAY) {
-        consumer_hw.worker_config.consumer_type.display.enable = true;
-    }
-    if (flags & CONSUME_SAVE_RAW) {
-        consumer_hw.worker_config.consumer_type.save_raw.enable = true;
-    }
-    if (flags & CONSUME_SAVE_ENCODED) {
-        consumer_hw.worker_config.consumer_type.save_encoded.enable = true;
+    // 合并外部 flags 到 consumer_type（通过 Builder 模式）
+    {
+        auto builder = ConsumerTypeConfigBuilder(consumer_hw.worker_config.consumer_type);
+        if (flags & CONSUME_DISPLAY) {
+            builder.setDisplayConfig(DisplayConsumerConfigBuilder(consumer_hw.worker_config.consumer_type.display)
+                .setEnable(true).build());
+        }
+        if (flags & CONSUME_SAVE_RAW) {
+            builder.setSaveRawConfig(SaveRawConfigBuilder(consumer_hw.worker_config.consumer_type.save_raw)
+                .setEnable(true).build());
+        }
+        if (flags & CONSUME_SAVE_ENCODED) {
+            builder.setSaveEncodedConfig(SaveEncodedConfigBuilder(consumer_hw.worker_config.consumer_type.save_encoded)
+                .setEnable(true).build());
+        }
+        consumer_hw.worker_config.consumer_type = builder.build();
     }
     group.consumer_configs.push_back(consumer_hw);
     
@@ -102,13 +110,20 @@ buildMultiWorkerConfigForCompare(
     ConsumerConfig consumer_sw;
     consumer_sw.consumer_name = "sw_decoder";
     consumer_sw.worker_config = configs[1];
-    // sw_decoder 禁用 display：软解帧在系统内存中，PP 硬件无法 DMA 访问
-    consumer_sw.worker_config.consumer_type.display.enable = false;
-    if (flags & CONSUME_SAVE_RAW) {
-        consumer_sw.worker_config.consumer_type.save_raw.enable = true;
-    }
-    if (flags & CONSUME_SAVE_ENCODED) {
-        consumer_sw.worker_config.consumer_type.save_encoded.enable = true;
+    // sw_decoder 禁用 display：软解帧在系统内存中，PP 硬件无法 DMA 访问（通过 Builder 模式）
+    {
+        auto builder = ConsumerTypeConfigBuilder(consumer_sw.worker_config.consumer_type);
+        builder.setDisplayConfig(DisplayConsumerConfigBuilder(consumer_sw.worker_config.consumer_type.display)
+            .setEnable(false).build());
+        if (flags & CONSUME_SAVE_RAW) {
+            builder.setSaveRawConfig(SaveRawConfigBuilder(consumer_sw.worker_config.consumer_type.save_raw)
+                .setEnable(true).build());
+        }
+        if (flags & CONSUME_SAVE_ENCODED) {
+            builder.setSaveEncodedConfig(SaveEncodedConfigBuilder(consumer_sw.worker_config.consumer_type.save_encoded)
+                .setEnable(true).build());
+        }
+        consumer_sw.worker_config.consumer_type = builder.build();
     }
     group.consumer_configs.push_back(consumer_sw);
     
