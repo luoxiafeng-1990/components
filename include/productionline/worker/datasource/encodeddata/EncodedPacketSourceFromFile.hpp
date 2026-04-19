@@ -1,7 +1,7 @@
 #ifndef ENCODED_PACKET_SOURCE_FROM_FILE_HPP
 #define ENCODED_PACKET_SOURCE_FROM_FILE_HPP
 
-#include "productionline/worker/datasource/IEncodedPacketSource.hpp"  // 包含 PacketAcquireResult
+#include "productionline/worker/datasource/encodeddata/IEncodedPacketSource.hpp"  // 包含 PacketAcquireResult
 #include <log4cplus/logger.h>
 #include <log4cplus/loggingmacros.h>
 #include <string>

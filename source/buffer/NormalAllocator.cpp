@@ -1,6 +1,6 @@
 #include "buffer/NormalAllocator.hpp"
 #include "buffer/bufferpool/BufferPool.hpp"
-#include "buffer/bufferpool/BufferPoolRegistry.hpp"
+#include "productionline/worker/base/ComponentTopology.hpp"
 #include "common/Logger.hpp"
 extern "C" {
 #include <libavcodec/packet.h>
@@ -150,7 +150,7 @@ uint64_t NormalAllocator::allocatePoolWithBuffers(
     }
     
     // v2.0 步骤 3: 注册到 Registry（转移所有权，传入 Allocator ID）
-    uint64_t pool_id = BufferPoolRegistry::getInstance().registerPool(pool, getAllocatorId());
+    uint64_t pool_id = ComponentTopology::getInstance().registerPool(pool, getAllocatorId());
     pool->setRegistryId(pool_id);
     
     LOG4CPLUS_INFO_FMT(logger_, "BufferPool '%s' created with %d buffers (ID: %lu)", 
@@ -166,7 +166,7 @@ Buffer* NormalAllocator::injectBufferToPool(
     QueueType queue
 ) {
     // v2.0: 从 Registry 获取 Pool（返回 weak_ptr）
-    auto pool_weak = BufferPoolRegistry::getInstance().getPool(pool_id);
+    auto pool_weak = ComponentTopology::getInstance().getPool(pool_id);
     auto pool = pool_weak.lock();
     if (!pool) {
         LOG4CPLUS_ERROR_FMT(logger_, "injectBufferToPool: pool_id %lu not found or already destroyed", pool_id);
@@ -218,7 +218,7 @@ Buffer* NormalAllocator::injectExternalBufferToPool(
     }
     
     // v2.0: 从 Registry 获取 Pool（返回 weak_ptr）
-    auto pool_weak = BufferPoolRegistry::getInstance().getPool(pool_id);
+    auto pool_weak = ComponentTopology::getInstance().getPool(pool_id);
     auto pool = pool_weak.lock();
     if (!pool) {
         LOG4CPLUS_ERROR_FMT(logger_, "injectExternalBufferToPool: pool_id %lu not found or already destroyed", pool_id);
@@ -270,7 +270,7 @@ bool NormalAllocator::removeBufferFromPool(uint64_t pool_id, Buffer* buffer) {
     }
     
     // v2.0: 从 Registry 获取 Pool（返回 weak_ptr）
-    auto pool_weak = BufferPoolRegistry::getInstance().getPool(pool_id);
+    auto pool_weak = ComponentTopology::getInstance().getPool(pool_id);
     auto pool = pool_weak.lock();
     if (!pool) {
         LOG4CPLUS_ERROR_FMT(logger_, "removeBufferFromPool: pool_id %lu not found or already destroyed", pool_id);

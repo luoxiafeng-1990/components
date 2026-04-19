@@ -1,4 +1,4 @@
-#include "productionline/worker/datasource/EncodedPacketSourceFromFile.hpp"
+#include "productionline/worker/datasource/encodeddata/EncodedPacketSourceFromFile.hpp"
 #include "common/Logger.hpp"
 #include <cstring>
 #include <sys/stat.h>

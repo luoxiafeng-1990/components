@@ -14,8 +14,7 @@ libcomponents_la_SOURCES = \
     source/vendor/taco/display/TacoProDisplayExtension.cpp \
     source/vendor/taco/display/DisplayDeviceFactory.cpp \
     source/productionline/worker/base/WorkerBase.cpp \
-    source/productionline/worker/base/BufferFillingWorkerFactory.cpp \
-    source/productionline/worker/base/WorkerRegistry.cpp \
+    source/productionline/worker/base/WorkerFactory.cpp \
     source/productionline/worker/base/ComponentTopology.cpp \
     source/productionline/worker/config/WorkerConfig.cpp \
     source/productionline/worker/config/Connector.cpp \
@@ -29,11 +28,11 @@ libcomponents_la_SOURCES = \
     source/productionline/worker/core/FFmpegDecodeWorker.cpp \
     source/productionline/worker/core/FfmpegPacketRecorderWorker.cpp \
     source/productionline/worker/core/FFmpegEncodeWorker.cpp \
-    source/productionline/worker/datasource/EncodedPacketSourceFromFile.cpp \
-    source/productionline/worker/datasource/EncodedPacketSourceFromBuffer.cpp \
-    source/productionline/worker/datasource/EncodedPacketSourceFromRtsp.cpp \
-    source/productionline/worker/datasource/RawFrameSourceFromFile.cpp \
-    source/productionline/worker/datasource/RawFrameSourceFromBuffer.cpp \
+    source/productionline/worker/datasource/encodeddata/EncodedPacketSourceFromFile.cpp \
+    source/productionline/worker/datasource/encodeddata/EncodedPacketSourceFromBuffer.cpp \
+    source/productionline/worker/datasource/encodeddata/EncodedPacketSourceFromRtsp.cpp \
+    source/productionline/worker/datasource/rawdata/RawFrameSourceFromFile.cpp \
+    source/productionline/worker/datasource/rawdata/RawFrameSourceFromBuffer.cpp \
     source/common/PerformanceMonitor.cpp \
     source/common/Timer.cpp \
     source/common/GlobalThreadPool.cpp \
@@ -46,7 +45,6 @@ libcomponents_la_SOURCES = \
     source/buffer/AVFrameAllocator.cpp \
     source/buffer/MatAllocator.cpp \
     source/buffer/bufferpool/BufferPool.cpp \
-    source/buffer/bufferpool/BufferPoolRegistry.cpp \
     source/productionline/line/VideoProductionLine.cpp \
     source/productionline/line/MultiWorkerProductionLine.cpp \
     source/productionline/line/WorkerSyncCoordinator.cpp \
@@ -66,7 +64,7 @@ libcomponents_la_SOURCES = \
 # 1. Buildroot 会自动编译 log4cplus（已在 components.mk 中声明依赖）
 # 2. log4cplus 库位置：$(STAGING_DIR)/usr/lib/liblog4cplus-2.0.so.3.4.7
 # 3. 运行时需要目标系统有 log4cplus 动态库（Buildroot 会自动安装到 TARGET_DIR）
-COMMON_LIBS = -lpthread -luring -ltacosys -ltavo -llog4cplus -l:libfreetype.so.6 $(FFMPEG_LIBS) $(OPENCV_LIBS) $(NPU_LIBS)
+COMMON_LIBS = -lpthread -ltacosys -ltavo -llog4cplus -l:libfreetype.so.6 $(FFMPEG_LIBS) $(OPENCV_LIBS) $(NPU_LIBS)
 FFMPEG_LIBS = -lavformat -lavcodec -lavutil -lswscale
 OPENCV_LIBS = -ltacocv -lvx -lhwdec_jpeg -ltaco_ppvdec -lCLC -lOpenVX -lOpenVXU -lOpenCL -lSPIRV_viv -lCLC -lVSC -lGAL -lovxlib -lArchModelSw -lNNArchPerf -ldl \
         -lopencv_imgcodecs -lopencv_videoio -lopencv_core -lopencv_imgproc -lenc24 -lyuv -ljpeg

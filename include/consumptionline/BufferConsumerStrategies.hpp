@@ -26,7 +26,7 @@
 #include "vendor/contracts/IDisplayDevice.hpp"
 #include "vendor/taco/display/DisplayDeviceFactory.hpp"
 #include "productionline/worker/core/FFmpegEncodeWorker.hpp"
-#include "productionline/worker/datasource/RawFrameSourceFromBuffer.hpp"
+#include "productionline/worker/datasource/rawdata/RawFrameSourceFromBuffer.hpp"
 
 #include <log4cplus/logger.h>
 #include <memory>

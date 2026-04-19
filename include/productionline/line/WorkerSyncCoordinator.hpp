@@ -277,6 +277,13 @@ public:
      * @brief 获取参与同步的 Worker 数量
      */
     size_t getWorkerCount() const { return total_workers_; }
+
+    /**
+     * @brief Worker 退出时减少 total_workers_（v2.38 新增）
+     *
+     * 使得存活的 Worker 到达同步点后不必等待已退出的 Worker。
+     */
+    void removeWorker(const std::string& worker_name);
     
     /**
      * @brief 获取回调链长度
@@ -392,6 +399,19 @@ private:
     std::condition_variable cv_;             // 条件变量
     std::map<uint64_t, FrameSync> frame_syncs_;  // frame_version -> FrameSync
     
+    // B 帧 reorder 容错：基于 PTS 的深拷贝帧缓存
+    // 当 EAGAIN 不一致时，对成功 worker 的帧做 av_frame_clone() 深拷贝，
+    // 后续 PTS 匹配后再执行比较。避免持有 Buffer* 导致 use-after-free。
+    struct PendingFrame {
+        std::string worker_name;
+        int64_t pts;
+        AVFrame* frame;    // av_frame_clone() 产出，我们拥有所有权
+    };
+    std::vector<PendingFrame> pending_frames_;
+
+    void clearPendingFrames();
+    void tryMatchPending(const std::map<std::string, Buffer*>& current_buffers);
+
     // 日志
     log4cplus::Logger logger_;
 };

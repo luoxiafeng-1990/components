@@ -67,7 +67,7 @@ enum class BufferMemoryAllocatorType {
  * uint64_t pool_id = allocator->allocatePoolWithBuffers(10, 1024*1024, "MyPool", "Video");
  * 
  * // 使用者从 Registry 获取
- * auto pool = BufferPoolRegistry::getInstance().getPool(pool_id);
+ * auto pool = ComponentTopology::getInstance().getPool(pool_id);
  * 
  * // Allocator 析构时自动清理
  * @endcode
@@ -274,7 +274,7 @@ protected:
      * @brief 供子类清理时使用（通过友元访问 Registry）
      * 
      * v2.0 设计：
-     * - BufferAllocatorBase 是 BufferPoolRegistry 的友元
+     * - BufferAllocatorBase 是 ComponentTopology 的友元
      * - 子类可以通过此方法访问 Registry 的私有清理方法
      * - 返回 shared_ptr（不是 weak_ptr），保证清理期间 Pool 不被销毁
      * 

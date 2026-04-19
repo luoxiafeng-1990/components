@@ -1,4 +1,4 @@
-#include "productionline/worker/datasource/RawFrameSourceFromFile.hpp"
+#include "productionline/worker/datasource/rawdata/RawFrameSourceFromFile.hpp"
 #include "common/Logger.hpp"
 #include <sys/stat.h>
 #include <cstring>
@@ -133,11 +133,14 @@ int RawFrameSourceFromFile::readRawFrame(AVFrame* frame) {
     
     // 分配 AVFrame 内部缓冲区（若尚未分配）。64 字节对齐以适配硬件编码器常见 stride（与 backup 一致）。
     if (!frame->data[0]) {
+        LOG4CPLUS_DEBUG_FMT(logger_, "av_frame_get_buffer 前: format=%d, width=%d, height=%d",
+                           frame->format, frame->width, frame->height);
         int ret = av_frame_get_buffer(frame, 64);
         if (ret < 0) {
             char err_buf[AV_ERROR_MAX_STRING_SIZE];
             av_strerror(ret, err_buf, sizeof(err_buf));
-            LOG4CPLUS_ERROR_FMT(logger_, "av_frame_get_buffer 失败: %s", err_buf);
+            LOG4CPLUS_ERROR_FMT(logger_, "av_frame_get_buffer 失败: %s (format=%d, %dx%d)",
+                               err_buf, frame->format, frame->width, frame->height);
             return ret;
         }
     }

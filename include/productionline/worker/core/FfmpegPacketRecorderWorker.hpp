@@ -1,7 +1,7 @@
 #pragma once
 
 #include "productionline/worker/base/WorkerBase.hpp"
-#include "productionline/worker/datasource/IEncodedPacketSource.hpp"
+#include "productionline/worker/datasource/encodeddata/IEncodedPacketSource.hpp"
 #include <string>
 #include <atomic>
 #include <mutex>

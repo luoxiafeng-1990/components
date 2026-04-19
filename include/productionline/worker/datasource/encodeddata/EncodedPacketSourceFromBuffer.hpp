@@ -1,7 +1,7 @@
 #ifndef ENCODED_PACKET_SOURCE_FROM_BUFFER_HPP
 #define ENCODED_PACKET_SOURCE_FROM_BUFFER_HPP
 
-#include "productionline/worker/datasource/IEncodedPacketSource.hpp"
+#include "productionline/worker/datasource/encodeddata/IEncodedPacketSource.hpp"
 #include "buffer/bufferpool/Buffer.hpp"
 #include <memory>
 #include <string>
@@ -183,6 +183,15 @@ public:
     void cancelEncodedPacket(void* worker_id) override;
     
     /**
+     * @brief Worker 退出时注销订阅（v2.38 新增）
+     * @param worker_id Worker 的唯一标识
+     *
+     * 当一个 Worker 线程终止后调用，将 total_subscribers_ 减 1，
+     * 并视情况递减 remaining_subscribers_ 以保证 version 仍能前进。
+     */
+    void unsubscribe(void* worker_id);
+
+    /**
      * @brief 获取当前 buffer 版本号（v2.23 新增）
      * @return 当前 buffer 版本号
      * 
@@ -229,14 +238,6 @@ private:
     };
     
     std::map<void*, WorkerState> worker_states_;  // Worker ID (this指针) -> 状态
-    
-    /**
-     * @brief 从当前 Buffer 复制 packet 数据
-     * @param dst_packet 目标 packet
-     * @param src_packet 源 packet（从 Buffer 获取）
-     * @return 0=成功, <0=错误
-     */
-    int copyPacket(AVPacket* dst_packet, const AVPacket* src_packet);
     
     /**
      * @brief Fetch 任务函数（在全局线程池中运行）

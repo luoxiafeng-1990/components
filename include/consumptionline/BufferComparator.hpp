@@ -144,6 +144,14 @@ public:
      * @note 自动检测格式并选择最优对比策略
      */
     FrameCompareResult compare(Buffer* reference_buffer, Buffer* test_buffer);
+
+    /**
+     * @brief 对比两个 AVFrame（用于 PTS 匹配的深拷贝帧比较）
+     * @param ref_frame 参考帧
+     * @param test_frame 测试帧
+     * @return 对比结果
+     */
+    FrameCompareResult compareAVFrames(AVFrame* ref_frame, AVFrame* test_frame);
     
     /**
      * @brief 关闭对比器（输出报告）

@@ -95,7 +95,7 @@ void TacoProOsdOverlay::shutdown() {
     cleanupFreeType();
 
     if (pool_id_ != 0) {
-        auto pool = BufferPoolRegistry::getInstance().getPool(pool_id_).lock();
+        auto pool = ComponentTopology::getInstance().getPool(pool_id_).lock();
         if (pool) {
             if (display_buf_) {
                 pool->releaseFilled(display_buf_);
@@ -198,7 +198,7 @@ bool TacoProOsdOverlay::setupDssOverlay1() {
     write_sysfs(LCD_TRANS_KEY_VALUE_PATH, "0");
     write_sysfs(LCD_TRANS_KEY_ENABLED_PATH, "1");
 
-    auto pool = BufferPoolRegistry::getInstance().getPool(pool_id_).lock();
+    auto pool = ComponentTopology::getInstance().getPool(pool_id_).lock();
     if (!pool || pool->getAllManagedBuffers().empty()) {
         LOG4CPLUS_ERROR(logger_, "setupDssOverlay1: no buffers in pool");
         return false;
@@ -322,7 +322,7 @@ void TacoProOsdOverlay::onTimerTick() {
 // ============================================================
 
 void TacoProOsdOverlay::renderOsd() {
-    auto pool = BufferPoolRegistry::getInstance().getPool(pool_id_).lock();
+    auto pool = ComponentTopology::getInstance().getPool(pool_id_).lock();
     if (!pool) return;
 
     Buffer* buf = pool->acquireFree(false, 0);

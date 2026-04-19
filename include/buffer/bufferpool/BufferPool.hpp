@@ -16,6 +16,59 @@
 class BufferAllocatorBase;
 
 /**
+ * @brief BufferPool 类型枚举
+ *
+ * 定义 Worker 可以创建的所有 BufferPool 类型。
+ * 所有 Worker 使用此枚举标识其输出的 BufferPool。
+ */
+enum class BufferPoolType {
+    DECODE_VIDEO_PRIMARY,
+    DECODE_VIDEO_SECONDARY,
+    DECODE_VIDEO_THUMBNAIL,
+    DECODE_VIDEO_PREVIEW,
+    DECODE_AUDIO_PRIMARY,
+    DECODE_AUDIO_SECONDARY,
+    PACKET_VIDEO,
+    PACKET_AUDIO,
+    PACKET_SUBTITLE,
+    ENCODE_VIDEO_INPUT,
+    ENCODE_VIDEO_OUTPUT,
+    ENCODE_AUDIO_INPUT,
+    ENCODE_AUDIO_OUTPUT,
+    RAW_FILE_READ,
+    FRAMEBUFFER_OUTPUT,
+    NETWORK_STREAM,
+    CUSTOM_1,
+    CUSTOM_2,
+    CUSTOM_3
+};
+
+inline const char* bufferPoolTypeToString(BufferPoolType type) {
+    switch (type) {
+        case BufferPoolType::DECODE_VIDEO_PRIMARY:    return "DECODE_VIDEO_PRIMARY";
+        case BufferPoolType::DECODE_VIDEO_SECONDARY:  return "DECODE_VIDEO_SECONDARY";
+        case BufferPoolType::DECODE_VIDEO_THUMBNAIL:  return "DECODE_VIDEO_THUMBNAIL";
+        case BufferPoolType::DECODE_VIDEO_PREVIEW:    return "DECODE_VIDEO_PREVIEW";
+        case BufferPoolType::DECODE_AUDIO_PRIMARY:    return "DECODE_AUDIO_PRIMARY";
+        case BufferPoolType::DECODE_AUDIO_SECONDARY:  return "DECODE_AUDIO_SECONDARY";
+        case BufferPoolType::PACKET_VIDEO:            return "PACKET_VIDEO";
+        case BufferPoolType::PACKET_AUDIO:            return "PACKET_AUDIO";
+        case BufferPoolType::PACKET_SUBTITLE:         return "PACKET_SUBTITLE";
+        case BufferPoolType::ENCODE_VIDEO_INPUT:      return "ENCODE_VIDEO_INPUT";
+        case BufferPoolType::ENCODE_VIDEO_OUTPUT:     return "ENCODE_VIDEO_OUTPUT";
+        case BufferPoolType::ENCODE_AUDIO_INPUT:      return "ENCODE_AUDIO_INPUT";
+        case BufferPoolType::ENCODE_AUDIO_OUTPUT:     return "ENCODE_AUDIO_OUTPUT";
+        case BufferPoolType::RAW_FILE_READ:           return "RAW_FILE_READ";
+        case BufferPoolType::FRAMEBUFFER_OUTPUT:      return "FRAMEBUFFER_OUTPUT";
+        case BufferPoolType::NETWORK_STREAM:          return "NETWORK_STREAM";
+        case BufferPoolType::CUSTOM_1:                return "CUSTOM_1";
+        case BufferPoolType::CUSTOM_2:                return "CUSTOM_2";
+        case BufferPoolType::CUSTOM_3:                return "CUSTOM_3";
+        default:                                      return "UNKNOWN";
+    }
+}
+
+/**
  * @brief QueueType - 队列类型枚举
  */
 enum class QueueType {

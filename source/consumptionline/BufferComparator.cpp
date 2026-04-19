@@ -318,6 +318,35 @@ FrameCompareResult BufferComparator::compare(
     return result;
 }
 
+FrameCompareResult BufferComparator::compareAVFrames(
+    AVFrame* ref_frame,
+    AVFrame* test_frame
+) {
+    FrameCompareResult result;
+    if (!is_open_ || !ref_frame || !test_frame) {
+        result.error_message = !is_open_ ? "Not opened" : "Null AVFrame";
+        result.passed = false;
+        result.level = FrameCompareResult::FAIL;
+        return result;
+    }
+
+    Buffer ref_buf(0xFFF0, ref_frame->data[0], 0,
+                   ref_frame->linesize[0] * ref_frame->height,
+                   Buffer::Ownership::EXTERNAL);
+    ref_buf.setAVFrame(ref_frame);
+    ref_buf.setImageMetadataFromAVFrame(ref_frame);
+    ref_buf.setPts(ref_frame->pts);
+
+    Buffer test_buf(0xFFF1, test_frame->data[0], 0,
+                    test_frame->linesize[0] * test_frame->height,
+                    Buffer::Ownership::EXTERNAL);
+    test_buf.setAVFrame(test_frame);
+    test_buf.setImageMetadataFromAVFrame(test_frame);
+    test_buf.setPts(test_frame->pts);
+
+    return compare(&ref_buf, &test_buf);
+}
+
 void BufferComparator::printSummary() const {
     LOG_INFO("╔═══════════════════════════════════════════════════════╗");
     LOG_INFO("║  BufferComparator Summary                              ║");
@@ -1574,9 +1603,62 @@ AVFrame* BufferComparator::convertToYUV420P(Buffer* buffer, const FormatInfo& in
         return nullptr;
     }
     
-    // 如果已经是YUV420P，直接返回
-    if (info.format == AV_PIX_FMT_YUV420P) {
+    // YUVJ420P/YUVJ422P/YUVJ444P 与对应的 YUV420P/422P/444P 像素布局完全相同，
+    // 仅 color range 标记不同；PSNR/SSIM 计算无需 range 转换
+    if (info.format == AV_PIX_FMT_YUV420P || info.format == AV_PIX_FMT_YUVJ420P) {
         return av_frame_clone(src_frame);
+    }
+    
+    // NV12/NV21 是 semi-planar 420，Y 平面与 YUV420P 完全相同，
+    // 仅 UV 平面从交织变为分离；直接 clone 后手动 deinterleave 可避免
+    // sws_scale 引入的 color range 偏移（NV12 默认 limited range，
+    // 但 PSNR/SSIM 比较需要与 YUVJ420P full range 参考帧一致的原始像素值）
+    if (info.format == AV_PIX_FMT_NV12 || info.format == AV_PIX_FMT_NV21) {
+        AVFrame* dst_frame = av_frame_alloc();
+        if (!dst_frame) return nullptr;
+        
+        dst_frame->format = AV_PIX_FMT_YUV420P;
+        dst_frame->width = info.width;
+        dst_frame->height = info.height;
+        
+        if (av_frame_get_buffer(dst_frame, 0) < 0) {
+            av_frame_free(&dst_frame);
+            return nullptr;
+        }
+        
+        int uv_width = info.width / 2;
+        int uv_height = info.height / 2;
+        
+        // Y 平面：逐行复制（stride 可能不同）
+        for (int y = 0; y < info.height; y++) {
+            memcpy(dst_frame->data[0] + y * dst_frame->linesize[0],
+                   src_frame->data[0] + y * src_frame->linesize[0],
+                   info.width);
+        }
+        
+        // UV 平面：从交织 (UVUVUV...) 拆分为独立 U 和 V 平面
+        const uint8_t* uv_src = src_frame->data[1];
+        uint8_t* u_dst = dst_frame->data[1];
+        uint8_t* v_dst = dst_frame->data[2];
+        bool is_nv12 = (info.format == AV_PIX_FMT_NV12);
+        
+        for (int y = 0; y < uv_height; y++) {
+            const uint8_t* uv_row = uv_src + y * src_frame->linesize[1];
+            uint8_t* u_row = u_dst + y * dst_frame->linesize[1];
+            uint8_t* v_row = v_dst + y * dst_frame->linesize[2];
+            
+            for (int x = 0; x < uv_width; x++) {
+                if (is_nv12) {
+                    u_row[x] = uv_row[2 * x];
+                    v_row[x] = uv_row[2 * x + 1];
+                } else {
+                    v_row[x] = uv_row[2 * x];
+                    u_row[x] = uv_row[2 * x + 1];
+                }
+            }
+        }
+        
+        return dst_frame;
     }
     
     // 创建目标frame
@@ -1594,9 +1676,9 @@ AVFrame* BufferComparator::convertToYUV420P(Buffer* buffer, const FormatInfo& in
         return nullptr;
     }
     
-    // 创建转换上下文
+    AVPixelFormat src_fmt = info.format;
     SwsContext* sws_ctx = sws_getContext(
-        info.width, info.height, info.format,
+        info.width, info.height, src_fmt,
         info.width, info.height, AV_PIX_FMT_YUV420P,
         SWS_BILINEAR, nullptr, nullptr, nullptr
     );
@@ -1606,7 +1688,6 @@ AVFrame* BufferComparator::convertToYUV420P(Buffer* buffer, const FormatInfo& in
         return nullptr;
     }
     
-    // 执行转换
     sws_scale(sws_ctx, src_frame->data, src_frame->linesize, 0, info.height,
               dst_frame->data, dst_frame->linesize);
     

@@ -2,7 +2,7 @@
 #define FFMPEG_DECODE_WORKER_HPP
 
 #include "productionline/worker/base/WorkerBase.hpp"
-#include "productionline/worker/datasource/IEncodedPacketSource.hpp"
+#include "productionline/worker/datasource/encodeddata/IEncodedPacketSource.hpp"
 #include "buffer/bufferpool/Buffer.hpp"
 #include "buffer/bufferpool/BufferPool.hpp"
 #include <string>
@@ -63,7 +63,7 @@ class BufferPool;
  * 
  * // v2.0: 获取 BufferPool ID
  * uint64_t pool_id = worker.getOutputBufferPoolId();
- * auto pool = BufferPoolRegistry::getInstance().getPool(pool_id).lock();
+ * auto pool = ComponentTopology::getInstance().getPool(pool_id).lock();
  * 
  * // 同步解码
  * Buffer* buffer = pool->acquireFree(true, 100);
@@ -158,7 +158,7 @@ public:
      * FFmpegDecodeWorker consumer_worker(config);
      * 
      * // 2. 关联 Record BufferPool
-     * auto record_pool_weak = BufferPoolRegistry::getInstance().getPool(record_pool_id);
+     * auto record_pool_weak = ComponentTopology::getInstance().getPool(record_pool_id);
      * consumer_worker.setSourceBufferPool(record_pool_weak);
      * 
      * // 3. 打开并使用

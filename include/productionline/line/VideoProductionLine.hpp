@@ -2,7 +2,7 @@
 
 #include "buffer/bufferpool/BufferPool.hpp"
 #include "productionline/worker/base/WorkerBase.hpp"
-#include "productionline/worker/base/BufferFillingWorkerFactory.hpp"
+#include "productionline/worker/base/WorkerFactory.hpp"
 #include "productionline/worker/config/MultiWorkerConfig.hpp"
 #include "productionline/worker/config/WorkerConfigs.hpp"
 #include "productionline/worker/base/ComponentTopology.hpp"
@@ -116,7 +116,7 @@ public:
      * @brief 获取工作BufferPool ID
      * @return BufferPool的注册表ID
      * 
-     * @note 消费者应使用此ID从 BufferPoolRegistry 获取 BufferPool
+     * @note 消费者应使用此ID从 ComponentTopology 获取 BufferPool
      */
     uint64_t getWorkingBufferPoolId() const { return working_buffer_pool_id_; }
     
@@ -212,7 +212,7 @@ protected:
      */
     std::weak_ptr<BufferPool> working_buffer_pool_weak_;
     
-    // Worker（多线程共享，与 WorkerRegistry 共享所有权）
+    // Worker（多线程共享，与 ComponentTopology 共享所有权）
     std::shared_ptr<WorkerBase> worker_sptr_;
     
     // 本 Line 在 ComponentTopology 中的拓扑 ID（start() 时注册，stop() 时注销）

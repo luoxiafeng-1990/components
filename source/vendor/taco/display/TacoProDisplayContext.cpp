@@ -389,7 +389,7 @@ bool TacoProDisplayContext::createBufferPool() {
 
 std::shared_ptr<BufferPool> TacoProDisplayContext::getBufferPool() {
     if (fb_pool_id_ == 0) return nullptr;
-    return BufferPoolRegistry::getInstance().getPool(fb_pool_id_).lock();
+    return ComponentTopology::getInstance().getPool(fb_pool_id_).lock();
 }
 
 // ============================================================

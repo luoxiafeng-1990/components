@@ -1,4 +1,4 @@
-#include "productionline/worker/datasource/RawFrameSourceFromBuffer.hpp"
+#include "productionline/worker/datasource/rawdata/RawFrameSourceFromBuffer.hpp"
 #include "buffer/bufferpool/BufferPool.hpp"
 #include "buffer/bufferpool/Buffer.hpp"
 #include "common/Logger.hpp"
@@ -99,18 +99,6 @@ RawFrameSourceFromBuffer::RawFrameSourceFromBuffer(int width,
 {
     LOG4CPLUS_DEBUG_FMT(logger_, "构造函数（直接模式）: %dx%d, pix_fmt=%d",
                         width_, height_, pix_fmt_);
-}
-
-void RawFrameSourceFromBuffer::setFrame(AVFrame* frame) {
-    std::unique_lock<std::mutex> lock(direct_mutex_);
-    direct_frame_ = frame;
-    direct_cv_available_.notify_one();
-
-    // 阻塞等待编码线程消费完成，保证 buffer 在编码期间不被释放
-    direct_cv_consumed_.wait(lock, [this] {
-        return direct_frame_consumed_ || !is_open_.load(std::memory_order_acquire);
-    });
-    direct_frame_consumed_ = false;
 }
 
 RawFrameSourceFromBuffer::~RawFrameSourceFromBuffer() {
@@ -523,48 +511,6 @@ int RawFrameSourceFromBuffer::copyFrame(AVFrame* dst_frame, const AVFrame* src_f
     return 0;
 }
 
-AVFrame* RawFrameSourceFromBuffer::acquireRawFrame(void* worker_id) {
-    if (!is_shared_mode_) {
-        LOG4CPLUS_ERROR(logger_, "acquireRawFrame() 仅在共享模式下使用");
-        return nullptr;
-    }
-    
-    std::unique_lock<std::mutex> lock(mutex_);
-    
-    // 阻塞等待新 buffer 或 EOF
-    cv_subscribers_.wait(lock, [this]() {
-        return current_buffer_ != nullptr ||
-               !is_running_.load(std::memory_order_acquire);
-    });
-    
-    // 检查 EOF
-    if (!is_running_.load(std::memory_order_acquire) && !current_buffer_) {
-        LOG4CPLUS_DEBUG_FMT(logger_, "[Worker %p] acquireRawFrame: EOF", worker_id);
-        return nullptr;
-    }
-    
-    if (!current_buffer_) {
-        return nullptr;
-    }
-    
-    uint64_t current_version = current_buffer_version_.load(std::memory_order_acquire);
-    
-    // 获取或创建 Worker 状态
-    WorkerState& state = worker_states_[worker_id];
-    
-    // 检查是否已处理过当前版本
-    if (state.acquired_version == current_version) {
-        return nullptr;  // 已处理过当前版本
-    }
-    
-    // 新版本或首次获取
-    state.acquired_version = current_version;
-    state.has_acquired = true;
-    state.has_committed = false;
-    
-    return current_buffer_->getAVFrame();
-}
-
 bool RawFrameSourceFromBuffer::commitRawFrame(void* worker_id) {
     if (!is_shared_mode_) {
         LOG4CPLUS_WARN(logger_, "commitRawFrame() 仅在共享模式下使用");
@@ -614,29 +560,6 @@ bool RawFrameSourceFromBuffer::commitRawFrame(void* worker_id) {
     }
     
     return true;
-}
-
-void RawFrameSourceFromBuffer::cancelRawFrame(void* worker_id) {
-    if (!is_shared_mode_) {
-        return;
-    }
-    
-    std::lock_guard<std::mutex> lock(mutex_);
-    
-    auto it = worker_states_.find(worker_id);
-    if (it == worker_states_.end()) {
-        return;
-    }
-    
-    WorkerState& state = it->second;
-    uint64_t current_version = current_buffer_version_.load(std::memory_order_acquire);
-    
-    LOG4CPLUS_DEBUG_FMT(logger_,
-        "[Worker %p] cancelRawFrame: version=%llu",
-        worker_id, (unsigned long long)current_version);
-    
-    // 重置获取状态（允许重新 acquire）
-    state.has_acquired = false;
 }
 
 bool RawFrameSourceFromBuffer::seek(int frame_index) {

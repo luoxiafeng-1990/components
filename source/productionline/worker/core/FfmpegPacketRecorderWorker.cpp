@@ -1,9 +1,9 @@
 #include "productionline/worker/core/FfmpegPacketRecorderWorker.hpp"
-#include "productionline/worker/datasource/EncodedPacketSourceFromRtsp.hpp"
-#include "productionline/worker/datasource/EncodedPacketSourceFromFile.hpp"
+#include "productionline/worker/datasource/encodeddata/EncodedPacketSourceFromRtsp.hpp"
+#include "productionline/worker/datasource/encodeddata/EncodedPacketSourceFromFile.hpp"
 #include "common/Logger.hpp"
 #include "buffer/bufferpool/BufferPool.hpp"
-#include "buffer/bufferpool/BufferPoolRegistry.hpp"
+#include "productionline/worker/base/ComponentTopology.hpp"
 #include <climits>
 #include <cstring>
 
@@ -119,7 +119,7 @@ bool FfmpegPacketRecorderWorker::open(const char* path) {
         return false;
     }
     
-    auto pool_weak = BufferPoolRegistry::getInstance().getPool(pool_id);
+    auto pool_weak = ComponentTopology::getInstance().getPool(pool_id);
     auto pool = pool_weak.lock();
     std::string pool_name = pool ? pool->getName() : "Unknown";
     
@@ -206,7 +206,7 @@ size_t FfmpegPacketRecorderWorker::getFrameSize() const {
     uint64_t pool_id = getOutputBufferPoolId(BufferPoolType::PACKET_VIDEO);
     if (pool_id == 0) return 0;
     
-    auto pool_weak = BufferPoolRegistry::getInstance().getPool(pool_id);
+    auto pool_weak = ComponentTopology::getInstance().getPool(pool_id);
     auto pool = pool_weak.lock();
     if (!pool) return 0;
     

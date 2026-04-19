@@ -17,7 +17,7 @@
 #include "common/Timer.hpp"
 #include "buffer/BufferAllocatorFacade.hpp"
 #include "buffer/bufferpool/BufferPool.hpp"
-#include "buffer/bufferpool/BufferPoolRegistry.hpp"
+#include "productionline/worker/base/ComponentTopology.hpp"
 
 /**
  * TacoProOsdOverlay - vendor=tacopro 图形层 OSD 叠加显示

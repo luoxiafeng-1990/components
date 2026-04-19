@@ -9,7 +9,7 @@
 #include "productionline/line/MultiWorkerProductionLine.hpp"
 #include "productionline/line/WorkerSyncCoordinator.hpp"
 #include "common/GlobalThreadPool.hpp"
-#include "buffer/bufferpool/BufferPoolRegistry.hpp"
+#include "productionline/worker/base/ComponentTopology.hpp"
 #include "consumptionline/inference/NpuInferenceConsumer.hpp"
 
 #include <future>
@@ -277,7 +277,7 @@ ConsumeResult BufferConsumerService::startProductionLine(
         
         // 3. 获取 BufferPool（通过 Registry）
         auto pool_id = producer.getWorkingBufferPoolId();
-        auto pool_weak = BufferPoolRegistry::getInstance().getPool(pool_id);
+        auto pool_weak = ComponentTopology::getInstance().getPool(pool_id);
         auto pool = pool_weak.lock();
         if (!pool) {
             result.success = false;
@@ -677,7 +677,7 @@ ConsumeResult BufferConsumerService::startMultiWorkerCompare(
                 }
                 
                 // 获取 BufferPool
-                auto pool = BufferPoolRegistry::getInstance().getPool(pool_id).lock();
+                auto pool = ComponentTopology::getInstance().getPool(pool_id).lock();
                 if (!pool) {
                     LOG4CPLUS_ERROR_FMT(logger_, 
                         "Failed to get BufferPool for group[%zu] worker[%zu]",

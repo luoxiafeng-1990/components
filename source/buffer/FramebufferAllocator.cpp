@@ -1,7 +1,7 @@
 #include "buffer/FramebufferAllocator.hpp"
 #include "common/Logger.hpp"
 #include "buffer/bufferpool/BufferPool.hpp"
-#include "buffer/bufferpool/BufferPoolRegistry.hpp"
+#include "productionline/worker/base/ComponentTopology.hpp"
 #include <unordered_map>
 #include <mutex>
 #include <cstring>
@@ -117,7 +117,7 @@ uint64_t FramebufferAllocator::allocatePoolWithBuffers(
             i, blk_id, (unsigned long long)phys_addr, virt_addr, size);
     }
 
-    uint64_t pool_id = BufferPoolRegistry::getInstance().registerPool(
+    uint64_t pool_id = ComponentTopology::getInstance().registerPool(
         pool, getAllocatorId());
     pool->setRegistryId(pool_id);
 
@@ -176,7 +176,7 @@ bool FramebufferAllocator::removeBufferFromPool(
         return false;
     }
 
-    auto pool_weak = BufferPoolRegistry::getInstance().getPool(pool_id);
+    auto pool_weak = ComponentTopology::getInstance().getPool(pool_id);
     auto pool = pool_weak.lock();
     if (!pool) {
         LOG4CPLUS_ERROR_FMT(logger_,

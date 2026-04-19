@@ -2,7 +2,7 @@
 #define FFMPEG_ENCODE_WORKER_HPP
 
 #include "productionline/worker/base/WorkerBase.hpp"
-#include "productionline/worker/datasource/IRawFrameSource.hpp"
+#include "productionline/worker/datasource/rawdata/IRawFrameSource.hpp"
 #include <log4cplus/logger.h>
 #include <log4cplus/loggingmacros.h>
 #include <memory>

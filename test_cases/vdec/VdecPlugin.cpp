@@ -9,6 +9,7 @@
 #include "../common/WorkerConfigFactory.hpp"
 #include "consumptionline/BufferConsumerService.hpp"
 #include "consumptionline/config/ConsumerTypeConfigBuilder.hpp"
+#include "vendor/taco/decode/TacoDecoderExtension.hpp"
 
 #include "../common/third_party/CLI11.hpp"
 
@@ -291,6 +292,14 @@ std::vector<WorkerConfig> VdecPlugin::buildPipelineConfigs(const WorkerConfig& s
             .setMaxFrames(shared_config.data_source.max_frames)
             .setLoop(shared_config.data_source.loop)
             .build();
+
+        if (is_compare && use_hw) {
+            auto* taco_cfg = tacoDecoderConfig(cfg.decoder);
+            if (taco_cfg) {
+                taco_cfg->reorder_disable = false;
+            }
+        }
+
         return cfg;
     };
 

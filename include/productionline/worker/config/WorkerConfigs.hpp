@@ -26,7 +26,7 @@ class IRawFrameSource;
 /**
  * @brief Worker 类型枚举
  * 
- * 注意：此枚举独立定义，避免与 BufferFillingWorkerFactory 的循环依赖
+ * 注意：此枚举独立定义，避免与 WorkerFactory 的循环依赖
  * 
  * v3.0 重构：
  * - FFMPEG_DECODE: 统一的解码 Worker（支持文件/RTSP/Buffer 模式）

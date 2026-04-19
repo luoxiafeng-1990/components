@@ -1,7 +1,7 @@
 #ifndef ENCODED_PACKET_SOURCE_FROM_RTSP_HPP
 #define ENCODED_PACKET_SOURCE_FROM_RTSP_HPP
 
-#include "productionline/worker/datasource/IEncodedPacketSource.hpp"  // 包含 PacketAcquireResult
+#include "productionline/worker/datasource/encodeddata/IEncodedPacketSource.hpp"  // 包含 PacketAcquireResult
 #include <log4cplus/logger.h>
 #include <log4cplus/loggingmacros.h>
 #include <string>
@@ -95,21 +95,6 @@ public:
     
     // commit/cancel 使用接口默认实现（RTSP 模式不需要）
 
-    // ============ 中断控制接口 ============
-    
-    /**
-     * @brief 请求中断所有 RTSP 流操作（用于响应 Ctrl+C）
-     * 
-     * 当用户按 Ctrl+C 时，信号处理器应调用此方法。
-     * FFmpeg 会在下一次 I/O 检查时中断阻塞操作。
-     */
-    static void requestInterrupt();
-    
-    /**
-     * @brief 清除中断标志（用于重新开始）
-     */
-    static void clearInterrupt();
-    
 private:
     // ============ 中断机制（静态，所有实例共享） ============
     
@@ -152,12 +137,6 @@ private:
      * @return true 如果成功
      */
     bool findVideoStream();
-    
-    /**
-     * @brief 初始化 RTSP 连接
-     * @return true 如果成功
-     */
-    bool initializeConnection();
     
     // 日志器
     log4cplus::Logger logger_;

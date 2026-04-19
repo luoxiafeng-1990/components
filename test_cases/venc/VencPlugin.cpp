@@ -14,8 +14,8 @@
 #include "productionline/line/MultiWorkerProductionLine.hpp"
 #include "productionline/line/WorkerSyncCoordinator.hpp"
 #include "productionline/worker/config/FrameSyncTypes.hpp"
-#include "productionline/worker/datasource/RawFrameSourceFromFile.hpp"
-#include "buffer/bufferpool/BufferPoolRegistry.hpp"
+#include "productionline/worker/datasource/rawdata/RawFrameSourceFromFile.hpp"
+#include "productionline/worker/base/ComponentTopology.hpp"
 #include "buffer/bufferpool/Buffer.hpp"
 
 extern "C" {
@@ -1017,7 +1017,7 @@ consumer::ConsumeResult runEncodeQualityCompare(
     pipeline_started = true;
 
     const uint64_t decoded_pool_id = pipeline->getGroupConsumerBufferPoolId(0, 0);
-    auto decoded_pool = BufferPoolRegistry::getInstance().getPool(decoded_pool_id).lock();
+    auto decoded_pool = ComponentTopology::getInstance().getPool(decoded_pool_id).lock();
     if (!decoded_pool) {
         av_frame_free(&ref_avframe);
         ref_source.close();
@@ -1152,7 +1152,7 @@ consumer::ConsumeResult runEncodeDecodeDisplay(
     if (decoded_pool_id == 0) {
         return failResult(logger, "ENC_DISPLAY", "Failed to get decoded BufferPool ID");
     }
-    decoded_pool = BufferPoolRegistry::getInstance().getPool(decoded_pool_id).lock();
+    decoded_pool = ComponentTopology::getInstance().getPool(decoded_pool_id).lock();
     if (!decoded_pool) {
         return failResult(logger, "ENC_DISPLAY", "Failed to lock decoded BufferPool");
     }

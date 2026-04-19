@@ -1,12 +1,12 @@
 #include "productionline/worker/core/FFmpegDecodeWorker.hpp"
 #include "vendor/taco/decode/TacoDecoderExtension.hpp"
-#include "productionline/worker/datasource/EncodedPacketSourceFromRtsp.hpp"
-#include "productionline/worker/datasource/EncodedPacketSourceFromBuffer.hpp"
-#include "productionline/worker/datasource/EncodedPacketSourceFromFile.hpp"
+#include "productionline/worker/datasource/encodeddata/EncodedPacketSourceFromRtsp.hpp"
+#include "productionline/worker/datasource/encodeddata/EncodedPacketSourceFromBuffer.hpp"
+#include "productionline/worker/datasource/encodeddata/EncodedPacketSourceFromFile.hpp"
 #include "common/Logger.hpp"
 #include "buffer/bufferpool/BufferPool.hpp"
 #include "buffer/NormalAllocator.hpp"
-#include "buffer/bufferpool/BufferPoolRegistry.hpp"
+#include "productionline/worker/base/ComponentTopology.hpp"
 #include <string.h>
 #include <chrono>
 #include <climits>  // for INT_MAX
@@ -267,7 +267,7 @@ bool FFmpegDecodeWorker::open() {
     }
     
     // 8. 从 Registry 获取 Pool 名称
-    auto pool_weak = BufferPoolRegistry::getInstance().getPool(pool_id);
+    auto pool_weak = ComponentTopology::getInstance().getPool(pool_id);
     auto pool = pool_weak.lock();
     std::string actual_pool_name = pool ? pool->getName() : "Unknown";
     
@@ -661,6 +661,8 @@ FillResult FFmpegDecodeWorker::readAndSendPacket(AVPacket* packet_ptr) {
             LOG4CPLUS_ERROR_FMT(logger_, 
                 " avcodec_send_packet: still EAGAIN after %d retries, "
                 "returning sendPacketFailed to caller", kMaxRetries);
+            packet_acquired_ = false;
+            current_packet_ptr_ = nullptr;
             return FillResult::fromCodec(CodecSendResult::sendFailed());
         }
         // ret 已变为其他错误码，fall through 到下方映射
@@ -672,7 +674,11 @@ FillResult FFmpegDecodeWorker::readAndSendPacket(AVPacket* packet_ptr) {
     }
     
     // 错误码映射（与 PacketAcquireResult 在 acquireEncodedPacket 中的风格一致）
+    // 注意：所有错误路径必须重置 packet_acquired_，否则下一轮 fillBuffer 会跳过
+    // acquireEncodedPacket 而使用已释放的 current_packet_ptr_，导致死循环。
     using Result = CodecSendResult;
+    packet_acquired_ = false;
+    current_packet_ptr_ = nullptr;
     if (ret == AVERROR_EOF)     return FillResult::fromCodec(Result::eof());
     if (ret == AVERROR(EINVAL)) return FillResult::fromCodec(Result::invalidState());
     if (ret == AVERROR(ENOMEM)) return FillResult::fromCodec(Result::allocFailed());
@@ -682,6 +688,8 @@ FillResult FFmpegDecodeWorker::readAndSendPacket(AVPacket* packet_ptr) {
     av_strerror(ret, err_buf, sizeof(err_buf));
     LOG4CPLUS_ERROR_FMT(logger_, 
         " ERROR: avcodec_send_packet: decode error (ret=%d, %s)", ret, err_buf);
+    packet_acquired_ = false;
+    current_packet_ptr_ = nullptr;
     return FillResult::fromCodec(Result::decodeError());
 }
 

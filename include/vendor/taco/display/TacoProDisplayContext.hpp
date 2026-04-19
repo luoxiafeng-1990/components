@@ -5,7 +5,7 @@
 #include "buffer/bufferpool/BufferPool.hpp"
 #include "buffer/BufferAllocatorFacade.hpp"
 #include "buffer/BufferAllocatorFactory.hpp"
-#include "buffer/bufferpool/BufferPoolRegistry.hpp"
+#include "productionline/worker/base/ComponentTopology.hpp"
 #include "vendor/taco/display/TacoProDisplayExtension.hpp"
 
 #include <shared_mutex>

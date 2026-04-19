@@ -35,6 +35,7 @@
 #include "common/Logger.hpp"
 
 #include "productionline/line/WorkerSyncCoordinator.hpp"
+#include "productionline/worker/base/ComponentTopology.hpp"
 
 #include <iostream>
 #include <memory>
@@ -56,6 +57,9 @@ int main(int argc, char* argv[]) {
     CLI::App app{"qa_cases - Component 测试套件 v" + version_str};
     app.set_version_flag("-v,--version", version_detail, "显示版本号及编译时间并退出");
     app.require_subcommand(1, 0);
+
+    bool show_topology = false;
+    app.add_flag("--topology", show_topology, "执行完毕后打印组件拓扑关系");
 
     // ── 1. 创建所有插件 ──
     auto vdec_plugin    = std::make_unique<test::vdec::VdecPlugin>();
@@ -143,6 +147,11 @@ int main(int argc, char* argv[]) {
     }
 
     // ── 8. 从 config 推断执行模式，统一执行 ──
+    // RAII: 无论哪条 return 路径，析构时自动打印拓扑
+    struct TopologyGuard {
+        bool enabled;
+        ~TopologyGuard() { if (enabled) ComponentTopology::getInstance().printTopology(); }
+    } topo_guard{show_topology};
     // 合并共享 config 与管线 config 的 flags，确保管线特有的标志（如 CONSUME_SAVE_ENCODED）不丢失
     uint32_t flags = test::ExecuteMode::buildConsumeFlags(config);
     flags |= test::ExecuteMode::buildConsumeFlags(pipeline_configs[0]);

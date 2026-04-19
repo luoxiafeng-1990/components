@@ -6,8 +6,14 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <mutex>
+#include <memory>
+#include <chrono>
 #include <log4cplus/logger.h>
 #include <log4cplus/loggingmacros.h>
+
+class WorkerBase;
+class BufferPool;
+class BufferAllocatorBase;
 
 /**
  * @brief 组件拓扑所有者类型
@@ -22,10 +28,15 @@ enum class TopologyOwnerType : uint8_t {
 };
 
 /**
- * @brief ComponentTopology - 组件拓扑注册表（单例）
+ * @brief ComponentTopology - 统一组件注册表与拓扑管理（单例）
  *
- * 纯 ID 映射层，不持有任何组件对象指针，仅追踪组件间的层级关系。
- * 与 WorkerRegistry / BufferPoolRegistry 平行存在，不侵入其访问控制。
+ * 吸收 WorkerRegistry 和 BufferPoolRegistry 的全部职责，
+ * 同时管理组件间的层级拓扑关系。
+ *
+ * 职责：
+ * - 持有所有已注册 Worker 的 shared_ptr（与 ProductionLine 共享所有权）
+ * - 独占持有所有 BufferPool 的 shared_ptr（引用计数=1）
+ * - 管理 Line → Group → Worker → Pool 的四层拓扑关系
  *
  * 四层拓扑结构：
  *
@@ -38,7 +49,6 @@ enum class TopologyOwnerType : uint8_t {
  *                      Worker → Pool              Worker → Pool
  *
  * 线程安全：所有接口内部使用 mutex 保护。
- * ID 空间：Line 和 Group 各自独立编号，均从 1 开始。
  */
 class ComponentTopology {
 public:
@@ -47,7 +57,33 @@ public:
     ComponentTopology(const ComponentTopology&) = delete;
     ComponentTopology& operator=(const ComponentTopology&) = delete;
 
-    // ==================== 注册 ====================
+    // ==================== Worker 注册 ====================
+
+    /**
+     * @brief 注册 Worker（由 WorkerFactory::create() 调用）
+     * @param worker Worker 的 shared_ptr
+     * @return 唯一 ID（从 1 开始递增），失败返回 0
+     */
+    uint64_t registerWorker(std::shared_ptr<WorkerBase> worker);
+
+    // ==================== Pool 注册 ====================
+
+    /**
+     * @brief 注册 BufferPool（由 Allocator 创建后调用）
+     * @param pool BufferPool 的 shared_ptr（所有权转移给 Topology）
+     * @param allocator_id 创建者 Allocator 的唯一 ID
+     * @return 唯一 ID，失败返回 0
+     */
+    uint64_t registerPool(std::shared_ptr<BufferPool> pool, uint64_t allocator_id);
+
+    /**
+     * @brief 获取 BufferPool（返回 weak_ptr，观察者模式）
+     * @param id Pool ID
+     * @return weak_ptr<BufferPool>，不存在时返回空 weak_ptr
+     */
+    std::weak_ptr<BufferPool> getPool(uint64_t id) const;
+
+    // ==================== Line / Group 注册 ====================
 
     /**
      * @brief 注册一条生产线
@@ -58,94 +94,54 @@ public:
 
     /**
      * @brief 注册一个 WorkerGroup
-     * @param name 可选的显示名称（通常为 WorkerGroupConfig::group_id）
+     * @param name 可选的显示名称
      * @return 拓扑 Group ID（从 1 开始），失败返回 0
      */
     uint64_t registerGroup(const std::string& name = "");
 
     // ==================== 关联（建立关系）====================
 
-    /// Line 直属 Worker（简单 VideoProductionLine，无 Group 中间层）
-    void linkWorkerToLine(uint64_t line_id, uint64_t worker_registry_id);
-
-    /// Line → Group（MultiWorkerProductionLine 内的 WorkerGroup）
+    void linkWorkerToLine(uint64_t line_id, uint64_t worker_id);
     void linkGroupToLine(uint64_t line_id, uint64_t group_id);
-
-    /// Group 直属 Consumer Worker
-    void linkWorkerToGroup(uint64_t group_id, uint64_t worker_registry_id);
-
-    /// Group → Producer 子 Line（每个 Producer 内部的 VideoProductionLine）
+    void linkWorkerToGroup(uint64_t group_id, uint64_t worker_id);
     void linkProducerLineToGroup(uint64_t group_id, uint64_t producer_line_id);
+    void linkPoolToWorker(uint64_t worker_id, uint64_t pool_id);
 
-    /// Worker → Pool（任何 Worker 的输出 BufferPool）
-    void linkPoolToWorker(uint64_t worker_registry_id, uint64_t pool_id);
-
-    // ==================== 正向查询 ====================
-
-    /// 获取 Line 直属的 Worker ID 列表（简单模式）
-    std::vector<uint64_t> getWorkersOfLine(uint64_t line_id) const;
-
-    /// 获取 Line 包含的 Group ID 列表（MultiWorker 模式）
-    std::vector<uint64_t> getGroupsOfLine(uint64_t line_id) const;
-
-    /// 获取 Group 包含的 Consumer Worker ID 列表
-    std::vector<uint64_t> getWorkersOfGroup(uint64_t group_id) const;
-
-    /// 获取 Group 关联的 Producer 子 Line ID 列表
-    std::vector<uint64_t> getProducerLinesOfGroup(uint64_t group_id) const;
-
-    /// 获取 Worker 拥有的 Pool ID 列表
-    std::vector<uint64_t> getPoolsOfWorker(uint64_t worker_registry_id) const;
-
-    // ==================== 反向查询 ====================
-
-    /// Worker 所属的 Line ID（简单模式下直属；MultiWorker 下返回 0，需通过 Group 查）
-    uint64_t getLineOfWorker(uint64_t worker_registry_id) const;
-
-    /// Worker 所属的 Group ID（仅 MultiWorker 模式有效）
-    uint64_t getGroupOfWorker(uint64_t worker_registry_id) const;
-
-    /// Group 所属的 Line ID
-    uint64_t getLineOfGroup(uint64_t group_id) const;
-
-    /// 子 Line 所属的 Group ID
-    uint64_t getGroupOfProducerLine(uint64_t producer_line_id) const;
+    /**
+     * @brief 解除 Pool 与 Worker 的拓扑关联
+     *
+     * 供 WorkerBase::unregisterBufferPool() 调用，
+     * 确保 Worker 注销某个 Pool 时拓扑同步更新。
+     */
+    void unlinkPool(uint64_t pool_id);
 
     // ==================== 注销 ====================
 
-    /// 注销 Line 及其所有 Group、Worker、Pool 关联
     void unregisterLine(uint64_t line_id);
-
-    /// 注销 Group 及其关联的 Worker、Producer Line
     void unregisterGroup(uint64_t group_id);
-
-    /// 解除 Worker 的所有关联（Line/Group → Worker 和 Worker → Pool）
-    void unlinkWorker(uint64_t worker_registry_id);
-
-    /// 解除单个 Pool 的关联
-    void unlinkPool(uint64_t pool_id);
 
     // ==================== 诊断 ====================
 
-    /// 打印完整拓扑树
     void printTopology() const;
-
-    /// 获取已注册的 Line 数量
-    size_t getLineCount() const;
-
-    /// 获取已注册的 Group 数量
-    size_t getGroupCount() const;
 
 private:
     ComponentTopology();
     ~ComponentTopology() = default;
 
+    // ========== Pool 管理（仅 BufferAllocatorBase 友元可调用）==========
+
+    std::shared_ptr<BufferPool> getPoolSpecialForAllocator(uint64_t pool_id);
+    std::vector<uint64_t> getPoolsByAllocator(uint64_t allocator_id) const;
+    void unregisterPool(uint64_t pool_id);
+
+    friend class BufferAllocatorBase;
+
     // --- Line 数据 ---
     struct LineInfo {
         uint64_t id;
         std::string name;
-        std::unordered_set<uint64_t> worker_ids;   // 直属 Worker（简单模式）
-        std::vector<uint64_t> group_ids;            // 所属 Group（MultiWorker 模式）
+        std::unordered_set<uint64_t> worker_ids;
+        std::vector<uint64_t> group_ids;
     };
 
     // --- Group 数据 ---
@@ -153,25 +149,47 @@ private:
         uint64_t id;
         std::string name;
         uint64_t parent_line_id{0};
-        std::unordered_set<uint64_t> worker_ids;          // Consumer Worker
-        std::vector<uint64_t> producer_line_ids;           // Producer 子 Line
+        std::unordered_set<uint64_t> worker_ids;
+        std::vector<uint64_t> producer_line_ids;
+    };
+
+    // --- Worker 数据 ---
+    struct WorkerInfo {
+        uint64_t id;
+        std::shared_ptr<WorkerBase> worker;
+        std::chrono::system_clock::time_point created_time;
+    };
+
+    // --- Pool 数据 ---
+    struct PoolInfo {
+        uint64_t id;
+        std::shared_ptr<BufferPool> pool;
+        std::string name;
+        std::string category;
+        uint64_t allocator_id;
+        std::chrono::system_clock::time_point created_time;
     };
 
     // --- 反向索引 ---
-    std::unordered_map<uint64_t, uint64_t> worker_to_line_;    // worker_id → line_id
-    std::unordered_map<uint64_t, uint64_t> worker_to_group_;   // worker_id → group_id
-    std::unordered_map<uint64_t, uint64_t> pool_to_worker_;    // pool_id → worker_id
-    std::unordered_map<uint64_t, uint64_t> producer_line_to_group_;  // line_id → group_id
+    std::unordered_map<uint64_t, uint64_t> worker_to_line_;
+    std::unordered_map<uint64_t, uint64_t> worker_to_group_;
+    std::unordered_map<uint64_t, uint64_t> pool_to_worker_;
+    std::unordered_map<uint64_t, uint64_t> producer_line_to_group_;
 
     // --- Worker → Pool 正向 ---
-    std::unordered_map<uint64_t, std::unordered_set<uint64_t>> worker_pools_;  // worker_id → {pool_id...}
+    std::unordered_map<uint64_t, std::unordered_set<uint64_t>> worker_pools_;
 
     // --- 主数据 ---
     std::unordered_map<uint64_t, LineInfo> lines_;
     std::unordered_map<uint64_t, GroupInfo> groups_;
+    std::unordered_map<uint64_t, WorkerInfo> workers_;
+    std::unordered_map<uint64_t, PoolInfo> pools_;
+    std::unordered_map<std::string, uint64_t> pool_name_to_id_;
 
     uint64_t next_line_id_;
     uint64_t next_group_id_;
+    uint64_t next_worker_id_;
+    uint64_t next_pool_id_;
 
     mutable std::mutex mutex_;
     log4cplus::Logger logger_;

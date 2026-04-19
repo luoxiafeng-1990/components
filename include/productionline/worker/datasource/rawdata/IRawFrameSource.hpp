@@ -68,12 +68,6 @@ public:
      * @return 帧高度（像素），如果不可用返回 0
      */
     virtual int getFrameHeight() const = 0;
-    
-    /**
-     * @brief 获取帧像素格式
-     * @return AVPixelFormat 枚举值
-     */
-    virtual int getFramePixelFormat() const = 0;
 };
 
 #endif // IRAW_FRAME_SOURCE_HPP

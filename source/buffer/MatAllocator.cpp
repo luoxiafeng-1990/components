@@ -1,7 +1,7 @@
 #include "buffer/MatAllocator.hpp"
 #include "common/Logger.hpp"
 #include "buffer/bufferpool/BufferPool.hpp"
-#include "buffer/bufferpool/BufferPoolRegistry.hpp"
+#include "productionline/worker/base/ComponentTopology.hpp"
 #include <stdio.h>
 #include <vector>
 #include <unordered_map>
@@ -236,7 +236,7 @@ uint64_t MatAllocator::allocatePoolWithBuffers(
     LOG4CPLUS_INFO(logger_, "╚══════════════════════════════════════════════════════════════════╝");
     
     // v2.0 步骤 3: 注册到 Registry（转移所有权，传入 Allocator ID）
-    uint64_t pool_id = BufferPoolRegistry::getInstance().registerPool(pool, getAllocatorId());
+    uint64_t pool_id = ComponentTopology::getInstance().registerPool(pool, getAllocatorId());
     pool->setRegistryId(pool_id);
     
     // v2.0 步骤 4: 返回 pool_id
@@ -267,7 +267,7 @@ Buffer* MatAllocator::injectExternalBufferToPool(
     }
     
     // v2.0: 从 Registry 获取 Pool（返回 weak_ptr）
-    auto pool_weak = BufferPoolRegistry::getInstance().getPool(pool_id);
+    auto pool_weak = ComponentTopology::getInstance().getPool(pool_id);
     auto pool = pool_weak.lock();
     if (!pool) {
         LOG4CPLUS_ERROR_FMT(logger_, "pool_id %lu not found or already destroyed", pool_id);
@@ -319,7 +319,7 @@ bool MatAllocator::removeBufferFromPool(uint64_t pool_id, Buffer* buffer) {
     }
     
     // v2.0: 从 Registry 获取 Pool（返回 weak_ptr）
-    auto pool_weak = BufferPoolRegistry::getInstance().getPool(pool_id);
+    auto pool_weak = ComponentTopology::getInstance().getPool(pool_id);
     auto pool = pool_weak.lock();
     if (!pool) {
         LOG4CPLUS_ERROR_FMT(logger_, "pool_id %lu not found or already destroyed", pool_id);

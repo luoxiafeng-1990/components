@@ -1,7 +1,7 @@
 #ifndef RAW_FRAME_SOURCE_FROM_BUFFER_HPP
 #define RAW_FRAME_SOURCE_FROM_BUFFER_HPP
 
-#include "productionline/worker/datasource/IRawFrameSource.hpp"
+#include "productionline/worker/datasource/rawdata/IRawFrameSource.hpp"
 #include <log4cplus/logger.h>
 #include <log4cplus/loggingmacros.h>
 #include <memory>
@@ -117,21 +117,10 @@ public:
      */
     void setSourceBufferPool(std::weak_ptr<BufferPool> pool_weak);
     
-    /**
-     * @brief 注入帧并阻塞等待编码完成（直接模式专用）
-     * @param frame 要编码的 AVFrame 指针（不接管所有权）
-     *
-     * 1. 存储帧指针，唤醒 readRawFrame 中等待的编码线程
-     * 2. 阻塞等待编码线程消费完成后才返回
-     * 3. 返回后调用者可以安全释放 buffer
-     */
-    void setFrame(AVFrame* frame);
-    
     // ============ IRawFrameSource 接口实现 ============
     int readRawFrame(AVFrame* frame) override;
     int getFrameWidth() const override { return width_; }
     int getFrameHeight() const override { return height_; }
-    int getFramePixelFormat() const override { return static_cast<int>(pix_fmt_); }
     
     // ============ IDataSourceNavigator 接口实现 ============
     
@@ -166,51 +155,11 @@ public:
     // ============ 共享模式 API（与 EncodedPacketSourceFromBuffer 对称）============
     
     /**
-     * @brief 获取原始帧指针（共享模式，零拷贝）
-     * @param worker_id Worker 的唯一标识（通常是 this 指针）
-     * @return AVFrame* 指针，nullptr=EOF 或已获取过当前版本
-     * 
-     * 说明：
-     * - 只在共享模式下使用
-     * - 阻塞等待直到有新 buffer 或 EOF
-     * - 防止同一个 Worker 重复获取同一个 buffer（通过版本号机制）
-     * - 不递减 remaining_subscribers_（由 commitRawFrame 负责）
-     */
-    AVFrame* acquireRawFrame(void* worker_id);
-    
-    /**
      * @brief 提交释放原始帧（共享模式）
      * @param worker_id Worker 的唯一标识
      * @return true=成功提交, false=失败（状态不对）
-     * 
-     * 说明：
-     * - 只有成功处理（编码出至少一个 packet）后才调用
-     * - 递减 remaining_subscribers_
-     * - 如果是最后一个订阅者，唤醒 Fetch 任务
-     * - 重置 Worker 状态，允许获取下一个 buffer
      */
     bool commitRawFrame(void* worker_id);
-    
-    /**
-     * @brief 取消当前获取（共享模式）
-     * @param worker_id Worker 的唯一标识
-     * 
-     * 说明：
-     * - 失败时调用（如 send_frame 失败）
-     * - 不递减 remaining_subscribers_（保持订阅者计数不变）
-     * - 重置 Worker 状态，允许重新获取当前 buffer（重试）
-     */
-    void cancelRawFrame(void* worker_id);
-    
-    /**
-     * @brief 获取当前 buffer 版本号
-     * @return 当前 buffer 版本号
-     * 
-     * 说明：用于同步多个 Worker 处理同一帧
-     */
-    uint64_t getCurrentBufferVersion() const {
-        return current_buffer_version_.load(std::memory_order_acquire);
-    }
 
 private:
     // ========== 通用成员 ==========

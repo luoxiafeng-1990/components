@@ -1,4 +1,4 @@
-#include "productionline/worker/datasource/EncodedPacketSourceFromBuffer.hpp"
+#include "productionline/worker/datasource/encodeddata/EncodedPacketSourceFromBuffer.hpp"
 #include "buffer/bufferpool/BufferPool.hpp"
 #include "common/Logger.hpp"
 #include "common/GlobalThreadPool.hpp"
@@ -536,51 +536,34 @@ void EncodedPacketSourceFromBuffer::cancelEncodedPacket(void* worker_id) {
     state.has_acquired = false;
 }
 
-int EncodedPacketSourceFromBuffer::copyPacket(AVPacket* dst_packet, const AVPacket* src_packet) {
-    if (!dst_packet || !src_packet) {
-        return AVERROR(EINVAL);
+void EncodedPacketSourceFromBuffer::unsubscribe(void* worker_id) {
+    if (!is_shared_mode_) return;
+
+    std::lock_guard<std::mutex> lock(mutex_);
+
+    if (total_subscribers_ == 0) return;
+
+    LOG4CPLUS_INFO_FMT(logger_,
+        "[Worker %p] unsubscribe: total_subscribers %zu -> %zu",
+        worker_id, total_subscribers_, total_subscribers_ - 1);
+
+    worker_states_.erase(worker_id);
+    total_subscribers_--;
+
+    // remaining_subscribers_ 不应超过新的 total_subscribers_。
+    // 若超出，说明退出的 worker 在当前轮还未 commit，需替它递减。
+    size_t remaining = remaining_subscribers_.load(std::memory_order_acquire);
+    if (remaining > total_subscribers_) {
+        remaining_subscribers_.store(total_subscribers_, std::memory_order_release);
+        LOG4CPLUS_INFO_FMT(logger_,
+            "[Worker %p] unsubscribe: adjusted remaining %zu -> %zu",
+            worker_id, remaining, total_subscribers_);
+        if (total_subscribers_ == 0) {
+            cv_fetch_.notify_one();
+        }
     }
-    
-    // ✅ 方案：使用裸指针方案（零拷贝视图）
-    // 
-    // 设计原则：
-    //   1. dst_packet 只是一个"视图"，指向 src_packet 的数据
-    //   2. 不增加引用计数，不拥有数据
-    //   3. avcodec_send_packet() 会在内部处理引用计数（如果需要）
-    //   4. dst_packet 的生命周期必须短于 src_packet
-    //   5. 调用者**不能**调用 av_packet_unref(dst_packet)
-    //
-    // 为什么不用 av_packet_ref()：
-    //   - av_packet_ref() 会增加引用计数，需要对应的 unref
-    //   - 但 dst_packet 来自消费者 Buffer，其生命周期由 BufferPool 管理
-    //   - Buffer::freeBuffer() 会调用 av_packet_unref()，导致双重释放或引用计数混乱
-    //   - 共享模式下，Fetch任务会等待所有订阅者完成后才释放 src_packet
-    //   - 所以裸指针方案是安全的，且避免了引用计数管理的复杂性
-    //
-    // 为什么保留 side_data：
-    //   - H.264 解码需要 PPS/SPS 等关键信息
-    //   - 这些信息存储在 side_data 中
-    //   - 必须复制 side_data 指针（不是深拷贝，只是指针）
-    
-    // 方法：让 dst_packet 的所有字段指向 src_packet
-    // 等价于：dst_packet 就是 src_packet 的别名
-    dst_packet->buf = nullptr;                  // 不使用引用计数
-    dst_packet->data = src_packet->data;        // 直接指向原始数据
-    dst_packet->size = src_packet->size;
-    dst_packet->pts = src_packet->pts;
-    dst_packet->dts = src_packet->dts;
-    dst_packet->stream_index = src_packet->stream_index;
-    dst_packet->flags = src_packet->flags;
-    dst_packet->duration = src_packet->duration;
-    dst_packet->pos = src_packet->pos;
-    
-    // ⭐ 关键修复：保留 side_data（不能设为 nullptr）
-    // side_data 包含 H.264 的 PPS/SPS/SEI 等关键解码信息
-    // 这里只是复制指针，不是深拷贝，所以是安全的
-    dst_packet->side_data = src_packet->side_data;
-    dst_packet->side_data_elems = src_packet->side_data_elems;
-    
-    return 0;
+
+    cv_subscribers_.notify_all();
 }
 
 IDataSourceNavigator::SourceType EncodedPacketSourceFromBuffer::getDataSourceType() const {

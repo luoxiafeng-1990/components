@@ -4,12 +4,12 @@
  */
 
 #include "consumptionline/BufferConsumerStrategies.hpp"
-#include "buffer/bufferpool/BufferPoolRegistry.hpp"
+#include "productionline/worker/base/ComponentTopology.hpp"
 #include "buffer/BufferAllocatorFacade.hpp"
 #include "buffer/BufferAllocatorFactory.hpp"
 #include "vendor/taco/display/DisplayDeviceFactory.hpp"
 #include "productionline/worker/core/FFmpegEncodeWorker.hpp"
-#include "productionline/worker/datasource/RawFrameSourceFromBuffer.hpp"
+#include "productionline/worker/datasource/rawdata/RawFrameSourceFromBuffer.hpp"
 #include "productionline/line/VideoProductionLine.hpp"
 
 #include <log4cplus/logger.h>
@@ -1508,7 +1508,7 @@ bool JpegEncodeConsumer::initialize(const std::vector<Buffer*>& first_buffers) {
             LOG4CPLUS_ERROR(logger_, "创建编码输入 BufferPool 失败");
             return false;
         }
-        input_pool_ = BufferPoolRegistry::getInstance().getPool(input_pool_id_).lock();
+        input_pool_ = ComponentTopology::getInstance().getPool(input_pool_id_).lock();
         if (!input_pool_) {
             LOG4CPLUS_ERROR(logger_, "获取编码输入 BufferPool 失败");
             return false;
@@ -1547,7 +1547,7 @@ bool JpegEncodeConsumer::initialize(const std::vector<Buffer*>& first_buffers) {
             auto worker = encode_pipeline_->getWorker();
             if (worker) {
                 worker->setSourceBufferPool(
-                    BufferPoolRegistry::getInstance().getPool(input_pool_id_));
+                    ComponentTopology::getInstance().getPool(input_pool_id_));
             }
 
             encode_pool_id_ = encode_pipeline_->getWorkingBufferPoolId();
@@ -1664,7 +1664,7 @@ std::string JpegEncodeConsumer::getStats() const {
 void JpegEncodeConsumer::readerThreadFunc() {
     LOG4CPLUS_INFO_FMT(logger_, "编码输出读取线程启动, pool_id=%lu", encode_pool_id_);
 
-    auto pool_weak = BufferPoolRegistry::getInstance().getPool(encode_pool_id_);
+    auto pool_weak = ComponentTopology::getInstance().getPool(encode_pool_id_);
     auto pool = pool_weak.lock();
     if (!pool) {
         LOG4CPLUS_ERROR_FMT(logger_, "编码 BufferPool (id=%lu) 无效，读取线程退出", encode_pool_id_);

@@ -6,7 +6,7 @@
 #include "ExecuteMode.hpp"
 #include "productionline/line/VideoProductionLine.hpp"
 #include "consumptionline/BufferConsumerStrategies.hpp"
-#include "buffer/bufferpool/BufferPoolRegistry.hpp"
+#include "productionline/worker/base/ComponentTopology.hpp"
 #include <log4cplus/logger.h>
 #include <log4cplus/loggingmacros.h>
 
@@ -121,7 +121,7 @@ consumer::ConsumeResult ExecuteMode::channelCompare(
     }
 
     auto pool_id = producer.getWorkingBufferPoolId();
-    auto pool = BufferPoolRegistry::getInstance().getPool(pool_id).lock();
+    auto pool = ComponentTopology::getInstance().getPool(pool_id).lock();
     if (!pool) {
         result.success = false;
         result.error_message = "Failed to get BufferPool";

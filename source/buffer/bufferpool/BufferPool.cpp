@@ -1,5 +1,4 @@
 #include "buffer/bufferpool/BufferPool.hpp"
-#include "buffer/bufferpool/BufferPoolRegistry.hpp"
 #include "common/Logger.hpp"
 #include <stdexcept>
 #include <chrono>

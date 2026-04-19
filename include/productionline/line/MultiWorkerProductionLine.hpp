@@ -7,7 +7,7 @@
 #include "productionline/worker/config/WorkerConfigs.hpp"
 #include "productionline/line/WorkerSyncCoordinator.hpp"
 #include "buffer/bufferpool/BufferPool.hpp"
-#include "buffer/bufferpool/BufferPoolRegistry.hpp"
+#include "productionline/worker/base/ComponentTopology.hpp"
 #include "common/Logger.hpp"
 #include "common/GlobalThreadPool.hpp"
 #include "common/Timer.hpp"

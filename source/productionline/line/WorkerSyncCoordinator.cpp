@@ -2,6 +2,8 @@
 #include "consumptionline/BufferComparator.hpp"
 #include "buffer/bufferpool/Buffer.hpp"
 #include <log4cplus/loggingmacros.h>
+#include <set>
+#include <chrono>
 
 // ============================================================
 // CompareCallbackContext 成员方法实现
@@ -160,6 +162,19 @@ WorkerSyncCoordinator::~WorkerSyncCoordinator() {
     LOG4CPLUS_DEBUG(logger_, "析构 WorkerSyncCoordinator");
 }
 
+void WorkerSyncCoordinator::removeWorker(const std::string& worker_name) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (total_workers_ == 0) return;
+
+    LOG4CPLUS_INFO_FMT(logger_,
+        "removeWorker '%s': total_workers %zu -> %zu",
+        worker_name.c_str(), total_workers_, total_workers_ - 1);
+
+    total_workers_--;
+    // 唤醒可能正在 cv_.wait_for 等待该 worker 的其他 worker
+    cv_.notify_all();
+}
+
 bool WorkerSyncCoordinator::arrive(
     const std::string& worker_name, 
     uint64_t frame_version, 
@@ -230,23 +245,40 @@ bool WorkerSyncCoordinator::arrive(
         
         // 根据状态组合决定处理方式
         if (success_count == static_cast<int>(total_workers_)) {
-            // 场景 1：都成功 → 执行回调对比
-            LOG4CPLUS_DEBUG_FMT(logger_, 
-                "[Frame %llu] 所有 Worker 成功，执行回调链 (%zu 个回调)", 
-                (unsigned long long)frame_version,
-                callback_chain_.size());
-            
-            bool callback_result = executeCallbackChain(frame_version, sync.worker_buffers);
-            sync.should_submit = callback_result;
-            
-            if (callback_result) {
-                LOG4CPLUS_DEBUG_FMT(logger_, 
-                    "[Frame %llu] 回调链执行成功，允许提交", 
-                    (unsigned long long)frame_version);
+            // 场景 1：都成功
+            // 先尝试消化 pending 缓存：把当前各 worker 的帧也加入匹配池
+            tryMatchPending(sync.worker_buffers);
+
+            // 检查当前帧是否所有 worker 的 PTS 一致（无 B 帧偏差）
+            std::set<int64_t> pts_set;
+            for (const auto& [name, buf] : sync.worker_buffers) {
+                if (buf) pts_set.insert(buf->getPts());
+            }
+
+            if (pts_set.size() == 1) {
+                // PTS 一致 → 直接执行回调对比
+                LOG4CPLUS_DEBUG_FMT(logger_,
+                    "[Frame %llu] 所有 Worker 成功且 PTS 一致 (PTS=%lld)，执行回调链",
+                    (unsigned long long)frame_version, (long long)*pts_set.begin());
+
+                bool callback_result = executeCallbackChain(frame_version, sync.worker_buffers);
+                sync.should_submit = callback_result;
             } else {
-                LOG4CPLUS_WARN_FMT(logger_, 
-                    "[Frame %llu] 回调链执行失败，拒绝提交", 
-                    (unsigned long long)frame_version);
+                // PTS 不一致（B 帧 reorder 导致）→ 各 worker 的帧分别缓存
+                for (const auto& [name, buf] : sync.worker_buffers) {
+                    if (buf && buf->getAVFrame()) {
+                        AVFrame* cloned = av_frame_clone(buf->getAVFrame());
+                        if (cloned) {
+                            pending_frames_.push_back({name, buf->getPts(), cloned});
+                            LOG4CPLUS_DEBUG_FMT(logger_,
+                                "[Frame %llu] PTS 不一致，缓存 Worker '%s' (PTS=%lld) 的深拷贝帧",
+                                (unsigned long long)frame_version, name.c_str(), (long long)buf->getPts());
+                        }
+                    }
+                }
+                // 再次尝试匹配
+                tryMatchPending(sync.worker_buffers);
+                sync.should_submit = false;
             }
         }
         else if (eagain_count == static_cast<int>(total_workers_)) {
@@ -257,29 +289,40 @@ bool WorkerSyncCoordinator::arrive(
             sync.should_submit = false;
         }
         else if (success_count > 0 && eagain_count > 0) {
-            // 场景 3a：一个成功 + 一个 EAGAIN → ❌ 报错！不应该发生
-            LOG4CPLUS_ERROR_FMT(logger_, 
-                "[Frame %llu] ❌ EAGAIN 不一致！%d 个成功，%d 个 EAGAIN。"
-                "无法进行帧同步对比，请检查解码器配置！", 
-                (unsigned long long)frame_version,
-                success_count, eagain_count);
+            // 场景 3a：部分成功 + 部分 EAGAIN（B 帧 reorder）
+            // 将成功 worker 的帧做深拷贝缓存到 pending
+            for (const auto& [name, r] : sync.worker_results) {
+                if (r.ok() && sync.worker_buffers.count(name)) {
+                    Buffer* buf = sync.worker_buffers.at(name);
+                    if (buf && buf->getAVFrame()) {
+                        AVFrame* cloned = av_frame_clone(buf->getAVFrame());
+                        if (cloned) {
+                            pending_frames_.push_back({name, buf->getPts(), cloned});
+                            LOG4CPLUS_DEBUG_FMT(logger_,
+                                "[Frame %llu] EAGAIN 不一致，缓存 Worker '%s' (PTS=%lld) 的深拷贝帧",
+                                (unsigned long long)frame_version, name.c_str(), (long long)buf->getPts());
+                        }
+                    }
+                }
+            }
             sync.should_submit = false;
-            // TODO: 可以设置标志通知外部切换比较模式
         }
         else if (eof_count > 0) {
-            // 场景 4：有 Worker 正常 EOF → 数据源结束，干净跳过，不算错误
+            // 场景 4：有 Worker 正常 EOF → 数据源结束
             LOG4CPLUS_DEBUG_FMT(logger_,
                 "[Frame %llu] 有 Worker EOF (成功:%d, EAGAIN:%d, EOF:%d, 错误:%d)，跳过当前帧",
                 (unsigned long long)frame_version,
                 success_count, eagain_count, eof_count, error_count);
+            clearPendingFrames();
             sync.should_submit = false;
         }
         else {
-            // 场景 2b/3b：有不可恢复 ERROR（无论是否有成功）→ 跳过回调，继续下一帧
+            // 场景 2b/3b：有不可恢复 ERROR → 跳过回调，清空 pending
             LOG4CPLUS_WARN_FMT(logger_, 
                 "[Frame %llu] 有 Worker 返回错误 (成功:%d, EAGAIN:%d, EOF:%d, 错误:%d)，跳过当前帧", 
                 (unsigned long long)frame_version,
                 success_count, eagain_count, eof_count, error_count);
+            clearPendingFrames();
             sync.should_submit = false;
         }
         
@@ -294,15 +337,41 @@ bool WorkerSyncCoordinator::arrive(
         return sync.should_submit;
         
     } else {
-        // ⏳ 等待其他 Worker 到达
+        // ⏳ 等待其他 Worker 到达（带超时防死锁）
         LOG4CPLUS_DEBUG_FMT(logger_, 
             "[Frame %llu] Worker '%s' 等待其他 Worker...", 
             (unsigned long long)frame_version,
             worker_name.c_str());
         
-        cv_.wait(lock, [&sync]() {
-            return sync.callback_executed;
+        // v2.38: 增加检查 arrived_count >= total_workers_，
+        // 以便 removeWorker() 减少 total_workers_ 后能立即唤醒
+        bool waited_ok = cv_.wait_for(lock, std::chrono::seconds(5), [&sync, this]() {
+            return sync.callback_executed || sync.arrived_count >= total_workers_;
         });
+
+        // 如果因 total_workers_ 减少而满足条件但 callback 未执行，
+        // 则由当前 worker 负责执行回调逻辑
+        if (waited_ok && !sync.callback_executed && sync.arrived_count >= total_workers_) {
+            LOG4CPLUS_INFO_FMT(logger_,
+                "[Frame %llu] Worker '%s' 因其他 Worker 退出而成为最后到达者，执行回调",
+                (unsigned long long)frame_version,
+                worker_name.c_str());
+            // 仅此 worker 存活，跳过比较
+            sync.should_submit = true;
+            sync.callback_executed = true;
+            cv_.notify_all();
+            cleanupOldFrames(frame_version);
+            return sync.should_submit;
+        }
+
+        if (!waited_ok) {
+            LOG4CPLUS_WARN_FMT(logger_,
+                "[Frame %llu] Worker '%s' 等待超时 (5s)，其他 Worker 可能已终止，跳过此帧",
+                (unsigned long long)frame_version,
+                worker_name.c_str());
+            clearPendingFrames();
+            return false;
+        }
         
         LOG4CPLUS_DEBUG_FMT(logger_, 
             "[Frame %llu] Worker '%s' 被唤醒，结果: %s", 
@@ -382,7 +451,6 @@ bool WorkerSyncCoordinator::executeCallbackChain(
 }
 
 void WorkerSyncCoordinator::cleanupOldFrames(uint64_t current_version) {
-    // 保留最近 10 帧，删除更早的帧数据
     const uint64_t KEEP_FRAMES = 10;
     
     if (current_version < KEEP_FRAMES) {
@@ -400,6 +468,108 @@ void WorkerSyncCoordinator::cleanupOldFrames(uint64_t current_version) {
             it = frame_syncs_.erase(it);
         } else {
             ++it;
+        }
+    }
+}
+
+// ============================================================
+// B 帧 reorder 容错：深拷贝 PTS 匹配
+// ============================================================
+
+void WorkerSyncCoordinator::clearPendingFrames() {
+    for (auto& pf : pending_frames_) {
+        if (pf.frame) {
+            av_frame_free(&pf.frame);
+        }
+    }
+    pending_frames_.clear();
+}
+
+void WorkerSyncCoordinator::tryMatchPending(
+    const std::map<std::string, Buffer*>& /* current_buffers */
+) {
+    if (pending_frames_.empty() || total_workers_ < 2) return;
+
+    // 按 PTS 分组：pts → { worker_name → index_in_pending }
+    std::map<int64_t, std::map<std::string, size_t>> pts_groups;
+    for (size_t i = 0; i < pending_frames_.size(); i++) {
+        pts_groups[pending_frames_[i].pts][pending_frames_[i].worker_name] = i;
+    }
+
+    std::set<size_t> consumed_indices;
+    for (auto& [pts, wmap] : pts_groups) {
+        if (wmap.size() < total_workers_) continue;
+
+        auto it = wmap.begin();
+        size_t idx_a = it->second; ++it;
+        size_t idx_b = it->second;
+
+        AVFrame* frame_a = pending_frames_[idx_a].frame;
+        AVFrame* frame_b = pending_frames_[idx_b].frame;
+
+        if (frame_a && frame_b && !callback_chain_.empty()) {
+            for (const auto& item : callback_chain_) {
+                auto* cmp_ctx = static_cast<CompareCallbackContext*>(item.context);
+                if (!cmp_ctx) continue;
+
+                if (!cmp_ctx->comparator_opened_) {
+                    cmp_ctx->openComparator();
+                }
+                if (!cmp_ctx->comparator_opened_ || !cmp_ctx->comparator_) continue;
+
+                auto result = cmp_ctx->comparator_->compareAVFrames(frame_a, frame_b);
+                double psnr = result.psnr_avg;
+                double ssim = result.ssim_avg;
+
+                bool psnr_ok = !cmp_ctx->enable_psnr || (psnr >= cmp_ctx->min_psnr);
+                bool ssim_ok = !cmp_ctx->enable_ssim || (ssim >= cmp_ctx->min_ssim);
+                bool passed = psnr_ok && ssim_ok;
+
+                cmp_ctx->total_frames.fetch_add(1);
+                if (passed) cmp_ctx->passed_frames.fetch_add(1);
+                else cmp_ctx->failed_frames.fetch_add(1);
+
+                double old_psnr = cmp_ctx->psnr_sum.load();
+                while (!cmp_ctx->psnr_sum.compare_exchange_weak(old_psnr, old_psnr + psnr)) {}
+                double old_ssim = cmp_ctx->ssim_sum.load();
+                while (!cmp_ctx->ssim_sum.compare_exchange_weak(old_ssim, old_ssim + ssim)) {}
+
+                if (cmp_ctx->result_callback) {
+                    cmp_ctx->result_callback(static_cast<int>(pts), psnr, ssim, passed);
+                }
+
+                if (!passed) {
+                    LOG4CPLUS_WARN_FMT(logger_,
+                        "[PTS %lld] PTS-match FAILED: PSNR=%.2f SSIM=%.4f",
+                        (long long)pts, psnr, ssim);
+                } else {
+                    LOG4CPLUS_DEBUG_FMT(logger_,
+                        "[PTS %lld] PTS-match PASSED: PSNR=%.2f SSIM=%.4f",
+                        (long long)pts, psnr, ssim);
+                }
+            }
+        }
+
+        for (auto& [name, idx] : wmap) {
+            consumed_indices.insert(idx);
+        }
+    }
+
+    if (!consumed_indices.empty()) {
+        std::vector<PendingFrame> remaining;
+        for (size_t i = 0; i < pending_frames_.size(); i++) {
+            if (consumed_indices.count(i)) {
+                av_frame_free(&pending_frames_[i].frame);
+            } else {
+                remaining.push_back(pending_frames_[i]);
+            }
+        }
+        pending_frames_ = std::move(remaining);
+
+        if (pending_frames_.size() > 64) {
+            LOG4CPLUS_WARN_FMT(logger_,
+                "pending_frames_ 超过 64 帧未匹配，清空");
+            clearPendingFrames();
         }
     }
 }

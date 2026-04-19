@@ -1,7 +1,7 @@
 #include "productionline/line/VideoProductionLine.hpp"
-#include "productionline/worker/base/BufferFillingWorkerFactory.hpp"
+#include "productionline/worker/base/WorkerFactory.hpp"
 #include "vendor/contracts/DecoderConfigValidate.hpp"
-#include "buffer/bufferpool/BufferPoolRegistry.hpp"
+#include "productionline/worker/base/ComponentTopology.hpp"
 #include "common/Logger.hpp"
 #include "common/GlobalThreadPool.hpp"
 #include <stdio.h>
@@ -98,8 +98,8 @@ bool VideoProductionLine::start(const WorkerConfig& worker_config) {
     // 注册本 Line 到 ComponentTopology
     line_registry_id_ = ComponentTopology::getInstance().registerLine("VideoProductionLine");
     
-    // 通过 Factory 创建 Worker（自动注册到 WorkerRegistry + Topology）
-    worker_sptr_ = BufferFillingWorkerFactory::create(
+    // 通过 Factory 创建 Worker（自动注册到 ComponentTopology）
+    worker_sptr_ = WorkerFactory::create(
         worker_config, TopologyOwnerType::LINE, line_registry_id_);
     LOG4CPLUS_INFO(logger_, "启动Worker...");
     
@@ -124,7 +124,7 @@ bool VideoProductionLine::start(const WorkerConfig& worker_config) {
     
     // v2.0: 记录 pool_id 并从 Registry 获取 weak_ptr（符合架构设计）
     working_buffer_pool_id_ = worker_pool_id;
-    working_buffer_pool_weak_ = BufferPoolRegistry::getInstance().getPool(worker_pool_id);
+    working_buffer_pool_weak_ = ComponentTopology::getInstance().getPool(worker_pool_id);
     
     // 验证 Pool 是否存在
     auto pool_sptr = working_buffer_pool_weak_.lock();

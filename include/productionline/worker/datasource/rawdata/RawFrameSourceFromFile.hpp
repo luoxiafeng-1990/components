@@ -1,7 +1,7 @@
 #ifndef RAW_FRAME_SOURCE_FROM_FILE_HPP
 #define RAW_FRAME_SOURCE_FROM_FILE_HPP
 
-#include "productionline/worker/datasource/IRawFrameSource.hpp"
+#include "productionline/worker/datasource/rawdata/IRawFrameSource.hpp"
 #include <log4cplus/logger.h>
 #include <log4cplus/loggingmacros.h>
 #include <string>
@@ -58,7 +58,6 @@ public:
     int readRawFrame(AVFrame* frame) override;
     int getFrameWidth() const override { return width_; }
     int getFrameHeight() const override { return height_; }
-    int getFramePixelFormat() const override { return static_cast<int>(pix_fmt_); }
     
     // ============ IDataSourceNavigator 接口实现 ============
     

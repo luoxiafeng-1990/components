@@ -1,9 +1,9 @@
 #include "productionline/worker/core/FFmpegEncodeWorker.hpp"
-#include "productionline/worker/datasource/RawFrameSourceFromFile.hpp"
-#include "productionline/worker/datasource/RawFrameSourceFromBuffer.hpp"
+#include "productionline/worker/datasource/rawdata/RawFrameSourceFromFile.hpp"
+#include "productionline/worker/datasource/rawdata/RawFrameSourceFromBuffer.hpp"
 #include "common/Logger.hpp"
 #include "buffer/bufferpool/BufferPool.hpp"
-#include "buffer/bufferpool/BufferPoolRegistry.hpp"
+#include "productionline/worker/base/ComponentTopology.hpp"
 #include <cstring>
 #include <climits>
 
@@ -222,7 +222,7 @@ bool FFmpegEncodeWorker::open() {
     }
     
     // 6. 获取 Pool 信息用于日志
-    auto pool_weak = BufferPoolRegistry::getInstance().getPool(pool_id);
+    auto pool_weak = ComponentTopology::getInstance().getPool(pool_id);
     auto pool = pool_weak.lock();
     std::string actual_pool_name = pool ? pool->getName() : "Unknown";
     
@@ -263,8 +263,12 @@ bool FFmpegEncodeWorker::open() {
             input_frame_->width  = output_width_;
             input_frame_->height = output_height_;
         }
-        LOG4CPLUS_DEBUG(logger_,
-            "[EncodeWorker] input_frame 已就绪，YUV buffer 延迟到首帧 readRawFrame（64 对齐由数据源分配）");
+        LOG4CPLUS_DEBUG_FMT(logger_,
+            "[EncodeWorker] input_frame 已就绪: format=%d(%s), %dx%d, codec_pix_fmt=%d, scale_needed=%d",
+            input_frame_->format,
+            av_get_pix_fmt_name(static_cast<AVPixelFormat>(input_frame_->format)) ? av_get_pix_fmt_name(static_cast<AVPixelFormat>(input_frame_->format)) : "unknown",
+            input_frame_->width, input_frame_->height,
+            codec_ctx_ptr_->pix_fmt, input_scale_needed_ ? 1 : 0);
 
         if (input_scale_needed_) {
             scaled_frame_ = av_frame_alloc();

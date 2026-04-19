@@ -1,9 +1,9 @@
 #include "productionline/line/MultiWorkerProductionLine.hpp"
-#include "productionline/worker/base/BufferFillingWorkerFactory.hpp"
+#include "productionline/worker/base/WorkerFactory.hpp"
 #include "productionline/worker/base/ComponentTopology.hpp"
 #include "productionline/worker/core/FfmpegPacketRecorderWorker.hpp"
-#include "productionline/worker/datasource/EncodedPacketSourceFromBuffer.hpp"
-#include "buffer/bufferpool/BufferPoolRegistry.hpp"
+#include "productionline/worker/datasource/encodeddata/EncodedPacketSourceFromBuffer.hpp"
+#include "productionline/worker/base/ComponentTopology.hpp"
 #include "common/Logger.hpp"
 #include "common/GlobalThreadPool.hpp"
 #include <algorithm>
@@ -382,7 +382,7 @@ bool MultiWorkerProductionLine::createProducersForGroup(WorkerGroupRuntime* grou
             return false;
         }
         
-        auto buffer_pool_weak = BufferPoolRegistry::getInstance().getPool(buffer_pool_id);
+        auto buffer_pool_weak = ComponentTopology::getInstance().getPool(buffer_pool_id);
         auto pool = buffer_pool_weak.lock();
         if (!pool) {
             setError("Failed to get BufferPool from Registry: " + pcfg.producer_name);
@@ -619,8 +619,8 @@ bool MultiWorkerProductionLine::createConsumersForGroup(WorkerGroupRuntime* grou
                            << producer_info->producer_name << "' 获取 codec_params");
         }
         
-        // 4.3.3 通过 Factory 创建消费者 Worker（自动注册到 WorkerRegistry + Topology）
-        auto consumer_worker = BufferFillingWorkerFactory::create(
+        // 4.3.3 通过 Factory 创建消费者 Worker（自动注册到 ComponentTopology）
+        auto consumer_worker = WorkerFactory::create(
             consumer_config, TopologyOwnerType::GROUP, group->topology_group_id);
         
         // 4.3.4 如果是普通模式，设置 BufferPool
@@ -648,7 +648,7 @@ bool MultiWorkerProductionLine::createConsumersForGroup(WorkerGroupRuntime* grou
         // 获取消费者的输出 BufferPool 信息
         BufferPoolType primary_type = consumer_worker->getPrimaryBufferPoolType();
         consumer_info->buffer_pool_id = consumer_worker->getOutputBufferPoolId(primary_type);
-        consumer_info->buffer_pool_weak = BufferPoolRegistry::getInstance().getPool(consumer_info->buffer_pool_id);
+        consumer_info->buffer_pool_weak = ComponentTopology::getInstance().getPool(consumer_info->buffer_pool_id);
         
         // 保存 buffer_pool_id 用于日志（避免 use-after-move）
         uint64_t buffer_pool_id_for_log = consumer_info->buffer_pool_id;
@@ -891,6 +891,10 @@ bool MultiWorkerProductionLine::performFrameSync(
     //
     // v2.36 重构：使用 FillResult::shouldBypassFrameSync() 代替原来直接枚举 AcquireStatus 的写法，
     // 恢复封装性，消费者不应感知 Acquire 层的具体枚举值。
+    //
+    // v2.38 说明：PacketAlreadyProcessed 意味着 worker 没有 acquire 当前版本，
+    // 因此不能也不需要 commit。version 的推进依赖所有存活 subscriber 都 commit，
+    // 已退出的 worker 通过 unsubscribe() 从 total_subscribers_ 中移除。
     if (result.shouldBypassFrameSync()) {
         return true;
     }
@@ -1037,6 +1041,28 @@ void MultiWorkerProductionLine::workerThreadFunc(
         if (stop_worker) break;
     }
     pool_sptr->shutdown();
+
+    // v2.38: Worker 退出时注销订阅，让 EncodedPacketSourceFromBuffer 的
+    // total_subscribers_ 正确反映存活 worker 数，防止 remaining 永远无法归零。
+    // 同时通知 WorkerSyncCoordinator 减少 total_workers_，避免存活 worker 等超时。
+    {
+        Connector* owner_connector = group->getConnectorForConsumer(consumer_name);
+        if (owner_connector) {
+            std::string producer_name = owner_connector->getProducerNameForConsumer(consumer_name);
+            auto shared_source = std::dynamic_pointer_cast<EncodedPacketSourceFromBuffer>(
+                owner_connector->getSharedSource(producer_name));
+            if (shared_source) {
+                shared_source->unsubscribe(consumer_info->worker.get());
+            }
+
+            size_t conn_idx = group->getConnectorIndex(owner_connector);
+            auto coord_it = group->connector_coordinators.find(conn_idx);
+            if (coord_it != group->connector_coordinators.end()) {
+                coord_it->second->removeWorker(consumer_name);
+            }
+        }
+    }
+
     LOG4CPLUS_INFO(logger_, "[Worker '" << consumer_name << "'] 线程结束 "
                    << "(produced=" << worker_stats->worker_frames_produced.load() 
                    << ", failed=" << worker_stats->worker_frames_failed.load() << ")");

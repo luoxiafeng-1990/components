@@ -1,4 +1,4 @@
-#include "productionline/worker/datasource/EncodedPacketSourceFromRtsp.hpp"
+#include "productionline/worker/datasource/encodeddata/EncodedPacketSourceFromRtsp.hpp"
 #include "common/Logger.hpp"
 #include <cstring>
 #include <climits>
@@ -315,20 +315,6 @@ int EncodedPacketSourceFromRtsp::interrupt_callback(void* ctx) {
     }
     
     return should_interrupt ? 1 : 0;
-}
-
-void EncodedPacketSourceFromRtsp::requestInterrupt() {
-    bool was_interrupted = interrupt_requested_.exchange(true, std::memory_order_release);
-    if (!was_interrupted) {
-        auto logger = log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.DataSource.Rtsp"));
-        LOG4CPLUS_INFO(logger, "🛑 收到中断请求: 所有 RTSP 流操作将被中断");
-    }
-}
-
-void EncodedPacketSourceFromRtsp::clearInterrupt() {
-    interrupt_requested_.store(false, std::memory_order_release);
-    auto logger = log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.DataSource.Rtsp"));
-    LOG4CPLUS_DEBUG(logger, "✅ 中断标志已清除");
 }
 
 IDataSourceNavigator::SourceType EncodedPacketSourceFromRtsp::getDataSourceType() const {

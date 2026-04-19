@@ -1,5 +1,4 @@
-#include "productionline/worker/base/BufferFillingWorkerFactory.hpp"
-#include "productionline/worker/base/WorkerRegistry.hpp"
+#include "productionline/worker/base/WorkerFactory.hpp"
 #include "productionline/worker/base/ComponentTopology.hpp"
 #include "common/Logger.hpp"
 #include "productionline/worker/core/FFmpegDecodeWorker.hpp"
@@ -8,12 +7,12 @@
 #include <stdlib.h>
 #include <string.h>
 
-log4cplus::Logger BufferFillingWorkerFactory::logger_ =
-    log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.BufferFillingWorkerFactory"));
+log4cplus::Logger WorkerFactory::logger_ =
+    log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.WorkerFactory"));
 
 // ============ 公共接口 ============
 
-std::shared_ptr<WorkerBase> BufferFillingWorkerFactory::create(
+std::shared_ptr<WorkerBase> WorkerFactory::create(
     const WorkerConfig& config,
     TopologyOwnerType owner_type,
     uint64_t owner_id)
@@ -46,12 +45,12 @@ std::shared_ptr<WorkerBase> BufferFillingWorkerFactory::create(
         return nullptr;
     }
 
-    // unique_ptr → shared_ptr，自动注册到 WorkerRegistry
+    // unique_ptr → shared_ptr，注册到 ComponentTopology
     std::shared_ptr<WorkerBase> shared_worker(std::move(worker));
-    uint64_t worker_id = WorkerRegistry::getInstance().registerWorker(shared_worker);
+    uint64_t worker_id = ComponentTopology::getInstance().registerWorker(shared_worker);
 
-    // 设置 registry ID，供后续 registerBufferPool() 自动建立 Pool→Worker 关联
-    shared_worker->setWorkerRegistryId(worker_id);
+    // 设置 Topology ID，供后续 registerBufferPool() 自动建立 Pool→Worker 关联
+    shared_worker->setTopologyId(worker_id);
 
     // 建立 Worker → Owner 拓扑关联
     if (owner_type == TopologyOwnerType::LINE && owner_id != 0) {
@@ -66,32 +65,26 @@ std::shared_ptr<WorkerBase> BufferFillingWorkerFactory::create(
     return shared_worker;
 }
 
-BufferFillingWorkerFactory::WorkerType BufferFillingWorkerFactory::getRecommendedType() {
-    // 推荐使用 FFmpeg Decode Worker（统一处理文件和 RTSP）
-    return WorkerType::FFMPEG_DECODE;
-}
-
-const char* BufferFillingWorkerFactory::typeToString(WorkerType type) {
+const char* WorkerFactory::typeToString(WorkerType type) {
     switch (type) {
         case WorkerType::AUTO:                  return "AUTO";
         case WorkerType::FFMPEG_DECODE:         return "FFMPEG_DECODE";
         case WorkerType::FFMPEG_PACKET_RECORDER: return "FFMPEG_PACKET_RECORDER";
-        case WorkerType::FFMPEG_ENCODE:         return "FFMPEG_ENCODE";  // ⭐ v2.29 新增
+        case WorkerType::FFMPEG_ENCODE:         return "FFMPEG_ENCODE";
         default:                                return "UNKNOWN";
     }
 }
 
 // ============ 私有辅助方法 ============
 
-std::unique_ptr<WorkerBase> BufferFillingWorkerFactory::autoDetect(const WorkerConfig& config) {
+std::unique_ptr<WorkerBase> WorkerFactory::autoDetect(const WorkerConfig& config) {
     LOG4CPLUS_INFO(logger_, "Auto-detecting Worker type...");
     LOG4CPLUS_INFO(logger_, "Using FFmpegDecodeWorker as default");
     
-    // 默认使用 FFmpeg Decode Worker（统一处理文件和 RTSP）
     return std::make_unique<FFmpegDecodeWorker>(config);
 }
 
-std::unique_ptr<WorkerBase> BufferFillingWorkerFactory::createByType(WorkerType type, const WorkerConfig& config) {
+std::unique_ptr<WorkerBase> WorkerFactory::createByType(WorkerType type, const WorkerConfig& config) {
     switch (type) {
         case WorkerType::FFMPEG_DECODE:
             return std::make_unique<FFmpegDecodeWorker>(config);
@@ -99,7 +92,7 @@ std::unique_ptr<WorkerBase> BufferFillingWorkerFactory::createByType(WorkerType 
         case WorkerType::FFMPEG_PACKET_RECORDER:
             return std::make_unique<FfmpegPacketRecorderWorker>(config);
 
-        case WorkerType::FFMPEG_ENCODE:  // ⭐ v2.29 新增
+        case WorkerType::FFMPEG_ENCODE:
             return std::make_unique<FFmpegEncodeWorker>(config);
 
         case WorkerType::AUTO:
@@ -108,7 +101,7 @@ std::unique_ptr<WorkerBase> BufferFillingWorkerFactory::createByType(WorkerType 
     }
 }
 
-BufferFillingWorkerFactory::WorkerType BufferFillingWorkerFactory::getTypeFromEnvironment() {
+WorkerFactory::WorkerType WorkerFactory::getTypeFromEnvironment() {
     const char* env = getenv("VIDEO_READER_TYPE");
     if (!env) {
         return WorkerType::AUTO;
@@ -121,19 +114,13 @@ BufferFillingWorkerFactory::WorkerType BufferFillingWorkerFactory::getTypeFromEn
     } else if (strcmp(env, "packet_recorder") == 0 || strcmp(env, "ffmpeg_packet_recorder") == 0) {
         return WorkerType::FFMPEG_PACKET_RECORDER;
     } else if (strcmp(env, "encode") == 0 || strcmp(env, "ffmpeg_encode") == 0 ||
-               strcmp(env, "encoder") == 0) {  // ⭐ v2.29 新增
+               strcmp(env, "encoder") == 0) {
         return WorkerType::FFMPEG_ENCODE;
     }
     
     return WorkerType::AUTO;
 }
 
-BufferFillingWorkerFactory::WorkerType BufferFillingWorkerFactory::getTypeFromConfig() {
-    // 尝试读取配置文件：/etc/video_reader.conf 或 ~/.config/video_reader.conf
-    // 这里简化实现，返回 AUTO
-    // 实际项目中可以实现配置文件解析
+WorkerFactory::WorkerType WorkerFactory::getTypeFromConfig() {
     return WorkerType::AUTO;
 }
-
-
-
