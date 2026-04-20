@@ -28,7 +28,7 @@
 #ifndef NPU_INFERENCE_CONSUMER_HPP
 #define NPU_INFERENCE_CONSUMER_HPP
 
-#include "consumptionline/IBufferConsumer.hpp"
+#include "consumptionline/core/IBufferConsumer.hpp"
 #include "buffer/bufferpool/Buffer.hpp"
 
 #include <ta-runtime-api.h>

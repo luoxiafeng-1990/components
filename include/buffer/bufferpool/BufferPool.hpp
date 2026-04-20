@@ -261,15 +261,6 @@ public:
     void setRegistryId(uint64_t id) { registry_id_ = id; }
     
     /**
-     * @brief 根据 ID 获取 Buffer（用于特定场景，如 framebuffer）
-     * 线程安全：是
-     * 
-     * @param id Buffer ID
-     * @return Buffer* 找到返回 buffer，否则返回 nullptr
-     */
-    Buffer* getBufferById(uint32_t id) const;
-    
-    /**
      * @brief 获取 Buffer 大小（返回第一个 buffer 的大小）
      * 注意：假设所有 buffer 大小相同
      * 线程安全：是
@@ -339,11 +330,6 @@ public:
      * @brief 打印统计信息
      */
     void printStats() const;
-    
-    /**
-     * @brief 打印所有 buffer 详情
-     */
-    void printAllBuffers() const;
     
     // ====== 禁止拷贝 ======
     BufferPool(const BufferPool&) = delete;

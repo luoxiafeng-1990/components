@@ -9,7 +9,7 @@
 #include "../common/WorkerConfigFactory.hpp"
 #include "vendor/taco/encode/TacoEncoderExtension.hpp"
 
-#include "consumptionline/BufferConsumerService.hpp"
+#include "consumptionline/core/BufferConsumerService.hpp"
 #include "consumptionline/config/ConsumerTypeConfigBuilder.hpp"
 #include "productionline/line/MultiWorkerProductionLine.hpp"
 #include "productionline/line/WorkerSyncCoordinator.hpp"

@@ -6,7 +6,7 @@
  * 与其他消费者策略（Display, SaveRaw 等）保持架构一致
  */
 
-#include "consumptionline/inference/NpuInferenceConsumer.hpp"
+#include "consumptionline/types/npu/NpuInferenceConsumer.hpp"
 
 #include <log4cplus/logger.h>
 #include <log4cplus/loggingmacros.h>

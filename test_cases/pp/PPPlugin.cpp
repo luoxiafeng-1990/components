@@ -11,8 +11,8 @@
 
 #include "PPPlugin.hpp"
 #include "../common/WorkerConfigFactory.hpp"
-#include "consumptionline/BufferConsumerService.hpp"
-#include "consumptionline/BufferConsumerStrategies.hpp"
+#include "consumptionline/core/BufferConsumerService.hpp"
+#include "consumptionline/core/BufferConsumerStrategies.hpp"
 
 #include "../common/third_party/CLI11.hpp"
 

@@ -21,7 +21,7 @@ class Buffer;
 #include "productionline/worker/config/MultiWorkerConfig.hpp"
 #include "productionline/worker/config/WorkerConfigs.hpp"
 #include "productionline/worker/base/WorkerBase.hpp"  // for FillStatus, FillResult
-#include "consumptionline/BufferComparator.hpp"
+#include "consumptionline/types/compare/BufferComparator.hpp"
 
 // ============================================================
 // 比较回调上下文（与 WorkerSyncCoordinator 配套使用）
@@ -274,26 +274,11 @@ public:
                 Buffer* buffer, const FillResult& result);
     
     /**
-     * @brief 获取参与同步的 Worker 数量
-     */
-    size_t getWorkerCount() const { return total_workers_; }
-
-    /**
      * @brief Worker 退出时减少 total_workers_（v2.38 新增）
      *
      * 使得存活的 Worker 到达同步点后不必等待已退出的 Worker。
      */
     void removeWorker(const std::string& worker_name);
-    
-    /**
-     * @brief 获取回调链长度
-     */
-    size_t getCallbackCount() const { return callback_chain_.size(); }
-    
-    /**
-     * @brief 检查是否启用了同步（是否有回调）
-     */
-    bool isEnabled() const { return !callback_chain_.empty(); }
     
     // ============================================================
     // 静态工厂方法：创建默认比较回调

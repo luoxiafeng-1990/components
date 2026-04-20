@@ -8,7 +8,7 @@
 #include "WriterPlugin.hpp"
 #include "../common/WorkerConfigFactory.hpp"
 #include "../common/third_party/CLI11.hpp"
-#include "consumptionline/BufferConsumerService.hpp"
+#include "consumptionline/core/BufferConsumerService.hpp"
 #include "consumptionline/config/ConsumerTypeConfigBuilder.hpp"
 
 #include <iostream>

@@ -7,7 +7,7 @@
 
 #include "RecordPlugin.hpp"
 #include "../common/WorkerConfigFactory.hpp"
-#include "consumptionline/BufferConsumerService.hpp"
+#include "consumptionline/core/BufferConsumerService.hpp"
 #include "../common/third_party/CLI11.hpp"
 #include "consumptionline/config/ConsumerTypeConfigBuilder.hpp"
 

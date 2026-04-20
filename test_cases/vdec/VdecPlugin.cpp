@@ -7,7 +7,7 @@
 
 #include "VdecPlugin.hpp"
 #include "../common/WorkerConfigFactory.hpp"
-#include "consumptionline/BufferConsumerService.hpp"
+#include "consumptionline/core/BufferConsumerService.hpp"
 #include "consumptionline/config/ConsumerTypeConfigBuilder.hpp"
 #include "vendor/taco/decode/TacoDecoderExtension.hpp"
 

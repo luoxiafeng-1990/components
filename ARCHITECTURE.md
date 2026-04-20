@@ -19,7 +19,60 @@
 
 ## 版本历史
 
-### v2.33（当前版本）- FillResult 类型安全重构
+### v2.70（当前版本）- 多Worker同步比较重构与目录规范化
+
+**发布日期：** 2026-04-19
+
+**主要变更：**
+
+- ✅ **WorkerSyncCoordinator PTS 深拷贝匹配**：解决 B 帧视频 EAGAIN 不一致问题
+  - 新增 `PendingFrame` 结构：`av_frame_clone()` 深拷贝成功 Worker 的帧
+  - 新增 `tryMatchPending()`：按 PTS 配对缓存帧并执行比较
+  - 新增 `clearPendingFrames()`：释放所有缓存的 AVFrame
+  - `arrive()` 使用 `cv_.wait_for(5s)` 超时机制替代无限等待，防止死锁
+
+- ✅ **Worker 退出计数器同步**：解决 busy loop 问题
+  - `WorkerSyncCoordinator::removeWorker()`：Worker 退出时递减 `total_workers_` 并唤醒等待线程
+  - `EncodedPacketSourceFromBuffer::unsubscribe()`：Worker 退出时递减 `total_subscribers_`
+  - `MultiWorkerProductionLine::workerThreadFunc()`：退出前调用 `unsubscribe` + `removeWorker`
+  - `arrive()` 条件更新为同时检查 `arrived_count >= total_workers_`
+
+- ✅ **FFmpegDecodeWorker 状态安全**：修复 `readAndSendPacket` 重入问题
+  - 所有非 SUCCESS 返回路径显式重置 `packet_acquired_ = false` 和 `current_packet_ptr_ = nullptr`
+  - 防止 stale 指针导致的 busy loop
+
+- ✅ **BufferComparator 色彩空间保真**：修复 YUVJ420P 全范围丢失
+  - `convertToYUV420P()` 对 `YUVJ420P`/`YUV420P` 直接 `av_frame_clone()`，不经过 `sws_scale`
+  - `NV12`/`NV21` 手动去交织为 `YUV420P`，避免 `sws_scale` 引入色彩范围转换
+
+- ✅ **consumptionline 目录重构**：
+  - `core/`：核心接口和服务（`IBufferConsumer`、`BufferConsumerService`、`BufferConsumerStrategies`、`config/`）
+  - `types/compare/`：比较消费类型（`BufferComparator`）
+  - `types/writer/`：写入消费类型（`BufferWriter`）
+  - `types/npu/`：NPU推理消费类型（`NpuInferenceConsumer`）
+
+- ✅ **未使用接口清理**：删除 9 个类共 16 个未被调用的 public 方法
+  - `WorkerSyncCoordinator`：`getWorkerCount()`、`getCallbackCount()`、`isEnabled()`
+  - `FFmpegDecodeWorker`：`getDecodedFrames()`、`getDroppedFrames()`、`printStats()`
+  - `FFmpegEncodeWorker`：`setFrameSource()`、`getCodecContext()`、`printStats()`
+  - `BufferComparator`：`getCompareCount()`、`getPassedCount()`、`getFailedCount()`、`isPassed()`
+  - `WorkerBase`：`getTopologyId()`、`hasBufferPoolType()`
+  - `BufferPool`：`getBufferById()`、`printAllBuffers()`
+  - `MultiWorkerProductionLine`：`getGroupCount()`
+
+- ✅ **VdecPlugin COMPARE 模式增强**：
+  - 硬件解码器设置 `reorder_disable = false` 确保 PTS 有序输出
+  - 与软件解码器帧对齐，消除 B 帧重排序差异
+
+**设计原则：**
+- **资源生命周期一致性**：Worker 退出必须同步更新所有关联计数器
+- **超时防御**：同步等待必须有超时机制，防止单个 Worker 异常导致全局死锁
+- **深拷贝隔离**：跨帧缓存使用 `av_frame_clone()` 避免 use-after-free
+- **目录即接口**：`consumptionline` 按职责分为 `core`（不可变内核）和 `types`（可扩展消费类型）
+
+---
+
+### v2.33 - FillResult 类型安全重构
 
 **发布日期：** 2026-02-04
 

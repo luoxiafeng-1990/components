@@ -171,16 +171,6 @@ public:
     bool setSourceBufferPool(std::weak_ptr<BufferPool> pool_weak) override;
     
     /**
-     * 获取已解码帧数
-     */
-    int getDecodedFrames() const { return decoded_frames_.load(); }
-    
-    /**
-     * 获取丢帧数
-     */
-    int getDroppedFrames() const { return dropped_frames_.load(); }
-    
-    /**
      * 获取连接状态
      */
     bool isConnected() const;
@@ -220,11 +210,6 @@ public:
      * @brief 获取编解码器名称
      */
     const char* getCodecName() const;
-    
-    /**
-     * 打印统计信息
-     */
-    void printStats() const;
 
 private:
     // ============ Logger ============

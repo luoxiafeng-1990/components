@@ -16,9 +16,9 @@
 #ifndef BUFFER_CONSUMER_STRATEGIES_HPP
 #define BUFFER_CONSUMER_STRATEGIES_HPP
 
-#include "consumptionline/IBufferConsumer.hpp"
-#include "consumptionline/BufferWriter.hpp"
-#include "consumptionline/BufferComparator.hpp"
+#include "consumptionline/core/IBufferConsumer.hpp"
+#include "consumptionline/types/writer/BufferWriter.hpp"
+#include "consumptionline/types/compare/BufferComparator.hpp"
 #include "consumptionline/config/ConsumerTypeConfig.hpp"
 #include "productionline/worker/config/MultiWorkerConfig.hpp"
 #include "productionline/worker/config/WorkerConfigs.hpp"

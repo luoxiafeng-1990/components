@@ -27,7 +27,7 @@
 #include "opencv/OpencvPlugin.hpp"
 #include "venc/VencPlugin.hpp"
 
-#include "consumptionline/BufferConsumerService.hpp"
+#include "consumptionline/core/BufferConsumerService.hpp"
 
 #include <iostream>
 #include <sstream>

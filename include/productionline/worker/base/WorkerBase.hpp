@@ -177,16 +177,6 @@ public:
     }
     
     /**
-     * @brief 检查是否存在指定类型的 BufferPool
-     * 
-     * @param type BufferPool 类型
-     * @return true 存在，false 不存在
-     */
-    virtual bool hasBufferPoolType(BufferPoolType type) const {
-        return buffer_pool_type_map_.find(type) != buffer_pool_type_map_.end();
-    }
-    
-    /**
      * @brief 获取 Worker 的主要 BufferPool 类型
      * 
      * 这是一个查询方法，告诉调用者这个 Worker 的主要输出是什么类型。
@@ -503,9 +493,6 @@ protected:
     uint64_t topology_id_;
     
 public:
-    /// 获取本 Worker 在 ComponentTopology 中的 ID（0 表示尚未注册）
-    uint64_t getTopologyId() const { return topology_id_; }
-    
     /// 由 Factory 设置 ComponentTopology ID
     void setTopologyId(uint64_t id) { topology_id_ = id; }
     

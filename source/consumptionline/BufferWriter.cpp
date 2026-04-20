@@ -1,4 +1,4 @@
-#include "consumptionline/BufferWriter.hpp"
+#include "consumptionline/types/writer/BufferWriter.hpp"
 #include "common/Logger.hpp"
 #include <cstring>
 #include <cerrno>

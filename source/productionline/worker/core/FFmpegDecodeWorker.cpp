@@ -946,29 +946,6 @@ const char* FFmpegDecodeWorker::getCodecName() const {
     return "unknown";
 }
 
-void FFmpegDecodeWorker::printStats() const {
-    LOG4CPLUS_INFO(logger_, "");
-    LOG4CPLUS_INFO(logger_, " 📊 Statistics:");
-    std::string path = packet_source_ ? packet_source_->getPath() : std::string();
-    LOG4CPLUS_INFO_FMT(logger_, "    Codec: %s", getCodecName());
-    LOG4CPLUS_INFO_FMT(logger_, "    Resolution: %dx%d → %dx%d",
-        getSourceWidth(), getSourceHeight(), output_width_, output_height_);
-    LOG4CPLUS_INFO_FMT(logger_, "    Source: %s", path.empty() ? "(Buffer mode)" : path.c_str());
-    LOG4CPLUS_INFO_FMT(logger_, "    success=%d failed=%d skipped=%d",
-        decoded_frames_.load(), 0, dropped_frames_.load());
-
-    SourceType type = getDataSourceType();
-    if (type == SourceType::FILE_SOURCE) {
-        LOG4CPLUS_INFO_FMT(logger_, "    Total frames: %d", packet_source_ ? packet_source_->getTotalFrames() : -1);
-        LOG4CPLUS_INFO_FMT(logger_, "    EOF: %s", packet_source_ && packet_source_->isAtEnd() ? "YES" : "NO");
-    } else if (type == SourceType::NETWORK_SOURCE) {
-        LOG4CPLUS_INFO_FMT(logger_, "    Connected: %s", isConnected() ? "Yes" : "No");
-    }
-
-    uint64_t pool_id = getOutputBufferPoolId(BufferPoolType::DECODE_VIDEO_PRIMARY);
-    LOG4CPLUS_INFO_FMT(logger_, "    BufferPool ID: %lu", pool_id);
-}
-
 // ============ 内部实现 ============
 
 bool FFmpegDecodeWorker::initializeDecoder(const AVCodecParameters* codec_params) {

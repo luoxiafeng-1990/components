@@ -21,8 +21,8 @@
 #ifndef BUFFER_CONSUMER_SERVICE_HPP
 #define BUFFER_CONSUMER_SERVICE_HPP
 
-#include "consumptionline/IBufferConsumer.hpp"
-#include "consumptionline/BufferConsumerStrategies.hpp"
+#include "consumptionline/core/IBufferConsumer.hpp"
+#include "consumptionline/core/BufferConsumerStrategies.hpp"
 #include "consumptionline/config/ConsumerTypeConfig.hpp"
 #include "productionline/worker/config/MultiWorkerConfig.hpp"
 #include "productionline/worker/config/WorkerConfigs.hpp"

@@ -158,11 +158,6 @@ public:
     // ========== 查询接口 ==========
     
     /**
-     * @brief 获取 WorkerGroup 数量
-     */
-    size_t getGroupCount() const { return groups_.size(); }
-    
-    /**
      * @brief 获取指定 Group 的消费者 BufferPool ID（通过索引）
      * @param group_index Group 索引
      * @param consumer_index 消费者索引（在该 Group 内）

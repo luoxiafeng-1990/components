@@ -134,20 +134,9 @@ public:
     bool setSourceBufferPool(std::weak_ptr<BufferPool> pool_weak) override;
     
     /**
-     * @brief 设置帧数据源（直接模式）
-     * @param source IRawFrameSource 实现（如 RawFrameSourceFromBuffer 直接模式）
-     *
-     * 在构造函数中 frame_source_ 为 null 时，open() 前调用此方法注入数据源。
-     */
-    void setFrameSource(std::shared_ptr<IRawFrameSource> source) {
-        frame_source_ = std::move(source);
-    }
-    
-    /**
      * @brief 获取编码器名称
      */
     const char* getEncoderName() const;
-    AVCodecContext* getCodecContext() const { return codec_ctx_ptr_; }
     
     /**
      * @brief 获取编解码器参数（用于 BufferWriter 等场景）
@@ -158,11 +147,6 @@ public:
      * @brief 获取时间基
      */
     AVRational getTimeBase() const override;
-    
-    /**
-     * @brief 打印统计信息
-     */
-    void printStats() const;
 
 private:
     // ==================== 内部方法 ====================

@@ -5,7 +5,7 @@
 #include "../include/ConfigStore.hpp"
 #include "../include/ComponentsBridge.hpp"
 
-#include "consumptionline/BufferConsumerService.hpp"
+#include "consumptionline/core/BufferConsumerService.hpp"
 
 #include <atomic>
 #include <sstream>

@@ -32,7 +32,7 @@
 
 #include "../common/IOptionPlugin.hpp"
 #include "../common/DataSourceOptions.hpp"
-#include "consumptionline/BufferConsumerService.hpp"
+#include "consumptionline/core/BufferConsumerService.hpp"
 #include "productionline/worker/config/ConfigBuilders.hpp"
 #include "productionline/worker/config/MultiWorkerConfig.hpp"
 #include "productionline/worker/config/WorkerConfigs.hpp"

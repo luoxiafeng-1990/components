@@ -27,7 +27,7 @@
 #include "../common/IOptionPlugin.hpp"
 #include "../common/ExecuteMode.hpp"
 #include "../common/DataSourceOptions.hpp"
-#include "consumptionline/BufferConsumerService.hpp"
+#include "consumptionline/core/BufferConsumerService.hpp"
 #include "productionline/worker/config/MultiWorkerConfig.hpp"
 #include "productionline/worker/config/WorkerConfigs.hpp"
 

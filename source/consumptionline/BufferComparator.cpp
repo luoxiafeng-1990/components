@@ -1,4 +1,4 @@
-#include "consumptionline/BufferComparator.hpp"
+#include "consumptionline/types/compare/BufferComparator.hpp"
 #include "common/Logger.hpp"
 #include "common/GlobalThreadPool.hpp"
 #include <cmath>

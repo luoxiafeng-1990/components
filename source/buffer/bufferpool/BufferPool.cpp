@@ -267,19 +267,6 @@ int BufferPool::getTotalCount() const {
     return managed_buffers_.size();
 }
 
-Buffer* BufferPool::getBufferById(uint32_t id) const {
-    std::lock_guard<std::mutex> lock(mutex_);
-    
-    // 遍历所有托管的 buffer，查找匹配的 ID
-    for (Buffer* buf : managed_buffers_) {
-        if (buf && buf->id() == id) {
-            return buf;
-        }
-    }
-    
-    return nullptr;
-}
-
 size_t BufferPool::getBufferSize() const {
     std::lock_guard<std::mutex> lock(mutex_);
     
@@ -419,27 +406,6 @@ void BufferPool::printStats() const {
     LOG4CPLUS_INFO(logger_, "========================================");
 }
 
-void BufferPool::printAllBuffers() const {
-    std::lock_guard<std::mutex> lock(mutex_);
-    
-    LOG4CPLUS_INFO(logger_, "");
-    LOG4CPLUS_INFO(logger_, "========================================");
-    LOG4CPLUS_INFO_FMT(logger_, "📋 BufferPool '%s' - All Buffers", name_.c_str());
-    LOG4CPLUS_INFO(logger_, "========================================");
-    
-    int index = 0;
-    for (Buffer* buf : managed_buffers_) {
-        LOG4CPLUS_INFO_FMT(logger_, "  [%d] Buffer #%u: virt=%p, phys=0x%lx, size=%zu, state=%s",
-               index++,
-               buf->id(),
-               buf->getVirtualAddress(),
-               buf->getPhysicalAddress(),
-               buf->size(),
-               Buffer::stateToString(buf->state()));
-    }
-    
-    LOG4CPLUS_INFO(logger_, "========================================");
-}
 
 void BufferPool::clearAllManagedBuffers() {
     std::lock_guard<std::mutex> lock(mutex_);

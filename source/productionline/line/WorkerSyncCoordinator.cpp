@@ -1,5 +1,5 @@
 #include "productionline/line/WorkerSyncCoordinator.hpp"
-#include "consumptionline/BufferComparator.hpp"
+#include "consumptionline/types/compare/BufferComparator.hpp"
 #include "buffer/bufferpool/Buffer.hpp"
 #include <log4cplus/loggingmacros.h>
 #include <set>

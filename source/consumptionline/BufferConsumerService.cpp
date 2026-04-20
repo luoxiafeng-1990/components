@@ -3,14 +3,14 @@
  * @brief Buffer 消费服务实现
  */
 
-#include "consumptionline/BufferConsumerService.hpp"
+#include "consumptionline/core/BufferConsumerService.hpp"
 #include "productionline/worker/config/ConfigBuilders.hpp"
 #include "consumptionline/config/ConsumerTypeConfigBuilder.hpp"
 #include "productionline/line/MultiWorkerProductionLine.hpp"
 #include "productionline/line/WorkerSyncCoordinator.hpp"
 #include "common/GlobalThreadPool.hpp"
 #include "productionline/worker/base/ComponentTopology.hpp"
-#include "consumptionline/inference/NpuInferenceConsumer.hpp"
+#include "consumptionline/types/npu/NpuInferenceConsumer.hpp"
 
 #include <future>
 #include <sstream>

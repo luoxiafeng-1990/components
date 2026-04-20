@@ -3,7 +3,7 @@
  * @brief Buffer 消费策略实现
  */
 
-#include "consumptionline/BufferConsumerStrategies.hpp"
+#include "consumptionline/core/BufferConsumerStrategies.hpp"
 #include "productionline/worker/base/ComponentTopology.hpp"
 #include "buffer/BufferAllocatorFacade.hpp"
 #include "buffer/BufferAllocatorFactory.hpp"

@@ -163,26 +163,6 @@ public:
      */
     void printSummary() const;
     
-    /**
-     * @brief 获取对比帧数
-     */
-    int getCompareCount() const { return compare_count_.load(); }
-    
-    /**
-     * @brief 获取通过帧数
-     */
-    int getPassedCount() const { return passed_count_.load(); }
-    
-    /**
-     * @brief 获取失败帧数
-     */
-    int getFailedCount() const { return failed_count_.load(); }
-    
-    /**
-     * @brief 是否全部通过
-     */
-    bool isPassed() const { return failed_count_.load() == 0; }
-    
 private:
     CompareConfig config_;
     bool is_open_;
