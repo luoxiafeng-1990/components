@@ -17,7 +17,6 @@ libcomponents_la_SOURCES = \
     source/productionline/worker/base/WorkerFactory.cpp \
     source/productionline/worker/base/ComponentTopology.cpp \
     source/productionline/worker/config/WorkerConfig.cpp \
-    source/productionline/worker/config/Connector.cpp \
     source/productionline/worker/config/ConsumerTypeConfig.cpp \
     source/consumptionline/config/ConsumerTypeConfigBuilder.cpp \
     source/vendor/contracts/DecoderVendorRegistry.cpp \

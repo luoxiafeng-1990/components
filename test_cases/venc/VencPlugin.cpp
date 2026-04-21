@@ -884,43 +884,39 @@ consumer::ConsumeResult runEncodeQualityCompare(
 
     // 3) MultiWorker：encoder -> decoder，并用 callback 做 compare
     MultiWorkerConfig multi_config;
-    WorkerGroupConfig group("encode_decode_quality_compare_group");
+    GroupConfig group("encode_decode_quality_compare_group");
 
-    ProducerConfig encode_producer;
-    encode_producer.producer_name = "encoder";
-    encode_producer.worker_config = encode_cfg;
-    encode_producer.worker_config.global.worker_type = WorkerType::FFMPEG_ENCODE;
-    // 质量验证路径不需要显示，避免显示侧副作用
-    encode_producer.worker_config.consumer_type = ConsumerTypeConfigBuilder(encode_producer.worker_config.consumer_type)
-        .setDisplayConfig(DisplayConsumerConfigBuilder(encode_producer.worker_config.consumer_type.display)
-            .setEnable(false)
-            .build())
-        .build();
-    group.producer_configs.push_back(encode_producer);
+    {
+        WorkerConfig enc_wc = encode_cfg;
+        enc_wc.global.worker_type = WorkerType::FFMPEG_ENCODE;
+        enc_wc.consumer_type = ConsumerTypeConfigBuilder(enc_wc.consumer_type)
+            .setDisplayConfig(DisplayConsumerConfigBuilder(enc_wc.consumer_type.display)
+                .setEnable(false)
+                .build())
+            .build();
+        group.producers["encoder"] = enc_wc;
+    }
 
-    ConsumerConfig decode_consumer;
-    decode_consumer.consumer_name = "decoder";
-    decode_consumer.worker_config = encode_cfg;
-    decode_consumer.worker_config.global.worker_type = WorkerType::FFMPEG_DECODE;
-    decode_consumer.worker_config.data_source.buffer_mode = true;
-    decode_consumer.worker_config.decoder.name = std::nullopt;
-    decode_consumer.worker_config.decoder.enable_hardware = false;  // 软件解码用于与参考对比
-    decode_consumer.worker_config.consumer_type = ConsumerTypeConfigBuilder(decode_consumer.worker_config.consumer_type)
-        .setDisplayConfig(DisplayConsumerConfigBuilder(decode_consumer.worker_config.consumer_type.display)
-            .setEnable(false)
-            .build())
-        .setCompareConfig(CompareConfigBuilder(decode_consumer.worker_config.consumer_type.compare)
-            .setEnablePsnr(false)
-            .setEnableSsim(false)
-            .build())
-        .build();
-    group.consumer_configs.push_back(decode_consumer);
+    {
+        WorkerConfig dec_wc = encode_cfg;
+        dec_wc.global.worker_type = WorkerType::FFMPEG_DECODE;
+        dec_wc.data_source.buffer_mode = true;
+        dec_wc.decoder.name = std::nullopt;
+        dec_wc.decoder.enable_hardware = false;
+        dec_wc.consumer_type = ConsumerTypeConfigBuilder(dec_wc.consumer_type)
+            .setDisplayConfig(DisplayConsumerConfigBuilder(dec_wc.consumer_type.display)
+                .setEnable(false)
+                .build())
+            .setCompareConfig(CompareConfigBuilder(dec_wc.consumer_type.compare)
+                .setEnablePsnr(false)
+                .setEnableSsim(false)
+                .build())
+            .build();
+        group.consumers["decoder"] = dec_wc;
+    }
 
-    ConnectorConfig connector;
-    connector.mode = Connector::Mode::ONE_TO_ONE;
-    connector.producer_names = {"encoder"};
-    connector.consumer_names = {"decoder"};
-    connector.enable_frame_sync = true;
+    group.mode = GroupConfig::Mode::ONE_TO_ONE;
+    group.enable_frame_sync = true;
 
     FrameSyncCallback callback = [](uint64_t /*frame_version*/,
                                      const std::map<std::string, Buffer*>& worker_buffers,
@@ -948,7 +944,6 @@ consumer::ConsumeResult runEncodeQualityCompare(
         cb->ref_buf_wrap->setAVFrame(cb->ref_avframe);
         cb->ref_buf_wrap->setImageMetadataFromAVFrame(cb->ref_avframe);
 
-        // comparator_ 在主线程已 open
         auto cmp = cb->compare_ctx->comparator_->compare(cb->ref_buf_wrap, decoded_buf);
         const double psnr = cmp.psnr_avg;
         const double ssim = cmp.ssim_avg;
@@ -981,16 +976,9 @@ consumer::ConsumeResult runEncodeQualityCompare(
         return true;
     };
 
-    connector.callback_chain.push_back(
-        WorkerSyncCoordinator::createDefaultCompareCallback(compare_ctx.get()) );
-    // 用我们自己的 compare 逻辑覆盖 default_compare_callback 的工作：
-    // - default callback 需要 reference/test 两路 buffer
-    // - 本场景只有 decoder 输出，所以我们改为"只注册一次自己的回调"
-    connector.callback_chain.clear();
-    connector.callback_chain.push_back(
+    group.callback_chain.push_back(
         CallbackChainItem(callback, &cb_ctx, "venc_encode_quality_callback"));
 
-    group.connector_configs.push_back(connector);
     multi_config.groups.push_back(group);
 
     auto start_time = std::chrono::steady_clock::now();
@@ -1093,37 +1081,31 @@ consumer::ConsumeResult runEncodeDecodeDisplay(
         .build();
 
     MultiWorkerConfig multi_config;
-    WorkerGroupConfig group("encode_decode_display_group");
+    GroupConfig group("encode_decode_display_group");
 
-    ProducerConfig encode_producer;
-    encode_producer.producer_name = "encoder";
-    encode_producer.worker_config = encode_decode_cfg;
-    encode_producer.worker_config.global.worker_type = WorkerType::FFMPEG_ENCODE;
-    group.producer_configs.push_back(encode_producer);
+    {
+        WorkerConfig enc_wc = encode_decode_cfg;
+        enc_wc.global.worker_type = WorkerType::FFMPEG_ENCODE;
+        group.producers["encoder"] = enc_wc;
+    }
 
-    ConsumerConfig decode_consumer;
-    decode_consumer.consumer_name = "decoder";
-    decode_consumer.worker_config = encode_decode_cfg;
-    decode_consumer.worker_config.global.worker_type = WorkerType::FFMPEG_DECODE;
-    decode_consumer.worker_config.data_source.buffer_mode = true;
-    decode_consumer.worker_config.decoder.name = std::nullopt;
-    // 为验证"硬件解码是否产不出帧"：display 路径改为软件解码。
-    // 若软件解码有帧而硬件解码为 0 frames，则根因基本可定位到硬件解码的初始化/参数集缺失。
-    decode_consumer.worker_config.decoder.enable_hardware = false;
-    decode_consumer.worker_config.consumer_type = ConsumerTypeConfigBuilder(decode_consumer.worker_config.consumer_type)
-        .setDisplayConfig(DisplayConsumerConfigBuilder(decode_consumer.worker_config.consumer_type.display)
-            .setEnable(false)
-            .build())
-        .setSaveRawConfig(encode_decode_cfg.consumer_type.save_raw)
-        .setSaveEncodedConfig(encode_decode_cfg.consumer_type.save_encoded)
-        .build();
-    group.consumer_configs.push_back(decode_consumer);
+    {
+        WorkerConfig dec_wc = encode_decode_cfg;
+        dec_wc.global.worker_type = WorkerType::FFMPEG_DECODE;
+        dec_wc.data_source.buffer_mode = true;
+        dec_wc.decoder.name = std::nullopt;
+        dec_wc.decoder.enable_hardware = false;
+        dec_wc.consumer_type = ConsumerTypeConfigBuilder(dec_wc.consumer_type)
+            .setDisplayConfig(DisplayConsumerConfigBuilder(dec_wc.consumer_type.display)
+                .setEnable(false)
+                .build())
+            .setSaveRawConfig(encode_decode_cfg.consumer_type.save_raw)
+            .setSaveEncodedConfig(encode_decode_cfg.consumer_type.save_encoded)
+            .build();
+        group.consumers["decoder"] = dec_wc;
+    }
 
-    ConnectorConfig decode_connector;
-    decode_connector.mode = Connector::Mode::ONE_TO_ONE;
-    decode_connector.producer_names = {"encoder"};
-    decode_connector.consumer_names = {"decoder"};
-    group.connector_configs.push_back(decode_connector);
+    group.mode = GroupConfig::Mode::ONE_TO_ONE;
 
     multi_config.groups.push_back(group);
 

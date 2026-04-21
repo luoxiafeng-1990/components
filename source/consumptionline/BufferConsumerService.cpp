@@ -56,14 +56,10 @@ buildMultiWorkerConfigForCompare(
     uint32_t flags)
 {
     MultiWorkerConfig multi_config;
-    WorkerGroupConfig group("compare_group");
+    GroupConfig group("compare_group");
     
-    // ========================================
     // 1. 配置生产者（Packet Source）
-    // ========================================
-    ProducerConfig producer_cfg;
-    producer_cfg.producer_name = "packet_source";
-    producer_cfg.worker_config = WorkerConfigBuilder()
+    group.producers["packet_source"] = WorkerConfigBuilder()
         .setGlobalConfig(
             WorkerGlobalConfigBuilder()
                 .setWorkerType(WorkerType::FFMPEG_PACKET_RECORDER)
@@ -74,80 +70,59 @@ buildMultiWorkerConfigForCompare(
                 .setPath(configs[0].data_source.path)
                 .setBufferCount(configs[0].data_source.buffer_count > 0 
                     ? configs[0].data_source.buffer_count : 32)
-                .setMaxFrames(configs[0].data_source.max_frames)  // v2.23 新增：传递帧数限制
+                .setMaxFrames(configs[0].data_source.max_frames)
                 .build()
         )
         .build();
-    group.producer_configs.push_back(producer_cfg);
     
-    // ========================================
     // 2. 配置消费者（Decoder Workers）
-    // ========================================
-    // 消费者1：硬件解码器
-    ConsumerConfig consumer_hw;
-    consumer_hw.consumer_name = "hw_decoder";
-    consumer_hw.worker_config = configs[0];
-    // 合并外部 flags 到 consumer_type（通过 Builder 模式）
     {
-        auto builder = ConsumerTypeConfigBuilder(consumer_hw.worker_config.consumer_type);
+        WorkerConfig hw_wc = configs[0];
+        auto builder = ConsumerTypeConfigBuilder(hw_wc.consumer_type);
         if (flags & CONSUME_DISPLAY) {
-            builder.setDisplayConfig(DisplayConsumerConfigBuilder(consumer_hw.worker_config.consumer_type.display)
+            builder.setDisplayConfig(DisplayConsumerConfigBuilder(hw_wc.consumer_type.display)
                 .setEnable(true).build());
         }
         if (flags & CONSUME_SAVE_RAW) {
-            builder.setSaveRawConfig(SaveRawConfigBuilder(consumer_hw.worker_config.consumer_type.save_raw)
+            builder.setSaveRawConfig(SaveRawConfigBuilder(hw_wc.consumer_type.save_raw)
                 .setEnable(true).build());
         }
         if (flags & CONSUME_SAVE_ENCODED) {
-            builder.setSaveEncodedConfig(SaveEncodedConfigBuilder(consumer_hw.worker_config.consumer_type.save_encoded)
+            builder.setSaveEncodedConfig(SaveEncodedConfigBuilder(hw_wc.consumer_type.save_encoded)
                 .setEnable(true).build());
         }
-        consumer_hw.worker_config.consumer_type = builder.build();
+        hw_wc.consumer_type = builder.build();
+        group.consumers["hw_decoder"] = hw_wc;
     }
-    group.consumer_configs.push_back(consumer_hw);
     
-    // 消费者2：软件解码器
-    ConsumerConfig consumer_sw;
-    consumer_sw.consumer_name = "sw_decoder";
-    consumer_sw.worker_config = configs[1];
-    // sw_decoder 禁用 display：软解帧在系统内存中，PP 硬件无法 DMA 访问（通过 Builder 模式）
     {
-        auto builder = ConsumerTypeConfigBuilder(consumer_sw.worker_config.consumer_type);
-        builder.setDisplayConfig(DisplayConsumerConfigBuilder(consumer_sw.worker_config.consumer_type.display)
+        WorkerConfig sw_wc = configs[1];
+        auto builder = ConsumerTypeConfigBuilder(sw_wc.consumer_type);
+        builder.setDisplayConfig(DisplayConsumerConfigBuilder(sw_wc.consumer_type.display)
             .setEnable(false).build());
         if (flags & CONSUME_SAVE_RAW) {
-            builder.setSaveRawConfig(SaveRawConfigBuilder(consumer_sw.worker_config.consumer_type.save_raw)
+            builder.setSaveRawConfig(SaveRawConfigBuilder(sw_wc.consumer_type.save_raw)
                 .setEnable(true).build());
         }
         if (flags & CONSUME_SAVE_ENCODED) {
-            builder.setSaveEncodedConfig(SaveEncodedConfigBuilder(consumer_sw.worker_config.consumer_type.save_encoded)
+            builder.setSaveEncodedConfig(SaveEncodedConfigBuilder(sw_wc.consumer_type.save_encoded)
                 .setEnable(true).build());
         }
-        consumer_sw.worker_config.consumer_type = builder.build();
+        sw_wc.consumer_type = builder.build();
+        group.consumers["sw_decoder"] = sw_wc;
     }
-    group.consumer_configs.push_back(consumer_sw);
     
-    // ========================================
-    // 3. 配置连接器（ONE_TO_MANY + 回调）
-    // ========================================
-    ConnectorConfig connector;
-    connector.mode = Connector::Mode::ONE_TO_MANY;
-    connector.producer_names.push_back("packet_source");
-    connector.consumer_names.push_back("hw_decoder");
-    connector.consumer_names.push_back("sw_decoder");
-    connector.enable_frame_sync = true;
+    // 3. 配置组模式和回调
+    group.mode = GroupConfig::Mode::ONE_TO_MANY;
+    group.enable_frame_sync = true;
 
     const auto& consumer_type = configs[0].consumer_type;
 
-    // ⭐ 创建本地 logger（因为这是静态函数，没有 logger_ 成员）
     auto logger = log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("consumer.BufferConsumerService"));
 
-    // 初始化 compare_ctx（在两个分支中都会使用）
     std::shared_ptr<CompareCallbackContext> compare_ctx = nullptr;
 
-    // ⭐ 根据 consumer_type 的类型选择 callback
     if (consumer_type.opencv.enable) {
-        // OpenCV 模式：执行 add/absdiff 等算术运算
         LOG4CPLUS_INFO_FMT(logger,
             "使用 OpenCV 模式，操作类型: %d",
             static_cast<int>(consumer_type.opencv.op_type));
@@ -157,11 +132,10 @@ buildMultiWorkerConfigForCompare(
         opencv_ctx->worker1_name = "hw_decoder";
         opencv_ctx->worker2_name = "sw_decoder";
 
-        connector.callback_chain.push_back(
+        group.callback_chain.push_back(
             WorkerSyncCoordinator::createOpenCVCallback(opencv_ctx.get()));
     }
     else {
-        // Compare 模式：计算 PSNR/SSIM（保留现有逻辑）
         LOG4CPLUS_INFO(logger, "使用 Compare 模式，计算 PSNR/SSIM");
 
         compare_ctx = std::make_shared<CompareCallbackContext>();
@@ -169,15 +143,11 @@ buildMultiWorkerConfigForCompare(
         compare_ctx->worker1_name = "hw_decoder";
         compare_ctx->worker2_name = "sw_decoder";
 
-        connector.callback_chain.push_back(
+        group.callback_chain.push_back(
             WorkerSyncCoordinator::createDefaultCompareCallback(compare_ctx.get()));
     }
 
-    group.connector_configs.push_back(connector);
-    
-    // ========================================
     // 4. 组装配置
-    // ========================================
     multi_config.groups.push_back(group);
     
     return {multi_config, compare_ctx};
@@ -632,17 +602,14 @@ ConsumeResult BufferConsumerService::startMultiWorkerCompare(
         // 1.2 查找 CompareCallbackContext（用于获取比较结果）
         CompareCallbackContext* compare_ctx = nullptr;
         for (const auto& group_config : multi_config.groups) {
-            for (const auto& conn_cfg : group_config.connector_configs) {
-                if (conn_cfg.enable_frame_sync) {
-                    for (const auto& cb_item : conn_cfg.callback_chain) {
-                        if (cb_item.name == "default_compare_callback" && cb_item.context) {
-                            compare_ctx = static_cast<CompareCallbackContext*>(cb_item.context);
-                            LOG4CPLUS_DEBUG(logger_, "Found CompareCallbackContext in callback_chain");
-                            break;
-                        }
+            if (group_config.enable_frame_sync) {
+                for (const auto& cb_item : group_config.callback_chain) {
+                    if (cb_item.name == "default_compare_callback" && cb_item.context) {
+                        compare_ctx = static_cast<CompareCallbackContext*>(cb_item.context);
+                        LOG4CPLUS_DEBUG(logger_, "Found CompareCallbackContext in callback_chain");
+                        break;
                     }
                 }
-                if (compare_ctx) break;
             }
             if (compare_ctx) break;
         }
@@ -661,11 +628,8 @@ ConsumeResult BufferConsumerService::startMultiWorkerCompare(
         for (size_t group_idx = 0; group_idx < multi_config.groups.size(); ++group_idx) {
             const auto& group_config = multi_config.groups[group_idx];
             
-            for (size_t worker_idx = 0; worker_idx < group_config.consumer_configs.size(); ++worker_idx) {
-                const auto& consumer_config = group_config.consumer_configs[worker_idx];
-                const auto& worker_config = consumer_config.worker_config;
-                
-                // 获取 BufferPool ID
+            size_t worker_idx = 0;
+            for (const auto& [consumer_name, worker_config] : group_config.consumers) {
                 uint64_t pool_id = production_line->getGroupConsumerBufferPoolId(
                     group_idx, worker_idx);
                 
@@ -673,22 +637,21 @@ ConsumeResult BufferConsumerService::startMultiWorkerCompare(
                     LOG4CPLUS_WARN_FMT(logger_, 
                         "No BufferPool for group[%zu] worker[%zu]", 
                         group_idx, worker_idx);
+                    worker_idx++;
                     continue;
                 }
                 
-                // 获取 BufferPool
                 auto pool = ComponentTopology::getInstance().getPool(pool_id).lock();
                 if (!pool) {
                     LOG4CPLUS_ERROR_FMT(logger_, 
                         "Failed to get BufferPool for group[%zu] worker[%zu]",
                         group_idx, worker_idx);
+                    worker_idx++;
                     continue;
                 }
                 
-                // 生成 flags（比较在 WorkerSyncCoordinator 内部完成，这里只处理消费类型）
                 uint32_t flags = getConsumeFlagsFromConfig(worker_config.consumer_type);
                 
-                // 为该 worker 创建消费者
                 auto consumer = createConsumerForWorker(
                     worker_config, 
                     flags,
@@ -696,9 +659,9 @@ ConsumeResult BufferConsumerService::startMultiWorkerCompare(
                     worker_config.data_source.time_base);
                 
                 WorkerConsumeContext ctx;
-                ctx.worker_name = consumer_config.consumer_name.empty() 
+                ctx.worker_name = consumer_name.empty() 
                     ? ("worker_" + std::to_string(group_idx) + "_" + std::to_string(worker_idx))
-                    : consumer_config.consumer_name;
+                    : consumer_name;
                 ctx.pool = pool;
                 ctx.consumer = consumer;
                 
@@ -708,6 +671,7 @@ ConsumeResult BufferConsumerService::startMultiWorkerCompare(
                     "Added worker context: %s (pool_id=%llu, flags=0x%x)",
                     worker_contexts.back().worker_name.c_str(), 
                     (unsigned long long)pool_id, flags);
+                worker_idx++;
             }
         }
         
@@ -722,7 +686,7 @@ ConsumeResult BufferConsumerService::startMultiWorkerCompare(
         
         // 5. 消费循环 - 轮询所有 worker 的 BufferPool
         // 使用第一个 group 第一个 consumer 的配置作为默认
-        const auto& first_config = multi_config.groups[0].consumer_configs[0].worker_config.consumer_type;
+        const auto& first_config = multi_config.groups[0].consumers.begin()->second.consumer_type;
         int max_frames = first_config.max_frames;
         int timeout_ms = 5000;  // 固定 5s，确保有足够时间等待 Worker 处理（如 compare 回调）
         int max_timeout_count = first_config.max_timeout_count;

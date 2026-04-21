@@ -15,7 +15,6 @@ class Buffer;
 
 // ⭐ 注意：FrameSyncCallback 和 CallbackChainItem 的定义在 WorkerConfig.hpp 中
 // 这里只需要包含该头文件即可
-#include "productionline/worker/config/Connector.hpp"
 #include "consumptionline/config/ConsumerTypeConfig.hpp"
 #include "productionline/worker/config/FrameSyncTypes.hpp"
 #include "productionline/worker/config/MultiWorkerConfig.hpp"
@@ -40,8 +39,8 @@ class Buffer;
  * compare_ctx->worker1_name = "hw_decoder";
  * compare_ctx->worker2_name = "sw_decoder";
  * 
- * connector_config.enable_frame_sync = true;
- * connector_config.callback_chain.push_back(
+ * group_config.enable_frame_sync = true;
+ * group_config.callback_chain.push_back(
  *     WorkerSyncCoordinator::createDefaultCompareCallback(compare_ctx.get()));
  * @endcode
  */
@@ -136,8 +135,8 @@ struct CompareCallbackContext {
  * auto opencv_ctx = std::make_shared<OpenCVCallbackContext>();
  * opencv_ctx->config = worker_config.consumer_type.opencv;
  *
- * connector_config.enable_frame_sync = true;
- * connector_config.callback_chain.push_back(
+ * group_config.enable_frame_sync = true;
+ * group_config.callback_chain.push_back(
  *     WorkerSyncCoordinator::createOpenCVCallback(opencv_ctx.get()));
  * @endcode
  */
@@ -288,7 +287,7 @@ public:
      * @brief 创建默认的比较回调
      *
      * @param context 比较上下文（用于累积统计结果）
-     * @return CallbackChainItem 可添加到 ConnectorConfig.callback_chain
+     * @return CallbackChainItem 可添加到 GroupConfig.callback_chain
      *
      * 功能：
      * - 使用 BufferComparator 计算 PSNR/SSIM
@@ -300,8 +299,8 @@ public:
      * auto compare_ctx = std::make_shared<CompareCallbackContext>();
      * compare_ctx->initFromCompareType(worker_config.consumer_type.compare);
      *
-     * connector_config.enable_frame_sync = true;
-     * connector_config.callback_chain.push_back(
+     * group_config.enable_frame_sync = true;
+     * group_config.callback_chain.push_back(
      *     WorkerSyncCoordinator::createDefaultCompareCallback(compare_ctx.get()));
      * @endcode
      *
@@ -313,7 +312,7 @@ public:
      * @brief 创建 OpenCV 算术运算回调
      *
      * @param context OpenCV 上下文（用于累积统计结果）
-     * @return CallbackChainItem 可添加到 ConnectorConfig.callback_chain
+     * @return CallbackChainItem 可添加到 GroupConfig.callback_chain
      *
      * 功能：
      * - 获取两个 Worker 的 Buffer 并转换为 cv::Mat
@@ -331,8 +330,8 @@ public:
      * opencv_ctx->config.op_type = OpencvType::OpType::ADD;
      * opencv_ctx->config.enable_psnr = true;
      *
-     * connector_config.enable_frame_sync = true;
-     * connector_config.callback_chain.push_back(
+     * group_config.enable_frame_sync = true;
+     * group_config.callback_chain.push_back(
      *     WorkerSyncCoordinator::createOpenCVCallback(opencv_ctx.get()));
      * @endcode
      *
