@@ -1,27 +1,30 @@
 #pragma once
 
 #include "buffer/BufferAllocatorBase.hpp"
+#include "vendor/contracts/IMemoryProvider.hpp"
+#include <memory>
 #include <log4cplus/logger.h>
 #include <log4cplus/loggingmacros.h>
 
 /**
- * @brief FramebufferAllocator - TACO 物理连续内存分配器
+ * @brief FramebufferAllocator - TACO 物理连续内存 BufferPool 构建器
  * 
- * 内部通过 taco_sys_get_block / handle2_phys / mmap_noncache
- * 为每个 buffer 独立分配物理连续内存。
- * 
- * Buffer::id() == taco blk_id，destroyPool 时自动 munmap + release_block。
- * 
- * 使用示例：
- * @code
- * BufferAllocatorFacade facade(BufferAllocatorFactory::AllocatorType::FRAMEBUFFER);
- * uint64_t pool_id = facade.allocatePoolWithBuffers(4, frame_size, "FBPool", "Display");
- * // ... 使用 pool ...
- * // facade 析构时自动 destroyPool → taco_sys_munmap + taco_sys_release_block
- * @endcode
+ * v3.0 架构变更：
+ * - 通过构造函数注入 IMemoryProvider（依赖注入）
+ * - createBuffer / deallocateBuffer 委托给 IMemoryProvider
+ * - 默认构造函数从 MemoryProviderRegistry 查找 "taco" provider
  */
 class FramebufferAllocator : public BufferAllocatorBase {
 public:
+    /**
+     * @brief v3.0 推荐构造函数：注入内存提供者
+     */
+    explicit FramebufferAllocator(std::unique_ptr<IMemoryProvider> provider);
+
+    /**
+     * @brief 旧构造函数（向后兼容，从 Registry 查找 "taco" provider）
+     * @deprecated 请使用 FramebufferAllocator(unique_ptr<IMemoryProvider>) 代替
+     */
     FramebufferAllocator();
     ~FramebufferAllocator() override;
     
@@ -68,5 +71,6 @@ protected:
     void deallocateBuffer(Buffer* buffer) override;
     
 private:
+    std::unique_ptr<IMemoryProvider> memory_provider_;
     log4cplus::Logger logger_;
 };

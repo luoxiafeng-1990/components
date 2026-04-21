@@ -1,39 +1,35 @@
 #pragma once
 
 #include "buffer/BufferAllocatorBase.hpp"
+#include "vendor/contracts/IMemoryProvider.hpp"
 #include <cstdlib>
+#include <memory>
 #include <log4cplus/logger.h>
 #include <log4cplus/loggingmacros.h>
 
 /**
- * @brief NormalAllocator - 普通内存分配器
+ * @brief NormalAllocator - 普通内存 BufferPool 构建器
  * 
- * 继承自 BufferAllocatorBase（抽象基类）
+ * 继承自 BufferAllocatorBase，负责使用注入的 IMemoryProvider 分配内存
+ * 并构建 BufferPool。
  * 
- * 使用标准 C++ 内存分配（malloc/posix_memalign）创建 Buffer
- * 
- * 特点：
- * - 虚拟内存：是
- * - 物理地址：否（phys_addr = 0）
- * - 连续性：不保证物理连续
- * 
- * 使用场景：
- * - CPU 处理的普通数据缓冲
- * - 不需要 DMA 访问的场景
- * 
- * 使用示例：
- * @code
- * auto allocator = std::make_unique<NormalAllocator>(BufferMemoryAllocatorType::NORMAL_MALLOC);
- * auto pool = allocator->allocatePoolWithBuffers(10, 1920*1080*3, "VideoPool", "Video");
- * @endcode
+ * v3.0 架构变更：
+ * - 通过构造函数注入 IMemoryProvider（依赖注入）
+ * - createBuffer / deallocateBuffer 委托给 IMemoryProvider
+ * - 保留旧构造函数（deprecated）以保持向后兼容
  */
 class NormalAllocator : public BufferAllocatorBase {
 public:
     /**
-     * @brief 构造函数
-     * 
-     * @param type 分配器类型（通常为 NORMAL_MALLOC）
-     * @param alignment 内存对齐（默认 64 字节）
+     * @brief v3.0 推荐构造函数：注入内存提供者
+     *
+     * @param provider 内存提供者（所有权转移）
+     */
+    explicit NormalAllocator(std::unique_ptr<IMemoryProvider> provider);
+
+    /**
+     * @brief 旧构造函数（向后兼容，内部创建 MallocMemoryProvider）
+     * @deprecated 请使用 NormalAllocator(unique_ptr<IMemoryProvider>) 代替
      */
     explicit NormalAllocator(
         BufferMemoryAllocatorType type = BufferMemoryAllocatorType::NORMAL_MALLOC,
@@ -128,10 +124,10 @@ protected:
     void deallocateBuffer(Buffer* buffer) override;
     
 private:
+    std::unique_ptr<IMemoryProvider> memory_provider_;
     BufferMemoryAllocatorType type_;
     size_t alignment_;
     
-    // 日志器
     log4cplus::Logger logger_;
 };
 

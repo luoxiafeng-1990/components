@@ -32,6 +32,8 @@
 #include "save/SavePlugin.hpp"
 #include "opencv/OpencvPlugin.hpp"
 #include "preview/PreviewPlugin.hpp"
+#include "memleak/MemleakPlugin.hpp"
+#include "logconfig/LogConfigPlugin.hpp"
 #include "common/Logger.hpp"
 
 #include "productionline/line/WorkerSyncCoordinator.hpp"
@@ -70,6 +72,8 @@ int main(int argc, char* argv[]) {
     auto npu_plugin     = std::make_unique<test::npu::NpuPlugin>();
     auto opencv_plugin  = std::make_unique<test::opencv::OpencvPlugin>();
     auto preview_plugin = std::make_unique<test::preview::PreviewPlugin>();
+    auto memleak_plugin   = std::make_unique<test::memleak::MemleakPlugin>();
+    auto logconfig_plugin = std::make_unique<test::logconfig::LogConfigPlugin>();
 
     // ── 2. 统一注册：每个插件 = 一个子命令 ──
     struct PluginEntry {
@@ -92,6 +96,8 @@ int main(int argc, char* argv[]) {
     register_plugin(npu_plugin.get());
     register_plugin(opencv_plugin.get());
     register_plugin(preview_plugin.get());
+    register_plugin(memleak_plugin.get());
+    register_plugin(logconfig_plugin.get());
 
     // ── 3. 解析命令行（支持多子命令） ──
     try {
@@ -116,6 +122,14 @@ int main(int argc, char* argv[]) {
     for (auto* p : actived_plugins) {
         int rc = p->handlePreActions();
         if (rc >= 0) return rc;
+    }
+
+    // ── 5.5 UTILITY 插件分流 ──
+    // UTILITY 类型的插件直接调用 run()，不走消费策略
+    for (auto* p : actived_plugins) {
+        if (p->getCategory() == test::PluginCategory::UTILITY) {
+            return p->run();
+        }
     }
 
     // ── 6. 所有被解析的插件依次 applyTo → 构建共享 WorkerConfig ──

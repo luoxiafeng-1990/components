@@ -44,6 +44,9 @@ libcomponents_la_SOURCES = \
     source/buffer/AVFrameAllocator.cpp \
     source/buffer/MatAllocator.cpp \
     source/buffer/bufferpool/BufferPool.cpp \
+    source/buffer/pool/MallocMemoryProvider.cpp \
+    source/vendor/MemoryProviderRegistry.cpp \
+    source/vendor/taco/TacoMemoryProvider.cpp \
     source/productionline/line/VideoProductionLine.cpp \
     source/productionline/line/MultiWorkerProductionLine.cpp \
     source/productionline/line/WorkerSyncCoordinator.cpp \
@@ -97,7 +100,9 @@ qa_cases_SOURCES = \
     test_cases/npu/NpuPlugin.cpp \
     test_cases/opencv/OpencvPlugin.cpp \
     test_cases/venc/VencPlugin.cpp \
-    test_cases/preview/PreviewPlugin.cpp
+    test_cases/preview/PreviewPlugin.cpp \
+    test_cases/memleak/MemleakPlugin.cpp \
+    test_cases/logconfig/LogConfigPlugin.cpp
 qa_cases_LDADD = libcomponents.la $(COMMON_LIBS)
 qa_cases_CPPFLAGS = -I$(top_srcdir)/test_cases $(AM_CPPFLAGS)
 qa_cases_LDFLAGS = -Wl,--allow-shlib-undefined

@@ -2,7 +2,9 @@
 #define BUFFER_ALLOCATOR_FACTORY_HPP
 
 #include "buffer/BufferAllocatorBase.hpp"
+#include "vendor/contracts/IMemoryProvider.hpp"
 #include <memory>
+#include <string>
 
 /**
  * @brief BufferAllocatorFactory - Buffer分配器工厂
@@ -72,7 +74,33 @@ public:
     static std::unique_ptr<BufferAllocatorBase> create(
         AllocatorType type = AllocatorType::AUTO
     );
-    
+
+    /**
+     * @brief v3.0 工厂方法：通过 IMemoryProvider 创建分配器
+     *
+     * @param type       Allocator 类型（NORMAL / FRAMEBUFFER）
+     * @param provider   外部注入的内存提供者（所有权转移）
+     * @return Allocator 实例
+     */
+    static std::unique_ptr<BufferAllocatorBase> create(
+        AllocatorType type,
+        std::unique_ptr<IMemoryProvider> provider
+    );
+
+    /**
+     * @brief v3.0 工厂方法：按 provider kind 名称创建
+     *
+     * 从 MemoryProviderRegistry 查找 provider 并注入到对应的 Allocator。
+     *
+     * @param type          Allocator 类型
+     * @param provider_kind 内存提供者名称（如 "malloc", "taco"）
+     * @return Allocator 实例
+     */
+    static std::unique_ptr<BufferAllocatorBase> createWithProvider(
+        AllocatorType type,
+        const std::string& provider_kind
+    );
+
     /**
      * @brief 创建Buffer分配器（完整版，用于特殊配置需求）
      * 

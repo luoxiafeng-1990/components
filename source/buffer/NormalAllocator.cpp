@@ -1,4 +1,5 @@
 #include "buffer/NormalAllocator.hpp"
+#include "buffer/pool/MallocMemoryProvider.hpp"
 #include "buffer/bufferpool/BufferPool.hpp"
 #include "productionline/worker/base/ComponentTopology.hpp"
 #include "common/Logger.hpp"
@@ -17,12 +18,23 @@ extern "C" {
 // 构造/析构函数
 // ============================================================
 
+NormalAllocator::NormalAllocator(std::unique_ptr<IMemoryProvider> provider)
+    : memory_provider_(std::move(provider))
+    , type_(BufferMemoryAllocatorType::NORMAL_MALLOC)
+    , alignment_(memory_provider_ ? memory_provider_->getCapabilities().default_alignment : 64)
+    , logger_(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Allocator.Normal")))
+{
+    LOG4CPLUS_DEBUG_FMT(logger_, "创建: provider=%s",
+                        memory_provider_ ? memory_provider_->kind() : "null");
+}
+
 NormalAllocator::NormalAllocator(BufferMemoryAllocatorType type, size_t alignment)
-    : type_(type)
+    : memory_provider_(std::make_unique<MallocMemoryProvider>(alignment))
+    , type_(type)
     , alignment_(alignment)
     , logger_(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Allocator.Normal")))
 {
-    LOG4CPLUS_DEBUG_FMT(logger_, "创建: alignment=%zu", alignment_);
+    LOG4CPLUS_DEBUG_FMT(logger_, "创建: alignment=%zu (兼容模式, provider=malloc)", alignment_);
 }
 
 NormalAllocator::~NormalAllocator() {
@@ -39,43 +51,29 @@ NormalAllocator::~NormalAllocator() {
 // ============================================================
 
 Buffer* NormalAllocator::createBuffer(uint32_t id, size_t size) {
-    // 1. 分配对齐内存
-    void* virt_addr = nullptr;
-    
-    if (alignment_ > 0) {
-        // 使用对齐分配
-        if (posix_memalign(&virt_addr, alignment_, size) != 0) {
-            LOG4CPLUS_ERROR_FMT(logger_, "posix_memalign failed for buffer #%u (size=%zu)", id, size);
-            return nullptr;
-        }
-    } else {
-        // 普通分配
-        virt_addr = malloc(size);
-        if (!virt_addr) {
-            LOG4CPLUS_ERROR_FMT(logger_, "malloc failed for buffer #%u (size=%zu)", id, size);
-            return nullptr;
-        }
+    MemoryBlock block = memory_provider_->allocate(size, alignment_);
+    if (!block.virt_addr) {
+        LOG4CPLUS_ERROR_FMT(logger_, "IMemoryProvider(%s) 分配失败: id=%u size=%zu",
+                            memory_provider_->kind(), id, size);
+        return nullptr;
     }
-    
-    // 2. 清零内存（可选，用于调试）
-    memset(virt_addr, 0, size);
-    
-    // 3. 创建 Buffer 对象
-    // 普通内存没有物理地址，phys_addr = 0
+
+    memset(block.virt_addr, 0, size);
+
     Buffer* buffer = new Buffer(
         id,
-        virt_addr,
-        0,  // phys_addr = 0（普通内存不提供物理地址）
+        block.virt_addr,
+        block.phys_addr,
         size,
         Buffer::Ownership::OWNED
     );
-    
+
     if (!buffer) {
-        LOG4CPLUS_ERROR_FMT(logger_, "Failed to create Buffer object #%u", id);
-        free(virt_addr);
+        LOG4CPLUS_ERROR_FMT(logger_, "Buffer 对象创建失败: id=%u", id);
+        memory_provider_->deallocate(block);
         return nullptr;
     }
-    
+
     return buffer;
 }
 
@@ -84,20 +82,21 @@ void NormalAllocator::deallocateBuffer(Buffer* buffer) {
         return;
     }
 
-    // 0. FFmpegEncodeWorker 等会在 Normal Buffer 上挂 AVPacket（编码输出槽位）
     if (buffer->getAVPacket()) {
         AVPacket* pkt = buffer->getAVPacket();
         av_packet_free(&pkt);
         buffer->setAVPacket(nullptr);
     }
-    
-    // 1. 释放内存
+
     void* virt_addr = buffer->getVirtualAddress();
     if (virt_addr) {
-        free(virt_addr);
+        MemoryBlock block;
+        block.virt_addr = virt_addr;
+        block.phys_addr = buffer->getPhysicalAddress();
+        block.size      = buffer->size();
+        memory_provider_->deallocate(block);
     }
-    
-    // 2. 删除 Buffer 对象
+
     delete buffer;
 }
 

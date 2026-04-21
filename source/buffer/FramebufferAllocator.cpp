@@ -1,14 +1,11 @@
 #include "buffer/FramebufferAllocator.hpp"
+#include "vendor/contracts/MemoryProviderRegistry.hpp"
 #include "common/Logger.hpp"
 #include "buffer/bufferpool/BufferPool.hpp"
 #include "productionline/worker/base/ComponentTopology.hpp"
 #include <unordered_map>
 #include <mutex>
 #include <cstring>
-
-extern "C" {
-#include "ta_sys_api.h"
-}
 
 static std::unordered_map<Buffer*, BufferAllocatorBase*> framebuffer_buffer_ownership_;
 static std::mutex framebuffer_ownership_mutex_;
@@ -17,11 +14,28 @@ static std::mutex framebuffer_ownership_mutex_;
 // 构造 / 析构
 // ============================================================
 
-FramebufferAllocator::FramebufferAllocator()
-    : logger_(log4cplus::Logger::getInstance(
+FramebufferAllocator::FramebufferAllocator(std::unique_ptr<IMemoryProvider> provider)
+    : memory_provider_(std::move(provider))
+    , logger_(log4cplus::Logger::getInstance(
           LOG4CPLUS_TEXT("components.Allocator.Framebuffer")))
 {
-    LOG4CPLUS_DEBUG(logger_, "创建完成");
+    LOG4CPLUS_DEBUG_FMT(logger_, "创建完成: provider=%s",
+                        memory_provider_ ? memory_provider_->kind() : "null");
+}
+
+FramebufferAllocator::FramebufferAllocator()
+    : memory_provider_(MemoryProviderRegistry::instance().hasProvider("taco")
+                        ? MemoryProviderRegistry::instance().create("taco")
+                        : nullptr)
+    , logger_(log4cplus::Logger::getInstance(
+          LOG4CPLUS_TEXT("components.Allocator.Framebuffer")))
+{
+    if (!memory_provider_) {
+        LOG4CPLUS_WARN(logger_,
+            "MemoryProviderRegistry 中未找到 'taco' provider，"
+            "allocatePoolWithBuffers 将无法工作");
+    }
+    LOG4CPLUS_DEBUG(logger_, "创建完成 (兼容模式)");
 }
 
 FramebufferAllocator::~FramebufferAllocator() {
@@ -30,7 +44,7 @@ FramebufferAllocator::~FramebufferAllocator() {
 }
 
 // ============================================================
-// 分配 BufferPool（内部通过 TACO API 分配物理连续内存）
+// 分配 BufferPool（通过 IMemoryProvider 分配物理连续内存）
 // ============================================================
 
 uint64_t FramebufferAllocator::allocatePoolWithBuffers(
@@ -46,62 +60,58 @@ uint64_t FramebufferAllocator::allocatePoolWithBuffers(
         return 0;
     }
 
+    if (!memory_provider_) {
+        LOG4CPLUS_ERROR(logger_,
+            "allocatePoolWithBuffers: no IMemoryProvider available");
+        return 0;
+    }
+
     LOG4CPLUS_INFO_FMT(logger_,
-        "Creating BufferPool '%s': %d buffers x %zu bytes",
-        name.c_str(), count, size);
+        "Creating BufferPool '%s': %d buffers x %zu bytes (provider=%s)",
+        name.c_str(), count, size, memory_provider_->kind());
 
     auto pool = std::make_shared<BufferPool>(
         token(), name, category);
 
+    std::vector<MemoryBlock> allocated_blocks;
+
     auto cleanup_pool = [&]() {
         std::lock_guard<std::mutex> lock(framebuffer_ownership_mutex_);
         for (Buffer* buf : pool->getAllManagedBuffers()) {
-            if (buf->getVirtualAddress()) {
-                taco_sys_munmap(buf->getVirtualAddress(),
-                               static_cast<uint32_t>(buf->size()));
-            }
-            if (buf->id() != 0) {
-                taco_sys_release_block(buf->id());
-            }
-            deallocateBuffer(buf);
             framebuffer_buffer_ownership_.erase(buf);
+            delete buf;
         }
         pool->clearAllManagedBuffers();
+        for (auto& blk : allocated_blocks) {
+            if (blk.virt_addr) {
+                memory_provider_->deallocate(blk);
+            }
+        }
     };
 
     for (int i = 0; i < count; i++) {
-        uint32_t blk_id = taco_sys_get_block(
-            TACO_INVALID_POOLID, size, name.c_str());
-        if (blk_id == 0) {
+        MemoryBlock block = memory_provider_->allocate(size);
+        if (!block.virt_addr) {
             LOG4CPLUS_ERROR_FMT(logger_,
-                "taco_sys_get_block failed for buffer #%d (size=%zu)", i, size);
+                "IMemoryProvider(%s) 分配失败: buffer #%d (size=%zu)",
+                memory_provider_->kind(), i, size);
             cleanup_pool();
             return 0;
         }
+        allocated_blocks.push_back(block);
 
-        uint64_t phys_addr = taco_sys_handle2_phys_addr(blk_id);
-        void* virt_addr = taco_sys_mmap_noncache(
-            phys_addr, static_cast<uint32_t>(size));
-        if (!virt_addr) {
-            LOG4CPLUS_ERROR_FMT(logger_,
-                "taco_sys_mmap_noncache failed for buffer #%d", i);
-            taco_sys_release_block(blk_id);
-            cleanup_pool();
-            return 0;
-        }
-
-        memset(virt_addr, 0, size);
+        memset(block.virt_addr, 0, size);
 
         Buffer* buffer = new Buffer(
-            blk_id, virt_addr, phys_addr, size,
+            block.handle, block.virt_addr, block.phys_addr, size,
             Buffer::Ownership::EXTERNAL);
 
         if (!BufferAllocatorBase::addBufferToPoolQueue(
                 pool.get(), buffer, QueueType::FREE)) {
             LOG4CPLUS_ERROR_FMT(logger_,
                 "Failed to add buffer #%d to pool", i);
-            taco_sys_munmap(virt_addr, static_cast<uint32_t>(size));
-            taco_sys_release_block(blk_id);
+            memory_provider_->deallocate(block);
+            allocated_blocks.pop_back();
             delete buffer;
             cleanup_pool();
             return 0;
@@ -113,8 +123,9 @@ uint64_t FramebufferAllocator::allocatePoolWithBuffers(
         }
 
         LOG4CPLUS_INFO_FMT(logger_,
-            "  Buffer #%d: blk_id=%u, phys=0x%llx, virt=%p, size=%zu",
-            i, blk_id, (unsigned long long)phys_addr, virt_addr, size);
+            "  Buffer #%d: handle=%u, phys=0x%llx, virt=%p, size=%zu",
+            i, block.handle, (unsigned long long)block.phys_addr,
+            block.virt_addr, size);
     }
 
     uint64_t pool_id = ComponentTopology::getInstance().registerPool(
@@ -201,7 +212,7 @@ bool FramebufferAllocator::removeBufferFromPool(
 }
 
 // ============================================================
-// 销毁所有 Pool（自动 TACO 清理）
+// 销毁所有 Pool（通过 IMemoryProvider 清理）
 // ============================================================
 
 bool FramebufferAllocator::destroyPool() {
@@ -233,15 +244,16 @@ bool FramebufferAllocator::destroyPool() {
         }
 
         for (Buffer* buf : to_remove) {
-            if (buf->getVirtualAddress()) {
-                taco_sys_munmap(buf->getVirtualAddress(),
-                               static_cast<uint32_t>(buf->size()));
-            }
-            if (buf->id() != 0) {
-                taco_sys_release_block(buf->id());
+            if (buf->getVirtualAddress() && memory_provider_) {
+                MemoryBlock block;
+                block.virt_addr = buf->getVirtualAddress();
+                block.phys_addr = buf->getPhysicalAddress();
+                block.size      = buf->size();
+                block.handle    = buf->id();
+                memory_provider_->deallocate(block);
             }
             LOG4CPLUS_DEBUG_FMT(logger_,
-                "TACO block released: blk_id=%u", buf->id());
+                "Memory block released: handle=%u", buf->id());
 
             BufferAllocatorBase::removeBufferFromPoolInternal(pool.get(), buf);
             deallocateBuffer(buf);

@@ -26,12 +26,34 @@ namespace CLI { class App; }
 
 namespace test {
 
+/**
+ * @brief 插件分类
+ *
+ * PIPELINE  — 数据消费型插件（vdec / pp / record 等），走消费策略执行
+ * UTILITY   — 独立工具型插件（memleak / logconfig 等），由 main 直接调用 run()
+ */
+enum class PluginCategory {
+    PIPELINE,
+    UTILITY
+};
+
 class IOptionPlugin {
 public:
     virtual ~IOptionPlugin() = default;
 
     virtual std::string getName() const = 0;
     virtual std::string getDescription() const { return ""; }
+
+    /**
+     * @brief 返回插件分类，默认为 PIPELINE
+     */
+    virtual PluginCategory getCategory() const { return PluginCategory::PIPELINE; }
+
+    /**
+     * @brief UTILITY 插件的执行入口
+     * @return 退出码（0 成功）
+     */
+    virtual int run() { return 0; }
 
     /**
      * @brief 向 CLI::App（子命令）注册本插件的命令行选项
