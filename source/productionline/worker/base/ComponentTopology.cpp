@@ -1,6 +1,6 @@
 #include "productionline/worker/base/ComponentTopology.hpp"
 #include "productionline/worker/base/WorkerBase.hpp"
-#include "buffer/bufferpool/BufferPool.hpp"
+#include "bufferpool/pool/base/BufferPool.hpp"
 #include <algorithm>
 
 // ========== 单例 ==========

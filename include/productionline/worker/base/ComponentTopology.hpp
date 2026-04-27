@@ -13,7 +13,7 @@
 
 class WorkerBase;
 class BufferPool;
-class BufferAllocatorBase;
+class IBufferPoolBuilder;
 
 /**
  * @brief 组件拓扑所有者类型
@@ -128,13 +128,13 @@ private:
     ComponentTopology();
     ~ComponentTopology() = default;
 
-    // ========== Pool 管理（仅 BufferAllocatorBase 友元可调用）==========
+    // ========== Pool 管理（仅 IBufferPoolBuilder 友元可调用）==========
 
     std::shared_ptr<BufferPool> getPoolSpecialForAllocator(uint64_t pool_id);
     std::vector<uint64_t> getPoolsByAllocator(uint64_t allocator_id) const;
     void unregisterPool(uint64_t pool_id);
 
-    friend class BufferAllocatorBase;
+    friend class IBufferPoolBuilder;
 
     // --- Line 数据 ---
     struct LineInfo {

@@ -3,8 +3,8 @@
 
 #include "productionline/worker/base/WorkerBase.hpp"
 #include "productionline/worker/datasource/encodeddata/IEncodedPacketSource.hpp"
-#include "buffer/bufferpool/Buffer.hpp"
-#include "buffer/bufferpool/BufferPool.hpp"
+#include "bufferpool/buffer/Buffer.hpp"
+#include "bufferpool/pool/base/BufferPool.hpp"
 #include <string>
 #include <thread>
 #include <atomic>
@@ -249,6 +249,7 @@ private:
     // 当数据源（Acquire 层）报告 EOF 时，需要把解码器内部缓冲 drain 出来，
     // 否则可能出现 0 帧解码成功但管线直接退出的问题。
     bool flush_sent_;                     // EOF 后是否已对 codec 发送过 flush（send_packet(NULL)）
+    bool driver_fatal_ = false;           // 硬件 driver 致命错误（AVERROR_EXTERNAL）后，不再调用 FFmpeg API
     
     // ============ 内部辅助方法 ============
     

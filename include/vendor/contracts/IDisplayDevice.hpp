@@ -1,7 +1,7 @@
 #ifndef IDISPLAYDEVICE_HPP
 #define IDISPLAYDEVICE_HPP
 
-#include "buffer/bufferpool/Buffer.hpp"
+#include "bufferpool/buffer/Buffer.hpp"
 #include <stddef.h>
 
 // 前向声明

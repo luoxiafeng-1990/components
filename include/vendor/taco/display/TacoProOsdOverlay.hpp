@@ -15,8 +15,9 @@
 #include FT_FREETYPE_H
 
 #include "common/Timer.hpp"
-#include "buffer/BufferAllocatorFacade.hpp"
-#include "buffer/bufferpool/BufferPool.hpp"
+#include "bufferpool/pool/base/IBufferPoolBuilder.hpp"
+#include "bufferpool/pool/base/BufferPoolBuilderFactory.hpp"
+#include "bufferpool/pool/base/BufferPool.hpp"
 #include "productionline/worker/base/ComponentTopology.hpp"
 
 /**
@@ -91,7 +92,7 @@ private:
 
     int fb_fd_ = -1;
 
-    std::unique_ptr<BufferAllocatorFacade> allocator_;
+    std::unique_ptr<IBufferPoolBuilder> allocator_;
     uint64_t pool_id_ = 0;
     Buffer* display_buf_ = nullptr;
 

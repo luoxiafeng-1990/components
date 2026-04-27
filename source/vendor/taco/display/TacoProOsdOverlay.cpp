@@ -139,7 +139,7 @@ bool TacoProOsdOverlay::openFbDevice() {
     fclose(fp);
 
     if (fb_num < 0) {
-        LOG4CPLUS_ERROR(logger_, "tpsfb0 not found in /proc/fb");
+        LOG4CPLUS_WARN(logger_, "tpsfb0 not found in /proc/fb (display hardware may not be present on this host)");
         return false;
     }
 
@@ -174,8 +174,8 @@ bool TacoProOsdOverlay::openFbDevice() {
 // ============================================================
 
 bool TacoProOsdOverlay::createBufferPool() {
-    allocator_ = std::make_unique<BufferAllocatorFacade>(
-        BufferAllocatorFactory::AllocatorType::FRAMEBUFFER);
+    allocator_ = BufferPoolBuilderFactory::create(
+        BufferPoolBuilderFactory::AllocatorType::CONTINUOUS_PHYSICAL);
 
     pool_id_ = allocator_->allocatePoolWithBuffers(
         BUFFER_COUNT, frame_size_, "TacoProOsdOverlay_fb", "Display");

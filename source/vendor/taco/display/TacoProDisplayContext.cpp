@@ -74,23 +74,23 @@ namespace {
         }
     }
 
-    inline int getBlkIdFromAVFrame(AVFrame* avframe, int fallback_id) {
+    inline int getBlkIdFromAVFrame(AVFrame* avframe, int /*fallback_id*/) {
         if (avframe && avframe->metadata) {
             auto meta = reinterpret_cast<TA_AVDictionary*>(avframe->metadata);
             if (meta && meta->count > 0 && meta->elems) {
-                // To be safe, look for "pool_blk_id"
                 for (int i = 0; i < meta->count; ++i) {
                     if (meta->elems[i].key && strcmp(meta->elems[i].key, "pool_blk_id") == 0) {
                         int val = std::atoi(meta->elems[i].value);
                         if (val > 0) return val;
                     }
                 }
-                // Fallback to first element if not named correctly (as taco-vo does)
                 int val = std::atoi(meta->elems[0].value);
                 if (val > 0) return val;
             }
         }
-        return fallback_id;
+        // 不使用 fallback_id：Buffer 内部 ID 不是有效的 DMA block ID，
+        // 传给 ta_cv_image_create_ext 会导致 libmm 输出 ERROR 到 stderr
+        return -1;
     }
 }
 
@@ -173,7 +173,7 @@ bool TacoProDisplayContext::open() {
     auto pool = getBufferPool();
     if (!pool) {
         fb_pool_id_ = 0;
-        allocator_facade_.reset();
+        builder_.reset();
         ::close(fd_);
         fd_ = -1;
         return false;
@@ -185,7 +185,7 @@ bool TacoProDisplayContext::open() {
     if (template_blk_id_ == 0) {
         LOG4CPLUS_ERROR(logger_, "Failed to allocate TACO block for template frame");
         fb_pool_id_ = 0;
-        allocator_facade_.reset();
+        builder_.reset();
         ::close(fd_);
         fd_ = -1;
         return false;
@@ -199,7 +199,7 @@ bool TacoProDisplayContext::open() {
         taco_sys_release_block(template_blk_id_);
         template_blk_id_ = 0;
         fb_pool_id_ = 0;
-        allocator_facade_.reset();
+        builder_.reset();
         ::close(fd_);
         fd_ = -1;
         return false;
@@ -226,7 +226,7 @@ bool TacoProDisplayContext::open() {
         taco_sys_release_block(template_blk_id_);
         template_blk_id_ = 0;
         fb_pool_id_ = 0;
-        allocator_facade_.reset();
+        builder_.reset();
         ::close(fd_);
         fd_ = -1;
         return false;
@@ -290,7 +290,7 @@ void TacoProDisplayContext::close() {
 
     // destroyPool 内部自动 taco_sys_munmap + taco_sys_release_block
     fb_pool_id_ = 0;
-    allocator_facade_.reset();
+    builder_.reset();
 
     if (fd_ >= 0) {
         ::close(fd_);
@@ -330,7 +330,7 @@ bool TacoProDisplayContext::openDevice() {
     fclose(fp);
 
     if (!device_node) {
-        LOG4CPLUS_ERROR(logger_, "tpsfb0 not found in /proc/fb");
+        LOG4CPLUS_WARN(logger_, "tpsfb0 not found in /proc/fb (display hardware may not be present on this host)");
         return false;
     }
 
@@ -373,14 +373,14 @@ bool TacoProDisplayContext::openDevice() {
 // ============================================================
 
 bool TacoProDisplayContext::createBufferPool() {
-    allocator_facade_ = std::make_unique<BufferAllocatorFacade>(
-        BufferAllocatorFactory::AllocatorType::FRAMEBUFFER);
+    builder_ = BufferPoolBuilderFactory::create(
+        BufferPoolBuilderFactory::AllocatorType::CONTINUOUS_PHYSICAL);
 
-    fb_pool_id_ = allocator_facade_->allocatePoolWithBuffers(
+    fb_pool_id_ = builder_->allocatePoolWithBuffers(
         buffer_count_, buffer_size_, "TacoProDisplayContext_fb", "Display");
     if (fb_pool_id_ == 0) {
         LOG4CPLUS_ERROR(logger_, "Failed to create BufferPool");
-        allocator_facade_.reset();
+        builder_.reset();
         return false;
     }
 

@@ -119,14 +119,17 @@ namespace {
  */
 class LoggerGuard {
 public:
-    LoggerGuard() { initializeLogger(); }
+    LoggerGuard() {
+        // 使用 function-local static 确保 Initializer 在进程退出时才销毁，
+        // 而非在 main() 栈帧展开时销毁——这样所有 Worker/BufferPool 的
+        // 析构函数都能安全地写日志（它们在 main 栈帧展开期间析构）。
+        static log4cplus::Initializer s_initializer;
+        initializeLogger();
+    }
     ~LoggerGuard() = default;
 
     LoggerGuard(const LoggerGuard&) = delete;
     LoggerGuard& operator=(const LoggerGuard&) = delete;
-
-private:
-    log4cplus::Initializer initializer_;
 };
 
 // 向后兼容：保留宏供旧代码使用（新代码请使用 LoggerGuard）

@@ -2,7 +2,7 @@
 #include "productionline/worker/datasource/rawdata/RawFrameSourceFromFile.hpp"
 #include "productionline/worker/datasource/rawdata/RawFrameSourceFromBuffer.hpp"
 #include "common/Logger.hpp"
-#include "buffer/bufferpool/BufferPool.hpp"
+#include "bufferpool/pool/base/BufferPool.hpp"
 #include "productionline/worker/base/ComponentTopology.hpp"
 #include <cstring>
 #include <climits>
@@ -21,7 +21,7 @@ extern "C" {
 // ============ 构造/析构 ============
 
 FFmpegEncodeWorker::FFmpegEncodeWorker(const WorkerConfig& config)
-    : WorkerBase(BufferAllocatorFactory::AllocatorType::AVFRAME, config)
+    : WorkerBase(BufferPoolBuilderFactory::AllocatorType::AVFRAME, config)
     , logger_(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Worker.Encode")))
     , frame_source_(nullptr)
     , codec_ctx_ptr_(nullptr)
@@ -96,7 +96,7 @@ FFmpegEncodeWorker::~FFmpegEncodeWorker() {
     // 先清理 BufferPool
     if (!buffer_pool_type_map_.empty()) {
         LOG4CPLUS_DEBUG(logger_, "[EncodeWorker] 手动清理 BufferPool...");
-        allocator_facade_.destroyPool();
+        builder_->destroyPool();
         clearAllBufferPools();
     }
     
@@ -191,7 +191,7 @@ bool FFmpegEncodeWorker::open() {
         buffer_count = 32;  // 编码器默认 Buffer 数量
     }
     
-    uint64_t pool_id = allocator_facade_.allocatePoolWithBuffers(
+    uint64_t pool_id = builder_->allocatePoolWithBuffers(
         buffer_count,
         0,  // 初始大小，后续会动态调整
         pool_name,
@@ -246,7 +246,7 @@ bool FFmpegEncodeWorker::open() {
         if (!input_frame_) {
             LOG4CPLUS_ERROR(logger_, "[EncodeWorker] 分配 input_frame 结构体失败");
             unregisterBufferPool(BufferPoolType::ENCODE_VIDEO_OUTPUT);
-            allocator_facade_.destroyPool();
+            builder_->destroyPool();
             freeOutputCodecParameters();
             if (codec_ctx_ptr_) {
                 avcodec_free_context(&codec_ctx_ptr_);
@@ -255,29 +255,45 @@ bool FFmpegEncodeWorker::open() {
             frame_source_->close();
             return false;
         }
-        input_frame_->format = codec_ctx_ptr_->pix_fmt;
-        if (input_scale_needed_) {
+        const bool need_sws = input_scale_needed_ || format_conversion_needed_;
+        if (need_sws) {
+            input_frame_->format = static_cast<int>(worker_config_.encoder.input_pix_fmt);
             input_frame_->width  = frame_source_->getFrameWidth();
             input_frame_->height = frame_source_->getFrameHeight();
         } else {
+            input_frame_->format = codec_ctx_ptr_->pix_fmt;
             input_frame_->width  = output_width_;
             input_frame_->height = output_height_;
+            // TACO 硬件编码器按 contiguous 布局读取像素数据，不处理 linesize padding。
+            // 使用 align=1 确保 linesize == width，避免非 64 倍数宽度（如 144→192）时数据错位。
+            if (av_frame_get_buffer(input_frame_, 1) < 0) {
+                LOG4CPLUS_ERROR(logger_, "[EncodeWorker] input_frame av_frame_get_buffer 失败 (align=1)");
+                av_frame_free(&input_frame_);
+                input_frame_ = nullptr;
+                unregisterBufferPool(BufferPoolType::ENCODE_VIDEO_OUTPUT);
+                builder_->destroyPool();
+                freeOutputCodecParameters();
+                avcodec_free_context(&codec_ctx_ptr_);
+                codec_ctx_ptr_ = nullptr;
+                frame_source_->close();
+                return false;
+            }
         }
         LOG4CPLUS_DEBUG_FMT(logger_,
-            "[EncodeWorker] input_frame 已就绪: format=%d(%s), %dx%d, codec_pix_fmt=%d, scale_needed=%d",
+            "[EncodeWorker] input_frame 已就绪: format=%d(%s), %dx%d, codec_pix_fmt=%d, scale_needed=%d, fmt_conv=%d",
             input_frame_->format,
             av_get_pix_fmt_name(static_cast<AVPixelFormat>(input_frame_->format)) ? av_get_pix_fmt_name(static_cast<AVPixelFormat>(input_frame_->format)) : "unknown",
             input_frame_->width, input_frame_->height,
-            codec_ctx_ptr_->pix_fmt, input_scale_needed_ ? 1 : 0);
+            codec_ctx_ptr_->pix_fmt, input_scale_needed_ ? 1 : 0, format_conversion_needed_ ? 1 : 0);
 
-        if (input_scale_needed_) {
+        if (need_sws) {
             scaled_frame_ = av_frame_alloc();
             if (!scaled_frame_) {
                 LOG4CPLUS_ERROR(logger_, "[EncodeWorker] 分配 scaled_frame 失败");
                 av_frame_free(&input_frame_);
                 input_frame_ = nullptr;
                 unregisterBufferPool(BufferPoolType::ENCODE_VIDEO_OUTPUT);
-                allocator_facade_.destroyPool();
+                builder_->destroyPool();
                 freeOutputCodecParameters();
                 avcodec_free_context(&codec_ctx_ptr_);
                 codec_ctx_ptr_ = nullptr;
@@ -287,14 +303,15 @@ bool FFmpegEncodeWorker::open() {
             scaled_frame_->format = codec_ctx_ptr_->pix_fmt;
             scaled_frame_->width  = output_width_;
             scaled_frame_->height = output_height_;
-            if (av_frame_get_buffer(scaled_frame_, 64) < 0) {
+            // TACO 硬件编码器不处理 linesize padding，align=1 确保 linesize == width
+            if (av_frame_get_buffer(scaled_frame_, 1) < 0) {
                 LOG4CPLUS_ERROR(logger_, "[EncodeWorker] scaled_frame av_frame_get_buffer 失败");
                 av_frame_free(&scaled_frame_);
                 scaled_frame_ = nullptr;
                 av_frame_free(&input_frame_);
                 input_frame_ = nullptr;
                 unregisterBufferPool(BufferPoolType::ENCODE_VIDEO_OUTPUT);
-                allocator_facade_.destroyPool();
+                builder_->destroyPool();
                 freeOutputCodecParameters();
                 avcodec_free_context(&codec_ctx_ptr_);
                 codec_ctx_ptr_ = nullptr;
@@ -321,7 +338,7 @@ bool FFmpegEncodeWorker::open() {
                 av_frame_free(&input_frame_);
                 input_frame_ = nullptr;
                 unregisterBufferPool(BufferPoolType::ENCODE_VIDEO_OUTPUT);
-                allocator_facade_.destroyPool();
+                builder_->destroyPool();
                 freeOutputCodecParameters();
                 avcodec_free_context(&codec_ctx_ptr_);
                 codec_ctx_ptr_ = nullptr;
@@ -640,7 +657,20 @@ bool FFmpegEncodeWorker::initializeEncoder() {
     codec_ctx_ptr_->max_b_frames = enc_config.max_b_frames;
     codec_ctx_ptr_->time_base = {enc_config.framerate_den, enc_config.framerate_num};
     codec_ctx_ptr_->framerate = {enc_config.framerate_num, enc_config.framerate_den};
-    codec_ctx_ptr_->pix_fmt = static_cast<AVPixelFormat>(enc_config.input_pix_fmt);
+    const AVPixelFormat user_input_pix_fmt = static_cast<AVPixelFormat>(enc_config.input_pix_fmt);
+    
+    // TACO 硬件编码器只接受 NV12，需要将其他格式转换为 NV12
+    if (encoder_name_.find("taco") != std::string::npos) {
+        codec_ctx_ptr_->pix_fmt = AV_PIX_FMT_NV12;
+        if (user_input_pix_fmt != AV_PIX_FMT_NV12) {
+            LOG4CPLUS_INFO_FMT(logger_,
+                "[EncodeWorker] TACO 硬件编码器需 NV12，输入格式=%s，将自动转换",
+                av_get_pix_fmt_name(user_input_pix_fmt) ? av_get_pix_fmt_name(user_input_pix_fmt) : "unknown");
+            format_conversion_needed_ = true;
+        }
+    } else {
+        codec_ctx_ptr_->pix_fmt = user_input_pix_fmt;
+    }
     
     // 4. 设置码率控制模式
     // TACO h264_taco：rc-mode 走表达式求值，已注册的符号为 cbr / vbr 等；CQP 与
@@ -802,7 +832,7 @@ FillResult FFmpegEncodeWorker::readAndSendFrame(AVFrame* temp_frame) {
     
     // 发送帧到编码器（Codec 层）
     using Result = CodecSendResult;
-    if (input_scale_needed_ && scaled_frame_ && sws_ctx_) {
+    if ((input_scale_needed_ || format_conversion_needed_) && scaled_frame_ && sws_ctx_) {
         const int src_h = frame_source_->getFrameHeight();
         const int lines = sws_scale(
             sws_ctx_,

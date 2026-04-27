@@ -24,7 +24,7 @@ bool TacoProDisplayDevice::initialize(int /*device_index*/) {
 
     context_ = TacoProDisplayContext::acquire(config_);
     if (!context_) {
-        LOG4CPLUS_ERROR(logger_, "Failed to acquire TacoProDisplayContext");
+        LOG4CPLUS_WARN(logger_, "Failed to acquire TacoProDisplayContext (display hardware unavailable)");
         return false;
     }
 

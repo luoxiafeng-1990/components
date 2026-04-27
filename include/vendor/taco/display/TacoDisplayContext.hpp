@@ -2,7 +2,7 @@
 #define TACO_DISPLAY_CONTEXT_HPP
 
 #include "vendor/taco/display/TacoDisplayExtension.hpp"
-#include "buffer/bufferpool/Buffer.hpp"
+#include "bufferpool/buffer/Buffer.hpp"
 
 #include <mutex>
 #include <vector>

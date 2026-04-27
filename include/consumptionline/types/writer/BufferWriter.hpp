@@ -1,6 +1,6 @@
 #pragma once
 
-#include "buffer/bufferpool/Buffer.hpp"
+#include "bufferpool/buffer/Buffer.hpp"
 #include <log4cplus/logger.h>
 #include <log4cplus/loggingmacros.h>
 #include <atomic>

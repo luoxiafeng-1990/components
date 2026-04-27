@@ -1,4 +1,4 @@
-#include "buffer/pool/MallocMemoryProvider.hpp"
+#include "vendor/contracts/MallocMemoryProvider.hpp"
 #include "vendor/contracts/MemoryProviderRegistry.hpp"
 #include <cstdlib>
 #include <cstring>

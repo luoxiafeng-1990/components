@@ -237,6 +237,8 @@ private:
 
     /// 源分辨率与编码分辨率不一致时，readRawFrame → swscale → 编码
     bool input_scale_needed_ = false;
+    /// 输入像素格式与编码器要求不一致时需要格式转换
+    bool format_conversion_needed_ = false;
     SwsContext* sws_ctx_ = nullptr;
     AVFrame* scaled_frame_ = nullptr;
 };

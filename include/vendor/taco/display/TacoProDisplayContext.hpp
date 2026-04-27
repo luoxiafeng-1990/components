@@ -1,10 +1,10 @@
 #ifndef TACO_PRO_DISPLAY_CONTEXT_HPP
 #define TACO_PRO_DISPLAY_CONTEXT_HPP
 
-#include "buffer/bufferpool/Buffer.hpp"
-#include "buffer/bufferpool/BufferPool.hpp"
-#include "buffer/BufferAllocatorFacade.hpp"
-#include "buffer/BufferAllocatorFactory.hpp"
+#include "bufferpool/buffer/Buffer.hpp"
+#include "bufferpool/pool/base/BufferPool.hpp"
+#include "bufferpool/pool/base/IBufferPoolBuilder.hpp"
+#include "bufferpool/pool/base/BufferPoolBuilderFactory.hpp"
 #include "productionline/worker/base/ComponentTopology.hpp"
 #include "vendor/taco/display/TacoProDisplayExtension.hpp"
 
@@ -37,7 +37,7 @@ class TacoProOsdOverlay;
  *
  * 核心职责：
  *   1. 通过 TACO 平台 API 独立分配每个 framebuffer 页的物理连续内存
- *   2. 通过 BufferAllocatorFacade（FRAMEBUFFER 类型）+ BufferPool 管理 framebuffer 页
+ *   2. 通过 IBufferPoolBuilder（CONTINUOUS_PHYSICAL 类型）+ BufferPool 管理 framebuffer 页
  *   3. 提供 channelWrite() 接口供多通道并发写入（PP 硬件 resize）
  *   4. 渲染线程等待所有通道写完后提交（帧级超时保护）
  *   5. 显示定时器定时从 FILLED 队列取帧 → DMA → VSYNC
@@ -155,7 +155,7 @@ private:
 
     // === BufferPool 管理 ===
     // allocatePoolWithBuffers 内部通过 TACO API 分配，destroyPool 自动清理
-    std::unique_ptr<BufferAllocatorFacade> allocator_facade_;
+    std::unique_ptr<IBufferPoolBuilder> builder_;
     uint64_t fb_pool_id_ = 0;
 
     std::shared_ptr<BufferPool> getBufferPool();

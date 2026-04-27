@@ -1,5 +1,5 @@
 #include "productionline/worker/datasource/encodeddata/EncodedPacketSourceFromBuffer.hpp"
-#include "buffer/bufferpool/BufferPool.hpp"
+#include "bufferpool/pool/base/BufferPool.hpp"
 #include "common/Logger.hpp"
 #include "common/GlobalThreadPool.hpp"
 #include <cstring>
@@ -405,19 +405,30 @@ PacketAcquireResult EncodedPacketSourceFromBuffer::acquireEncodedPacket(AVPacket
     }
     
     std::unique_lock<std::mutex> lock(mutex_);
-    // ⭐ v2.22 修改：阻塞等待新 buffer 或 EOF
-    cv_subscribers_.wait(lock, [this]() {
-        return current_buffer_ != nullptr || 
-               !is_running_.load(std::memory_order_acquire);
+    
+    WorkerState& state = worker_states_[worker_id];
+    
+    // 等待条件：有可用 buffer，且版本高于 Worker 上次已 commit 的版本（或首次 acquire）
+    cv_subscribers_.wait(lock, [this, &state, worker_id]() {
+        if (!is_running_.load(std::memory_order_acquire))
+            return true;
+        if (!current_buffer_)
+            return false;
+        uint64_t ver = current_buffer_version_.load(std::memory_order_acquire);
+        if (state.acquired_version == ver && (state.has_committed || state.has_acquired))
+            return false;  // 当前版本已处理过，等待 Fetch 推进
+        return true;
     });
     
-    // 检查 EOF
     if (!is_running_.load(std::memory_order_acquire) && !current_buffer_) {
         LOG4CPLUS_DEBUG_FMT(logger_, "[Worker %p] acquireEncodedPacket: EOF", worker_id);
-        return Result::eof();  // EOF：已停止且无可用数据
+        return Result::eof();
     }
     
     if (!current_buffer_) {
+        if (!is_running_.load(std::memory_order_acquire)) {
+            return Result::eof();
+        }
         LOG4CPLUS_ERROR_FMT(logger_, "[Worker %p] acquireEncodedPacket: Internal error - "
             "cv woke up with is_running=true but current_buffer is null", worker_id);
         return Result::internalError();
@@ -425,13 +436,6 @@ PacketAcquireResult EncodedPacketSourceFromBuffer::acquireEncodedPacket(AVPacket
     
     uint64_t current_version = current_buffer_version_.load(std::memory_order_acquire);
     
-    // ⭐ v2.22 新增：获取或创建 Worker 状态
-    WorkerState& state = worker_states_[worker_id];
-    
-    // ⭐ v2.41 修复：同版本状态机判定
-    // - has_committed=true：该版本已完成，返回 packetAlreadyProcessed
-    // - has_acquired=true：正在处理该版本，返回 packetAlreadyProcessed
-    // - has_acquired=false && has_committed=false：上次已取消，允许同版本重新 acquire（避免卡死）
     if (state.acquired_version == current_version) {
         if (state.has_committed || state.has_acquired) {
             LOG4CPLUS_DEBUG_FMT(logger_,
@@ -440,7 +444,6 @@ PacketAcquireResult EncodedPacketSourceFromBuffer::acquireEncodedPacket(AVPacket
                 state.has_acquired, state.has_committed);
             return Result::packetAlreadyProcessed();
         }
-        // 取消后重试：允许重新获取同一 version
         LOG4CPLUS_DEBUG_FMT(logger_,
             "[Worker %p] acquireEncodedPacket: Re-acquire cancelled version %llu",
             worker_id, (unsigned long long)current_version);
@@ -498,13 +501,18 @@ bool EncodedPacketSourceFromBuffer::commitEncodedPacket(void* worker_id) {
     state.has_acquired = false;
     state.has_committed = true;
     
-    // 3. 递减订阅者计数
+    // 3. 递减订阅者计数（带下溢保护）
+    size_t prev = remaining_subscribers_.load(std::memory_order_acquire);
+    if (prev == 0) {
+        LOG4CPLUS_WARN_FMT(logger_,
+            "[Worker %p] commitEncodedPacket: remaining already 0, skip decrement (version %llu)",
+            worker_id, (unsigned long long)current_version);
+        return true;
+    }
     size_t remaining = remaining_subscribers_.fetch_sub(1, std::memory_order_acq_rel) - 1;
     LOG4CPLUS_DEBUG_FMT(logger_, "commitEncodedPacket: remaining=%zu", remaining);
     // 4. 如果所有订阅者都完成，唤醒 Fetch 任务
     if (remaining == 0) {
-        // ⭐ v2.22 修复：不在这里清空 current_buffer_！
-        // current_buffer_ 的清空和释放由 fetchTaskFunc() 负责
         LOG4CPLUS_DEBUG(logger_, "commitEncodedPacket: notify_one");
         cv_fetch_.notify_one();
     }

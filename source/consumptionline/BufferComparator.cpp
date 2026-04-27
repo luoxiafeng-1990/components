@@ -226,10 +226,90 @@ FrameCompareResult BufferComparator::compare(
     }
     
     // 步骤2：元数据检查
+    resolution_mismatch_detected_ = false;
     if (!compareMetadata(ref_info, test_info, result)) {
         failed_count_++;
         updateStatistics(result);
         writeReport(result);
+        return result;
+    }
+    
+    // 步骤2.5：分辨率不匹配时（pp/scale场景），转 YUV420P 后缩放参考帧再比较
+    if (resolution_mismatch_detected_) {
+        AVFrame* ref_yuv = convertToYUV420P(reference_buffer, ref_info);
+        AVFrame* test_yuv = convertToYUV420P(test_buffer, test_info);
+        
+        if (!ref_yuv || !test_yuv) {
+            if (ref_yuv) freeConvertedFrame(ref_yuv);
+            if (test_yuv) freeConvertedFrame(test_yuv);
+            result.error_message = "Format conversion failed for resolution-mismatch path";
+            result.passed = false;
+            result.level = FrameCompareResult::FAIL;
+            failed_count_++;
+            updateStatistics(result);
+            writeReport(result);
+            return result;
+        }
+        
+        AVFrame* ref_scaled = rescaleFrame(ref_yuv, test_yuv->width, test_yuv->height);
+        freeConvertedFrame(ref_yuv);
+        
+        if (!ref_scaled) {
+            freeConvertedFrame(test_yuv);
+            result.error_message = "Rescale failed for resolution-mismatch path";
+            result.passed = false;
+            result.level = FrameCompareResult::FAIL;
+            failed_count_++;
+            updateStatistics(result);
+            writeReport(result);
+            return result;
+        }
+        
+        Buffer tmp_ref(0xFFF0, ref_scaled->data[0], 0,
+                       ref_scaled->linesize[0] * ref_scaled->height,
+                       Buffer::Ownership::EXTERNAL);
+        tmp_ref.setAVFrame(ref_scaled);
+        tmp_ref.setImageMetadataFromAVFrame(ref_scaled);
+        
+        Buffer tmp_test(0xFFF1, test_yuv->data[0], 0,
+                        test_yuv->linesize[0] * test_yuv->height,
+                        Buffer::Ownership::EXTERNAL);
+        tmp_test.setAVFrame(test_yuv);
+        tmp_test.setImageMetadataFromAVFrame(test_yuv);
+        
+        FormatInfo scaled_info = {};
+        scaled_info.format = AV_PIX_FMT_YUV420P;
+        scaled_info.width = ref_scaled->width;
+        scaled_info.height = ref_scaled->height;
+        scaled_info.name = "yuv420p";
+        scaled_info.is_yuv = true;
+        scaled_info.is_rgb = false;
+        scaled_info.is_planar = true;
+        scaled_info.num_planes = 3;
+        
+        FormatInfo test_yuv_info = scaled_info;
+        test_yuv_info.width = test_yuv->width;
+        test_yuv_info.height = test_yuv->height;
+        
+        result = compareYUV(&tmp_ref, scaled_info, &tmp_test, test_yuv_info);
+        
+        freeConvertedFrame(ref_scaled);
+        freeConvertedFrame(test_yuv);
+        
+        result.frame_index = compare_count_.load() - 1;
+        updateStatistics(result);
+        writeReport(result);
+        
+        if (config_.verbose) {
+            if (result.level == FrameCompareResult::FAIL) {
+                LOG_ERROR_FMT("  Frame %d (rescaled): FAIL (PSNR-Y: %.2f dB)", result.frame_index, result.psnr_y);
+            } else if (result.level == FrameCompareResult::WARN) {
+                LOG_WARN_FMT("  Frame %d (rescaled): WARN (PSNR-Y: %.2f dB)", result.frame_index, result.psnr_y);
+            } else if (result.frame_index % 50 == 0) {
+                LOG_DEBUG_FMT("  Frame %d (rescaled): PASS (PSNR-Y: %.2f dB)", result.frame_index, result.psnr_y);
+            }
+        }
+        
         return result;
     }
     
@@ -478,16 +558,10 @@ bool BufferComparator::compareMetadata(
     const FormatInfo& test_info,
     FrameCompareResult& result
 ) {
-    // 检查分辨率
     if (ref_info.width != test_info.width || ref_info.height != test_info.height) {
-        result.error_message = "Resolution mismatch: " + 
-                              std::to_string(ref_info.width) + "x" + std::to_string(ref_info.height) + 
-                              " vs " + 
-                              std::to_string(test_info.width) + "x" + std::to_string(test_info.height);
-        result.passed = false;
-        result.level = FrameCompareResult::FAIL;
-        LOG_ERROR_FMT("[BufferComparator] %s", result.error_message.c_str());
-        return false;
+        LOG_WARN_FMT("[BufferComparator] Resolution differs: ref=%dx%d test=%dx%d (pp/scale expected, will rescale ref for comparison)",
+                     ref_info.width, ref_info.height, test_info.width, test_info.height);
+        resolution_mismatch_detected_ = true;
     }
     
     return true;
@@ -2072,6 +2146,49 @@ double BufferComparator::calculateSSIM_RGB_B(
     return calculateSSIM(channel1.data(), channel2.data(), 
                        info1.width, info1.height,
                        info1.width, info2.width);
+}
+
+// ============================================================================
+// 缩放帧（处理 pp 模式分辨率变化）
+// ============================================================================
+
+AVFrame* BufferComparator::rescaleFrame(AVFrame* src_frame, int dst_width, int dst_height) {
+    if (!src_frame) return nullptr;
+    if (src_frame->width == dst_width && src_frame->height == dst_height) {
+        return av_frame_clone(src_frame);
+    }
+
+    AVFrame* dst_frame = av_frame_alloc();
+    if (!dst_frame) return nullptr;
+
+    dst_frame->format = src_frame->format;
+    dst_frame->width = dst_width;
+    dst_frame->height = dst_height;
+
+    if (av_frame_get_buffer(dst_frame, 0) < 0) {
+        av_frame_free(&dst_frame);
+        return nullptr;
+    }
+
+    SwsContext* sws_ctx = sws_getContext(
+        src_frame->width, src_frame->height, static_cast<AVPixelFormat>(src_frame->format),
+        dst_width, dst_height, static_cast<AVPixelFormat>(src_frame->format),
+        SWS_BICUBIC, nullptr, nullptr, nullptr
+    );
+
+    if (!sws_ctx) {
+        av_frame_free(&dst_frame);
+        return nullptr;
+    }
+
+    sws_scale(sws_ctx, src_frame->data, src_frame->linesize, 0, src_frame->height,
+              dst_frame->data, dst_frame->linesize);
+
+    sws_freeContext(sws_ctx);
+
+    LOG_DEBUG_FMT("[BufferComparator] Rescaled ref frame: %dx%d → %dx%d",
+                  src_frame->width, src_frame->height, dst_width, dst_height);
+    return dst_frame;
 }
 
 } // namespace io

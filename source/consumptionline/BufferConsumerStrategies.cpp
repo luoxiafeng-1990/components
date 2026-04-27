@@ -5,8 +5,8 @@
 
 #include "consumptionline/core/BufferConsumerStrategies.hpp"
 #include "productionline/worker/base/ComponentTopology.hpp"
-#include "buffer/BufferAllocatorFacade.hpp"
-#include "buffer/BufferAllocatorFactory.hpp"
+#include "bufferpool/pool/base/IBufferPoolBuilder.hpp"
+#include "bufferpool/pool/base/BufferPoolBuilderFactory.hpp"
 #include "vendor/taco/display/DisplayDeviceFactory.hpp"
 #include "productionline/worker/core/FFmpegEncodeWorker.hpp"
 #include "productionline/worker/datasource/rawdata/RawFrameSourceFromBuffer.hpp"
@@ -84,7 +84,7 @@ bool DisplayConsumer::initialize(const std::vector<Buffer*>& first_buffers) {
         }
         display_ = DisplayDeviceFactory::create(*config_.vendor);
         if (!display_->initialize(config_.device_id)) {
-            LOG4CPLUS_ERROR(log4cplus::Logger::getRoot(), "DisplayConsumer: Failed to initialize display device");
+            LOG4CPLUS_WARN(log4cplus::Logger::getRoot(), "DisplayConsumer: Failed to initialize display device (tpsfb* may not exist on this host)");
             return false;
         }
         
@@ -1500,9 +1500,9 @@ bool JpegEncodeConsumer::initialize(const std::vector<Buffer*>& first_buffers) {
     // 1. 创建编码输入 BufferPool（AVFrame 分配器）
     {
         size_t frame_size = static_cast<size_t>(src_width) * src_height * 3 / 2;
-        BufferAllocatorFacade allocator(
-            BufferAllocatorFactory::AllocatorType::AVFRAME);
-        input_pool_id_ = allocator.allocatePoolWithBuffers(
+        auto allocator = BufferPoolBuilderFactory::create(
+            BufferPoolBuilderFactory::AllocatorType::AVFRAME);
+        input_pool_id_ = allocator->allocatePoolWithBuffers(
             4, frame_size, "JpegEncodeInput", "ENCODE_INPUT");
         if (input_pool_id_ == 0) {
             LOG4CPLUS_ERROR(logger_, "创建编码输入 BufferPool 失败");

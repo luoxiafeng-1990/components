@@ -2,7 +2,7 @@
 #define ENCODED_PACKET_SOURCE_FROM_BUFFER_HPP
 
 #include "productionline/worker/datasource/encodeddata/IEncodedPacketSource.hpp"
-#include "buffer/bufferpool/Buffer.hpp"
+#include "bufferpool/buffer/Buffer.hpp"
 #include <memory>
 #include <string>
 #include <atomic>

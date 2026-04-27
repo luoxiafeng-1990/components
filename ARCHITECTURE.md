@@ -2,1551 +2,210 @@
 
 ## 📋 目录
 
-1. [架构概述](#架构概述)
-2. [核心类职责](#核心类职责)
-3. [类协作关系](#类协作关系)
-4. [设计模式](#设计模式)
-5. [门面模式与工厂模式详细分析](#门面模式与工厂模式详细分析)
-6. [数据流](#数据流)
-7. [核心类详解](#核心类详解)
-8. [使用示例](#使用示例)
-9. [最佳实践](#最佳实践)
-10. [代码规范与风格指南](#代码规范与风格指南)
-11. [API参考](#api参考)
-12. [常见问题](#常见问题)
+1. [MultiWorkerProductionLine 多组并行架构](#multiworkerproductionline-多组并行架构)
+2. [架构概述](#架构概述)
+3. [核心类职责](#核心类职责)
+4. [类协作关系](#类协作关系)
+5. [设计模式](#设计模式)
+6. [门面模式与工厂模式详细分析](#门面模式与工厂模式详细分析)
+7. [数据流](#数据流)
+8. [核心类详解](#核心类详解)
+9. [使用示例](#使用示例)
+10. [最佳实践](#最佳实践)
+11. [代码规范与风格指南](#代码规范与风格指南)
+12. [API参考](#api参考)
+13. [常见问题](#常见问题)
+
 
 ---
 
-## 版本历史
+## MultiWorkerProductionLine 多组并行架构
 
-### v2.70（当前版本）- 多Worker同步比较重构与目录规范化
+### 设计哲学
 
-**发布日期：** 2026-04-19
+MultiWorkerProductionLine 采用 **Build Phase / Run Phase 分离** 的架构设计，核心原则如下：
 
-**主要变更：**
+- **Build Phase / Run Phase 分离**：Config 的生命周期在构造函数的 `buildGroups()` 阶段结束，之后所有运行逻辑仅依赖 `WorkerGroupRuntime`
+- **Single Source of Truth**：`WorkerGroupRuntime` 是运行阶段的唯一数据权威，不反查 Config
+- **Pure Data Config**：`GroupConfig` 是纯数据结构，不含业务方法
+- **Stats 下沉**：统计数据按 Worker 粒度独立管理，Group 级统计通过聚合 Worker 级数据得出
 
-- ✅ **WorkerSyncCoordinator PTS 深拷贝匹配**：解决 B 帧视频 EAGAIN 不一致问题
-  - 新增 `PendingFrame` 结构：`av_frame_clone()` 深拷贝成功 Worker 的帧
-  - 新增 `tryMatchPending()`：按 PTS 配对缓存帧并执行比较
-  - 新增 `clearPendingFrames()`：释放所有缓存的 AVFrame
-  - `arrive()` 使用 `cv_.wait_for(5s)` 超时机制替代无限等待，防止死锁
+### 配置结构（Config）
 
-- ✅ **Worker 退出计数器同步**：解决 busy loop 问题
-  - `WorkerSyncCoordinator::removeWorker()`：Worker 退出时递减 `total_workers_` 并唤醒等待线程
-  - `EncodedPacketSourceFromBuffer::unsubscribe()`：Worker 退出时递减 `total_subscribers_`
-  - `MultiWorkerProductionLine::workerThreadFunc()`：退出前调用 `unsubscribe` + `removeWorker`
-  - `arrive()` 条件更新为同时检查 `arrived_count >= total_workers_`
-
-- ✅ **FFmpegDecodeWorker 状态安全**：修复 `readAndSendPacket` 重入问题
-  - 所有非 SUCCESS 返回路径显式重置 `packet_acquired_ = false` 和 `current_packet_ptr_ = nullptr`
-  - 防止 stale 指针导致的 busy loop
-
-- ✅ **BufferComparator 色彩空间保真**：修复 YUVJ420P 全范围丢失
-  - `convertToYUV420P()` 对 `YUVJ420P`/`YUV420P` 直接 `av_frame_clone()`，不经过 `sws_scale`
-  - `NV12`/`NV21` 手动去交织为 `YUV420P`，避免 `sws_scale` 引入色彩范围转换
-
-- ✅ **consumptionline 目录重构**：
-  - `core/`：核心接口和服务（`IBufferConsumer`、`BufferConsumerService`、`BufferConsumerStrategies`、`config/`）
-  - `types/compare/`：比较消费类型（`BufferComparator`）
-  - `types/writer/`：写入消费类型（`BufferWriter`）
-  - `types/npu/`：NPU推理消费类型（`NpuInferenceConsumer`）
-
-- ✅ **未使用接口清理**：删除 9 个类共 16 个未被调用的 public 方法
-  - `WorkerSyncCoordinator`：`getWorkerCount()`、`getCallbackCount()`、`isEnabled()`
-  - `FFmpegDecodeWorker`：`getDecodedFrames()`、`getDroppedFrames()`、`printStats()`
-  - `FFmpegEncodeWorker`：`setFrameSource()`、`getCodecContext()`、`printStats()`
-  - `BufferComparator`：`getCompareCount()`、`getPassedCount()`、`getFailedCount()`、`isPassed()`
-  - `WorkerBase`：`getTopologyId()`、`hasBufferPoolType()`
-  - `BufferPool`：`getBufferById()`、`printAllBuffers()`
-  - `MultiWorkerProductionLine`：`getGroupCount()`
-
-- ✅ **VdecPlugin COMPARE 模式增强**：
-  - 硬件解码器设置 `reorder_disable = false` 确保 PTS 有序输出
-  - 与软件解码器帧对齐，消除 B 帧重排序差异
-
-**设计原则：**
-- **资源生命周期一致性**：Worker 退出必须同步更新所有关联计数器
-- **超时防御**：同步等待必须有超时机制，防止单个 Worker 异常导致全局死锁
-- **深拷贝隔离**：跨帧缓存使用 `av_frame_clone()` 避免 use-after-free
-- **目录即接口**：`consumptionline` 按职责分为 `core`（不可变内核）和 `types`（可扩展消费类型）
-
----
-
-### v2.33 - FillResult 类型安全重构
-
-**发布日期：** 2026-02-04
-
-**主要变更：**
-
-- ✅ **FillResult 类型安全**：重构 `fillBuffer()` 返回类型
-  - 新增 `FillStatus` 枚举：状态值设计（成功=0，可重试=正值，终止=-1，错误=负值）
-  - 新增 `FillResult` 类：封装 `FillStatus`，提供丰富的查询方法
-  - 所有 Worker 的 `fillBuffer()` 返回类型从 `bool` 改为 `FillResult`
-
-- ✅ **FillStatus 枚举设计**：
-  - 成功：`Success` (0)
-  - 可重试：`NonVideoPacket` (1)、`CodecEagain` (2)、`PacketAlreadyProcessed` (3)
-  - 终止：`EndOfStream` (-1)
-  - 错误：`AcquireError` (-10)、`CodecError` (-11)、`InvalidParam` (-12)、`NotOpen` (-13)、`AllocFailed` (-14)、`InternalError` (-15)
-
-- ✅ **FillResult 便捷方法**：
-  - `ok()`：是否成功
-  - `isEof()`：是否到达 EOF
-  - `shouldRetry()`：是否需要重试（正值状态）
-  - `isTerminal()`：是否是终止状态（EOF 或错误）
-  - `isError()`：是否是错误
-  - `statusString()`：获取状态描述
-
-- ✅ **WorkerSyncCoordinator 更新**：
-  - `arrive()` 参数类型从 `FillBufferResult` 改为 `FillStatus`
-  - `FrameSync::worker_results` 类型相应更新
-
-- ✅ **MultiWorkerProductionLine 优化**：
-  - `performFrameSync()` 参数类型更新为 `FillStatus`
-  - 简化 fillBuffer 失败后的状态处理逻辑
-
-- ✅ **VideoProductionLine 重构**：
-  - 使用新的 `FillResult` 类型处理 fillBuffer 结果
-  - 更清晰的分支处理：成功 / EOF / 可重试 / 错误
-
-**FillResult 使用示例：**
 ```cpp
-FillResult result = worker->fillBuffer(index, buffer);
-
-if (result.ok()) {
-    // ✅ 成功，处理 buffer
-} else if (result.shouldRetry()) {
-    // ⏳ 需要重试（NonVideoPacket / CodecEagain / PacketAlreadyProcessed）
-    continue;
-} else if (result.isEof()) {
-    // 📍 正常结束
-    break;
-} else {
-    // ❌ 错误
-    LOG_ERROR("Fill failed: %s", result.statusString());
-}
-```
-
-**设计原则：**
-- **类型安全**：`FillResult` 替代 `bool`，编译期捕获遗漏的状态处理
-- **语义清晰**：状态值设计使得 `shouldRetry()` 等方法可以用简单的数值比较实现
-- **统一风格**：与 `PacketAcquireResult` 保持一致的 API 风格
-
----
-
-### v2.32 - IEncodedPacketSource 接口统一
-
-**发布日期：** 2026-02-04
-
-**主要变更：**
-
-- ✅ **接口类型移动**：`AcquireStatus` 和 `PacketAcquireResult` 从 `EncodedPacketSourceFromBuffer.hpp` 移至 `IEncodedPacketSource.hpp`
-  - 原因：这些类型是接口方法的返回值，所有子类都在使用
-
-- ✅ **接口方法统一**：删除 `readEncodedPacket()`，统一使用 `acquireEncodedPacket()`
-  - 新签名：`PacketAcquireResult acquireEncodedPacket(AVPacket* out_packet, void* worker_id = nullptr)`
-  - File/RTSP 模式：往 `out_packet` 填充数据（零拷贝），`result.packet()` 返回 `out_packet`
-  - Buffer 共享模式：忽略 `out_packet`，`result.packet()` 返回借用指针
-
-- ✅ **新增接口方法**：`commitEncodedPacket()` 和 `cancelEncodedPacket()` 提升为接口方法
-  - 共享模式（Buffer）：递减订阅者计数 / 重置 Worker 状态
-  - 非共享模式（File/RTSP）：提供默认空实现
-
-- ✅ **EncodedPacketSourceFromRtsp 增强**：
-  - 构造函数新增 `max_frames` 参数：`EncodedPacketSourceFromRtsp(const std::string& rtsp_url, int max_frames = -1)`
-  - 支持 RTSP 流的帧数限制
-
-- ✅ **FFmpegDecodeWorker 统一**：
-  - `readAndSendPacket()` 重构，统一使用 `acquireEncodedPacket()` 接口
-  - 简化 Buffer 模式与 File/RTSP 模式的代码路径
-
-**接口统一设计：**
-| 模式 | `out_packet` 参数 | `result.packet()` 返回值 | `commit/cancel` |
-|------|-------------------|--------------------------|-----------------|
-| File | 必须提供 | 返回 `out_packet` | 默认空实现 |
-| RTSP | 必须提供 | 返回 `out_packet` | 默认空实现 |
-| Buffer 共享 | 忽略 | 返回借用指针 | 必须调用 |
-
-**设计原则：**
-- **零拷贝**：File/RTSP 模式直接填充调用者的 `AVPacket`
-- **统一接口**：所有数据源使用相同的获取/提交/取消接口
-- **向后兼容**：非共享模式的 `commit/cancel` 有默认实现
-
----
-
-### v2.31 - FFmpeg 编码 Worker 与 PacketAcquireResult 状态管理
-
-**发布日期：** 2026-02-04
-
-**主要变更：**
-
-- ✅ **FFmpegEncodeWorker 新增**：支持 H.264/H.265/JPEG 编码的 Worker 实现
-  - 支持编码器：`h264_taco`、`hevc_taco`、`jpeg_taco`（硬件）、`libx264`、`libx265`、`mjpeg`（软件）
-  - 新增 `WorkerType::FFMPEG_ENCODE` 类型
-  - 新增 `WorkerConfig::EncoderConfig` 配置结构（码率、GOP、B帧、帧率等）
-
-- ✅ **IRawFrameSource 接口层次**：引入原始帧数据源接口（与 `IEncodedPacketSource` 对称）
-  - `IRawFrameSource`：原始帧数据源抽象接口（继承 `IDataSourceNavigator`）
-  - `RawFrameSourceFromFile`：从 YUV/RGB 文件读取原始帧
-  - `RawFrameSourceFromBuffer`：从 BufferPool 获取已解码帧（Pipeline：解码→编码）
-
-- ✅ **PacketAcquireResult 类型安全**：`acquireEncodedPacket()` 返回类型重构
-  - 返回类型从 `AVPacket*` 改为 `PacketAcquireResult`（类似 Google StatusOr / Rust Result）
-  - 新增 `AcquireStatus` 枚举：`Success`、`Eof`、`PacketAlreadyProcessed`、`InvalidMode`、`NoData`
-  - 提供便捷方法：`ok()`、`isEof()`、`isPacketAlreadyProcessed()`、`isError()`、`packet()`、`operator->()`
-
-- ✅ **FillBufferResult 细分**：支持更精确的错误状态
-  - 新增状态：`ACQUIRE_AGAIN`（需等待新 buffer）、`ACQUIRE_EOF`（数据流结束）、`ACQUIRE_ERROR`（获取错误）
-  - `fillBuffer()` 返回 `FillResult` 已包含完整状态，无需额外的状态查询方法
-
-- ✅ **WorkerSyncCoordinator 增强**：帧同步支持多场景处理
-  - `arrive()` 方法新增 `FillBufferResult` 参数
-  - 支持场景：都成功（执行对比）、都 EAGAIN（跳过）、都 ERROR（跳过）、混合状态（报错/跳过）
-  - `CompareCallbackContext` 新增 `BufferComparator` 成员，避免每帧重复创建
-
-- ✅ **DataSourceConfig 增强**：
-  - 新增 `max_frames` 帧数限制（-1=无限制）
-  - 新增 `deferred_commit` 延迟提交模式（帧同步场景使用）
-
-- ✅ **MultiWorkerProductionLine 优化**：
-  - 新增 `performFrameSync()` 私有方法，封装帧同步逻辑
-  - 支持根据 `FillBufferResult` 状态决定提交行为
-
-**数据源接口对称设计：**
-| 接口类型 | 数据形式 | 用途 | 实现类 |
-|----------|----------|------|--------|
-| `IEncodedPacketSource` | 编码后的 AVPacket | 解码器输入 | `EncodedPacketSourceFromFile/Buffer/Rtsp` |
-| `IRawFrameSource` | 原始的 AVFrame | 编码器输入 | `RawFrameSourceFromFile/Buffer` |
-
-**PacketAcquireResult 使用示例：**
-```cpp
-auto result = ps->acquireEncodedPacket(this);
-
-if (result.ok()) {
-    AVPacket* pkt = result.packet();
-    int64_t pts = result->pts;  // 箭头运算符访问
-} else if (result.isEof()) {
-    // 正常结束
-} else if (result.isPacketAlreadyProcessed()) {
-    // 当前 packet 已处理过
-} else {
-    // 错误处理
-    LOG_ERROR("获取失败: %s", result.statusString());
-}
-```
-
-**FillBufferResult 状态转换：**
-```
-acquireEncodedPacket() 返回值 → FillBufferResult 映射：
-- Success     → SUCCESS（解码成功后）
-- Eof         → ACQUIRE_EOF
-- PacketAlreadyProcessed → ACQUIRE_AGAIN
-- InvalidMode → ACQUIRE_ERROR
-- NoData      → ACQUIRE_ERROR
-```
-
-**设计原则：**
-- **类型安全**：使用结果类型替代裸指针，编译期捕获错误
-- **语义清晰**：状态枚举明确表达各种情况
-- **对称设计**：`IRawFrameSource` 与 `IEncodedPacketSource` 形成对称的数据源层次
-- **错误可追溯**：`FillBufferResult` 细分状态便于调试和日志记录
-
----
-
-### v2.28 - 编码数据源接口重命名与 CompareConfig 统一
-
-**发布日期：** 2026-02-02
-
-**主要变更：**
-
-- ✅ **编码数据源接口重命名**：优化接口命名，明确数据源处理的是编码后的数据
-  - `IPacketSource` → `IEncodedPacketSource`
-  - `FilePacketSource` → `EncodedPacketSourceFromFile`
-  - `RtspPacketSource` → `EncodedPacketSourceFromRtsp`
-  - `BufferPacketSource` → `EncodedPacketSourceFromBuffer`
-  - 文件名同步更新（如 `IEncodedPacketSource.hpp`、`EncodedPacketSourceFromFile.hpp/.cpp` 等）
-
-- ✅ **方法重命名**：
-  - `readPacket()` → `readEncodedPacket()`
-  - `acquirePacket()` → `acquireEncodedPacket()`
-  - `commitPacket()` → `commitEncodedPacket()`
-  - `cancelPacket()` → `cancelEncodedPacket()`
-
-- ✅ **CompareConfig 统一**：将 `CompareConfig` 统一到 `WorkerConfig::ConsumerTypeConfig::CompareType`
-  - 重构 `CompareCallbackContext` 到 `WorkerSyncCoordinator.hpp`
-  - `WorkerSyncCoordinator` 新增 `createDefaultCompareCallback()` 工厂方法
-  - `BufferConsumerService.startMultiWorkerCompare()` 简化接口
-  - 配置字段命名规范化 (`min_psnr`, `min_ssim`, `warn_psnr`, `warn_ssim`)
-
-- ✅ **Buffer PTS 支持**：Buffer 类新增 PTS 接口支持多通道帧对齐
-
-**设计原则：**
-- **命名清晰**：接口名明确表示数据源类型（编码后的 AVPacket）
-- **语义准确**：`Encoded` 前缀与 FFmpeg 术语保持一致
-- **扩展预留**：为未来的 `IRawDataSource`（原始数据源）接口预留空间
-
-**命名对照表：**
-| 旧名称 | 新名称 | 说明 |
-|--------|--------|------|
-| `IPacketSource` | `IEncodedPacketSource` | 编码数据源抽象接口 |
-| `FilePacketSource` | `EncodedPacketSourceFromFile` | 文件编码数据源 |
-| `RtspPacketSource` | `EncodedPacketSourceFromRtsp` | RTSP 流编码数据源 |
-| `BufferPacketSource` | `EncodedPacketSourceFromBuffer` | Buffer 池编码数据源 |
-| `readPacket()` | `readEncodedPacket()` | 读取编码 packet |
-| `acquirePacket()` | `acquireEncodedPacket()` | 获取共享模式编码 packet |
-| `commitPacket()` | `commitEncodedPacket()` | 提交共享模式编码 packet |
-| `cancelPacket()` | `cancelEncodedPacket()` | 取消共享模式编码 packet |
-
----
-
-### v2.26 - 多通道扩展支持与参数审计修复
-
-**发布日期：** 2026-01-30
-
-**主要变更：**
-
-- ✅ **多通道配置支持**：重构 `PPTestParams`/`SaveRawType` 支持多通道配置
-  - 新增 `channels`、`formats`、`output_paths` 字段
-  - 命令行参数支持逗号分隔：`-c 0,1 -f nv12,rgb888 -o ch0.yuv,ch1.rgb -n 100,200`
-  - `SaveRawConsumer` 支持按通道独立保存和帧数限制
-
-- ✅ **参数审计修复**：
-  - 修复 `--verbose` 参数链断裂问题
-  - 移除无效的 `--reference` 参数
-  - 修复 `LOG4CPLUS` 宏参数错误 (`WARN/INFO` → `WARN_FMT/INFO_FMT`)
-
-- ✅ **测试用例清理**：删除 `VdecTestSuite` 中 14 个无效的 PP 组合测试
-
-**设计原则：**
-- **通道独立性**：每个通道可以有独立的格式、输出路径和帧数限制
-- **配置灵活性**：支持单通道和多通道的统一配置方式
-
----
-
-### v2.25 - ConsumerTypeConfig 架构重构与 MultiWorker 比较模式
-
-**发布日期：** 2026-01-30
-
-**主要变更：**
-
-- ✅ **ConsumerTypeConfig 重构**：重构 `ConsumerConfig` → `ConsumerTypeConfig`
-  - 使用嵌套结构体分类消费类型
-  - 新增 `DisplayType`/`SaveRawType`/`SaveEncodedType`/`CompareType`/`PerformanceType`/`CountType` 子结构
-  - 支持多种消费类型叠加（如同时显示+保存）
-
-- ✅ **MultiWorker 比较模式**：新增 `startMultiWorkerCompare()` 函数
-  - 支持 `MultiWorkerProductionLine` 比较
-  - 新增 `callbacks::CompareCallbackContext` 比较回调机制
-
-- ✅ **WorkerConfigBuilder 更新**：
-  - 新增 `enableDisplay()`、`enableSaveRaw()`、`enableCompare()` 等便捷方法
-  - 优化 BufferPool shutdown 后的 drain 阶段
-
-- ✅ **测试框架优化**：
-  - `ITestModule` 新增 `runSingle`/`runCompare`/`runParallel` 公共方法
-  - `PPTestSuite` 重构为 `ExecuteMode` 风格
-
----
-
-### v2.24 - 消费类型配置重构与 MultiWorker 比较模式
-
-**发布日期：** 2026-01-29
-
-**主要变更：**
-
-- ✅ **ConsumerTypeConfig 重构**：将 `WorkerConfig::ConsumerConfig` 重命名为 `ConsumerTypeConfig`
-  - 成员变量 `consumer` 重命名为 `consumer_type`
-  - 使用嵌套结构体分类不同消费类型，每种类型都有独立的 `enable` 标志
-  - 支持多种消费类型叠加（如同时显示和保存）
-
-- ✅ **消费类型嵌套结构**：
-  - `DisplayType display` - 显示消费类型（设备 ID 配置）
-  - `SaveRawType save_raw` - 保存原始 YUV/RGB 数据（`BufferWriter::openRaw()`）
-  - `SaveEncodedType save_encoded` - 保存编码数据（`BufferWriter::openEncoded()`）
-  - `CompareType compare` - 比较消费类型（PSNR/SSIM 阈值配置）
-  - `PerformanceType performance` - 性能验证类型（目标帧率）
-  - `CountType count` - 仅统计消费类型
-
-- ✅ **startMultiWorkerCompare 新函数**：使用 `MultiWorkerProductionLine` 实现多 Worker 比较
-  - 比较在内部通过 `WorkerSyncCoordinator` 完成
-  - 支持每个 Worker 独立配置消费类型（显示、保存路径等）
-  - 外部消费策略独立于比较逻辑
-
-- ✅ **比较回调机制**：`callbacks::CompareCallbackContext` 和 `createCompareCallback()`
-  - 用于 `WorkerSyncCoordinator` 的 `callback_chain`
-  - 支持在帧同步完成后执行自定义比较逻辑
-  - 统计通过/失败帧数、计算平均 PSNR/SSIM
-
-- ✅ **WorkerConfigBuilder 更新**：
-  - `setConsumerConfig()` → `setConsumerTypeConfig()`
-  - 新增方法：`enableDisplay()`、`enableSaveRaw()`、`enableSaveEncoded()`、`enableCompare()`、`enablePerformance()`
-
-**设计原则：**
-- **类型分离**：每种消费类型独立配置，通过 `enable` 标志控制
-- **多类型叠加**：支持同时启用多种消费类型（如显示 + 保存）
-- **配置归属清晰**：消费循环控制（`max_frames`、`timeout_ms`）与消费类型分开
-- **独立配置**：每个 Worker 可以有不同的消费类型配置
-
-**配置结构变更：**
-```cpp
-// 旧结构
-struct WorkerConfig {
-    struct ConsumerConfig {
-        int max_frames;
-        bool enable_display;
-        int save_frames;
-        std::string output_path;
-        // ...
-    } consumer;
+struct GroupConfig {
+    enum class Mode { ONE_TO_ONE, ONE_TO_MANY, MANY_TO_ONE, MANY_TO_MANY };
+
+    std::string group_id;
+    std::map<std::string, WorkerConfig> producers;
+    std::map<std::string, WorkerConfig> consumers;
+    Mode mode = Mode::ONE_TO_ONE;
+    bool enable_frame_sync = false;
+    CallbackChain callback_chain;
 };
 
-// 新结构 (v2.24)
-struct WorkerConfig {
-    struct ConsumerTypeConfig {
-        // 执行控制
-        int max_frames;
-        int timeout_ms;
-        
-        // 消费类型（每种独立启用）
-        struct DisplayType {
-            bool enable;
-            int device_id;
-        } display;
-        
-        struct SaveRawType {
-            bool enable;
-            std::string output_path;
-            int max_frames;
-        } save_raw;
-        
-        struct SaveEncodedType {
-            bool enable;
-            std::string output_path;
-        } save_encoded;
-        
-        struct CompareType {
-            bool enable;
-            bool enable_psnr;
-            double min_psnr;
-            bool enable_ssim;
-            double min_ssim;
-        } compare;
-        
-        struct PerformanceType {
-            bool enable;
-            double target_fps;
-        } performance;
-        
-        struct CountType {
-            bool enable;
-        } count;
-    } consumer_type;
+struct MultiWorkerConfig {
+    std::vector<GroupConfig> groups;
+    int thread_pool_size = 64;
 };
 ```
 
-**使用示例：**
-```cpp
-// v2.24 新方式：使用嵌套结构体
-WorkerConfig config;
-config.consumer_type.display.enable = true;
-config.consumer_type.display.device_id = 0;
-config.consumer_type.save_raw.enable = true;
-config.consumer_type.save_raw.output_path = "/tmp/output.yuv";
-config.consumer_type.save_raw.max_frames = 100;
+配置结构是纯粹的 POD-like 数据容器，不包含任何业务逻辑方法。生产者和消费者通过 `std::map<std::string, WorkerConfig>` 统一管理，key 为 Worker 名称。
 
-// 使用 ConsumerTypeConfigBuilder + 顶层组装
-auto config = WorkerConfigBuilder()
-    .setConsumerTypeConfig(
-        ConsumerTypeConfigBuilder()
-            .setConsumerMaxFrames(100)
-            .enableDisplay(true, 0)
-            .enableSaveRaw(true, "/tmp/output.yuv", 100)
-            .enableCompare(true, 35.0, 0.95)
-            .build())
-    .build();
-
-// MultiWorker 比较模式
-BufferConsumerService service;
-service.startMultiWorkerCompare(multi_config, compare_callback);
-```
-
-**架构优势：**
-- **配置清晰**：每种消费类型的参数集中在一起
-- **独立控制**：可以精确控制每种消费类型的启用/禁用
-- **扩展性好**：新增消费类型只需添加新的嵌套结构体
-- **向后兼容**：通过 Builder 方法保持使用便利性
-
----
-
-### v2.23 - 帧同步回调机制
-
-**发布日期：** 2026-01-23
-
-**主要变更：**
-- ✅ **WorkerSyncCoordinator**：协调多 Worker 帧同步，支持回调链
-- ✅ **CallbackChainItem**：定义回调函数、上下文和名称
-- ✅ **ConnectorConfig 扩展**：新增 `enable_frame_sync` 和 `callback_chain`
-
----
-
-### v2.22 - 共享数据源三态控制与数据源配置重构
-**发布日期：** 2026-01-22
-
-**主要变更：**
-- ✅ **共享模式三态控制**：EncodedPacketSourceFromBuffer 引入 `acquire/commit/cancel` 三态 API（带 `worker_id`）
-  - `acquireEncodedPacket()`：阻塞等待新 buffer，版本号防止重复获取
-  - `commitEncodedPacket()`：成功解码后提交，递减订阅计数并驱动 Fetch 释放
-  - `cancelEncodedPacket()`：失败时取消，允许重试当前 buffer
-  - 移除 `PacketGuard`（RAII 不再适配成功/失败分支）
-- ✅ **共享模式状态追踪**：新增 `current_buffer_version_` + `worker_states_`，保证多消费者一致性
-- ✅ **数据源配置归一**：`buffer_mode/codec_params/time_base/shared_packet_source` 迁移至 `data_source`
-- ✅ **Worker 行为更新**：RTSP 解码在 Buffer 模式下显式 commit/cancel，并在 close 时清理未提交 packet
-
-**设计原则：**
-- **显式生命周期**：成功/失败分支清晰，避免隐式释放导致状态不一致
-- **版本号保护**：每个 Worker 只处理当前 buffer 一次
-- **配置职责清晰**：数据源相关参数统一归属 `data_source`
-
-**架构优势：**
-- **更可控的共享语义**：避免重复消费与错误释放
-- **可恢复性更强**：失败可取消并重试
-- **配置更直观**：Buffer 模式参数从解码器配置中剥离
-
----
-
-### v2.21 - 日志系统重构与关键 Bug 修复
-**发布日期：** 2026-01-16
-
-**主要变更：**
-- ✅ **日志系统全面重构**：采用 log4cplus 层次化架构
-  - 实现 26 个模块的层次化日志管理（components.Worker、components.BufferPool 等）
-  - 每个类使用独立 logger 成员变量，替代全局 LOG_XXX 宏
-  - 支持通过配置文件动态调整日志级别（无需重编译）
-  - 新增 `logger.properties` 配置文件支持
-  - 新增 `LOGGER_CONFIG_README.md` 日志配置指南
-- ✅ **关键 Bug 修复**：修复多处导致段错误的初始化问题
-  - 修复 `WorkerBase` 构造函数未初始化 `logger_` 导致段错误
-  - 修复 `BufferPoolRegistry` 构造函数未初始化 `logger_` 导致段错误
-  - 修复 `MultiWorkerProductionLine` 中 use-after-move 错误（访问已移走的 `consumer_info`）
-- ✅ **日志格式统一**：移除硬编码模块名，自动显示层次化模块路径
-  - 所有 `LOG_XXX` 宏替换为 `LOG4CPLUS_XXX(logger_, ...)`
-  - 移除手动添加的 `[ModuleName]` 前缀
-  - 日志输出格式：`[YYYY-MM-DD HH:MM:SS.mmm] [components.Module.SubModule] [LEVEL] message`
-
-**设计原则：**
-- **层次化管理**：日志按模块层次组织，支持继承式配置
-- **配置驱动**：通过配置文件控制日志级别，提高灵活性
-- **类型安全**：每个类持有独立 logger，避免全局状态
-- **初始化安全**：确保所有 logger 在构造函数中正确初始化
-- **模块独立控制**：每个模块拥有独立的 logger 实例，便于单独控制日志输出
-
-**核心设计：每个模块独立 Logger + 构造函数初始化**
-
-**设计理念：**
-- **目的**：为每个模块提供独立的日志控制能力，便于调试和问题定位
-- **实现方式**：每个类在构造函数初始化列表中初始化自己的 `logger_` 成员变量
-- **命名规范**：使用层次化命名，如 `components.Worker.Decode`、`components.BufferPool` 等
-
-**已实现该设计的模块清单：**
-
-| 模块类别 | 模块名称 | Logger 名称 | 初始化位置 |
-|---------|---------|------------|-----------|
-| Worker 基类 | `WorkerBase` | `components.Worker` | 构造函数初始化列表 |
-| Worker 实现 | `FFmpegDecodeWorker` | `components.Worker.Decode` | 构造函数初始化列表 |
-| Worker 实现 | `FFmpegEncodeWorker` | `components.Worker.Encode` | 构造函数初始化列表 |
-| Worker 实现 | `FfmpegPacketRecorderWorker` | `components.Worker.Recorder` | 构造函数初始化列表 |
-| Worker 门面 | `BufferFillingWorkerFacade` | `components.Worker.Facade` | 构造函数初始化列表 |
-| Worker 工厂 | `BufferFillingWorkerFactory` | `components.BufferFillingWorkerFactory` | 静态成员初始化（特殊） |
-| 数据源 | `EncodedPacketSourceFromFile` | `components.DataSource.File` | 构造函数初始化列表 |
-| 数据源 | `EncodedPacketSourceFromRtsp` | `components.DataSource.Rtsp` | 构造函数初始化列表 |
-| 数据源 | `EncodedPacketSourceFromBuffer` | `components.EncodedPacketSourceFromBuffer` | 构造函数初始化列表 |
-| 数据源 | `RawFrameSourceFromFile` | `components.RawFrameSource.File` | 构造函数初始化列表 |
-| 数据源 | `RawFrameSourceFromBuffer` | `components.RawFrameSource.Buffer` | 构造函数初始化列表 |
-| 生产流水线 | `VideoProductionLine` | `components.VideoProductionLine` | 构造函数初始化列表 |
-| 生产流水线 | `MultiWorkerProductionLine` | `components.MultiWorker` | 构造函数初始化列表 |
-| 协调器 | `WorkerSyncCoordinator` | `components.WorkerSyncCoordinator` | 构造函数初始化列表 |
-| Buffer 管理 | `BufferPool` | `components.BufferPool` | 构造函数初始化列表 |
-| Buffer 管理 | `BufferPoolRegistry` | `components.BufferPool.Registry` | 构造函数初始化列表 |
-| 分配器 | `AVFrameAllocator` | `components.Allocator.AVFrame` | 构造函数初始化列表 |
-| 分配器 | `FramebufferAllocator` | `components.Allocator.Framebuffer` | 构造函数初始化列表 |
-| 分配器 | `NormalAllocator` | `components.Allocator.Normal` | 构造函数初始化列表 |
-| I/O 服务 | `BufferConsumerService` | `consumer.BufferConsumerService` | 构造函数初始化列表 |
-| I/O 服务 | `BufferWriter` | `components.BufferWriter` | 构造函数初始化列表 |
-| 监控 | `PerformanceMonitor` | `components.Monitor.Performance` | 构造函数初始化列表 |
-| 显示 | `LinuxFramebufferDevice` | `components.Display.Framebuffer` | 构造函数初始化列表 |
-
-**代码示例：**
+### 运行时结构（Runtime）
 
 ```cpp
-// ✅ 正确的实现方式：在构造函数初始化列表中初始化 logger
-class FFmpegDecodeWorker : public WorkerBase {
-private:
-    log4cplus::Logger logger_;  // 每个模块独立的 logger 成员变量
+struct WorkerGroupRuntime {
+    std::string group_id;
+    uint64_t topology_group_id{0};
 
-public:
-    FFmpegDecodeWorker(const WorkerConfig& config)
-        : WorkerBase(BufferAllocatorFactory::AllocatorType::AVFRAME, config)
-        , logger_(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Worker.Decode")))  // 🎯 构造函数初始化
-    {
-        LOG4CPLUS_DEBUG(logger_, "FFmpegDecodeWorker created");
-    }
+    // 从 Config 复制而来（Build Phase），之后 Config 不再被引用
+    GroupConfig::Mode mode{GroupConfig::Mode::ONE_TO_ONE};
+    bool enable_frame_sync{false};
+    CallbackChain callback_chain;
+
+    struct ProducerInfo {
+        std::unique_ptr<VideoProductionLine> producer_line;
+        uint64_t buffer_pool_id{0};
+        std::weak_ptr<BufferPool> buffer_pool_weak;
+    };
+    std::map<std::string, ProducerInfo> producers;
+
+    struct ConsumerInfo {
+        std::shared_ptr<WorkerBase> worker;
+        uint64_t buffer_pool_id{0};
+        std::weak_ptr<BufferPool> buffer_pool_weak;
+        std::string producer_name;  // Build Phase 预解析的路由关系
+    };
+    std::map<std::string, ConsumerInfo> consumers;
+
+    std::map<std::string, std::shared_ptr<IEncodedPacketSource>> shared_sources;
+    std::unique_ptr<WorkerSyncCoordinator> coordinator;
+
+    std::thread group_thread;
+    std::atomic<bool> is_running{false};
+
+    struct WorkerStats {
+        std::atomic<int64_t> frames_produced{0};
+        std::atomic<int64_t> frames_failed{0};
+        std::atomic<int64_t> consecutive_failures{0};
+        std::atomic<bool> is_active{true};
+    };
+    std::map<std::string, std::unique_ptr<WorkerStats>> worker_stats;
 };
 ```
 
-**设计优势：**
-- **独立控制**：每个模块的日志可以单独配置，互不影响
-- **层次化管理**：通过配置文件可以统一控制某个层次的所有模块（如 `components.Worker=DEBUG`）
-- **调试友好**：在调试特定模块时，可以只启用该模块的详细日志
-- **性能优化**：可以针对性地关闭不相关模块的日志，减少日志输出开销
+设计要点：
+- `producers` 和 `consumers` 均采用 `std::map<std::string, Info>` 直接管理，无需双容器
+- `ConsumerInfo::producer_name` 在 Build Phase 预解析，运行时直接使用，无需反查 Config
+- `WorkerStats` 按 Worker 粒度独立管理，Group 级统计通过遍历聚合得出
 
-**架构优势：**
-- **动态调试**：运行时调整日志级别，无需重新编译
-- **精细控制**：可针对单个模块设置不同日志级别
-- **性能优化**：减少不必要的日志输出，提升运行效率
-- **易于维护**：统一的日志格式，便于问题排查
+### 生命周期
 
-**影响范围：**
-- 修改文件：45 个（包括所有核心模块）
-- 新增文件：3 个（logger.properties, logger.properties.minimal, LOGGER_CONFIG_README.md）
-- 涉及模块：Worker、BufferPool、Allocator、Display、ProductionLine、Monitor 等全部核心组件
+```
+构造函数（Build Phase）
+  ├─ validateConfig()              // 校验配置合法性
+  ├─ registerLine()                // 注册拓扑
+  └─ buildGroups()                 // Config → Runtime 完整转换
+       ├─ 创建 WorkerGroupRuntime
+       ├─ 复制 mode / enable_frame_sync / callback_chain
+       ├─ createProducersForGroup()
+       ├─ setupSharedSources()     // 仅从 Runtime 获取数据
+       ├─ setupCoordinator()       // 仅从 Runtime 获取数据
+       └─ createConsumersForGroup()// 预解析 producer_name
 
----
+start()（Run Phase 启动）
+  ├─ initializeGlobalThreadPool()
+  ├─ running_ = true
+  └─ startGroupThreads()           // 每组独立线程
 
-### v2.19 - 共享数据源模式与硬件解码增强
-**发布日期：** 2025-01-14
+stop()（Graceful Shutdown）
+  ├─ running_ = false
+  ├─ 等待各组线程结束
+  ├─ 汇总统计日志（聚合 WorkerStats）
+  └─ 释放所有 Worker 和 BufferPool 资源
 
-**主要变更：**
-- ✅ **EncodedPacketSourceFromBuffer 共享模式**：支持 ONE_TO_MANY 发布-订阅模式
-  - 新增共享模式构造函数，接受 `subscriber_count` 参数
-  - 实现订阅者同步机制：所有消费者处理同一个 packet
-  - 使用互斥锁和条件变量确保线程安全
-  - 新增成员：`is_shared_mode_`、`total_subscribers_`、`remaining_subscribers_`、`current_buffer_`
-  - ⭐ v2.22：新增 `current_buffer_version_` + `worker_states_`，共享模式改为 `acquire/commit/cancel` 三态流程
-- ✅ **Connector 共享实例管理**：支持共享 PacketSource 生命周期管理
-  - 新增 `setSharedSource()` 方法：存储共享的 PacketSource
-  - 新增 `getSharedSource()` 方法：获取共享实例
-  - 新增成员：`shared_source_`（仅 ONE_TO_MANY 模式使用）
-- ✅ **Ffmpeg 解码器硬件检测工具**：统一的硬件解码器判断机制
-  - `isHardwareDecoder()`：使用 FFmpeg 官方 API 判断（`AV_CODEC_CAP_HARDWARE` + `avcodec_get_hw_config`）
-  - `findPureSoftwareDecoder()`：查找指定 codec_id 的纯软件解码器
-  - 替代不可靠的字符串匹配方式（`strstr`）
-  - 使用 `virtual final` 禁止子类覆盖，保证判断逻辑统一
-- ✅ **packet_source_ 智能指针升级**：从 `unique_ptr` 改为 `shared_ptr`
-  - 支持多个消费者 Worker 共享同一个 PacketSource 实例
-  - 适配 ONE_TO_MANY 模式的共享需求
-  - 修改类：FfmpegDecodeRtspWorker、FfmpegDecodeVideoFileWorker
-- ✅ **解码器辅助方法重构**：提取公共逻辑，提高代码复用
-  - `readAndSendPacket()`：从数据源读取 packet 并发送到解码器
-  - `fillBufferMetadataFromFrame()`：从 AVFrame 填充 Buffer 元数据
-  - 新增帧缓存：`cached_frames_`（用于多通道解码场景）
+~MultiWorkerProductionLine()
+  └─ 确保 stop() 已调用
+```
 
-**设计原则：**
-- **共享语义明确**：shared_ptr 表达共享所有权，unique_ptr 表达独占所有权
-- **线程安全保证**：使用互斥锁和条件变量保护共享状态
-- **官方 API 优先**：使用 FFmpeg 官方接口而非字符串匹配
-- **代码复用**：提取公共逻辑为独立方法，减少重复代码
+关键约束：
+- **Config 的使命在构造函数中结束**：`buildGroups()` 完成后，所有运行所需信息已转移到 `WorkerGroupRuntime`
+- **`start()` 是纯粹的启动操作**：不涉及任何 Config 读取或 Runtime 构建
+- **`stop()` 负责优雅关闭**：等待线程、汇总统计、释放资源
 
-**架构优势：**
-- **真正的共享模式**：所有消费者处理同一个 packet，而非各自复制
-- **类型安全检测**：硬件解码器判断基于 API 而非字符串，更可靠
-- **扩展性强**：shared_ptr 支持任意数量的消费者共享
-- **维护性好**：公共逻辑集中管理，易于调试和优化
+### 路由解析
 
-**使用示例：**
+生产者与消费者之间的路由关系在 Build Phase 通过 `resolveProducerNameForConsumer()` 静态方法预解析：
+
+| Mode | 路由规则 |
+|------|---------|
+| ONE_TO_ONE | 消费者与同名生产者配对 |
+| ONE_TO_MANY | 所有消费者共享唯一生产者 |
+| MANY_TO_ONE | 消费者与同名生产者配对 |
+| MANY_TO_MANY | 消费者与同名生产者配对 |
+
+解析结果存储在 `ConsumerInfo::producer_name`，运行时直接通过该字段查找共享数据源，无需任何 Config 访问。
+
+### 共享数据源与帧同步
+
+- **共享数据源（shared_sources）**：在 ONE_TO_MANY 模式下，多个消费者通过 `IEncodedPacketSource` 接口共享同一个生产者的数据流，使用订阅/发布机制分发数据
+- **帧同步协调器（WorkerSyncCoordinator）**：当 `enable_frame_sync = true` 时，使用 Barrier 模式同步同组内所有消费者的帧处理节奏，确保回调链在所有消费者完成当前帧后统一触发
+
+### 统计与监控
+
+统计数据按 Worker 粒度管理在 `WorkerStats` 中（`frames_produced`、`frames_failed`、`consecutive_failures`、`is_active`），Group 级和全局统计通过遍历聚合：
+
 ```cpp
-// 示例1：创建共享模式 EncodedPacketSourceFromBuffer
-size_t consumer_count = 3;  // 3个消费者
-auto shared_source = std::make_shared<EncodedPacketSourceFromBuffer>(
-    codec_params, 
-    consumer_count  // 共享模式
-);
-
-// 所有消费者共享同一个实例（通过配置注入）
-WorkerConfig consumer_cfg;
-consumer_cfg.data_source.buffer_mode = true;
-consumer_cfg.data_source.shared_packet_source = shared_source;
-
-FfmpegDecodeRtspWorker worker1(consumer_cfg);
-FfmpegDecodeRtspWorker worker2(consumer_cfg);
-FfmpegDecodeRtspWorker worker3(consumer_cfg);
-
-// 示例2：Connector 管理共享实例
-Connector connector(Connector::Mode::ONE_TO_MANY, {0}, {0, 1, 2});
-connector.setSharedSource(shared_source);  // 防止被销毁
-
-// 示例3：强制使用软件解码器
-const AVCodec* codec = nullptr;
-if (!use_hardware_decoder_) {
-    codec = findPureSoftwareDecoder(AV_CODEC_ID_H264);
-    if (!codec) {
-        LOG_ERROR("No pure software decoder found for H264");
-        return false;
-    }
+// Group 级统计：遍历该组所有 WorkerStats
+for (const auto& [name, stats] : group->worker_stats) {
+    total_produced += stats->frames_produced.load();
+    total_failed += stats->frames_failed.load();
 }
 
-// 示例4：使用辅助方法简化解码流程
-AVPacket* packet = av_packet_alloc();
-if (readAndSendPacket(packet)) {
-    AVFrame* frame = av_frame_alloc();
-    if (avcodec_receive_frame(codec_ctx_, frame) == 0) {
-        Buffer* buffer = getBufferForFilling();
-        fillBufferMetadataFromFrame(frame, buffer);
-    }
+// 全局统计：遍历所有 Group
+for (const auto& group : groups_) {
+    for (const auto& [name, stats] : group->worker_stats) { ... }
 }
 ```
 
-**典型应用场景：**
-- **ONE_TO_MANY 场景**：一路输入，多路不同格式输出（如 YUV + RGB）
-- **硬件解码限制**：需要明确强制软件解码的场景
-- **多消费者共享**：多个 Worker 需要处理同一帧数据
+### 配置示例
 
-**向后兼容：**
-- EncodedPacketSourceFromBuffer 保留原有单参数构造函数（普通模式）
-- Connector 原有接口不变，共享模式为可选功能
-- 硬件检测工具为新增功能，不影响现有逻辑
-
----
-
-### v2.18 - 输入源信息查询与动态适配
-**发布日期：** 2025-01
-
-**主要变更：**
-- ✅ **输入源信息查询接口**：`IEncodedPacketSource` 新增 `getSourceWidth()`、`getSourceHeight()`、`getSourcePixelFormat()` 方法
-  - 查询输入数据源（文件/流）的原始分辨率和像素格式
-  - 区别于解码器输出格式（可能经过缩放/格式转换）
-  - 所有 PacketSource 实现类（EncodedPacketSourceFromFile、EncodedPacketSourceFromRtsp、EncodedPacketSourceFromBuffer）实现此接口
-  - WorkerBase 和 BufferFillingWorkerFacade 提供转发方法
-- ✅ **三级优先级动态适配机制**：自动适配输入源分辨率和格式
-  - Priority 1（最高）：`taco_config.chX_scale_width/height` - 用户显式配置
-  - Priority 2（次高）：`getSourceWidth/Height/PixelFormat()` - 输入源自动检测
-  - Priority 3（兜底）：`1920x1080 / AV_PIX_FMT_NV12` - 默认值
-- ✅ **测试代码优化**：移除硬编码分辨率，支持任意分辨率输入（720p/1080p/4K/8K）
-
-**设计原则：**
-- **信息透明**：输入源信息可直接查询，无需解析复杂结构
-- **配置优先**：用户显式配置优先级最高，保证可控性
-- **智能适配**：未配置时自动适配输入特性，提升易用性
-- **层次化设计**：三级优先级清晰，易于理解和维护
-
-**架构优势：**
-- **灵活性**：支持多种分辨率输入，无需硬编码
-- **易用性**：自动适配减少配置复杂度
-- **可控性**：显式配置优先，保证用户控制权
-- **可测试性**：便于测试不同分辨率/格式的视频
-
-**使用示例：**
 ```cpp
-// 示例1：查询输入源信息
-auto worker = std::make_shared<BufferFillingWorkerFacade>(config);
-worker->open();
+GroupConfig group("compare_test");
+group.producers["enc_producer"] = WorkerConfigBuilder().setType(...).build();
+group.consumers["dec_consumer_a"] = WorkerConfigBuilder().setType(...).build();
+group.consumers["dec_consumer_b"] = WorkerConfigBuilder().setType(...).build();
+group.mode = GroupConfig::Mode::ONE_TO_MANY;
+group.enable_frame_sync = true;
+group.callback_chain = { compare_callback_fn };
 
-int source_width = worker->getSourceWidth();       // 如 3840（4K视频）
-int source_height = worker->getSourceHeight();     // 如 2160
-AVPixelFormat source_fmt = worker->getSourcePixelFormat();  // 如 AV_PIX_FMT_YUV420P
-
-// 示例2：优先级自动适配（BufferWriter 创建场景）
-int output_width, output_height;
-AVPixelFormat output_format;
-
-// Priority 1: 显式配置优先
-if (taco_config.ch1_scale_width > 0) {
-    output_width = taco_config.ch1_scale_width;
-    output_height = taco_config.ch1_scale_height;
-}
-// Priority 2: 自动检测输入源
-else if (worker->getSourceWidth() > 0) {
-    output_width = worker->getSourceWidth();
-    output_height = worker->getSourceHeight();
-    output_format = worker->getSourcePixelFormat();
-}
-// Priority 3: 默认值兜底
-else {
-    output_width = 1920;
-    output_height = 1080;
-    output_format = AV_PIX_FMT_NV12;
-}
-
-// 示例3：测试不同分辨率视频无需修改代码
-// 输入720p视频 → 自动适配为720p输出
-// 输入4K视频 → 自动适配为4K输出
-// 显式设置 setCh1ScaleResolution(1920, 1080) → 强制1080p输出
-```
-
-**典型应用场景：**
-- **多分辨率测试**：测试同一套代码对不同分辨率视频的处理能力
-- **智能转码**：根据输入源自动确定输出参数
-- **向后兼容**：旧代码显式配置仍然有效
-
----
-
-### v2.17 - TacoConfig 类型安全重构
-**发布日期：** 2025-01
-
-**主要变更：**
-- ✅ **字段类型改变**：`TacoConfig` 配置字段从字符串改为整型枚举
-  - 旧：`ch1_pixel_format = "argb888"`（字符串）→ 新：`ch1_rgb_format = 9`（整型）
-  - 旧：`ch1_std = "bt601"`（字符串）→ 新：`ch1_rgb_std = 1`（整型）
-  - YUV 格式（ch0）由解码器自动决定，无配置字段
-- ✅ **通道配置完善**：新增 ch0/ch1 的裁剪和缩放配置
-  - ch0（YUV通道）：`ch0_crop_x/y/width/height`、`ch0_scale_width/height`
-  - ch1（RGB通道）：`ch1_crop_x/y/width/height`、`ch1_scale_width/height`
-- ✅ **TacoConfigBuilder 增强**：新增通道专用配置方法
-  - `setCh0CropRegion()`、`setCh0ScaleResolution()` - 通道0配置
-  - `setCh1RgbConfig()`、`setCh1CropRegion()`、`setCh1ScaleResolution()` - 通道1配置
-- ✅ **向后兼容支持**：保留字符串接口，内部映射为整型
-  - `mapRgbFormatNameToInt()` - 支持15种RGB格式名映射
-  - `mapRgbStdNameToInt()` - 支持6种颜色标准映射
-- ✅ **Buffer 通道判断**：`Buffer` 新增 `getOutputChannel()` 方法，从 AVFrame metadata 读取通道号
-
-**设计原则：**
-- **类型安全**：编译时类型检查，避免字符串拼写错误
-- **性能优化**：整型比较替代字符串比较
-- **配置完整**：支持通道裁剪、缩放等完整功能
-- **向后兼容**：旧代码仍可使用字符串接口
-
-**架构优势：**
-- **编译时安全**：类型错误在编译期发现，而非运行时
-- **性能提升**：整型操作效率高于字符串操作
-- **配置清晰**：ch0/ch1 配置独立，职责明确
-- **易于维护**：枚举值集中管理，便于扩展
-
-**使用示例：**
-```cpp
-// ✅ v2.17 推荐方式：使用整型枚举
-auto taco_config = TacoConfigBuilder()
-    .setChannels(false, true)  // 启用ch1（RGB），禁用ch0
-    .setCh1RgbConfig(true, 9, 1)  // enable=true, format=9(argb888), std=1(bt601)
-    .setCh1ScaleResolution(1920, 1080)
-    .build();
-
-// ✅ v2.17 向后兼容方式：使用字符串（自动映射为整型）
-auto taco_config = TacoConfigBuilder()
-    .setRgbConfig(true, "argb888", "bt601")  // 内部映射为 (9, 1)
-    .setDecoderOutputResolution(1920, 1080)  // 映射为 setCh1ScaleResolution
-    .build();
-
-// ✅ 完整配置示例：ch0 + ch1 双通道
-auto taco_config = TacoConfigBuilder()
-    .setChannels(true, true)  // 同时启用ch0和ch1
-    .setCh0ScaleResolution(1920, 1080)  // ch0输出YUV 1080p
-    .setCh1RgbConfig(true, 9, 1)  // ch1输出ARGB888
-    .setCh1ScaleResolution(1920, 1080)
-    .build();
-
-// ✅ Buffer 通道判断
-int channel = buffer->getOutputChannel();  // 0=ch0(YUV), 1=ch1(RGB), -1=不支持
-if (channel == 0 && taco_config.ch0_enable) {
-    // 处理 YUV 输出
-} else if (channel == 1 && taco_config.ch1_enable) {
-    // 处理 RGB 输出
-}
-```
-
-**RGB 格式枚举映射表**（部分）：
-| 字符串名称 | 整型值 | 说明 |
-|-----------|-------|------|
-| `"rgb888"` | 1 | 24-bit RGB |
-| `"bgr888"` | 3 | 24-bit BGR |
-| `"argb888"` | 9 | 32-bit ARGB（默认） |
-| `"abgr888"` | 11 | 32-bit ABGR |
-| `"r16g16b16"` | 17 | 48-bit RGB |
-
-**颜色标准枚举映射表**：
-| 字符串名称 | 整型值 | 说明 |
-|-----------|-------|------|
-| `"bt601"` | 1 | BT.601（默认） |
-| `"bt709"` | 3 | BT.709（HD） |
-| `"bt2020"` | 5 | BT.2020（4K/8K） |
-
----
-
-### v2.16 - BufferWriter 多格式支持与时间戳修复
-**发布日期：** 2025-01
-
-**主要变更：**
-- ✅ **多容器格式支持**：扩展 `BufferWriter::openEncoded()` 支持7种容器格式
-  - 支持格式：MP4, AVI, MKV, FLV, MOV, TS, MPEG
-  - H.264 remux：不重新编码，直接封装（高效）
-  - 自动格式推断：根据文件扩展名自动选择容器
-- ✅ **时间戳修复策略**："Retain + Supplement" 策略
-  - 保留原有修复：`AVFMT_AVOID_NEG_TS_MAKE_NON_NEGATIVE`（处理负时间戳）
-  - 补充新修复：记录第一帧的 PTS/DTS 偏移量，所有后续帧减去此偏移量
-  - 解决 RTSP 流时间戳从非零开始（如720秒）导致播放器显示异常时长的问题
-- ✅ **函数命名规范化**：`BufferWriter` 方法重命名
-  - `open()` → `openRaw()` - 打开原始数据流（raw格式）
-  - `open()` → `openEncoded()` - 打开编码数据流（容器格式）
-- ✅ **定时器录制控制**：使用 `PerformanceMonitor::Timer` 替代手动时间检查
-  - 优雅的定时停止机制
-  - 代码更简洁、更可维护
-- ✅ **Raw 格式测试增强**：完善原始格式保存测试
-  - 分类目录：`./test_output_raw/rgb/`, `./test_output_raw/yuv/`, `./test_output_raw/gray/`
-  - 文件命名规范：`ch0_nv12_1920x1080.raw`, `ch1_argb_3840x2160.raw`
-  - 格式验证：`BufferWriter::write()` 内部验证格式/分辨率匹配
-
-**设计原则：**
-- **格式通用性**：一套代码支持多种容器格式
-- **时间一致性**：修复时间戳异常，确保播放正确
-- **职责清晰**：函数命名明确表达操作类型（raw vs encoded）
-- **自动化**：自动格式推断，减少配置复杂度
-
-**架构优势：**
-- **兼容性强**：支持主流容器格式，满足不同场景需求
-- **播放正确**：时间戳修复确保播放器正确显示时长
-- **代码规范**：函数命名清晰，易于理解和维护
-- **测试完善**：覆盖 RGB/YUV/灰度等多种原始格式
-
-**使用示例：**
-```cpp
-// 示例1：保存编码流到多种容器格式
-BufferWriter writer_mp4, writer_avi, writer_mkv;
-
-// MP4 格式（最常用）
-writer_mp4.openEncoded("output.mp4", codec_params, time_base);
-
-// AVI 格式（兼容性好）
-writer_avi.openEncoded("output.avi", codec_params, time_base);
-
-// MKV 格式（开源免费）
-writer_mkv.openEncoded("output.mkv", codec_params, time_base);
-
-// 写入数据
-while (running) {
-    producer.waitForFilled(buffer, timeout);
-    writer_mp4.write(buffer);
-    writer_avi.write(buffer);
-    writer_mkv.write(buffer);
-    producer.releaseFilled(buffer);
-}
-
-// 示例2：使用 Timer 控制录制时长
-Timer recording_timer;
-recording_timer.start();
-
-auto timer_id = recording_timer.scheduleOnce(
-    30000,  // 30秒
-    []() {
-        g_running = false;
-        LOG_INFO("Recording duration reached, stopping...");
-    }
-);
-
-// ... 录制循环 ...
-
-recording_timer.cancel(timer_id);
-recording_timer.stop();
-
-// 示例3：保存原始数据（通道区分）
-BufferWriter ch0_writer, ch1_writer;
-
-// ch0: YUV 通道
-ch0_writer.openRaw("./test_output_raw/yuv/ch0_nv12_1920x1080.raw", 
-                   AV_PIX_FMT_NV12, 1920, 1080);
-
-// ch1: RGB 通道
-ch1_writer.openRaw("./test_output_raw/rgb/ch1_argb_1920x1080.raw", 
-                   AV_PIX_FMT_ARGB, 1920, 1080);
-
-// 写入时根据通道过滤
-int channel = buffer->getOutputChannel();
-if (channel == 0) ch0_writer.write(buffer);
-if (channel == 1) ch1_writer.write(buffer);
-```
-
-**时间戳修复原理**：
-```cpp
-// Retain: 保留原有修复（处理负时间戳）
-output_format_ctx_->avoid_negative_ts = AVFMT_AVOID_NEG_TS_MAKE_NON_NEGATIVE;
-
-// Supplement: 补充新修复（处理非零起始时间戳）
-if (first_pts_offset_ == AV_NOPTS_VALUE) {
-    first_pts_offset_ = packet->pts;  // 记录第一帧偏移量
-    first_dts_offset_ = packet->dts;
-}
-packet->pts -= first_pts_offset_;  // 减去偏移量，确保从0开始
-packet->dts -= first_dts_offset_;
-```
-
-**支持的容器格式列表**：
-| 格式 | 扩展名 | 特点 | 适用场景 |
-|------|-------|------|---------|
-| MP4 | `.mp4` | 兼容性最好 | 通用场景、网络传输 |
-| AVI | `.avi` | Windows原生支持 | Windows环境 |
-| MKV | `.mkv` | 开源、功能强大 | 高级用户、存档 |
-| FLV | `.flv` | 流媒体友好 | 直播、点播 |
-| MOV | `.mov` | macOS原生支持 | macOS环境 |
-| TS | `.ts` | 流式传输 | IPTV、HLS |
-| MPEG | `.mpeg` | 标准格式 | 广播、DVD |
-
----
-
-### v2.15 - MultiWorkerProductionLine WorkerGroup + Connector 多组并行架构（新）
-**发布日期：** 2025-01（本节已按最新实现修正）
-
-**主要变更：**
-- ✅ **WorkerGroup 概念升级**：引入"工作组"概念，支持多组独立并行  
-  - 每组包含：**多个生产者（Producers）+ 多个消费者（Consumers）+ 多个 Connector**
-  - 配置结构与头文件一致：  
-    `struct WorkerGroup { std::string group_id; std::vector<ProducerConfig> producer_configs; std::vector<ConsumerConfig> consumer_configs; std::vector<ConnectorConfig> connector_configs; };`
-- ✅ **Connector 连接器**：显式描述生产者与消费者之间的绑定关系  
-  - 单一类 `Connector` + `Mode` 枚举：`ONE_TO_ONE / ONE_TO_MANY / MANY_TO_ONE / MANY_TO_MANY`  
-  - 配置结构：`ConnectorConfig { Connector::Mode mode; std::vector<std::string> producer_ids; std::vector<std::string> consumer_ids; }`  
-  - 运行时内部计算 `consumer_index -> producer_index` 映射，**仅负责路由，不负责数据**
-  - **v2.19 新增**：支持共享 PacketSource 实例管理（`setSharedSource()` / `getSharedSource()`）
-    - 在 ONE_TO_MANY 模式下，Connector 持有共享的 EncodedPacketSourceFromBuffer 实例
-    - 防止共享实例被过早销毁，确保生命周期正确管理
-    - 新增成员：`std::shared_ptr<IEncodedPacketSource> shared_source_`
-- ✅ **共享全局线程池**：所有组、所有消费者共用一份线程池  
-  - 使用 `GlobalThreadPool` 单例包装 `BS::thread_pool`  
-  - 线程池大小通过 `MultiWorkerConfig::thread_pool_size` 进行初始化配置  
-  - 各组内部通过 `CountDownLatch` 实现一次调度内的同步
-- ✅ **Buffer 模式数据源 + 零拷贝**  
-  - 生产者写入自身 `BufferPool`；消费者统一以 `buffer_mode` 从指定 `BufferPool` 取数  
-  - 通过 Connector 事先绑定好：**消费者只认 BufferPool，不直接感知具体生产者实现**  
-  - 避免中间拷贝，保持数据链路简洁
-  - ⭐ v2.22: 配置从 `decoder.datasource_buffer_mode` 移至 `data_source.buffer_mode`
-- ✅ **配置驱动 + 严格校验**  
-  - `validateConfig()` 在 `start()` 前对每个 Group 做完整校验：  
-    - 每组必须至少 1 个 Producer + 1 个 Consumer  
-    - 每组必须至少 1 个 Connector  
-    - Connector 中引用的 `producer_ids` / `consumer_ids` 必须存在  
-    - 按 `Mode` 检查 1:1 / 1:N / N:1 的规模约束  
-    - 检查是否存在“未被任何 Connector 绑定”的 Producer / Consumer
-
-**设计原则：**
-- **组间独立**：每组有独立的 `GroupData` 与线程，互不干扰
-- **组内通过 Connector 建模关系**：不再在代码里硬编码“1 个 Producer + N 个 Consumer”的假设
-- **全局统一线程池**：线程资源集中管理，避免多实例、多组重复创建线程池
-- **统计下沉到数据源**：以 `BufferPool` 为统计主体（生产/消费/丢帧），生产线聚合展示
-
-**架构优势：**
-- **可扩展性**：支持任意多组、每组任意多个生产者/消费者、多种连接关系
-- **高性能**：组间并行 + 全局线程池调度组内所有消费者任务
-- **资源安全**：`CountDownLatch` + BufferPool 生命周期控制，避免早释放/泄漏
-- **清晰观测性**：MultiWorker + Group + Producer/Consumer 多层级统计接口
-
-**配置示例：**
-```cpp
-// 示例1：单组配置（1 个 Producer + 2 个 Consumer，经典对比场景）
-MultiWorkerProductionLine::ProducerConfig producer;
-producer.producer_id = "record";
-producer.worker_config = record_config;  // RTSP 录制
-
-MultiWorkerProductionLine::ConsumerConfig hw;
-hw.consumer_id = "hw_decode";
-hw.worker_config = decode_hw_config;     // 硬件解码器
-
-MultiWorkerProductionLine::ConsumerConfig sw;
-sw.consumer_id = "sw_decode";
-sw.worker_config = decode_sw_config;     // 软件解码器
-
-MultiWorkerProductionLine::ConnectorConfig conn;
-conn.mode = Connector::Mode::ONE_TO_MANY;
-conn.producer_ids = { "record" };
-conn.consumer_ids = { "hw_decode", "sw_decode" };
-
-MultiWorkerProductionLine::WorkerGroup group("group1");
-group.producer_configs = { producer };
-group.consumer_configs = { hw, sw };
-group.connector_configs = { conn };
-
-MultiWorkerProductionLine::MultiWorkerConfig config;
-config.thread_pool_size = 4;  // 初始化全局线程池大小
+MultiWorkerConfig config;
 config.groups.push_back(group);
-
 MultiWorkerProductionLine pipeline(config);
-pipeline.start();
+pipeline.start();  // Run Phase
+// ...
+pipeline.stop();   // Graceful Shutdown
 ```
 
-```cpp
-// 示例2：多组配置 + 多 Producer 场景（组间并行）
-MultiWorkerProductionLine::WorkerGroup group1("compare_test");
-{
-    // 组1：RTSP 录制 → 硬件解码 + 软件解码（对比测试）
-    MultiWorkerProductionLine::ProducerConfig p;
-    p.producer_id = "rtsp_record";
-    p.worker_config = rtsp_record_config;
+### 运行时拓扑
 
-    MultiWorkerProductionLine::ConsumerConfig hw_dec;
-    hw_dec.consumer_id = "hw";
-    hw_dec.worker_config = hw_decode_config;
-
-    MultiWorkerProductionLine::ConsumerConfig sw_dec;
-    sw_dec.consumer_id = "sw";
-    sw_dec.worker_config = sw_decode_config;
-
-    MultiWorkerProductionLine::ConnectorConfig c;
-    c.mode = Connector::Mode::ONE_TO_MANY;
-    c.producer_ids = { "rtsp_record" };
-    c.consumer_ids = { "hw", "sw" };
-
-    group1.producer_configs = { p };
-    group1.consumer_configs = { hw_dec, sw_dec };
-    group1.connector_configs = { c };
-}
-
-MultiWorkerProductionLine::WorkerGroup group2("multi_resolution");
-{
-    // 组2：文件解码 → 多路缩放（多分辨率输出）
-    MultiWorkerProductionLine::ProducerConfig p;
-    p.producer_id = "file_decode";
-    p.worker_config = file_decode_config;
-
-    MultiWorkerProductionLine::ConsumerConfig c720;
-    c720.consumer_id = "scale_720p";
-    c720.worker_config = scale_720p_config;
-
-    MultiWorkerProductionLine::ConsumerConfig c1080;
-    c1080.consumer_id = "scale_1080p";
-    c1080.worker_config = scale_1080p_config;
-
-    MultiWorkerProductionLine::ConsumerConfig c4k;
-    c4k.consumer_id = "scale_4k";
-    c4k.worker_config = scale_4k_config;
-
-    MultiWorkerProductionLine::ConnectorConfig c;
-    c.mode = Connector::Mode::ONE_TO_MANY;
-    c.producer_ids = { "file_decode" };
-    c.consumer_ids = { "scale_720p", "scale_1080p", "scale_4k" };
-
-    group2.producer_configs = { p };
-    group2.consumer_configs = { c720, c1080, c4k };
-    group2.connector_configs = { c };
-}
-
-MultiWorkerProductionLine::MultiWorkerConfig config;
-config.thread_pool_size = 8;
-config.groups = { group1, group2 };
-
-// 组1和组2并行执行，互不干扰；共享同一个全局线程池
-MultiWorkerProductionLine pipeline(config);
-pipeline.start();
-```
-
-```cpp
-// 示例3：访问组内 BufferPool（兼容多 Producer 的查询语义）
-// 当前接口语义：getGroupProducerBufferPoolId 默认返回该组“第一个 Producer”的 BufferPool
-uint64_t producer_pool_id = pipeline.getGroupProducerBufferPoolId(0);
-
-// 获取组 0 的第 1 个 Consumer 的 BufferPool ID
-uint64_t consumer_pool_id = pipeline.getGroupConsumerBufferPoolId(0, 1);
-
-BufferPoolRegistry& registry = BufferPoolRegistry::getInstance();
-auto producer_pool = registry.getBufferPool(producer_pool_id);
-auto consumer_pool = registry.getBufferPool(consumer_pool_id);
-```
-
-```cpp
-// 示例4：v2.19 共享模式配置（ONE_TO_MANY 使用共享 EncodedPacketSourceFromBuffer）
-// 场景：一路输入，多路不同格式输出（YUV + RGB），所有消费者处理同一帧
-MultiWorkerProductionLine::WorkerGroup group("shared_mode_test");
-{
-    // 生产者：录制 H.264 编码的 packet
-    MultiWorkerProductionLine::ProducerConfig producer;
-    producer.producer_id = "rtsp_record";
-    producer.worker_config = rtsp_record_config;
-    
-    // 消费者1：解码为 YUV 格式
-    MultiWorkerProductionLine::ConsumerConfig yuv_consumer;
-    yuv_consumer.consumer_id = "yuv_decode";
-    yuv_consumer.worker_config = yuv_decode_config;
-    
-    // 消费者2：解码为 RGB 格式
-    MultiWorkerProductionLine::ConsumerConfig rgb_consumer;
-    rgb_consumer.consumer_id = "rgb_decode";
-    rgb_consumer.worker_config = rgb_decode_config;
-    
-    // Connector：ONE_TO_MANY 模式（触发共享模式）
-    MultiWorkerProductionLine::ConnectorConfig connector;
-    connector.mode = Connector::Mode::ONE_TO_MANY;
-    connector.producer_ids = { "rtsp_record" };
-    connector.consumer_ids = { "yuv_decode", "rgb_decode" };
-    
-    group.producer_configs = { producer };
-    group.consumer_configs = { yuv_consumer, rgb_consumer };
-    group.connector_configs = { connector };
-}
-
-// MultiWorkerProductionLine 内部逻辑（自动处理）：
-// 1. 检测到 ONE_TO_MANY 且 consumer_count > 1
-// 2. 创建共享模式 EncodedPacketSourceFromBuffer(codec_params, 2)
-// 3. 所有消费者共享同一个实例（通过 shared_ptr）
-// 4. Connector 持有共享实例，防止被销毁（connector.setSharedSource(shared_source)）
-// 5. 运行时所有消费者同步读取同一个 packet
-
-MultiWorkerProductionLine::MultiWorkerConfig config;
-config.thread_pool_size = 4;
-config.groups = { group };
-
-MultiWorkerProductionLine pipeline(config);
-pipeline.start();
-// 运行时：YUV 和 RGB 消费者始终解码同一帧，无需手动同步
-```
-
-**核心运行时结构：**
 ```
 MultiWorkerProductionLine
-  ├─ WorkerGroup 1 (独立线程)
-  │   ├─ Producers:
-  │   │    ├─ P0: rtsp_record      → BufferPool(P0)
-  │   │    └─ P1: ...（可选）
-  │   ├─ Consumers:
-  │   │    ├─ C0: hw_decode        (datasource=BufferPool(P0))
-  │   │    └─ C1: sw_decode        (datasource=BufferPool(P0))
-  │   ├─ Connectors:
-  │   │    └─ ONE_TO_MANY: {P0} → {C0, C1}
-  │   └─ CountDownLatch + 全局线程池任务调度
-  │
-  ├─ WorkerGroup 2 (独立线程)
-  │   ├─ Producers:
-  │   │    └─ P0: file_decode      → BufferPool(P0)
-  │   ├─ Consumers:
-  │   │    ├─ C0: scale_720p       (datasource=BufferPool(P0))
-  │   │    ├─ C1: scale_1080p      (datasource=BufferPool(P0))
-  │   │    └─ C2: scale_4k         (datasource=BufferPool(P0))
-  │   ├─ Connectors:
-  │   │    └─ ONE_TO_MANY: {P0} → {C0, C1, C2}
-  │   └─ CountDownLatch + 全局线程池任务调度
-  │
-  └─ GlobalThreadPool (BS::thread_pool)
-       └─ 所有 Group 的消费者任务在线程池中执行
+  ├─ WorkerGroupRuntime 1 (独立线程)
+  │    ├─ producers: {"enc_p1": ProducerInfo}
+  │    ├─ consumers: {"dec_c1": ConsumerInfo, "dec_c2": ConsumerInfo}
+  │    ├─ shared_sources: {"enc_p1": IEncodedPacketSource}
+  │    ├─ coordinator: WorkerSyncCoordinator
+  │    └─ worker_stats: {"dec_c1": WorkerStats, "dec_c2": WorkerStats}
+  ├─ WorkerGroupRuntime 2 (独立线程)
+  │    └─ ...
+  └─ GlobalThreadPool (shared)
 ```
 
-**典型应用场景：**
-1. **对比测试**：硬件解码 vs 软件解码性能对比（单 Producer + 多 Consumer，ONE_TO_MANY）
-2. **多路输出**：同一视频输出多种分辨率/格式（单 Producer + 多 Consumer，ONE_TO_MANY）
-3. **多路输入聚合**：多个 Producer 统一喂给一个 Consumer（MANY_TO_ONE / MANY_TO_MANY）
-4. **实时处理流水线**：实时流 → 多路 AI 推理 + 显示 + 存储，多组解耦运行
+### 拓扑注册与资源跟踪
 
----
-
-### v2.14 - EncodedPacketSourceFromBuffer 零拷贝直连架构
-**发布日期：** 2025-01
-
-**主要变更：**
-- ✅ **EncodedPacketSourceFromBuffer 重新设计**：普通模式移除中间缓存，直接关联 BufferPool
-  - 删除：`use_pool_mode_`（兼容模式标志）
-  - 删除：`setCurrentBuffer()` / `clearCurrentBuffer()` 方法
-  - 普通模式不再依赖 `current_buffer_`；共享模式下 `current_buffer_` 仅用于同步与生命周期管理
-  - 新增：`std::weak_ptr<BufferPool> source_pool_`（直接关联）
-  - 新增：`setSourceBufferPool(std::weak_ptr<BufferPool> pool_weak)` 方法
-- ✅ **真正的零拷贝数据流**：`readEncodedPacket()` 直接从 BufferPool 获取，立即释放
-  - 获取：`Buffer* buffer = pool->acquireFilled(true, 100);`
-  - 使用：`copyPacket(packet, buffer->getAVPacket());`
-  - 释放：`pool->releaseFilled(buffer);`（立即释放，避免积压）
-- ✅ **配置字段重命名**：`use_buffer_mode` → `datasource_buffer_mode`（v2.14）→ `buffer_mode`（v2.22，移至 data_source 结构体）
-- ✅ **MultiWorkerProductionLine 简化**：移除中间拷贝逻辑
-  - 删除：`producerThreadFunc()` 中的 `buffer_source->setCurrentBuffer()`
-  - 消费者直接从生产者 BufferPool 读取
-
-**v2.19 新增 - 共享模式（发布-订阅）：**
-- ✅ **共享模式构造函数**：支持多消费者共享同一个 packet
-  - 新增：`EncodedPacketSourceFromBuffer(codec_params, subscriber_count)` 构造函数
-  - 新增成员：`is_shared_mode_`、`total_subscribers_`、`remaining_subscribers_`、`current_buffer_`
-  - 新增同步机制：`std::mutex mutex_`、`std::condition_variable cv_subscribers_`、`cv_fetch_`
-- ✅ **订阅者同步机制**：确保所有消费者处理同一帧
-  - 工作流程：消费者 `acquireEncodedPacket(worker_id)` → 解码成功 `commitEncodedPacket(worker_id)` / 失败 `cancelEncodedPacket(worker_id)` → 所有订阅者提交后 Fetch 释放 Buffer
-  - ⭐ v2.22：增加 `current_buffer_version_` 与 `worker_states_`，避免重复消费
-  - 线程安全：使用互斥锁和条件变量保护共享状态
-  - 防止数据竞争：确保 packet 在所有订阅者提交前不被释放
-
-**设计原则：**
-- **真正零拷贝**：消除所有中间拷贝环节
-- **职责清晰**：EncodedPacketSourceFromBuffer 自主管理数据获取
-- **资源高效**：buffer 使用后立即释放，避免积压
-- **架构简化**：删除兼容模式，代码更清晰
-- **共享语义明确**（v2.19）：shared_ptr 表达共享所有权，支持多消费者场景
-- **线程安全保证**（v2.19）：使用同步原语保护共享状态
-
-**架构优势：**
-- **内存效率**：无中间缓存，内存占用最小
-- **性能优化**：减少拷贝次数，提升吞吐量
-- **代码简洁**：删除冗余逻辑，易于维护
-- **职责分离**：数据源自主管理，不依赖外部设置
-- **真正共享**（v2.19）：所有消费者处理同一个 packet，而非各自复制
-- **扩展性强**（v2.19）：支持任意数量的消费者共享
-
-**使用示例：**
-```cpp
-// v2.14 零拷贝架构 - 普通模式（单消费者）
-// 1. 创建 EncodedPacketSourceFromBuffer（消费者数据源）
-auto buffer_source = std::make_unique<EncodedPacketSourceFromBuffer>(codec_params);
-
-// 2. 关联生产者的 BufferPool
-buffer_source->setSourceBufferPool(producer_buffer_pool_weak);
-
-// 3. EncodedPacketSourceFromBuffer 内部自动处理获取和释放
-int ret = buffer_source->readEncodedPacket(packet);
-// 内部逻辑：
-// - acquireFilled() 获取 buffer
-// - copyPacket() 拷贝数据
-// - releaseFilled() 立即释放 ⭐ 关键改进
-
-// v2.19 共享模式 - 多消费者共享同一个 packet（ONE_TO_MANY）
-// 1. 创建共享模式 EncodedPacketSourceFromBuffer（指定订阅者数量）
-size_t consumer_count = 3;  // 3个消费者
-auto shared_source = std::make_shared<EncodedPacketSourceFromBuffer>(
-    codec_params, 
-    consumer_count  // ⭐ 共享模式构造
-);
-
-// 2. 关联生产者的 BufferPool
-shared_source->setSourceBufferPool(producer_buffer_pool_weak);
-
-// 3. 所有消费者 Worker 共享同一个实例（通过配置注入）
-WorkerConfig consumer_cfg;
-consumer_cfg.data_source.buffer_mode = true;
-consumer_cfg.data_source.shared_packet_source = shared_source;
-
-FfmpegDecodeRtspWorker worker1(consumer_cfg);  // 消费者1
-FfmpegDecodeRtspWorker worker2(consumer_cfg);  // 消费者2
-FfmpegDecodeRtspWorker worker3(consumer_cfg);  // 消费者3
-
-// 4. 共享模式工作流程（自动同步）
-// - 消费者1/2/3 调用 acquireEncodedPacket(this) → 等待新 buffer
-// - 解码成功：commitEncodedPacket(this)；解码失败：cancelEncodedPacket(this)（允许重试）
-// - 所有订阅者 commit 完成后，Fetch 释放 Buffer
-
-// ❌ v2.13 旧方式（已废弃）
-// buffer_source->setCurrentBuffer(buffer);  // 需要外部设置
-// buffer_source->readEncodedPacket(packet);
-// buffer_source->clearCurrentBuffer();      // 需要外部清理
-```
-
-**架构对比**：
-| 项目 | v2.13 旧架构 | v2.14 新架构 | v2.19 共享模式 |
-|------|-------------|-------------|---------------|
-| 中间缓存 | ✗ 需要 `current_buffer_` | ✓ 无中间缓存 | ✓ 仅在同步时持有 |
-| 设置方式 | ✗ 外部调用 `setCurrentBuffer()` | ✓ 内部自动获取 | ✓ 内部自动获取 + 同步 |
-| 释放方式 | ✗ 外部调用 `clearCurrentBuffer()` | ✓ 内部立即释放 | ✓ 所有订阅者完成后释放 |
-| 拷贝次数 | ✗ 2次（Producer→中间→Consumer） | ✓ 1次（Producer→Consumer） | ✓ 1次共享（所有消费者读取同一个） |
-| 代码复杂度 | ✗ 需要手动管理生命周期 | ✓ 自动管理 | ✓ 自动管理 + 同步机制 |
-| 消费者数量 | 1 个 | 1 个 | N 个（共享） |
-| 数据一致性 | N/A | N/A | ✓ 保证所有消费者处理同一帧 |
-| 智能指针 | unique_ptr | unique_ptr | shared_ptr（v2.19） |
-
-**职责变化**：
-```
-v2.13 旧架构：
-MultiWorkerProductionLine → 获取 buffer → 设置到 EncodedPacketSourceFromBuffer → Consumer 读取 → 清理
-
-v2.14 新架构（普通模式）：
-MultiWorkerProductionLine → 触发 Consumer → EncodedPacketSourceFromBuffer 自主获取/释放 → Consumer 读取
-
-v2.19 新架构（共享模式）：
-MultiWorkerProductionLine → 触发所有 Consumers → EncodedPacketSourceFromBuffer 同步等待 → 所有消费者到齐 → 
-获取 Buffer → 所有 Consumers 读取同一 packet → 最后完成者释放 Buffer
-```
-
----
-
-### v2.13 - 配置单一数据源与接口简化
-**发布日期：** 2025-01
-
-**主要变更：**
-- ✅ **接口简化**：删除 `open(path, width, height, bits_per_pixel)` 重载，统一使用 `open()` 和 `open(path)` 两个版本
-  - `open()`：Worker 从 `worker_config_` 读取所有参数（推荐）
-  - `open(path)`：快速指定文件路径（可选，RTSP Worker 不支持）
-- ✅ **配置单一数据源原则**：Worker 统一从 `worker_config_` 读取所有参数，消除 Facade 与 Worker 的配置冗余
-  - 删除 `BufferFillingWorkerFacade::open()` 中的参数提取逻辑
-  - Facade 直接调用 `worker->open()`，不再充当"参数转发器"
-- ✅ **getBytesPerPixel() 优化（方案A）**：
-  - 返回类型改为 `double`，支持 NV12 等格式的 1.5 字节/像素
-  - 优先从解码器实际输出格式 `codec_ctx_ptr_->pix_fmt` 计算
-  - Fallback 从 `tacoDecoderConfig(worker_config_.decoder)` 指向的 `TacoConfig` 格式枚举推断（RGB整型枚举/YUV自动）
-  - 删除冗余的 `output_bits_per_pixel_` 成员变量
-  - **注**：v2.17 后，TacoConfig 使用整型枚举而非字符串
-- ✅ **架构一致性改进**：所有 Worker（`FfmpegDecodeVideoFileWorker`、`FfmpegDecodeRtspWorker`、`FfmpegRecordRtspWorker`）统一实现无参 `open()`
-
-**设计原则：**
-- **单一数据源**：Worker 只从 `worker_config_` 读取配置，不接受外部参数传递
-- **接口简化**：`open()` 无参数或只有一个可选的 `path` 参数，降低接口复杂度
-- **精确计算**：`getBytesPerPixel()` 支持 `double` 类型，准确表示各种像素格式（如 NV12=1.5）
-- **职责分离**：Facade 不再提取和转发参数，只负责创建和转发调用
-
-**架构优势：**
-- **消除冗余**：不再有两份 config（Facade 的 `config_` 和 Worker 的 `worker_config_`）
-- **数据一致**：单一数据源保证参数来源统一，避免同步问题
-- **类型安全**：`double` 类型支持非整数字节/像素比例
-- **易于维护**：接口更简洁，职责更清晰，符合单一职责原则
-
-**使用示例：**
-```cpp
-// ✅ v2.13 推荐方式：无参 open()，所有参数从 config 读取
-auto config = WorkerConfigBuilder()
-    .setFileConfig(FileConfigBuilder().setFilePath("rtsp://...").build())
-    .setDisplayConfig(DisplayConfigBuilder()
-        .setDisplayResolution(1920, 1080)
-        .setBitsPerPixel(32)
-        .build())
-    .setDecoderConfig(DecoderConfigBuilder().useTaco("h264").build())
-    .build();
-
-BufferFillingWorkerFacade worker(config);
-worker.open();  // Worker 自动从 worker_config_ 读取所有参数
-
-// ❌ v2.12 旧方式（已废弃）
-// worker.open("rtsp://...", 1920, 1080, 32);  // 不再支持
-```
-
-**getBytesPerPixel() 计算示例：**
-```cpp
-double bpp = worker.getBytesPerPixel();
-// NV12: 1.5 字节/像素
-// ARGB8888: 4.0 字节/像素  
-// RGB888: 3.0 字节/像素
-// RGB48LE: 6.0 字节/像素
-```
-
-### v2.12 - 数据源抽象模式重构
-**发布日期：** 2024-12
-
-**主要变更：**
-- ✅ **数据源抽象接口**：引入 `IEncodedPacketSource` 接口，支持策略模式，实现数据源与 Worker 的解耦
-- ✅ **文件数据源实现**：`EncodedPacketSourceFromFile` 管理 `AVFormatContext` 和文件相关状态（视频流索引、总帧数、EOF 状态等）
-- ✅ **Buffer 数据源实现**：`EncodedPacketSourceFromBuffer` 用于 MultiWorkerProductionLine 场景，从 BufferPool 获取 AVPacket
-- ✅ **Worker 重构**：`FfmpegDecodeVideoFileWorker` 使用数据源抽象，移除冗余状态变量
-  - 移除：`format_ctx_ptr_`、`file_path_`、`width_`、`height_`、`total_frames_`、`video_stream_index_`、`is_open_`、`eof_reached_`
-  - 所有状态统一由数据源管理，避免状态不一致
-- ✅ **状态管理优化**：单一数据源管理状态，Worker 直接查询数据源，避免缓存导致的不一致
-- ✅ **线程安全改进**：数据源的 `is_open_` 使用 `std::atomic<bool>`，保证线程安全的状态检查
-- ✅ **配置系统增强**：`WorkerConfig` 添加 `use_buffer_mode`（默认 false，v2.14 重命名为 `datasource_buffer_mode`，v2.22 移至 `data_source.buffer_mode`）和 `codec_params` 配置项
-
-**v2.19 新增 - 共享模式支持：**
-- ✅ **智能指针升级**：Worker 的 `packet_source_` 从 `unique_ptr` 改为 `shared_ptr`
-  - 支持多个 Worker 共享同一个 PacketSource 实例
-  - 修改类：`FfmpegDecodeRtspWorker`、`FfmpegDecodeVideoFileWorker`
-  - 独占场景仍使用 `std::make_unique`，共享场景使用 `std::make_shared`
-- ✅ **EncodedPacketSourceFromBuffer 共享模式**：支持多消费者订阅同一数据源
-  - 新增共享模式构造函数：`EncodedPacketSourceFromBuffer(codec_params, subscriber_count)`
-  - 实现发布-订阅同步机制，确保所有消费者处理同一帧
-  - 详见 v2.14 章节补充说明
-
-**设计原则：**
-- **单一职责**：Worker 专注解码逻辑，数据源负责数据访问和元数据管理
-- **依赖倒置**：Worker 依赖 `IEncodedPacketSource` 接口，不依赖具体实现
-- **易于扩展**：新增数据源类型（如网络流）无需修改 Worker 代码
-- **状态一致**：单一数据源管理状态，避免冗余和不同步
-
-**数据源职责边界（重要）：**
-
-`IEncodedPacketSource` 数据源**仅负责数据读取和元数据管理**，职责明确限定为：
-
-✅ **数据源应该做的**：
-- **打开/关闭数据源**：管理文件、网络流、Buffer 等数据源的生命周期
-- **读取原始数据包**：从数据源读取 `AVPacket`（编码数据），不进行任何转换
-- **提供元数据查询**：编解码器参数、总帧数、文件大小、视频流索引等
-- **管理读取状态**：EOF 状态、打开状态、连接状态等
-- **提供导航功能**：`seek()` 定位到指定帧（仅文件模式支持）
-
-❌ **数据源不应该做的**：
-- ❌ **解码数据**：解码是 Worker 的职责（如 `FfmpegDecodeVideoFileWorker`）
-- ❌ **编码数据**：编码是编码器 Worker 的职责
-- ❌ **数据格式转换**：像素格式转换由 `SwsContext` 或解码器处理
-- ❌ **写入数据**：写入是 `BufferWriter` 的职责
-- ❌ **业务逻辑处理**：业务逻辑由应用层负责
-
-**职责边界原则**：
-> 数据源是"**纯粹的数据提供者**"，只管"**读**"，不管"**写**"和"**转换**"。  
-> 数据源与 Worker 的关系：数据源提供原材料（`AVPacket`），Worker 负责加工（解码、编码）。
-
-**架构优势：**
-- **职责分离**：Worker 和数据源职责清晰，符合 SOLID 原则
-- **状态一致**：单一数据源管理状态，避免缓存导致的不一致
-- **线程安全**：使用原子变量保证状态检查的线程安全
-- **代码简化**：Worker 代码更简洁，职责更清晰
-
-**使用示例：**
-```cpp
-// 文件模式（默认）
-auto config = WorkerConfigBuilder()
-    .setFileConfig(FileConfigBuilder().setFilePath("video.mp4").build())
-    .build();
-// Worker 内部创建 EncodedPacketSourceFromFile
-
-// Buffer 模式（MultiWorkerProductionLine，v2.22 配置归一）
-WorkerConfig::DataSourceConfig ds_cfg;
-ds_cfg.buffer_mode = true;
-ds_cfg.codec_params = record_codec_params;
-
-auto config = WorkerConfigBuilder()
-    .setDataSourceConfig(ds_cfg)
-    .build();
-// Worker 内部创建 EncodedPacketSourceFromBuffer
-```
-
-### v2.11 - 编解码器类型检测
-**发布日期：** 2024-12
-
-**主要变更：**
-- ✅ **编解码器匹配检测**：WorkerBase 提供通用的编解码器类型检测工具
-- ✅ **配置验证**：在 Worker 打开媒体文件时自动检查配置的解码器与实际编解码器是否匹配
-- ✅ **友好警告**：不匹配时打印详细的警告信息（包含期望类型 vs 实际类型，以及修复建议），但不中断程序运行
-- ✅ **通用接口**：所有 FFmpeg Worker（FfmpegDecodeVideoFileWorker、FfmpegDecodeRtspWorker）统一使用
-
-**设计原则：**
-- **Fail-Soft**：检测到问题时只警告不中断，允许程序继续运行（FFmpeg 会自动选择正确的解码器）
-- **Protected 方法**：检测工具放在 WorkerBase protected 区域，只供子类使用，避免外部误用
-- **可扩展**：支持常见编解码器（H.264/H.265/VP8/VP9/AV1/MPEG-2/MPEG-4），易于扩展
-
-**使用示例：**
-```cpp
-// Worker 子类在 open() 中调用
-AVCodecParameters* codecpar = format_ctx_->streams[video_idx]->codecpar;
-checkCodecMismatch(codecpar->codec_id, decoder_name_);  // 自动检测并警告
-```
-
-### v2.10 - Buffer 动态大小调整
-**发布日期：** 2024-12
-
-**主要变更：**
-- ✅ **动态大小更新**：Buffer 类添加 `setSize()` 方法，支持根据实际数据大小动态调整容量
-- ✅ **精确的帧大小**：FfmpegDecodeVideoFileWorker 在解码后调用 `av_image_get_buffer_size()` 获取实际帧大小
-- ✅ **安全性提升**：`memcpy` 等操作使用实际数据大小，避免越界访问
-
-**设计原因：**
-- 原设计中 Buffer 的 `size_` 在创建时固定（基于预估的 `width * height * bpp`）
-- 软件解码时，FFmpeg 返回的实际帧大小可能因像素格式、对齐等因素与预估值不同
-- 动态更新 `size_` 确保 `buffer->size()` 返回的是真实可用的数据大小
-
-**与 `setUsedSize()` 的区别：**
-- `setSize()`：更新 Buffer 的**容量**（capacity），表示可用的最大空间
-- `setUsedSize()`：更新 Buffer 的**实际使用大小**（used），表示当前有效数据的大小
-- 两者配合使用，提供完整的大小信息
-
-### v2.3 - 多 BufferPool 支持
-**发布日期：** 2024-12
-
-**主要变更：**
-- ✅ **多 BufferPool 管理**：WorkerBase 支持一个 Worker 管理多个不同类型的 BufferPool
-- ✅ **强类型标识**：引入 `BufferPoolType` 枚举，明确区分不同用途的 BufferPool
-- ❌ **破坏性变更**：删除 `getOutputBufferPoolId()` 无参数版本，必须使用 `getOutputBufferPoolId(BufferPoolType)`
-- ❌ **删除遍历接口**：移除 `getAllBufferPoolTypes()` 等方法，强制调用者明确意图
-- ✅ **新增查询方法**：`hasBufferPoolType(BufferPoolType)` 检查是否存在指定类型
-
-**迁移要点：**
-```cpp
-// ❌ v2.0（旧代码）
-uint64_t pool_id = worker->getOutputBufferPoolId();
-
-// ✅ v2.3（新代码）
-uint64_t pool_id = worker->getOutputBufferPoolId(BufferPoolType::DECODE_VIDEO_PRIMARY);
-```
-
-### v2.1 - 门面模式重构
-**主要变更：**
-- ✅ BufferFillingWorkerFacade 不再继承接口，改用组合模式
-- ✅ 简化架构，减少继承层次
-
-### v2.0 - Registry 中心化管理
-**主要变更：**
-- ✅ BufferPoolRegistry 独占持有 BufferPool
-- ✅ Worker 和 ProductionLine 只记录 pool_id
-- ✅ 通过 Registry 获取临时访问（weak_ptr）
-- ✅ WorkerBase 整合 IBufferFillingWorker 接口
-
-### v1.5 - 初始版本
-- Worker 持有 BufferPool 的 unique_ptr
-- 通过 getOutputBufferPool() 转移所有权
+每个组通过 `ComponentTopology` 注册拓扑关系（producer → shared_source → consumer），`WorkerBase` 的 `removeWorker()` 在退出时注销。数据源的 `subscribe()` / `unsubscribe()` 在运行时由 `workerThreadFunc` 自动管理。
 
 ---
 
@@ -1572,7 +231,6 @@ uint64_t pool_id = worker->getOutputBufferPoolId(BufferPoolType::DECODE_VIDEO_PR
 ┌───────────────────────▼─────────────────────────────────┐
 │                   门面层（Facade）                        │
 │         BufferFillingWorkerFacade（门面，v2.1）          │
-│    BufferAllocatorFacade（Allocator门面）                │
 │    （直接定义方法，不继承接口）                            │
 └───────────────────────┬─────────────────────────────────┘
                         │ 使用配置
@@ -1587,7 +245,7 @@ uint64_t pool_id = worker->getOutputBufferPoolId(BufferPoolType::DECODE_VIDEO_PR
 ┌───────────────────────▼─────────────────────────────────┐
 │                   工厂层（Factory）                        │
 │         BufferFillingWorkerFactory（Worker工厂）          │
-│         BufferAllocatorFactory（Allocator工厂）           │
+│         BufferPoolBuilderFactory（Builder工厂）           │
 │    （通过基类创建实现，不依赖具体类）                      │
 │    （工厂注入配置到Worker，v2.2）                         │
 └───────────────────────┬─────────────────────────────────┘
@@ -1595,7 +253,7 @@ uint64_t pool_id = worker->getOutputBufferPoolId(BufferPoolType::DECODE_VIDEO_PR
 ┌───────────────────────▼─────────────────────────────────┐
 │                   接口层（Interface）                      │
 │  IVideoFileNavigator（Worker导航接口）                    │
-│  BufferAllocatorBase（Allocator接口，纯抽象基类）         │
+│  IBufferPoolBuilder（Builder接口，纯抽象基类）            │
 │    （定义契约，所有实现必须遵循）                          │
 └───────────────────────┬─────────────────────────────────┘
                         │ 继承
@@ -1608,14 +266,14 @@ uint64_t pool_id = worker->getOutputBufferPoolId(BufferPoolType::DECODE_VIDEO_PR
 ┌───────────────────────▼─────────────────────────────────┐
 │                   实现层（Implementation）                  │
 │  Worker实现类（继承WorkerBase，实现纯虚函数）              │
-│  Allocator实现类（继承BufferAllocatorBase，实现接口方法）  │
+│  Builder实现类（继承IBufferPoolBuilder，实现接口方法）     │
 │    （具体实现细节，对上层透明）                            │
 └─────────────────────────────────────────────────────────┘
                         │
 ┌───────────────────────▼─────────────────────────────────┐
 │                   调度层（Scheduler）                       │
 │              BufferPool（纯调度器）                        │
-│    （通过接口与Allocator协作，不依赖具体实现）              │
+│    （通过接口与Builder协作，不依赖具体实现）              │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -1624,7 +282,7 @@ uint64_t pool_id = worker->getOutputBufferPoolId(BufferPoolType::DECODE_VIDEO_PR
 - ✅ **接口隔离**：接口定义清晰，职责单一
 - ✅ **开闭原则**：对扩展开放，对修改关闭（新增实现无需修改接口）
 - ✅ **单一职责**：每个层次职责明确，接口层定义契约，基类层提供公共功能，实现层提供具体逻辑
-- ✅ **模块化日志**：每个模块拥有独立的 logger 实例，在构造函数中初始化，便于单独控制日志输出（详见 [v2.21 日志系统重构](#v221---日志系统重构与关键-bug-修复)）
+- ✅ **模块化日志**：每个模块拥有独立的 logger 实例，在构造函数中初始化，便于单独控制日志输出
 
 ---
 
@@ -1664,12 +322,12 @@ uint64_t pool_id = worker->getOutputBufferPoolId(BufferPoolType::DECODE_VIDEO_PR
 - ✅ **定义Buffer填充功能**：通过纯虚函数定义契约 (`fillBuffer()`, `getWorkerType()`, `getOutputBufferPoolId(BufferPoolType)`)
 - ✅ **继承文件导航接口**：继承`IVideoFileNavigator`接口，提供文件操作功能
 - ✅ **多BufferPool管理**（v2.3新增）：支持一个Worker创建和管理多个不同类型的BufferPool
-  - Worker内部持有`BufferAllocatorFacade`实例（通过构造函数参数指定类型）
-  - Worker调用`allocator_facade_.allocatePoolWithBuffers()`创建BufferPool
+  - Worker内部持有`std::unique_ptr<IBufferPoolBuilder> builder_`（通过BufferPoolBuilderFactory创建）
+  - Worker调用`builder_->allocatePoolWithBuffers()`创建BufferPool
   - Worker通过`buffer_pool_type_map_`记录多个BufferPool的映射关系（v2.3：使用枚举类型标识）
   - 使用者必须明确指定BufferPool类型来获取对应的pool_id
   - 使用者从Registry通过 pool_id 获取临时访问
-- ✅ **统一Allocator管理**：通过构造函数参数传递AllocatorType，父类统一管理
+- ✅ **统一Builder管理**：通过构造函数参数传递AllocatorType，父类统一管理
 - ✅ **编解码器类型检测**（v2.11新增）：提供通用的编解码器匹配检测工具
   - `checkCodecMismatch(actual_codec_id, decoder_name)`：检查配置的解码器与实际编解码器是否匹配
   - `getExpectedCodecIdFromDecoderName(decoder_name)`：从解码器名称推断期望的编解码器ID
@@ -1694,14 +352,14 @@ uint64_t pool_id = worker->getOutputBufferPoolId(BufferPoolType::DECODE_VIDEO_PR
 - ✅ Registry中心化管理：Worker只记录pool_id，Registry独占持有BufferPool
 
 **不负责：**
-- ❌ Buffer创建/销毁（由Allocator负责，Worker只调用Allocator的方法）
+- ❌ Buffer创建/销毁（由Builder负责，Worker只调用Builder的方法）
 - ❌ Buffer队列管理（由BufferPool负责）
 - ❌ 生产流程管理（由ProductionLine负责）
 
 **关键设计**：
 - Worker在实现`open()`时**必须**创建BufferPool并通过 `registerBufferPool(type, pool_id)` 注册
-- Worker通过调用Allocator创建BufferPool，而不是直接创建
-- Worker根据场景在构造函数中指定合适的AllocatorType（NORMAL、AVFRAME等）
+- Worker通过调用Builder创建BufferPool，而不是直接创建
+- Worker根据场景在构造函数中指定合适的AllocatorType（CONTINUOUS_PHYSICAL、AVFRAME、MAT等）
 - Worker可以创建多个不同类型的BufferPool，每个用途独立管理
 
 **BufferPoolType枚举定义（v2.3）**：
@@ -1728,7 +386,7 @@ bool FfmpegDecodeVideoFileWorker::open(const char* path) {
     int bpp = worker_config_.display.bits_per_pixel;
     
     // ... 创建 BufferPool ...
-    uint64_t pool_id = allocator_facade_.allocatePoolWithBuffers(...);
+    uint64_t pool_id = builder_->allocatePoolWithBuffers(...);
     
     // 注册到类型映射
     registerBufferPool(BufferPoolType::DECODE_VIDEO_PRIMARY, pool_id);
@@ -1775,7 +433,7 @@ if (auto pool = pool_weak.lock()) {
 - 所有Worker实现类（`FfmpegDecodeVideoFileWorker`, `FfmpegDecodeRtspWorker`, `FfmpegRecordRtspWorker`）都继承`WorkerBase`基类
 - **v2.12新增**：`FfmpegDecodeVideoFileWorker` 使用数据源抽象（`IEncodedPacketSource`），支持文件模式和 Buffer 模式
 
-### 5. BufferAllocator（分配器）
+### 5. IBufferPoolBuilder（Pool 构建器接口）
 
 **职责：**
 - ✅ **Buffer创建**：创建Buffer实例（调用子类的`createBuffer()`）
@@ -1783,11 +441,56 @@ if (auto pool = pool_weak.lock()) {
 - ✅ **BufferPool创建**：通过 Passkey Token 创建 BufferPool 实例（使用 `token()` 方法获取通行证）
 - ✅ **Buffer注入**：将Buffer注入到BufferPool的队列中（通过友元关系访问BufferPool的私有方法）
 - ✅ **Buffer移除**：从BufferPool移除Buffer（通过友元关系）
+- ✅ **内存提供者集成**：通过 `IMemoryProvider` 接口获取物理或虚拟内存（ContinuousPhysicalPoolBuilder 支持依赖注入）
 
 **不负责：**
 - ❌ Buffer队列调度（由BufferPool负责）
 - ❌ 数据填充（由Worker负责）
 - ❌ 生产流程管理（由ProductionLine负责）
+
+**目录结构：**
+```
+include/bufferpool/
+├── buffer/
+│   └── Buffer.hpp                              # Buffer 数据对象定义
+└── pool/
+    ├── base/
+    │   ├── IBufferPoolBuilder.hpp              # 纯抽象接口（所有Builder的基类）
+    │   ├── BufferPool.hpp                      # BufferPool 调度器
+    │   └── BufferPoolBuilderFactory.hpp        # Builder 工厂
+    └── builder/
+        ├── ContinuousPhysicalPoolBuilder.hpp   # 物理连续内存 Builder（通过IMemoryProvider DI）
+        ├── AVFramePoolBuilder.hpp              # FFmpeg AVFrame Builder
+        └── MatPoolBuilder.hpp                  # OpenCV Mat Builder
+
+source/bufferpool/
+├── buffer/
+│   └── Buffer.cpp
+└── pool/
+    ├── base/
+    │   ├── IBufferPoolBuilder.cpp
+    │   ├── BufferPool.cpp
+    │   └── BufferPoolBuilderFactory.cpp
+    └── builder/
+        ├── ContinuousPhysicalPoolBuilder.cpp
+        ├── AVFramePoolBuilder.cpp
+        └── MatPoolBuilder.cpp
+
+include/vendor/contracts/
+├── IMemoryProvider.hpp                         # 内存提供者抽象接口
+├── MallocMemoryProvider.hpp                    # 标准堆内存实现（默认）
+└── MemoryProviderRegistry.hpp                  # 内存提供者注册表
+```
+
+**内存提供者体系（IMemoryProvider）：**
+```
+IMemoryProvider (vendor/contracts/IMemoryProvider.hpp)
+├── MallocMemoryProvider          — 标准堆内存（posix_memalign）
+└── TacoMemoryProvider            — TACO 物理连续内存（/dev/taco_mem）
+
+MemoryProviderRegistry (vendor/contracts/MemoryProviderRegistry.hpp)
+└── 单例注册表，通过名称动态查找 IMemoryProvider
+```
 
 ---
 
@@ -1817,8 +520,8 @@ if (auto pool = pool_weak.lock()) {
         ┌───────────────┼───────────────┐
         │               │               │
 ┌───────▼──────┐ ┌──────▼──────┐ ┌──────▼──────┐
-│ BufferPool   │ │ WorkerBase   │ │BufferAllocator│
-│ (调度器)     │ │ (基类)       │ │Base(接口)    │
+│ BufferPool   │ │ WorkerBase   │ │BufferPool   │
+│ (调度器)     │ │ (基类)       │ │Builder(接口)│
 │              │ │              │ │              │
 │ 通过接口协作 │ │ 定义方法     │ │ 定义接口     │
 └──────────────┘ └─────────────┘ └─────────────┘
@@ -1848,7 +551,7 @@ EncodedPacketSourceFromFile EncodedPacketSourceFromBuffer (未来可扩展网络
         ┌───────────────▼───────────────┐
         │   Factory（工厂层）            │
         │   - BufferFillingWorkerFactory │
-        │   - BufferAllocatorFactory      │
+        │   - BufferPoolBuilderFactory     │
         │   （不依赖具体实现类）          │
         └───────────────────────────────┘
 ```
@@ -1856,7 +559,7 @@ EncodedPacketSourceFromFile EncodedPacketSourceFromBuffer (未来可扩展网络
 **关键设计点（v2.0）**：
 - ✅ **依赖基类**：ProductionLine 依赖 `WorkerBase` 基类，通过其定义的纯虚函数调用功能
 - ✅ **基类统一**：所有 Worker 实现通过 `WorkerBase` 基类统一类型，Factory 返回 `WorkerBase*`
-- ✅ **接口定义**：`BufferAllocatorBase` 是纯抽象接口，定义所有 Allocator 必须实现的契约
+- ✅ **接口定义**：`IBufferPoolBuilder` 是纯抽象接口，定义所有 Builder 必须实现的契约
 - ✅ **工厂解耦**：Factory 通过基类创建实现，不依赖具体实现类
 - ✅ **Registry 中心化**：BufferPool 由 Registry 独占持有，Worker 和 ProductionLine 只记录 pool_id
 
@@ -1873,23 +576,23 @@ EncodedPacketSourceFromFile EncodedPacketSourceFromBuffer (未来可扩展网络
    ├─ 打开视频源（Worker在实现IVideoFileNavigator::open()时自动创建BufferPool）
    │   └─ worker_->open(...)  // 调用IVideoFileNavigator::open()
    │       │
-   │       ├─ Worker必须创建BufferPool（通过调用Allocator）
-   │       ├─ Worker创建Allocator实例（根据场景选择合适的Allocator）
-   │       │   ├─ NormalAllocator（普通内存，用于Raw视频文件）
-   │       │   ├─ AVFrameAllocator（FFmpeg解码，用于RTSP流和编码视频）
-   │       │   └─ FramebufferAllocator（外部内存，用于Framebuffer显示）
-   │       ├─ Worker调用 allocator->allocatePoolWithBuffers(...)
+   │       ├─ Worker必须创建BufferPool（通过调用Builder）
+   │       ├─ Worker构造时通过BufferPoolBuilderFactory创建Builder
+   │       │   ├─ ContinuousPhysicalPoolBuilder（物理连续内存，通过IMemoryProvider DI）
+   │       │   ├─ AVFramePoolBuilder（FFmpeg解码，用于RTSP流和编码视频）
+   │       │   └─ MatPoolBuilder（OpenCV Mat，用于图像处理）
+   │       ├─ Worker调用 builder_->allocatePoolWithBuffers(...)
    │       │   │
-   │       │   ├─ Allocator 通过 Passkey Token 创建空的 BufferPool
+   │       │   ├─ Builder 通过 Passkey Token 创建空的 BufferPool
    │       │   │   └─ std::make_unique<BufferPool>(token(), name, category)
-   │       │   │       ├─ token() 从 BufferAllocatorBase 基类获取通行证
-   │       │   │       └─ 只有 Allocator 可以创建 PrivateToken
+   │       │   │       ├─ token() 从 IBufferPoolBuilder 基类获取通行证
+   │       │   │       └─ 只有 Builder 可以创建 PrivateToken
    │       │   │       └─ 返回 unique_ptr（转移所有权给Worker）
    │       │   │
-   │       │   ├─ Allocator创建Buffer（调用子类的createBuffer）
-   │       │   │   └─ NormalAllocator::createBuffer(id, size)
+   │       │   ├─ Builder创建Buffer（调用子类的createBuffer）
+   │       │   │   └─ ContinuousPhysicalPoolBuilder::createBuffer(id, size)
    │       │   │
-   │       │   └─ Allocator注入Buffer到Pool（通过友元关系）
+   │       │   └─ Builder注入Buffer到Pool（通过友元关系）
    │       │       └─ BufferPool::addBufferToQueue(buffer, FREE)
    │       │
    │       └─ Worker保存创建的BufferPool（内部成员）
@@ -1953,16 +656,16 @@ Worker内部解码循环（适用于RTSP流等）：
    ├─ 1. FFmpeg解码获得AVFrame
    │   └─ avcodec_receive_frame(codec_ctx, frame)
    │
-   ├─ 2. 调用Allocator注入Buffer
-   │   └─ allocator->injectAVFrameToPool(frame, pool)
+   ├─ 2. 调用Builder注入Buffer
+   │   └─ builder->injectBufferToPool(pool_id, size)
    │       │
-   │       ├─ Allocator创建Buffer包装AVFrame
-   │       │   └─ AVFrameAllocator::createBuffer(id, size)
+   │       ├─ Builder创建Buffer包装AVFrame
+   │       │   └─ AVFramePoolBuilder::createBuffer(id, size)
    │       │
-   │       ├─ Allocator注入Buffer到Pool（通过友元关系）
+   │       ├─ Builder注入Buffer到Pool（通过友元关系）
    │       │   └─ BufferPool::addBufferToQueue(buffer, FILLED)
    │       │
-   │       └─ Allocator记录AVFrame和Buffer的映射
+   │       └─ Builder记录AVFrame和Buffer的映射
    │
    └─ 3. 消费者从BufferPool获取填充后的Buffer
        └─ pool->acquireFilled(true, timeout)
@@ -1976,10 +679,10 @@ Worker内部解码循环（适用于RTSP流等）：
 | **ProductionLine** | `working_buffer_pool_id_` | `uint64_t` | 只记录 pool_id，从 Registry 临时访问 |
 | **ProductionLine** | `working_buffer_pool_ptr_` | `BufferPool*` | 缓存的临时访问指针（警告：Pool 销毁后失效） |
 | **ProductionLine** | `worker_` | `std::shared_ptr<BufferFillingWorkerFacade>` | 多线程共享Worker门面 |
-| **Worker** | `allocator_facade_`（内部） | `BufferAllocatorFacade` | Worker持有Allocator门面，用于创建BufferPool和Buffer |
+| **Worker** | `builder_`（内部） | `std::unique_ptr<IBufferPoolBuilder>` | Worker持有Builder，用于创建BufferPool和Buffer |
 | **Worker** | `buffer_pool_id_`（内部） | `uint64_t` | 只记录 pool_id，Registry 独占持有 Pool |
-| **Allocator** | `Buffer`对象 | 通过`createBuffer()`创建 | Allocator负责Buffer的生命周期管理 |
-| **Allocator** | BufferPool | ❌ **不持有** | Allocator创建BufferPool后注册到Registry，Registry独占持有 |
+| **Builder** | `Buffer`对象 | 通过`createBuffer()`创建 | Builder负责Buffer的生命周期管理 |
+| **Builder** | BufferPool | ❌ **不持有** | Builder创建BufferPool后注册到Registry，Registry独占持有 |
 | **BufferPool** | `Buffer`对象 | 通过`managed_buffers_`集合管理 | BufferPool只管理Buffer的调度，不拥有Buffer |
 
 ### 关联方式
@@ -1990,15 +693,15 @@ Worker内部解码循环（适用于RTSP流等）：
 | **ProductionLine** | BufferPool | `uint64_t pool_id` | 只记录ID，通过Registry临时访问 |
 | **ProductionLine** | Worker | `std::shared_ptr<BufferFillingWorkerFacade>` | 通过智能指针持有Worker门面 |
 | **Worker** | BufferPool | `uint64_t pool_id` | 只记录ID，Registry独占持有Pool |
-| **Worker** | Allocator | `BufferAllocatorFacade` | Worker内部持有Allocator门面，用于创建BufferPool和Buffer |
-| **Allocator** | BufferPool | Friend关系 + 注册到Registry | Allocator是BufferPool的友元，创建后注册到Registry，Registry独占持有 |
+| **Worker** | Builder | `std::unique_ptr<IBufferPoolBuilder>` | Worker内部持有Builder，用于创建BufferPool和Buffer |
+| **Builder** | BufferPool | Friend关系 + 注册到Registry | Builder是BufferPool的友元，创建后注册到Registry，Registry独占持有 |
 | **BufferPool** | Buffer | `std::set<Buffer*>` | BufferPool通过集合管理所有Buffer，但不拥有Buffer的所有权 |
 
 **核心设计原则（v2.0）**：
 - ✅ **Registry 中心化**：Registry 独占持有 BufferPool（shared_ptr，引用计数=1）
 - ✅ **ID 索引**：Worker 和 ProductionLine 只记录 pool_id，不持有所有权
 - ✅ **临时访问**：通过 `BufferPoolRegistry::getInstance().getPool(pool_id)` 获取临时访问
-- ✅ **Allocator ID 机制**：每个 Allocator 有唯一 ID，Registry 记录 Pool 归属关系
+- ✅ **Builder ID 机制**：每个 Builder 有唯一 ID，Registry 记录 Pool 归属关系
 - ✅ **自动清理**：Allocator 析构时查询 Registry 获取所有 Pool，逐个清理
 - ✅ **Worker 主动清理**：Worker 的 `close()` 调用 `destroyPool()` 主动清理资源
 
@@ -2068,7 +771,7 @@ Worker内部解码循环（适用于RTSP流等）：
 
 ### 2. 工厂模式（Factory Pattern）
 
-**应用位置**：`BufferFillingWorkerFactory`、`BufferAllocatorBase`
+**应用位置**：`BufferFillingWorkerFactory`、`BufferPoolBuilderFactory`
 
 **设计意图**：封装对象的创建逻辑，根据环境和配置创建合适的实例。
 
@@ -2082,10 +785,10 @@ Worker内部解码循环（适用于RTSP流等）：
 
 **工厂模式类型**：
 1. **工厂模式**：`BufferFillingWorkerFactory` - 创建Worker实现类
-2. **抽象工厂模式**：`BufferAllocatorBase` - 创建Buffer和BufferPool，有3个具体实现：
-   - `NormalAllocator` - 普通内存分配器
-   - `FramebufferAllocator` - Framebuffer分配器
-   - `AVFrameAllocator` - AVFrame分配器
+2. **抽象工厂模式**：`IBufferPoolBuilder` - 创建Buffer和BufferPool，有3个具体实现：
+   - `ContinuousPhysicalPoolBuilder` - 物理连续内存构建器（通过IMemoryProvider DI）
+   - `AVFramePoolBuilder` - FFmpeg AVFrame构建器
+   - `MatPoolBuilder` - OpenCV Mat构建器
 
 **注意**：`BufferPool` 不再使用静态工厂方法 `CreateEmpty()`，改用 **Passkey Idiom** 控制创建权限。
 
@@ -2150,14 +853,14 @@ Worker内部解码循环（适用于RTSP流等）：
 
 ### 7. Passkey Idiom（通行证模式）
 
-**应用位置**：`BufferPool` 和 `BufferAllocatorBase`
+**应用位置**：`BufferPool` 和 `IBufferPoolBuilder`
 
-**设计意图**：限制类的实例化权限，只有特定的类（Allocator）可以创建 BufferPool 实例，提供比 friend 更精细的访问控制。
+**设计意图**：限制类的实例化权限，只有特定的类（Builder）可以创建 BufferPool 实例，提供比 friend 更精细的访问控制。
 
 **实现方式**：
 - `BufferPool` 有一个嵌套类 `PrivateToken`，其构造函数是 `private`
-- 只有 `BufferAllocatorBase` 是 `PrivateToken` 的 `friend`，可以创建 Token
-- `BufferAllocatorBase` 提供 `protected static token()` 方法供子类获取 Token
+- 只有 `IBufferPoolBuilder` 是 `PrivateToken` 的 `friend`，可以创建 Token
+- `IBufferPoolBuilder` 提供 `protected static token()` 方法供子类获取 Token
 - 子类通过 `token()` 获取 PrivateToken，然后调用 BufferPool 构造函数
 
 **代码示例**：
@@ -2165,15 +868,12 @@ Worker内部解码循环（适用于RTSP流等）：
 // BufferPool.hpp
 class BufferPool {
 public:
-    // 嵌套的 PrivateToken 类
     class PrivateToken {
     private:
         PrivateToken() = default;
-        // 只有 BufferAllocatorBase 可以创建 Token
-        friend class BufferAllocatorBase;
+        friend class IBufferPoolBuilder;
     };
     
-    // 构造函数需要 Token（虽然是 public，但外部无法创建 Token）
     BufferPool(
         PrivateToken token,
         const std::string& name,
@@ -2181,16 +881,15 @@ public:
     );
 };
 
-// BufferAllocatorBase.hpp
-class BufferAllocatorBase {
+// IBufferPoolBuilder.hpp
+class IBufferPoolBuilder {
 protected:
-    // 提供 Token 给子类使用
     static BufferPool::PrivateToken token() {
         return BufferPool::PrivateToken();
     }
 };
 
-// 子类使用示例（NormalAllocator.cpp）
+// 子类使用示例（ContinuousPhysicalPoolBuilder.cpp）
 auto pool = std::make_unique<BufferPool>(
     token(),    // 从基类获取通行证
     name,
@@ -2316,100 +1015,124 @@ private:
 - ~~`MmapRawVideoFileWorker`~~ _（未实现）_
 - ~~`IoUringRawVideoFileWorker`~~ _（未实现）_
 
-#### ✅ BufferAllocatorBase（Allocator接口，纯抽象基类）
+#### ✅ BufferPoolBuilder（Pool 构建器接口，纯抽象基类）
 
 **文件位置**:
-- 接口: `include/buffer/BufferAllocatorBase.hpp`
-- 实现类: `include/buffer/`（NormalAllocator, AVFrameAllocator, FramebufferAllocator）
+- 接口: `include/bufferpool/pool/base/IBufferPoolBuilder.hpp`
+- 实现类: `include/bufferpool/pool/builder/`（ContinuousPhysicalPoolBuilder, AVFramePoolBuilder, MatPoolBuilder）
 
 **设计模式**: 抽象工厂模式（Abstract Factory Pattern）
 
 **架构角色**: 纯抽象接口类（所有方法都是纯虚函数）
 
 **职责**:
-- 定义所有 Allocator 必须实现的接口契约
+- 定义所有 PoolBuilder 必须实现的接口契约
 - 创建 Buffer 和 BufferPool
 - 管理 Buffer 生命周期
+- 通过 `IMemoryProvider` 获取底层内存（ContinuousPhysicalPoolBuilder 支持依赖注入）
 
 **接口定义**（纯虚函数，子类必须实现）:
 ```cpp
-class BufferAllocatorBase {
+class IBufferPoolBuilder {
 public:
-    virtual ~BufferAllocatorBase() = default;
-    
-    // 纯虚函数接口（子类必须实现）
-    virtual std::unique_ptr<BufferPool> allocatePoolWithBuffers(
+    IBufferPoolBuilder() : allocator_id_(next_allocator_id_++) {}
+    virtual ~IBufferPoolBuilder();
+
+    virtual uint64_t allocatePoolWithBuffers(
         int count, size_t size,
-        const std::string& name,
-        const std::string& category = ""
-    ) = 0;
-    
+        const std::string& name, const std::string& category = "") = 0;
+
     virtual Buffer* injectBufferToPool(
-        size_t size,
-        BufferPool* pool,
-        QueueType queue = QueueType::FREE
-    ) = 0;
-    
-    virtual bool removeBufferFromPool(Buffer* buffer, BufferPool* pool) = 0;
-    
-    virtual bool destroyPool(BufferPool* pool) = 0;
-    
+        uint64_t pool_id, size_t size,
+        QueueType queue = QueueType::FREE) = 0;
+
+    virtual Buffer* injectExternalBufferToPool(
+        uint64_t pool_id, void* virt_addr, uint64_t phys_addr,
+        size_t size, QueueType queue = QueueType::FREE,
+        uint32_t custom_id = 0) = 0;
+
+    virtual bool removeBufferFromPool(uint64_t pool_id, Buffer* buffer) = 0;
+    virtual bool destroyPool() = 0;
+
 protected:
-    // 子类必须实现的核心方法
+    uint64_t allocator_id_;
+    static std::atomic<uint64_t> next_allocator_id_;
+
+    uint64_t getAllocatorId() const { return allocator_id_; }
+    std::vector<uint64_t> getPoolsByAllocator() const;
+    std::shared_ptr<BufferPool> getPoolSpecialForAllocator(uint64_t pool_id);
+    void unregisterPool(uint64_t pool_id);
+
     virtual Buffer* createBuffer(uint32_t id, size_t size) = 0;
     virtual void deallocateBuffer(Buffer* buffer) = 0;
 };
 ```
 
-**设计特点**:
-- ✅ **纯抽象接口**：所有方法都是纯虚函数（`= 0`），只有头文件，无实现文件
-- ✅ **接口契约**：定义所有 Allocator 必须实现的完整接口
-- ✅ **依赖倒置**：上层代码依赖 `BufferAllocatorBase` 接口，不依赖具体实现
-- ✅ **实现透明**：具体实现类（NormalAllocator、AVFrameAllocator、FramebufferAllocator）对上层透明
+**子类继承关系**:
+```
+IBufferPoolBuilder (bufferpool/pool/base/IBufferPoolBuilder.hpp)
+├── ContinuousPhysicalPoolBuilder  — 物理连续内存（通过 IMemoryProvider DI）
+├── AVFramePoolBuilder             — 包装 FFmpeg AVFrame 动态注入
+└── MatPoolBuilder                 — 包装 OpenCV cv::Mat 动态注入
+```
 
-#### ✅ BufferAllocatorFactory（Allocator工厂）
+**设计特点**:
+- ✅ **纯抽象接口**：核心方法都是纯虚函数（`= 0`）
+- ✅ **接口契约**：定义所有 PoolBuilder 必须实现的完整接口
+- ✅ **依赖倒置**：上层代码依赖 `IBufferPoolBuilder` 接口，不依赖具体实现
+- ✅ **实现透明**：具体实现类对上层透明
+- ✅ **命名规范**：遵循 `I` 前缀命名约定标识纯抽象接口
+
+#### ✅ BufferPoolBuilderFactory（Pool 构建器工厂）
 
 **文件位置**:
-- 工厂: `include/buffer/BufferAllocatorFactory.hpp`
-- 源文件: `source/buffer/BufferAllocatorFactory.cpp`
+- 工厂: `include/bufferpool/pool/base/BufferPoolBuilderFactory.hpp`
+- 源文件: `source/bufferpool/pool/base/BufferPoolBuilderFactory.cpp`
 
 **设计模式**: 工厂模式（Factory Pattern）
 
 **职责**:
-- 根据类型创建合适的 Allocator 实现
-- 封装 Allocator 创建逻辑
-- 返回 `BufferAllocatorBase*` 接口指针，不依赖具体实现类
+- 根据类型创建合适的 PoolBuilder 实现
+- 封装 PoolBuilder 创建逻辑
+- 返回 `IBufferPoolBuilder*` 接口指针，不依赖具体实现类
 
 **工厂方法**:
 ```cpp
-class BufferAllocatorFactory {
+class BufferPoolBuilderFactory {
 public:
     enum class AllocatorType {
-        AUTO,           // 自动选择（默认使用 NormalAllocator）
-        NORMAL,         // NormalAllocator
-        AVFRAME,        // AVFrameAllocator
-        FRAMEBUFFER     // FramebufferAllocator
+        AUTO,                 // 自动选择（默认使用 ContinuousPhysicalPoolBuilder）
+        CONTINUOUS_PHYSICAL,  // ContinuousPhysicalPoolBuilder
+        AVFRAME,              // AVFramePoolBuilder
+        MAT                   // MatPoolBuilder
     };
-    
-    // 工厂方法（返回接口指针）
-    static std::unique_ptr<BufferAllocatorBase> create(
-        AllocatorType type = AllocatorType::AUTO,
-        BufferMemoryAllocatorType mem_type = BufferMemoryAllocatorType::NORMAL_MALLOC,
-        size_t alignment = 64
-    );
+
+    static std::unique_ptr<IBufferPoolBuilder> create(
+        AllocatorType type = AllocatorType::AUTO);
+
+    static std::unique_ptr<IBufferPoolBuilder> create(
+        AllocatorType type,
+        std::unique_ptr<IMemoryProvider> provider);
+
+    static std::unique_ptr<IBufferPoolBuilder> createWithProvider(
+        AllocatorType type,
+        const std::string& provider_name);
 };
 ```
 
 **设计特点**:
-- ✅ **接口返回**：返回 `BufferAllocatorBase*` 接口指针，不返回具体实现类
+- ✅ **接口返回**：返回 `IBufferPoolBuilder*` 接口指针，不返回具体实现类
 - ✅ **解耦合**：Factory 不依赖具体实现类，只依赖接口
-- ✅ **统一创建**：所有 Allocator 类型通过统一接口创建
+- ✅ **统一创建**：所有 Builder 类型通过统一接口创建
+- ✅ **DI 支持**：`ContinuousPhysicalPoolBuilder` 可通过 `IMemoryProvider` 注入不同的内存提供者
 
-#### ✅ BufferAllocatorFacade（Allocator门面）
+#### ~~BufferAllocatorFacade~~（已删除）
 
-**文件位置**:
-- 门面: `include/buffer/BufferAllocatorFacade.hpp`
-- 源文件: `source/buffer/BufferAllocatorFacade.cpp`
+> `BufferAllocatorFacade` 已删除。Worker 现在直接持有 `std::unique_ptr<IBufferPoolBuilder> builder_`，通过 `BufferPoolBuilderFactory::create()` 创建。
+
+~~**文件位置**~~:
+- ~~门面: `include/buffer/BufferAllocatorFacade.hpp`~~
+- ~~源文件: `source/buffer/BufferAllocatorFacade.cpp`~~
 
 **设计模式**: 门面模式（Facade Pattern）
 
@@ -2481,7 +1204,7 @@ graph TB
     
     subgraph "接口层 Interface"
         IVFN[IVideoFileNavigator<br/>Worker导航接口]
-        BAB[BufferAllocatorBase<br/>Allocator接口<br/>纯抽象基类]
+        BAB[BufferPoolBuilder<br/>Pool构建器接口<br/>纯抽象基类]
     end
     
     subgraph "基类层 Base"
@@ -2490,7 +1213,7 @@ graph TB
     
     subgraph "实现层 Implementation"
         WorkerImpl[Worker实现类<br/>继承WorkerBase]
-        AllocatorImpl[Allocator实现类<br/>继承BufferAllocatorBase]
+        AllocatorImpl[PoolBuilder实现类<br/>继承BufferPoolBuilder]
     end
     
     VPL -->|使用| BFW
@@ -2526,11 +1249,11 @@ classDiagram
         -createByType(WorkerType) WorkerBase*
     }
     
-    class BufferAllocatorFactory {
+    class BufferPoolBuilderFactory {
         <<factory>>
-        +create(AllocatorType) BufferAllocatorBase*
-        +createByName(string) BufferAllocatorBase*
-        -createByType(AllocatorType) BufferAllocatorBase*
+        +create(AllocatorType) BufferPoolBuilder*
+        +createByName(string) BufferPoolBuilder*
+        -createByType(AllocatorType) BufferPoolBuilder*
     }
     
     class IVideoFileNavigator {
@@ -3248,11 +1971,13 @@ auto consumer_config = WorkerConfigBuilder()
 - Worker实现类通过继承 `WorkerBase` 基类来实现此接口
 - `WorkerBase` 基类继承 `IVideoFileNavigator`，同时定义Buffer填充方法（纯虚函数）
 
-### 5. BufferAllocatorBase（Allocator接口，纯抽象基类）
+### 5. BufferPoolBuilder（Pool 构建器接口，纯抽象基类）
+
+> 原 `BufferAllocatorBase`，已重命名。`using BufferAllocatorBase = BufferPoolBuilder;`
 
 **文件位置**:
-- 接口: `include/buffer/BufferAllocatorBase.hpp`
-- 实现类: `include/buffer/`（NormalAllocator, AVFrameAllocator, FramebufferAllocator）
+- 接口: `include/buffer/pool/BufferPoolBuilder.hpp`
+- 实现类: `include/buffer/pool/`（NormalPoolBuilder, AVFramePoolBuilder, MatPoolBuilder, FramebufferPoolBuilder）
 
 **架构角色**: 接口层（Interface Layer，纯抽象基类）
 
@@ -3341,7 +2066,7 @@ return pool_id;
 - 所有具体Worker实现类继承 `WorkerBase`
 
 **核心成员**（protected，子类自动继承）：
-- `BufferAllocatorFacade allocator_facade_`：Allocator门面（所有Worker自动继承）
+- `std::unique_ptr<IBufferPoolBuilder> builder_`：Builder实例（所有Worker自动继承）
 - `uint64_t buffer_pool_id_`：Worker创建的BufferPool ID（v2.0：Registry独占持有）
 
 **核心方法**（public，纯虚函数，子类必须实现）：
@@ -3609,24 +2334,25 @@ bool FfmpegDecodeRtspWorker::fillBuffer(...) {
 ### 8. Allocator实现类（Implementation Layer）
 
 **文件位置**:
-- 实现类: `include/buffer/`（NormalAllocator, AVFrameAllocator, FramebufferAllocator）
+- 实现类: `include/bufferpool/pool/builder/`（ContinuousPhysicalPoolBuilder, AVFramePoolBuilder, MatPoolBuilder）
 
 **架构角色**: 实现层（Implementation Layer）
 
 **设计特点**：
-- ✅ **继承接口**：所有实现类继承 `BufferAllocatorBase` 接口
+- ✅ **继承接口**：所有实现类继承 `IBufferPoolBuilder` 接口
 - ✅ **实现契约**：实现所有接口定义的纯虚函数
 - ✅ **对上层透明**：上层代码通过接口访问，不依赖具体实现类
 
 **实现类概览**：
-- **NormalAllocator**：普通内存分配器（malloc/posix_memalign），适用于CPU处理的普通数据缓冲
-- **AVFrameAllocator**：AVFrame包装分配器（FFmpeg帧内存），适用于FFmpeg解码，零拷贝模式
-- **FramebufferAllocator**：Framebuffer内存包装分配器（外部内存），适用于Framebuffer设备
+- **ContinuousPhysicalPoolBuilder**：物理连续内存构建器（通过 IMemoryProvider DI），支持 malloc 和 TACO 物理内存
+- **AVFramePoolBuilder**：AVFrame包装构建器（FFmpeg帧内存），适用于FFmpeg解码，零拷贝模式
+- **MatPoolBuilder**：OpenCV Mat包装构建器（cv::Mat内存），适用于OpenCV图像处理
 
 **关键设计**：
-- ✅ **接口统一**：所有实现类通过 `BufferAllocatorBase` 接口统一访问
-- ✅ **工厂创建**：通过 `BufferAllocatorFactory` 创建，返回接口指针
+- ✅ **接口统一**：所有实现类通过 `IBufferPoolBuilder` 接口统一访问
+- ✅ **工厂创建**：通过 `BufferPoolBuilderFactory` 创建，返回接口指针
 - ✅ **实现透明**：具体实现细节对上层完全透明
+- ✅ **依赖注入**：`ContinuousPhysicalPoolBuilder` 通过构造函数注入 `IMemoryProvider`，解耦内存提供方式
 
 ---
 
@@ -4821,18 +3547,18 @@ auto config = WorkerConfigBuilder().setDecoderName(decoder).build();
 
 | 场景 | Worker类型 | Worker内部使用的Allocator | 理由 |
 |------|-----------|-------------------------|------|
-| 解码视频文件 | `FFMPEG_DECODE` | NormalAllocator（Worker自动选择） | 支持多种编码格式，硬件加速 |
-| RTSP流解码 | `FFMPEG_DECODE` | AVFrameAllocator（Worker自动选择） | 实时流处理，零拷贝模式 |
-| RTSP流录制 | `FFMPEG_PACKET_RECORDER` | NormalAllocator | 录制编码数据包 |
-| 编码原始帧 | `FFMPEG_ENCODE` ⭐v2.31 | NormalAllocator（Worker自动选择） | 将 YUV/RGB 编码为视频 |
+| 解码视频文件 | `FFMPEG_DECODE` | ContinuousPhysicalPoolBuilder（Worker自动选择） | 支持多种编码格式，硬件加速 |
+| RTSP流解码 | `FFMPEG_DECODE` | AVFramePoolBuilder（Worker自动选择） | 实时流处理，零拷贝模式 |
+| RTSP流录制 | `FFMPEG_PACKET_RECORDER` | ContinuousPhysicalPoolBuilder | 录制编码数据包 |
+| 编码原始帧 | `FFMPEG_ENCODE` ⭐v2.31 | ContinuousPhysicalPoolBuilder（Worker自动选择） | 将 YUV/RGB 编码为视频 |
 | Raw视频文件 | ~~`MMAP_RAW`~~ / ~~`IOURING_RAW`~~ | _（未实现）_ | _计划中的功能_ |
 
 ### 2. BufferPool创建策略
 
 **推荐做法：**
-- ✅ 使用Worker自动创建BufferPool，Worker会根据场景自动选择合适的Allocator
+- ✅ 使用Worker自动创建BufferPool，Worker会根据场景自动选择合适的Builder
 - ✅ Worker必须在实现`IVideoFileNavigator::open()`时创建BufferPool，不能返回nullptr
-- ❌ 不要直接调用Allocator创建BufferPool（除非是不涉及Worker的场景）
+- ❌ 不要直接调用Builder创建BufferPool（除非是不涉及Worker的场景）
 
 ### 3. 错误处理
 
@@ -5233,18 +3959,21 @@ feat(buffer): 新增AVFrame管理功能
 
 **注意**：BufferPool 只能通过 Allocator（持有 Passkey Token）创建，外部无法直接实例化。
 
-### BufferAllocator API
+### BufferPoolBuilder API
+
+> 原 `BufferAllocator API`，类名已重命名为 `BufferPoolBuilder`。
 
 | 方法 | 说明 | 参数 | 返回值 |
 |------|------|------|--------|
 | `allocatePoolWithBuffers(count, size, name, category)` | 批量分配并创建Pool | `count`: Buffer数量<br>`size`: Buffer大小<br>`name`: Pool名称<br>`category`: Pool分类 | `uint64_t`<br>（返回pool_id，Registry独占持有Pool） |
 | `injectBufferToPool(pool_id, size, queue)` | 单个注入到Pool | `pool_id`: BufferPool ID<br>`size`: Buffer大小<br>`queue`: 队列类型 | `Buffer*` |
+| `injectExternalBufferToPool(pool_id, virt_addr, phys_addr, size, queue, custom_id)` | 注入外部内存到Pool | `pool_id`: BufferPool ID<br>其他: 外部内存参数 | `Buffer*` |
 | `removeBufferFromPool(pool_id, buffer)` | 从Pool移除并销毁 | `pool_id`: BufferPool ID<br>`buffer`: Buffer指针 | `bool` |
-| `destroyPool(pool_id)` | 销毁整个Pool及其所有Buffer | `pool_id`: BufferPool ID | `bool` |
+| `destroyPool()` | 销毁此Builder创建的所有Pool及Buffer | 无 | `bool` |
 
-**所有权说明（v2.0）**：
+**所有权说明**：
 - ✅ `allocatePoolWithBuffers()` 返回 `uint64_t` pool_id，Registry独占持有BufferPool
-- ✅ Allocator 创建后立即注册到Registry，不持有BufferPool
+- ✅ PoolBuilder 创建后立即注册到Registry，不持有BufferPool
 - ✅ Registry 负责BufferPool生命周期管理（shared_ptr，引用计数=1）
 - ✅ 调用者通过 `BufferPoolRegistry::getInstance().getPool(pool_id)` 获取临时访问
 
@@ -5350,18 +4079,18 @@ feat(buffer): 新增AVFrame管理功能
 **A**:
 - **Worker必须创建BufferPool**：Worker在实现`IVideoFileNavigator::open()`时**必须**自动调用Allocator创建BufferPool，流程如下：
   1. Worker实现`IVideoFileNavigator::open()`方法（文件打开逻辑）
-  2. Worker创建Allocator实例（根据场景选择合适的Allocator）
-     - Raw视频文件：使用NormalAllocator
-     - RTSP流/编码视频：使用AVFrameAllocator（动态注入模式）
-     - Framebuffer显示：使用FramebufferAllocator
-  3. Worker调用`allocator->allocatePoolWithBuffers(count, size, name, category)`
-  4. Allocator内部：
+  2. Worker构造时通过BufferPoolBuilderFactory创建Builder
+     - 物理连续内存：使用ContinuousPhysicalPoolBuilder（通过IMemoryProvider DI）
+     - RTSP流/编码视频：使用AVFramePoolBuilder（动态注入模式）
+     - OpenCV处理：使用MatPoolBuilder
+  3. Worker调用`builder_->allocatePoolWithBuffers(count, size, name, category)`
+  4. Builder内部：
      - 使用 Passkey Token 创建空的 BufferPool：
        ```cpp
        auto pool = std::make_unique<BufferPool>(token(), name, category);
        ```
-       - `token()` 从 `BufferAllocatorBase` 基类获取通行证
-       - 只有 Allocator 可以创建 `PrivateToken`
+       - `token()` 从 `IBufferPoolBuilder` 基类获取通行证
+       - 只有 Builder 可以创建 `PrivateToken`
      - 注册到Registry（使用weak_ptr，不持有所有权）：
        ```cpp
        std::shared_ptr<BufferPool> temp_shared = std::shared_ptr<BufferPool>(
@@ -5431,15 +4160,15 @@ ProductionLine架构通过清晰的职责划分和设计模式应用，实现了
 
 **BufferPool 创建权限控制（v2.0）**：
 - 采用 **Passkey Idiom**（通行证模式）限制 BufferPool 的创建权限
-- 只有 Allocator（持有 PrivateToken）可以创建 BufferPool 实例
+- 只有 Builder（持有 PrivateToken）可以创建 BufferPool 实例
 - 提供比 friend 更精细的访问控制，更加安全和优雅
-- 子类通过 `BufferAllocatorBase::token()` 获取通行证，调用 `std::make_shared<BufferPool>(token(), name, category)` 创建
+- 子类通过 `IBufferPoolBuilder::token()` 获取通行证，调用 `std::make_shared<BufferPool>(token(), name, category)` 创建
 
 **BufferPool 所有权管理（v2.0）**：
 - **Registry 中心化管理**：Registry 独占持有 BufferPool（shared_ptr，引用计数=1）
-- **Allocator ID 机制**：每个 Allocator 有唯一 ID，Registry 记录 Pool 归属关系
-- **Allocator 不维护状态**：Allocator 不持有 Pool 列表，需要时向 Registry 查询
-- **自动清理**：Allocator 析构时查询 Registry 获取所有 Pool，逐个调用 `destroyPool()` 清理
+- **Builder ID 机制**：每个 Builder 有唯一 ID，Registry 记录 Pool 归属关系
+- **Builder 不维护状态**：Builder 不持有 Pool 列表，需要时向 Registry 查询
+- **自动清理**：Builder 析构时查询 Registry 获取所有 Pool，逐个调用 `destroyPool()` 清理
 - **Worker 主动清理**：Worker 的 `close()` 调用 `destroyPool()` 主动清理资源
 - **生命周期清晰**：Pool 销毁时，Registry 自动从归属关系中移除
 

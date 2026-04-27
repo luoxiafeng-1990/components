@@ -22,7 +22,7 @@
 #include "consumptionline/config/ConsumerTypeConfig.hpp"
 #include "productionline/worker/config/MultiWorkerConfig.hpp"
 #include "productionline/worker/config/WorkerConfigs.hpp"
-#include "buffer/bufferpool/BufferPool.hpp"
+#include "bufferpool/pool/base/BufferPool.hpp"
 #include "vendor/contracts/IDisplayDevice.hpp"
 #include "vendor/taco/display/DisplayDeviceFactory.hpp"
 #include "productionline/worker/core/FFmpegEncodeWorker.hpp"

@@ -27,7 +27,7 @@
 #include "productionline/worker/config/MultiWorkerConfig.hpp"
 #include "productionline/worker/config/WorkerConfigs.hpp"
 #include "productionline/line/VideoProductionLine.hpp"
-#include "buffer/bufferpool/BufferPool.hpp"
+#include "bufferpool/pool/base/BufferPool.hpp"
 #include "common/GlobalThreadPool.hpp"
 #include "common/Logger.hpp"
 

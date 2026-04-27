@@ -23,7 +23,7 @@
 #ifndef IBUFFER_CONSUMER_HPP
 #define IBUFFER_CONSUMER_HPP
 
-#include "buffer/bufferpool/Buffer.hpp"
+#include "bufferpool/buffer/Buffer.hpp"
 #include <vector>
 #include <string>
 #include <cstdint>

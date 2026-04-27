@@ -173,7 +173,7 @@ int main(int argc, char* argv[]) {
     // CHANNEL COMPARE
     if (config.consumer_type.compare.enable_channel_compare) {
         auto result = test::ExecuteMode::channelCompare(pipeline_configs[0], test_name + " (CHANNEL_COMPARE)");
-        return result.success ? 0 : 1;
+        return result.getOverallResult() ? 0 : 1;
     }
 
     const bool compare_enabled = config.consumer_type.compare.enable_psnr
@@ -186,7 +186,7 @@ int main(int argc, char* argv[]) {
         auto result = test::venc::runEncodeQualityCompare(
             pipeline_configs[0], config, test_name + " (ENC_COMPARE)");
         consumer::BufferConsumerService::printResult(test_name, result);
-        return result.success ? 0 : 1;
+        return result.getOverallResult() ? 0 : 1;
     }
 
     // 单路编码 + 显示：编码 -> 解码 -> 显示（码流不可直接显示）
@@ -198,7 +198,7 @@ int main(int argc, char* argv[]) {
         auto result = test::venc::runEncodeDecodeDisplay(
             pipeline_configs[0], config, test_name);
         consumer::BufferConsumerService::printResult(test_name, result);
-        return result.success ? 0 : 1;
+        return result.getOverallResult() ? 0 : 1;
     }
 
     // PARALLEL COMPARE (N 组 hw vs sw 并发对比)
@@ -230,10 +230,10 @@ int main(int argc, char* argv[]) {
         bool all_ok = true;
         int total_frames = 0;
         for (int i = 0; i < groups; i++) {
-            if (!results[i].success) all_ok = false;
+            if (!results[i].getOverallResult()) all_ok = false;
             total_frames += results[i].frames_consumed;
             std::cout << "  [" << (i + 1) << "/" << groups << "] "
-                      << (results[i].success ? "PASSED" : "FAILED")
+                      << (results[i].getOverallResult() ? "PASSED" : "FAILED")
                       << " (" << results[i].frames_consumed << " frames)\n";
         }
         std::cout << "\n  Summary: " << (all_ok ? "ALL PASSED" : "SOME FAILED")
@@ -257,19 +257,19 @@ int main(int argc, char* argv[]) {
         if ((is_arithmetic_op || compare_enabled) && pipeline_configs.size() == 2) {
             auto result = test::ExecuteMode::compare(pipeline_configs, flags, test_name + " (OPENCV)");
             consumer::BufferConsumerService::printResult(test_name, result);
-            return result.success ? 0 : 1;
+            return result.getOverallResult() ? 0 : 1;
         }
 
         auto result = test::ExecuteMode::single(pipeline_configs[0], flags, test_name);
         consumer::BufferConsumerService::printResult(test_name, result);
-        return result.success ? 0 : 1;
+        return result.getOverallResult() ? 0 : 1;
     }
 
     // COMPARE (PSNR/SSIM, 2 configs = hw vs sw)
     if (compare_enabled && pipeline_configs.size() == 2) {
         auto result = test::ExecuteMode::compare(pipeline_configs, flags, test_name + " (COMPARE)");
         consumer::BufferConsumerService::printResult(test_name, result);
-        return result.success ? 0 : 1;
+        return result.getOverallResult() ? 0 : 1;
     }
 
     // PARALLEL / BATCH (configs.size() > 1)
@@ -287,10 +287,10 @@ int main(int argc, char* argv[]) {
                 auto r = test::ExecuteMode::single(pipeline_configs[i],
                     test::ExecuteMode::buildConsumeFlags(pipeline_configs[i]),
                     test_name + " [" + std::to_string(i + 1) + "/" + std::to_string(pipeline_configs.size()) + "]");
-                if (!r.success) all_ok = false;
+                if (!r.getOverallResult()) all_ok = false;
                 total_frames += r.frames_consumed;
                 std::cout << "  [" << (i + 1) << "/" << pipeline_configs.size() << "] "
-                          << (r.success ? "PASSED" : "FAILED") << " (" << r.frames_consumed << " frames)\n";
+                          << (r.getOverallResult() ? "PASSED" : "FAILED") << " (" << r.frames_consumed << " frames)\n";
             }
             std::cout << "\n  Summary: " << (all_ok ? "ALL PASSED" : "SOME FAILED")
                       << " (" << total_frames << " total frames)\n";
@@ -300,11 +300,11 @@ int main(int argc, char* argv[]) {
         auto result = test::ExecuteMode::parallel(pipeline_configs, flags,
             test_name + " (PARALLEL x" + std::to_string(pipeline_configs.size()) + ")");
         consumer::BufferConsumerService::printResult(test_name, result);
-        return result.success ? 0 : 1;
+        return result.getOverallResult() ? 0 : 1;
     }
 
     // SINGLE
     auto result = test::ExecuteMode::single(pipeline_configs[0], flags, test_name);
     consumer::BufferConsumerService::printResult(test_name, result);
-    return result.success ? 0 : 1;
+    return result.getOverallResult() ? 0 : 1;
 }

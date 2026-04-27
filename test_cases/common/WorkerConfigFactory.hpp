@@ -169,7 +169,7 @@ public:
             .setDataSourceConfig(
                 DataSourceConfigBuilder()
                     .setPath(path)
-                    .setBufferCount(isRtspUrl(path) ? 8 : 128)
+                    .setBufferCount(8)
                     .build()
             )
             .setDecoderConfig(
@@ -205,7 +205,7 @@ public:
             .setDataSourceConfig(
                 DataSourceConfigBuilder()
                     .setPath(path)
-                    .setBufferCount(128)
+                    .setBufferCount(32)
                     .build()
             )
             .setDecoderConfig(
@@ -418,7 +418,7 @@ public:
             .setDataSourceConfig(
                 DataSourceConfigBuilder()
                     .setPath(path)
-                    .setBufferCount(128)
+                    .setBufferCount(32)
                     .build()
             )
             .setDecoderConfig(
@@ -447,7 +447,7 @@ public:
             .setDataSourceConfig(
                 DataSourceConfigBuilder()
                     .setPath(path)
-                    .setBufferCount(128)
+                    .setBufferCount(32)
                     .build()
             )
             .setDecoderConfig(
@@ -476,7 +476,7 @@ public:
             .setDataSourceConfig(
                 DataSourceConfigBuilder()
                     .setPath(path)
-                    .setBufferCount(128)
+                    .setBufferCount(32)
                     .build()
             )
             .setDecoderConfig(
@@ -508,7 +508,7 @@ public:
             .setDataSourceConfig(
                 DataSourceConfigBuilder()
                     .setPath(path)
-                    .setBufferCount(128)
+                    .setBufferCount(32)
                     .build()
             )
             .setDecoderConfig(
@@ -535,7 +535,7 @@ public:
             .setDataSourceConfig(
                 DataSourceConfigBuilder()
                     .setPath(path)
-                    .setBufferCount(128)
+                    .setBufferCount(32)
                     .build()
             )
             .setDecoderConfig(
@@ -562,7 +562,7 @@ public:
     
     static WorkerConfig createRtspRecord(
         const std::string& rtsp_url,
-        int buffer_count = 64
+        int buffer_count = 16
     ) {
         return WorkerConfigBuilder()
             .setDataSourceConfig(

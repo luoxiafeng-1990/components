@@ -4,10 +4,10 @@
 #include "productionline/worker/datasource/IDataSourceNavigator.hpp"
 #include "productionline/error/FillStatus.hpp"
 #include "productionline/worker/config/WorkerConfigs.hpp"
-#include "buffer/BufferAllocatorFacade.hpp"
-#include "buffer/BufferAllocatorFactory.hpp"
+#include "bufferpool/pool/base/IBufferPoolBuilder.hpp"
+#include "bufferpool/pool/base/BufferPoolBuilderFactory.hpp"
 #include "productionline/worker/base/ComponentTopology.hpp"
-#include "buffer/bufferpool/BufferPool.hpp"
+#include "bufferpool/pool/base/BufferPool.hpp"
 
 #include <log4cplus/logger.h>
 #include <map>
@@ -81,7 +81,7 @@ public:
      * - AUTO: 默认使用NORMAL（不推荐，子类应明确指定）
      * 
      * 构造顺序：
-     * 1. 父类 WorkerBase 构造（创建 allocator_facade_）
+     * 1. 父类 WorkerBase 构造（创建 builder_）
      * 2. 子类成员变量初始化
      * 3. 子类构造函数体执行
      * 
@@ -89,13 +89,13 @@ public:
      * @param config Worker配置（v2.2新增）
      */
     explicit WorkerBase(
-        BufferAllocatorFactory::AllocatorType allocator_type,
+        BufferPoolBuilderFactory::AllocatorType allocator_type,
         const WorkerConfig& config = WorkerConfig()
-    ) : allocator_facade_(allocator_type)  // 🎯 父类直接创建Allocator门面
-      , topology_id_(0)  // 拓扑：由 Factory 设置
-      , buffer_pool_type_map_()  // v2.0: 初始化 BufferPool 类型映射表
-      , worker_config_(config)  // 🎯 v2.2: 存储配置
-      , logger_(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Worker")))  // 🎯 初始化 logger
+    ) : builder_(BufferPoolBuilderFactory::create(allocator_type))
+      , topology_id_(0)
+      , buffer_pool_type_map_()
+      , worker_config_(config)
+      , logger_(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Worker")))
     {
     }
     
@@ -480,9 +480,9 @@ protected:
     virtual const AVCodec* findPureSoftwareDecoder(AVCodecID codec_id) const final;
     
     /**
-     * @brief Allocator门面（所有Worker子类自动继承）
+     * @brief BufferPool 构建器（所有Worker子类自动继承）
      */
-    BufferAllocatorFacade allocator_facade_;
+    std::unique_ptr<IBufferPoolBuilder> builder_;
     
     /**
      * @brief Worker 在 ComponentTopology 中的唯一 ID
@@ -514,14 +514,14 @@ protected:
      * @brief 注册一个 BufferPool（供子类在 open() 中调用）
      * 
      * @param type BufferPool 类型枚举
-     * @param pool_id BufferPool ID（由 allocator_facade_.allocatePoolWithBuffers() 返回）
+     * @param pool_id BufferPool ID（由 builder_->allocatePoolWithBuffers() 返回）
      * @return true 注册成功，false 该类型已存在或 pool_id 无效
      * 
      * @note 同一类型只能注册一次，重复注册会返回 false
      * 
      * @note 使用示例：
      * @code
-     * uint64_t pool_id = allocator_facade_.allocatePoolWithBuffers(...);
+     * uint64_t pool_id = builder_->allocatePoolWithBuffers(...);
      * if (pool_id != 0) {
      *     registerBufferPool(BufferPoolType::DECODE_VIDEO_PRIMARY, pool_id);
      * }

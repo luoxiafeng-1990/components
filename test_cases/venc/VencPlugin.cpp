@@ -16,7 +16,7 @@
 #include "productionline/worker/config/FrameSyncTypes.hpp"
 #include "productionline/worker/datasource/rawdata/RawFrameSourceFromFile.hpp"
 #include "productionline/worker/base/ComponentTopology.hpp"
-#include "buffer/bufferpool/Buffer.hpp"
+#include "bufferpool/buffer/Buffer.hpp"
 
 extern "C" {
 #include <libavutil/pixfmt.h>
@@ -134,16 +134,18 @@ static int mapPixFmtStringToAVPixFmt(std::string_view format_name) {
     if (fmt == "abgr"   || fmt == "abgr888") return AV_PIX_FMT_ABGR;
     if (fmt == "rgb0"   || fmt == "rgbx888") return AV_PIX_FMT_RGB0;
     if (fmt == "bgr0"   || fmt == "bgrx888") return AV_PIX_FMT_BGR0;
-    if (fmt == "rgb565")      return AV_PIX_FMT_RGB565LE;
-    if (fmt == "bgr565")      return AV_PIX_FMT_BGR565LE;
-    if (fmt == "rgb555")      return AV_PIX_FMT_RGB555LE;
-    if (fmt == "bgr555")      return AV_PIX_FMT_BGR555LE;
+    if (fmt == "rgb565" || fmt == "rgb565le") return AV_PIX_FMT_RGB565LE;
+    if (fmt == "bgr565" || fmt == "bgr565le") return AV_PIX_FMT_BGR565LE;
+    if (fmt == "rgb555" || fmt == "rgb555le") return AV_PIX_FMT_RGB555LE;
+    if (fmt == "bgr555" || fmt == "bgr555le") return AV_PIX_FMT_BGR555LE;
+    if (fmt == "rgb444" || fmt == "rgb444le") return AV_PIX_FMT_RGB444LE;
+    if (fmt == "bgr444" || fmt == "bgr444le") return AV_PIX_FMT_BGR444LE;
 #if defined(AV_PIX_FMT_X2RGB10LE)
-    if (fmt == "x2rgb10le" || fmt == "rgbx101010" || fmt == "rgb101010")
+    if (fmt == "x2rgb10le" || fmt == "rgbx101010" || fmt == "rgb101010" || fmt == "rgb101010le")
         return AV_PIX_FMT_X2RGB10LE;
 #endif
 #if defined(AV_PIX_FMT_X2BGR10LE)
-    if (fmt == "x2bgr10le" || fmt == "bgrx101010" || fmt == "bgr101010")
+    if (fmt == "x2bgr10le" || fmt == "bgrx101010" || fmt == "bgr101010" || fmt == "bgr101010le")
         return AV_PIX_FMT_X2BGR10LE;
 #endif
 
@@ -852,7 +854,7 @@ consumer::ConsumeResult runEncodeQualityCompare(
     ref_avframe->format = ref_pix_fmt;
     ref_avframe->width = ref_width;
     ref_avframe->height = ref_height;
-    if (av_frame_get_buffer(ref_avframe, 0) < 0) {
+    if (av_frame_get_buffer(ref_avframe, 64) < 0) {
         av_frame_free(&ref_avframe);
         ref_source.close();
         return failResult(logger, "ENC_COMPARE", "Failed to allocate buffer for reference AVFrame");

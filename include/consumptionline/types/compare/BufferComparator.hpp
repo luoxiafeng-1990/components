@@ -1,6 +1,6 @@
 #pragma once
 
-#include "buffer/bufferpool/Buffer.hpp"
+#include "bufferpool/buffer/Buffer.hpp"
 #include "consumptionline/config/ConsumerTypeConfig.hpp"
 #include "productionline/worker/config/MultiWorkerConfig.hpp"
 #include "productionline/worker/config/WorkerConfigs.hpp"
@@ -369,6 +369,22 @@ private:
      * @brief 写入报告
      */
     void writeReport(const FrameCompareResult& result);
+    
+    /**
+     * @brief pp模式分辨率不匹配标记
+     * 当参考帧和测试帧分辨率不同时设为true，
+     * 后续对比会先将参考帧缩放到测试帧分辨率
+     */
+    bool resolution_mismatch_detected_ = false;
+    
+    /**
+     * @brief 将AVFrame缩放到目标分辨率
+     * @param src_frame 源帧
+     * @param dst_width 目标宽度
+     * @param dst_height 目标高度
+     * @return 缩放后的AVFrame，失败返回nullptr（调用者负责释放）
+     */
+    AVFrame* rescaleFrame(AVFrame* src_frame, int dst_width, int dst_height);
     
     /**
      * @brief 格式转换到YUV420P

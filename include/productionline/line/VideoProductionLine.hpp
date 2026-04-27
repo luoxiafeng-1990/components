@@ -1,6 +1,6 @@
 #pragma once
 
-#include "buffer/bufferpool/BufferPool.hpp"
+#include "bufferpool/pool/base/BufferPool.hpp"
 #include "productionline/worker/base/WorkerBase.hpp"
 #include "productionline/worker/base/WorkerFactory.hpp"
 #include "productionline/worker/config/MultiWorkerConfig.hpp"

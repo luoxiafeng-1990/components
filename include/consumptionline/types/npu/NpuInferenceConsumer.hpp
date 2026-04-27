@@ -29,7 +29,7 @@
 #define NPU_INFERENCE_CONSUMER_HPP
 
 #include "consumptionline/core/IBufferConsumer.hpp"
-#include "buffer/bufferpool/Buffer.hpp"
+#include "bufferpool/buffer/Buffer.hpp"
 
 #include <ta-runtime-api.h>
 #include <opencv2/core.hpp>

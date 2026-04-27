@@ -13,6 +13,7 @@
 #include "../common/WorkerConfigFactory.hpp"
 #include "consumptionline/core/BufferConsumerService.hpp"
 #include "consumptionline/core/BufferConsumerStrategies.hpp"
+#include "vendor/taco/decode/TacoDecoderExtension.hpp"
 
 #include "../common/third_party/CLI11.hpp"
 
@@ -577,8 +578,24 @@ std::vector<WorkerConfig> PPPlugin::buildPipelineConfigs(const WorkerConfig& sha
     }
 
     // COMPARE：单通道 → HW vs SW
+    // HW 解码器双通道输出（ch0 NV12 + ch1 RGB888）会与 SW 单通道 PTS 不匹配，
+    // 此处禁用 ch1 使其仅单通道输出，与 SW 解码器对齐
     if (shared_config.consumer_type.compare.enable_psnr ||
         shared_config.consumer_type.compare.enable_ssim) {
+        // HW 解码器改为单通道（禁用 ch1），与 SW 的 1 帧/帧对齐
+        auto hw_decoder = full_config.decoder;
+        auto* taco_cfg = tacoDecoderConfig(hw_decoder);
+        if (taco_cfg) {
+            taco_cfg->ch1_enable = false;
+        }
+        auto hw_config = WorkerConfigBuilder()
+            .setDataSourceConfig(data_source)
+            .setDecoderConfig(hw_decoder)
+            .setConsumerTypeConfig(shared_config.consumer_type)
+            .setGlobalConfig(
+                WorkerGlobalConfigBuilder().setWorkerType(WorkerType::FFMPEG_DECODE).build()
+            )
+            .build();
         auto sw_config = WorkerConfigBuilder()
             .setDataSourceConfig(data_source)
             .setDecoderConfig(DecoderConfigBuilder().useSoftware().build())
@@ -587,7 +604,7 @@ std::vector<WorkerConfig> PPPlugin::buildPipelineConfigs(const WorkerConfig& sha
                 WorkerGlobalConfigBuilder().setWorkerType(WorkerType::FFMPEG_DECODE).build()
             )
             .build();
-        return {full_config, sw_config};
+        return {hw_config, sw_config};
     }
 
     // SINGLE

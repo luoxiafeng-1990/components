@@ -2,7 +2,7 @@
 #include "productionline/worker/datasource/encodeddata/EncodedPacketSourceFromRtsp.hpp"
 #include "productionline/worker/datasource/encodeddata/EncodedPacketSourceFromFile.hpp"
 #include "common/Logger.hpp"
-#include "buffer/bufferpool/BufferPool.hpp"
+#include "bufferpool/pool/base/BufferPool.hpp"
 #include "productionline/worker/base/ComponentTopology.hpp"
 #include <climits>
 #include <cstring>
@@ -15,17 +15,17 @@ extern "C" {
 // ============ 构造/析构 ============
 
 FfmpegPacketRecorderWorker::FfmpegPacketRecorderWorker()
-    : WorkerBase(BufferAllocatorFactory::AllocatorType::AVFRAME)  // ⭐ 使用 AVFrameAllocator（支持 AVPacket）
+    : WorkerBase(BufferPoolBuilderFactory::AllocatorType::AVFRAME)
     , packet_source_(nullptr)
     , is_open_(false)
     , packet_count_(0)
     , logger_(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Worker.Recorder")))
 {
-    LOG4CPLUS_DEBUG(logger_, "FfmpegPacketRecorderWorker created (using AVFrameAllocator, v2.13 多数据源支持)");
+    LOG4CPLUS_DEBUG(logger_, "FfmpegPacketRecorderWorker created (using AVFramePoolBuilder)");
 }
 
 FfmpegPacketRecorderWorker::FfmpegPacketRecorderWorker(const WorkerConfig& config)
-    : WorkerBase(BufferAllocatorFactory::AllocatorType::AVFRAME, config)  // ⭐ 使用 AVFrameAllocator（支持 AVPacket）
+    : WorkerBase(BufferPoolBuilderFactory::AllocatorType::AVFRAME, config)
     , packet_source_(nullptr)
     , is_open_(false)
     , packet_count_(0)
@@ -97,7 +97,7 @@ bool FfmpegPacketRecorderWorker::open(const char* path) {
     }
     
     // 创建 BufferPool
-    uint64_t pool_id = allocator_facade_.allocatePoolWithBuffers(
+    uint64_t pool_id = builder_->allocatePoolWithBuffers(
         worker_config_.data_source.buffer_count,
         max_packet_size,
         std::string("FfmpegPacketRecorderWorker_") + std::string(path),

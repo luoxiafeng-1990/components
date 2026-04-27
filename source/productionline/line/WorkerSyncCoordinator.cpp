@@ -1,6 +1,6 @@
 #include "productionline/line/WorkerSyncCoordinator.hpp"
 #include "consumptionline/types/compare/BufferComparator.hpp"
-#include "buffer/bufferpool/Buffer.hpp"
+#include "bufferpool/buffer/Buffer.hpp"
 #include <log4cplus/loggingmacros.h>
 #include <set>
 #include <chrono>
@@ -36,6 +36,9 @@ double CompareCallbackContext::getPassRate() const {
 }
 
 bool CompareCallbackContext::isPassed() const {
+    if (total_frames.load() == 0) {
+        return false;
+    }
     return failed_frames.load() == 0;
 }
 
@@ -193,8 +196,8 @@ bool WorkerSyncCoordinator::arrive(
     
     // 防御性检查：防止重复到达
     if (sync.worker_buffers.find(worker_name) != sync.worker_buffers.end()) {
-        LOG4CPLUS_ERROR_FMT(logger_, 
-            "[Frame %llu] Worker '%s' 重复到达同步点", 
+        LOG4CPLUS_WARN_FMT(logger_, 
+            "[Frame %llu] Worker '%s' 重复到达同步点 (已忽略)", 
             (unsigned long long)frame_version, 
             worker_name.c_str());
         return false;
@@ -350,14 +353,17 @@ bool WorkerSyncCoordinator::arrive(
         });
 
         // 如果因 total_workers_ 减少而满足条件但 callback 未执行，
-        // 则由当前 worker 负责执行回调逻辑
+        // 则由当前 worker 负责执行回调（仍需比较已有 buffer）
         if (waited_ok && !sync.callback_executed && sync.arrived_count >= total_workers_) {
             LOG4CPLUS_INFO_FMT(logger_,
                 "[Frame %llu] Worker '%s' 因其他 Worker 退出而成为最后到达者，执行回调",
                 (unsigned long long)frame_version,
                 worker_name.c_str());
-            // 仅此 worker 存活，跳过比较
-            sync.should_submit = true;
+            if (!sync.worker_buffers.empty()) {
+                sync.should_submit = executeCallbackChain(frame_version, sync.worker_buffers);
+            } else {
+                sync.should_submit = true;
+            }
             sync.callback_executed = true;
             cv_.notify_all();
             cleanupOldFrames(frame_version);
@@ -566,9 +572,9 @@ void WorkerSyncCoordinator::tryMatchPending(
         }
         pending_frames_ = std::move(remaining);
 
-        if (pending_frames_.size() > 64) {
+        if (pending_frames_.size() > 16) {
             LOG4CPLUS_WARN_FMT(logger_,
-                "pending_frames_ 超过 64 帧未匹配，清空");
+                "pending_frames_ 超过 16 帧未匹配，清空以释放 DMA 资源");
             clearPendingFrames();
         }
     }

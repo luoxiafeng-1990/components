@@ -4,10 +4,10 @@
 #include "productionline/worker/datasource/encodeddata/EncodedPacketSourceFromBuffer.hpp"
 #include "productionline/worker/datasource/encodeddata/EncodedPacketSourceFromFile.hpp"
 #include "common/Logger.hpp"
-#include "buffer/bufferpool/BufferPool.hpp"
-#include "buffer/NormalAllocator.hpp"
+#include "bufferpool/pool/base/BufferPool.hpp"
 #include "productionline/worker/base/ComponentTopology.hpp"
 #include <string.h>
+#include <algorithm>
 #include <chrono>
 #include <climits>  // for INT_MAX
 
@@ -21,11 +21,13 @@ extern "C" {
 #include "ta_sys_api.h"
 }
 
+static constexpr size_t MAX_CACHED_FRAMES = 4;
+
 // ============ 构造/析构 ============
 
 // 构造函数（v3.0：统一的 FFmpeg 解码 Worker，支持文件/RTSP/Buffer 模式）
 FFmpegDecodeWorker::FFmpegDecodeWorker(const WorkerConfig& config)
-    : WorkerBase(BufferAllocatorFactory::AllocatorType::AVFRAME, config)  // 传递 config 给父类
+    : WorkerBase(BufferPoolBuilderFactory::AllocatorType::AVFRAME, config)
     , logger_(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Worker.Decode")))
     , packet_source_(nullptr)  // ⚠️ 数据源将在下面根据配置创建
     , codec_ctx_ptr_(nullptr)
@@ -95,7 +97,7 @@ FFmpegDecodeWorker::~FFmpegDecodeWorker() {
     //
     // 正确顺序：
     // 1. 先释放缓存的帧
-    // 2. 手动调用 allocator_facade_.destroyPool() 释放所有 AVFrame
+    // 2. 手动调用 builder_->destroyPool() 释放所有 AVFrame
     // 3. 再调用 close() 关闭解码器和数据源
     
     // 步骤1：清理缓存的帧（避免内存泄漏）
@@ -109,7 +111,7 @@ FFmpegDecodeWorker::~FFmpegDecodeWorker() {
     // 步骤2：先清理 BufferPool 和 AVFrame（避免 free(): invalid pointer）
     if (!buffer_pool_type_map_.empty()) {
         LOG4CPLUS_DEBUG(logger_, "手动清理 BufferPool 和 AVFrame...");
-        allocator_facade_.destroyPool();  // 释放所有 Pool 中的 Buffer 和 AVFrame
+        builder_->destroyPool();  // 释放所有 Pool 中的 Buffer 和 AVFrame
         clearAllBufferPools();
     }
     
@@ -246,7 +248,7 @@ bool FFmpegDecodeWorker::open() {
         pool_name = std::string("FFmpegDecodeWorker_") + worker_config_.data_source.path;
     }
     
-    uint64_t pool_id = allocator_facade_.allocatePoolWithBuffers(
+    uint64_t pool_id = builder_->allocatePoolWithBuffers(
         worker_config_.data_source.buffer_count,
         0,
         pool_name,
@@ -567,9 +569,8 @@ bool FFmpegDecodeWorker::fillBufferMetadataFromFrame(AVFrame* frame_ptr, Buffer*
     // ⭐ 硬件解码器：提取物理内存地址
     if (!decoder_name_.empty() && use_hardware_decoder_) {
         if (!extractHardwareAddressFromMetadata(frame_ptr, buffer)) {
-            LOG4CPLUS_ERROR_FMT(logger_, " Hardware decoder '%s': Failed to extract physical address",
+            LOG4CPLUS_WARN_FMT(logger_, " Hardware decoder '%s': Physical address not available (fallback to virtual)",
                          decoder_name_.c_str());
-            // ⚠️ 容错处理，打印日志但继续执行
         }
     }
     
@@ -690,6 +691,11 @@ FillResult FFmpegDecodeWorker::readAndSendPacket(AVPacket* packet_ptr) {
         " ERROR: avcodec_send_packet: decode error (ret=%d, %s)", ret, err_buf);
     packet_acquired_ = false;
     current_packet_ptr_ = nullptr;
+    if (ret == AVERROR_EXTERNAL) {
+        LOG4CPLUS_ERROR(logger_,
+            " FATAL: hardware driver returned AVERROR_EXTERNAL, marking driver as dead");
+        driver_fatal_ = true;
+    }
     return FillResult::fromCodec(Result::decodeError());
 }
 
@@ -700,6 +706,10 @@ FillResult FFmpegDecodeWorker::readAndSendPacket(AVPacket* packet_ptr) {
  */
 FillResult FFmpegDecodeWorker::fillBuffer(int frame_index, Buffer* buffer) {
     (void)frame_index;  // 未使用
+    
+    if (driver_fatal_) {
+        return FillResult::fromCodec(CodecSendResult::decodeError());
+    }
     
     // ========== 参数校验 ==========
     if (!buffer) {
@@ -751,11 +761,16 @@ FillResult FFmpegDecodeWorker::fillBuffer(int frame_index, Buffer* buffer) {
                 flush_sent_ = true;
             }
 
-            // ========== drain: receive_frame 直到拿到一帧或 EAGAIN/EOF ==========
+            // ========== drain: receive_frame（限制缓存数防止 DMA 耗尽）==========
             bool decoded_at_least_one = false;
             CodecSendResult receive_result = CodecSendResult::success();
 
             while (true) {
+                if (cached_frames_.size() >= MAX_CACHED_FRAMES) {
+                    receive_result = CodecSendResult::eagain();
+                    break;
+                }
+
                 AVFrame* temp_frame = av_frame_alloc();
                 if (!temp_frame) {
                     receive_result = CodecSendResult::allocFailed();
@@ -810,11 +825,16 @@ FillResult FFmpegDecodeWorker::fillBuffer(int frame_index, Buffer* buffer) {
         return send_result;
     }
    
-    // ========== 步骤3: 循环读取所有解码的帧到缓存 ==========
+    // ========== 步骤3: 循环读取解码帧到缓存（限制最大缓存数防止 DMA 耗尽） ==========
     bool decoded_at_least_one = false;
     CodecSendResult receive_result = CodecSendResult::success();
     
     while (true) {
+        if (cached_frames_.size() >= MAX_CACHED_FRAMES) {
+            receive_result = CodecSendResult::eagain();
+            break;
+        }
+
         AVFrame* temp_frame = av_frame_alloc();
         if (!temp_frame) {
             receive_result = CodecSendResult::allocFailed();
@@ -824,7 +844,6 @@ FillResult FFmpegDecodeWorker::fillBuffer(int frame_index, Buffer* buffer) {
         int ret = avcodec_receive_frame(codec_ctx_ptr_, temp_frame);
         
         if (ret == 0) {
-            // ✅ 成功解码一帧
             decoded_at_least_one = true;
             cached_frames_.push_back(temp_frame);
             continue;
@@ -1096,14 +1115,24 @@ bool FFmpegDecodeWorker::configureSpecialDecoder() {
     // ========== 通道0配置 ==========
     
     // 配置通道0裁剪参数（从 config 读取）
+    // 将裁剪区域钳制到实际输入分辨率，避免硬件 PP 拒绝超出范围的参数
     if (taco.ch0_crop_width > 0 && taco.ch0_crop_height > 0) {
-        av_opt_set_int(codec_ctx_ptr_->priv_data, "ch0_crop_x", taco.ch0_crop_x, 0);
-        av_opt_set_int(codec_ctx_ptr_->priv_data, "ch0_crop_y", taco.ch0_crop_y, 0);
-        av_opt_set_int(codec_ctx_ptr_->priv_data, "ch0_crop_width", taco.ch0_crop_width, 0);
-        av_opt_set_int(codec_ctx_ptr_->priv_data, "ch0_crop_height", taco.ch0_crop_height, 0);
-        LOG4CPLUS_DEBUG_FMT(logger_, "    ch0_crop: (%d, %d, %d, %d)", 
-               taco.ch0_crop_x, taco.ch0_crop_y, 
-               taco.ch0_crop_width, taco.ch0_crop_height);
+        int input_w = codec_ctx_ptr_->width;
+        int input_h = codec_ctx_ptr_->height;
+        int crop_x = std::min(taco.ch0_crop_x, input_w > 0 ? input_w - 1 : 0);
+        int crop_y = std::min(taco.ch0_crop_y, input_h > 0 ? input_h - 1 : 0);
+        int crop_w = std::min(taco.ch0_crop_width, input_w - crop_x);
+        int crop_h = std::min(taco.ch0_crop_height, input_h - crop_y);
+        if (crop_w <= 0) crop_w = input_w;
+        if (crop_h <= 0) crop_h = input_h;
+        
+        av_opt_set_int(codec_ctx_ptr_->priv_data, "ch0_crop_x", crop_x, 0);
+        av_opt_set_int(codec_ctx_ptr_->priv_data, "ch0_crop_y", crop_y, 0);
+        av_opt_set_int(codec_ctx_ptr_->priv_data, "ch0_crop_width", crop_w, 0);
+        av_opt_set_int(codec_ctx_ptr_->priv_data, "ch0_crop_height", crop_h, 0);
+        LOG4CPLUS_DEBUG_FMT(logger_, "    ch0_crop: config=(%d,%d,%d,%d) clamped=(%d,%d,%d,%d) input=(%dx%d)", 
+               taco.ch0_crop_x, taco.ch0_crop_y, taco.ch0_crop_width, taco.ch0_crop_height,
+               crop_x, crop_y, crop_w, crop_h, input_w, input_h);
     }
     
     // 配置通道0缩放参数（从 config 读取）
@@ -1116,14 +1145,24 @@ bool FFmpegDecodeWorker::configureSpecialDecoder() {
     // ========== 通道1配置 ==========
     
     // 配置通道1裁剪参数（从 config 读取）
+    // 将裁剪区域钳制到实际输入分辨率
     if (taco.ch1_crop_width > 0 && taco.ch1_crop_height > 0) {
-        av_opt_set_int(codec_ctx_ptr_->priv_data, "ch1_crop_x", taco.ch1_crop_x, 0);
-        av_opt_set_int(codec_ctx_ptr_->priv_data, "ch1_crop_y", taco.ch1_crop_y, 0);
-        av_opt_set_int(codec_ctx_ptr_->priv_data, "ch1_crop_width", taco.ch1_crop_width, 0);
-        av_opt_set_int(codec_ctx_ptr_->priv_data, "ch1_crop_height", taco.ch1_crop_height, 0);
-        LOG4CPLUS_DEBUG_FMT(logger_, "    ch1_crop: (%d, %d, %d, %d)", 
-               taco.ch1_crop_x, taco.ch1_crop_y, 
-               taco.ch1_crop_width, taco.ch1_crop_height);
+        int input_w = codec_ctx_ptr_->width;
+        int input_h = codec_ctx_ptr_->height;
+        int crop_x = std::min(taco.ch1_crop_x, input_w > 0 ? input_w - 1 : 0);
+        int crop_y = std::min(taco.ch1_crop_y, input_h > 0 ? input_h - 1 : 0);
+        int crop_w = std::min(taco.ch1_crop_width, input_w - crop_x);
+        int crop_h = std::min(taco.ch1_crop_height, input_h - crop_y);
+        if (crop_w <= 0) crop_w = input_w;
+        if (crop_h <= 0) crop_h = input_h;
+        
+        av_opt_set_int(codec_ctx_ptr_->priv_data, "ch1_crop_x", crop_x, 0);
+        av_opt_set_int(codec_ctx_ptr_->priv_data, "ch1_crop_y", crop_y, 0);
+        av_opt_set_int(codec_ctx_ptr_->priv_data, "ch1_crop_width", crop_w, 0);
+        av_opt_set_int(codec_ctx_ptr_->priv_data, "ch1_crop_height", crop_h, 0);
+        LOG4CPLUS_DEBUG_FMT(logger_, "    ch1_crop: config=(%d,%d,%d,%d) clamped=(%d,%d,%d,%d) input=(%dx%d)", 
+               taco.ch1_crop_x, taco.ch1_crop_y, taco.ch1_crop_width, taco.ch1_crop_height,
+               crop_x, crop_y, crop_w, crop_h, input_w, input_h);
     }
     
     // ⭐ 配置通道1缩放参数（从 config 读取）
@@ -1222,8 +1261,13 @@ bool FFmpegDecodeWorker::extractHardwareAddressFromMetadata(AVFrame* frame, Buff
             }
         }
         
-        // ❌ TACO 解码器但没有 metadata（异常情况）
-        LOG4CPLUS_ERROR(logger_, " TACO: AVFrame->metadata is missing or no 'pool_blk_id' entry");
+        // TACO 解码器但没有 metadata（MJPEG 等部分编解码器可能不提供）
+        if (decoder_name_.find("mjpeg") != std::string::npos) {
+            LOG4CPLUS_DEBUG(logger_, " TACO MJPEG: No pool_blk_id metadata (expected for MJPEG)");
+        } else {
+            LOG4CPLUS_WARN_FMT(logger_, " TACO %s: AVFrame->metadata is missing or no 'pool_blk_id' entry",
+                decoder_name_.c_str());
+        }
         return false;
     }
     

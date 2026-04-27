@@ -1,6 +1,6 @@
 #include "productionline/worker/datasource/rawdata/RawFrameSourceFromBuffer.hpp"
-#include "buffer/bufferpool/BufferPool.hpp"
-#include "buffer/bufferpool/Buffer.hpp"
+#include "bufferpool/pool/base/BufferPool.hpp"
+#include "bufferpool/buffer/Buffer.hpp"
 #include "common/Logger.hpp"
 #include "common/GlobalThreadPool.hpp"
 #include <thread>

@@ -35,16 +35,14 @@ libcomponents_la_SOURCES = \
     source/common/PerformanceMonitor.cpp \
     source/common/Timer.cpp \
     source/common/GlobalThreadPool.cpp \
-    source/buffer/bufferpool/Buffer.cpp \
-    source/buffer/BufferAllocatorFactory.cpp \
-    source/buffer/BufferAllocatorFacade.cpp \
-    source/buffer/BufferAllocatorBase.cpp \
-    source/buffer/NormalAllocator.cpp \
-    source/buffer/FramebufferAllocator.cpp \
-    source/buffer/AVFrameAllocator.cpp \
-    source/buffer/MatAllocator.cpp \
-    source/buffer/bufferpool/BufferPool.cpp \
-    source/buffer/pool/MallocMemoryProvider.cpp \
+    source/bufferpool/buffer/Buffer.cpp \
+    source/bufferpool/pool/base/BufferPool.cpp \
+    source/bufferpool/pool/base/IBufferPoolBuilder.cpp \
+    source/bufferpool/pool/base/BufferPoolBuilderFactory.cpp \
+    source/bufferpool/pool/builder/ContinuousPhysicalPoolBuilder.cpp \
+    source/bufferpool/pool/builder/AVFramePoolBuilder.cpp \
+    source/bufferpool/pool/builder/MatPoolBuilder.cpp \
+    source/vendor/MallocMemoryProvider.cpp \
     source/vendor/MemoryProviderRegistry.cpp \
     source/vendor/taco/TacoMemoryProvider.cpp \
     source/productionline/line/VideoProductionLine.cpp \

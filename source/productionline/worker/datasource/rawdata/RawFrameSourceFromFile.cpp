@@ -131,11 +131,13 @@ int RawFrameSourceFromFile::readRawFrame(AVFrame* frame) {
     frame->width = width_;
     frame->height = height_;
     
-    // 分配 AVFrame 内部缓冲区（若尚未分配）。64 字节对齐以适配硬件编码器常见 stride（与 backup 一致）。
+    // 分配 AVFrame 内部缓冲区（若尚未分配）。
+    // align=1 确保 linesize == 实际行字节数：TACO 硬件编码器按连续内存读取像素，
+    // 不处理 linesize padding；若 linesize > width（如 align=64 时 144→192），编码数据错位。
     if (!frame->data[0]) {
         LOG4CPLUS_DEBUG_FMT(logger_, "av_frame_get_buffer 前: format=%d, width=%d, height=%d",
                            frame->format, frame->width, frame->height);
-        int ret = av_frame_get_buffer(frame, 64);
+        int ret = av_frame_get_buffer(frame, 1);
         if (ret < 0) {
             char err_buf[AV_ERROR_MAX_STRING_SIZE];
             av_strerror(ret, err_buf, sizeof(err_buf));
@@ -155,64 +157,71 @@ int RawFrameSourceFromFile::readRawFrame(AVFrame* frame) {
     }
     
     // 根据像素格式读取数据
+    // 关键：裸文件中数据是紧密排列（无行尾 padding），而 av_frame_get_buffer 分配的
+    // linesize 可能大于 width（64 字节对齐）。必须逐行读取，尊重 frame->linesize，
+    // 否则当 width 不是对齐值的整数倍时（如 144x96），从第 2 行起数据全部错位。
     size_t bytes_read = 0;
     
     switch (pix_fmt_) {
         case AV_PIX_FMT_NV12:
         case AV_PIX_FMT_NV21: {
-            // Semi-planar: Y 平面 + UV 交错平面
-            // Y 平面大小: width * height
-            // UV 平面大小: width * height / 2
-            size_t y_size = static_cast<size_t>(width_) * static_cast<size_t>(height_);
-            size_t uv_size = static_cast<size_t>(width_) * static_cast<size_t>(height_) / 2;
-            
-            // 读取 Y 平面
-            bytes_read = fread(frame->data[0], 1, y_size, file_ptr_);
-            if (bytes_read < y_size) {
-                eof_reached_ = true;
-                LOG4CPLUS_DEBUG(logger_, "EOF: Y 平面读取不完整");
-                return AVERROR_EOF;
+            // Y 平面：逐行读取 width 字节，写入 stride=linesize[0] 的目标
+            for (int y = 0; y < height_; ++y) {
+                uint8_t* dst = frame->data[0] + y * frame->linesize[0];
+                bytes_read = fread(dst, 1, static_cast<size_t>(width_), file_ptr_);
+                if (bytes_read < static_cast<size_t>(width_)) {
+                    eof_reached_ = true;
+                    LOG4CPLUS_DEBUG(logger_, "EOF: Y 平面读取不完整");
+                    return AVERROR_EOF;
+                }
             }
-            
-            // 读取 UV 平面
-            bytes_read = fread(frame->data[1], 1, uv_size, file_ptr_);
-            if (bytes_read < uv_size) {
-                eof_reached_ = true;
-                LOG4CPLUS_DEBUG(logger_, "EOF: UV 平面读取不完整");
-                return AVERROR_EOF;
+            // UV 交错平面：height/2 行，每行 width 字节
+            const int uv_height = height_ / 2;
+            for (int y = 0; y < uv_height; ++y) {
+                uint8_t* dst = frame->data[1] + y * frame->linesize[1];
+                bytes_read = fread(dst, 1, static_cast<size_t>(width_), file_ptr_);
+                if (bytes_read < static_cast<size_t>(width_)) {
+                    eof_reached_ = true;
+                    LOG4CPLUS_DEBUG(logger_, "EOF: UV 平面读取不完整");
+                    return AVERROR_EOF;
+                }
             }
             break;
         }
         
         case AV_PIX_FMT_YUV420P:
         case AV_PIX_FMT_YUVJ420P: {
-            // Planar: Y + U + V 分开的三个平面
-            size_t y_size = static_cast<size_t>(width_) * static_cast<size_t>(height_);
-            size_t u_size = static_cast<size_t>(width_) * static_cast<size_t>(height_) / 4;
-            size_t v_size = static_cast<size_t>(width_) * static_cast<size_t>(height_) / 4;
-            
-            // 读取 Y 平面
-            bytes_read = fread(frame->data[0], 1, y_size, file_ptr_);
-            if (bytes_read < y_size) {
-                eof_reached_ = true;
-                LOG4CPLUS_DEBUG(logger_, "EOF: Y 平面读取不完整");
-                return AVERROR_EOF;
+            // Y 平面：逐行读取
+            for (int y = 0; y < height_; ++y) {
+                uint8_t* dst = frame->data[0] + y * frame->linesize[0];
+                bytes_read = fread(dst, 1, static_cast<size_t>(width_), file_ptr_);
+                if (bytes_read < static_cast<size_t>(width_)) {
+                    eof_reached_ = true;
+                    LOG4CPLUS_DEBUG(logger_, "EOF: Y 平面读取不完整");
+                    return AVERROR_EOF;
+                }
             }
-            
-            // 读取 U 平面
-            bytes_read = fread(frame->data[1], 1, u_size, file_ptr_);
-            if (bytes_read < u_size) {
-                eof_reached_ = true;
-                LOG4CPLUS_DEBUG(logger_, "EOF: U 平面读取不完整");
-                return AVERROR_EOF;
+            // U 平面：width/2 字节/行，height/2 行
+            const int chroma_w = width_ / 2;
+            const int chroma_h = height_ / 2;
+            for (int y = 0; y < chroma_h; ++y) {
+                uint8_t* dst = frame->data[1] + y * frame->linesize[1];
+                bytes_read = fread(dst, 1, static_cast<size_t>(chroma_w), file_ptr_);
+                if (bytes_read < static_cast<size_t>(chroma_w)) {
+                    eof_reached_ = true;
+                    LOG4CPLUS_DEBUG(logger_, "EOF: U 平面读取不完整");
+                    return AVERROR_EOF;
+                }
             }
-            
-            // 读取 V 平面
-            bytes_read = fread(frame->data[2], 1, v_size, file_ptr_);
-            if (bytes_read < v_size) {
-                eof_reached_ = true;
-                LOG4CPLUS_DEBUG(logger_, "EOF: V 平面读取不完整");
-                return AVERROR_EOF;
+            // V 平面
+            for (int y = 0; y < chroma_h; ++y) {
+                uint8_t* dst = frame->data[2] + y * frame->linesize[2];
+                bytes_read = fread(dst, 1, static_cast<size_t>(chroma_w), file_ptr_);
+                if (bytes_read < static_cast<size_t>(chroma_w)) {
+                    eof_reached_ = true;
+                    LOG4CPLUS_DEBUG(logger_, "EOF: V 平面读取不完整");
+                    return AVERROR_EOF;
+                }
             }
             break;
         }
@@ -220,10 +229,6 @@ int RawFrameSourceFromFile::readRawFrame(AVFrame* frame) {
         case AV_PIX_FMT_YUYV422:
         case AV_PIX_FMT_UYVY422:
         case AV_PIX_FMT_YVYU422: {
-            // Packed 4:2:2：裸文件每行紧密 width*2 字节，无行尾填充。
-            // 必须用 av_frame_get_buffer 得到的 linesize（常 64 对齐）逐行拷贝；若用
-            // av_image_fill_arrays(..., align=1) 会把 linesize 收成 width*2 并换指针，
-            // 硬件编码器 DMA 仍按对齐 stride 读，易出现整幅偏绿、横纹、底部重复块状错位。
             const int row_bytes = width_ * 2;
             for (int y = 0; y < height_; ++y) {
                 uint8_t* dst = frame->data[0] + y * frame->linesize[0];
@@ -238,35 +243,40 @@ int RawFrameSourceFromFile::readRawFrame(AVFrame* frame) {
         }
         
         default: {
-            // 通用处理：一次性读取整帧数据
-            // 创建临时缓冲区
-            uint8_t* buffer = static_cast<uint8_t*>(av_malloc(frame_size_));
-            if (!buffer) {
+            // 通用处理：先读入紧密临时缓冲区，再用 av_image_copy 按 linesize 拷贝到 AVFrame
+            uint8_t* temp_buf = static_cast<uint8_t*>(av_malloc(frame_size_));
+            if (!temp_buf) {
                 LOG4CPLUS_ERROR(logger_, "内存分配失败");
                 return AVERROR(ENOMEM);
             }
             
-            bytes_read = fread(buffer, 1, frame_size_, file_ptr_);
+            bytes_read = fread(temp_buf, 1, frame_size_, file_ptr_);
             if (bytes_read < frame_size_) {
-                av_free(buffer);
+                av_free(temp_buf);
                 eof_reached_ = true;
                 LOG4CPLUS_DEBUG(logger_, "EOF: 帧数据读取不完整");
                 return AVERROR_EOF;
             }
             
-            // 使用 av_image_fill_arrays 将数据填充到 AVFrame
-            ret = av_image_fill_arrays(frame->data, frame->linesize,
-                                       buffer, pix_fmt_, width_, height_, 1);
+            // 构建紧密（align=1）的源 data/linesize 描述
+            uint8_t* src_data[4] = {nullptr, nullptr, nullptr, nullptr};
+            int src_linesize[4] = {0, 0, 0, 0};
+            ret = av_image_fill_arrays(src_data, src_linesize,
+                                       temp_buf, pix_fmt_, width_, height_, 1);
             if (ret < 0) {
-                av_free(buffer);
+                av_free(temp_buf);
                 char err_buf[AV_ERROR_MAX_STRING_SIZE];
                 av_strerror(ret, err_buf, sizeof(err_buf));
                 LOG4CPLUS_ERROR_FMT(logger_, "av_image_fill_arrays 失败: %s", err_buf);
                 return ret;
             }
             
-            // 注意：buffer 的内存所有权已转移给 frame
-            // 如果 frame 被正确释放（av_frame_free），buffer 也会被释放
+            // 从紧密源拷贝到 AVFrame（自动处理 linesize 对齐差异）
+            av_image_copy(frame->data, frame->linesize,
+                          const_cast<const uint8_t**>(src_data), src_linesize,
+                          pix_fmt_, width_, height_);
+            
+            av_free(temp_buf);
             break;
         }
     }

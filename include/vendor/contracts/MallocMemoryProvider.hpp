@@ -6,7 +6,7 @@
 /**
  * @brief 标准堆内存提供者（posix_memalign / free）
  *
- * 默认的平台无关实现，不需要放在 vendor/ 目录下。
+ * IMemoryProvider 的默认实现，平台无关。
  */
 class MallocMemoryProvider : public IMemoryProvider {
 public:

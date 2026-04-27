@@ -1,4 +1,4 @@
-#include "buffer/bufferpool/Buffer.hpp"
+#include "bufferpool/buffer/Buffer.hpp"
 #include <stdio.h>
 
 // ========== 构造函数 ==========
@@ -183,7 +183,6 @@ void Buffer::freeBuffer() {
     // 之后再 delete mat_ 时 Mat 析构函数访问无效地址，导致 libGAL SIGSEGV。
     // 因此必须先 delete Mat（趁 AVFrame 数据仍有效），再 unref AVFrame。
     if (mat_) {
-        cv::imwrite("output.jpg",*mat_);
         delete mat_;
         mat_ = nullptr;
     }
