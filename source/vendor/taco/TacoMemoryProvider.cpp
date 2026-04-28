@@ -62,10 +62,10 @@ std::unique_ptr<IMemoryProvider> TacoMemoryProvider::clone() const {
     return std::make_unique<TacoMemoryProvider>(zone_name_);
 }
 
-namespace {
-    static const bool taco_provider_registered = []() {
-        MemoryProviderRegistry::instance().registerProvider(
-            "taco", []() { return std::make_unique<TacoMemoryProvider>(); });
-        return true;
-    }();
+// 提供一个外部可见的注册函数，供 display 代码在 createBufferPool 时调用。
+// 不能使用匿名 namespace 静态变量或 __attribute__((constructor))，
+// 因为链接器会丢弃未被外部引用的目标文件（dead code elimination）。
+void register_taco_memory_provider() {
+    MemoryProviderRegistry::instance().registerProvider(
+        "taco", []() { return std::make_unique<TacoMemoryProvider>(); });
 }

@@ -1,4 +1,5 @@
 #include "vendor/taco/display/TacoProOsdOverlay.hpp"
+#include "vendor/taco/memory/TacoMemoryProvider.hpp"
 #include "common/Logger.hpp"
 
 #include <fcntl.h>
@@ -174,8 +175,12 @@ bool TacoProOsdOverlay::openFbDevice() {
 // ============================================================
 
 bool TacoProOsdOverlay::createBufferPool() {
-    allocator_ = BufferPoolBuilderFactory::create(
-        BufferPoolBuilderFactory::AllocatorType::CONTINUOUS_PHYSICAL);
+    // 确保 TACO 内存提供者已注册（显式调用，避免链接器丢弃目标文件）
+    register_taco_memory_provider();
+
+    allocator_ = BufferPoolBuilderFactory::createWithProvider(
+        BufferPoolBuilderFactory::AllocatorType::CONTINUOUS_PHYSICAL,
+        "taco");
 
     pool_id_ = allocator_->allocatePoolWithBuffers(
         BUFFER_COUNT, frame_size_, "TacoProOsdOverlay_fb", "Display");

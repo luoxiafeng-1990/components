@@ -1086,15 +1086,6 @@ static cv::Mat avframeToMat(const AVFrame* frame)
 
     // ─── 辅助 lambda：拷贝交错双通道（UV / VU）8-bit 平面 → CV_8UC2
     // pairs_per_row = 水平方向像素对数（YUV420 为 w/2，YUV444 为 w）
-    auto copyPlaneUV8 = [](const uint8_t* src, int linesize,
-                           int rows, int pairs_per_row) -> cv::Mat {
-        cv::Mat plane(rows, pairs_per_row, CV_8UC2);
-        for (int r = 0; r < rows; ++r)
-            std::memcpy(plane.ptr(r),
-                        src + static_cast<ptrdiff_t>(r) * linesize,
-                        pairs_per_row * 2);
-        return plane;
-    };
 
     cv::Mat bgr;
 
@@ -1132,7 +1123,6 @@ static cv::Mat avframeToMat(const AVFrame* frame)
     // ══════════════════════════════════════════════════════════════════
     case AV_PIX_FMT_YUV420P:
     case AV_PIX_FMT_YUVJ420P: {
-        const bool is_yuv420p = (fmt == AV_PIX_FMT_YUV420P);
         const uint8_t* u_src = frame->data[1];
         const uint8_t* v_src = frame->data[2];
         const int u_ls = frame->linesize[1];

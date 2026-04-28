@@ -1,5 +1,6 @@
 #include "vendor/taco/display/TacoProDisplayContext.hpp"
 #include "vendor/taco/display/TacoProOsdOverlay.hpp"
+#include "vendor/taco/memory/TacoMemoryProvider.hpp"
 #include "common/Logger.hpp"
 
 #include <fcntl.h>
@@ -373,8 +374,12 @@ bool TacoProDisplayContext::openDevice() {
 // ============================================================
 
 bool TacoProDisplayContext::createBufferPool() {
-    builder_ = BufferPoolBuilderFactory::create(
-        BufferPoolBuilderFactory::AllocatorType::CONTINUOUS_PHYSICAL);
+    // 确保 TACO 内存提供者已注册（显式调用，避免链接器丢弃目标文件）
+    register_taco_memory_provider();
+
+    builder_ = BufferPoolBuilderFactory::createWithProvider(
+        BufferPoolBuilderFactory::AllocatorType::CONTINUOUS_PHYSICAL,
+        "taco");
 
     fb_pool_id_ = builder_->allocatePoolWithBuffers(
         buffer_count_, buffer_size_, "TacoProDisplayContext_fb", "Display");

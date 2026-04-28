@@ -29,4 +29,15 @@ private:
     log4cplus::Logger logger_;
 };
 
+/**
+ * @brief 注册 TACO 内存提供者到 MemoryProviderRegistry。
+ * 
+ * display 代码应在 createBufferPool 中调用此函数，确保 provider 在
+ * createWithProvider("taco") 之前完成注册。
+ * 
+ * 不能使用静态初始化（匿名 namespace / constructor attribute），
+ * 因为链接器会丢弃未被外部引用的目标文件。
+ */
+void register_taco_memory_provider();
+
 #endif // TACO_MEMORY_PROVIDER_HPP

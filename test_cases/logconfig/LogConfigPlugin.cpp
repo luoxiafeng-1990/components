@@ -7,8 +7,64 @@
 #include <iomanip>
 #include <algorithm>
 #include <sstream>
+#include <cstring>
 
 namespace test::logconfig {
+
+// ============================================================
+// 已知模块列表（代码中所有显式 Logger::getInstance 使用的名称）
+// ============================================================
+
+const std::vector<std::string> LogConfigPlugin::s_known_modules = {
+    // test_cases 插件 logger
+    "qa_cases.logconfig",
+    "qa_cases.memleak",
+    "qa_cases.vdec",
+    "qa_cases.venc",
+    "qa_cases.pp",
+    "qa_cases.save",
+    "qa_cases.display",
+    "qa_cases.npu",
+    "qa_cases.opencv",
+    "qa_cases.preview",
+    "qa_cases.record",
+    "qa_cases.writer",
+    // source 模块 logger
+    "components.Worker",
+    "components.Worker.Decode",
+    "components.Worker.Encode",
+    "components.Worker.Recorder",
+    "components.MultiWorker",
+    "components.WorkerSyncCoordinator",
+    "components.WorkerFactory",
+    "components.VideoProductionLine",
+    "components.Topology",
+    "components.BufferPool",
+    "components.PoolBuilder.AVFrame",
+    "components.PoolBuilder.Mat",
+    "components.PoolBuilder.ContinuousPhysical",
+    "consumer.BufferConsumerService",
+    "consumer.Consumer.JpegEncode",
+    "components.BufferWriter",
+    "components.Display.TacoVO",
+    "components.Display.SharedContext",
+    "components.Display.TacoPro",
+    "components.Display.OSD",
+    "components.DataSource.File",
+    "components.DataSource.Rtsp",
+    "components.RawFrameSource.File",
+    "components.RawFrameSource.Buffer",
+    "components.EncodedPacketSourceFromBuffer",
+    "components.MemoryProvider.Taco",
+    "components.Monitor.Performance",
+    "components.Util.Timer",
+};
+
+void LogConfigPlugin::ensureModulesRegistered() {
+    for (const auto& name : s_known_modules) {
+        log4cplus::Logger::getInstance(LOG4CPLUS_STRING_TO_TSTRING(name));
+    }
+}
 
 // ============================================================
 // CLI 注册
@@ -36,6 +92,8 @@ void LogConfigPlugin::registerOptions(CLI::App& app) {
 // ============================================================
 
 int LogConfigPlugin::run() {
+    ensureModulesRegistered();
+
     if (do_show_) return showAllLoggers();
     if (!set_spec_.empty()) return setLoggerLevel(set_spec_);
     if (!set_all_level_.empty()) return setAllLoggerLevels(set_all_level_);
@@ -79,23 +137,23 @@ int LogConfigPlugin::showAllLoggers() {
     auto loggers = collectAllLoggers();
 
     std::cout << "\n"
-              << "┌──────────────────────────────────────────────┬──────────┬───────────┐\n"
-              << "│ Logger Name                                  │ Level    │ Inherited │\n"
-              << "├──────────────────────────────────────────────┼──────────┼───────────┤\n";
+              << "+------------------------------------------------+----------+-----------+\n"
+              << "| Logger Name                                    | Level    | Inherited |\n"
+              << "+------------------------------------------------+----------+-----------+\n";
 
     for (auto& info : loggers) {
         std::string display_name = info.name;
-        if (display_name.length() > 44)
-            display_name = "..." + display_name.substr(display_name.length() - 41);
+        if (display_name.length() > 46)
+            display_name = "..." + display_name.substr(display_name.length() - 43);
 
-        std::cout << "│ " << std::left << std::setw(44) << display_name
-                  << " │ " << std::setw(8) << levelToString(info.level)
-                  << " │ " << std::setw(9)
+        std::cout << "| " << std::left << std::setw(46) << display_name
+                  << " | " << std::setw(8) << levelToString(info.level)
+                  << " | " << std::setw(9)
                   << (info.inherited ? "yes" : "no")
-                  << " │\n";
+                  << " |\n";
     }
 
-    std::cout << "└──────────────────────────────────────────────┴──────────┴───────────┘\n"
+    std::cout << "+------------------------------------------------+----------+-----------+\n"
               << "\n总计: " << loggers.size() << " 个模块\n\n";
 
     return 0;
@@ -196,49 +254,199 @@ int LogConfigPlugin::resetLoggers() {
 }
 
 // ============================================================
-// TUI 交互模式（简化版：逐行选择）
+// TUI 交互模式（纯文本风格，兼容串口终端）
+// ============================================================
+
+// ============================================================
+// TermRawMode
+// ============================================================
+
+void LogConfigPlugin::TermRawMode::enable() {
+    struct termios raw;
+    tcgetattr(STDIN_FILENO, &old_);
+    raw = old_;
+    raw.c_lflag &= ~(ECHO | ICANON | IEXTEN | ISIG);
+    raw.c_iflag &= ~(BRKINT | ICRNL | INPCK | ISTRIP | IXON);
+    raw.c_cflag |= CS8;
+    raw.c_oflag &= ~OPOST;
+    raw.c_cc[VMIN] = 0;
+    raw.c_cc[VTIME] = 1;
+    tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw);
+}
+
+void LogConfigPlugin::TermRawMode::disable() {
+    tcsetattr(STDIN_FILENO, TCSAFLUSH, &old_);
+}
+
+int LogConfigPlugin::TermRawMode::getch() {
+    unsigned char ch = 0;
+    if (read(STDIN_FILENO, &ch, 1) == 1)
+        return ch;
+    return -1;
+}
+
+// ============================================================
+// 单行渲染
+// ============================================================
+
+void LogConfigPlugin::printOneLine(const TuiEntry& entry,
+                                    bool is_cursor, std::ostream& out) {
+    char mark = is_cursor ? '>' : ' ';
+    char star = entry.changed ? '*' : ' ';
+    out << mark << star << entry.name << ' ' << levelToString(entry.level) << '\n';
+}
+
+// ============================================================
+// 打印全部列表
+// ============================================================
+
+void LogConfigPlugin::printAllList(const std::vector<TuiEntry>& entries,
+                                    int cursor, std::ostream& out) {
+    out << "\n===== Log4cplus 日志级别配置 =====\n\n";
+    for (size_t i = 0; i < entries.size(); i++) {
+        printOneLine(entries[i], (int)i == cursor, out);
+    }
+    out << "\n-------------------------------------\n";
+    out << "  上下箭头 移动 | 空格 切换级别 | r 重置当前为 INFO\n";
+    out << "  s 所有未改设为当前级别 | p 重新打印 | q 退出并应用\n";
+    out << "-------------------------------------\n" << std::flush;
+}
+
+// ============================================================
+// 循环切换级别
+// ============================================================
+
+void LogConfigPlugin::tuiCycleLevel(TuiEntry& entry) {
+    static const log4cplus::LogLevel cycle[] = {
+        log4cplus::OFF_LOG_LEVEL,
+        log4cplus::FATAL_LOG_LEVEL,
+        log4cplus::ERROR_LOG_LEVEL,
+        log4cplus::WARN_LOG_LEVEL,
+        log4cplus::INFO_LOG_LEVEL,
+        log4cplus::DEBUG_LOG_LEVEL,
+        log4cplus::TRACE_LOG_LEVEL,
+    };
+    static const int n = 7;
+
+    for (int i = 0; i < n; i++) {
+        if (entry.level == cycle[i]) {
+            entry.level = cycle[(i + 1) % n];
+            entry.changed = (entry.level != log4cplus::INFO_LOG_LEVEL);
+            return;
+        }
+    }
+    entry.level = log4cplus::INFO_LOG_LEVEL;
+    entry.changed = false;
+}
+
+// ============================================================
+// 应用
+// ============================================================
+
+void LogConfigPlugin::tuiApply(const std::vector<TuiEntry>& entries) {
+    for (const auto& entry : entries) {
+        if (!entry.changed) continue;
+        auto logger = log4cplus::Logger::getInstance(
+            LOG4CPLUS_STRING_TO_TSTRING(entry.name));
+        logger.setLogLevel(entry.level);
+    }
+}
+
+// ============================================================
+// 主 TUI 入口
 // ============================================================
 
 int LogConfigPlugin::runTui() {
-    std::cout << "\n=== log4cplus 日志配置 (TUI 模式) ===\n\n";
+    ensureModulesRegistered();
 
-    auto loggers = collectAllLoggers();
-
-    const char* levels[] = {
-        "TRACE", "DEBUG", "INFO", "WARN", "ERROR", "FATAL", "OFF"
-    };
-    const int n_levels = 7;
-
-    for (size_t i = 0; i < loggers.size(); i++) {
-        std::cout << "[" << (i + 1) << "/" << loggers.size() << "] "
-                  << loggers[i].name
-                  << " (当前: " << levelToString(loggers[i].level) << ")\n"
-                  << "  可选: ";
-        for (int j = 0; j < n_levels; j++) {
-            std::cout << (j + 1) << "." << levels[j] << "  ";
-        }
-        std::cout << "0.跳过\n"
-                  << "  输入选择 [0]: ";
-
-        std::string input;
-        std::getline(std::cin, input);
-
-        if (input.empty() || input == "0") continue;
-
-        int choice = 0;
-        try { choice = std::stoi(input); } catch (...) { continue; }
-
-        if (choice < 1 || choice > n_levels) continue;
-
-        auto level = stringToLevel(levels[choice - 1]);
-        auto logger = log4cplus::Logger::getInstance(
-            LOG4CPLUS_STRING_TO_TSTRING(loggers[i].name));
-        logger.setLogLevel(level);
-        std::cout << "  → " << loggers[i].name << " 设为 "
-                  << levels[choice - 1] << "\n\n";
+    auto raw = collectAllLoggers();
+    std::vector<TuiEntry> entries;
+    for (auto& r : raw) {
+        TuiEntry e;
+        e.name = r.name;
+        e.level = r.level;
+        e.changed = false;
+        entries.push_back(e);
     }
 
-    std::cout << "\n=== 配置完成 ===\n";
+    if (entries.empty()) {
+        std::cerr << "没有发现任何 logger 模块\n";
+        return 1;
+    }
+
+    TermRawMode raw_mode;
+    raw_mode.enable();
+
+    int cursor = 0;
+    bool running = true;
+
+    // 首次打印完整列表
+    printAllList(entries, cursor, std::cout);
+
+    while (running) {
+        int ch;
+        while ((ch = raw_mode.getch()) == -1) {
+            /* wait */
+        }
+
+        if (ch == 'q' || ch == 'Q' || ch == 27) {
+            if (ch == 27) {
+                int ch2 = raw_mode.getch();
+                int ch3 = raw_mode.getch();
+                if (ch2 == '[') {
+                    if (ch3 == 'A') {
+                        cursor = (cursor - 1 + (int)entries.size()) % entries.size();
+                        // 方向键移动后只打印当前行的变化
+                        std::cout << "  >> " << entries[cursor].name
+                                  << "  [" << levelToString(entries[cursor].level) << "]\n" << std::flush;
+                        continue;
+                    } else if (ch3 == 'B') {
+                        cursor = (cursor + 1) % entries.size();
+                        std::cout << "  >> " << entries[cursor].name
+                                  << "  [" << levelToString(entries[cursor].level) << "]\n" << std::flush;
+                        continue;
+                    }
+                }
+            }
+            running = false;
+        } else if (ch == ' ' || ch == '\t') {
+            tuiCycleLevel(entries[cursor]);
+            std::cout << "  >> " << entries[cursor].name
+                      << "  =>  " << levelToString(entries[cursor].level) << "\n" << std::flush;
+        } else if (ch == 'r' || ch == 'R') {
+            entries[cursor].level = log4cplus::INFO_LOG_LEVEL;
+            entries[cursor].changed = false;
+            std::cout << "  >> " << entries[cursor].name
+                      << "  =>  INFO (重置)\n" << std::flush;
+        } else if (ch == 's' || ch == 'S') {
+            for (auto& e : entries) {
+                if (!e.changed) {
+                    e.level = entries[cursor].level;
+                    e.changed = true;
+                }
+            }
+            std::cout << "  所有未改模块已设为 "
+                      << levelToString(entries[cursor].level) << "\n" << std::flush;
+        } else if (ch == 'p' || ch == 'P') {
+            printAllList(entries, cursor, std::cout);
+        }
+    }
+
+    raw_mode.disable();
+
+    // 应用
+    int changed_count = 0;
+    for (const auto& e : entries) {
+        if (e.changed) changed_count++;
+    }
+
+    if (changed_count > 0) {
+        tuiApply(entries);
+        std::cout << "\n已应用 " << changed_count << " 个模块的日志级别变更\n\n";
+    } else {
+        std::cout << "\n未做任何修改\n\n";
+    }
+
     showAllLoggers();
     return 0;
 }
