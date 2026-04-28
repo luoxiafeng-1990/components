@@ -4,6 +4,7 @@
 #include <cmath>
 #include <algorithm>
 #include <cstdlib>
+#include <sys/stat.h>
 
 TacoDisplayContext::TacoDisplayContext(const TacoDisplayExtension& config)
     : config_(config)
@@ -76,6 +77,24 @@ TacoDisplayContext::~TacoDisplayContext() {
 }
 
 bool TacoDisplayContext::initDevice() {
+    // Pre-check: verify that the VO/IDS hardware is actually available.
+    // When VO kernel modules are not loaded, ta_vo_dev_create() may succeed
+    // but ta_vo_chn_send_frame() will crash with SIGSEGV in libGAL.
+    // Note: /dev/fb* is for tacopro (framebuffer) path, NOT for taco (ta_vo_*).
+    // We check for IDS/DSS device nodes which indicate the VO subsystem is loaded.
+    struct stat st;
+    bool vo_hw_available = (stat("/dev/ids0", &st) == 0) ||
+                           (stat("/dev/dss0", &st) == 0) ||
+                           (stat("/dev/taco_vo", &st) == 0);
+    if (!vo_hw_available) {
+        LOG4CPLUS_ERROR(logger_,
+            "TacoDisplayContext: VO hardware not detected "
+            "(/dev/ids0, /dev/dss0, /dev/taco_vo all missing). "
+            "VO kernel modules may not be loaded. "
+            "Cannot safely initialize taco display.");
+        return false;
+    }
+
     dev_ctx_ = ta_vo_dev_create(TA_VO_DEV_IDS);
     if (!dev_ctx_) {
         LOG4CPLUS_ERROR(logger_, "ta_vo_dev_create(TA_VO_DEV_IDS) failed");
@@ -201,11 +220,18 @@ bool TacoDisplayContext::allocateFramePool(ChannelState& ch) {
     ch.frame_pool = std::make_unique<FrameSlot[]>(pool_size);
     ch.pool_size = pool_size;
 
+    // Bug fix: VO layer dimensions are screen_width x screen_height (set in initLayer),
+    // so frame buffers sent to ta_vo_chn_send_frame must also be screen-sized.
+    // Using frame_width/height here caused ta_image_frame_fill to fail with
+    // "phy_len < total_size" when frame dimensions < screen dimensions.
+    int buf_w = config_.screen_width;
+    int buf_h = config_.screen_height;
+
     uint64_t frame_size;
     if (config_.frame_format == TA_AV_PIX_FMT_NV12) {
-        frame_size = static_cast<uint64_t>(config_.frame_width) * config_.frame_height * 3 / 2;
+        frame_size = static_cast<uint64_t>(buf_w) * buf_h * 3 / 2;
     } else {
-        frame_size = static_cast<uint64_t>(config_.frame_width) * config_.frame_height * 4;
+        frame_size = static_cast<uint64_t>(buf_w) * buf_h * 4;
     }
 
     for (size_t i = 0; i < pool_size; i++) {
@@ -244,8 +270,8 @@ bool TacoDisplayContext::allocateFramePool(ChannelState& ch) {
 
         slot.av_frame->data[0] = slot.virt_addr;
         slot.av_frame->metadata = &slot.dict;
-        slot.av_frame->width = config_.frame_width;
-        slot.av_frame->height = config_.frame_height;
+        slot.av_frame->width = buf_w;
+        slot.av_frame->height = buf_h;
         slot.av_frame->format = config_.frame_format;
 
         slot.vo_frame->av_frame = slot.av_frame;

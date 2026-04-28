@@ -98,10 +98,11 @@ int TacoDisplayDevice::getBufferCount() const {
 }
 
 size_t TacoDisplayDevice::getBufferSize() const {
+    // Must match TacoDisplayContext::allocateFramePool: VO layer uses screen dimensions
     if (config_.frame_format == 0) {
-        return static_cast<size_t>(config_.frame_width) * config_.frame_height * 3 / 2;
+        return static_cast<size_t>(config_.screen_width) * config_.screen_height * 3 / 2;
     }
-    return static_cast<size_t>(config_.frame_width) * config_.frame_height * 4;
+    return static_cast<size_t>(config_.screen_width) * config_.screen_height * 4;
 }
 
 int TacoDisplayDevice::getCurrentDisplayBuffer() const {
