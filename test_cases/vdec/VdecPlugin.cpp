@@ -6,12 +6,12 @@
  */
 
 #include "VdecPlugin.hpp"
+#include "../common/third_party/CLI11.hpp"
 #include "../common/WorkerConfigFactory.hpp"
 #include "consumptionline/core/BufferConsumerService.hpp"
 #include "consumptionline/config/ConsumerTypeConfigBuilder.hpp"
 #include "vendor/taco/decode/TacoDecoderExtension.hpp"
-
-#include "../common/third_party/CLI11.hpp"
+#include "vendor/taco/decode/TacoVendorOptions.hpp"
 
 #include <iostream>
 #include <sstream>
@@ -152,6 +152,19 @@ void VdecPlugin::registerOptions(CLI::App& app) {
     app.add_flag("-v,--verbose", verbose_, "详细日志");
     app.add_option("-t,--threads", threads_, "并发路数 (启用 PARALLEL 模式)");
     app.add_flag("--loop", loop_, "循环播放");
+    app.add_option("--vendor", vendor_str_, "解码器厂商 (默认: taco)");
+
+    // 注册厂商（各插件按需注册，此处注册 taco）
+    auto& registrars = common::WorkerConfigFactory::vendorRegistrars();
+    if (registrars.find("taco") == registrars.end()) {
+        registrars["taco"] = std::make_shared<TacoVendorOptions>();
+    }
+
+    // 让所有厂商注册各自的 CLI 参数（与 DisplayPlugin --vendor 同模式）
+    for (auto& [name, registrar] : registrars) {
+        registrar->registerTo(app);
+    }
+
     ds_opts_.registerTo(app);
     app.add_option("positional", positional_args_, "测试名或输入文件路径");
 
@@ -280,9 +293,36 @@ std::vector<WorkerConfig> VdecPlugin::buildPipelineConfigs(const WorkerConfig& s
     }
 
     auto makeConfig = [&](bool use_hw) -> WorkerConfig {
-        auto cfg = use_hw
-            ? common::WorkerConfigFactory::createDecode(shared_config.data_source.path, params.codec)
-            : common::WorkerConfigFactory::createSoftwareDecode(shared_config.data_source.path);
+        WorkerConfig cfg;
+        if (!use_hw) {
+            cfg = common::WorkerConfigFactory::createSoftwareDecode(
+                shared_config.data_source.path);
+        } else {
+            // 使用 --vendor 选定的厂商构建（与 DisplayPlugin 同模式）
+            auto& registrars = common::WorkerConfigFactory::vendorRegistrars();
+            auto it = registrars.find(vendor_str_);
+            if (it != registrars.end()) {
+                auto spec = common::WorkerConfigFactory::parseDecoderName(params.codec);
+                cfg = WorkerConfigBuilder()
+                    .setDataSourceConfig(
+                        DataSourceConfigBuilder()
+                            .setPath(shared_config.data_source.path)
+                            .setBufferCount(8)
+                            .build())
+                    .setDecoderConfig(
+                        DecoderConfigBuilder()
+                            .useVendor(spec.codec, it->second->buildExtension())
+                            .build())
+                    .setGlobalConfig(
+                        WorkerGlobalConfigBuilder()
+                            .setWorkerType(WorkerType::FFMPEG_DECODE)
+                            .build())
+                    .build();
+            } else {
+                cfg = common::WorkerConfigFactory::createDecode(
+                    shared_config.data_source.path, params.codec);
+            }
+        }
         cfg.consumer_type = ConsumerTypeConfigBuilder(shared_config.consumer_type)
             .setPerformanceConfig(PerformanceConfigBuilder(shared_config.consumer_type.performance)
                 .setTargetFps(params.fps)

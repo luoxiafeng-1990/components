@@ -21,7 +21,7 @@ FfmpegPacketRecorderWorker::FfmpegPacketRecorderWorker()
     , packet_count_(0)
     , logger_(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Worker.Recorder")))
 {
-    LOG4CPLUS_DEBUG(logger_, "FfmpegPacketRecorderWorker created (using AVFramePoolBuilder)");
+    LOG4CPLUS_DEBUG(logger_, "FfmpegPacketRecorderWorker created (using BufferPoolBuilder)");
 }
 
 FfmpegPacketRecorderWorker::FfmpegPacketRecorderWorker(const WorkerConfig& config)

@@ -6,6 +6,7 @@
 #include "consumptionline/core/BufferConsumerStrategies.hpp"
 #include "productionline/worker/base/ComponentTopology.hpp"
 #include "bufferpool/pool/base/IBufferPoolBuilder.hpp"
+#include "bufferpool/buffer/AVFrameBuffer.hpp"
 #include "bufferpool/pool/base/BufferPoolBuilderFactory.hpp"
 #include "vendor/taco/display/DisplayDeviceFactory.hpp"
 #include "productionline/worker/core/FFmpegEncodeWorker.hpp"
@@ -1372,7 +1373,7 @@ bool OpencvConsumer::consume(const std::vector<Buffer*>& buffers, int frame_inde
         }
 
         // 临时 Buffer 包装 Mat；comparator 检测到 setMat 后走 is_mat 路径
-        Buffer ref_buf(0, nullptr, 0, 0, Buffer::Ownership::EXTERNAL);
+        AVFrameBuffer ref_buf(0, nullptr, 0, 0, Buffer::Ownership::EXTERNAL);
         ref_buf.setMat(&mat_sw);
         buffers[0]->setMat(&mat_hw);
 

@@ -792,13 +792,33 @@ void MultiWorkerProductionLine::workerThreadFunc(
         bool stop_worker = false;
         switch (fill_result.toAction()) {
             case FillResult::ConsumerAction::kSubmit: {
+                // v2.37：版本校验——datasource 判断此 worker 是否 acquire 了当前版本
+                // 如果 fillBuffer 走了 cached_frames_ 路径（如双通道 ch1），
+                // worker 没有 acquire 当前版本 → 丢弃该帧，回到循环重新 fillBuffer
+                if (group->enable_frame_sync) {
+                    auto source_it = group->shared_sources.find(consumer_info->producer_name);
+                    if (source_it != group->shared_sources.end()) {
+                        auto shared_source = std::dynamic_pointer_cast<EncodedPacketSourceFromBuffer>(
+                            source_it->second);
+                        if (shared_source &&
+                            !shared_source->hasWorkerAcquiredCurrentVersion(consumer_info->worker.get())) {
+                            LOG4CPLUS_DEBUG_FMT(logger_,
+                                "[Worker '%s'] 帧来自缓存（未 acquire 当前版本），丢弃",
+                                consumer_name.c_str());
+                            buffer->free();
+                            pool_sptr->releaseFree(buffer);
+                            break;  // 回到 while 循环顶部
+                        }
+                    }
+                }
+
                 bool should_submit = performFrameSync(group, consumer_name, consumer_info,
                                                      buffer, fill_result);
                 if (should_submit) {
                     pool_sptr->submitFilled(buffer);
                     worker_stats->frames_produced.fetch_add(1);
                 } else {
-                    buffer->freeBuffer();
+                    buffer->free();
                     pool_sptr->releaseFree(buffer);
                 }
                 worker_stats->consecutive_failures.store(0);
@@ -806,19 +826,19 @@ void MultiWorkerProductionLine::workerThreadFunc(
             }
 
             case FillResult::ConsumerAction::kSkip:
-                buffer->freeBuffer();
+                buffer->free();
                 pool_sptr->releaseFree(buffer);
                 performFrameSync(group, consumer_name, consumer_info, nullptr, fill_result);
                 break;
 
             case FillResult::ConsumerAction::kRetry:
-                buffer->freeBuffer();
+                buffer->free();
                 pool_sptr->releaseFree(buffer);
                 performFrameSync(group, consumer_name, consumer_info, nullptr, fill_result);
                 break;
 
             case FillResult::ConsumerAction::kTerminate:
-                buffer->freeBuffer();
+                buffer->free();
                 pool_sptr->releaseFree(buffer);
                 performFrameSync(group, consumer_name, consumer_info, nullptr, fill_result);
 

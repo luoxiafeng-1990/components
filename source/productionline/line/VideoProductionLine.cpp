@@ -358,8 +358,27 @@ void VideoProductionLine::producerThreadFunc(int thread_id) {
                 break;
 
             case FillResult::ConsumerAction::kRetry:
-                // 🔄 重试当前操作（Again / TimedOut / CodecEagain）
+                // 🔄 重试当前操作
                 pool_sptr->releaseFree(buffer);
+                // Eagain / ExternalError 均为 packet 级瞬态错误，不计入连续失败
+                // 仅 InvalidData 计入连续失败（真正的数据格式错误）
+                if (result.isCodecError() &&
+                    result.codecCause() != CodecStatus::Eagain &&
+                    result.codecCause() != CodecStatus::ExternalError) {
+                    skipped_frames_.fetch_add(1);
+                    ++thread_skipped;
+                    LOG4CPLUS_WARN_FMT(logger_,
+                        "[Thread #%d] %s, packet skipped (consecutive=%d)",
+                        thread_id, result.statusString(), consecutive_failures + 1);
+                    if (++consecutive_failures > kMaxConsecutiveFailures) {
+                        LOG4CPLUS_ERROR_FMT(logger_,
+                            "[Thread #%d] %d consecutive errors, stopping",
+                            thread_id, kMaxConsecutiveFailures);
+                        stop_loop = true;
+                    }
+                } else {
+                    consecutive_failures = 0;
+                }
                 break;
 
             case FillResult::ConsumerAction::kTerminate:

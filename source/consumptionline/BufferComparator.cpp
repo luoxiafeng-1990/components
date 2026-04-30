@@ -1,4 +1,5 @@
 #include "consumptionline/types/compare/BufferComparator.hpp"
+#include "bufferpool/buffer/AVFrameBuffer.hpp"
 #include "common/Logger.hpp"
 #include "common/GlobalThreadPool.hpp"
 #include <cmath>
@@ -265,13 +266,13 @@ FrameCompareResult BufferComparator::compare(
             return result;
         }
         
-        Buffer tmp_ref(0xFFF0, ref_scaled->data[0], 0,
+        AVFrameBuffer tmp_ref(0xFFF0, ref_scaled->data[0], 0,
                        ref_scaled->linesize[0] * ref_scaled->height,
                        Buffer::Ownership::EXTERNAL);
         tmp_ref.setAVFrame(ref_scaled);
         tmp_ref.setImageMetadataFromAVFrame(ref_scaled);
         
-        Buffer tmp_test(0xFFF1, test_yuv->data[0], 0,
+        AVFrameBuffer tmp_test(0xFFF1, test_yuv->data[0], 0,
                         test_yuv->linesize[0] * test_yuv->height,
                         Buffer::Ownership::EXTERNAL);
         tmp_test.setAVFrame(test_yuv);
@@ -293,6 +294,9 @@ FrameCompareResult BufferComparator::compare(
         
         result = compareYUV(&tmp_ref, scaled_info, &tmp_test, test_yuv_info);
         
+        // 分离 AVFrame 防止析构器 double-free
+        tmp_ref.detachAVFrame();
+        tmp_test.detachAVFrame();
         freeConvertedFrame(ref_scaled);
         freeConvertedFrame(test_yuv);
         
@@ -410,21 +414,25 @@ FrameCompareResult BufferComparator::compareAVFrames(
         return result;
     }
 
-    Buffer ref_buf(0xFFF0, ref_frame->data[0], 0,
+    AVFrameBuffer ref_buf(0xFFF0, ref_frame->data[0], 0,
                    ref_frame->linesize[0] * ref_frame->height,
                    Buffer::Ownership::EXTERNAL);
     ref_buf.setAVFrame(ref_frame);
     ref_buf.setImageMetadataFromAVFrame(ref_frame);
     ref_buf.setPts(ref_frame->pts);
 
-    Buffer test_buf(0xFFF1, test_frame->data[0], 0,
+    AVFrameBuffer test_buf(0xFFF1, test_frame->data[0], 0,
                     test_frame->linesize[0] * test_frame->height,
                     Buffer::Ownership::EXTERNAL);
     test_buf.setAVFrame(test_frame);
     test_buf.setImageMetadataFromAVFrame(test_frame);
     test_buf.setPts(test_frame->pts);
 
-    return compare(&ref_buf, &test_buf);
+    result = compare(&ref_buf, &test_buf);
+    // 分离 AVFrame 防止析构器 double-free（调用者拥有 ref_frame/test_frame）
+    ref_buf.detachAVFrame();
+    test_buf.detachAVFrame();
+    return result;
 }
 
 void BufferComparator::printSummary() const {
@@ -1163,7 +1171,7 @@ FrameCompareResult BufferComparator::compareMixed(
         }
         
         // 创建临时Buffer包装转换后的AVFrame
-        Buffer temp_ref_buffer(
+        AVFrameBuffer temp_ref_buffer(
             0,  // 临时ID
             ref_rgb->data[0],  // 虚拟地址
             0,  // 物理地址
@@ -1200,7 +1208,8 @@ FrameCompareResult BufferComparator::compareMixed(
         // 使用RGB对比函数进行对比
         result = compareRGB(&temp_ref_buffer, ref_rgb_info, test_buffer, test_info);
         
-        // 清理：释放转换后的AVFrame（Buffer析构时不会释放，因为Ownership::EXTERNAL）
+        // 分离 AVFrame 防止析构器 double-free
+        temp_ref_buffer.detachAVFrame();
         freeConvertedFrame(ref_rgb);
         
         return result;
@@ -1224,7 +1233,7 @@ FrameCompareResult BufferComparator::compareMixed(
         }
         
         // 创建临时Buffer包装转换后的AVFrame
-        Buffer temp_test_buffer(
+        AVFrameBuffer temp_test_buffer(
             0,  // 临时ID
             test_rgb->data[0],  // 虚拟地址
             0,  // 物理地址
@@ -1261,7 +1270,8 @@ FrameCompareResult BufferComparator::compareMixed(
         // 使用RGB对比函数进行对比
         result = compareRGB(ref_buffer, ref_info, &temp_test_buffer, test_rgb_info);
         
-        // 清理：释放转换后的AVFrame
+        // 分离 AVFrame 防止析构器 double-free
+        temp_test_buffer.detachAVFrame();
         freeConvertedFrame(test_rgb);
         
         return result;
@@ -1284,7 +1294,7 @@ FrameCompareResult BufferComparator::compareMixed(
     }
     
     // 创建临时Buffer包装转换后的AVFrame
-    Buffer temp_ref_yuv(
+    AVFrameBuffer temp_ref_yuv(
         0,
         ref_yuv->data[0],
         0,
@@ -1294,7 +1304,7 @@ FrameCompareResult BufferComparator::compareMixed(
     temp_ref_yuv.setAVFrame(ref_yuv);
     temp_ref_yuv.setImageMetadataFromAVFrame(ref_yuv);
     
-    Buffer temp_test_yuv(
+    AVFrameBuffer temp_test_yuv(
         0,
         test_yuv->data[0],
         0,
@@ -1331,7 +1341,9 @@ FrameCompareResult BufferComparator::compareMixed(
     // 使用YUV对比函数进行对比
     result = compareYUV(&temp_ref_yuv, ref_yuv_info, &temp_test_yuv, test_yuv_info);
     
-    // 清理：释放转换后的AVFrame
+    // 分离 AVFrame 防止析构器 double-free
+    temp_ref_yuv.detachAVFrame();
+    temp_test_yuv.detachAVFrame();
     freeConvertedFrame(ref_yuv);
     freeConvertedFrame(test_yuv);
     

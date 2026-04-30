@@ -17,14 +17,16 @@ enum class ErrorSource : int {
 
 enum class CodecStatus : int {
     Success = 0,
-    Eagain = 1,
-    Eof = -1,
-    SendFailed = -2,
-    InvalidState = -3,
-    DecodeError = -4,
-    ReceiveError = -5,
-    AllocFailed = -6,
-    EncodeError = -7
+    Eagain = 1,           // AVERROR(EAGAIN)      — 解码器缓冲区满，保留 packet 重试
+    Eof = -1,             // AVERROR_EOF           — 数据流结束
+    SendFailed = -2,      // （保留）
+    InvalidState = -3,    // AVERROR(EINVAL)       — 编解码器未打开或参数错误
+    DecodeError = -4,     // 未识别的解码错误（兜底）
+    ReceiveError = -5,    // receive_frame 失败
+    AllocFailed = -6,     // AVERROR(ENOMEM)       — 内存分配失败
+    EncodeError = -7,     // 编码错误
+    InvalidData = -8,     // AVERROR_INVALIDDATA   — 流数据损坏（NAL/SPS/PPS 等），可跳过
+    ExternalError = -9,   // AVERROR_EXTERNAL      — 外部库错误（硬件解码器报错），可跳过
 };
 
 enum class WorkerStatus : int {
@@ -54,16 +56,18 @@ inline const char* errorSourceToString(ErrorSource source) {
 
 inline const char* codecStatusToString(CodecStatus status) {
     switch (status) {
-        case CodecStatus::Success:      return "Success";
-        case CodecStatus::Eagain:       return "Eagain";
-        case CodecStatus::Eof:          return "Eof";
-        case CodecStatus::SendFailed:   return "SendFailed";
-        case CodecStatus::InvalidState: return "InvalidState";
-        case CodecStatus::DecodeError:  return "DecodeError";
-        case CodecStatus::ReceiveError: return "ReceiveError";
-        case CodecStatus::AllocFailed:  return "AllocFailed";
-        case CodecStatus::EncodeError:  return "EncodeError";
-        default:                        return "Unknown";
+        case CodecStatus::Success:       return "Success";
+        case CodecStatus::Eagain:        return "Eagain (AVERROR_EAGAIN)";
+        case CodecStatus::Eof:           return "Eof (AVERROR_EOF)";
+        case CodecStatus::SendFailed:    return "SendFailed";
+        case CodecStatus::InvalidState:  return "InvalidState (AVERROR_EINVAL)";
+        case CodecStatus::DecodeError:   return "DecodeError";
+        case CodecStatus::ReceiveError:  return "ReceiveError";
+        case CodecStatus::AllocFailed:   return "AllocFailed (AVERROR_ENOMEM)";
+        case CodecStatus::EncodeError:   return "EncodeError";
+        case CodecStatus::InvalidData:   return "InvalidData (AVERROR_INVALIDDATA)";
+        case CodecStatus::ExternalError: return "ExternalError (AVERROR_EXTERNAL)";
+        default:                         return "Unknown";
     }
 }
 
@@ -88,12 +92,18 @@ public:
     static CodecSendResult receiveError() { return CodecSendResult(CodecStatus::ReceiveError); }
     static CodecSendResult allocFailed() { return CodecSendResult(CodecStatus::AllocFailed); }
     static CodecSendResult encodeError() { return CodecSendResult(CodecStatus::EncodeError); }
+    static CodecSendResult invalidData() { return CodecSendResult(CodecStatus::InvalidData); }
+    static CodecSendResult externalError() { return CodecSendResult(CodecStatus::ExternalError); }
 
     bool ok() const noexcept { return status_ == CodecStatus::Success; }
     bool isEoFlush() const noexcept { return status_ == CodecStatus::Eof; }
     bool isEagain() const noexcept { return status_ == CodecStatus::Eagain; }
-    bool isRetryable() const noexcept { return isEagain(); }
-    bool isTerminal() const noexcept { return !ok() && !isEoFlush() && !isEagain(); }
+    bool isRetryable() const noexcept {
+        return status_ == CodecStatus::Eagain ||
+               status_ == CodecStatus::InvalidData ||
+               status_ == CodecStatus::ExternalError;
+    }
+    bool isTerminal() const noexcept { return !ok() && !isEoFlush() && !isRetryable(); }
     CodecStatus status() const noexcept { return status_; }
     const char* statusString() const noexcept { return codecStatusToString(status_); }
     explicit operator bool() const noexcept { return ok(); }
@@ -185,7 +195,9 @@ public:
                    acquire_cause_ == AcquireStatus::TimedOut;
         }
         if (isCodecError()) {
-            return codec_cause_ == CodecStatus::Eagain;
+            return codec_cause_ == CodecStatus::Eagain ||
+                   codec_cause_ == CodecStatus::InvalidData ||
+                   codec_cause_ == CodecStatus::ExternalError;
         }
         return false;
     }

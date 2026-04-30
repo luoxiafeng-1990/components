@@ -1,4 +1,5 @@
 #include "vendor/taco/display/TacoProDisplayContext.hpp"
+#include "bufferpool/buffer/RawBuffer.hpp"
 #include "vendor/taco/display/TacoProOsdOverlay.hpp"
 #include "vendor/taco/memory/TacoMemoryProvider.hpp"
 #include "common/Logger.hpp"
@@ -213,7 +214,7 @@ bool TacoProDisplayContext::open() {
         memset(p, 0, y_plane_size);
         memset(p + y_plane_size, 128, uv_plane_size);
     }
-    template_buf_ = std::make_unique<Buffer>(
+    template_buf_ = std::make_unique<RawBuffer>(
         template_blk_id_, tmpl_virt, tmpl_phys, buffer_size_,
         Buffer::Ownership::EXTERNAL);
 

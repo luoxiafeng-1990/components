@@ -36,12 +36,13 @@ libcomponents_la_SOURCES = \
     source/common/Timer.cpp \
     source/common/GlobalThreadPool.cpp \
     source/bufferpool/buffer/Buffer.cpp \
+    source/bufferpool/buffer/AVFrameBuffer.cpp \
+    source/bufferpool/buffer/MatBuffer.cpp \
+    source/bufferpool/buffer/RawBuffer.cpp \
     source/bufferpool/pool/base/BufferPool.cpp \
     source/bufferpool/pool/base/IBufferPoolBuilder.cpp \
     source/bufferpool/pool/base/BufferPoolBuilderFactory.cpp \
-    source/bufferpool/pool/builder/ContinuousPhysicalPoolBuilder.cpp \
-    source/bufferpool/pool/builder/AVFramePoolBuilder.cpp \
-    source/bufferpool/pool/builder/MatPoolBuilder.cpp \
+    source/bufferpool/pool/base/BufferPoolBuilder.cpp \
     source/vendor/MallocMemoryProvider.cpp \
     source/vendor/MemoryProviderRegistry.cpp \
     source/vendor/taco/TacoMemoryProvider.cpp \

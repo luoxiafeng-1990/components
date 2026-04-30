@@ -9,27 +9,39 @@
 extern "C" {
 #include <libavutil/pixfmt.h>
 #include <libavutil/frame.h>
-#include <libavcodec/packet.h>  // ⭐ v2.8新增：AVPacket 定义
-#include <libavcodec/avcodec.h> // ⭐ v2.19新增：av_packet_unref 函数定义
-#include <libavutil/dict.h>     // ⭐ v2.17新增：AVDictionary 定义（用于 metadata）
+#include <libavcodec/packet.h>
+#include <libavcodec/avcodec.h>
+#include <libavutil/dict.h>
 }
 
 #include "opencv2/opencv.hpp"
 #include "opencv2/core/tacv.hpp"
 
 /**
- * @brief Buffer 元数据类
+ * @brief Buffer 基类
  * 
  * 封装单个 buffer 的完整元数据，包括：
  * - 唯一ID（用于硬件回调识别）
  * - 虚拟地址（CPU访问）
  * - 物理地址（DMA/硬件访问）
  * - 所有权类型（自有/外部）
- * - 状态机（FREE/ACQUIRED/FILLED/IN_USE）
- * - 图像元数据（宽高、格式、stride等）⭐ v2.6新增
+ * - 状态机（IDLE/LOCKED_BY_PRODUCER/READY_FOR_CONSUME/LOCKED_BY_CONSUMER）
+ * - 图像元数据（宽高、格式、stride等）
+ * 
+ * 子类负责管理各自的载荷：
+ * - AVFrameBuffer:  持有 AVFrame* + AVPacket*
+ * - MatBuffer:      持有 cv::Mat* + AVPacket* + 可选 AVFrame*
+ * - RawBuffer:      纯原始内存 + 可选 AVPacket*
  */
 class Buffer {
 public:
+    // Buffer 类型
+    enum class Type {
+        RAW,        // 原始内存 (RawBuffer)
+        AVFRAME,    // FFmpeg AVFrame (AVFrameBuffer)
+        MAT         // OpenCV Mat (MatBuffer)
+    };
+
     // 所有权类型
     enum class Ownership {
         OWNED,      // BufferPool 拥有并管理生命周期
@@ -51,370 +63,141 @@ public:
      * @param phys_addr 物理地址（硬件/DMA，0表示未知）
      * @param size Buffer 大小（字节）
      * @param ownership 所有权类型
+     * @param type Buffer 类型
      */
     Buffer(uint32_t id, 
            void* virt_addr, 
            uint64_t phys_addr,
            size_t size,
-           Ownership ownership);
+           Ownership ownership,
+           Type type);
     
     /**
-     * @brief 析构函数
+     * @brief 虚析构函数（子类覆写以释放各自的载荷资源）
      */
-    ~Buffer() = default;
+    virtual ~Buffer();
     
-    /**
-     * @brief 禁止拷贝构造（Buffer 不应该被拷贝）
-     */
+    // 禁止拷贝
     Buffer(const Buffer&) = delete;
-    
-    /**
-     * @brief 禁止拷贝赋值（Buffer 不应该被拷贝）
-     */
     Buffer& operator=(const Buffer&) = delete;
     
-    /**
-     * @brief 移动构造函数
-     * @param other 源Buffer对象
-     * 
-     * @note 用于 vector 的 resize/reserve 操作
-     * @note 移动后源对象将被清空
-     */
+    // 移动构造函数和移动赋值运算符
     Buffer(Buffer&& other) noexcept;
-    
-    /**
-     * @brief 移动赋值运算符
-     * @param other 源Buffer对象
-     * @return 当前对象的引用
-     * 
-     * @note 用于 vector 的内部管理
-     * @note 移动后源对象将被清空
-     */
     Buffer& operator=(Buffer&& other) noexcept;
     
-    // ========== 基础信息接口 ==========
+    // ========== 基础信息接口（非虚，所有子类共用）==========
     
-    /**
-     * @brief 获取Buffer唯一ID
-     * @return Buffer的唯一标识符
-     */
     uint32_t id() const { return id_; }
-    
-    /**
-     * @brief 获取虚拟地址
-     * @return CPU可访问的虚拟地址指针
-     */
     void* getVirtualAddress() const { return virt_addr_; }
-    
-    /**
-     * @brief 获取物理地址
-     * @return DMA/硬件访问的物理地址（0表示未知）
-     */
     uint64_t getPhysicalAddress() const { return phys_addr_; }
-    
-    /**
-     * @brief 获取Buffer大小
-     * @return Buffer大小（字节）
-     */
     size_t size() const { return size_; }
-    
-    /**
-     * @brief 设置Buffer大小
-     * @param size 新的Buffer大小（字节）
-     * @note v2.10新增：用于软件解码时根据实际帧大小更新Buffer容量
-     */
     void setSize(size_t size) { size_ = size; }
-    
-    /**
-     * @brief 设置实际使用大小
-     * @param used_size 实际使用的字节数
-     * @note v2.9新增：用于原始码流等可变大小数据
-     */
     void setUsedSize(size_t used_size) { used_size_ = used_size; }
-    
-    /**
-     * @brief 获取实际使用大小
-     * @return 实际使用的字节数（如果未设置，返回 size_）
-     * @note v2.9新增：用于原始码流等可变大小数据
-     */
     size_t getUsedSize() const { return used_size_ > 0 ? used_size_ : size_; }
-    
-    /**
-     * @brief 获取当前状态
-     * @return Buffer当前状态（线程安全）
-     */
     State state() const { return state_.load(); }
-    
-    /**
-     * @brief 获取数据指针（getVirtualAddress的别名）
-     * @return CPU可访问的虚拟地址指针
-     * 
-     * @note 为兼容旧代码保留
-     */
     void* data() const { return virt_addr_; }
+    Type type() const { return type_; }
     
     // ========== 状态管理接口 ==========
     
-    /**
-     * @brief 设置Buffer状态
-     * @param state 新的状态值
-     * 
-     * @note 线程安全操作
-     */
     void setState(State state) { state_.store(state); }
-    
-    /**
-     * @brief 设置物理地址
-     * @param phys_addr 物理地址
-     * 
-     * @note 用于延迟获取物理地址的场景，如零拷贝解码
-     */
     void setPhysicalAddress(uint64_t phys_addr) { phys_addr_ = phys_addr; }
-    
-    // ========== AVFrame 关联接口 ⭐ v2.7新增 ==========
-    
-    /**
-     * @brief 设置关联的 AVFrame（仅用于 AVFrameAllocator）
-     * @param frame AVFrame 指针
-     * 
-     * @note Buffer 持有引用但不拥有所有权，释放由 Allocator 负责
-     */
-    void setAVFrame(AVFrame* frame) { avframe_ = frame; }
-    
-    /**
-     * @brief 获取关联的 AVFrame
-     * @return AVFrame 指针，如果没有关联则返回 nullptr
-     */
-    AVFrame* getAVFrame() const { return avframe_; }
-    
-    // ========== AVPacket 关联接口 ⭐ v2.8新增 ==========
-    
-    /**
-     * @brief 设置关联的 AVPacket（仅用于 AVFrameAllocator）
-     * @param packet AVPacket 指针
-     * 
-     * @note Buffer 持有引用但不拥有所有权，释放由 Allocator 负责
-     */
-    void setAVPacket(AVPacket* packet) { avpacket_ = packet; }
-    
-    /**
-     * @brief 获取关联的 AVPacket
-     * @return AVPacket 指针，如果没有关联则返回 nullptr
-     */
-    AVPacket* getAVPacket() const { return avpacket_; }
-
-    void setMat(cv::Mat* mat) { mat_ = mat; }
-    
-    cv::Mat* getMat() const { return mat_; }
-
-    /**
-     * @brief 更新虚拟地址（解码后更新为 frame->data[0]）
-     * @param addr 新的虚拟地址
-     * 
-     * @note 用于解码后更新数据地址
-     */
     void setVirtualAddress(void* addr) { virt_addr_ = addr; }
     
-    // ========== 图像元数据接口 ⭐ v2.6新增 ==========
+    // ========== 载荷接口（虚方法，基类返回 nullptr / no-op）==========
     
-    /**
-     * @brief 从AVFrame设置图像元数据
-     * @param frame AVFrame指针（不能为nullptr）
-     * 
-     * @note 会自动提取frame的width、height、format、linesize等信息
-     * @note 会计算各plane相对于virt_addr_的偏移
-     */
+    virtual AVFrame* getAVFrame() const { return nullptr; }
+    virtual void setAVFrame(AVFrame* frame) { (void)frame; }
+    
+    virtual AVPacket* getAVPacket() const { return nullptr; }
+    virtual void setAVPacket(AVPacket* packet) { (void)packet; }
+
+    virtual cv::Mat* getMat() const { return nullptr; }
+    virtual void setMat(cv::Mat* mat) { (void)mat; }
+    
+    // ========== 图像元数据接口 ==========
+    
     void setImageMetadataFromAVFrame(const AVFrame* frame);
-    
-    /**
-     * @brief 检查是否有图像元数据
-     * @return true 如果已设置图像元数据，否则返回 false
-     */
     bool hasImageMetadata() const { return has_image_metadata_; }
-    
-    /**
-     * @brief 获取图像宽度
-     * @return 图像宽度（像素）
-     */
     int getImageWidth() const { return width_; }
-    
-    /**
-     * @brief 获取图像高度
-     * @return 图像高度（像素）
-     */
     int getImageHeight() const { return height_; }
-    
-    /**
-     * @brief 获取像素格式
-     * @return FFmpeg标准的像素格式枚举
-     */
     AVPixelFormat getImageFormat() const { return format_; }
-    
-    /**
-     * @brief 获取linesize数组
-     * @return 指向包含4个元素的linesize数组的指针（每个plane的stride）
-     */
     const int* getImageLinesize() const { return linesize_; }
     
     /**
-     * @brief 获取指定plane的数据指针
-     * @param plane plane索引（0-3）
-     * @return plane数据的起始地址，如果参数无效则返回 nullptr
-     * 
-     * @note 返回的地址已加上 plane_offset_
-     */
-    /**
-     * @brief 获取指定 plane 的数据指针
+     * @brief 获取指定 plane 的数据指针（虚方法）
      * @param plane plane 索引 [0-3]
      * @return plane 数据指针，失败返回 nullptr
      * 
-     * @note v2.7改进：
-     *   1. 优先使用 virt_addr_（解码后已更新为 frame->data[0]）
-     *   2. 如果 virt_addr_ 为 nullptr，尝试从 avframe_->data[plane] 获取
-     *   3. 对于 plane > 0，通过 avframe_->data[plane] 获取（硬件解码零拷贝场景）
+     * 基类实现：virt_addr_ + plane_offset_
+     * 子类可覆写以使用各自载荷的数据指针
      */
-    uint8_t* getImagePlaneData(int plane) const {
-        if (plane < 0 || plane >= 4) return nullptr;
-        
-        // ⭐ v2.7修复：对于 plane 0，优先使用 virt_addr_（已是 frame->data[0]）
-        if (plane == 0) {
-            if (virt_addr_) {
-                return (uint8_t*)virt_addr_;
-            }
-            // 回退到 AVFrame（用于创建时的临时访问）
-            if (avframe_) {
-                return avframe_->data[0];
-            }
-            return nullptr;
-        }
-        
-        // ⭐ v2.7修复：对于 plane > 0，必须从 AVFrame 获取（多plane地址不连续）
-        if (avframe_) {
-            return avframe_->data[plane];
-        }
-        
-        // 最后回退到旧逻辑（兼容非 AVFrame 场景，如纯软件解码）
-        if (!virt_addr_) return nullptr;
-        return (uint8_t*)virt_addr_ + plane_offset_[plane];
-    }
+    virtual uint8_t* getImagePlaneData(int plane) const;
     
-    // ========== 硬件平台相关接口 ⭐ v2.17新增 ==========
+    // ========== 硬件平台相关接口 ==========
     
     /**
-     * @brief 获取输出通道号（硬件平台相关）
-     * @return 通道号（0=YUV通道, 1=RGB通道, ...），-1 表示不支持或无 AVFrame
+     * @brief 获取输出通道号（虚方法）
+     * @return 通道号（0=YUV通道, 1=RGB通道, ...），-1 表示不支持
      * 
-     * @note 仅在支持多通道输出的硬件平台有效（如 TACO 解码器）
-     * @note 从 AVFrame->metadata["output_channel"] 实时读取，零存储开销
-     * @note 调用开销：微秒级（哈希表查找），可忽略
-     * 
-     * @example 基本用法
-     * @code
-     *   int channel = buffer->getOutputChannel();
-     *   if (channel == 0) {
-     *       // 处理 YUV 通道
-     *   } else if (channel == 1) {
-     *       // 处理 RGB 通道
-     *   } else {
-     *       // channel == -1，不支持或未设置
-     *   }
-     * @endcode
+     * 基类返回 -1，AVFrameBuffer 覆写从 avframe_->metadata 读取
      */
-    int getOutputChannel() const;
+    virtual int getOutputChannel() const;
     
-    // ========== 帧同步接口 ⭐ v2.26新增 ==========
+    // ========== 帧同步接口 ==========
     
-    /**
-     * @brief 设置显示时间戳（PTS）
-     * @param pts 显示时间戳（AV_NOPTS_VALUE 表示未设置）
-     * 
-     * @note 用于多通道帧对齐：同一 AVPacket 解码后的所有通道输出具有相同的 PTS
-     */
     void setPts(int64_t pts) { pts_ = pts; }
-    
-    /**
-     * @brief 获取显示时间戳（PTS）
-     * @return 显示时间戳，AV_NOPTS_VALUE 表示未设置
-     */
     int64_t getPts() const { return pts_; }
     
-    // ========== 生命周期管理接口 ⭐ v2.19新增 ==========
+    // ========== 生命周期管理接口 ==========
     
     /**
      * @brief 清理 Buffer 中的引用计数和元数据（用于归还到 free 队列前）
      * 
-     * 职责：
-     * 1. 清空 AVFrame 的引用计数（av_frame_unref），但不释放 AVFrame 结构体
-     * 2. 清空 AVPacket 的引用计数（av_packet_unref），但不释放 AVPacket 结构体
-     * 3. 重置虚拟地址为 nullptr（因为 AVFrame 数据已被清空）
-     * 4. 清空图像元数据标志和相关字段
+     * 基类职责：清空图像元数据 + 重置 PTS
+     * 子类覆写：先清理各自载荷（unref），再调用 Buffer::free()
      * 
-     * 使用场景：
-     * - 在 BufferPool::releaseFilled() 时调用，确保 buffer 回到 free 队列时是"干净"的
-     * - 在 BufferPool::releaseFree() 时调用，确保填充失败的 buffer 也是"干净"的
-     * 
-     * 注意事项：
-     * - 不释放 AVFrame/AVPacket 结构体本身（所有权在 AVFrameAllocator）
-     * - 不修改 buffer ID、size、ownership 等基本信息
-     * - 不修改 buffer 状态（由 BufferPool 管理）
-     * 
-     * @note 线程安全：此函数不涉及线程同步，调用者需要保证线程安全
-     * @note v2.19新增：用于解决 AVFrame 数据被清空的问题
+     * 注意：不释放结构体本身（由析构函数负责）
      */
-    void freeBuffer();
+    virtual void free();
     
     // ========== 校验接口 ==========
     
-    /**
-     * @brief 基础校验：检查Buffer是否仍然有效
-     * @return true 如果 magic number 正确且地址非空
-     */
     bool isValid() const { 
         return validation_magic_ == MAGIC_NUMBER && virt_addr_ != nullptr;
     }
     
     // ========== 调试接口 ==========
     
-    /**
-     * @brief 获取状态字符串
-     * @param state Buffer状态
-     * @return 状态的中文描述字符串
-     * 
-     * @note 静态方法，可直接调用
-     */
     static const char* stateToString(State state);
+    static const char* typeToString(Type type);
     
-private:
+protected:
     // ========== 核心属性 ==========
-    uint32_t id_;                    // 唯一标识
-    void* virt_addr_;                // 虚拟地址（真实数据地址，如 frame->data[0]）⭐ v2.7语义修正
-    uint64_t phys_addr_;             // 物理地址（硬件/DMA）
-    size_t size_;                    // Buffer 总大小（分配大小）
-    size_t used_size_;               // 实际使用大小（对于可变大小数据，如原始码流）⭐ v2.9新增
-    Ownership ownership_;            // 所有权类型
+    uint32_t id_;
+    void* virt_addr_;
+    uint64_t phys_addr_;
+    size_t size_;
+    size_t used_size_;
+    Ownership ownership_;
+    Type type_;
     
     // ========== 状态管理 ==========
-    std::atomic<State> state_;       // 当前状态（线程安全）
+    std::atomic<State> state_;
     
-    // ========== AVFrame 关联 ⭐ v2.7新增 ==========
-    AVFrame* avframe_;               // 关联的 AVFrame 指针（引用，不拥有所有权）
-    AVPacket* avpacket_;             // ⭐ v2.8新增：关联的 AVPacket 指针（引用，不拥有所有权）
-    cv::Mat* mat_;
+    // ========== 图像元数据（所有子类共用）==========
+    bool has_image_metadata_;
+    int width_;
+    int height_;
+    AVPixelFormat format_;
+    int linesize_[4];
+    size_t plane_offset_[4];
+    int nb_planes_;
     
-    // ========== 图像元数据 ⭐ v2.6新增 ==========
-    bool has_image_metadata_;        // 是否包含图像元数据
-    int width_;                      // 图像宽度（像素）
-    int height_;                     // 图像高度（像素）
-    AVPixelFormat format_;           // 像素格式（FFmpeg标准）
-    int linesize_[4];                // 各plane的stride（字节）
-    size_t plane_offset_[4];         // 各plane相对于virt_addr_的偏移
-    int nb_planes_;                  // plane数量（1-4）
-    
-    // ========== 帧同步信息 ⭐ v2.26新增 ==========
-    int64_t pts_;                    // 显示时间戳（用于多通道帧对齐）
+    // ========== 帧同步信息 ==========
+    int64_t pts_;
     
     // ========== 安全性 ==========
-    static constexpr uint32_t MAGIC_NUMBER = 0xBEEFF123;  // 魔数：BEEF + F123
-    uint32_t validation_magic_;      // 魔数，用于检测野指针
-  
+    static constexpr uint32_t MAGIC_NUMBER = 0xBEEFF123;
+    uint32_t validation_magic_;
 };

@@ -203,6 +203,24 @@ public:
         return current_buffer_version_.load(std::memory_order_acquire);
     }
     
+    /**
+     * @brief 查询指定 Worker 是否已 acquire 当前版本的 packet（v2.37 新增）
+     * 
+     * 用于帧同步版本校验：如果 Worker 返回的帧来自缓存（如双通道 ch1），
+     * 它没有 acquire 当前版本的 packet，此方法返回 false。
+     * 调用方应丢弃该帧，不参与同步。
+     * 
+     * @param worker_id Worker 的唯一标识（this 指针）
+     * @return true 已 acquire 当前版本，false 未 acquire（缓存帧）
+     */
+    bool hasWorkerAcquiredCurrentVersion(void* worker_id) const {
+        std::lock_guard<std::mutex> lock(mutex_);
+        auto it = worker_states_.find(worker_id);
+        if (it == worker_states_.end()) return false;
+        return it->second.has_acquired &&
+               it->second.acquired_version == current_buffer_version_.load(std::memory_order_relaxed);
+    }
+    
    
 private:
     // ========== 通用成员（普通模式和共享模式都使用）==========

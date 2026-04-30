@@ -1048,10 +1048,12 @@ bool FFmpegDecodeWorker::initializeDecoder(const AVCodecParameters* codec_params
         return false;
     }
     
-    // 4. 配置特殊解码器（如 h264_taco）
-    if (decoder_name_ == "h264_taco") {
+    // 4. 配置硬件解码器厂商扩展（vendor-agnostic）
+    //    判定条件：实际打开的 codec 是硬件解码器 + 配置了厂商扩展
+    //    ⭐ v2.75 修复：不再硬编码解码器名称，支持 fallback 后仍正确配置
+    if (isHardwareDecoder(codec) && worker_config_.decoder.vendor) {
         if (!configureSpecialDecoder()) {
-            LOG4CPLUS_ERROR(logger_, " ERROR: Failed to configure special decoder options");
+            LOG4CPLUS_ERROR(logger_, " ERROR: Failed to configure vendor decoder options");
             avcodec_free_context(&codec_ctx_ptr_);
             codec_ctx_ptr_ = nullptr;
             return false;
@@ -1078,7 +1080,7 @@ bool FFmpegDecodeWorker::initializeDecoder(const AVCodecParameters* codec_params
 }
 
 bool FFmpegDecodeWorker::configureSpecialDecoder() {
-    // 配置 h264_taco 解码器（从 worker_config_ 读取配置）
+    // 配置 Taco 硬件解码器 PP 通道参数（ch0/ch1）
     if (!codec_ctx_ptr_->priv_data) {
         LOG4CPLUS_WARN_FMT(logger_, "  Warning: codec_ctx->priv_data is NULL, cannot set options");
         return false;
@@ -1091,7 +1093,8 @@ bool FFmpegDecodeWorker::configureSpecialDecoder() {
     }
     TacoConfig& taco = *taco_ptr;
     
-    LOG4CPLUS_DEBUG_FMT(logger_, " Configuring h264_taco decoder options from config...");
+    LOG4CPLUS_DEBUG_FMT(logger_, " Configuring %s decoder options from config...",
+        codec_ctx_ptr_->codec ? codec_ctx_ptr_->codec->name : "taco");
     
     int ret;
     

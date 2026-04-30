@@ -169,7 +169,7 @@ void BufferPool::releaseFilled(Buffer* buffer) {
         }
         free_queue_.push(buffer);
         buffer->setState(Buffer::State::IDLE);
-        buffer->freeBuffer();
+        buffer->free();
     }
     free_cv_.notify_one();
 }

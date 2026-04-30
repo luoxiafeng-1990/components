@@ -29,9 +29,7 @@ enum class BufferMemoryAllocatorType {
  * - 析构时自动清理
  *
  * 子类：
- * - AVFramePoolBuilder:              包装 FFmpeg AVFrame 动态注入 Pool
- * - MatPoolBuilder:                   包装 OpenCV cv::Mat 动态注入 Pool
- * - ContinuousPhysicalPoolBuilder:    使用 IMemoryProvider 分配物理连续内存构建 Pool
+ * - BufferPoolBuilder:  统一构建器，通过 Buffer::Type 分派（AVFRAME / MAT / RAW）
  */
 class IBufferPoolBuilder {
 public:

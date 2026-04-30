@@ -1,7 +1,5 @@
 #include "bufferpool/pool/base/BufferPoolBuilderFactory.hpp"
-#include "bufferpool/pool/builder/AVFramePoolBuilder.hpp"
-#include "bufferpool/pool/builder/MatPoolBuilder.hpp"
-#include "bufferpool/pool/builder/ContinuousPhysicalPoolBuilder.hpp"
+#include "bufferpool/pool/base/BufferPoolBuilder.hpp"
 #include "vendor/contracts/MemoryProviderRegistry.hpp"
 #include "vendor/contracts/MallocMemoryProvider.hpp"
 #include "common/Logger.hpp"
@@ -20,21 +18,21 @@ std::unique_ptr<IBufferPoolBuilder> BufferPoolBuilderFactory::create(
 
     switch (type) {
         case AllocatorType::AVFRAME:
-            LOG4CPLUS_DEBUG(logger, "创建 AVFramePoolBuilder");
-            return std::make_unique<AVFramePoolBuilder>();
+            LOG4CPLUS_DEBUG(logger, "创建 BufferPoolBuilder(AVFRAME)");
+            return BufferPoolBuilder::forAVFrame();
 
         case AllocatorType::MAT:
-            LOG4CPLUS_DEBUG(logger, "创建 MatPoolBuilder");
-            return std::make_unique<MatPoolBuilder>();
+            LOG4CPLUS_DEBUG(logger, "创建 BufferPoolBuilder(MAT)");
+            return BufferPoolBuilder::forMat();
 
         case AllocatorType::CONTINUOUS_PHYSICAL:
-            LOG4CPLUS_DEBUG(logger, "创建 ContinuousPhysicalPoolBuilder (default malloc)");
-            return std::make_unique<ContinuousPhysicalPoolBuilder>(
+            LOG4CPLUS_DEBUG(logger, "创建 BufferPoolBuilder(RAW, default malloc)");
+            return BufferPoolBuilder::forPhysicalMemory(
                 std::make_unique<MallocMemoryProvider>(64));
 
         default:
-            LOG4CPLUS_WARN(logger, "Unknown type, using AVFramePoolBuilder");
-            return std::make_unique<AVFramePoolBuilder>();
+            LOG4CPLUS_WARN(logger, "Unknown type, using BufferPoolBuilder(AVFRAME)");
+            return BufferPoolBuilder::forAVFrame();
     }
 }
 
@@ -49,9 +47,9 @@ std::unique_ptr<IBufferPoolBuilder> BufferPoolBuilderFactory::create(
         case AllocatorType::CONTINUOUS_PHYSICAL:
         case AllocatorType::AUTO:
             LOG4CPLUS_DEBUG_FMT(logger,
-                "创建 ContinuousPhysicalPoolBuilder (provider=%s)",
+                "创建 BufferPoolBuilder(RAW, provider=%s)",
                 provider ? provider->kind() : "null");
-            return std::make_unique<ContinuousPhysicalPoolBuilder>(std::move(provider));
+            return BufferPoolBuilder::forPhysicalMemory(std::move(provider));
 
         default:
             LOG4CPLUS_WARN_FMT(logger,
@@ -89,7 +87,7 @@ std::unique_ptr<IBufferPoolBuilder> BufferPoolBuilderFactory::createByName(
         LOG4CPLUS_TEXT("components.PoolBuilder.Factory"));
 
     if (!name) {
-        LOG4CPLUS_WARN(logger, "Null name, using AVFramePoolBuilder");
+        LOG4CPLUS_WARN(logger, "Null name, using BufferPoolBuilder(AVFRAME)");
         return create(AllocatorType::AVFRAME);
     }
 
@@ -104,7 +102,7 @@ std::unique_ptr<IBufferPoolBuilder> BufferPoolBuilderFactory::createByName(
         return create(AllocatorType::AUTO);
     }
 
-    LOG4CPLUS_WARN_FMT(logger, "Unknown type: %s, using AVFramePoolBuilder", name);
+    LOG4CPLUS_WARN_FMT(logger, "Unknown type: %s, using BufferPoolBuilder(AVFRAME)", name);
     return create(AllocatorType::AVFRAME);
 }
 

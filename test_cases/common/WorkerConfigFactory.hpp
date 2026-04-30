@@ -12,10 +12,11 @@
  *   显示配置由 DisplayPlugin 负责
  * 
  * 厂商扩展：
- * - 新增厂商只需在 vendorDecodeBuilders() 中注册一行
+ * - 新增厂商只需实现 IVendorOptionsRegistrar 接口，在 vendorRegistrars() 中注册一行
+ * - 厂商自注册 CLI 参数（与 DisplayPlugin --vendor 模式对齐）
  * - codec 参数支持 ffmpeg 标准命名（如 h264_taco, hevc_nvidia）
  * 
- * @version 4.1
+ * @version 4.2
  */
 
 #ifndef WORKER_CONFIG_FACTORY_HPP
@@ -24,7 +25,7 @@
 #include "productionline/worker/config/ConfigBuilders.hpp"
 #include "productionline/worker/config/MultiWorkerConfig.hpp"
 #include "productionline/worker/config/WorkerConfigs.hpp"
-#include "vendor/contracts/DecoderVendorExtension.hpp"
+#include "vendor/contracts/IVendorOptionsRegistrar.hpp"
 #include "vendor/taco/decode/TacoDecoderExtension.hpp"
 #include "vendor/taco/encode/TacoEncoderExtension.hpp"
 
@@ -66,24 +67,24 @@ class WorkerConfigFactory {
 public:
 
     // ========================================
-    // 厂商扩展注册
+    // 厂商扩展注册（IVendorOptionsRegistrar 模式）
     // ========================================
 
-    using VendorExtBuilder = std::function<std::unique_ptr<IDecoderVendorExtension>()>;
+    using VendorRegistrar = std::shared_ptr<IVendorOptionsRegistrar>;
 
     /**
-     * @brief 厂商解码器扩展构建分发表
+     * @brief 厂商解码器扩展注册表
      *
-     * 每个厂商注册一个 lambda，负责创建"基础解码"用的 VendorExtension。
-     * 新增厂商只需在此 map 中加一行。
+     * 每个厂商实现 IVendorOptionsRegistrar，负责：
+     * - 注册自己的 CLI 参数（registerTo）
+     * - 使用解析后的参数构建 VendorExtension（buildExtension）
+     *
+     * 新增厂商只需：
+     * 1. 实现 IVendorOptionsRegistrar（如 TacoVendorOptions）
+     * 2. 在此 map 中加一行注册
      */
-    static const std::unordered_map<std::string, VendorExtBuilder>& vendorDecodeBuilders() {
-        static const std::unordered_map<std::string, VendorExtBuilder> map = {
-            {"taco", []() -> std::unique_ptr<IDecoderVendorExtension> {
-                auto taco = TacoConfigBuilder().setChannels(true, false).build();
-                return makeTacoDecoderExtension(taco);
-            }},
-        };
+    static std::unordered_map<std::string, VendorRegistrar>& vendorRegistrars() {
+        static std::unordered_map<std::string, VendorRegistrar> map;
         return map;
     }
 
@@ -158,11 +159,17 @@ public:
         const std::string& path,
         const DecoderSpec& spec
     ) {
-        const auto& builders = vendorDecodeBuilders();
-        auto it = builders.find(spec.vendor);
-        if (it == builders.end()) {
-            throw std::invalid_argument(
-                "WorkerConfigFactory: unknown decoder vendor '" + spec.vendor + "'");
+        // 优先使用 registrar（带 CLI 参数的厂商配置）
+        auto& registrars = vendorRegistrars();
+        auto it = registrars.find(spec.vendor);
+
+        std::unique_ptr<IDecoderVendorExtension> extension;
+        if (it != registrars.end()) {
+            extension = it->second->buildExtension();
+        } else {
+            // 未注册 registrar 时的默认构建（向后兼容 OpencvPlugin 等直接调用方）
+            auto taco = TacoConfigBuilder().setChannels(true, false).build();
+            extension = makeTacoDecoderExtension(taco);
         }
 
         return WorkerConfigBuilder()
@@ -174,7 +181,7 @@ public:
             )
             .setDecoderConfig(
                 DecoderConfigBuilder()
-                    .useVendor(spec.codec, it->second())
+                    .useVendor(spec.codec, std::move(extension))
                     .build()
             )
             .setGlobalConfig(WorkerGlobalConfigBuilder().setWorkerType(WorkerType::FFMPEG_DECODE).build())

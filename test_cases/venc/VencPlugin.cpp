@@ -17,6 +17,7 @@
 #include "productionline/worker/datasource/rawdata/RawFrameSourceFromFile.hpp"
 #include "productionline/worker/base/ComponentTopology.hpp"
 #include "bufferpool/buffer/Buffer.hpp"
+#include "bufferpool/buffer/AVFrameBuffer.hpp"
 
 extern "C" {
 #include <libavutil/pixfmt.h>
@@ -863,7 +864,7 @@ consumer::ConsumeResult runEncodeQualityCompare(
         av_image_get_buffer_size(ref_pix_fmt, ref_width, ref_height, 1));
 
     // 先用 frame->data[0] 构造 Buffer wrapper；具体元数据在 callback 内逐帧刷新
-    Buffer ref_buf_wrap(
+    AVFrameBuffer ref_buf_wrap(
         0, ref_avframe->data[0], 0, static_cast<size_t>(ref_buf_size),
         Buffer::Ownership::EXTERNAL);
     ref_buf_wrap.setAVFrame(ref_avframe);

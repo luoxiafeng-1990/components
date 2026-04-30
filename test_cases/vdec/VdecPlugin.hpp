@@ -129,6 +129,7 @@ private:
     int threads_ = 0;              ///< 0 = 未指定
     int max_frames_ = -1;          ///< -1 = 无限制
     bool loop_ = false;
+    std::string vendor_str_ = "taco";  ///< 解码器厂商（默认 taco，与 DisplayPlugin --vendor 同模式）
     DataSourceOptions ds_opts_;    ///< DataSource 横切选项
 };
 
