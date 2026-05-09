@@ -21,17 +21,8 @@ AVFrameBuffer::~AVFrameBuffer() {
     }
 }
 
-AVFrame* AVFrameBuffer::detachAVFrame() {
-    AVFrame* f = avframe_;
-    avframe_ = nullptr;
-    return f;
-}
 
-AVPacket* AVFrameBuffer::detachAVPacket() {
-    AVPacket* p = avpacket_;
-    avpacket_ = nullptr;
-    return p;
-}
+
 
 void AVFrameBuffer::free() {
     // 1. 清空 AVFrame 的引用计数（保留结构体）
@@ -63,20 +54,3 @@ int AVFrameBuffer::getOutputChannel() const {
     return -1;
 }
 
-uint8_t* AVFrameBuffer::getImagePlaneData(int plane) const {
-    if (plane < 0 || plane >= 4) return nullptr;
-    
-    // plane 0：优先使用 virt_addr_（解码后已更新为 frame->data[0]）
-    if (plane == 0) {
-        if (virt_addr_) return (uint8_t*)virt_addr_;
-        if (avframe_) return avframe_->data[0];
-        return nullptr;
-    }
-    
-    // plane > 0：从 AVFrame 获取（多 plane 地址不连续）
-    if (avframe_) return avframe_->data[plane];
-    
-    // 回退到旧逻辑（兼容纯软件解码）
-    if (!virt_addr_) return nullptr;
-    return (uint8_t*)virt_addr_ + plane_offset_[plane];
-}

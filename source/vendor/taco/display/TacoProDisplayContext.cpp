@@ -1,5 +1,6 @@
 #include "vendor/taco/display/TacoProDisplayContext.hpp"
 #include "bufferpool/buffer/RawBuffer.hpp"
+#include "common/ImageMeta.hpp"
 #include "vendor/taco/display/TacoProOsdOverlay.hpp"
 #include "vendor/taco/memory/TacoMemoryProvider.hpp"
 #include "common/Logger.hpp"
@@ -764,8 +765,9 @@ bool TacoProDisplayContext::channelWrite(int channel_id, Buffer* decoded) {
                 continue;
             }
 
-            int src_width  = decoded->getImageWidth();
-            int src_height = decoded->getImageHeight();
+            auto dec_img = ImageMeta::fromBuffer(decoded);
+            int src_width  = dec_img.width();
+            int src_height = dec_img.height();
 
             if (src_width <= 0 || src_height <= 0 || !decoded->getAVFrame()) {
                 LOG4CPLUS_WARN_FMT(logger_,

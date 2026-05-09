@@ -48,23 +48,3 @@ void MatBuffer::free() {
     Buffer::free();
 }
 
-uint8_t* MatBuffer::getImagePlaneData(int plane) const {
-    if (plane < 0 || plane >= 4) return nullptr;
-
-    // 优先从 AVFrame 获取（如果有）
-    if (avframe_) {
-        if (plane == 0) {
-            if (virt_addr_) return (uint8_t*)virt_addr_;
-            return avframe_->data[0];
-        }
-        return avframe_->data[plane];
-    }
-
-    // 从 Mat 获取（仅 plane 0）
-    if (plane == 0 && mat_ && !mat_->empty()) {
-        return mat_->data;
-    }
-
-    // 回退到基类逻辑
-    return Buffer::getImagePlaneData(plane);
-}

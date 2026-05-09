@@ -39,10 +39,11 @@ libcomponents_la_SOURCES = \
     source/bufferpool/buffer/AVFrameBuffer.cpp \
     source/bufferpool/buffer/MatBuffer.cpp \
     source/bufferpool/buffer/RawBuffer.cpp \
+    source/common/ImageMeta.cpp \
     source/bufferpool/pool/base/BufferPool.cpp \
     source/bufferpool/pool/base/IBufferPoolBuilder.cpp \
-    source/bufferpool/pool/base/BufferPoolBuilderFactory.cpp \
-    source/bufferpool/pool/base/BufferPoolBuilder.cpp \
+    source/bufferpool/pool/builder/BufferPoolBuilderFactory.cpp \
+    source/bufferpool/pool/builder/BufferPoolBuilder.cpp \
     source/vendor/MallocMemoryProvider.cpp \
     source/vendor/MemoryProviderRegistry.cpp \
     source/vendor/taco/TacoMemoryProvider.cpp \

@@ -1,4 +1,5 @@
 #include "consumptionline/types/writer/BufferWriter.hpp"
+#include "common/ImageMeta.hpp"
 #include "common/Logger.hpp"
 #include <cstring>
 #include <cerrno>
@@ -133,10 +134,11 @@ bool BufferWriter::write(const Buffer* buffer) {
     }
     
     // 4. ⭐⭐⭐ v2.17 需求4：格式和尺寸验证（在 BufferWriter 内部完成）
-    if (buffer->hasImageMetadata()) {
-        AVPixelFormat actual_format = buffer->getImageFormat();
-        int actual_width = buffer->getImageWidth();
-        int actual_height = buffer->getImageHeight();
+    auto img = ImageMeta::fromBuffer(buffer);
+    if (img.isValid()) {
+        AVPixelFormat actual_format = img.format();
+        int actual_width = img.width();
+        int actual_height = img.height();
         
         bool format_match = (actual_format == format_);
         bool size_match = (actual_width == width_ && actual_height == height_);
@@ -147,7 +149,7 @@ bool BufferWriter::write(const Buffer* buffer) {
             
             // 只打印前5次错误，避免刷屏
             if (current_count <= 5) {
-                LOG4CPLUS_ERROR_FMT(logger_, "❌ Format/size mismatch (count: %lld):", 
+                LOG4CPLUS_ERROR_FMT(logger_, "❌ Format/size mismatch (count: %lld)", 
                              (long long)current_count);
                 if (!format_match) {
                     LOG4CPLUS_ERROR_FMT(logger_, "  Expected format: %s, got: %s",
@@ -165,7 +167,7 @@ bool BufferWriter::write(const Buffer* buffer) {
     }
     
     // 5. ⭐ 检查Buffer是否有图像元数据
-    if (buffer->hasImageMetadata()) {
+    if (img.isValid()) {
         // 使用元数据模式（v2.6新功能）
         return writeWithMetadata(buffer);
     } else {
@@ -235,11 +237,12 @@ bool BufferWriter::writeWithMetadata(const Buffer* buffer) {
         return false;
     }
     
-    // 2. 获取图像元数据（从Buffer的图像元数据中获取）
-    AVPixelFormat buf_format = buffer->getImageFormat();
-    int buf_width = buffer->getImageWidth();
-    int buf_height = buffer->getImageHeight();
-    const int* linesize = buffer->getImageLinesize();
+    // 2. 获取图像元数据（通过 ImageMeta 从载荷中提取）
+    auto img = ImageMeta::fromBuffer(buffer);
+    AVPixelFormat buf_format = img.format();
+    int buf_width = img.width();
+    int buf_height = img.height();
+    const int linesize[4] = { img.linesize(0), img.linesize(1), img.linesize(2), img.linesize(3) };
     
     // 3. ⭐ 格式过滤：只保存匹配期望格式的帧（静默跳过不匹配的帧）
     if (format_ != AV_PIX_FMT_NONE && buf_format != format_) {
@@ -252,7 +255,7 @@ bool BufferWriter::writeWithMetadata(const Buffer* buffer) {
     
     // 3.5 ⭐ 数据有效性检查：如果第一个plane的数据为空，静默跳过整个帧
     // 场景：Buffer 报告了格式但实际数据未就绪，或者帧不完整
-    const uint8_t* first_plane = buffer->getImagePlaneData(0);
+    const uint8_t* first_plane = img.planeData(0);
     if (!first_plane) {
         // 数据未就绪，静默跳过
         LOG4CPLUS_ERROR(logger_, "Warning: First image plane data is null, skipping frame");
@@ -264,8 +267,8 @@ bool BufferWriter::writeWithMetadata(const Buffer* buffer) {
         case AV_PIX_FMT_NV12:
         case AV_PIX_FMT_NV21: {
             // Semi-planar: Plane 0 (Y) + Plane 1 (UV/VU)
-            const uint8_t* y_data = buffer->getImagePlaneData(0);
-            const uint8_t* uv_data = buffer->getImagePlaneData(1);
+            const uint8_t* y_data = img.planeData(0);
+            const uint8_t* uv_data = img.planeData(1);
             
             // 写入Y平面（去除stride）
             if (!writePlane(y_data, linesize[0], buf_width, buf_height)) {
@@ -287,19 +290,19 @@ bool BufferWriter::writeWithMetadata(const Buffer* buffer) {
             int bytes_per_pixel = (buf_format == AV_PIX_FMT_YUV420P10LE) ? 2 : 1;
             
             // Y平面
-            if (!writePlane(buffer->getImagePlaneData(0), linesize[0], 
+            if (!writePlane(img.planeData(0), linesize[0], 
                           buf_width * bytes_per_pixel, buf_height)) {
                 return false;
             }
             
             // U平面
-            if (!writePlane(buffer->getImagePlaneData(1), linesize[1], 
+            if (!writePlane(img.planeData(1), linesize[1], 
                           buf_width / 2 * bytes_per_pixel, buf_height / 2)) {
                 return false;
             }
             
             // V平面
-            if (!writePlane(buffer->getImagePlaneData(2), linesize[2], 
+            if (!writePlane(img.planeData(2), linesize[2], 
                           buf_width / 2 * bytes_per_pixel, buf_height / 2)) {
                 return false;
             }
@@ -315,7 +318,7 @@ bool BufferWriter::writeWithMetadata(const Buffer* buffer) {
         case AV_PIX_FMT_0RGB:
         case AV_PIX_FMT_0BGR: {
             // Packed RGB: 单plane，4 bytes/pixel
-            const uint8_t* rgb_data = buffer->getImagePlaneData(0);
+            const uint8_t* rgb_data = img.planeData(0);
             if (!writePlane(rgb_data, linesize[0], buf_width * 4, buf_height)) {
                 return false;
             }
@@ -325,7 +328,7 @@ bool BufferWriter::writeWithMetadata(const Buffer* buffer) {
         case AV_PIX_FMT_RGB24:
         case AV_PIX_FMT_BGR24: {
             // Packed RGB: 单plane，3 bytes/pixel
-            const uint8_t* rgb_data = buffer->getImagePlaneData(0);
+            const uint8_t* rgb_data = img.planeData(0);
             if (!writePlane(rgb_data, linesize[0], buf_width * 3, buf_height)) {
                 return false;
             }
@@ -335,7 +338,7 @@ bool BufferWriter::writeWithMetadata(const Buffer* buffer) {
         case AV_PIX_FMT_RGB48LE:
         case AV_PIX_FMT_BGR48LE: {
             // Packed RGB: 单plane，6 bytes/pixel
-            const uint8_t* rgb_data = buffer->getImagePlaneData(0);
+            const uint8_t* rgb_data = img.planeData(0);
             if (!writePlane(rgb_data, linesize[0], buf_width * 6, buf_height)) {
                 return false;
             }
@@ -344,7 +347,7 @@ bool BufferWriter::writeWithMetadata(const Buffer* buffer) {
         
         case AV_PIX_FMT_GRAY8: {
             // 灰度：单plane，1 byte/pixel
-            const uint8_t* gray_data = buffer->getImagePlaneData(0);
+            const uint8_t* gray_data = img.planeData(0);
             if (!writePlane(gray_data, linesize[0], buf_width, buf_height)) {
                 return false;
             }
@@ -353,7 +356,7 @@ bool BufferWriter::writeWithMetadata(const Buffer* buffer) {
         
         case AV_PIX_FMT_GRAY10LE: {
             // 灰度10bit：单plane，2 bytes/pixel
-            const uint8_t* gray_data = buffer->getImagePlaneData(0);
+            const uint8_t* gray_data = img.planeData(0);
             if (!writePlane(gray_data, linesize[0], buf_width * 2, buf_height)) {
                 return false;
             }
@@ -362,8 +365,8 @@ bool BufferWriter::writeWithMetadata(const Buffer* buffer) {
         
         case AV_PIX_FMT_P010LE: {
             // YUV420 P010: Semi-planar 16bit
-            const uint8_t* y_data = buffer->getImagePlaneData(0);
-            const uint8_t* uv_data = buffer->getImagePlaneData(1);
+            const uint8_t* y_data = img.planeData(0);
+            const uint8_t* uv_data = img.planeData(1);
             
             // Y平面（16bit/pixel）
             if (!writePlane(y_data, linesize[0], buf_width * 2, buf_height)) {
@@ -380,9 +383,9 @@ bool BufferWriter::writeWithMetadata(const Buffer* buffer) {
         case AV_PIX_FMT_YUV422P: {
             // YUV422 Planar: Plane 0 (Y) + Plane 1 (U) + Plane 2 (V)
             // Y: full resolution, U/V: half width
-            const uint8_t* y_data = buffer->getImagePlaneData(0);
-            const uint8_t* u_data = buffer->getImagePlaneData(1);
-            const uint8_t* v_data = buffer->getImagePlaneData(2);
+            const uint8_t* y_data = img.planeData(0);
+            const uint8_t* u_data = img.planeData(1);
+            const uint8_t* v_data = img.planeData(2);
             
             // Y平面（full resolution）
             if (!writePlane(y_data, linesize[0], buf_width, buf_height)) {
@@ -404,9 +407,9 @@ bool BufferWriter::writeWithMetadata(const Buffer* buffer) {
         case AV_PIX_FMT_YUV444P: {
             // YUV444 Planar: Plane 0 (Y) + Plane 1 (U) + Plane 2 (V)
             // All planes are full resolution
-            const uint8_t* y_data = buffer->getImagePlaneData(0);
-            const uint8_t* u_data = buffer->getImagePlaneData(1);
-            const uint8_t* v_data = buffer->getImagePlaneData(2);
+            const uint8_t* y_data = img.planeData(0);
+            const uint8_t* u_data = img.planeData(1);
+            const uint8_t* v_data = img.planeData(2);
             
             // Y平面（full resolution）
             if (!writePlane(y_data, linesize[0], buf_width, buf_height)) {
@@ -428,9 +431,9 @@ bool BufferWriter::writeWithMetadata(const Buffer* buffer) {
         case AV_PIX_FMT_GBRP: {
             // GBR Planar: Plane 0 (G) + Plane 1 (B) + Plane 2 (R)
             // All planes are full resolution
-            const uint8_t* g_data = buffer->getImagePlaneData(0);
-            const uint8_t* b_data = buffer->getImagePlaneData(1);
-            const uint8_t* r_data = buffer->getImagePlaneData(2);
+            const uint8_t* g_data = img.planeData(0);
+            const uint8_t* b_data = img.planeData(1);
+            const uint8_t* r_data = img.planeData(2);
             
             // G平面
             if (!writePlane(g_data, linesize[0], buf_width, buf_height)) {

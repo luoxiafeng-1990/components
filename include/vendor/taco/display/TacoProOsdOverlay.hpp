@@ -16,7 +16,7 @@
 
 #include "common/Timer.hpp"
 #include "bufferpool/pool/base/IBufferPoolBuilder.hpp"
-#include "bufferpool/pool/base/BufferPoolBuilderFactory.hpp"
+#include "bufferpool/pool/builder/BufferPoolBuilderFactory.hpp"
 #include "bufferpool/pool/base/BufferPool.hpp"
 #include "productionline/worker/base/ComponentTopology.hpp"
 

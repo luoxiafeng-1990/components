@@ -24,6 +24,8 @@ extern "C" {
 #include <libavutil/pixfmt.h>
 }
 
+#include "common/ImageMeta.hpp"
+
 static log4cplus::Logger logger() {
     return log4cplus::Logger::getRoot();
 }
@@ -347,8 +349,9 @@ void NpuInferenceConsumer::releaseModel() {
 NpuInferenceConsumer::LetterboxParams
 NpuInferenceConsumer::preprocessVirtualAddr(Buffer* buffer, cv::Mat* bgr_out) {
     LetterboxParams params;
-    params.src_w = buffer->getImageWidth();
-    params.src_h = buffer->getImageHeight();
+    auto img = ImageMeta::fromBuffer(buffer);
+    params.src_w = img.width();
+    params.src_h = img.height();
 
     // 1) NV12 → BGR (通过 OpenCV)
     cv::Mat nv12(params.src_h * 3 / 2, params.src_w, CV_8UC1,
@@ -413,8 +416,9 @@ NpuInferenceConsumer::preprocessVirtualAddr(Buffer* buffer, cv::Mat* bgr_out) {
 NpuInferenceConsumer::LetterboxParams
 NpuInferenceConsumer::preprocessPhysicalAddr(Buffer* buffer) {
     LetterboxParams params;
-    params.src_w = buffer->getImageWidth();
-    params.src_h = buffer->getImageHeight();
+    auto img = ImageMeta::fromBuffer(buffer);
+    params.src_w = img.width();
+    params.src_h = img.height();
     params.ratio = 1.0f;
 
     /*
@@ -545,8 +549,9 @@ void NpuInferenceConsumer::drawAndWriteBack(
     }
 
     // BGR → NV12, 回写到 buffer 的虚拟地址
-    int h = buffer->getImageHeight();
-    int w = buffer->getImageWidth();
+    auto draw_img = ImageMeta::fromBuffer(buffer);
+    int h = draw_img.height();
+    int w = draw_img.width();
 
     cv::Mat yuv_i420;
     cv::cvtColor(bgr, yuv_i420, cv::COLOR_BGR2YUV_I420);

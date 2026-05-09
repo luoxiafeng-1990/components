@@ -26,15 +26,11 @@ public:
     // === 生命周期 ===
     void free() override;
 
-    // === 硬件通道 ===
-    int getOutputChannel() const override;
+    // === 硬件输出通道（仅 AVFrameBuffer 支持）===
+    int getOutputChannel() const;
 
-    // === 分离载荷（临时包装器用，防止析构时 double-free）===
-    AVFrame* detachAVFrame();
-    AVPacket* detachAVPacket();
 
-    // === 图像 plane 数据 ===
-    uint8_t* getImagePlaneData(int plane) const override;
+
 
 private:
     AVFrame* avframe_ = nullptr;

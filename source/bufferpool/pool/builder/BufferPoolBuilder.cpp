@@ -1,4 +1,4 @@
-#include "bufferpool/pool/base/BufferPoolBuilder.hpp"
+#include "bufferpool/pool/builder/BufferPoolBuilder.hpp"
 #include "bufferpool/buffer/AVFrameBuffer.hpp"
 #include "bufferpool/buffer/MatBuffer.hpp"
 #include "bufferpool/buffer/RawBuffer.hpp"

@@ -7,7 +7,8 @@
 #include "productionline/worker/base/ComponentTopology.hpp"
 #include "bufferpool/pool/base/IBufferPoolBuilder.hpp"
 #include "bufferpool/buffer/AVFrameBuffer.hpp"
-#include "bufferpool/pool/base/BufferPoolBuilderFactory.hpp"
+#include "common/ImageMeta.hpp"
+#include "bufferpool/pool/builder/BufferPoolBuilderFactory.hpp"
 #include "vendor/taco/display/DisplayDeviceFactory.hpp"
 #include "productionline/worker/core/FFmpegEncodeWorker.hpp"
 #include "productionline/worker/datasource/rawdata/RawFrameSourceFromBuffer.hpp"
@@ -221,9 +222,10 @@ consumptionline::io::BufferWriter* SaveRawConsumer::getOrCreateWriter(int channe
     
     // 创建新的 Writer
     std::string path = getOutputPath(channel);
-    AVPixelFormat format = sample_buffer->getImageFormat();
-    int width = sample_buffer->getImageWidth();
-    int height = sample_buffer->getImageHeight();
+    auto img = ImageMeta::fromBuffer(sample_buffer);
+    AVPixelFormat format = img.format();
+    int width = img.width();
+    int height = img.height();
     
     auto writer = std::make_unique<consumptionline::io::BufferWriter>();
     if (!writer->openRaw(path.c_str(), format, width, height)) {
@@ -253,10 +255,11 @@ bool SaveRawConsumer::consume(const std::vector<Buffer*>& buffers, int frame_ind
     
     Buffer* buffer = buffers[0];
     
-    // 获取 Buffer 的输出通道
-    int channel = buffer->getOutputChannel();
-    if (channel < 0) {
-        channel = 0;  // 默认通道 0
+    // 获取 Buffer 的输出通道（仅 AVFrameBuffer 支持）
+    int channel = 0;  // 默认通道 0
+    if (buffer->type() == Buffer::Type::AVFRAME) {
+        int ch = static_cast<AVFrameBuffer*>(buffer)->getOutputChannel();
+        if (ch >= 0) channel = ch;
     }
     
     // 检查该通道是否达到最大保存帧数
@@ -495,7 +498,8 @@ void ChannelCompareConsumer::run(int max_frames) {
         }
         
         int64_t pts = buffer->getPts();
-        int channel = buffer->getOutputChannel();
+        int channel = (buffer->type() == Buffer::Type::AVFRAME)
+            ? static_cast<AVFrameBuffer*>(buffer)->getOutputChannel() : -1;
         
         // 只关心指定的两个通道
         if (channel != config_.reference_channel && channel != config_.compare_channel) {
@@ -544,7 +548,9 @@ void ChannelCompareConsumer::run(int max_frames) {
                 mismatch_count_++;
                 LOG4CPLUS_WARN_FMT(log4cplus::Logger::getRoot(), 
                     "ChannelCompare: PTS mismatch! cached=%lld (ch=%d), new=%lld (ch=%d)",
-                    (long long)cached_pts, cached_buffer->getOutputChannel(),
+                    (long long)cached_pts,
+                    (cached_buffer->type() == Buffer::Type::AVFRAME)
+                        ? static_cast<AVFrameBuffer*>(cached_buffer)->getOutputChannel() : -1,
                     (long long)pts, channel);
                 
                 // 释放旧的，缓存新的

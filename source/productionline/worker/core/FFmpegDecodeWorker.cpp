@@ -592,9 +592,6 @@ bool FFmpegDecodeWorker::fillBufferMetadataFromFrame(AVFrame* frame_ptr, Buffer*
         LOG4CPLUS_ERROR_FMT(logger_, " Failed to get frame buffer size: %d", actual_frame_size);
     }
     
-    // ⭐ 设置图像元数据（格式、宽高、linesize 等）
-    buffer->setImageMetadataFromAVFrame(frame_ptr);
-    
     // ⭐ v2.26新增：保存 PTS（用于多通道帧对齐）
     buffer->setPts(frame_ptr->pts);
     

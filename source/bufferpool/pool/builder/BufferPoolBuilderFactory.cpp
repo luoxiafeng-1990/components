@@ -1,5 +1,5 @@
-#include "bufferpool/pool/base/BufferPoolBuilderFactory.hpp"
-#include "bufferpool/pool/base/BufferPoolBuilder.hpp"
+#include "bufferpool/pool/builder/BufferPoolBuilderFactory.hpp"
+#include "bufferpool/pool/builder/BufferPoolBuilder.hpp"
 #include "vendor/contracts/MemoryProviderRegistry.hpp"
 #include "vendor/contracts/MallocMemoryProvider.hpp"
 #include "common/Logger.hpp"

@@ -8,7 +8,7 @@
  *
  * 用于物理连续内存场景（Framebuffer 显示、DMA 传输等）：
  * - memory_provider_ 非拥有指针，用于析构时归还内存
- * - avpacket_ 可选
+ * - 不持有 AVFrame / AVPacket / Mat，仅管理物理地址和虚拟地址
  */
 class RawBuffer : public Buffer {
 public:
@@ -21,14 +21,9 @@ public:
               IMemoryProvider* memory_provider = nullptr);
     ~RawBuffer() override;
 
-    // === AVPacket 载荷（可选） ===
-    AVPacket* getAVPacket() const override { return avpacket_; }
-    void setAVPacket(AVPacket* packet) override { avpacket_ = packet; }
-
     // === 生命周期 ===
     void free() override;
 
 private:
-    AVPacket* avpacket_ = nullptr;
     IMemoryProvider* memory_provider_ = nullptr;
 };

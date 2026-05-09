@@ -868,7 +868,6 @@ consumer::ConsumeResult runEncodeQualityCompare(
         0, ref_avframe->data[0], 0, static_cast<size_t>(ref_buf_size),
         Buffer::Ownership::EXTERNAL);
     ref_buf_wrap.setAVFrame(ref_avframe);
-    ref_buf_wrap.setImageMetadataFromAVFrame(ref_avframe);
 
     // 2) compare_ctx：沿用 WorkerSyncCoordinator 的 BufferComparator 累积统计
     auto compare_ctx = std::make_shared<CompareCallbackContext>();
@@ -945,7 +944,6 @@ consumer::ConsumeResult runEncodeQualityCompare(
         }
 
         cb->ref_buf_wrap->setAVFrame(cb->ref_avframe);
-        cb->ref_buf_wrap->setImageMetadataFromAVFrame(cb->ref_avframe);
 
         auto cmp = cb->compare_ctx->comparator_->compare(cb->ref_buf_wrap, decoded_buf);
         const double psnr = cmp.psnr_avg;

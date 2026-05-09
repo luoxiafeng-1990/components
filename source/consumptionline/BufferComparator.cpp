@@ -1,5 +1,5 @@
 #include "consumptionline/types/compare/BufferComparator.hpp"
-#include "bufferpool/buffer/AVFrameBuffer.hpp"
+#include "common/ImageMeta.hpp"
 #include "common/Logger.hpp"
 #include "common/GlobalThreadPool.hpp"
 #include <cmath>
@@ -207,9 +207,12 @@ FrameCompareResult BufferComparator::compare(
         return result;
     }
     
-    // 步骤1：分析两个Buffer的格式
-    FormatInfo ref_info = analyzeFormat(reference_buffer);
-    FormatInfo test_info = analyzeFormat(test_buffer);
+    // 步骤1：在入口一次性提取 ImageMeta，后续内部函数不再接触 Buffer*
+    ImageMeta ref_img = ImageMeta::fromBuffer(reference_buffer);
+    ImageMeta test_img = ImageMeta::fromBuffer(test_buffer);
+    
+    FormatInfo ref_info = analyzeFormat(ref_img);
+    FormatInfo test_info = analyzeFormat(test_img);
     
     result.ref_format_name = ref_info.name;
     result.test_format_name = test_info.name;
@@ -237,8 +240,8 @@ FrameCompareResult BufferComparator::compare(
     
     // 步骤2.5：分辨率不匹配时（pp/scale场景），转 YUV420P 后缩放参考帧再比较
     if (resolution_mismatch_detected_) {
-        AVFrame* ref_yuv = convertToYUV420P(reference_buffer, ref_info);
-        AVFrame* test_yuv = convertToYUV420P(test_buffer, test_info);
+        AVFrame* ref_yuv = convertToYUV420P(ref_img, ref_info);
+        AVFrame* test_yuv = convertToYUV420P(test_img, test_info);
         
         if (!ref_yuv || !test_yuv) {
             if (ref_yuv) freeConvertedFrame(ref_yuv);
@@ -266,37 +269,14 @@ FrameCompareResult BufferComparator::compare(
             return result;
         }
         
-        AVFrameBuffer tmp_ref(0xFFF0, ref_scaled->data[0], 0,
-                       ref_scaled->linesize[0] * ref_scaled->height,
-                       Buffer::Ownership::EXTERNAL);
-        tmp_ref.setAVFrame(ref_scaled);
-        tmp_ref.setImageMetadataFromAVFrame(ref_scaled);
+        // 直接从转换后的 AVFrame 构建 ImageMeta，无需临时 AVFrameBuffer
+        ImageMeta scaled_img = ImageMeta::fromAVFrame(ref_scaled);
+        ImageMeta test_yuv_img = ImageMeta::fromAVFrame(test_yuv);
+        FormatInfo scaled_info = analyzeFormat(scaled_img);
+        FormatInfo test_yuv_fi = analyzeFormat(test_yuv_img);
         
-        AVFrameBuffer tmp_test(0xFFF1, test_yuv->data[0], 0,
-                        test_yuv->linesize[0] * test_yuv->height,
-                        Buffer::Ownership::EXTERNAL);
-        tmp_test.setAVFrame(test_yuv);
-        tmp_test.setImageMetadataFromAVFrame(test_yuv);
+        result = compareYUV(scaled_img, scaled_info, test_yuv_img, test_yuv_fi);
         
-        FormatInfo scaled_info = {};
-        scaled_info.format = AV_PIX_FMT_YUV420P;
-        scaled_info.width = ref_scaled->width;
-        scaled_info.height = ref_scaled->height;
-        scaled_info.name = "yuv420p";
-        scaled_info.is_yuv = true;
-        scaled_info.is_rgb = false;
-        scaled_info.is_planar = true;
-        scaled_info.num_planes = 3;
-        
-        FormatInfo test_yuv_info = scaled_info;
-        test_yuv_info.width = test_yuv->width;
-        test_yuv_info.height = test_yuv->height;
-        
-        result = compareYUV(&tmp_ref, scaled_info, &tmp_test, test_yuv_info);
-        
-        // 分离 AVFrame 防止析构器 double-free
-        tmp_ref.detachAVFrame();
-        tmp_test.detachAVFrame();
         freeConvertedFrame(ref_scaled);
         freeConvertedFrame(test_yuv);
         
@@ -320,11 +300,11 @@ FrameCompareResult BufferComparator::compare(
     // 步骤3：根据配置选择对比策略
     switch (config_.format_strategy) {
         case CompareConfig::AUTO:
-            result = compareAuto(reference_buffer, ref_info, test_buffer, test_info);
+            result = compareAuto(ref_img, ref_info, test_img, test_info);
             break;
             
         case CompareConfig::FORCE_YUV:
-            result = compareMixed(reference_buffer, ref_info, test_buffer, test_info);
+            result = compareMixed(ref_img, ref_info, test_img, test_info);
             break;
             
         case CompareConfig::NATIVE:
@@ -341,9 +321,9 @@ FrameCompareResult BufferComparator::compare(
             }
             
             if (ref_info.is_yuv) {
-                result = compareYUV(reference_buffer, ref_info, test_buffer, test_info);
+                result = compareYUV(ref_img, ref_info, test_img, test_info);
             } else if (ref_info.is_rgb) {
-                result = compareRGB(reference_buffer, ref_info, test_buffer, test_info);
+                result = compareRGB(ref_img, ref_info, test_img, test_info);
             }
             break;
             
@@ -414,24 +394,41 @@ FrameCompareResult BufferComparator::compareAVFrames(
         return result;
     }
 
-    AVFrameBuffer ref_buf(0xFFF0, ref_frame->data[0], 0,
-                   ref_frame->linesize[0] * ref_frame->height,
-                   Buffer::Ownership::EXTERNAL);
-    ref_buf.setAVFrame(ref_frame);
-    ref_buf.setImageMetadataFromAVFrame(ref_frame);
-    ref_buf.setPts(ref_frame->pts);
+    // 直接从 AVFrame 构建 ImageMeta，不再创建临时 AVFrameBuffer
+    ImageMeta ref_img = ImageMeta::fromAVFrame(ref_frame);
+    ImageMeta test_img = ImageMeta::fromAVFrame(test_frame);
+    
+    FormatInfo ref_info = analyzeFormat(ref_img);
+    FormatInfo test_info = analyzeFormat(test_img);
+    
+    result.frame_index = compare_count_++;
+    result.ref_format_name = ref_info.name;
+    result.test_format_name = test_info.name;
 
-    AVFrameBuffer test_buf(0xFFF1, test_frame->data[0], 0,
-                    test_frame->linesize[0] * test_frame->height,
-                    Buffer::Ownership::EXTERNAL);
-    test_buf.setAVFrame(test_frame);
-    test_buf.setImageMetadataFromAVFrame(test_frame);
-    test_buf.setPts(test_frame->pts);
+    // 直接路由到策略函数
+    switch (config_.format_strategy) {
+        case CompareConfig::AUTO:
+            result = compareAuto(ref_img, ref_info, test_img, test_info);
+            break;
+        case CompareConfig::FORCE_YUV:
+            result = compareMixed(ref_img, ref_info, test_img, test_info);
+            break;
+        case CompareConfig::NATIVE:
+            if (ref_info.is_yuv)
+                result = compareYUV(ref_img, ref_info, test_img, test_info);
+            else if (ref_info.is_rgb)
+                result = compareRGB(ref_img, ref_info, test_img, test_info);
+            break;
+        default:
+            result.error_message = "Unknown format strategy";
+            result.passed = false;
+            result.level = FrameCompareResult::FAIL;
+            break;
+    }
 
-    result = compare(&ref_buf, &test_buf);
-    // 分离 AVFrame 防止析构器 double-free（调用者拥有 ref_frame/test_frame）
-    ref_buf.detachAVFrame();
-    test_buf.detachAVFrame();
+    result.frame_index = compare_count_.load() - 1;
+    updateStatistics(result);
+    writeReport(result);
     return result;
 }
 
@@ -485,46 +482,40 @@ void BufferComparator::printSummary() const {
 // 格式分析
 // ============================================================================
 
-BufferComparator::FormatInfo BufferComparator::analyzeFormat(Buffer* buffer) {
+BufferComparator::FormatInfo BufferComparator::analyzeFormat(const ImageMeta& img) {
     FormatInfo info = {};
     info.format = AV_PIX_FMT_NONE;
     info.name = "Unknown";
 
-    if (!buffer) {
-        return info;
-    }
-
-    // Mat 路径：Buffer 持有 cv::Mat，无 AVFrame 元数据
-    cv::Mat* mat = buffer->getMat();
-    if (mat && !mat->empty()) {
-        info.width      = mat->cols;
-        info.height     = mat->rows;
-        info.num_planes = mat->channels();
-        info.is_planar  = false;
-        info.is_mat     = true;
-
-        // 按通道数映射为已有逻辑类型，使 compareYUV/compareRGB 路由可直接复用：
-        //   单通道（灰度）→ is_yuv=true  ，与 Y 平面计算逻辑相同
-        //   多通道（BGR/RGB 等 packed）→ is_rgb=true，与 packed RGB 计算逻辑相同
-        if (mat->channels() == 1) {
+    // Mat 路径：ImageMeta 来自 fromMat()，format = NONE 但 plane_data[0] 有效
+    if (img.format() == AV_PIX_FMT_NONE && img.planeData(0) && img.width() > 0) {
+        info.width = img.width();
+        info.height = img.height();
+        info.num_planes = img.nbPlanes();
+        info.is_planar = false;
+        info.is_mat = true;
+        // Mat 通道数通过 linesize 推算：linesize[0] / width 即每像素字节数
+        int bytes_per_pixel = (img.linesize(0) > 0 && img.width() > 0)
+                            ? img.linesize(0) / img.width() : 1;
+        if (bytes_per_pixel == 1) {
             info.is_yuv = true;
             info.is_rgb = false;
-            info.name   = "Mat_Gray";
+            info.name = "Mat_Gray";
         } else {
             info.is_yuv = false;
             info.is_rgb = true;
-            info.name   = "Mat_" + std::to_string(mat->channels()) + "ch";
+            info.name = "Mat_" + std::to_string(bytes_per_pixel) + "ch";
         }
         return info;
     }
 
-    if (!buffer->hasImageMetadata()) {
+    if (!img.isValid()) {
         return info;
     }
 
-    info.format = buffer->getImageFormat();
-    info.width = buffer->getImageWidth();
-    info.height = buffer->getImageHeight();
+    info.format = img.format();
+    info.width = img.width();
+    info.height = img.height();
     info.name = av_get_pix_fmt_name(info.format);
     
     const AVPixFmtDescriptor* desc = av_pix_fmt_desc_get(info.format);
@@ -579,9 +570,33 @@ bool BufferComparator::compareMetadata(
 // 自动选择对比策略
 // ============================================================================
 
+/**
+ * @brief 检查 RGB 格式是否可被 extractRGBChannel 直接提取通道
+ * 子字节打包格式（RGB444/555/565 等）每通道不足 8bit，
+ * 无法用字节偏移提取，需先转为 RGB24 再比较。
+ */
+static bool isDirectlyExtractableRGB(AVPixelFormat format) {
+    switch (format) {
+        case AV_PIX_FMT_RGB24:
+        case AV_PIX_FMT_BGR24:
+        case AV_PIX_FMT_ARGB:
+        case AV_PIX_FMT_RGBA:
+        case AV_PIX_FMT_ABGR:
+        case AV_PIX_FMT_BGRA:
+        case AV_PIX_FMT_RGB0:
+        case AV_PIX_FMT_BGR0:
+        case AV_PIX_FMT_0RGB:
+        case AV_PIX_FMT_0BGR:
+        case AV_PIX_FMT_GBRP:
+            return true;
+        default:
+            return false;
+    }
+}
+
 FrameCompareResult BufferComparator::compareAuto(
-    Buffer* ref_buffer, const FormatInfo& ref_info,
-    Buffer* test_buffer, const FormatInfo& test_info
+    const ImageMeta& ref_img, const FormatInfo& ref_info,
+    const ImageMeta& test_img, const FormatInfo& test_info
 ) {
     // 情况1：格式完全一致 → 直接对比（最快）
     if (ref_info.format == test_info.format) {
@@ -590,9 +605,13 @@ FrameCompareResult BufferComparator::compareAuto(
         }
         
         if (ref_info.is_yuv) {
-            return compareYUV(ref_buffer, ref_info, test_buffer, test_info);
+            return compareYUV(ref_img, ref_info, test_img, test_info);
         } else if (ref_info.is_rgb) {
-            return compareRGB(ref_buffer, ref_info, test_buffer, test_info);
+            // 同格式但可能是子字节格式（如两个 RGB565）
+            if (!ref_info.is_mat && !isDirectlyExtractableRGB(ref_info.format)) {
+                return compareSubByteRGB(ref_img, ref_info, test_img, test_info);
+            }
+            return compareRGB(ref_img, ref_info, test_img, test_info);
         }
     }
     
@@ -605,25 +624,34 @@ FrameCompareResult BufferComparator::compareAuto(
             }
         }
 
-        // packed 422（yuyv/uyvy）与 NV12/YUV420P 等混用时，不能直接 compareYUV（plane0 语义不同）；
-        // 与 compareMixed 尾部「双路转 YUV420P」一致。
+        // packed 422（yuyv/uyvy）与 NV12/YUV420P 等混用时，不能直接 compareYUV
         if (ref_info.format != test_info.format) {
             if (config_.verbose && compare_count_.load() == 1) {
                 LOG_DEBUG("[BufferComparator] Strategy: YUV_FAMILY → compareMixed (YUV420P)");
             }
-            return compareMixed(ref_buffer, ref_info, test_buffer, test_info);
+            return compareMixed(ref_img, ref_info, test_img, test_info);
         }
 
-        return compareYUV(ref_buffer, ref_info, test_buffer, test_info);
+        return compareYUV(ref_img, ref_info, test_img, test_info);
     }
     
     // 情况3：都是RGB家族 → RGB空间对比
     if (ref_info.is_rgb && test_info.is_rgb) {
-        if (config_.verbose && compare_count_.load() == 1) {
-            LOG_DEBUG("[BufferComparator] Strategy: RGB_FAMILY");
+        // 子字节 packed RGB（如 RGB444/555/565）无法直接按字节提取通道
+        bool ref_extractable = ref_info.is_mat || isDirectlyExtractableRGB(ref_info.format);
+        bool test_extractable = test_info.is_mat || isDirectlyExtractableRGB(test_info.format);
+        
+        if (ref_extractable && test_extractable) {
+            if (config_.verbose && compare_count_.load() == 1) {
+                LOG_DEBUG("[BufferComparator] Strategy: RGB_FAMILY (direct)");
+            }
+            return compareRGB(ref_img, ref_info, test_img, test_info);
         }
         
-        return compareRGB(ref_buffer, ref_info, test_buffer, test_info);
+        if (config_.verbose && compare_count_.load() == 1) {
+            LOG_WARN("[BufferComparator] Strategy: RGB_FAMILY → convert to RGB24 (sub-byte packed format)");
+        }
+        return compareSubByteRGB(ref_img, ref_info, test_img, test_info);
     }
     
     // 情况4：YUV vs RGB → 转换到YUV空间对比（业界标准）
@@ -633,7 +661,7 @@ FrameCompareResult BufferComparator::compareAuto(
             LOG_WARN("  Converting to YUV420P for comparison (industry standard)");
         }
         
-        return compareMixed(ref_buffer, ref_info, test_buffer, test_info);
+        return compareMixed(ref_img, ref_info, test_img, test_info);
     }
     
     // 未知格式
@@ -649,8 +677,8 @@ FrameCompareResult BufferComparator::compareAuto(
 // ============================================================================
 
 FrameCompareResult BufferComparator::compareYUV(
-    Buffer* ref_buffer, const FormatInfo& ref_info,
-    Buffer* test_buffer, const FormatInfo& test_info
+    const ImageMeta& ref_img, const FormatInfo& ref_info,
+    const ImageMeta& test_img, const FormatInfo& test_info
 ) {
     FrameCompareResult result;
     
@@ -666,12 +694,12 @@ FrameCompareResult BufferComparator::compareYUV(
         auto& pool = GlobalThreadPool::getInstance().getThreadPool();
         
         // 提交两个异步任务
-        auto future_psnr = pool.submit_task([this, ref_buffer, test_buffer, &ref_info, &test_info]() {
-            return this->calculatePSNR_YUV_Y(ref_buffer, test_buffer, ref_info, test_info);
+        auto future_psnr = pool.submit_task([this, &ref_img, &test_img, &ref_info, &test_info]() {
+            return this->calculatePSNR_YUV_Y(ref_img, test_img, ref_info, test_info);
         });
         
-        auto future_ssim = pool.submit_task([this, ref_buffer, test_buffer, &ref_info, &test_info]() {
-            return this->calculateSSIM_YUV_Y(ref_buffer, test_buffer, ref_info, test_info);
+        auto future_ssim = pool.submit_task([this, &ref_img, &test_img, &ref_info, &test_info]() {
+            return this->calculateSSIM_YUV_Y(ref_img, test_img, ref_info, test_info);
         });
         
         // 等待结果
@@ -685,11 +713,11 @@ FrameCompareResult BufferComparator::compareYUV(
     else {
         // 串行计算（兼容模式或只启用一个指标）
         if (config_.enable_psnr) {
-            result.psnr_y = calculatePSNR_YUV_Y(ref_buffer, test_buffer, ref_info, test_info);
+            result.psnr_y = calculatePSNR_YUV_Y(ref_img, test_img, ref_info, test_info);
         }
         
         if (config_.enable_ssim) {
-            result.ssim_y = calculateSSIM_YUV_Y(ref_buffer, test_buffer, ref_info, test_info);
+            result.ssim_y = calculateSSIM_YUV_Y(ref_img, test_img, ref_info, test_info);
         }
         
         // 判定快速通过条件（严格模式：都要满足）
@@ -738,20 +766,20 @@ FrameCompareResult BufferComparator::compareYUV(
             // 完全并行：4 个任务（PSNR-U, PSNR-V, SSIM-U, SSIM-V）
             auto& pool = GlobalThreadPool::getInstance().getThreadPool();
             
-            auto future_psnr_u = pool.submit_task([this, ref_buffer, test_buffer, &ref_info, &test_info]() {
-                return this->calculatePSNR_YUV_U(ref_buffer, test_buffer, ref_info, test_info);
+            auto future_psnr_u = pool.submit_task([this, &ref_img, &test_img, &ref_info, &test_info]() {
+                return this->calculatePSNR_YUV_U(ref_img, test_img, ref_info, test_info);
             });
             
-            auto future_psnr_v = pool.submit_task([this, ref_buffer, test_buffer, &ref_info, &test_info]() {
-                return this->calculatePSNR_YUV_V(ref_buffer, test_buffer, ref_info, test_info);
+            auto future_psnr_v = pool.submit_task([this, &ref_img, &test_img, &ref_info, &test_info]() {
+                return this->calculatePSNR_YUV_V(ref_img, test_img, ref_info, test_info);
             });
             
-            auto future_ssim_u = pool.submit_task([this, ref_buffer, test_buffer, &ref_info, &test_info]() {
-                return this->calculateSSIM_YUV_U(ref_buffer, test_buffer, ref_info, test_info);
+            auto future_ssim_u = pool.submit_task([this, &ref_img, &test_img, &ref_info, &test_info]() {
+                return this->calculateSSIM_YUV_U(ref_img, test_img, ref_info, test_info);
             });
             
-            auto future_ssim_v = pool.submit_task([this, ref_buffer, test_buffer, &ref_info, &test_info]() {
-                return this->calculateSSIM_YUV_V(ref_buffer, test_buffer, ref_info, test_info);
+            auto future_ssim_v = pool.submit_task([this, &ref_img, &test_img, &ref_info, &test_info]() {
+                return this->calculateSSIM_YUV_V(ref_img, test_img, ref_info, test_info);
             });
             
             // 等待所有结果
@@ -774,12 +802,12 @@ FrameCompareResult BufferComparator::compareYUV(
             auto& pool = GlobalThreadPool::getInstance().getThreadPool();
             
             if (config_.enable_psnr) {
-                auto future_psnr_u = pool.submit_task([this, ref_buffer, test_buffer, &ref_info, &test_info]() {
-                    return this->calculatePSNR_YUV_U(ref_buffer, test_buffer, ref_info, test_info);
+                auto future_psnr_u = pool.submit_task([this, &ref_img, &test_img, &ref_info, &test_info]() {
+                    return this->calculatePSNR_YUV_U(ref_img, test_img, ref_info, test_info);
                 });
                 
-                auto future_psnr_v = pool.submit_task([this, ref_buffer, test_buffer, &ref_info, &test_info]() {
-                    return this->calculatePSNR_YUV_V(ref_buffer, test_buffer, ref_info, test_info);
+                auto future_psnr_v = pool.submit_task([this, &ref_img, &test_img, &ref_info, &test_info]() {
+                    return this->calculatePSNR_YUV_V(ref_img, test_img, ref_info, test_info);
                 });
                 
                 result.psnr_u = future_psnr_u.get();
@@ -794,12 +822,12 @@ FrameCompareResult BufferComparator::compareYUV(
             }
             
             if (config_.enable_ssim) {
-                auto future_ssim_u = pool.submit_task([this, ref_buffer, test_buffer, &ref_info, &test_info]() {
-                    return this->calculateSSIM_YUV_U(ref_buffer, test_buffer, ref_info, test_info);
+                auto future_ssim_u = pool.submit_task([this, &ref_img, &test_img, &ref_info, &test_info]() {
+                    return this->calculateSSIM_YUV_U(ref_img, test_img, ref_info, test_info);
                 });
                 
-                auto future_ssim_v = pool.submit_task([this, ref_buffer, test_buffer, &ref_info, &test_info]() {
-                    return this->calculateSSIM_YUV_V(ref_buffer, test_buffer, ref_info, test_info);
+                auto future_ssim_v = pool.submit_task([this, &ref_img, &test_img, &ref_info, &test_info]() {
+                    return this->calculateSSIM_YUV_V(ref_img, test_img, ref_info, test_info);
                 });
                 
                 result.ssim_u = future_ssim_u.get();
@@ -816,8 +844,8 @@ FrameCompareResult BufferComparator::compareYUV(
         else {
             // 串行计算（兼容模式）
             if (config_.enable_psnr) {
-                result.psnr_u = calculatePSNR_YUV_U(ref_buffer, test_buffer, ref_info, test_info);
-                result.psnr_v = calculatePSNR_YUV_V(ref_buffer, test_buffer, ref_info, test_info);
+                result.psnr_u = calculatePSNR_YUV_U(ref_img, test_img, ref_info, test_info);
+                result.psnr_v = calculatePSNR_YUV_V(ref_img, test_img, ref_info, test_info);
                 
                 // 加权平均
                 if (config_.use_perceptual_weighting) {
@@ -828,8 +856,8 @@ FrameCompareResult BufferComparator::compareYUV(
             }
             
             if (config_.enable_ssim) {
-                result.ssim_u = calculateSSIM_YUV_U(ref_buffer, test_buffer, ref_info, test_info);
-                result.ssim_v = calculateSSIM_YUV_V(ref_buffer, test_buffer, ref_info, test_info);
+                result.ssim_u = calculateSSIM_YUV_U(ref_img, test_img, ref_info, test_info);
+                result.ssim_v = calculateSSIM_YUV_V(ref_img, test_img, ref_info, test_info);
                 
                 // 加权平均
                 if (config_.use_perceptual_weighting) {
@@ -879,8 +907,8 @@ FrameCompareResult BufferComparator::compareYUV(
 // ============================================================================
 
 FrameCompareResult BufferComparator::compareRGB(
-    Buffer* ref_buffer, const FormatInfo& ref_info,
-    Buffer* test_buffer, const FormatInfo& test_info
+    const ImageMeta& ref_img, const FormatInfo& ref_info,
+    const ImageMeta& test_img, const FormatInfo& test_info
 ) {
     FrameCompareResult result;
     
@@ -895,12 +923,12 @@ FrameCompareResult BufferComparator::compareRGB(
         // 方案B：完全并行 - 使用全局线程池
         auto& pool = GlobalThreadPool::getInstance().getThreadPool();
         
-        auto future_psnr = pool.submit_task([this, ref_buffer, test_buffer, &ref_info, &test_info]() {
-            return this->calculatePSNR_RGB_G(ref_buffer, test_buffer, ref_info, test_info);
+        auto future_psnr = pool.submit_task([this, &ref_img, &test_img, &ref_info, &test_info]() {
+            return this->calculatePSNR_RGB_G(ref_img, test_img, ref_info, test_info);
         });
         
-        auto future_ssim = pool.submit_task([this, ref_buffer, test_buffer, &ref_info, &test_info]() {
-            return this->calculateSSIM_RGB_G(ref_buffer, test_buffer, ref_info, test_info);
+        auto future_ssim = pool.submit_task([this, &ref_img, &test_img, &ref_info, &test_info]() {
+            return this->calculateSSIM_RGB_G(ref_img, test_img, ref_info, test_info);
         });
         
         // 等待结果
@@ -914,12 +942,12 @@ FrameCompareResult BufferComparator::compareRGB(
     else {
         // 串行计算
         if (config_.enable_psnr) {
-            double psnr_g = calculatePSNR_RGB_G(ref_buffer, test_buffer, ref_info, test_info);
+            double psnr_g = calculatePSNR_RGB_G(ref_img, test_img, ref_info, test_info);
             result.psnr_y = psnr_g;  // 复用psnr_y字段
         }
         
         if (config_.enable_ssim) {
-            double ssim_g = calculateSSIM_RGB_G(ref_buffer, test_buffer, ref_info, test_info);
+            double ssim_g = calculateSSIM_RGB_G(ref_img, test_img, ref_info, test_info);
             result.ssim_y = ssim_g;  // 复用ssim_y字段
         }
         
@@ -981,20 +1009,20 @@ FrameCompareResult BufferComparator::compareRGB(
             // 完全并行：4 个任务（PSNR-R, PSNR-B, SSIM-R, SSIM-B）
             auto& pool = GlobalThreadPool::getInstance().getThreadPool();
             
-            auto future_psnr_r = pool.submit_task([this, ref_buffer, test_buffer, &ref_info, &test_info]() {
-                return this->calculatePSNR_RGB_R(ref_buffer, test_buffer, ref_info, test_info);
+            auto future_psnr_r = pool.submit_task([this, &ref_img, &test_img, &ref_info, &test_info]() {
+                return this->calculatePSNR_RGB_R(ref_img, test_img, ref_info, test_info);
             });
             
-            auto future_psnr_b = pool.submit_task([this, ref_buffer, test_buffer, &ref_info, &test_info]() {
-                return this->calculatePSNR_RGB_B(ref_buffer, test_buffer, ref_info, test_info);
+            auto future_psnr_b = pool.submit_task([this, &ref_img, &test_img, &ref_info, &test_info]() {
+                return this->calculatePSNR_RGB_B(ref_img, test_img, ref_info, test_info);
             });
             
-            auto future_ssim_r = pool.submit_task([this, ref_buffer, test_buffer, &ref_info, &test_info]() {
-                return this->calculateSSIM_RGB_R(ref_buffer, test_buffer, ref_info, test_info);
+            auto future_ssim_r = pool.submit_task([this, &ref_img, &test_img, &ref_info, &test_info]() {
+                return this->calculateSSIM_RGB_R(ref_img, test_img, ref_info, test_info);
             });
             
-            auto future_ssim_b = pool.submit_task([this, ref_buffer, test_buffer, &ref_info, &test_info]() {
-                return this->calculateSSIM_RGB_B(ref_buffer, test_buffer, ref_info, test_info);
+            auto future_ssim_b = pool.submit_task([this, &ref_img, &test_img, &ref_info, &test_info]() {
+                return this->calculateSSIM_RGB_B(ref_img, test_img, ref_info, test_info);
             });
             
             // 等待所有结果
@@ -1025,12 +1053,12 @@ FrameCompareResult BufferComparator::compareRGB(
             auto& pool = GlobalThreadPool::getInstance().getThreadPool();
             
             if (config_.enable_psnr) {
-                auto future_psnr_r = pool.submit_task([this, ref_buffer, test_buffer, &ref_info, &test_info]() {
-                    return this->calculatePSNR_RGB_R(ref_buffer, test_buffer, ref_info, test_info);
+                auto future_psnr_r = pool.submit_task([this, &ref_img, &test_img, &ref_info, &test_info]() {
+                    return this->calculatePSNR_RGB_R(ref_img, test_img, ref_info, test_info);
                 });
                 
-                auto future_psnr_b = pool.submit_task([this, ref_buffer, test_buffer, &ref_info, &test_info]() {
-                    return this->calculatePSNR_RGB_B(ref_buffer, test_buffer, ref_info, test_info);
+                auto future_psnr_b = pool.submit_task([this, &ref_img, &test_img, &ref_info, &test_info]() {
+                    return this->calculatePSNR_RGB_B(ref_img, test_img, ref_info, test_info);
                 });
                 
                 double psnr_r = future_psnr_r.get();
@@ -1050,12 +1078,12 @@ FrameCompareResult BufferComparator::compareRGB(
             }
             
             if (config_.enable_ssim) {
-                auto future_ssim_r = pool.submit_task([this, ref_buffer, test_buffer, &ref_info, &test_info]() {
-                    return this->calculateSSIM_RGB_R(ref_buffer, test_buffer, ref_info, test_info);
+                auto future_ssim_r = pool.submit_task([this, &ref_img, &test_img, &ref_info, &test_info]() {
+                    return this->calculateSSIM_RGB_R(ref_img, test_img, ref_info, test_info);
                 });
                 
-                auto future_ssim_b = pool.submit_task([this, ref_buffer, test_buffer, &ref_info, &test_info]() {
-                    return this->calculateSSIM_RGB_B(ref_buffer, test_buffer, ref_info, test_info);
+                auto future_ssim_b = pool.submit_task([this, &ref_img, &test_img, &ref_info, &test_info]() {
+                    return this->calculateSSIM_RGB_B(ref_img, test_img, ref_info, test_info);
                 });
                 
                 double ssim_r = future_ssim_r.get();
@@ -1077,8 +1105,8 @@ FrameCompareResult BufferComparator::compareRGB(
         else {
             // 串行计算（兼容模式）
             if (config_.enable_psnr) {
-                double psnr_r = calculatePSNR_RGB_R(ref_buffer, test_buffer, ref_info, test_info);
-                double psnr_b = calculatePSNR_RGB_B(ref_buffer, test_buffer, ref_info, test_info);
+                double psnr_r = calculatePSNR_RGB_R(ref_img, test_img, ref_info, test_info);
+                double psnr_b = calculatePSNR_RGB_B(ref_img, test_img, ref_info, test_info);
                 
                 // 加权平均（G通道权重更高）
                 if (config_.use_perceptual_weighting) {
@@ -1094,8 +1122,8 @@ FrameCompareResult BufferComparator::compareRGB(
             }
             
             if (config_.enable_ssim) {
-                double ssim_r = calculateSSIM_RGB_R(ref_buffer, test_buffer, ref_info, test_info);
-                double ssim_b = calculateSSIM_RGB_B(ref_buffer, test_buffer, ref_info, test_info);
+                double ssim_r = calculateSSIM_RGB_R(ref_img, test_img, ref_info, test_info);
+                double ssim_b = calculateSSIM_RGB_B(ref_img, test_img, ref_info, test_info);
                 
                 // 加权平均（G通道权重更高）
                 if (config_.use_perceptual_weighting) {
@@ -1148,8 +1176,8 @@ FrameCompareResult BufferComparator::compareRGB(
 // ============================================================================
 
 FrameCompareResult BufferComparator::compareMixed(
-    Buffer* ref_buffer, const FormatInfo& ref_info,
-    Buffer* test_buffer, const FormatInfo& test_info
+    const ImageMeta& ref_img, const FormatInfo& ref_info,
+    const ImageMeta& test_img, const FormatInfo& test_info
 ) {
     FrameCompareResult result;
     
@@ -1160,7 +1188,7 @@ FrameCompareResult BufferComparator::compareMixed(
         }
         
         // 将YUV转换为RGB（使用test的RGB格式）
-        AVFrame* ref_rgb = convertYUVToRGB(ref_buffer, ref_info, test_info.format);
+        AVFrame* ref_rgb = convertYUVToRGB(ref_img, ref_info, test_info.format);
         
         if (!ref_rgb) {
             LOG_ERROR("[BufferComparator] Failed to convert YUV to RGB");
@@ -1170,46 +1198,13 @@ FrameCompareResult BufferComparator::compareMixed(
             return result;
         }
         
-        // 创建临时Buffer包装转换后的AVFrame
-        AVFrameBuffer temp_ref_buffer(
-            0,  // 临时ID
-            ref_rgb->data[0],  // 虚拟地址
-            0,  // 物理地址
-            ref_rgb->linesize[0] * ref_rgb->height,  // 大小
-            Buffer::Ownership::EXTERNAL  // 外部管理（AVFrame）
-        );
-        
-        // 设置AVFrame关联
-        temp_ref_buffer.setAVFrame(ref_rgb);
-        
-        // 设置图像元数据
-        temp_ref_buffer.setImageMetadataFromAVFrame(ref_rgb);
-        
-        // 创建转换后的FormatInfo（使用analyzeFormat的方式初始化）
-        FormatInfo ref_rgb_info = {};
-        ref_rgb_info.format = test_info.format;  // 使用test的RGB格式
-        ref_rgb_info.width = ref_rgb->width;
-        ref_rgb_info.height = ref_rgb->height;
-        ref_rgb_info.name = av_get_pix_fmt_name(ref_rgb_info.format);
-        
-        const AVPixFmtDescriptor* desc = av_pix_fmt_desc_get(ref_rgb_info.format);
-        if (desc) {
-            ref_rgb_info.num_planes = desc->nb_components;
-            ref_rgb_info.is_planar = !(desc->flags & AV_PIX_FMT_FLAG_RGB);
-            ref_rgb_info.is_rgb = (desc->flags & AV_PIX_FMT_FLAG_RGB) != 0;
-            ref_rgb_info.is_yuv = false;
-        } else {
-            ref_rgb_info.is_rgb = true;
-            ref_rgb_info.is_yuv = false;
-            ref_rgb_info.is_planar = (ref_rgb_info.format == AV_PIX_FMT_GBRP);
-            ref_rgb_info.num_planes = ref_rgb_info.is_planar ? 3 : 1;
-        }
+        // 直接从转换后的 AVFrame 构建 ImageMeta，无需临时 Buffer
+        ImageMeta ref_rgb_img = ImageMeta::fromAVFrame(ref_rgb);
+        FormatInfo ref_rgb_info = analyzeFormat(ref_rgb_img);
         
         // 使用RGB对比函数进行对比
-        result = compareRGB(&temp_ref_buffer, ref_rgb_info, test_buffer, test_info);
+        result = compareRGB(ref_rgb_img, ref_rgb_info, test_img, test_info);
         
-        // 分离 AVFrame 防止析构器 double-free
-        temp_ref_buffer.detachAVFrame();
         freeConvertedFrame(ref_rgb);
         
         return result;
@@ -1222,7 +1217,7 @@ FrameCompareResult BufferComparator::compareMixed(
         }
         
         // 将YUV转换为RGB（使用ref的RGB格式）
-        AVFrame* test_rgb = convertYUVToRGB(test_buffer, test_info, ref_info.format);
+        AVFrame* test_rgb = convertYUVToRGB(test_img, test_info, ref_info.format);
         
         if (!test_rgb) {
             LOG_ERROR("[BufferComparator] Failed to convert YUV to RGB");
@@ -1232,54 +1227,21 @@ FrameCompareResult BufferComparator::compareMixed(
             return result;
         }
         
-        // 创建临时Buffer包装转换后的AVFrame
-        AVFrameBuffer temp_test_buffer(
-            0,  // 临时ID
-            test_rgb->data[0],  // 虚拟地址
-            0,  // 物理地址
-            test_rgb->linesize[0] * test_rgb->height,  // 大小
-            Buffer::Ownership::EXTERNAL  // 外部管理（AVFrame）
-        );
-        
-        // 设置AVFrame关联
-        temp_test_buffer.setAVFrame(test_rgb);
-        
-        // 设置图像元数据
-        temp_test_buffer.setImageMetadataFromAVFrame(test_rgb);
-        
-        // 创建转换后的FormatInfo（使用analyzeFormat的方式初始化）
-        FormatInfo test_rgb_info = {};
-        test_rgb_info.format = ref_info.format;  // 使用ref的RGB格式
-        test_rgb_info.width = test_rgb->width;
-        test_rgb_info.height = test_rgb->height;
-        test_rgb_info.name = av_get_pix_fmt_name(test_rgb_info.format);
-        
-        const AVPixFmtDescriptor* desc = av_pix_fmt_desc_get(test_rgb_info.format);
-        if (desc) {
-            test_rgb_info.num_planes = desc->nb_components;
-            test_rgb_info.is_planar = !(desc->flags & AV_PIX_FMT_FLAG_RGB);
-            test_rgb_info.is_rgb = (desc->flags & AV_PIX_FMT_FLAG_RGB) != 0;
-            test_rgb_info.is_yuv = false;
-        } else {
-            test_rgb_info.is_rgb = true;
-            test_rgb_info.is_yuv = false;
-            test_rgb_info.is_planar = (test_rgb_info.format == AV_PIX_FMT_GBRP);
-            test_rgb_info.num_planes = test_rgb_info.is_planar ? 3 : 1;
-        }
+        // 直接从转换后的 AVFrame 构建 ImageMeta，无需临时 Buffer
+        ImageMeta test_rgb_img = ImageMeta::fromAVFrame(test_rgb);
+        FormatInfo test_rgb_info = analyzeFormat(test_rgb_img);
         
         // 使用RGB对比函数进行对比
-        result = compareRGB(ref_buffer, ref_info, &temp_test_buffer, test_rgb_info);
+        result = compareRGB(ref_img, ref_info, test_rgb_img, test_rgb_info);
         
-        // 分离 AVFrame 防止析构器 double-free
-        temp_test_buffer.detachAVFrame();
         freeConvertedFrame(test_rgb);
         
         return result;
     }
     
     // 其他情况：都转换为YUV420P（用于其他混合格式对比）
-    AVFrame* ref_yuv = convertToYUV420P(ref_buffer, ref_info);
-    AVFrame* test_yuv = convertToYUV420P(test_buffer, test_info);
+    AVFrame* ref_yuv = convertToYUV420P(ref_img, ref_info);
+    AVFrame* test_yuv = convertToYUV420P(test_img, test_info);
     
     if (!ref_yuv || !test_yuv) {
         LOG_ERROR("[BufferComparator] Format conversion failed");
@@ -1293,59 +1255,116 @@ FrameCompareResult BufferComparator::compareMixed(
         return result;
     }
     
-    // 创建临时Buffer包装转换后的AVFrame
-    AVFrameBuffer temp_ref_yuv(
-        0,
-        ref_yuv->data[0],
-        0,
-        ref_yuv->linesize[0] * ref_yuv->height,
-        Buffer::Ownership::EXTERNAL
-    );
-    temp_ref_yuv.setAVFrame(ref_yuv);
-    temp_ref_yuv.setImageMetadataFromAVFrame(ref_yuv);
-    
-    AVFrameBuffer temp_test_yuv(
-        0,
-        test_yuv->data[0],
-        0,
-        test_yuv->linesize[0] * test_yuv->height,
-        Buffer::Ownership::EXTERNAL
-    );
-    temp_test_yuv.setAVFrame(test_yuv);
-    temp_test_yuv.setImageMetadataFromAVFrame(test_yuv);
-    
-    // 创建转换后的FormatInfo（使用analyzeFormat的方式初始化）
-    FormatInfo ref_yuv_info = {};
-    ref_yuv_info.format = AV_PIX_FMT_YUV420P;
-    ref_yuv_info.width = ref_yuv->width;
-    ref_yuv_info.height = ref_yuv->height;
-    ref_yuv_info.name = av_get_pix_fmt_name(ref_yuv_info.format);
-    
-    const AVPixFmtDescriptor* desc_yuv = av_pix_fmt_desc_get(ref_yuv_info.format);
-    if (desc_yuv) {
-        ref_yuv_info.num_planes = desc_yuv->nb_components;
-        ref_yuv_info.is_planar = !(desc_yuv->flags & AV_PIX_FMT_FLAG_RGB);
-        ref_yuv_info.is_yuv = true;
-        ref_yuv_info.is_rgb = false;
-    } else {
-        ref_yuv_info.is_yuv = true;
-        ref_yuv_info.is_rgb = false;
-        ref_yuv_info.is_planar = true;
-        ref_yuv_info.num_planes = 3;
-    }
-    
-    FormatInfo test_yuv_info = ref_yuv_info;
-    test_yuv_info.width = test_yuv->width;
-    test_yuv_info.height = test_yuv->height;
+    // 直接从转换后的 AVFrame 构建 ImageMeta，无需临时 Buffer
+    ImageMeta ref_yuv_img = ImageMeta::fromAVFrame(ref_yuv);
+    ImageMeta test_yuv_img = ImageMeta::fromAVFrame(test_yuv);
+    FormatInfo ref_yuv_info = analyzeFormat(ref_yuv_img);
+    FormatInfo test_yuv_info = analyzeFormat(test_yuv_img);
     
     // 使用YUV对比函数进行对比
-    result = compareYUV(&temp_ref_yuv, ref_yuv_info, &temp_test_yuv, test_yuv_info);
+    result = compareYUV(ref_yuv_img, ref_yuv_info, test_yuv_img, test_yuv_info);
     
-    // 分离 AVFrame 防止析构器 double-free
-    temp_ref_yuv.detachAVFrame();
-    temp_test_yuv.detachAVFrame();
     freeConvertedFrame(ref_yuv);
     freeConvertedFrame(test_yuv);
+    
+    return result;
+}
+
+// ============================================================================
+// 子字节 packed RGB 格式对比（RGB444/555/565 等）
+// ============================================================================
+
+AVFrame* BufferComparator::convertToRGB24(const ImageMeta& img, const FormatInfo& info) {
+    if (!img.isValid() || info.format == AV_PIX_FMT_NONE) {
+        return nullptr;
+    }
+    
+    // 已经是 RGB24 则直接 clone
+    if (info.format == AV_PIX_FMT_RGB24) {
+        AVFrame* tmp = av_frame_alloc();
+        if (!tmp) return nullptr;
+        tmp->format = AV_PIX_FMT_RGB24;
+        tmp->width = info.width;
+        tmp->height = info.height;
+        for (int i = 0; i < img.nbPlanes(); i++) {
+            tmp->data[i] = img.planeData(i);
+            tmp->linesize[i] = img.linesize(i);
+        }
+        AVFrame* cloned = av_frame_clone(tmp);
+        av_frame_free(&tmp);
+        return cloned;
+    }
+    
+    AVFrame* dst = av_frame_alloc();
+    if (!dst) return nullptr;
+    
+    dst->format = AV_PIX_FMT_RGB24;
+    dst->width = info.width;
+    dst->height = info.height;
+    
+    if (av_frame_get_buffer(dst, 0) < 0) {
+        av_frame_free(&dst);
+        return nullptr;
+    }
+    
+    const uint8_t* src_data[4] = {
+        img.planeData(0), img.planeData(1), img.planeData(2), img.planeData(3)
+    };
+    int src_linesize[4] = {
+        img.linesize(0), img.linesize(1), img.linesize(2), img.linesize(3)
+    };
+    
+    SwsContext* sws = sws_getContext(
+        info.width, info.height, info.format,
+        info.width, info.height, AV_PIX_FMT_RGB24,
+        SWS_BILINEAR, nullptr, nullptr, nullptr
+    );
+    
+    if (!sws) {
+        av_frame_free(&dst);
+        return nullptr;
+    }
+    
+    sws_scale(sws, src_data, src_linesize, 0, info.height,
+              dst->data, dst->linesize);
+    sws_freeContext(sws);
+    
+    return dst;
+}
+
+FrameCompareResult BufferComparator::compareSubByteRGB(
+    const ImageMeta& ref_img, const FormatInfo& ref_info,
+    const ImageMeta& test_img, const FormatInfo& test_info
+) {
+    if (config_.verbose) {
+        LOG_WARN_FMT("[BufferComparator] Sub-byte RGB: converting %s + %s → RGB24",
+                     ref_info.name.c_str(), test_info.name.c_str());
+    }
+    
+    AVFrame* ref_rgb24 = convertToRGB24(ref_img, ref_info);
+    AVFrame* test_rgb24 = convertToRGB24(test_img, test_info);
+    
+    if (!ref_rgb24 || !test_rgb24) {
+        if (ref_rgb24) freeConvertedFrame(ref_rgb24);
+        if (test_rgb24) freeConvertedFrame(test_rgb24);
+        
+        FrameCompareResult result;
+        result.error_message = "Sub-byte RGB to RGB24 conversion failed";
+        result.passed = false;
+        result.level = FrameCompareResult::FAIL;
+        return result;
+    }
+    
+    ImageMeta ref_rgb24_img = ImageMeta::fromAVFrame(ref_rgb24);
+    ImageMeta test_rgb24_img = ImageMeta::fromAVFrame(test_rgb24);
+    FormatInfo ref_rgb24_info = analyzeFormat(ref_rgb24_img);
+    FormatInfo test_rgb24_info = analyzeFormat(test_rgb24_img);
+    
+    FrameCompareResult result = compareRGB(ref_rgb24_img, ref_rgb24_info,
+                                           test_rgb24_img, test_rgb24_info);
+    
+    freeConvertedFrame(ref_rgb24);
+    freeConvertedFrame(test_rgb24);
     
     return result;
 }
@@ -1391,40 +1410,23 @@ double BufferComparator::calculatePSNR(
 // ============================================================================
 
 double BufferComparator::calculatePSNR_YUV_Y(
-    Buffer* buf1, Buffer* buf2,
+    const ImageMeta& img1, const ImageMeta& img2,
     const FormatInfo& info1, const FormatInfo& info2
 ) {
-    // Mat 单通道路径：直接从 Mat 读取数据
-    if (info1.is_mat || info2.is_mat) {
-        cv::Mat* mat1 = buf1->getMat();
-        cv::Mat* mat2 = buf2->getMat();
-        if (!mat1 || !mat2 || mat1->empty() || mat2->empty()) {
-            return 0.0;
-        }
-        // Mat::step[0] 是行字节数（即 stride），与 AVFrame linesize 等价
-        return calculatePSNR(mat1->ptr<uint8_t>(0), mat2->ptr<uint8_t>(0),
-                             info1.width, info1.height,
-                             static_cast<int>(mat1->step[0]),
-                             static_cast<int>(mat2->step[0]));
-    }
-
-    // AVFrame 路径
-    uint8_t* data1 = buf1->getImagePlaneData(0);
-    uint8_t* data2 = buf2->getImagePlaneData(0);
+    // ImageMeta 统一了 Mat 和 AVFrame 路径：plane_data[0] 和 linesize[0] 已就绪
+    uint8_t* data1 = img1.planeData(0);
+    uint8_t* data2 = img2.planeData(0);
     
     if (!data1 || !data2) {
         return 0.0;
     }
     
-    const int* linesize1 = buf1->getImageLinesize();
-    const int* linesize2 = buf2->getImageLinesize();
-    
     return calculatePSNR(data1, data2, info1.width, info1.height,
-                        linesize1[0], linesize2[0]);
+                        img1.linesize(0), img2.linesize(0));
 }
 
 double BufferComparator::calculatePSNR_YUV_U(
-    Buffer* buf1, Buffer* buf2,
+    const ImageMeta& img1, const ImageMeta& img2,
     const FormatInfo& info1, const FormatInfo& info2
 ) {
     // Mat 单通道没有 U 平面，视为完全一致
@@ -1433,26 +1435,23 @@ double BufferComparator::calculatePSNR_YUV_U(
     }
 
     // 获取U平面数据
-    uint8_t* data1 = buf1->getImagePlaneData(1);
-    uint8_t* data2 = buf2->getImagePlaneData(1);
+    uint8_t* data1 = img1.planeData(1);
+    uint8_t* data2 = img2.planeData(1);
     
     if (!data1 || !data2) {
         return 100.0;  // 无U平面，认为一致
     }
-    
-    const int* linesize1 = buf1->getImageLinesize();
-    const int* linesize2 = buf2->getImageLinesize();
     
     // U平面通常是原始分辨率的一半
     int uv_width = info1.width / 2;
     int uv_height = info1.height / 2;
     
     return calculatePSNR(data1, data2, uv_width, uv_height,
-                        linesize1[1], linesize2[1]);
+                        img1.linesize(1), img2.linesize(1));
 }
 
 double BufferComparator::calculatePSNR_YUV_V(
-    Buffer* buf1, Buffer* buf2,
+    const ImageMeta& img1, const ImageMeta& img2,
     const FormatInfo& info1, const FormatInfo& info2
 ) {
     // Mat 单通道没有 V 平面，视为完全一致
@@ -1461,21 +1460,18 @@ double BufferComparator::calculatePSNR_YUV_V(
     }
 
     // 获取V平面数据
-    uint8_t* data1 = buf1->getImagePlaneData(2);
-    uint8_t* data2 = buf2->getImagePlaneData(2);
+    uint8_t* data1 = img1.planeData(2);
+    uint8_t* data2 = img2.planeData(2);
     
     if (!data1 || !data2) {
         return 100.0;  // 无V平面，认为一致
     }
     
-    const int* linesize1 = buf1->getImageLinesize();
-    const int* linesize2 = buf2->getImageLinesize();
-    
     int uv_width = info1.width / 2;
     int uv_height = info1.height / 2;
     
     return calculatePSNR(data1, data2, uv_width, uv_height,
-                        linesize1[2], linesize2[2]);
+                        img1.linesize(2), img2.linesize(2));
 }
 
 // ============================================================================
@@ -1484,7 +1480,7 @@ double BufferComparator::calculatePSNR_YUV_V(
 
 /**
  * @brief 提取RGB通道到临时缓冲区（用于通道分离计算）
- * @param buffer Buffer指针
+ * @param img ImageMeta 引用
  * @param format 像素格式
  * @param width 宽度
  * @param height 高度
@@ -1493,30 +1489,37 @@ double BufferComparator::calculatePSNR_YUV_V(
  * @return 成功返回true
  */
 static bool extractRGBChannel(
-    Buffer* buffer, AVPixelFormat format, int width, int height,
+    const ImageMeta& img, AVPixelFormat format, int width, int height,
     int channel, uint8_t* out_data
 ) {
-    if (!buffer || !out_data || channel < 0 || channel > 2) {
+    if (!out_data || channel < 0 || channel > 2) {
         return false;
     }
 
-    // Mat packed 路径：Buffer 持有 cv::Mat（多通道 packed 格式）
-    cv::Mat* mat = buffer->getMat();
-    if (mat && !mat->empty()) {
-        int channels = mat->channels();
+    uint8_t* src_data = img.planeData(0);
+    if (!src_data) {
+        return false;
+    }
+    
+    int src_stride = img.linesize(0);
+    
+    // Mat packed 路径：format == NONE 表示来自 fromMat()
+    if (format == AV_PIX_FMT_NONE && src_data) {
+        // 通道数通过 linesize / width 推算
+        int channels = (width > 0) ? src_stride / width : 1;
         if (channel >= channels) {
             return false;
         }
-        // 单通道退化情况（不应走到这里，但做防御处理）
+        // 单通道退化情况
         if (channels == 1) {
             for (int y = 0; y < height; y++) {
-                memcpy(out_data + y * width, mat->ptr<uint8_t>(y), width);
+                memcpy(out_data + y * width, src_data + y * src_stride, width);
             }
             return true;
         }
-        // 多通道：逐像素提取指定通道（BGR/RGB 顺序由调用方负责解释）
+        // 多通道：逐像素提取指定通道
         for (int y = 0; y < height; y++) {
-            const uint8_t* src_row = mat->ptr<uint8_t>(y);
+            const uint8_t* src_row = src_data + y * src_stride;
             uint8_t* dst_row = out_data + y * width;
             for (int x = 0; x < width; x++) {
                 dst_row[x] = src_row[x * channels + channel];
@@ -1524,22 +1527,12 @@ static bool extractRGBChannel(
         }
         return true;
     }
-
-    // AVFrame 路径（原有逻辑）
-    uint8_t* src_data = buffer->getImagePlaneData(0);
-    const int* linesize = buffer->getImageLinesize();
-    
-    if (!src_data || !linesize) {
-        return false;
-    }
-    
-    int src_stride = linesize[0];
     
     // Planar格式（GBRP）：直接使用对应plane
     if (format == AV_PIX_FMT_GBRP) {
-        uint8_t* plane_data = buffer->getImagePlaneData(channel);
+        uint8_t* plane_data = img.planeData(channel);
         if (!plane_data) return false;
-        int plane_stride = linesize[channel];
+        int plane_stride = img.linesize(channel);
         
         for (int y = 0; y < height; y++) {
             memcpy(out_data + y * width, plane_data + y * plane_stride, width);
@@ -1617,17 +1610,17 @@ static bool extractRGBChannel(
 // ============================================================================
 
 double BufferComparator::calculatePSNR_RGB_R(
-    Buffer* buf1, Buffer* buf2,
+    const ImageMeta& img1, const ImageMeta& img2,
     const FormatInfo& info1, const FormatInfo& info2
 ) {
-    if (!buf1 || !buf2) return 0.0;
+    if (!img1.isValid() || !img2.isValid()) return 0.0;
     
     // 分配临时缓冲区
     std::vector<uint8_t> channel1(info1.width * info1.height);
     std::vector<uint8_t> channel2(info2.width * info2.height);
     
-    if (!extractRGBChannel(buf1, info1.format, info1.width, info1.height, 0, channel1.data()) ||
-        !extractRGBChannel(buf2, info2.format, info2.width, info2.height, 0, channel2.data())) {
+    if (!extractRGBChannel(img1, info1.format, info1.width, info1.height, 0, channel1.data()) ||
+        !extractRGBChannel(img2, info2.format, info2.width, info2.height, 0, channel2.data())) {
         return 0.0;
     }
     
@@ -1638,16 +1631,16 @@ double BufferComparator::calculatePSNR_RGB_R(
 }
 
 double BufferComparator::calculatePSNR_RGB_G(
-    Buffer* buf1, Buffer* buf2,
+    const ImageMeta& img1, const ImageMeta& img2,
     const FormatInfo& info1, const FormatInfo& info2
 ) {
-    if (!buf1 || !buf2) return 0.0;
+    if (!img1.isValid() || !img2.isValid()) return 0.0;
     
     std::vector<uint8_t> channel1(info1.width * info1.height);
     std::vector<uint8_t> channel2(info2.width * info2.height);
     
-    if (!extractRGBChannel(buf1, info1.format, info1.width, info1.height, 1, channel1.data()) ||
-        !extractRGBChannel(buf2, info2.format, info2.width, info2.height, 1, channel2.data())) {
+    if (!extractRGBChannel(img1, info1.format, info1.width, info1.height, 1, channel1.data()) ||
+        !extractRGBChannel(img2, info2.format, info2.width, info2.height, 1, channel2.data())) {
         return 0.0;
     }
     
@@ -1657,16 +1650,16 @@ double BufferComparator::calculatePSNR_RGB_G(
 }
 
 double BufferComparator::calculatePSNR_RGB_B(
-    Buffer* buf1, Buffer* buf2,
+    const ImageMeta& img1, const ImageMeta& img2,
     const FormatInfo& info1, const FormatInfo& info2
 ) {
-    if (!buf1 || !buf2) return 0.0;
+    if (!img1.isValid() || !img2.isValid()) return 0.0;
     
     std::vector<uint8_t> channel1(info1.width * info1.height);
     std::vector<uint8_t> channel2(info2.width * info2.height);
     
-    if (!extractRGBChannel(buf1, info1.format, info1.width, info1.height, 2, channel1.data()) ||
-        !extractRGBChannel(buf2, info2.format, info2.width, info2.height, 2, channel2.data())) {
+    if (!extractRGBChannel(img1, info1.format, info1.width, info1.height, 2, channel1.data()) ||
+        !extractRGBChannel(img2, info2.format, info2.width, info2.height, 2, channel2.data())) {
         return 0.0;
     }
     
@@ -1679,26 +1672,32 @@ double BufferComparator::calculatePSNR_RGB_B(
 // 格式转换
 // ============================================================================
 
-AVFrame* BufferComparator::convertToYUV420P(Buffer* buffer, const FormatInfo& info) {
-    if (!buffer || !buffer->hasImageMetadata()) {
-        return nullptr;
-    }
-    
-    AVFrame* src_frame = buffer->getAVFrame();
-    if (!src_frame) {
+AVFrame* BufferComparator::convertToYUV420P(const ImageMeta& img, const FormatInfo& info) {
+    if (!img.isValid()) {
         return nullptr;
     }
     
     // YUVJ420P/YUVJ422P/YUVJ444P 与对应的 YUV420P/422P/444P 像素布局完全相同，
     // 仅 color range 标记不同；PSNR/SSIM 计算无需 range 转换
     if (info.format == AV_PIX_FMT_YUV420P || info.format == AV_PIX_FMT_YUVJ420P) {
-        return av_frame_clone(src_frame);
+        // 从 ImageMeta 构造一个临时 AVFrame 并 clone
+        AVFrame* tmp = av_frame_alloc();
+        if (!tmp) return nullptr;
+        tmp->format = info.format;
+        tmp->width = info.width;
+        tmp->height = info.height;
+        for (int i = 0; i < img.nbPlanes(); i++) {
+            tmp->data[i] = img.planeData(i);
+            tmp->linesize[i] = img.linesize(i);
+        }
+        AVFrame* cloned = av_frame_clone(tmp);
+        av_frame_free(&tmp);
+        return cloned;
     }
     
     // NV12/NV21 是 semi-planar 420，Y 平面与 YUV420P 完全相同，
-    // 仅 UV 平面从交织变为分离；直接 clone 后手动 deinterleave 可避免
-    // sws_scale 引入的 color range 偏移（NV12 默认 limited range，
-    // 但 PSNR/SSIM 比较需要与 YUVJ420P full range 参考帧一致的原始像素值）
+    // 仅 UV 平面从交织变为分离；直接 deinterleave 可避免
+    // sws_scale 引入的 color range 偏移
     if (info.format == AV_PIX_FMT_NV12 || info.format == AV_PIX_FMT_NV21) {
         AVFrame* dst_frame = av_frame_alloc();
         if (!dst_frame) return nullptr;
@@ -1718,18 +1717,18 @@ AVFrame* BufferComparator::convertToYUV420P(Buffer* buffer, const FormatInfo& in
         // Y 平面：逐行复制（stride 可能不同）
         for (int y = 0; y < info.height; y++) {
             memcpy(dst_frame->data[0] + y * dst_frame->linesize[0],
-                   src_frame->data[0] + y * src_frame->linesize[0],
+                   img.planeData(0) + y * img.linesize(0),
                    info.width);
         }
         
         // UV 平面：从交织 (UVUVUV...) 拆分为独立 U 和 V 平面
-        const uint8_t* uv_src = src_frame->data[1];
+        const uint8_t* uv_src = img.planeData(1);
         uint8_t* u_dst = dst_frame->data[1];
         uint8_t* v_dst = dst_frame->data[2];
         bool is_nv12 = (info.format == AV_PIX_FMT_NV12);
         
         for (int y = 0; y < uv_height; y++) {
-            const uint8_t* uv_row = uv_src + y * src_frame->linesize[1];
+            const uint8_t* uv_row = uv_src + y * img.linesize(1);
             uint8_t* u_row = u_dst + y * dst_frame->linesize[1];
             uint8_t* v_row = v_dst + y * dst_frame->linesize[2];
             
@@ -1762,6 +1761,14 @@ AVFrame* BufferComparator::convertToYUV420P(Buffer* buffer, const FormatInfo& in
         return nullptr;
     }
     
+    // 使用 ImageMeta 的 plane_data/linesize 构造 sws_scale 输入
+    const uint8_t* src_data[4] = {
+        img.planeData(0), img.planeData(1), img.planeData(2), img.planeData(3)
+    };
+    int src_linesize[4] = {
+        img.linesize(0), img.linesize(1), img.linesize(2), img.linesize(3)
+    };
+    
     AVPixelFormat src_fmt = info.format;
     SwsContext* sws_ctx = sws_getContext(
         info.width, info.height, src_fmt,
@@ -1774,7 +1781,7 @@ AVFrame* BufferComparator::convertToYUV420P(Buffer* buffer, const FormatInfo& in
         return nullptr;
     }
     
-    sws_scale(sws_ctx, src_frame->data, src_frame->linesize, 0, info.height,
+    sws_scale(sws_ctx, src_data, src_linesize, 0, info.height,
               dst_frame->data, dst_frame->linesize);
     
     sws_freeContext(sws_ctx);
@@ -1784,20 +1791,15 @@ AVFrame* BufferComparator::convertToYUV420P(Buffer* buffer, const FormatInfo& in
 
 /**
  * @brief 将YUV格式转换为RGB格式
- * @param buffer YUV格式的Buffer
+ * @param img YUV格式的ImageMeta
  * @param info YUV格式信息
  * @param target_rgb_format 目标RGB格式
  * @return 转换后的AVFrame，失败返回nullptr
  */
 AVFrame* BufferComparator::convertYUVToRGB(
-    Buffer* buffer, const FormatInfo& info, AVPixelFormat target_rgb_format
+    const ImageMeta& img, const FormatInfo& info, AVPixelFormat target_rgb_format
 ) {
-    if (!buffer || !buffer->hasImageMetadata()) {
-        return nullptr;
-    }
-    
-    AVFrame* src_frame = buffer->getAVFrame();
-    if (!src_frame) {
+    if (!img.isValid()) {
         return nullptr;
     }
     
@@ -1816,6 +1818,14 @@ AVFrame* BufferComparator::convertYUVToRGB(
         return nullptr;
     }
     
+    // 使用 ImageMeta 的 plane_data/linesize 构造 sws_scale 输入
+    const uint8_t* src_data[4] = {
+        img.planeData(0), img.planeData(1), img.planeData(2), img.planeData(3)
+    };
+    int src_linesize[4] = {
+        img.linesize(0), img.linesize(1), img.linesize(2), img.linesize(3)
+    };
+    
     // 创建转换上下文（YUV -> RGB）
     SwsContext* sws_ctx = sws_getContext(
         info.width, info.height, info.format,
@@ -1829,7 +1839,7 @@ AVFrame* BufferComparator::convertYUVToRGB(
     }
     
     // 执行转换
-    sws_scale(sws_ctx, src_frame->data, src_frame->linesize, 0, info.height,
+    sws_scale(sws_ctx, src_data, src_linesize, 0, info.height,
               dst_frame->data, dst_frame->linesize);
     
     sws_freeContext(sws_ctx);
@@ -2016,39 +2026,23 @@ double BufferComparator::calculateSSIM(
 // ============================================================================
 
 double BufferComparator::calculateSSIM_YUV_Y(
-    Buffer* buf1, Buffer* buf2,
+    const ImageMeta& img1, const ImageMeta& img2,
     const FormatInfo& info1, const FormatInfo& info2
 ) {
-    // Mat 单通道路径
-    if (info1.is_mat || info2.is_mat) {
-        cv::Mat* mat1 = buf1->getMat();
-        cv::Mat* mat2 = buf2->getMat();
-        if (!mat1 || !mat2 || mat1->empty() || mat2->empty()) {
-            return 0.0;
-        }
-        return calculateSSIM(mat1->ptr<uint8_t>(0), mat2->ptr<uint8_t>(0),
-                             info1.width, info1.height,
-                             static_cast<int>(mat1->step[0]),
-                             static_cast<int>(mat2->step[0]));
-    }
-
-    // AVFrame 路径
-    uint8_t* data1 = buf1->getImagePlaneData(0);
-    uint8_t* data2 = buf2->getImagePlaneData(0);
+    // ImageMeta 统一了 Mat 和 AVFrame 路径
+    uint8_t* data1 = img1.planeData(0);
+    uint8_t* data2 = img2.planeData(0);
     
     if (!data1 || !data2) {
         return 0.0;
     }
     
-    const int* linesize1 = buf1->getImageLinesize();
-    const int* linesize2 = buf2->getImageLinesize();
-    
     return calculateSSIM(data1, data2, info1.width, info1.height,
-                        linesize1[0], linesize2[0]);
+                        img1.linesize(0), img2.linesize(0));
 }
 
 double BufferComparator::calculateSSIM_YUV_U(
-    Buffer* buf1, Buffer* buf2,
+    const ImageMeta& img1, const ImageMeta& img2,
     const FormatInfo& info1, const FormatInfo& info2
 ) {
     // Mat 单通道没有 U 平面，视为完全一致
@@ -2056,25 +2050,22 @@ double BufferComparator::calculateSSIM_YUV_U(
         return 1.0;
     }
 
-    uint8_t* data1 = buf1->getImagePlaneData(1);
-    uint8_t* data2 = buf2->getImagePlaneData(1);
+    uint8_t* data1 = img1.planeData(1);
+    uint8_t* data2 = img2.planeData(1);
     
     if (!data1 || !data2) {
         return 1.0;  // 无U平面，认为一致
     }
     
-    const int* linesize1 = buf1->getImageLinesize();
-    const int* linesize2 = buf2->getImageLinesize();
-    
     int uv_width = info1.width / 2;
     int uv_height = info1.height / 2;
     
     return calculateSSIM(data1, data2, uv_width, uv_height,
-                        linesize1[1], linesize2[1]);
+                        img1.linesize(1), img2.linesize(1));
 }
 
 double BufferComparator::calculateSSIM_YUV_V(
-    Buffer* buf1, Buffer* buf2,
+    const ImageMeta& img1, const ImageMeta& img2,
     const FormatInfo& info1, const FormatInfo& info2
 ) {
     // Mat 单通道没有 V 平面，视为完全一致
@@ -2082,21 +2073,18 @@ double BufferComparator::calculateSSIM_YUV_V(
         return 1.0;
     }
 
-    uint8_t* data1 = buf1->getImagePlaneData(2);
-    uint8_t* data2 = buf2->getImagePlaneData(2);
+    uint8_t* data1 = img1.planeData(2);
+    uint8_t* data2 = img2.planeData(2);
     
     if (!data1 || !data2) {
         return 1.0;
     }
     
-    const int* linesize1 = buf1->getImageLinesize();
-    const int* linesize2 = buf2->getImageLinesize();
-    
     int uv_width = info1.width / 2;
     int uv_height = info1.height / 2;
     
     return calculateSSIM(data1, data2, uv_width, uv_height,
-                        linesize1[2], linesize2[2]);
+                        img1.linesize(2), img2.linesize(2));
 }
 
 // ============================================================================
@@ -2104,16 +2092,16 @@ double BufferComparator::calculateSSIM_YUV_V(
 // ============================================================================
 
 double BufferComparator::calculateSSIM_RGB_R(
-    Buffer* buf1, Buffer* buf2,
+    const ImageMeta& img1, const ImageMeta& img2,
     const FormatInfo& info1, const FormatInfo& info2
 ) {
-    if (!buf1 || !buf2) return 0.0;
+    if (!img1.isValid() || !img2.isValid()) return 0.0;
     
     std::vector<uint8_t> channel1(info1.width * info1.height);
     std::vector<uint8_t> channel2(info2.width * info2.height);
     
-    if (!extractRGBChannel(buf1, info1.format, info1.width, info1.height, 0, channel1.data()) ||
-        !extractRGBChannel(buf2, info2.format, info2.width, info2.height, 0, channel2.data())) {
+    if (!extractRGBChannel(img1, info1.format, info1.width, info1.height, 0, channel1.data()) ||
+        !extractRGBChannel(img2, info2.format, info2.width, info2.height, 0, channel2.data())) {
         return 0.0;
     }
     
@@ -2123,16 +2111,16 @@ double BufferComparator::calculateSSIM_RGB_R(
 }
 
 double BufferComparator::calculateSSIM_RGB_G(
-    Buffer* buf1, Buffer* buf2,
+    const ImageMeta& img1, const ImageMeta& img2,
     const FormatInfo& info1, const FormatInfo& info2
 ) {
-    if (!buf1 || !buf2) return 0.0;
+    if (!img1.isValid() || !img2.isValid()) return 0.0;
     
     std::vector<uint8_t> channel1(info1.width * info1.height);
     std::vector<uint8_t> channel2(info2.width * info2.height);
     
-    if (!extractRGBChannel(buf1, info1.format, info1.width, info1.height, 1, channel1.data()) ||
-        !extractRGBChannel(buf2, info2.format, info2.width, info2.height, 1, channel2.data())) {
+    if (!extractRGBChannel(img1, info1.format, info1.width, info1.height, 1, channel1.data()) ||
+        !extractRGBChannel(img2, info2.format, info2.width, info2.height, 1, channel2.data())) {
         return 0.0;
     }
     
@@ -2142,16 +2130,16 @@ double BufferComparator::calculateSSIM_RGB_G(
 }
 
 double BufferComparator::calculateSSIM_RGB_B(
-    Buffer* buf1, Buffer* buf2,
+    const ImageMeta& img1, const ImageMeta& img2,
     const FormatInfo& info1, const FormatInfo& info2
 ) {
-    if (!buf1 || !buf2) return 0.0;
+    if (!img1.isValid() || !img2.isValid()) return 0.0;
     
     std::vector<uint8_t> channel1(info1.width * info1.height);
     std::vector<uint8_t> channel2(info2.width * info2.height);
     
-    if (!extractRGBChannel(buf1, info1.format, info1.width, info1.height, 2, channel1.data()) ||
-        !extractRGBChannel(buf2, info2.format, info2.width, info2.height, 2, channel2.data())) {
+    if (!extractRGBChannel(img1, info1.format, info1.width, info1.height, 2, channel1.data()) ||
+        !extractRGBChannel(img2, info2.format, info2.width, info2.height, 2, channel2.data())) {
         return 0.0;
     }
     

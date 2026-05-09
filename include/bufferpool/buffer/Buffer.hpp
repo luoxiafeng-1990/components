@@ -18,7 +18,7 @@ extern "C" {
 #include "opencv2/core/tacv.hpp"
 
 /**
- * @brief Buffer 基类
+ * @brief Buffer 基类 — 纯粹的内存容器 + 传输时间戳
  * 
  * 封装单个 buffer 的完整元数据，包括：
  * - 唯一ID（用于硬件回调识别）
@@ -26,7 +26,10 @@ extern "C" {
  * - 物理地址（DMA/硬件访问）
  * - 所有权类型（自有/外部）
  * - 状态机（IDLE/LOCKED_BY_PRODUCER/READY_FOR_CONSUME/LOCKED_BY_CONSUMER）
- * - 图像元数据（宽高、格式、stride等）
+ * - PTS 时间戳（帧同步/比较）
+ * 
+ * 图像描述信息（宽高、格式、stride 等）不再由 Buffer 持有，
+ * 消费者使用 ImageMeta::fromBuffer() 按需从载荷中提取。
  * 
  * 子类负责管理各自的载荷：
  * - AVFrameBuffer:  持有 AVFrame* + AVPacket*
@@ -95,7 +98,6 @@ public:
     void setUsedSize(size_t used_size) { used_size_ = used_size; }
     size_t getUsedSize() const { return used_size_ > 0 ? used_size_ : size_; }
     State state() const { return state_.load(); }
-    void* data() const { return virt_addr_; }
     Type type() const { return type_; }
     
     // ========== 状态管理接口 ==========
@@ -115,34 +117,6 @@ public:
     virtual cv::Mat* getMat() const { return nullptr; }
     virtual void setMat(cv::Mat* mat) { (void)mat; }
     
-    // ========== 图像元数据接口 ==========
-    
-    void setImageMetadataFromAVFrame(const AVFrame* frame);
-    bool hasImageMetadata() const { return has_image_metadata_; }
-    int getImageWidth() const { return width_; }
-    int getImageHeight() const { return height_; }
-    AVPixelFormat getImageFormat() const { return format_; }
-    const int* getImageLinesize() const { return linesize_; }
-    
-    /**
-     * @brief 获取指定 plane 的数据指针（虚方法）
-     * @param plane plane 索引 [0-3]
-     * @return plane 数据指针，失败返回 nullptr
-     * 
-     * 基类实现：virt_addr_ + plane_offset_
-     * 子类可覆写以使用各自载荷的数据指针
-     */
-    virtual uint8_t* getImagePlaneData(int plane) const;
-    
-    // ========== 硬件平台相关接口 ==========
-    
-    /**
-     * @brief 获取输出通道号（虚方法）
-     * @return 通道号（0=YUV通道, 1=RGB通道, ...），-1 表示不支持
-     * 
-     * 基类返回 -1，AVFrameBuffer 覆写从 avframe_->metadata 读取
-     */
-    virtual int getOutputChannel() const;
     
     // ========== 帧同步接口 ==========
     
@@ -154,7 +128,7 @@ public:
     /**
      * @brief 清理 Buffer 中的引用计数和元数据（用于归还到 free 队列前）
      * 
-     * 基类职责：清空图像元数据 + 重置 PTS
+     * 基类职责：重置 PTS
      * 子类覆写：先清理各自载荷（unref），再调用 Buffer::free()
      * 
      * 注意：不释放结构体本身（由析构函数负责）
@@ -185,14 +159,6 @@ protected:
     // ========== 状态管理 ==========
     std::atomic<State> state_;
     
-    // ========== 图像元数据（所有子类共用）==========
-    bool has_image_metadata_;
-    int width_;
-    int height_;
-    AVPixelFormat format_;
-    int linesize_[4];
-    size_t plane_offset_[4];
-    int nb_planes_;
     
     // ========== 帧同步信息 ==========
     int64_t pts_;

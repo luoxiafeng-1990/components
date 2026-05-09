@@ -31,9 +31,6 @@ public:
     // === 生命周期 ===
     void free() override;
 
-    // === 图像 plane 数据 ===
-    uint8_t* getImagePlaneData(int plane) const override;
-
 private:
     cv::Mat* mat_ = nullptr;
     AVPacket* avpacket_ = nullptr;

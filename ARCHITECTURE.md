@@ -1019,7 +1019,7 @@ private:
 
 **文件位置**:
 - 接口: `include/bufferpool/pool/base/IBufferPoolBuilder.hpp`
-- 实现类: `include/bufferpool/pool/builder/`（ContinuousPhysicalPoolBuilder, AVFramePoolBuilder, MatPoolBuilder）
+- 实现类: `include/bufferpool/pool/builder/BufferPoolBuilder.hpp`（统一构建器，通过 Buffer::Type 分派）
 
 **设计模式**: 抽象工厂模式（Abstract Factory Pattern）
 
@@ -1086,8 +1086,8 @@ IBufferPoolBuilder (bufferpool/pool/base/IBufferPoolBuilder.hpp)
 #### ✅ BufferPoolBuilderFactory（Pool 构建器工厂）
 
 **文件位置**:
-- 工厂: `include/bufferpool/pool/base/BufferPoolBuilderFactory.hpp`
-- 源文件: `source/bufferpool/pool/base/BufferPoolBuilderFactory.cpp`
+- 工厂: `include/bufferpool/pool/builder/BufferPoolBuilderFactory.hpp`
+- 源文件: `source/bufferpool/pool/builder/BufferPoolBuilderFactory.cpp`
 
 **设计模式**: 工厂模式（Factory Pattern）
 
@@ -2334,7 +2334,7 @@ bool FfmpegDecodeRtspWorker::fillBuffer(...) {
 ### 8. Allocator实现类（Implementation Layer）
 
 **文件位置**:
-- 实现类: `include/bufferpool/pool/builder/`（ContinuousPhysicalPoolBuilder, AVFramePoolBuilder, MatPoolBuilder）
+- 实现类: `include/bufferpool/pool/builder/BufferPoolBuilder.hpp`（统一构建器，通过 Buffer::Type 分派）
 
 **架构角色**: 实现层（Implementation Layer）
 

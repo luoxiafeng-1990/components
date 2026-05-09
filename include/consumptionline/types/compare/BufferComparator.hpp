@@ -1,6 +1,7 @@
 #pragma once
 
 #include "bufferpool/buffer/Buffer.hpp"
+#include "common/ImageMeta.hpp"
 #include "consumptionline/config/ConsumerTypeConfig.hpp"
 #include "productionline/worker/config/MultiWorkerConfig.hpp"
 #include "productionline/worker/config/WorkerConfigs.hpp"
@@ -207,42 +208,54 @@ private:
     };
     
     /**
-     * @brief 分析Buffer格式
+     * @brief 分析图像格式（从 ImageMeta 提取格式分类信息）
      */
-    FormatInfo analyzeFormat(Buffer* buffer);
+    FormatInfo analyzeFormat(const ImageMeta& img);
     
     // ========== 多格式对比策略（核心）==========
+    // 所有策略函数接受 const ImageMeta& 而非 Buffer*，
+    // 使得 compareAVFrames() 可直接从 AVFrame 构建 ImageMeta 传入，
+    // 无需创建临时 AVFrameBuffer 包装器。
     
     /**
      * @brief 自动选择对比策略
      */
     FrameCompareResult compareAuto(
-        Buffer* ref_buffer, const FormatInfo& ref_info,
-        Buffer* test_buffer, const FormatInfo& test_info
+        const ImageMeta& ref_img, const FormatInfo& ref_info,
+        const ImageMeta& test_img, const FormatInfo& test_info
     );
     
     /**
      * @brief YUV格式对比（分平面）
      */
     FrameCompareResult compareYUV(
-        Buffer* ref_buffer, const FormatInfo& ref_info,
-        Buffer* test_buffer, const FormatInfo& test_info
+        const ImageMeta& ref_img, const FormatInfo& ref_info,
+        const ImageMeta& test_img, const FormatInfo& test_info
     );
     
     /**
      * @brief RGB格式对比（分通道）
      */
     FrameCompareResult compareRGB(
-        Buffer* ref_buffer, const FormatInfo& ref_info,
-        Buffer* test_buffer, const FormatInfo& test_info
+        const ImageMeta& ref_img, const FormatInfo& ref_info,
+        const ImageMeta& test_img, const FormatInfo& test_info
     );
     
     /**
      * @brief 混合格式对比（需要转换）
      */
     FrameCompareResult compareMixed(
-        Buffer* ref_buffer, const FormatInfo& ref_info,
-        Buffer* test_buffer, const FormatInfo& test_info
+        const ImageMeta& ref_img, const FormatInfo& ref_info,
+        const ImageMeta& test_img, const FormatInfo& test_info
+    );
+    
+    /**
+     * @brief 子字节 packed RGB 格式对比（RGB444/555/565 等）
+     * 先将两帧转为 RGB24 再调用 compareRGB
+     */
+    FrameCompareResult compareSubByteRGB(
+        const ImageMeta& ref_img, const FormatInfo& ref_info,
+        const ImageMeta& test_img, const FormatInfo& test_info
     );
     
     // ========== PSNR计算 ==========
@@ -259,37 +272,37 @@ private:
     /**
      * @brief YUV格式：Y平面PSNR
      */
-    double calculatePSNR_YUV_Y(Buffer* buf1, Buffer* buf2, 
+    double calculatePSNR_YUV_Y(const ImageMeta& img1, const ImageMeta& img2, 
                                const FormatInfo& info1, const FormatInfo& info2);
     
     /**
      * @brief YUV格式：U平面PSNR
      */
-    double calculatePSNR_YUV_U(Buffer* buf1, Buffer* buf2,
+    double calculatePSNR_YUV_U(const ImageMeta& img1, const ImageMeta& img2,
                                const FormatInfo& info1, const FormatInfo& info2);
     
     /**
      * @brief YUV格式：V平面PSNR
      */
-    double calculatePSNR_YUV_V(Buffer* buf1, Buffer* buf2,
+    double calculatePSNR_YUV_V(const ImageMeta& img1, const ImageMeta& img2,
                                const FormatInfo& info1, const FormatInfo& info2);
     
     /**
      * @brief RGB格式：R通道PSNR
      */
-    double calculatePSNR_RGB_R(Buffer* buf1, Buffer* buf2,
+    double calculatePSNR_RGB_R(const ImageMeta& img1, const ImageMeta& img2,
                                const FormatInfo& info1, const FormatInfo& info2);
     
     /**
      * @brief RGB格式：G通道PSNR
      */
-    double calculatePSNR_RGB_G(Buffer* buf1, Buffer* buf2,
+    double calculatePSNR_RGB_G(const ImageMeta& img1, const ImageMeta& img2,
                                const FormatInfo& info1, const FormatInfo& info2);
     
     /**
      * @brief RGB格式：B通道PSNR
      */
-    double calculatePSNR_RGB_B(Buffer* buf1, Buffer* buf2,
+    double calculatePSNR_RGB_B(const ImageMeta& img1, const ImageMeta& img2,
                                const FormatInfo& info1, const FormatInfo& info2);
     
     // ========== SSIM计算 ==========
@@ -316,37 +329,37 @@ private:
     /**
      * @brief YUV格式：Y平面 SSIM
      */
-    double calculateSSIM_YUV_Y(Buffer* buf1, Buffer* buf2, 
+    double calculateSSIM_YUV_Y(const ImageMeta& img1, const ImageMeta& img2, 
                               const FormatInfo& info1, const FormatInfo& info2);
     
     /**
      * @brief YUV格式：U平面 SSIM
      */
-    double calculateSSIM_YUV_U(Buffer* buf1, Buffer* buf2,
+    double calculateSSIM_YUV_U(const ImageMeta& img1, const ImageMeta& img2,
                               const FormatInfo& info1, const FormatInfo& info2);
     
     /**
      * @brief YUV格式：V平面 SSIM
      */
-    double calculateSSIM_YUV_V(Buffer* buf1, Buffer* buf2,
+    double calculateSSIM_YUV_V(const ImageMeta& img1, const ImageMeta& img2,
                               const FormatInfo& info1, const FormatInfo& info2);
     
     /**
      * @brief RGB格式：R通道 SSIM
      */
-    double calculateSSIM_RGB_R(Buffer* buf1, Buffer* buf2,
+    double calculateSSIM_RGB_R(const ImageMeta& img1, const ImageMeta& img2,
                               const FormatInfo& info1, const FormatInfo& info2);
     
     /**
      * @brief RGB格式：G通道 SSIM
      */
-    double calculateSSIM_RGB_G(Buffer* buf1, Buffer* buf2,
+    double calculateSSIM_RGB_G(const ImageMeta& img1, const ImageMeta& img2,
                               const FormatInfo& info1, const FormatInfo& info2);
     
     /**
      * @brief RGB格式：B通道 SSIM
      */
-    double calculateSSIM_RGB_B(Buffer* buf1, Buffer* buf2,
+    double calculateSSIM_RGB_B(const ImageMeta& img1, const ImageMeta& img2,
                               const FormatInfo& info1, const FormatInfo& info2);
 
     // ========== 辅助方法 ==========
@@ -387,18 +400,26 @@ private:
     AVFrame* rescaleFrame(AVFrame* src_frame, int dst_width, int dst_height);
     
     /**
-     * @brief 格式转换到YUV420P
+     * @brief 格式转换到YUV420P（从 ImageMeta 读取源帧）
      */
-    AVFrame* convertToYUV420P(Buffer* buffer, const FormatInfo& info);
+    AVFrame* convertToYUV420P(const ImageMeta& img, const FormatInfo& info);
     
     /**
      * @brief 将YUV格式转换为RGB格式（用于RGB对比）
-     * @param buffer YUV格式的Buffer
+     * @param img 源图像信息
      * @param info YUV格式信息
      * @param target_rgb_format 目标RGB格式
      * @return 转换后的AVFrame，失败返回nullptr
      */
-    AVFrame* convertYUVToRGB(Buffer* buffer, const FormatInfo& info, AVPixelFormat target_rgb_format);
+    AVFrame* convertYUVToRGB(const ImageMeta& img, const FormatInfo& info, AVPixelFormat target_rgb_format);
+    
+    /**
+     * @brief 将子字节 packed RGB 格式转为 RGB24
+     * @param img 源图像信息（RGB444/555/565 等）
+     * @param info 格式信息
+     * @return 转换后的 RGB24 AVFrame，调用者负责释放
+     */
+    AVFrame* convertToRGB24(const ImageMeta& img, const FormatInfo& info);
     
     /**
      * @brief 释放转换后的AVFrame
