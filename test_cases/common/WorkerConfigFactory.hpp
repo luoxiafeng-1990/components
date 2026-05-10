@@ -212,7 +212,7 @@ public:
             .setDataSourceConfig(
                 DataSourceConfigBuilder()
                     .setPath(path)
-                    .setBufferCount(32)
+                    .setBufferCount(WorkerConfig::DataSourceConfig::kDefaultBufferCount)
                     .build()
             )
             .setDecoderConfig(
@@ -258,7 +258,7 @@ public:
             .setDataSourceConfig(
                 DataSourceConfigBuilder()
                     .setPath(input_path)
-                    .setBufferCount(32)
+                    .setBufferCount(WorkerConfig::DataSourceConfig::kDefaultBufferCount)
                     .build()
             )
             .setEncoderConfig(encoder_config)
@@ -294,7 +294,7 @@ public:
             .setDataSourceConfig(
                 DataSourceConfigBuilder()
                     .setPath(input_path)
-                    .setBufferCount(32)
+                    .setBufferCount(WorkerConfig::DataSourceConfig::kDefaultBufferCount)
                     .build()
             )
             .setEncoderConfig(encoder_config)
@@ -325,7 +325,7 @@ public:
             .setDataSourceConfig(
                 DataSourceConfigBuilder()
                     .setPath(input_path)
-                    .setBufferCount(32)
+                    .setBufferCount(WorkerConfig::DataSourceConfig::kDefaultBufferCount)
                     .build()
             )
             .setEncoderConfig(encoder_config)
@@ -367,7 +367,7 @@ public:
             .setDataSourceConfig(
                 DataSourceConfigBuilder()
                     .setPath(input_path)
-                    .setBufferCount(32)
+                    .setBufferCount(WorkerConfig::DataSourceConfig::kDefaultBufferCount)
                     .build()
             )
             .setEncoderConfig(encoder_config)
@@ -425,7 +425,7 @@ public:
             .setDataSourceConfig(
                 DataSourceConfigBuilder()
                     .setPath(path)
-                    .setBufferCount(32)
+                    .setBufferCount(WorkerConfig::DataSourceConfig::kDefaultBufferCount)
                     .build()
             )
             .setDecoderConfig(
@@ -454,7 +454,7 @@ public:
             .setDataSourceConfig(
                 DataSourceConfigBuilder()
                     .setPath(path)
-                    .setBufferCount(32)
+                    .setBufferCount(WorkerConfig::DataSourceConfig::kDefaultBufferCount)
                     .build()
             )
             .setDecoderConfig(
@@ -483,7 +483,7 @@ public:
             .setDataSourceConfig(
                 DataSourceConfigBuilder()
                     .setPath(path)
-                    .setBufferCount(32)
+                    .setBufferCount(WorkerConfig::DataSourceConfig::kDefaultBufferCount)
                     .build()
             )
             .setDecoderConfig(
@@ -515,7 +515,7 @@ public:
             .setDataSourceConfig(
                 DataSourceConfigBuilder()
                     .setPath(path)
-                    .setBufferCount(32)
+                    .setBufferCount(WorkerConfig::DataSourceConfig::kDefaultBufferCount)
                     .build()
             )
             .setDecoderConfig(
@@ -542,7 +542,7 @@ public:
             .setDataSourceConfig(
                 DataSourceConfigBuilder()
                     .setPath(path)
-                    .setBufferCount(32)
+                    .setBufferCount(WorkerConfig::DataSourceConfig::kDefaultBufferCount)
                     .build()
             )
             .setDecoderConfig(

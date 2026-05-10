@@ -260,12 +260,6 @@ private:
     bool initializeDecoder(const AVCodecParameters* codec_params);
     
     /**
-     * 配置特殊解码器（如 h264_taco）
-     * @return true 如果成功
-     */
-    bool configureSpecialDecoder();
-    
-    /**
      * @brief 从数据源读取 packet 并发送到解码器
      * @param packet_ptr AVPacket 指针（必须已分配）
      * @return true 成功发送 packet 到解码器，false 失败或 EOF
@@ -279,6 +273,19 @@ private:
      * v2.33 变更：返回类型从 bool 改为 FillResult
      */
     FillResult readAndSendPacket(AVPacket* packet_ptr);
+    
+    /**
+     * @brief 从解码器收取所有就绪帧到缓存，取第一帧填充 buffer
+     *
+     * 统一了"正常解码"和"drain"两个路径中相同的 receive_frame 循环逻辑。
+     * 循环调用 avcodec_receive_frame() 将就绪帧放入 cached_frames_，
+     * 然后取第一帧填充到 buffer 中。
+     *
+     * @param frame_ptr  目标 AVFrame（buffer->getAVFrame()）
+     * @param buffer     目标 Buffer（用于 fillBufferMetadataFromFrame）
+     * @return success 填充了一帧；fromCodec(eagain/eof/error) 无帧可填
+     */
+    FillResult receiveAndFillBuffer(AVFrame* frame_ptr, Buffer* buffer);
     
     /**
      * @brief 从 AVFrame 填充 Buffer 的元数据

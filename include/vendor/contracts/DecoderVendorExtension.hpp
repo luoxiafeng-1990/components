@@ -42,6 +42,21 @@ public:
      * @return > 0 时为有效值；0 表示未配置，调用方应使用源分辨率
      */
     virtual int getOutputHeight(int channel = 0) const;
+
+    /**
+     * @brief 将厂商特有的解码器后处理参数应用到已打开的 AVCodecContext
+     *
+     * 由 Worker 在获取到源分辨率后、调用 avcodec_open2 前调用。
+     * 厂商实现负责：参数校验、硬件能力限制检查、av_opt_set 设置。
+     * 如果参数不符合硬件规定，应记录错误信息并返回 false。
+     *
+     * @param priv_data      AVCodecContext::priv_data（void* 避免在接口层引入 FFmpeg 头）
+     * @param source_width   输入视频的实际宽度
+     * @param source_height  输入视频的实际高度
+     * @return true 成功，false 参数不合法（Worker 应终止初始化）
+     */
+    virtual bool applyToCodecContext(void* priv_data,
+                                     int source_width, int source_height);
 };
 
 inline bool IDecoderVendorExtension::validate(std::string& /*err*/) const {
@@ -59,6 +74,11 @@ inline int IDecoderVendorExtension::getOutputWidth(int /*channel*/) const {
 
 inline int IDecoderVendorExtension::getOutputHeight(int /*channel*/) const {
     return 0;
+}
+
+inline bool IDecoderVendorExtension::applyToCodecContext(
+    void* /*priv_data*/, int /*source_width*/, int /*source_height*/) {
+    return true;
 }
 
 #endif

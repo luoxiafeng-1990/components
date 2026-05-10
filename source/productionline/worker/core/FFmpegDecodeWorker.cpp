@@ -1,5 +1,5 @@
 #include "productionline/worker/core/FFmpegDecodeWorker.hpp"
-#include "vendor/taco/decode/TacoDecoderExtension.hpp"
+#include "vendor/contracts/DecoderVendorExtension.hpp"
 #include "productionline/worker/datasource/encodeddata/EncodedPacketSourceFromRtsp.hpp"
 #include "productionline/worker/datasource/encodeddata/EncodedPacketSourceFromBuffer.hpp"
 #include "productionline/worker/datasource/encodeddata/EncodedPacketSourceFromFile.hpp"
@@ -240,7 +240,19 @@ bool FFmpegDecodeWorker::open() {
         return false;
     }
     
-    // 6. 生成 BufferPool 名称
+    // 6. 防御性处理：buffer_count 必须 > 0，否则使用默认值
+    //    ⭐ v2.78 修复：当 consumer 以 buffer_mode 创建时，原 config 的 buffer_count
+    //    可能为 0（DataSourceConfig 默认值）。旧的 configureSpecialDecoder() 中有隐式
+    //    处理，重构后该路径被移除，导致 allocatePoolWithBuffers(0, ...) 失败。
+    //    与 FFmpegEncodeWorker 保持一致的防御逻辑。
+    int buffer_count = worker_config_.data_source.buffer_count;
+    if (buffer_count <= 0) {
+        buffer_count = WorkerConfig::DataSourceConfig::kDefaultBufferCount;
+        LOG4CPLUS_DEBUG_FMT(logger_, " buffer_count was %d, using default: %d",
+                      worker_config_.data_source.buffer_count, buffer_count);
+    }
+    
+    // 7. 生成 BufferPool 名称
     std::string pool_name;
     if (is_buffer_mode) {
         pool_name = "FFmpegDecodeWorker_BufferMode";
@@ -249,7 +261,7 @@ bool FFmpegDecodeWorker::open() {
     }
     
     uint64_t pool_id = builder_->allocatePoolWithBuffers(
-        worker_config_.data_source.buffer_count,
+        buffer_count,
         0,
         pool_name,
         is_buffer_mode ? "BUFFER_MODE" : "NORMAL_MODE"
@@ -288,7 +300,7 @@ bool FFmpegDecodeWorker::open() {
     LOG4CPLUS_DEBUG_FMT(logger_, "    Codec: %s", codec_ctx_ptr_->codec->name);
     LOG4CPLUS_DEBUG_FMT(logger_, "    BufferPool: '%s' (ID: %lu, %d buffers)", 
                   actual_pool_name.c_str(), pool_id, 
-                  worker_config_.data_source.buffer_count);
+                  buffer_count);
     
     return true;
 }
@@ -697,6 +709,77 @@ FillResult FFmpegDecodeWorker::readAndSendPacket(AVPacket* packet_ptr) {
 }
 
 /**
+ * @brief 从解码器收取所有就绪帧到缓存，取第一帧填充 buffer
+ *
+ * 统一了"正常解码"和"drain"两个路径中相同的 receive_frame 循环逻辑。
+ */
+FillResult FFmpegDecodeWorker::receiveAndFillBuffer(AVFrame* frame_ptr, Buffer* buffer) {
+    bool decoded_at_least_one = false;
+    CodecSendResult receive_result = CodecSendResult::success();
+
+    while (true) {
+        if (cached_frames_.size() >= MAX_CACHED_FRAMES) {
+            receive_result = CodecSendResult::eagain();
+            break;
+        }
+
+        AVFrame* temp_frame = av_frame_alloc();
+        if (!temp_frame) {
+            receive_result = CodecSendResult::allocFailed();
+            break;
+        }
+
+        int ret = avcodec_receive_frame(codec_ctx_ptr_, temp_frame);
+
+        if (ret == 0) {
+            decoded_at_least_one = true;
+            cached_frames_.push_back(temp_frame);
+            continue;
+        }
+
+        av_frame_free(&temp_frame);
+
+        if (ret == AVERROR(EAGAIN)) {
+            receive_result = CodecSendResult::eagain();
+        } else if (ret == AVERROR_EOF) {
+            receive_result = CodecSendResult::eof();
+        } else if (ret == AVERROR(EINVAL)) {
+            LOG4CPLUS_ERROR(logger_,
+                " ERROR: avcodec_receive_frame: EINVAL - codec not opened or is an encoder");
+            receive_result = CodecSendResult::invalidState();
+        } else if (ret == AVERROR_INPUT_CHANGED) {
+            LOG4CPLUS_WARN(logger_,
+                " WARN: avcodec_receive_frame: input parameters changed between frames");
+            receive_result = CodecSendResult::receiveError();
+        } else {
+            char err_buf[AV_ERROR_MAX_STRING_SIZE];
+            av_strerror(ret, err_buf, sizeof(err_buf));
+            LOG4CPLUS_ERROR_FMT(logger_,
+                " ERROR: avcodec_receive_frame: unknown error (ret=%d, %s)", ret, err_buf);
+            receive_result = CodecSendResult::receiveError();
+        }
+        break;
+    }
+
+    if (!decoded_at_least_one) {
+        return FillResult::fromCodec(receive_result);
+    }
+
+    if (cached_frames_.empty()) {
+        return FillResult::internalError();
+    }
+
+    AVFrame* first_frame = cached_frames_.front();
+    cached_frames_.erase(cached_frames_.begin());
+
+    av_frame_move_ref(frame_ptr, first_frame);
+    av_frame_free(&first_frame);
+
+    fillBufferMetadataFromFrame(frame_ptr, buffer);
+    return FillResult::success();
+}
+
+/**
  * @brief 填充 Buffer（解码一帧）
  * 
  * v2.33 变更：返回类型从 bool 改为 FillResult
@@ -757,136 +840,21 @@ FillResult FFmpegDecodeWorker::fillBuffer(int frame_index, Buffer* buffer) {
                 (void)avcodec_send_packet(codec_ctx_ptr_, nullptr);
                 flush_sent_ = true;
             }
-
-            // ========== drain: receive_frame（限制缓存数防止 DMA 耗尽）==========
-            bool decoded_at_least_one = false;
-            CodecSendResult receive_result = CodecSendResult::success();
-
-            while (true) {
-                if (cached_frames_.size() >= MAX_CACHED_FRAMES) {
-                    receive_result = CodecSendResult::eagain();
-                    break;
-                }
-
-                AVFrame* temp_frame = av_frame_alloc();
-                if (!temp_frame) {
-                    receive_result = CodecSendResult::allocFailed();
-                    break;
-                }
-
-                int ret = avcodec_receive_frame(codec_ctx_ptr_, temp_frame);
-
-                if (ret == 0) {
-                    decoded_at_least_one = true;
-                    cached_frames_.push_back(temp_frame);
-                    continue;
-                }
-
-                // 失败：释放临时帧，映射错误码
-                av_frame_free(&temp_frame);
-
-                if (ret == AVERROR(EAGAIN)) {
-                    receive_result = CodecSendResult::eagain();
-                } else if (ret == AVERROR_EOF) {
-                    receive_result = CodecSendResult::eof();
-                } else if (ret == AVERROR(EINVAL)) {
-                    receive_result = CodecSendResult::invalidState();
-                } else {
-                    receive_result = CodecSendResult::receiveError();
-                }
-                break;
-            }
-
-            if (!decoded_at_least_one) {
-                // drain 阶段无帧：
-                // - 如果 codec 返回 EAGAIN，说明可能仍有“延迟帧”尚未准备好（尤其是硬件/部分 codec）
-                //   这里必须返回 eagain 触发 kRetry，让后续 fillBuffer 再次 drain。
-                // - 其余情况（如真正 flush 完成的 eof / 或其它错误）按 receive_result 原样返回。
-                return FillResult::fromCodec(receive_result);
-            }
-
-            // ========== 从缓存取第一帧填充 buffer ==========
-            if (cached_frames_.empty()) {
-                return FillResult::internalError();
-            }
-
-            AVFrame* first_frame = cached_frames_.front();
-            cached_frames_.erase(cached_frames_.begin());
-
-            av_frame_move_ref(buffer->getAVFrame(), first_frame);
-            av_frame_free(&first_frame);
-            fillBufferMetadataFromFrame(buffer->getAVFrame(), buffer);
-            return FillResult::success();
+            return receiveAndFillBuffer(buffer->getAVFrame(), buffer);
         }
 
         return send_result;
     }
    
-    // ========== 步骤3: 循环读取解码帧到缓存（限制最大缓存数防止 DMA 耗尽） ==========
-    bool decoded_at_least_one = false;
-    CodecSendResult receive_result = CodecSendResult::success();
+    // ========== 步骤3: 从解码器收取帧并填充 buffer ==========
+    FillResult recv_result = receiveAndFillBuffer(frame_ptr, buffer);
     
-    while (true) {
-        if (cached_frames_.size() >= MAX_CACHED_FRAMES) {
-            receive_result = CodecSendResult::eagain();
-            break;
-        }
-
-        AVFrame* temp_frame = av_frame_alloc();
-        if (!temp_frame) {
-            receive_result = CodecSendResult::allocFailed();
-            break;
-        }
-        
-        int ret = avcodec_receive_frame(codec_ctx_ptr_, temp_frame);
-        
-        if (ret == 0) {
-            decoded_at_least_one = true;
-            cached_frames_.push_back(temp_frame);
-            continue;
-        }
-        
-        // 失败：释放临时帧，映射错误码
-        av_frame_free(&temp_frame);
-        
-        if (ret == AVERROR(EAGAIN)) {
-            receive_result = CodecSendResult::eagain();
-        } else if (ret == AVERROR_EOF) {
-            // 解码器缓存帧耗尽，等同于需要更多输入（不是文件 EOF）
-            receive_result = CodecSendResult::eagain();
-        } else if (ret == AVERROR(EINVAL)) {
-            // codec 未正确打开或类型不匹配（编程错误）
-            LOG4CPLUS_ERROR(logger_, 
-                " ERROR: avcodec_receive_frame: EINVAL - codec not opened or is an encoder");
-            receive_result = CodecSendResult::invalidState();
-        } else if (ret == AVERROR_INPUT_CHANGED) {
-            // 解码参数在帧间发生变化（需要 AV_CODEC_FLAG_DROPCHANGED）
-            LOG4CPLUS_WARN(logger_, 
-                " WARN: avcodec_receive_frame: input parameters changed between frames");
-            receive_result = CodecSendResult::receiveError();
-        } else {
-            char err_buf[AV_ERROR_MAX_STRING_SIZE];
-            av_strerror(ret, err_buf, sizeof(err_buf));
-            LOG4CPLUS_ERROR_FMT(logger_, 
-                " ERROR: avcodec_receive_frame: unknown error (ret=%d, %s)", ret, err_buf);
-            receive_result = CodecSendResult::receiveError();
-        }
-        break;
-    }
-    
-    // ========== 步骤4: 检查是否成功解码 ==========
-    if (!decoded_at_least_one) {
-        // 根据 receive_result 的真实原因返回：
-        // - eagain: 正常，解码器需要更多输入
-        // - receiveError/allocFailed: 真正的错误
-        
-        // v2.32 统一：调用接口的 cancel 方法
-        // - Buffer 共享模式：重置 Worker 状态，允许重试
-        // - File/RTSP 模式：默认空实现，无需操作
+    if (!recv_result.ok()) {
+        // 无帧可填：处理 packet 生命周期
         if (!worker_config_.data_source.deferred_commit) {
-            // 注意：当 receive_result 为 eagain 时，packet 已经被 avcodec_send_packet 消费；
+            // 注意：当 codec 返回 eagain 时，packet 已经被 avcodec_send_packet 消费；
             // 共享模式必须 commit 以推进共享版本，否则 fetch 线程可能卡在同一 version。
-            if (receive_result.isEagain()) {
+            if (recv_result.codecCause() == CodecStatus::Eagain) {
                 packet_source_->commitEncodedPacket(this);
             } else {
                 packet_source_->cancelEncodedPacket(this);
@@ -894,36 +862,19 @@ FillResult FFmpegDecodeWorker::fillBuffer(int frame_index, Buffer* buffer) {
         }
         packet_acquired_ = false;
         current_packet_ptr_ = nullptr;
-        return FillResult::fromCodec(receive_result);
+        return recv_result;
     }
     
-    // ========== 步骤5: 成功解码，提交（释放）==========
-    // v2.32 统一：调用接口的 commit 方法
-    // - Buffer 共享模式：递减订阅者计数，最后一个订阅者触发 Buffer 释放
-    // - File/RTSP 模式：默认返回 true，无需操作
+    // ========== 步骤4: 成功解码，提交 packet ==========
     if (packet_acquired_) {
         if (!worker_config_.data_source.deferred_commit) {
             packet_source_->commitEncodedPacket(this);
         }
-        
-        // 重置状态
         packet_acquired_ = false;
         current_packet_ptr_ = nullptr;
     }
     
-    // ========== 步骤6: 从缓存取第一帧填充 buffer ==========
-    if (cached_frames_.empty()) {
-        return FillResult::internalError();  // 不应该到这里，逻辑错误
-    }
-    
-    AVFrame* first_frame = cached_frames_.front();
-    cached_frames_.erase(cached_frames_.begin());
-    
-    av_frame_move_ref(frame_ptr, first_frame);
-    av_frame_free(&first_frame);
-    
-    fillBufferMetadataFromFrame(frame_ptr, buffer);
-    return FillResult::success();
+    return recv_result;
 }
 
 // ============================================================================
@@ -1047,10 +998,14 @@ bool FFmpegDecodeWorker::initializeDecoder(const AVCodecParameters* codec_params
     
     // 4. 配置硬件解码器厂商扩展（vendor-agnostic）
     //    判定条件：实际打开的 codec 是硬件解码器 + 配置了厂商扩展
-    //    ⭐ v2.75 修复：不再硬编码解码器名称，支持 fallback 后仍正确配置
+    //    ⭐ v3.1: 通过 IDecoderVendorExtension::applyToCodecContext() 委托，
+    //          Worker 核心不再包含任何厂商特有的 PP 配置逻辑
     if (isHardwareDecoder(codec) && worker_config_.decoder.vendor) {
-        if (!configureSpecialDecoder()) {
-            LOG4CPLUS_ERROR(logger_, " ERROR: Failed to configure vendor decoder options");
+        if (!worker_config_.decoder.vendor->applyToCodecContext(
+                codec_ctx_ptr_->priv_data,
+                codec_ctx_ptr_->width,
+                codec_ctx_ptr_->height)) {
+            LOG4CPLUS_ERROR(logger_, " ERROR: Vendor decoder extension rejected configuration");
             avcodec_free_context(&codec_ctx_ptr_);
             codec_ctx_ptr_ = nullptr;
             return false;
@@ -1076,150 +1031,11 @@ bool FFmpegDecodeWorker::initializeDecoder(const AVCodecParameters* codec_params
     return true;
 }
 
-bool FFmpegDecodeWorker::configureSpecialDecoder() {
-    // 配置 Taco 硬件解码器 PP 通道参数（ch0/ch1）
-    if (!codec_ctx_ptr_->priv_data) {
-        LOG4CPLUS_WARN_FMT(logger_, "  Warning: codec_ctx->priv_data is NULL, cannot set options");
-        return false;
-    }
-    
-    TacoConfig* taco_ptr = tacoDecoderConfig(worker_config_.decoder);
-    if (!taco_ptr) {
-        LOG4CPLUS_ERROR(logger_, " configureSpecialDecoder: no TACO vendor config (decoder.vendor)");
-        return false;
-    }
-    TacoConfig& taco = *taco_ptr;
-    
-    LOG4CPLUS_DEBUG_FMT(logger_, " Configuring %s decoder options from config...",
-        codec_ctx_ptr_->codec ? codec_ctx_ptr_->codec->name : "taco");
-    
-    int ret;
-    
-    // 禁用重排序（从 config 读取）
-    ret = av_opt_set_int(codec_ctx_ptr_->priv_data, "reorder_disable", 
-                         taco.reorder_disable ? 1 : 0, 0);
-    LOG4CPLUS_DEBUG_FMT(logger_, "    reorder_disable=%d: %s", taco.reorder_disable ? 1 : 0, 
-           ret < 0 ? "FAILED" : "OK");
-    
-    // 启用通道（从 config 读取）
-    ret = av_opt_set_int(codec_ctx_ptr_->priv_data, "ch0_enable", 
-                         taco.ch0_enable ? 1 : 0, 0);
-    LOG4CPLUS_DEBUG_FMT(logger_, "    ch0_enable=%d: %s", taco.ch0_enable ? 1 : 0, 
-           ret < 0 ? "FAILED" : "OK");
-    
-    ret = av_opt_set_int(codec_ctx_ptr_->priv_data, "ch1_enable", 
-                         taco.ch1_enable ? 1 : 0, 0);
-    LOG4CPLUS_DEBUG_FMT(logger_, "    ch1_enable=%d: %s", taco.ch1_enable ? 1 : 0, 
-           ret < 0 ? "FAILED" : "OK");
-    
-    // ========== 通道0配置 ==========
-    
-    // 配置通道0裁剪参数（从 config 读取）
-    // 将裁剪区域钳制到实际输入分辨率，避免硬件 PP 拒绝超出范围的参数
-    if (taco.ch0_crop_width > 0 && taco.ch0_crop_height > 0) {
-        int input_w = codec_ctx_ptr_->width;
-        int input_h = codec_ctx_ptr_->height;
-        int crop_x = std::min(taco.ch0_crop_x, input_w > 0 ? input_w - 1 : 0);
-        int crop_y = std::min(taco.ch0_crop_y, input_h > 0 ? input_h - 1 : 0);
-        int crop_w = std::min(taco.ch0_crop_width, input_w - crop_x);
-        int crop_h = std::min(taco.ch0_crop_height, input_h - crop_y);
-        if (crop_w <= 0) crop_w = input_w;
-        if (crop_h <= 0) crop_h = input_h;
-        
-        av_opt_set_int(codec_ctx_ptr_->priv_data, "ch0_crop_x", crop_x, 0);
-        av_opt_set_int(codec_ctx_ptr_->priv_data, "ch0_crop_y", crop_y, 0);
-        av_opt_set_int(codec_ctx_ptr_->priv_data, "ch0_crop_width", crop_w, 0);
-        av_opt_set_int(codec_ctx_ptr_->priv_data, "ch0_crop_height", crop_h, 0);
-        LOG4CPLUS_DEBUG_FMT(logger_, "    ch0_crop: config=(%d,%d,%d,%d) clamped=(%d,%d,%d,%d) input=(%dx%d)", 
-               taco.ch0_crop_x, taco.ch0_crop_y, taco.ch0_crop_width, taco.ch0_crop_height,
-               crop_x, crop_y, crop_w, crop_h, input_w, input_h);
-    }
-    
-    // 配置通道0缩放参数（从 config 读取）
-    if (taco.ch0_scale_width > 0 && taco.ch0_scale_height > 0) {
-        av_opt_set_int(codec_ctx_ptr_->priv_data, "ch0_scale_width", taco.ch0_scale_width, 0);
-        av_opt_set_int(codec_ctx_ptr_->priv_data, "ch0_scale_height", taco.ch0_scale_height, 0);
-        LOG4CPLUS_DEBUG_FMT(logger_, "    ch0_scale: (%d, %d)", taco.ch0_scale_width, taco.ch0_scale_height);
-    }
-    
-    // ========== 通道1配置 ==========
-    
-    // 配置通道1裁剪参数（从 config 读取）
-    // 将裁剪区域钳制到实际输入分辨率
-    if (taco.ch1_crop_width > 0 && taco.ch1_crop_height > 0) {
-        int input_w = codec_ctx_ptr_->width;
-        int input_h = codec_ctx_ptr_->height;
-        int crop_x = std::min(taco.ch1_crop_x, input_w > 0 ? input_w - 1 : 0);
-        int crop_y = std::min(taco.ch1_crop_y, input_h > 0 ? input_h - 1 : 0);
-        int crop_w = std::min(taco.ch1_crop_width, input_w - crop_x);
-        int crop_h = std::min(taco.ch1_crop_height, input_h - crop_y);
-        if (crop_w <= 0) crop_w = input_w;
-        if (crop_h <= 0) crop_h = input_h;
-        
-        av_opt_set_int(codec_ctx_ptr_->priv_data, "ch1_crop_x", crop_x, 0);
-        av_opt_set_int(codec_ctx_ptr_->priv_data, "ch1_crop_y", crop_y, 0);
-        av_opt_set_int(codec_ctx_ptr_->priv_data, "ch1_crop_width", crop_w, 0);
-        av_opt_set_int(codec_ctx_ptr_->priv_data, "ch1_crop_height", crop_h, 0);
-        LOG4CPLUS_DEBUG_FMT(logger_, "    ch1_crop: config=(%d,%d,%d,%d) clamped=(%d,%d,%d,%d) input=(%dx%d)", 
-               taco.ch1_crop_x, taco.ch1_crop_y, taco.ch1_crop_width, taco.ch1_crop_height,
-               crop_x, crop_y, crop_w, crop_h, input_w, input_h);
-    }
-    
-    // ⭐ 配置通道1缩放参数（从 config 读取）
-    // ⚠️ TACO 硬件限制：只能缩小，不能放大
-    if (taco.ch1_scale_width > 0 && taco.ch1_scale_height > 0) {
-        // 验证缩放配置是否超出原始分辨率
-        int orig_width = getSourceWidth();
-        int orig_height = getSourceHeight();
-        if (taco.ch1_scale_width > orig_width || taco.ch1_scale_height > orig_height) {
-            LOG4CPLUS_WARN(logger_, "═══════════════════════════════════════════════════════════════");
-            LOG4CPLUS_WARN(logger_, "  ⚠️  TACO 硬件缩放限制：只能缩小，不能放大");
-            LOG4CPLUS_WARN(logger_, "═══════════════════════════════════════════════════════════════");
-            LOG4CPLUS_WARN_FMT(logger_, "  原始分辨率: %dx%d", orig_width, orig_height);
-            LOG4CPLUS_WARN_FMT(logger_, "  请求分辨率: %dx%d (超出限制)", 
-                         taco.ch1_scale_width, taco.ch1_scale_height);
-            LOG4CPLUS_WARN_FMT(logger_, "  自动回退：使用原始分辨率 %dx%d", orig_width, orig_height);
-            LOG4CPLUS_WARN(logger_, "═══════════════════════════════════════════════════════════════");
-            
-            // 清除缩放配置，使用原始分辨率
-            taco.ch1_scale_width = 0;
-            taco.ch1_scale_height = 0;
-        } else {
-            // 配置有效，设置缩放参数
-            av_opt_set_int(codec_ctx_ptr_->priv_data, "ch1_scale_width", taco.ch1_scale_width, 0);
-            av_opt_set_int(codec_ctx_ptr_->priv_data, "ch1_scale_height", taco.ch1_scale_height, 0);
-            LOG4CPLUS_DEBUG_FMT(logger_, "    ch1_scale: (%d, %d)", taco.ch1_scale_width, taco.ch1_scale_height);
-        }
-    }
-    
-    // 配置通道1 RGB（从 config 读取）
-    ret = av_opt_set_int(codec_ctx_ptr_->priv_data, "ch1_rgb", 
-                         taco.ch1_rgb ? 1 : 0, 0);
-    LOG4CPLUS_DEBUG_FMT(logger_, "    ch1_rgb=%d: %s", taco.ch1_rgb ? 1 : 0, 
-           ret < 0 ? "FAILED" : "OK");
-    
-    if (taco.ch1_rgb && taco.ch1_rgb_format < 0) {
-        LOG4CPLUS_ERROR(logger_, "Unsupported RGB format for TACO driver (ch1_rgb_format=" 
-                        + std::to_string(taco.ch1_rgb_format) + ")");
-        return false;
-    }
-    if (taco.ch1_rgb && taco.ch1_rgb_format > 0) {
-        ret = av_opt_set_int(codec_ctx_ptr_->priv_data, "ch1_rgb_format", 
-                             taco.ch1_rgb_format, 0);
-        LOG4CPLUS_DEBUG_FMT(logger_, "    ch1_rgb_format=%d: %s", taco.ch1_rgb_format, 
-               ret < 0 ? "FAILED" : "OK");
-    }
-    
-    // ⭐ v2.17: 设置颜色标准（使用整型枚举）
-    if (taco.ch1_rgb && taco.ch1_rgb_std > 0) {
-        ret = av_opt_set_int(codec_ctx_ptr_->priv_data, "ch1_rgb_std", 
-                             taco.ch1_rgb_std, 0);
-        LOG4CPLUS_DEBUG_FMT(logger_, "    ch1_rgb_std=%d: %s", taco.ch1_rgb_std, 
-               ret < 0 ? "FAILED" : "OK");
-    }
-    
-    return true;
-}
+// configureSpecialDecoder() has been removed.
+// PP configuration logic migrated to IDecoderVendorExtension::applyToCodecContext()
+// (see TacoDecoderExtension.cpp)
+
+
 
 // ============================================================================
 // 硬件解码器元数据提取（重写基类虚函数）

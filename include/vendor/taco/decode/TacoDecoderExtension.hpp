@@ -23,6 +23,9 @@ public:
     int getOutputWidth(int channel = 0) const override;
     int getOutputHeight(int channel = 0) const override;
 
+    bool applyToCodecContext(void* priv_data,
+                             int source_width, int source_height) override;
+
     // ========================================
     // Taco 厂商专属映射（从 TacoConfigBuilder / FFmpegDecodeWorker 迁入）
     // ========================================

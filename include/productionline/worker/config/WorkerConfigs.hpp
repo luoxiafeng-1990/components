@@ -53,9 +53,12 @@ struct WorkerConfig {
     // 数据源配置
     // ========================================
     struct DataSourceConfig {
+        /// Worker 默认的 BufferPool Buffer 数量（当 buffer_count == 0 时使用）
+        static constexpr int kDefaultBufferCount = 32;
+
         // 【用户可设置】基础配置
         std::string path;                     ///< 数据源路径/URL（RTSP/HTTP/文件等）
-        int buffer_count = 0;                 ///< BufferPool 的 Buffer 数量（0=使用 Worker 默认值）
+        int buffer_count = 0;                 ///< BufferPool 的 Buffer 数量（0=使用 kDefaultBufferCount）
         int max_frames = -1;                  ///< 最大读取帧数（-1=无限制）
         bool loop = false;                    ///< true=文件播放结束后自动回到开头循环播放
         int raw_frame_width = 0;              ///< 裸帧（YUV）文件的实际宽度（用于 swscale 缩放场景）

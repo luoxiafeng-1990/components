@@ -188,7 +188,7 @@ bool FFmpegEncodeWorker::open() {
     
     int buffer_count = worker_config_.data_source.buffer_count;
     if (buffer_count <= 0) {
-        buffer_count = 32;  // 编码器默认 Buffer 数量
+        buffer_count = WorkerConfig::DataSourceConfig::kDefaultBufferCount;
     }
     
     uint64_t pool_id = builder_->allocatePoolWithBuffers(
