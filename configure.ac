@@ -1,4 +1,4 @@
-AC_INIT([component], [2.77])
+AC_INIT([component], [2.78])
 AM_INIT_AUTOMAKE([foreign subdir-objects])
 LT_INIT
 AC_PROG_CC
