@@ -23,7 +23,7 @@ extern "C" {
 FFmpegEncodeWorker::FFmpegEncodeWorker(const WorkerConfig& config)
     : WorkerBase(BufferPoolBuilderFactory::AllocatorType::AVFRAME, config)
     , logger_(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Worker.Encode")))
-    , frame_source_(nullptr)
+    , datasource_(nullptr)
     , codec_ctx_ptr_(nullptr)
     , codec_options_ptr_(nullptr)
     , out_codec_params_(nullptr)
@@ -42,10 +42,10 @@ FFmpegEncodeWorker::FFmpegEncodeWorker(const WorkerConfig& config)
     
     // 根据配置创建帧数据源
     if (config.data_source.shared_raw_frame_source) {
-        frame_source_ = config.data_source.shared_raw_frame_source;
+        datasource_ = config.data_source.shared_raw_frame_source;
         LOG4CPLUS_DEBUG(logger_, "[EncodeWorker] 使用外部注入的帧源（直接模式）");
     } else if (config.data_source.buffer_mode) {
-        frame_source_ = std::make_shared<RawFrameSourceFromBuffer>(
+        datasource_ = std::make_shared<RawFrameSourceFromBuffer>(
             config.encoder.width,
             config.encoder.height,
             static_cast<AVPixelFormat>(config.encoder.input_pix_fmt)
@@ -59,7 +59,7 @@ FFmpegEncodeWorker::FFmpegEncodeWorker(const WorkerConfig& config)
             fw = config.data_source.raw_frame_width;
             fh = config.data_source.raw_frame_height;
         }
-        frame_source_ = std::make_shared<RawFrameSourceFromFile>(
+        datasource_ = std::make_shared<RawFrameSourceFromFile>(
             config.data_source.path,
             fw,
             fh,
@@ -71,9 +71,9 @@ FFmpegEncodeWorker::FFmpegEncodeWorker(const WorkerConfig& config)
         LOG4CPLUS_WARN(logger_, "[EncodeWorker] 未指定数据源，需要后续调用 setSourceBufferPool");
     }
     
-    if (frame_source_ && !config.data_source.buffer_mode && !config.data_source.path.empty()) {
-        const int sw = frame_source_->getFrameWidth();
-        const int sh = frame_source_->getFrameHeight();
+    if (datasource_ && !config.data_source.buffer_mode && !config.data_source.path.empty()) {
+        const int sw = datasource_->getFrameWidth();
+        const int sh = datasource_->getFrameHeight();
         if (output_width_ > 0 && output_height_ > 0 && (sw != output_width_ || sh != output_height_)) {
             input_scale_needed_ = true;
         }
@@ -101,7 +101,7 @@ FFmpegEncodeWorker::~FFmpegEncodeWorker() {
     }
     
     // 再关闭编码器和数据源
-    if (frame_source_ && frame_source_->isOpen()) {
+    if (datasource_ && datasource_->isOpen()) {
         LOG4CPLUS_DEBUG(logger_, "[EncodeWorker] 关闭编码器和数据源...");
         close();
     } else if (input_frame_) {
@@ -123,13 +123,13 @@ bool FFmpegEncodeWorker::open() {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
     
     // 如果已经打开，先关闭
-    if (frame_source_ && frame_source_->isOpen()) {
+    if (datasource_ && datasource_->isOpen()) {
         LOG4CPLUS_WARN(logger_, "[EncodeWorker] ⚠️ 已打开，先关闭");
         close();
     }
     
     // 检查帧数据源
-    if (!frame_source_) {
+    if (!datasource_) {
         LOG4CPLUS_ERROR(logger_, "[EncodeWorker] 帧数据源未设置");
         return false;
     }
@@ -138,30 +138,30 @@ bool FFmpegEncodeWorker::open() {
     LOG4CPLUS_INFO(logger_, "🎬 Opening encoder...");
     
     // 1. 打开帧数据源
-    if (!frame_source_->open()) {
+    if (!datasource_->open()) {
         LOG4CPLUS_ERROR(logger_, "[EncodeWorker] 打开帧数据源失败");
         return false;
     }
     
     // 2. 获取输入帧信息
     if (output_width_ == 0) {
-        output_width_ = frame_source_->getFrameWidth();
+        output_width_ = datasource_->getFrameWidth();
     }
     if (output_height_ == 0) {
-        output_height_ = frame_source_->getFrameHeight();
+        output_height_ = datasource_->getFrameHeight();
     }
     
     if (output_width_ <= 0 || output_height_ <= 0) {
         LOG4CPLUS_ERROR_FMT(logger_, "[EncodeWorker] 无效的分辨率: %dx%d",
                            output_width_, output_height_);
-        frame_source_->close();
+        datasource_->close();
         return false;
     }
     
     // 3. 初始化编码器
     if (!initializeEncoder()) {
         LOG4CPLUS_ERROR(logger_, "[EncodeWorker] 初始化编码器失败");
-        frame_source_->close();
+        datasource_->close();
         return false;
     }
 
@@ -172,7 +172,7 @@ bool FFmpegEncodeWorker::open() {
             avcodec_free_context(&codec_ctx_ptr_);
             codec_ctx_ptr_ = nullptr;
         }
-        frame_source_->close();
+        datasource_->close();
         return false;
     }
 
@@ -205,7 +205,7 @@ bool FFmpegEncodeWorker::open() {
             avcodec_free_context(&codec_ctx_ptr_);
             codec_ctx_ptr_ = nullptr;
         }
-        frame_source_->close();
+        datasource_->close();
         return false;
     }
     
@@ -217,7 +217,7 @@ bool FFmpegEncodeWorker::open() {
             avcodec_free_context(&codec_ctx_ptr_);
             codec_ctx_ptr_ = nullptr;
         }
-        frame_source_->close();
+        datasource_->close();
         return false;
     }
     
@@ -241,7 +241,7 @@ bool FFmpegEncodeWorker::open() {
                       actual_pool_name.c_str(), pool_id, buffer_count);
     
     // 文件模式：仅分配 input_frame 壳子，buffer 在首帧 readRawFrame 时 Lazy 分配（backup 逻辑）
-    if (!worker_config_.data_source.buffer_mode && frame_source_) {
+    if (!worker_config_.data_source.buffer_mode && datasource_) {
         input_frame_ = av_frame_alloc();
         if (!input_frame_) {
             LOG4CPLUS_ERROR(logger_, "[EncodeWorker] 分配 input_frame 结构体失败");
@@ -252,14 +252,14 @@ bool FFmpegEncodeWorker::open() {
                 avcodec_free_context(&codec_ctx_ptr_);
                 codec_ctx_ptr_ = nullptr;
             }
-            frame_source_->close();
+            datasource_->close();
             return false;
         }
         const bool need_sws = input_scale_needed_ || format_conversion_needed_;
         if (need_sws) {
             input_frame_->format = static_cast<int>(worker_config_.encoder.input_pix_fmt);
-            input_frame_->width  = frame_source_->getFrameWidth();
-            input_frame_->height = frame_source_->getFrameHeight();
+            input_frame_->width  = datasource_->getFrameWidth();
+            input_frame_->height = datasource_->getFrameHeight();
         } else {
             input_frame_->format = codec_ctx_ptr_->pix_fmt;
             input_frame_->width  = output_width_;
@@ -275,7 +275,7 @@ bool FFmpegEncodeWorker::open() {
                 freeOutputCodecParameters();
                 avcodec_free_context(&codec_ctx_ptr_);
                 codec_ctx_ptr_ = nullptr;
-                frame_source_->close();
+                datasource_->close();
                 return false;
             }
         }
@@ -297,7 +297,7 @@ bool FFmpegEncodeWorker::open() {
                 freeOutputCodecParameters();
                 avcodec_free_context(&codec_ctx_ptr_);
                 codec_ctx_ptr_ = nullptr;
-                frame_source_->close();
+                datasource_->close();
                 return false;
             }
             scaled_frame_->format = codec_ctx_ptr_->pix_fmt;
@@ -315,14 +315,14 @@ bool FFmpegEncodeWorker::open() {
                 freeOutputCodecParameters();
                 avcodec_free_context(&codec_ctx_ptr_);
                 codec_ctx_ptr_ = nullptr;
-                frame_source_->close();
+                datasource_->close();
                 return false;
             }
             const AVPixelFormat src_pf =
                 static_cast<AVPixelFormat>(worker_config_.encoder.input_pix_fmt);
             sws_ctx_ = sws_getContext(
-                frame_source_->getFrameWidth(),
-                frame_source_->getFrameHeight(),
+                datasource_->getFrameWidth(),
+                datasource_->getFrameHeight(),
                 src_pf,
                 output_width_,
                 output_height_,
@@ -342,13 +342,13 @@ bool FFmpegEncodeWorker::open() {
                 freeOutputCodecParameters();
                 avcodec_free_context(&codec_ctx_ptr_);
                 codec_ctx_ptr_ = nullptr;
-                frame_source_->close();
+                datasource_->close();
                 return false;
             }
             LOG4CPLUS_INFO_FMT(logger_,
                 "[EncodeWorker] 编码前缩放: %dx%d -> %dx%d",
-                frame_source_->getFrameWidth(),
-                frame_source_->getFrameHeight(),
+                datasource_->getFrameWidth(),
+                datasource_->getFrameHeight(),
                 output_width_,
                 output_height_);
         }
@@ -358,7 +358,7 @@ bool FFmpegEncodeWorker::open() {
 }
 
 void FFmpegEncodeWorker::close() {
-    if (!frame_source_ || !frame_source_->isOpen()) {
+    if (!datasource_ || !datasource_->isOpen()) {
         return;
     }
     
@@ -391,7 +391,7 @@ void FFmpegEncodeWorker::close() {
         
         // Buffer 模式清理
         if (worker_config_.data_source.buffer_mode && frame_acquired_) {
-            auto* buffer_source = dynamic_cast<RawFrameSourceFromBuffer*>(frame_source_.get());
+            auto* buffer_source = dynamic_cast<RawFrameSourceFromBuffer*>(datasource_.get());
             if (buffer_source) {
                 buffer_source->commitRawFrame(this);
             }
@@ -436,8 +436,8 @@ void FFmpegEncodeWorker::close() {
         }
         
         // 关闭帧数据源
-        if (frame_source_) {
-            frame_source_->close();
+        if (datasource_) {
+            datasource_->close();
         }
         
         freeOutputCodecParameters();
@@ -465,12 +465,12 @@ void FFmpegEncodeWorker::close() {
 }
 
 bool FFmpegEncodeWorker::isOpen() const {
-    return frame_source_ && frame_source_->isOpen() && codec_ctx_ptr_ != nullptr;
+    return datasource_ && datasource_->isOpen() && codec_ctx_ptr_ != nullptr;
 }
 
 bool FFmpegEncodeWorker::seek(int frame_index) {
-    if (frame_source_) {
-        return frame_source_->seek(frame_index);
+    if (datasource_) {
+        return datasource_->seek(frame_index);
     }
     return false;
 }
@@ -485,14 +485,14 @@ bool FFmpegEncodeWorker::seekToEnd() {
 }
 
 bool FFmpegEncodeWorker::skip(int frame_count) {
-    if (frame_source_) {
-        return frame_source_->skip(frame_count);
+    if (datasource_) {
+        return datasource_->skip(frame_count);
     }
     return false;
 }
 
 int FFmpegEncodeWorker::getTotalFrames() const {
-    return frame_source_ ? frame_source_->getTotalFrames() : -1;
+    return datasource_ ? datasource_->getTotalFrames() : -1;
 }
 
 int FFmpegEncodeWorker::getCurrentFrameIndex() const {
@@ -512,37 +512,37 @@ size_t FFmpegEncodeWorker::getFrameSize() const {
 }
 
 long FFmpegEncodeWorker::getFileSize() const {
-    return frame_source_ ? frame_source_->getFileSize() : -1;
+    return datasource_ ? datasource_->getFileSize() : -1;
 }
 
 std::string FFmpegEncodeWorker::getPath() const {
-    return frame_source_ ? frame_source_->getPath() : "";
+    return datasource_ ? datasource_->getPath() : "";
 }
 
 bool FFmpegEncodeWorker::hasMoreFrames() const {
-    return frame_source_ && frame_source_->hasMoreFrames();
+    return datasource_ && datasource_->hasMoreFrames();
 }
 
 bool FFmpegEncodeWorker::isAtEnd() const {
-    return !frame_source_ || frame_source_->isAtEnd();
+    return !datasource_ || datasource_->isAtEnd();
 }
 
 IDataSourceNavigator::SourceType FFmpegEncodeWorker::getDataSourceType() const {
-    return frame_source_ ? frame_source_->getDataSourceType() : SourceType::FILE_SOURCE;
+    return datasource_ ? datasource_->getDataSourceType() : SourceType::FILE_SOURCE;
 }
 
 // ============ Worker 输出属性 ============
 
 int FFmpegEncodeWorker::getSourceWidth() const {
-    return frame_source_ ? frame_source_->getSourceWidth() : 0;
+    return datasource_ ? datasource_->getSourceWidth() : 0;
 }
 
 int FFmpegEncodeWorker::getSourceHeight() const {
-    return frame_source_ ? frame_source_->getSourceHeight() : 0;
+    return datasource_ ? datasource_->getSourceHeight() : 0;
 }
 
 AVPixelFormat FFmpegEncodeWorker::getSourcePixelFormat() const {
-    return frame_source_ ? frame_source_->getSourcePixelFormat() : AV_PIX_FMT_NONE;
+    return datasource_ ? datasource_->getSourcePixelFormat() : AV_PIX_FMT_NONE;
 }
 
 int FFmpegEncodeWorker::getOutputWidth() const {
@@ -563,7 +563,7 @@ double FFmpegEncodeWorker::getOutputBytesPerPixel(int channel) const {
 // ============ 编码器特有接口 ============
 
 bool FFmpegEncodeWorker::setSourceBufferPool(std::weak_ptr<BufferPool> pool_weak) {
-    auto* buffer_source = dynamic_cast<RawFrameSourceFromBuffer*>(frame_source_.get());
+    auto* buffer_source = dynamic_cast<RawFrameSourceFromBuffer*>(datasource_.get());
     if (!buffer_source) {
         LOG4CPLUS_WARN(logger_, "[EncodeWorker] setSourceBufferPool 失败：不是 Buffer 模式");
         return false;
@@ -802,12 +802,12 @@ bool FFmpegEncodeWorker::configureTacoEncoder() {
  * v2.33 变更：返回类型从 bool 改为 FillResult
  */
 FillResult FFmpegEncodeWorker::readAndSendFrame(AVFrame* temp_frame) {
-    if (!frame_source_ || !temp_frame) {
+    if (!datasource_ || !temp_frame) {
         return FillResult::notOpen();
     }
     
     // 从帧数据源读取一帧（Acquire 层）
-    int ret = frame_source_->readRawFrame(temp_frame);
+    int ret = datasource_->readRawFrame(temp_frame);
     if (ret < 0) {
         if (ret == AVERROR_EOF) {
             LOG4CPLUS_DEBUG(logger_, "[EncodeWorker] 🔄 EOF 到达");
@@ -824,7 +824,7 @@ FillResult FFmpegEncodeWorker::readAndSendFrame(AVFrame* temp_frame) {
     
     // 直接模式：消费者的 buffer 直接使用，不经过 temp_frame
     AVFrame* encode_frame = temp_frame;
-    auto* buf_src = dynamic_cast<RawFrameSourceFromBuffer*>(frame_source_.get());
+    auto* buf_src = dynamic_cast<RawFrameSourceFromBuffer*>(datasource_.get());
     if (buf_src) {
         AVFrame* df = buf_src->getDirectFrame();
         if (df) encode_frame = df;
@@ -833,7 +833,7 @@ FillResult FFmpegEncodeWorker::readAndSendFrame(AVFrame* temp_frame) {
     // 发送帧到编码器（Codec 层）
     using Result = CodecSendResult;
     if ((input_scale_needed_ || format_conversion_needed_) && scaled_frame_ && sws_ctx_) {
-        const int src_h = frame_source_->getFrameHeight();
+        const int src_h = datasource_->getFrameHeight();
         const int lines = sws_scale(
             sws_ctx_,
             encode_frame->data,
@@ -879,6 +879,10 @@ bool FFmpegEncodeWorker::fillBufferMetadataFromPacket(AVPacket* packet, Buffer* 
     
     // 设置虚拟地址（指向 packet 数据）
     buffer->setVirtualAddress(packet->data);
+    
+    // ⭐ 保存 PTS（与解码器 fillBufferMetadataFromFrame 对称，
+    //    确保下游通过 Buffer::getPts() 可追溯原始帧号）
+    buffer->setPts(packet->pts);
     
     // 更新统计
     encoded_frames_++;

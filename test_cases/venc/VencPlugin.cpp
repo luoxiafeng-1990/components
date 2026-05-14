@@ -24,6 +24,7 @@ extern "C" {
 #include <libavutil/imgutils.h>
 #include <libavutil/frame.h>
 #include <libavutil/error.h>
+#include <libswscale/swscale.h>
 }
 
 #include <cstring>
@@ -61,7 +62,11 @@ static const SpecFmt kSpec21H264Formats[] = {
     {"rgb555", "rgb555le"},
     {"bgr555", "bgr555le"},
     {"rgb565", "rgb565le"},
-
+    {"bgr565", "bgr565le"},
+    {"rgb888", "rgb888"},
+    {"brg888", "bgr888"},
+    {"rgb101010", "rgb101010le"},
+    {"brg101010", "bgr101010le"},
 };
 
 /** §2.2 JPEG：在 §2.1 基础上增加 BGR565 / RGB888 / BGR888 / 10bit RGB */
@@ -71,6 +76,8 @@ static const SpecFmt kSpec22JpegExtraFormats[] = {
     {"bgr888", "bgr888"},
     {"rgb101010", "rgb101010le"},
     {"bgr101010", "bgr101010le"},
+    {"brg888", "bgr888"},
+    {"brg101010", "bgr101010le"},
 };
 
 struct SpecRes {
@@ -162,6 +169,89 @@ static bool isParallelProfile(const std::string& pr) {
 WorkerConfig buildEncodeConfigInternal(const EncodeTestParams& params, const std::string& yuv_path) {
     using test::common::WorkerConfigFactory;
 
+    // ── 自动格式匹配 ──
+    // 当预设指定的 input_format 与命令行 -i 文件名暗示的格式不一致时，
+    // 自动在同目录和备用目录中搜索正确格式的输入文件。
+    // 例：preset=rgb565le 但 -i /usr/data/ffmpeg/1920x1080_nv12.yuv
+    //  → 自动替换为 /usr/data/ffmpeg/1920x1080_rgb565.rgb 或 /usr/data/qa/1920x1080_rgb565.rgb
+    std::string resolved_path = yuv_path;
+    {
+        const auto& ifmt = params.input_format;
+
+        // 从格式名推断文件后缀中应该包含的关键词
+        // nv12/nv21/yuv420p → _nv12.yuv / _nv21.yuv / _yuv420p.yuv
+        // yuyv422/uyvy422 → _yuyv422.yuv / _uyvy422.yuv
+        // rgb*/bgr*/brg* → _rgb*.rgb / _bgr*.rgb / _brg*.rgb
+        auto fmtFileKey = [](const std::string& fmt) -> std::string {
+            // 剥离尾部的 "le" / "be" 后缀（如 rgb565le → rgb565）
+            std::string key = fmt;
+            if (key.size() > 2 &&
+                (key.substr(key.size()-2) == "le" || key.substr(key.size()-2) == "be")) {
+                key = key.substr(0, key.size()-2);
+            }
+            return key;
+        };
+
+        std::string expected_key = fmtFileKey(ifmt);
+        bool is_rgb_fmt = (expected_key.find("rgb") != std::string::npos ||
+                           expected_key.find("bgr") != std::string::npos ||
+                           expected_key.find("brg") != std::string::npos);
+
+        // 检查当前文件名中是否包含预期的格式关键词
+        bool file_matches = (yuv_path.find(expected_key) != std::string::npos);
+
+        if (!file_matches && !yuv_path.empty()) {
+            // 从原始路径中提取分辨率和目录
+            std::string dir;
+            std::string base;
+            auto slash_pos = yuv_path.rfind('/');
+            if (slash_pos != std::string::npos) {
+                dir = yuv_path.substr(0, slash_pos);
+                base = yuv_path.substr(slash_pos + 1);
+            } else {
+                dir = ".";
+                base = yuv_path;
+            }
+
+            // 提取分辨率 WxH
+            std::string res_tag;
+            {
+                char buf[64];
+                snprintf(buf, sizeof(buf), "%dx%d", params.input_width, params.input_height);
+                res_tag = buf;
+            }
+
+            // 构建候选文件名
+            std::string ext = is_rgb_fmt ? ".rgb" : ".yuv";
+            std::string candidate_name = res_tag + "_" + expected_key + ext;
+
+            // 在多个目录中搜索
+            std::vector<std::string> search_dirs = {dir};
+            // 添加备用目录
+            if (dir.find("/usr/data/ffmpeg") != std::string::npos) {
+                search_dirs.push_back("/usr/data/qa");
+            } else if (dir.find("/usr/data/qa") != std::string::npos) {
+                search_dirs.push_back("/usr/data/ffmpeg");
+            } else {
+                search_dirs.push_back("/usr/data/ffmpeg");
+                search_dirs.push_back("/usr/data/qa");
+            }
+
+            for (const auto& sdir : search_dirs) {
+                std::string candidate = sdir + "/" + candidate_name;
+                FILE* f = fopen(candidate.c_str(), "r");
+                if (f) {
+                    fclose(f);
+                    fprintf(stderr,
+                        "[venc] Auto-format resolve: %s → %s (input_format=%s)\n",
+                        yuv_path.c_str(), candidate.c_str(), ifmt.c_str());
+                    resolved_path = candidate;
+                    break;
+                }
+            }
+        }
+    }
+
     const int output_width = params.output_width > 0 ? params.output_width : params.input_width;
     const int output_height = params.output_height > 0 ? params.output_height : params.input_height;
     const double fps = params.output_fps > 0 ? params.output_fps : params.input_fps;
@@ -180,14 +270,14 @@ WorkerConfig buildEncodeConfigInternal(const EncodeTestParams& params, const std
         const int q = params.jpeg_quality > 0 ? params.jpeg_quality : 80;
         const double jfps = fps > 0.0 ? fps : 25.0;
         config = WorkerConfigFactory::createJpegEncode(
-            yuv_path, output_width, output_height, q, jfps, pix);
+            resolved_path, output_width, output_height, q, jfps, pix);
     } else if (is_hevc) {
         if (params.use_hardware) {
             int prof = 1;
             if (!isParallelProfile(params.profile) && params.profile == "main10")
                 prof = 2;
             config = WorkerConfigFactory::createH265Encode(
-                yuv_path, output_width, output_height, br_kbps, fps, gop, prof, pix);
+                resolved_path, output_width, output_height, br_kbps, fps, gop, prof, pix);
             if (!isParallelProfile(params.profile)) {
                 auto* ext = dynamic_cast<TacoEncoderExtension*>(config.encoder.vendor.get());
                 if (ext) {
@@ -206,7 +296,7 @@ WorkerConfig buildEncodeConfigInternal(const EncodeTestParams& params, const std
             }
         } else {
             config = WorkerConfigFactory::createSoftwareEncode(
-                yuv_path, "h265", output_width, output_height, br_kbps, fps, gop, pix);
+                resolved_path, "h265", output_width, output_height, br_kbps, fps, gop, pix);
         }
     } else if (is_h264) {
         if (params.use_hardware) {
@@ -220,7 +310,7 @@ WorkerConfig buildEncodeConfigInternal(const EncodeTestParams& params, const std
                     prof = 100;
             }
             config = WorkerConfigFactory::createH264Encode(
-                yuv_path, output_width, output_height, br_kbps, fps, gop, prof, pix);
+                resolved_path, output_width, output_height, br_kbps, fps, gop, prof, pix);
             // 与 HEVC 分支一致：按分辨率/帧率设置 TACO level（供 FFmpeg 打开前经 options 下发）
             if (!isParallelProfile(params.profile)) {
                 const int w = output_width;
@@ -237,7 +327,7 @@ WorkerConfig buildEncodeConfigInternal(const EncodeTestParams& params, const std
             }
         } else {
             config = WorkerConfigFactory::createSoftwareEncode(
-                yuv_path, "h264", output_width, output_height, br_kbps, fps, gop, pix);
+                resolved_path, "h264", output_width, output_height, br_kbps, fps, gop, pix);
         }
     }
 
@@ -596,6 +686,251 @@ const std::map<std::string, EncodeTestParams>& VencPlugin::getPredefinedTests() 
         return p;
     }());
 
+    // ── 飞书测试用例补全：GOP 变体 ──
+    add("h264_1920x1080_30_4mbps_gop300", [&] {
+        EncodeTestParams p("h264", "main", 4000, 300, true);
+        p.input_format = "nv12";
+        p.input_width = 1920;
+        p.input_height = 1080;
+        p.input_fps = 30.0;
+        return p;
+    }());
+    add("h264_1920x1080_30_4mbps_gop600", [&] {
+        EncodeTestParams p("h264", "main", 4000, 600, true);
+        p.input_format = "nv12";
+        p.input_width = 1920;
+        p.input_height = 1080;
+        p.input_fps = 30.0;
+        return p;
+    }());
+
+    // ── VBR 变体 ──
+    add("h264_640x480_30_2mbps_vbr", [&] {
+        EncodeTestParams p("h264", "main", 2000, 30, true);
+        p.input_format = "nv12";
+        p.input_width = 640;
+        p.input_height = 480;
+        p.input_fps = 30.0;
+        p.rc_mode = 1;
+        return p;
+    }());
+    add("h264_1280x720_30_4mbps_vbr", [&] {
+        EncodeTestParams p("h264", "main", 4000, 30, true);
+        p.input_format = "nv12";
+        p.input_width = 1280;
+        p.input_height = 720;
+        p.input_fps = 30.0;
+        p.rc_mode = 1;
+        return p;
+    }());
+
+    // ── 非标准分辨率（鲁棒性测试）──
+    add("h264_1921x1081_30_4mbps", [&] {
+        EncodeTestParams p("h264", "main", 4000, 30, true);
+        p.input_format = "nv12";
+        p.input_width = 1921;
+        p.input_height = 1081;
+        p.input_fps = 30.0;
+        return p;
+    }());
+    add("h264_1279x719_30_3mbps", [&] {
+        EncodeTestParams p("h264", "main", 3000, 30, true);
+        p.input_format = "nv12";
+        p.input_width = 1279;
+        p.input_height = 719;
+        p.input_fps = 30.0;
+        return p;
+    }());
+
+    // ── JPEG 质量变体 ──
+    add("jpeg_1920x1080_q1", [&] {
+        EncodeTestParams p("jpeg", "", 0, 0, true);
+        p.input_format = "nv12";
+        p.input_width = 1920;
+        p.input_height = 1080;
+        p.input_fps = 25.0;
+        p.jpeg_quality = 1;
+        return p;
+    }());
+    add("jpeg_1920x1080_q50", [&] {
+        EncodeTestParams p("jpeg", "", 0, 0, true);
+        p.input_format = "nv12";
+        p.input_width = 1920;
+        p.input_height = 1080;
+        p.input_fps = 25.0;
+        p.jpeg_quality = 50;
+        return p;
+    }());
+    add("jpeg_1920x1080_q95", [&] {
+        EncodeTestParams p("jpeg", "", 0, 0, true);
+        p.input_format = "nv12";
+        p.input_width = 1920;
+        p.input_height = 1080;
+        p.input_fps = 25.0;
+        p.jpeg_quality = 95;
+        return p;
+    }());
+    add("jpeg_1920x1080_q100", [&] {
+        EncodeTestParams p("jpeg", "", 0, 0, true);
+        p.input_format = "nv12";
+        p.input_width = 1920;
+        p.input_height = 1080;
+        p.input_fps = 25.0;
+        p.jpeg_quality = 100;
+        return p;
+    }());
+
+    // ── 鲁棒性：极端参数组合 ──
+    add("robust_h264_trm_min_144x96_high_br", [&] {
+        EncodeTestParams p("h264", "main", 50000, 30, true);
+        p.input_format = "nv12";
+        p.input_width = 144;
+        p.input_height = 96;
+        p.input_fps = 30.0;
+        return p;
+    }());
+    add("robust_jpeg_trm_min_96x32_q1", [&] {
+        EncodeTestParams p("jpeg", "", 0, 0, true);
+        p.input_format = "nv12";
+        p.input_width = 96;
+        p.input_height = 32;
+        p.input_fps = 25.0;
+        p.jpeg_quality = 1;
+        return p;
+    }());
+
+    // ── §2.7 补充：nv21 ──
+    add("spec27_h264_1080p_25fps_nv21", [&] {
+        EncodeTestParams p("h264", "main", 5000, 30, true);
+        p.input_format = "nv21";
+        p.input_width = 1920;
+        p.input_height = 1080;
+        p.input_fps = 25.0;
+        return p;
+    }());
+
+    // ── 硬件格式校验（hwfmt_chk）：H.264 × 所有像素格式 ──
+    {
+        struct HwfmtEntry { const char* key; const char* pix; };
+        static const HwfmtEntry kHwfmtAll[] = {
+            {"yuv420p","yuv420p"}, {"nv12","nv12"}, {"nv21","nv21"},
+            {"yuyv422","yuyv422"}, {"uyvy422","uyvy422"},
+            {"rgb444","rgb444le"}, {"bgr444","bgr444le"},
+            {"rgb555","rgb555le"}, {"bgr555","bgr555le"},
+            {"rgb565","rgb565le"}, {"bgr565","bgr565le"},
+            {"rgb888","rgb888"}, {"brg888","bgr888"},
+            {"rgb101010","rgb101010le"}, {"brg101010","bgr101010le"},
+            {"yuv420sp","nv12"}, {"yuv420sp_vu","nv21"},
+        };
+        for (const auto& e : kHwfmtAll) {
+            // H.264 hwfmt_chk
+            {
+                std::string name = std::string("h264_hwfmt_chk_") + e.key + "_1920x1080";
+                EncodeTestParams p("h264", "main", 6000, 30, true);
+                p.input_format = e.pix;
+                p.input_width = 1920;
+                p.input_height = 1080;
+                p.input_fps = 30.0;
+                add(name.c_str(), std::move(p));
+            }
+            // JPEG hwfmt_chk (skip yuv420sp aliases for jpeg)
+            if (std::string(e.key).find("yuv420sp") == std::string::npos) {
+                std::string name = std::string("jpeg_hwfmt_chk_") + e.key + "_1920x1080";
+                EncodeTestParams p("jpeg", "", 0, 0, true);
+                p.input_format = e.pix;
+                p.input_width = 1920;
+                p.input_height = 1080;
+                p.input_fps = 25.0;
+                p.jpeg_quality = 80;
+                add(name.c_str(), std::move(p));
+            }
+        }
+    }
+
+    // ── 鲁棒性补充：极端码率/CQP/Profile/组合 ──
+    add("robust_h264_1080p_low_bitrate_500k", [&] {
+        EncodeTestParams p("h264", "main", 500, 30, true);
+        p.input_format = "nv12";
+        p.input_width = 1920;
+        p.input_height = 1080;
+        p.input_fps = 30.0;
+        p.rc_mode = 1;
+        return p;
+    }());
+    add("robust_h264_1080p_high_bitrate_20mbps", [&] {
+        EncodeTestParams p("h264", "main", 20000, 30, true);
+        p.input_format = "nv12";
+        p.input_width = 1920;
+        p.input_height = 1080;
+        p.input_fps = 30.0;
+        return p;
+    }());
+    add("robust_h264_1080p_gop600_vbr", [&] {
+        EncodeTestParams p("h264", "main", 4000, 600, true);
+        p.input_format = "nv12";
+        p.input_width = 1920;
+        p.input_height = 1080;
+        p.input_fps = 30.0;
+        p.rc_mode = 1;
+        return p;
+    }());
+    add("robust_h264_1080p_cqp_qp1", [&] {
+        EncodeTestParams p("h264", "main", 0, 30, true);
+        p.input_format = "nv12";
+        p.input_width = 1920;
+        p.input_height = 1080;
+        p.input_fps = 30.0;
+        p.rc_mode = 2;
+        p.cqp_qp = 1;
+        return p;
+    }());
+    add("robust_h264_1080p_cqp_qp10", [&] {
+        EncodeTestParams p("h264", "main", 0, 30, true);
+        p.input_format = "nv12";
+        p.input_width = 1920;
+        p.input_height = 1080;
+        p.input_fps = 30.0;
+        p.rc_mode = 2;
+        p.cqp_qp = 10;
+        return p;
+    }());
+    add("robust_h264_1080p_cqp_qp51", [&] {
+        EncodeTestParams p("h264", "main", 0, 30, true);
+        p.input_format = "nv12";
+        p.input_width = 1920;
+        p.input_height = 1080;
+        p.input_fps = 30.0;
+        p.rc_mode = 2;
+        p.cqp_qp = 51;
+        return p;
+    }());
+    add("robust_h264_baseline_720p_4mbps", [&] {
+        EncodeTestParams p("h264", "baseline", 4000, 30, true);
+        p.input_format = "nv12";
+        p.input_width = 1280;
+        p.input_height = 720;
+        p.input_fps = 30.0;
+        return p;
+    }());
+    add("robust_h264_1080p_gop1_cbr_1mbps", [&] {
+        EncodeTestParams p("h264", "main", 1000, 1, true);
+        p.input_format = "nv12";
+        p.input_width = 1920;
+        p.input_height = 1080;
+        p.input_fps = 30.0;
+        p.rc_mode = 0;
+        return p;
+    }());
+    add("robust_jpeg_8192_nv12_q80", [&] {
+        EncodeTestParams p("jpeg", "", 0, 0, true);
+        p.input_format = "nv12";
+        p.input_width = 8192;
+        p.input_height = 8192;
+        p.input_fps = 25.0;
+        p.jpeg_quality = 80;
+        return p;
+    }());
+
     return tests;
 }
 
@@ -808,6 +1143,14 @@ struct EncodeQualityCompareCallbackCtx {
     AVFrame* ref_avframe = nullptr;
     Buffer* ref_buf_wrap = nullptr;
 
+    // 解码帧格式转换（解码输出 YUV → 输入格式 RGB）
+    AVPixelFormat input_pix_fmt = AV_PIX_FMT_NONE;
+    SwsContext* decode_sws_ctx = nullptr;
+    AVFrame* decode_converted_frame = nullptr;
+
+    // 递增帧计数器（当 PTS 无效时用作参考帧索引）
+    std::atomic<int64_t> frame_counter{0};
+
     // 仅用于调试/错误信息：ref 结束后不再做比较
     std::atomic<bool> ref_eof{false};
 };
@@ -872,10 +1215,44 @@ consumer::ConsumeResult runEncodeQualityCompare(
     // 2) compare_ctx：沿用 WorkerSyncCoordinator 的 BufferComparator 累积统计
     auto compare_ctx = std::make_shared<CompareCallbackContext>();
     compare_ctx->initFromCompareType(shared_cfg.consumer_type.compare);
+    LOG4CPLUS_INFO_FMT(logger,
+        "  Compare thresholds: min_psnr=%.2f min_ssim=%.4f enable_psnr=%d enable_ssim=%d",
+        compare_ctx->min_psnr, compare_ctx->min_ssim,
+        (int)compare_ctx->enable_psnr, (int)compare_ctx->enable_ssim);
     if (!compare_ctx->openComparator()) {
         av_frame_free(&ref_avframe);
         ref_source.close();
         return failResult(logger, "ENC_COMPARE", "Failed to open BufferComparator");
+    }
+
+    // 3) 准备解码帧格式转换：当输入不是 YUV420P/NV12 时，
+    //    解码器输出 YUV420P 需要转换回输入格式再对比（同格式对比）
+    AVFrame* decode_converted_frame = nullptr;
+    SwsContext* decode_sws_ctx = nullptr;
+    const bool need_decode_fmt_conv = (ref_pix_fmt != AV_PIX_FMT_YUV420P &&
+                                       ref_pix_fmt != AV_PIX_FMT_NV12);
+    if (need_decode_fmt_conv) {
+        decode_converted_frame = av_frame_alloc();
+        if (decode_converted_frame) {
+            decode_converted_frame->format = ref_pix_fmt;
+            decode_converted_frame->width = ref_width;
+            decode_converted_frame->height = ref_height;
+            if (av_frame_get_buffer(decode_converted_frame, 64) < 0) {
+                av_frame_free(&decode_converted_frame);
+                decode_converted_frame = nullptr;
+            }
+        }
+        if (decode_converted_frame) {
+            decode_sws_ctx = sws_getContext(
+                ref_width, ref_height, AV_PIX_FMT_YUV420P,
+                ref_width, ref_height, ref_pix_fmt,
+                SWS_BILINEAR, nullptr, nullptr, nullptr);
+            if (decode_sws_ctx) {
+                LOG4CPLUS_INFO_FMT(logger,
+                    "  Decode fmt conv: YUV420P → %s (same-format comparison)",
+                    av_get_pix_fmt_name(ref_pix_fmt));
+            }
+        }
     }
 
     EncodeQualityCompareCallbackCtx cb_ctx;
@@ -883,8 +1260,11 @@ consumer::ConsumeResult runEncodeQualityCompare(
     cb_ctx.ref_source = &ref_source;
     cb_ctx.ref_avframe = ref_avframe;
     cb_ctx.ref_buf_wrap = &ref_buf_wrap;
+    cb_ctx.input_pix_fmt = ref_pix_fmt;
+    cb_ctx.decode_sws_ctx = decode_sws_ctx;
+    cb_ctx.decode_converted_frame = decode_converted_frame;
 
-    // 3) MultiWorker：encoder -> decoder，并用 callback 做 compare
+    // 4) MultiWorker：encoder -> decoder，并用 callback 做 compare
     MultiWorkerConfig multi_config;
     GroupConfig group("encode_decode_quality_compare_group");
 
@@ -937,7 +1317,18 @@ consumer::ConsumeResult runEncodeQualityCompare(
         if (!decoded_buf) {
             return true;
         }
-        int ref_ret = cb->ref_source->readRawFrame(cb->ref_avframe);
+        
+        int64_t target_pts = decoded_buf->getPts();
+        
+        // 编码器循环读取源帧，解码器 PTS 可能无效（JPEG: AV_NOPTS_VALUE）
+        // 或持续递增超出参考帧范围。使用帧计数器 + 取模对齐参考帧索引。
+        const int total_ref = cb->ref_source->getTotalFrames();
+        int64_t ref_frame_idx = cb->frame_counter.fetch_add(1, std::memory_order_relaxed);
+        if (total_ref > 0) {
+            ref_frame_idx = ref_frame_idx % total_ref;
+        }
+        int ref_ret = cb->ref_source->readRawFrameByPts(ref_frame_idx, cb->ref_avframe);
+        
         if (ref_ret == AVERROR_EOF || ref_ret < 0) {
             cb->ref_eof.store(true, std::memory_order_release);
             return true;
@@ -945,7 +1336,29 @@ consumer::ConsumeResult runEncodeQualityCompare(
 
         cb->ref_buf_wrap->setAVFrame(cb->ref_avframe);
 
-        auto cmp = cb->compare_ctx->comparator_->compare(cb->ref_buf_wrap, decoded_buf);
+        // ── 解码帧格式转换：将解码器输出(YUV420P)转回输入格式 ──
+        // 确保同格式对比：RGB565 vs RGB565，而不是 RGB565 vs YUV420P
+        Buffer* compare_buf = decoded_buf;
+        AVFrameBuffer* converted_wrap = nullptr;
+        if (cb->decode_sws_ctx && cb->decode_converted_frame) {
+            // 从 decoded_buf 获取 AVFrame
+            auto* decoded_avfb = dynamic_cast<AVFrameBuffer*>(decoded_buf);
+            AVFrame* decoded_avframe = decoded_avfb ? decoded_avfb->getAVFrame() : nullptr;
+            if (decoded_avframe) {
+                sws_scale(cb->decode_sws_ctx,
+                    decoded_avframe->data, decoded_avframe->linesize,
+                    0, decoded_avframe->height,
+                    cb->decode_converted_frame->data, cb->decode_converted_frame->linesize);
+                cb->decode_converted_frame->pts = decoded_avframe->pts;
+                // 用转换后的帧做比较
+                static thread_local AVFrameBuffer conv_wrap(
+                    0, nullptr, 0, 0, Buffer::Ownership::EXTERNAL);
+                conv_wrap.setAVFrame(cb->decode_converted_frame);
+                compare_buf = &conv_wrap;
+            }
+        }
+
+        auto cmp = cb->compare_ctx->comparator_->compare(cb->ref_buf_wrap, compare_buf);
         const double psnr = cmp.psnr_avg;
         const double ssim = cmp.ssim_avg;
 
@@ -968,11 +1381,12 @@ consumer::ConsumeResult runEncodeQualityCompare(
         while (!cb->compare_ctx->ssim_sum.compare_exchange_weak(
             old_ssim, old_ssim + ssim, std::memory_order_relaxed)) {}
 
-        if (cb->compare_ctx->verbose && !passed) {
+        if (!passed) {
             LOG4CPLUS_WARN_FMT(
-                log4cplus::Logger::getRoot(),
-                "Encode-compare frame FAILED: PSNR=%.2f (min=%.2f), SSIM=%.4f (min=%.4f)",
-                psnr, cb->compare_ctx->min_psnr, ssim, cb->compare_ctx->min_ssim);
+                log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.test.venc.EncodeCompare")),
+                "  frame: PSNR=%.2f (min=%.2f, %s), SSIM=%.4f (min=%.4f, %s) -> FAIL",
+                psnr, cb->compare_ctx->min_psnr, psnr_ok ? "OK" : "FAIL",
+                ssim, cb->compare_ctx->min_ssim, ssim_ok ? "OK" : "FAIL");
         }
         return true;
     };
@@ -999,7 +1413,7 @@ consumer::ConsumeResult runEncodeQualityCompare(
 
     pipeline = std::make_unique<MultiWorkerProductionLine>(multi_config, encode_cfg.data_source.loop, 1, false);
     if (!pipeline->start()) {
-        av_frame_free(&ref_avframe);
+        // ref_avframe 由 ref_buf_wrap RAII 管理，不可手动释放
         ref_source.close();
         return failResult(logger, "ENC_COMPARE", "Failed to start encode-decode pipeline");
     }
@@ -1008,7 +1422,7 @@ consumer::ConsumeResult runEncodeQualityCompare(
     const uint64_t decoded_pool_id = pipeline->getGroupConsumerBufferPoolId(0, 0);
     auto decoded_pool = ComponentTopology::getInstance().getPool(decoded_pool_id).lock();
     if (!decoded_pool) {
-        av_frame_free(&ref_avframe);
+        // ref_avframe 由 ref_buf_wrap RAII 管理，不可手动释放
         ref_source.close();
         return failResult(logger, "ENC_COMPARE", "Failed to lock decoded BufferPool");
     }
@@ -1038,7 +1452,13 @@ consumer::ConsumeResult runEncodeQualityCompare(
     }
 
     ref_source.close();
-    av_frame_free(&ref_avframe);
+    // 注意：ref_avframe 由 ref_buf_wrap 持有（setAVFrame），
+    // 在函数返回时 ref_buf_wrap 析构会自动 av_frame_free。
+    // 此处不可手动释放，否则 double-free → SIGSEGV。
+    if (decode_sws_ctx) sws_freeContext(decode_sws_ctx);
+    // 注意：decode_converted_frame 在 callback 中被 thread_local static conv_wrap
+    // 通过 setAVFrame() 持有，不可手动释放，否则 double-free → SIGSEGV。
+    // conv_wrap 会在线程结束时自动析构释放。
 
     result.frames_consumed = total;
     result.frames_compared = total;

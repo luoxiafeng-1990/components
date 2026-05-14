@@ -58,6 +58,14 @@ public:
     virtual int readRawFrame(AVFrame* frame) = 0;
     
     /**
+     * @brief 读取指定 PTS 的一帧原始数据
+     * @param pts 目标帧的 PTS（通常对于原始视频等于帧号）
+     * @param frame 输出的 AVFrame（必须已分配）
+     * @return 0=成功, <0=错误 (如 AVERROR(ENOSYS) 不支持, AVERROR(EINVAL) 越界等)
+     */
+    virtual int readRawFrameByPts(int64_t pts, AVFrame* frame) = 0;
+    
+    /**
      * @brief 获取帧宽度
      * @return 帧宽度（像素），如果不可用返回 0
      */

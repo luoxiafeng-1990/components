@@ -71,7 +71,7 @@ public:
      * @brief 填充 Buffer（编码一帧）
      * 
      * 流程：
-     * 1. 从 frame_source_ 获取原始帧
+     * 1. 从 datasource_ 获取原始帧
      * 2. 发送帧到编码器
      * 3. 接收编码后的 packet
      * 4. 将 packet 填充到输出 Buffer
@@ -177,7 +177,7 @@ private:
     
     /**
      * @brief 读取并发送帧到编码器
-     * @param temp_frame 临时帧（用于从 frame_source_ 读取）
+     * @param temp_frame 临时帧（用于从 datasource_ 读取）
      * @return FillResult 结果对象
      * 
      * v2.33 变更：返回类型从 bool 改为 FillResult
@@ -190,7 +190,7 @@ private:
     log4cplus::Logger logger_;
     
     // 帧数据源
-    std::shared_ptr<IRawFrameSource> frame_source_;
+    std::shared_ptr<IRawFrameSource> datasource_;
     
     // 编码器上下文
     AVCodecContext* codec_ctx_ptr_;

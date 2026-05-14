@@ -290,6 +290,14 @@ int RawFrameSourceFromFile::readRawFrame(AVFrame* frame) {
     return 0;
 }
 
+int RawFrameSourceFromFile::readRawFrameByPts(int64_t pts, AVFrame* frame) {
+    if (!seek(static_cast<int>(pts))) {
+        LOG4CPLUS_ERROR_FMT(logger_, "readRawFrameByPts 失败: 无法定位到 PTS %ld", pts);
+        return AVERROR(EINVAL);
+    }
+    return readRawFrame(frame);
+}
+
 bool RawFrameSourceFromFile::seek(int frame_index) {
     if (!is_open_.load(std::memory_order_acquire) || !file_ptr_) {
         LOG4CPLUS_ERROR(logger_, "seek 失败：文件未打开");

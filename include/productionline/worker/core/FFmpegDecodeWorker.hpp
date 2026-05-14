@@ -217,7 +217,7 @@ private:
     
     // ============ 数据源抽象（v2.12新增）============
     // ⭐ v2.18 修改：从 unique_ptr 改为 shared_ptr（支持共享模式）
-    std::shared_ptr<IEncodedPacketSource> packet_source_;  // 数据源抽象（文件/RTSP流/共享Buffer）
+    std::shared_ptr<IEncodedPacketSource> datasource_;  // 数据源抽象（文件/RTSP流/共享Buffer）
     
     // ============ FFmpeg 资源 ============
     AVCodecContext* codec_ctx_ptr_;
@@ -255,7 +255,7 @@ private:
     
     /**
      * 初始化解码器（支持硬件解码和配置）
-     * @param codec_params 编解码器参数（从 packet_source_ 获取）
+     * @param codec_params 编解码器参数（从 datasource_ 获取）
      */
     bool initializeDecoder(const AVCodecParameters* codec_params);
     
@@ -265,7 +265,7 @@ private:
      * @return true 成功发送 packet 到解码器，false 失败或 EOF
      * 
      * 功能：
-     * - 从 packet_source_ 读取 packet
+     * - 从 datasource_ 读取 packet
      * - 处理错误情况
      * - 调用 avcodec_send_packet 发送到解码器
      * - 释放 packet 引用

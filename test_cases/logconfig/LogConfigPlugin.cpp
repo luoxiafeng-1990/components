@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <sstream>
 #include <cstring>
+#include <sys/ioctl.h>
 
 namespace test::logconfig {
 
@@ -262,14 +263,12 @@ int LogConfigPlugin::resetLoggers() {
 // ============================================================
 
 void LogConfigPlugin::TermRawMode::enable() {
-    struct termios raw;
     tcgetattr(STDIN_FILENO, &old_);
-    raw = old_;
-    raw.c_lflag &= ~(ECHO | ICANON | IEXTEN | ISIG);
-    raw.c_iflag &= ~(BRKINT | ICRNL | INPCK | ISTRIP | IXON);
-    raw.c_cflag |= CS8;
-    raw.c_oflag &= ~OPOST;
-    raw.c_cc[VMIN] = 0;
+    struct termios raw = old_;
+    // 只关闭输入回显和行缓冲，保留 OPOST 让 \n 正确转为 \r\n
+    raw.c_lflag &= ~(ECHO | ICANON | ISIG);
+    raw.c_iflag &= ~(IXON | ICRNL);
+    raw.c_cc[VMIN]  = 0;
     raw.c_cc[VTIME] = 1;
     tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw);
 }
@@ -286,30 +285,93 @@ int LogConfigPlugin::TermRawMode::getch() {
 }
 
 // ============================================================
-// 单行渲染
+// 终端行数检测
 // ============================================================
 
-void LogConfigPlugin::printOneLine(const TuiEntry& entry,
-                                    bool is_cursor, std::ostream& out) {
-    char mark = is_cursor ? '>' : ' ';
-    char star = entry.changed ? '*' : ' ';
-    out << mark << star << entry.name << ' ' << levelToString(entry.level) << '\n';
+int LogConfigPlugin::getTerminalRows() {
+    struct winsize ws;
+    if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == 0 && ws.ws_row > 0)
+        return ws.ws_row;
+    return 24;  // 串口终端默认
 }
 
 // ============================================================
-// 打印全部列表
+// 全屏渲染（menuconfig 风格）
 // ============================================================
 
-void LogConfigPlugin::printAllList(const std::vector<TuiEntry>& entries,
-                                    int cursor, std::ostream& out) {
-    out << "\n===== Log4cplus 日志级别配置 =====\n\n";
-    for (size_t i = 0; i < entries.size(); i++) {
-        printOneLine(entries[i], (int)i == cursor, out);
+void LogConfigPlugin::renderFullScreen(const std::vector<TuiEntry>& entries,
+                                        int cursor, int scroll_offset, int visible) {
+    std::ostringstream buf;
+
+    // 光标归位 + 清屏
+    buf << "\033[H\033[2J";
+
+    // 标题
+    buf << "\n";
+    buf << "  \033[1m======== Log4cplus 日志级别配置 ========\033[0m\n";
+    buf << "\n";
+
+    int total = (int)entries.size();
+    int end   = std::min(scroll_offset + visible, total);
+
+    // 找最长模块名用于对齐
+    size_t max_name = 0;
+    for (int i = scroll_offset; i < end; i++)
+        max_name = std::max(max_name, entries[i].name.size());
+    if (max_name > 52) max_name = 52;
+
+    for (int i = scroll_offset; i < end; i++) {
+        bool sel = (i == cursor);
+        const auto& e = entries[i];
+
+        if (sel) buf << "\033[7m";  // 反显
+
+        buf << (sel ? " > " : "   ");
+
+        // [ LEVEL  ]
+        std::string lvl = levelToString(e.level);
+        while (lvl.size() < 6) lvl += ' ';
+        buf << "[ " << lvl << " ]  ";
+
+        // 模块名，右补空格对齐
+        std::string name = e.name;
+        if (name.size() > max_name)
+            name = name.substr(0, max_name);
+        buf << name;
+        for (size_t p = name.size(); p < max_name; p++) buf << ' ';
+
+        buf << (e.changed ? "  *" : "   ");
+
+        if (sel) buf << "\033[0m";
+        buf << "\033[K\n";  // 清行尾 + 换行
     }
-    out << "\n-------------------------------------\n";
-    out << "  上下箭头 移动 | 空格 切换级别 | r 重置当前为 INFO\n";
-    out << "  s 所有未改设为当前级别 | p 重新打印 | q 退出并应用\n";
-    out << "-------------------------------------\n" << std::flush;
+
+    // 滚动指示
+    if (total > visible) {
+        buf << "\n  (" << (cursor + 1) << "/" << total << ")";
+        if (scroll_offset > 0)  buf << "  ↑ more";
+        if (end < total)        buf << "  ↓ more";
+        buf << "\n";
+    } else {
+        buf << "\n";
+    }
+
+    // 操作提示
+    buf << "  ----------------------------------------\n";
+    buf << "  \033[1mUp/Down\033[0m 移动  "
+        << "\033[1mSpace\033[0m 切换级别  "
+        << "\033[1mr\033[0m 重置  "
+        << "\033[1ms\033[0m 全设  "
+        << "\033[1mq\033[0m 退出并应用\n";
+
+    // 已修改计数
+    int changed = 0;
+    for (const auto& e : entries)
+        if (e.changed) changed++;
+    if (changed > 0)
+        buf << "  \033[1;33m已修改: " << changed << " 个模块\033[0m\n";
+
+    std::cout << buf.str() << std::flush;
 }
 
 // ============================================================
@@ -353,18 +415,18 @@ void LogConfigPlugin::tuiApply(const std::vector<TuiEntry>& entries) {
 }
 
 // ============================================================
-// 主 TUI 入口
+// 主 TUI 入口（全屏 menuconfig 风格）
 // ============================================================
 
 int LogConfigPlugin::runTui() {
     ensureModulesRegistered();
 
-    auto raw = collectAllLoggers();
+    auto raw_loggers = collectAllLoggers();
     std::vector<TuiEntry> entries;
-    for (auto& r : raw) {
+    for (auto& r : raw_loggers) {
         TuiEntry e;
-        e.name = r.name;
-        e.level = r.level;
+        e.name    = r.name;
+        e.level   = r.level;
         e.changed = false;
         entries.push_back(e);
     }
@@ -374,77 +436,83 @@ int LogConfigPlugin::runTui() {
         return 1;
     }
 
-    TermRawMode raw_mode;
-    raw_mode.enable();
+    // 进入 raw 模式
+    TermRawMode term;
+    term.enable();
 
-    int cursor = 0;
-    bool running = true;
+    int cursor        = 0;
+    int scroll_offset = 0;
+    int term_rows     = getTerminalRows();
+    int visible       = std::max(4, term_rows - 10); // 留给标题和底栏
+    bool running      = true;
 
-    // 首次打印完整列表
-    printAllList(entries, cursor, std::cout);
+    // 首次全屏渲染
+    renderFullScreen(entries, cursor, scroll_offset, visible);
 
     while (running) {
         int ch;
-        while ((ch = raw_mode.getch()) == -1) {
-            /* wait */
-        }
+        while ((ch = term.getch()) == -1) { /* poll */ }
 
-        if (ch == 'q' || ch == 'Q' || ch == 27) {
-            if (ch == 27) {
-                int ch2 = raw_mode.getch();
-                int ch3 = raw_mode.getch();
-                if (ch2 == '[') {
-                    if (ch3 == 'A') {
-                        cursor = (cursor - 1 + (int)entries.size()) % entries.size();
-                        // 方向键移动后只打印当前行的变化
-                        std::cout << "  >> " << entries[cursor].name
-                                  << "  [" << levelToString(entries[cursor].level) << "]\n" << std::flush;
-                        continue;
-                    } else if (ch3 == 'B') {
-                        cursor = (cursor + 1) % entries.size();
-                        std::cout << "  >> " << entries[cursor].name
-                                  << "  [" << levelToString(entries[cursor].level) << "]\n" << std::flush;
-                        continue;
-                    }
-                }
-            }
+        if (ch == 'q' || ch == 'Q') {
             running = false;
+
+        } else if (ch == 27) {
+            // ESC 序列：方向键 = ESC [ A/B
+            int ch2 = term.getch();
+            if (ch2 == '[') {
+                int ch3 = term.getch();
+                if (ch3 == 'A') {           // Up
+                    if (cursor > 0) cursor--;
+                    if (cursor < scroll_offset)
+                        scroll_offset = cursor;
+                } else if (ch3 == 'B') {    // Down
+                    if (cursor < (int)entries.size() - 1) cursor++;
+                    if (cursor >= scroll_offset + visible)
+                        scroll_offset = cursor - visible + 1;
+                }
+            } else if (ch2 == -1) {
+                // 纯 ESC 键，退出
+                running = false;
+                continue;
+            }
+            renderFullScreen(entries, cursor, scroll_offset, visible);
+
         } else if (ch == ' ' || ch == '\t') {
             tuiCycleLevel(entries[cursor]);
-            std::cout << "  >> " << entries[cursor].name
-                      << "  =>  " << levelToString(entries[cursor].level) << "\n" << std::flush;
+            renderFullScreen(entries, cursor, scroll_offset, visible);
+
         } else if (ch == 'r' || ch == 'R') {
-            entries[cursor].level = log4cplus::INFO_LOG_LEVEL;
+            entries[cursor].level   = log4cplus::INFO_LOG_LEVEL;
             entries[cursor].changed = false;
-            std::cout << "  >> " << entries[cursor].name
-                      << "  =>  INFO (重置)\n" << std::flush;
+            renderFullScreen(entries, cursor, scroll_offset, visible);
+
         } else if (ch == 's' || ch == 'S') {
+            auto cur_level = entries[cursor].level;
             for (auto& e : entries) {
                 if (!e.changed) {
-                    e.level = entries[cursor].level;
+                    e.level   = cur_level;
                     e.changed = true;
                 }
             }
-            std::cout << "  所有未改模块已设为 "
-                      << levelToString(entries[cursor].level) << "\n" << std::flush;
-        } else if (ch == 'p' || ch == 'P') {
-            printAllList(entries, cursor, std::cout);
+            renderFullScreen(entries, cursor, scroll_offset, visible);
         }
     }
 
-    raw_mode.disable();
+    // 恢复终端
+    term.disable();
 
-    // 应用
+    // 清屏后显示结果
+    std::cout << "\033[H\033[2J";
+
     int changed_count = 0;
-    for (const auto& e : entries) {
+    for (const auto& e : entries)
         if (e.changed) changed_count++;
-    }
 
     if (changed_count > 0) {
         tuiApply(entries);
-        std::cout << "\n已应用 " << changed_count << " 个模块的日志级别变更\n\n";
+        std::cout << "已应用 " << changed_count << " 个模块的日志级别变更\n\n";
     } else {
-        std::cout << "\n未做任何修改\n\n";
+        std::cout << "未做任何修改\n\n";
     }
 
     showAllLoggers();

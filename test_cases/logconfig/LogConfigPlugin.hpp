@@ -61,8 +61,9 @@ private:
 
     void tuiCycleLevel(TuiEntry& entry);
     void tuiApply(const std::vector<TuiEntry>& entries);
-    static void printOneLine(const TuiEntry& entry, bool is_cursor, std::ostream& out);
-    static void printAllList(const std::vector<TuiEntry>& entries, int cursor, std::ostream& out);
+    void renderFullScreen(const std::vector<TuiEntry>& entries,
+                          int cursor, int scroll_offset, int visible);
+    static int getTerminalRows();
 
     static std::string levelToString(log4cplus::LogLevel level);
     static log4cplus::LogLevel stringToLevel(const std::string& s);

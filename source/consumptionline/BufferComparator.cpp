@@ -1203,7 +1203,14 @@ FrameCompareResult BufferComparator::compareMixed(
         FormatInfo ref_rgb_info = analyzeFormat(ref_rgb_img);
         
         // 使用RGB对比函数进行对比
-        result = compareRGB(ref_rgb_img, ref_rgb_info, test_img, test_info);
+        // 子字节打包格式不能用 compareRGB 的字节偏移提取通道
+        bool ref_extractable = ref_rgb_info.is_mat || isDirectlyExtractableRGB(ref_rgb_info.format);
+        bool test_extractable = test_info.is_mat || isDirectlyExtractableRGB(test_info.format);
+        if (ref_extractable && test_extractable) {
+            result = compareRGB(ref_rgb_img, ref_rgb_info, test_img, test_info);
+        } else {
+            result = compareSubByteRGB(ref_rgb_img, ref_rgb_info, test_img, test_info);
+        }
         
         freeConvertedFrame(ref_rgb);
         
@@ -1232,7 +1239,15 @@ FrameCompareResult BufferComparator::compareMixed(
         FormatInfo test_rgb_info = analyzeFormat(test_rgb_img);
         
         // 使用RGB对比函数进行对比
-        result = compareRGB(ref_img, ref_info, test_rgb_img, test_rgb_info);
+        // 子字节打包格式（rgb444/555/565等）不能用 compareRGB 的字节偏移提取通道，
+        // 需先 convertToRGB24 再比较
+        bool ref_extractable = ref_info.is_mat || isDirectlyExtractableRGB(ref_info.format);
+        bool test_extractable = test_rgb_info.is_mat || isDirectlyExtractableRGB(test_rgb_info.format);
+        if (ref_extractable && test_extractable) {
+            result = compareRGB(ref_img, ref_info, test_rgb_img, test_rgb_info);
+        } else {
+            result = compareSubByteRGB(ref_img, ref_info, test_rgb_img, test_rgb_info);
+        }
         
         freeConvertedFrame(test_rgb);
         

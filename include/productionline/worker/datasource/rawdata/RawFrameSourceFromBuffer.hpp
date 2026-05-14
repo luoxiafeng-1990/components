@@ -119,6 +119,7 @@ public:
     
     // ============ IRawFrameSource 接口实现 ============
     int readRawFrame(AVFrame* frame) override;
+    int readRawFrameByPts(int64_t pts, AVFrame* frame) override;
     int getFrameWidth() const override { return width_; }
     int getFrameHeight() const override { return height_; }
     

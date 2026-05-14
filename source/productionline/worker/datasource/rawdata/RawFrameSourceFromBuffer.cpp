@@ -479,6 +479,14 @@ int RawFrameSourceFromBuffer::readRawFrame(AVFrame* frame) {
     return 0;
 }
 
+int RawFrameSourceFromBuffer::readRawFrameByPts(int64_t pts, AVFrame* frame) {
+    // Buffer source typically streams linearly and does not support PTS-based random access.
+    // Return ENOSYS to indicate unsupported operation.
+    (void)pts;
+    (void)frame;
+    return AVERROR(ENOSYS);
+}
+
 int RawFrameSourceFromBuffer::copyFrame(AVFrame* dst_frame, const AVFrame* src_frame) {
     if (!dst_frame || !src_frame) {
         return AVERROR(EINVAL);

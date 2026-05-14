@@ -1,0 +1,7 @@
+refactor(components): 优化基础组件内存管理、排版及数据源规范
+
+- 统一编解码 Worker 中的数据源命名为 `datasource_`，提升架构一致性
+- 修复 VencPlugin H.264 硬件编码器在 ENC_COMPARE 退出时的 double-free 内存崩溃 (SIGSEGV)
+- 增加对 ENC_COMPARE 模式下输入像素格式与解码输出格式转换支持（确保同格式对比精度）
+- 优化日志配置 (logconfig) TUI 交互，提供结构化的菜单选择模式
+- 增强 RawFrameSource 接口，支持基于 PTS 的精准帧读取逻辑
