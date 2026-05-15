@@ -99,6 +99,7 @@ static const SpecRes kSpec22JpegResolutions[] = {
     {512, 512, "512x512"},
     {1280, 720, "1280x720"},
     {1920, 1080, "1920x1080"},
+    {2560, 1440, "2560x1440"},
     {3840, 2160, "3840x2160"},
     {8192, 8192, "8192x8192"},
 };
@@ -777,6 +778,15 @@ const std::map<std::string, EncodeTestParams>& VencPlugin::getPredefinedTests() 
         p.input_height = 1080;
         p.input_fps = 25.0;
         p.jpeg_quality = 100;
+        return p;
+    }());
+    add("jpeg_2560x1440_q80", [&] {
+        EncodeTestParams p("jpeg", "", 0, 0, true);
+        p.input_format = "nv12";
+        p.input_width = 2560;
+        p.input_height = 1440;
+        p.input_fps = 25.0;
+        p.jpeg_quality = 80;
         return p;
     }());
 
