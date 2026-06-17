@@ -14,14 +14,25 @@ COMPONENTS_LIBTOOL_PATCH = NO
 COMPONENTS_DEPENDENCIES = host-autoconf host-automake host-libtool log4cplus taco-ffmpeg taco-vo taco-pipeline opencv unify-9200O ta-runtime
 
 COMPONENTS_CONF_ENV += \
-	LDFLAGS="$(TARGET_LDFLAGS) -L$(STAGING_DIR)/usr/local/lib -Wl,-rpath-link,$(TARGET_DIR)/usr/lib -Wl,-rpath-link,$(TARGET_DIR)/usr/local/lib"
+	LDFLAGS="$(TARGET_LDFLAGS) -L$(TARGET_DIR)/usr/local/lib -Wl,-rpath-link,$(TARGET_DIR)/usr/lib -Wl,-rpath-link,$(TARGET_DIR)/usr/local/lib" \
+	TARGET_DIR=$(TARGET_DIR)
+
+COMPONENTS_MAKE_OPTS += TARGET_DIR=$(TARGET_DIR)
 
 ifeq ($(BR2_ENABLE_DEBUG),y)
 COMPONENTS_CONF_OPTS += --enable-debug
 endif
 
 define COMPONENTS_PATCH_CPPFLAGS
-	$(SED) 's|^CPPFLAGS = |CPPFLAGS = -I$(TARGET_DIR)/usr/local/include/opencv4 -I$(TARGET_DIR)/usr/local/include/ta-runtime |' $(@D)/Makefile
+	$(SED) 's|^CPPFLAGS = |CPPFLAGS = -I$(TARGET_DIR)/usr/local/include -I$(TARGET_DIR)/usr/local/include/opencv4 -I$(TARGET_DIR)/usr/local/include/ta-runtime |' $(@D)/Makefile
+	@# Move conflicting FFmpeg 7.x headers out of multilib path to avoid ABI mismatch
+	@# GCC's multilib gives $(sysroot)/usr/include/riscv64-linux-gnu highest priority,
+	@# which shadows taco-customized FFmpeg 4.2 headers in /usr/local/include/
+	@for d in libavformat libavcodec libavutil libswscale libavdevice libavfilter libswresample libpostproc; do \
+		if [ -d "$(TARGET_DIR)/usr/include/riscv64-linux-gnu/$$d" ]; then \
+			mv "$(TARGET_DIR)/usr/include/riscv64-linux-gnu/$$d" "$(TARGET_DIR)/usr/include/riscv64-linux-gnu/$$d.ffmpeg7.bak"; \
+		fi; \
+	done
 endef
 COMPONENTS_POST_CONFIGURE_HOOKS += COMPONENTS_PATCH_CPPFLAGS
 
