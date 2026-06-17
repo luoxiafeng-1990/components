@@ -32,6 +32,10 @@ define COMPONENTS_INSTALL_TARGET_CMDS
 		mkdir -p $(TARGET_DIR)/usr/local/share/webui; \
 		cp -r $(@D)/webui/dist/* $(TARGET_DIR)/usr/local/share/webui/; \
 	fi
+	mkdir -p /tmp/components/usr/local/bin
+	cp -f $(@D)/qa_cases /tmp/components/usr/local/bin
+	cp -rf $(@D)/DEBIAN /tmp/components
+	dpkg-deb --root-owner-group --build /tmp/components $(TARGET_DIR)/tmp/component_1.0_riscv64.deb 
 endef
 
 $(eval $(autotools-package))

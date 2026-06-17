@@ -1,0 +1,10 @@
+Package: components
+Version: 1.0
+Section: devel
+Priority: optional
+Architecture: riscv64
+Maintainer: <topsfuture@intchains.com>
+Recommends: liburing2,
+  liblog4cplus-dev
+Description: components Library
+ Library for components functionality.
