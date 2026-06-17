@@ -25,9 +25,10 @@
 12. [知识点 #11: std::unique_ptr 的解引用和访问操作符](#知识点-11-stduniqueptr-的解引用和访问操作符)
 13. [知识点 #12: explicit 关键字与隐式类型转换](#知识点-12-explicit-关键字与隐式类型转换)
 14. [知识点 #13: 基类成员变量声明顺序对派生类析构的影响](#知识点-13-基类成员变量声明顺序对派生类析构的影响)
-15. [错误 #14: FFmpeg RTSP 流时间戳不从0开始导致 MP4 封装失败](#错误-14-ffmpeg-rtsp-流时间戳不从0开始导致-mp4-封装失败)
-16. [错误 #15: FFmpeg 负时间戳导致 MP4 muxer 报错](#错误-15-ffmpeg-负时间戳导致-mp4-muxer-报错)
-17. [错误 #16: FFmpeg DTS 重复导致单调递增检查失败](#错误-16-ffmpeg-dts-重复导致单调递增检查失败)
+15. [知识点 #14: 为什么在 map 中存储包含 std::atomic 的结构体必须使用指针](#知识点-14-为什么在-map-中存储包含-stdatomic-的结构体必须使用指针)
+16. [错误 #14: FFmpeg RTSP 流时间戳不从0开始导致 MP4 封装失败](#错误-14-ffmpeg-rtsp-流时间戳不从0开始导致-mp4-封装失败)
+17. [错误 #15: FFmpeg 负时间戳导致 MP4 muxer 报错](#错误-15-ffmpeg-负时间戳导致-mp4-muxer-报错)
+18. [错误 #16: FFmpeg DTS 重复导致单调递增检查失败](#错误-16-ffmpeg-dts-重复导致单调递增检查失败)
 
 ---
 
@@ -693,7 +694,7 @@ BufferPool& getBufferPool() {
 }
 ```
 
-**4. LinuxFramebufferDevice.cpp - 添加 <string>**
+**4. LinuxFramebufferDevice.cpp - 添加 <string>**（历史记录：当时为 `include/display/`；该类已演进/移除，现行显示实现见 `vendor/taco/display/`。）
 
 ```cpp
 // LinuxFramebufferDevice.cpp
@@ -775,7 +776,7 @@ MyClass obj;  // OK
 /toolchain/riscv64-unknown-linux-gnu/include/c++/14.1.1/bits/new_allocator.h:191:11: error: no matching function for call to 'std::pair<const std::__cxx11::basic_string<char>, PerformanceMonitor::MetricData>::pair(const std::__cxx11::basic_string<char>&, PerformanceMonitor::MetricData)'
   191 |         { ::new((void *)__p) _Up(std::forward<_Args>(__args)...); }
       |           ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-source/monitor/PerformanceMonitor.cpp:292:30:   required from here
+source/common/PerformanceMonitor.cpp:292:30:   required from here
   292 |         it = metrics_.emplace(metric_name, MetricData()).first;
       |              ~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~
 ```
@@ -784,7 +785,7 @@ source/monitor/PerformanceMonitor.cpp:292:30:   required from here
 
 ```cpp
 // PerformanceMonitor.cpp
-#include "monitor/PerformanceMonitor.hpp"
+#include "common/PerformanceMonitor.hpp"
 #include <stdio.h>
 #include <string.h>
 // ❌ 缺少 #include <utility>
@@ -884,7 +885,7 @@ map.emplace(
 
 ```cpp
 // PerformanceMonitor.cpp
-#include "monitor/PerformanceMonitor.hpp"
+#include "common/PerformanceMonitor.hpp"
 #include <stdio.h>
 #include <string.h>
 #include <utility>  // ✅ 添加：for std::piecewise_construct, std::forward_as_tuple
@@ -3116,7 +3117,7 @@ bool BufferWriter::writeEncoded(const Buffer* buffer) {
 
 ## ✅ 总结
 
-本次重构过程中遇到的 **14 大类编译/运行时错误 + 3 个重要知识点** 涵盖了：
+本次重构过程中遇到的 **16 大类编译/运行时错误 + 4 个重要知识点** 涵盖了：
 - ✅ C++ 语言特性（designated initializers, std::atomic, piecewise_construct）
 - ✅ 类型系统（不完整类型、临时对象、默认参数）
 - ✅ 访问控制（public/private）
@@ -3128,13 +3129,14 @@ bool BufferWriter::writeEncoded(const Buffer* buffer) {
 - ✅ new vs make_unique（private 构造函数访问权限、内存分配效率）
 - ✅ 类继承与析构顺序（基类成员变量声明顺序的影响、派生类析构控制）
 - ✅ FFmpeg 时间戳处理（RTSP 流时间戳归一化、避免负时间戳、MP4 封装）
+- ✅ 容器中存储不可移动对象（为什么必须使用指针、std::atomic 的限制、容器操作要求）
 
-这些错误都已成功解决，项目已通过编译并修复运行时错误。智能指针、explicit 关键字、new vs make_unique、线程管理、类继承析构顺序以及 FFmpeg 时间戳处理的知识点将帮助开发者更好地理解和使用现代 C++ 特性以及多媒体编程。🎉
+这些错误都已成功解决，项目已通过编译并修复运行时错误。智能指针、explicit 关键字、new vs make_unique、线程管理、类继承析构顺序、FFmpeg 时间戳处理以及容器中存储不可移动对象的知识点将帮助开发者更好地理解和使用现代 C++ 特性以及多媒体编程。🎉
 
 ---
 
-**文档版本**: v1.7  
-**最后更新**: 2025-12-30  
+**文档版本**: v1.8  
+**最后更新**: 2026-01-19  
 **维护者**: AI Assistant  
 **状态**: ✅ 完成  
 **更新内容**: 
@@ -3145,7 +3147,351 @@ bool BufferWriter::writeEncoded(const Buffer* buffer) {
 - v1.5 (2025-12-24): 新增错误 #13 - `std::thread` 在 joinable 状态下析构导致 `std::terminate()`（运行时错误、线程生命周期管理、最佳实践）
 - v1.6 (2025-12-25): 新增知识点 #13 - 基类成员变量声明顺序对派生类析构的影响（C++ 析构顺序规则、可复现示例、正确的资源管理方式）
 - v1.7 (2025-12-30): 新增错误 #14/#15/#16 - FFmpeg RTSP 流 MP4 录制的三个时间戳问题（非零起始、负时间戳、DTS 重复），以及完整解决方案
+- v1.8 (2026-01-19): 新增知识点 #14 - 为什么在 map 中存储包含 `std::atomic` 的结构体必须使用指针（`std::unique_ptr`）
 
+---
 
+## 知识点 #14: 为什么在 map 中存储包含 std::atomic 的结构体必须使用指针
+
+### 背景代码
+
+在 `MultiWorkerProductionLine` 中，我们需要为每个 Worker 维护统计信息：
+
+```cpp
+// MultiWorkerProductionLine.hpp
+struct WorkerGroupRuntime {
+    // ⭐ Worker 生产统计
+    struct WorkerProductionStats {
+        std::atomic<int64_t> worker_frames_produced{0};  // Worker 累计生产的帧数
+        std::atomic<int64_t> worker_frames_failed{0};    // Worker 累计失败的帧数
+        std::atomic<int64_t> consecutive_failures{0};    // 连续失败次数（用于熔断）
+        std::atomic<bool> is_active{true};               // 是否活跃
+    };
+    
+    // Worker 统计映射：consumer_name -> WorkerProductionStats
+    std::unordered_map<std::string, std::unique_ptr<WorkerProductionStats>> worker_stats;
+};
+```
+
+```cpp
+// MultiWorkerProductionLine.cpp
+// 创建 Worker 统计信息
+for (auto& consumer_info : group->consumer_infos) {
+    if (consumer_info) {
+        auto stats = std::make_unique<WorkerGroupRuntime::WorkerProductionStats>();
+        group->worker_stats[consumer_info->consumer_name] = std::move(stats);
+    }
+}
+```
+
+### 用户的疑问
+
+> "为什么要在 group 中设置一个指针？不能直接作为 group runtime 结构体的成员吗？是因为不知道有多少个 worker 吗？难道不能设置 vector 或者 map 吗？没想明白为什么要使用指针？"
+
+这是一个非常好的问题！让我们深入分析。
+
+---
+
+### 核心问题：std::atomic 的不可复制、不可移动特性
+
+#### ❌ 问题根源
+
+`WorkerProductionStats` 包含 `std::atomic` 成员：
+
+```cpp
+struct WorkerProductionStats {
+    std::atomic<int64_t> worker_frames_produced{0};  // ❌ 不可复制、不可移动
+    std::atomic<int64_t> worker_frames_failed{0};    // ❌ 不可复制、不可移动
+    std::atomic<int64_t> consecutive_failures{0};    // ❌ 不可复制、不可移动
+    std::atomic<bool> is_active{true};               // ❌ 不可复制、不可移动
+};
+```
+
+**C++ 标准规定：**
+- `std::atomic` **删除了拷贝构造函数**（copy constructor）
+- `std::atomic` **删除了拷贝赋值运算符**（copy assignment operator）
+- `std::atomic` **删除了移动构造函数**（move constructor，C++11/14）
+- `std::atomic` **删除了移动赋值运算符**（move assignment operator，C++11/14）
+
+这意味着包含 `std::atomic` 成员的结构体也**不可复制、不可移动**。
+
+---
+
+### 方案对比：为什么不能用值类型？
+
+#### ❌ 方案1：直接作为成员（不可行 - 只能有一个 Worker）
+
+```cpp
+struct WorkerGroupRuntime {
+    WorkerProductionStats stats;  // ❌ 只能存储一个 Worker 的统计
+};
+```
+
+**问题：** 一个 Group 中有**多个 Worker**，这个方案只能存储一个 Worker 的统计信息，无法满足需求。
+
+---
+
+#### ❌ 方案2：使用 std::vector（不可行 - 编译错误）
+
+```cpp
+// 尝试使用 vector
+std::vector<WorkerProductionStats> worker_stats;  // ❌ 编译错误！
+
+// 插入元素时会发生什么？
+WorkerProductionStats stats;
+worker_stats.push_back(stats);  // ❌ 错误：std::atomic 不可复制/移动
+```
+
+**编译错误：**
+```
+error: use of deleted function 'WorkerProductionStats::WorkerProductionStats(const WorkerProductionStats&)'
+note: 'WorkerProductionStats::WorkerProductionStats(const WorkerProductionStats&)' is implicitly deleted 
+      because the default definition would be ill-formed:
+      std::atomic<int64_t> is not copyable
+```
+
+**为什么会失败？**
+
+当 `vector` 需要扩容时：
+1. 分配新的更大内存空间
+2. 将旧元素**移动或复制**到新空间
+3. 释放旧空间
+
+但是 `WorkerProductionStats` 包含 `std::atomic`，无法移动或复制，所以第2步会失败。
+
+**图解：**
+```
+vector 扩容过程：
+┌─────────────────────────────────────┐
+│ 旧内存空间                           │
+│ [stats1] [stats2] [stats3]          │
+└─────────────────────────────────────┘
+         │
+         │ 尝试移动/复制到新空间
+         ▼
+┌─────────────────────────────────────────────────┐
+│ 新内存空间（更大）                               │
+│ [stats1] [stats2] [stats3] [ ] [ ] [ ]         │
+└─────────────────────────────────────────────────┘
+         ↑
+         ❌ 失败！std::atomic 不可移动/复制
+```
+
+---
+
+#### ❌ 方案3：使用 std::unordered_map<string, WorkerProductionStats>（不可行 - 编译错误）
+
+```cpp
+// 尝试使用 map 存储值类型
+std::unordered_map<std::string, WorkerProductionStats> worker_stats;  // ❌ 编译错误！
+
+// 插入元素时会发生什么？
+WorkerProductionStats stats;
+worker_stats["worker1"] = stats;  // ❌ 错误：std::atomic 不可复制/移动
+worker_stats.emplace("worker1", stats);  // ❌ 错误：仍然需要移动
+```
+
+**编译错误：**
+```
+error: no matching function for call to 'std::pair<const std::string, WorkerProductionStats>::pair(const std::string&, WorkerProductionStats)'
+note: candidate expects 2 arguments, 0 provided
+```
+
+**为什么会失败？**
+
+`unordered_map` 内部存储的是 `std::pair<const Key, Value>`：
+1. 插入时需要构造 `pair<const string, WorkerProductionStats>`
+2. 构造 `pair` 需要**复制或移动** `WorkerProductionStats`
+3. 但 `WorkerProductionStats` 包含 `std::atomic`，无法复制或移动
+
+**图解：**
+```
+map 插入过程：
+┌─────────────────────────────────────────────────┐
+│ 栈上临时对象                                     │
+│ WorkerProductionStats temp_stats;               │ ← 步骤1：构造临时对象
+└─────────────────────────────────────────────────┘
+              │
+              │ 尝试复制/移动到 map 内部
+              ▼
+┌─────────────────────────────────────────────────┐
+│ map 内部存储位置                                 │
+│ pair<const string, WorkerProductionStats>       │ ← 步骤2：需要复制构造（失败）
+└─────────────────────────────────────────────────┘
+              ↑
+              ❌ 失败！std::atomic 不可复制/移动
+```
+
+**即使使用 `emplace` 也无法解决：**
+```cpp
+// emplace 也需要构造 pair，仍然需要移动 value
+worker_stats.emplace("worker1", WorkerProductionStats());  // ❌ 仍然失败
+```
+
+**注意：** 虽然可以使用 `std::piecewise_construct` 就地构造（见错误 #10），但这只适用于**构造时已知所有参数**的情况。在我们的场景中，Worker 是动态创建的，数量和名称在运行时确定，无法提前构造。
+
+---
+
+### ✅ 正确方案：使用指针（std::unique_ptr）
+
+```cpp
+// ✅ 使用 unique_ptr 存储指针
+std::unordered_map<std::string, std::unique_ptr<WorkerProductionStats>> worker_stats;
+
+// 插入元素
+auto stats = std::make_unique<WorkerProductionStats>();
+worker_stats["worker1"] = std::move(stats);  // ✅ 正确！移动指针，不移动对象
+```
+
+**为什么可以工作？**
+
+1. **指针可以移动**：`std::unique_ptr` 本身是可移动的（虽然不可复制）
+2. **对象本身不需要移动**：`WorkerProductionStats` 对象在堆上创建后，位置固定不变
+3. **只移动所有权**：`std::move(stats)` 只是转移指针的所有权，不涉及对象的复制或移动
+
+**图解：**
+```
+使用 unique_ptr 的过程：
+┌─────────────────────────────────────────────────┐
+│ 堆上的对象（位置固定）                           │
+│ WorkerProductionStats 对象                      │ ← 对象创建后位置不变
+│ [worker_frames_produced: 0]                    │
+│ [worker_frames_failed: 0]                      │
+│ [consecutive_failures: 0]                      │
+│ [is_active: true]                              │
+└─────────────────────────────────────────────────┘
+              ↑
+              │ unique_ptr 指向这里
+              │
+┌─────────────────────────────────────────────────┐
+│ map 内部存储                                     │
+│ pair<const string, unique_ptr<...>>            │
+│ ["worker1", ptr ──────────────────┘]           │ ← 只存储指针（可移动）
+└─────────────────────────────────────────────────┘
+```
+
+---
+
+### 为什么选择 std::unique_ptr？
+
+| 方案 | 优点 | 缺点 | 适用场景 |
+|------|------|------|----------|
+| **std::unique_ptr** | ✅ 独占所有权<br>✅ 零开销（无引用计数）<br>✅ 自动释放内存<br>✅ 明确语义 | ❌ 不可共享 | **当前场景**：每个 Worker 的统计只属于一个 Group |
+| **std::shared_ptr** | ✅ 可共享<br>✅ 自动释放内存 | ❌ 引用计数开销<br>❌ 多线程原子操作开销 | 多个对象需要共享同一个统计对象 |
+| **原始指针** | ✅ 零开销 | ❌ 需要手动管理内存<br>❌ 容易内存泄漏<br>❌ 不符合现代C++实践 | 遗留代码或特殊性能要求 |
+
+**为什么不用 shared_ptr？**
+- 每个 Worker 的统计信息只属于一个 Group，不需要共享
+- `unique_ptr` 零开销，没有引用计数的性能损失
+- `unique_ptr` 语义更明确：独占所有权
+
+---
+
+### 完整示例对比
+
+```cpp
+// ❌ 错误方案1：直接存储值类型
+struct WorkerGroupRuntime {
+    WorkerProductionStats stats;  // 只能存储一个 Worker
+};
+
+// ❌ 错误方案2：vector 存储值类型
+struct WorkerGroupRuntime {
+    std::vector<WorkerProductionStats> worker_stats;  // 编译错误！
+};
+
+// ❌ 错误方案3：map 存储值类型
+struct WorkerGroupRuntime {
+    std::unordered_map<std::string, WorkerProductionStats> worker_stats;  // 编译错误！
+};
+
+// ✅ 正确方案：map 存储指针
+struct WorkerGroupRuntime {
+    std::unordered_map<std::string, std::unique_ptr<WorkerProductionStats>> worker_stats;  // ✅
+};
+
+// 使用示例
+for (auto& consumer_info : group->consumer_infos) {
+    // ✅ 在堆上创建对象，返回 unique_ptr
+    auto stats = std::make_unique<WorkerProductionStats>();
+    
+    // ✅ 移动 unique_ptr（移动指针所有权，不移动对象本身）
+    group->worker_stats[consumer_info->consumer_name] = std::move(stats);
+}
+
+// 访问统计信息
+auto it = group->worker_stats.find("worker1");
+if (it != group->worker_stats.end()) {
+    it->second->worker_frames_produced.fetch_add(1);  // ✅ 通过指针访问
+}
+```
+
+---
+
+### 核心总结
+
+**为什么必须使用指针？**
+
+1. **技术限制**：`std::atomic` 不可复制/移动，包含它的结构体也不可复制/移动
+2. **容器要求**：`vector` 和 `map` 在操作元素时需要复制或移动
+3. **动态数量**：Worker 数量在运行时确定，需要动态容器
+4. **所有权清晰**：`std::unique_ptr` 明确表达"Group 独占拥有这些统计对象"
+
+**为什么选择 std::unique_ptr？**
+
+1. **独占所有权**：每个 Worker 的统计只属于一个 Group
+2. **零开销**：相比 `shared_ptr`，没有引用计数开销
+3. **自动管理**：自动释放内存，避免泄漏
+4. **现代C++最佳实践**：符合 RAII 原则
+
+**一句话总结：**
+
+> 这是一个**被 C++ 语言特性（`std::atomic` 的限制）强制要求的设计决策**，而不是可选的设计选择。必须使用指针来间接存储包含 `std::atomic` 的对象，因为容器操作需要移动/复制元素，而 `std::atomic` 禁止这些操作。
+
+---
+
+### 大厂实践参考
+
+**类似案例：**
+- **Chromium**: `std::unordered_map<std::string, std::unique_ptr<RenderThread>>`
+- **LLVM**: `std::map<std::string, std::unique_ptr<Module>>`
+- **TensorFlow**: `std::unordered_map<std::string, std::unique_ptr<OpKernel>>`
+- **Folly (Facebook)**: `folly::F14FastMap<Key, std::unique_ptr<Value>>`
+
+这些大型项目都采用了"map + unique_ptr"的模式来管理包含不可移动成员的对象。
+
+---
+
+### 相关知识点
+
+- **错误 #3**: `std::atomic` 不可移动导致 `vector` 操作失败
+  - 类似问题，但发生在 `Buffer` 类的 `vector::reserve()` 时
+  - 解决方案：显式实现移动构造函数和移动赋值运算符（通过 load/store）
+  
+- **错误 #10**: `std::atomic` 不可复制导致 `unordered_map::emplace` 失败
+  - 类似问题，但发生在 `PerformanceMonitor` 的 `MetricData` 插入时
+  - 解决方案：使用 `std::piecewise_construct` 就地构造
+
+**区别：**
+- 错误 #3 和 #10 的对象是**固定的、预先构造的**，可以通过技巧（显式移动语义、就地构造）解决
+- 当前场景的对象是**动态的、运行时创建的**，数量和名称不固定，必须使用指针
+
+---
+
+### 参考代码位置
+
+- `MultiWorkerProductionLine.hpp:286-294` - `WorkerProductionStats` 结构体定义
+- `MultiWorkerProductionLine.cpp:605-610` - 创建 Worker 统计信息
+- `MultiWorkerProductionLine.cpp:782-787` - 获取 Worker 统计信息
+
+---
+
+### 推荐阅读
+
+- C++ Core Guidelines: [C.67: A polymorphic class should suppress copying](https://isocpp.github.io/CppCoreGuidelines/CppCoreGuidelines#c67-a-polymorphic-class-should-suppress-copying)
+- Effective Modern C++ Item 18: "Use std::unique_ptr for exclusive-ownership resource management"
+- cppreference: [std::atomic](https://en.cppreference.com/w/cpp/atomic/atomic)
+
+---
 
 

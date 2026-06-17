@@ -149,6 +149,40 @@ public:
     }
 
 /**
+ * 注册多参数函数式测试用例
+ * 
+ * @param name 测试用例名称（标识符，不带引号，如 writer）
+ *             宏内部会自动字符串化为 "writer" 用于注册
+ * @param description 测试用例描述（显示在帮助信息中）
+ * @param usage 参数使用说明（如 "<format> <video_path>"）
+ * @param func 测试函数指针（签名：int func(const std::vector<std::string>& args)）
+ * @param help_func 帮助函数指针（签名：void help_func()）（可选）
+ * 
+ * 使用示例：
+ *   REGISTER_TEST_MULTI_ARG(writer, "BufferWriter - Save frames", "<format> <video_path>", test_buffer_writer, print_writer_help);
+ */
+#define REGISTER_TEST_MULTI_ARG(name, description, usage, func, help_func) \
+    namespace { \
+        struct TestRegistrar_##name { \
+            TestRegistrar_##name() { \
+                auto test_case = std::make_shared<TestFramework::MultiArgFunctionTestCase>( \
+                    #name, \
+                    description, \
+                    usage, \
+                    [](const std::vector<std::string>& args) { return func(args); }, \
+                    []() { help_func(); } \
+                ); \
+                TestFramework::TestRegistry::getInstance().registerTest( \
+                    #name, \
+                    description, \
+                    test_case \
+                ); \
+            } \
+        }; \
+        static TestRegistrar_##name g_test_registrar_##name; \
+    }
+
+/**
  * 测试框架主函数入口
  * 
  * 自动解析命令行参数，运行指定的测试用例
@@ -205,10 +239,21 @@ public:
             return 1; \
         } \
         \
-        if (opts.test_args.empty()) { \
-            std::cerr << "Error: Missing test argument (e.g., video file path)" << std::endl; \
-            std::cerr << "Usage: " << argv[0] << " -m " << test_name << " <test_file>" << std::endl; \
-            return 1; \
+        /* 获取测试用例对象，检查是否需要参数 */ \
+        auto test_case = registry.findTest(test_name); \
+        if (test_case) { \
+            std::string usage_str = test_case->getUsage(); \
+            if (opts.test_args.empty() && !usage_str.empty()) { \
+                std::cerr << "Error: Missing test arguments" << std::endl; \
+                std::cerr << "Usage: " << argv[0] << " " << test_name << " " << usage_str << std::endl; \
+                std::cerr << std::endl; \
+                test_case->printHelp(); \
+                return 1; \
+            } else if (opts.test_args.empty()) { \
+                std::cerr << "Error: Missing test argument (e.g., video file path)" << std::endl; \
+                std::cerr << "Usage: " << argv[0] << " -m " << test_name << " <test_file>" << std::endl; \
+                return 1; \
+            } \
         } \
         \
         return registry.runTest(test_name, opts.test_args); \

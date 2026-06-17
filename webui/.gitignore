@@ -1,0 +1,3 @@
+# 依赖与本地构建产物（源码与 dist 预构建由仓库提供）
+frontend/node_modules/
+build/
