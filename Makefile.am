@@ -105,7 +105,7 @@ qa_cases_SOURCES = \
     test_cases/logconfig/LogConfigPlugin.cpp
 qa_cases_LDADD = libcomponents.la $(COMMON_LIBS)
 qa_cases_CPPFLAGS = -I$(top_srcdir)/test_cases $(AM_CPPFLAGS)
-qa_cases_LDFLAGS = -L$(STAGING_DIR)/usr/local/lib -L$(TARGET_DIR)/usr/local/lib -Wl,--no-as-needed -Wl,--allow-shlib-undefined
+qa_cases_LDFLAGS = -Wl,--allow-shlib-undefined
 
 # ========== WebUI 服务器 ==========
 # webui_server 复用 qa_cases 的插件（VdecPlugin, DisplayPlugin 等），
@@ -131,7 +131,7 @@ webui_server_SOURCES = \
     test_cases/venc/VencPlugin.cpp
 webui_server_LDADD = libcomponents.la $(COMMON_LIBS)
 webui_server_CPPFLAGS = -I$(top_srcdir)/webui/backend/include -I$(top_srcdir)/webui/backend/third_party -I$(top_srcdir)/test_cases $(AM_CPPFLAGS)
-webui_server_LDFLAGS = -L$(STAGING_DIR)/usr/local/lib -L$(TARGET_DIR)/usr/local/lib -Wl,--no-as-needed -Wl,--allow-shlib-undefined
+webui_server_LDFLAGS = -Wl,--allow-shlib-undefined
 
 # WebUI 前端静态文件安装到 /usr/local/share/webui/
 webuistaticdir = $(prefix)/share/webui
@@ -146,8 +146,8 @@ install-data-local:
 	fi
 
 # ========== 编译选项 ==========
-OPENCV_INCLUDE = -I$(STAGING_DIR)/usr/local/include/opencv4 -I$(TARGET_DIR)/usr/local/include/opencv4
-AM_CPPFLAGS = -I$(top_srcdir)/include $(OPENCV_INCLUDE) -I$(top_srcdir)/include/common/third_party/freetype2 -I$(STAGING_DIR)/usr/local/include/ta-runtime -I$(TARGET_DIR)/usr/local/include/ta-runtime
+OPENCV_INCLUDE = -I$(STAGING_DIR)/usr/include/opencv4
+AM_CPPFLAGS = -I$(top_srcdir)/include $(OPENCV_INCLUDE) -I$(top_srcdir)/include/common/third_party/freetype2
 
 if DEBUG
 AM_CXXFLAGS = -g -O0 -Wall -std=c++17
