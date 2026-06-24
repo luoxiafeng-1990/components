@@ -57,6 +57,19 @@ public:
      */
     virtual bool applyToCodecContext(void* priv_data,
                                      int source_width, int source_height);
+
+    /**
+     * @brief 根据编解码器参数自动配置厂商扩展（如 B 帧探测 → reorder 策略）
+     *
+     * 由 Worker 在 applyToCodecContext() 之前调用。
+     * 厂商实现可根据 codec_id、profile、video_delay 等信息动态调整配置。
+     * 默认实现为空操作。
+     *
+     * @param codec_id      编解码器 ID（AVCodecID）
+     * @param profile       编码 Profile（如 H.264 Baseline=66, Main=77, High=100）
+     * @param video_delay   B 帧导致的参考帧延迟数（> 0 表示有 B 帧）
+     */
+    virtual void autoConfigureFromCodecParams(int codec_id, int profile, int video_delay);
 };
 
 inline bool IDecoderVendorExtension::validate(std::string& /*err*/) const {
@@ -79,6 +92,11 @@ inline int IDecoderVendorExtension::getOutputHeight(int /*channel*/) const {
 inline bool IDecoderVendorExtension::applyToCodecContext(
     void* /*priv_data*/, int /*source_width*/, int /*source_height*/) {
     return true;
+}
+
+inline void IDecoderVendorExtension::autoConfigureFromCodecParams(
+    int /*codec_id*/, int /*profile*/, int /*video_delay*/) {
+    // 默认空实现：不做任何自动配置
 }
 
 #endif

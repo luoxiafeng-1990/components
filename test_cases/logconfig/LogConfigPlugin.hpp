@@ -2,6 +2,7 @@
 
 #include "common/IOptionPlugin.hpp"
 #include <string>
+#include <fstream>
 #include <vector>
 #include <map>
 #include <log4cplus/logger.h>
@@ -59,8 +60,13 @@ private:
         bool changed = false;
     };
 
+    bool saveToFile(const std::vector<TuiEntry>& entries);
+
     void tuiCycleLevel(TuiEntry& entry);
     void tuiApply(const std::vector<TuiEntry>& entries);
+
+    /// 统一配置文件路径（与 Logger.hpp 保持一致）
+    static constexpr const char* kConfigFilePath = "/etc/logger.properties";
     void renderFullScreen(const std::vector<TuiEntry>& entries,
                           int cursor, int scroll_offset, int visible);
     static int getTerminalRows();

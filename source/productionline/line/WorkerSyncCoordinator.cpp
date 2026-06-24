@@ -4,6 +4,28 @@
 #include <log4cplus/loggingmacros.h>
 #include <set>
 #include <chrono>
+#include <type_traits>
+
+namespace {
+template <typename T, typename = void>
+struct has_mat_avframe_constructor : std::false_type {};
+
+template <typename T>
+struct has_mat_avframe_constructor<T, std::void_t<decltype(cv::Mat(std::declval<T>()))>> : std::true_type {};
+
+template <typename T>
+typename std::enable_if<has_mat_avframe_constructor<T>::value, cv::Mat>::type
+construct_mat_from_avframe(T frame) {
+    return cv::Mat(frame);
+}
+
+template <typename T>
+typename std::enable_if<!has_mat_avframe_constructor<T>::value, cv::Mat>::type
+construct_mat_from_avframe(T frame) {
+    (void)frame;
+    return cv::Mat();
+}
+}
 
 // ============================================================
 // CompareCallbackContext 成员方法实现
@@ -715,7 +737,7 @@ CallbackChainItem WorkerSyncCoordinator::createOpenCVCallback(
             if (buffer1->getMat()) {
                 mat1 = *buffer1->getMat();
             } else if (buffer1->getAVFrame()) {
-                mat1 = cv::Mat(buffer1->getAVFrame());
+                mat1 = construct_mat_from_avframe(buffer1->getAVFrame());
             } else {
                 LOG4CPLUS_WARN_FMT(logger,
                     "[Frame %llu] Buffer1 无法转换为 Mat",
@@ -727,7 +749,7 @@ CallbackChainItem WorkerSyncCoordinator::createOpenCVCallback(
             if (buffer2->getMat()) {
                 mat2 = *buffer2->getMat();
             } else if (buffer2->getAVFrame()) {
-                mat2 = cv::Mat(buffer2->getAVFrame());
+                mat2 = construct_mat_from_avframe(buffer2->getAVFrame());
             } else {
                 LOG4CPLUS_WARN_FMT(logger,
                     "[Frame %llu] Buffer2 无法转换为 Mat",

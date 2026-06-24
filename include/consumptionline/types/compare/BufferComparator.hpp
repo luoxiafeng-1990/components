@@ -65,6 +65,15 @@ struct FrameCompareResult {
         WARN,    // 警告（边界）
         FAIL     // 失败
     } level = PASS;
+
+    // ========== 颜色空间（用于日志/统计标签） ==========
+    enum ColorSpace {
+        COLOR_UNKNOWN,
+        COLOR_YUV,
+        COLOR_RGB,
+        COLOR_BGR,
+        COLOR_MIXED
+    } color_space = COLOR_UNKNOWN;
     
     std::string error_message;
     
@@ -187,6 +196,8 @@ private:
     double min_ssim_y_;
     double max_ssim_y_;
     
+    FrameCompareResult::ColorSpace stats_color_space_;
+    
     // ========== 失败帧列表 ==========
     std::vector<FrameCompareResult> failures_;
     std::vector<FrameCompareResult> warnings_;
@@ -199,6 +210,7 @@ private:
         AVPixelFormat format;
         bool is_yuv;
         bool is_rgb;
+        bool is_bgr;      // BGR 格式（如 BGR24, BGRA 等）
         bool is_planar;
         bool is_mat = false;   // Buffer 中存储的是 cv::Mat（非 AVFrame）
         int num_planes;
@@ -240,7 +252,15 @@ private:
         const ImageMeta& ref_img, const FormatInfo& ref_info,
         const ImageMeta& test_img, const FormatInfo& test_info
     );
-    
+
+    /**
+     * @brief BGR格式对比（不区分策略，三个通道全部计算）
+     */
+    FrameCompareResult compareBGR(
+        const ImageMeta& ref_img, const FormatInfo& ref_info,
+        const ImageMeta& test_img, const FormatInfo& test_info
+    );
+
     /**
      * @brief 混合格式对比（需要转换）
      */

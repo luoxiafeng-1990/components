@@ -26,6 +26,8 @@ public:
     bool applyToCodecContext(void* priv_data,
                              int source_width, int source_height) override;
 
+    void autoConfigureFromCodecParams(int codec_id, int profile, int video_delay) override;
+
     // ========================================
     // Taco 厂商专属映射（从 TacoConfigBuilder / FFmpegDecodeWorker 迁入）
     // ========================================

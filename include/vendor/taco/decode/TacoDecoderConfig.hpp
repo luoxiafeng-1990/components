@@ -78,7 +78,17 @@ enum class TacoColorSpace {
  * 由 TacoDecoderExtension 持有；通过 tacoDecoderConfig(DecoderConfig&) 访问。
  */
 struct TacoConfig {
-    bool reorder_disable = true;
+    // B 帧重排序模式：
+    //   AUTO = 自动探测（默认）：有 B 帧则开启 reorder，无则关闭以降低延迟
+    //   ON   = 强制开启 reorder（始终排序，保证帧序正确）
+    //   OFF  = 强制关闭 reorder（低延迟，但 B 帧会乱序）
+    enum class ReorderMode { AUTO, ON, OFF };
+    ReorderMode reorder_mode = ReorderMode::AUTO;
+
+    // AUTO 模式下自动探测的结果（由 TacoDecoderExtension::autoConfigureFromCodecParams 写入）
+    // 非 AUTO 模式下此字段无意义
+    bool reorder_disable_resolved = false;
+
 
     bool ch0_enable = true;
     int ch0_yuv_format = -1;

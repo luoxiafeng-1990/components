@@ -336,7 +336,7 @@ std::vector<WorkerConfig> VdecPlugin::buildPipelineConfigs(const WorkerConfig& s
         if (is_compare && use_hw) {
             auto* taco_cfg = tacoDecoderConfig(cfg.decoder);
             if (taco_cfg) {
-                taco_cfg->reorder_disable = false;
+                taco_cfg->reorder_mode = TacoConfig::ReorderMode::ON;
             }
         }
 

@@ -63,10 +63,7 @@ namespace {
     inline void initializeLogger() {
         // 尝试加载配置文件
         std::vector<std::string> config_paths = {
-            "./logger.properties",           // 当前目录（优先）
-            "/etc/logger.properties",        // 系统配置
-            "../logger.properties",          // 上级目录
-            "logger.properties"              // 备选
+            "/etc/logger.properties"
         };
         
         bool config_loaded = false;

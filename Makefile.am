@@ -19,6 +19,7 @@ libcomponents_la_SOURCES = \
     source/productionline/worker/config/WorkerConfig.cpp \
     source/productionline/worker/config/ConsumerTypeConfig.cpp \
     source/consumptionline/config/ConsumerTypeConfigBuilder.cpp \
+    source/productionline/worker/OpencvWorker.cpp \
     source/vendor/contracts/DecoderVendorRegistry.cpp \
     source/vendor/taco/decode/TacoDecoderExtension.cpp \
     source/vendor/taco/decode/TacoDecoderPluginLoader.cpp \
@@ -89,6 +90,8 @@ NPU_LIBS = -lta_runtime -lVIPhal -lNBGlinker
 # ========== QA 测试程序（模块化测试入口）==========
 bin_PROGRAMS = qa_cases webui_server
 
+# ========== Deprecated 调试工具已移除（opencv_decode_compare_mt / opencv_decode_hw_mat_resize）==========
+
 # ========== Mat(AVFrame*) 接口最小化测试 ==========
 qa_cases_SOURCES = \
     test_cases/test_module_main.cpp \
@@ -104,8 +107,7 @@ qa_cases_SOURCES = \
     test_cases/memleak/MemleakPlugin.cpp \
     test_cases/logconfig/LogConfigPlugin.cpp
 qa_cases_LDADD = libcomponents.la $(COMMON_LIBS)
-qa_cases_CPPFLAGS = -I$(top_srcdir)/test_cases $(AM_CPPFLAGS)
-qa_cases_LDFLAGS = -Wl,--allow-shlib-undefined
+qa_cases_LDFLAGS = -L=/usr/local/lib -Wl,--allow-shlib-undefined
 
 # ========== WebUI 服务器 ==========
 # webui_server 复用 qa_cases 的插件（VdecPlugin, DisplayPlugin 等），
@@ -131,7 +133,7 @@ webui_server_SOURCES = \
     test_cases/venc/VencPlugin.cpp
 webui_server_LDADD = libcomponents.la $(COMMON_LIBS)
 webui_server_CPPFLAGS = -I$(top_srcdir)/webui/backend/include -I$(top_srcdir)/webui/backend/third_party -I$(top_srcdir)/test_cases $(AM_CPPFLAGS)
-webui_server_LDFLAGS = -Wl,--allow-shlib-undefined
+webui_server_LDFLAGS = -L=/usr/local/lib -Wl,--allow-shlib-undefined
 
 # WebUI 前端静态文件安装到 /usr/local/share/webui/
 webuistaticdir = $(prefix)/share/webui
@@ -146,8 +148,8 @@ install-data-local:
 	fi
 
 # ========== 编译选项 ==========
-OPENCV_INCLUDE = -I$(STAGING_DIR)/usr/include/opencv4
-AM_CPPFLAGS = -I$(top_srcdir)/include $(OPENCV_INCLUDE) -I$(top_srcdir)/include/common/third_party/freetype2
+OPENCV_INCLUDE = -I$(STAGING_DIR)/usr/local/include/opencv4 -I$(TARGET_DIR)/usr/local/include/opencv4
+AM_CPPFLAGS = -I$(top_srcdir)/include $(OPENCV_INCLUDE) -I$(top_srcdir)/include/common/third_party/freetype2 -I$(STAGING_DIR)/usr/local/include/ta-runtime -I$(TARGET_DIR)/usr/local/include/ta-runtime
 
 if DEBUG
 AM_CXXFLAGS = -g -O0 -Wall -std=c++17

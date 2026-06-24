@@ -260,7 +260,9 @@ struct ConsumerTypeConfig {
             BITWISE_OR,   ///< cv::bitwise_or 按位或（多生产者对比）
             BITWISE_XOR,  ///< cv::bitwise_xor 按位异或（多生产者对比）
             BITWISE_NOT,  ///< cv::bitwise_not 按位非（单生产者）
-            RESIZE,       ///< cv::resize 缩放
+            RESIZE,       ///< cv::resize 缩放（通用，兼容旧代码）
+            RESIZE_WH,    ///< cv::resize 按目标宽高缩放
+            RESIZE_XY,    ///< cv::resize 按缩放因子缩放
             CROP,         ///< ROI 裁剪（src(cv::Rect(...))）
             ERODE,        ///< cv::erode 腐蚀
             DILATE,       ///< cv::dilate 膨胀
@@ -280,6 +282,8 @@ struct ConsumerTypeConfig {
             SPLIT,        ///< cv::split 通道分离
             MERGE,        ///< cv::merge 通道合并
             CVTCOLOR,     ///< cv::cvtColor 颜色空间转换
+            IMWRITE,      ///< cv::imwrite 保存图片
+            IMREAD,       ///< cv::imread 读取图片
         };
         OpType op_type = OpType::NONE;
 
@@ -444,8 +448,18 @@ struct ConsumerTypeConfig {
         struct ColorConvert {
             int    code = 0;         ///< cv::ColorConversionCodes
             int    dstCn = 0;        ///< 目标通道数（0=自动）
+            std::string dst_fmt;     ///< 目标格式字符串（如 "bgr888"）
             ColorConvert() = default;
         } cvtcolor;
+
+        // ----------------------------------------
+        // cv::imwrite JPEG 保存参数（v3.4 新增）
+        // ----------------------------------------
+        struct Imwrite {
+            bool   jpeg_progressive = false; ///< 是否使用渐进式 JPEG
+            int    jpeg_quality = 95;        ///< JPEG 质量 1-100
+            Imwrite() = default;
+        } imwrite;
 
         std::unique_ptr<IOpencvVendorExtension> vendor;
 

@@ -979,6 +979,7 @@ bool FFmpegDecodeWorker::initializeDecoder(const AVCodecParameters* codec_params
     }
     
     // 2. 分配解码器上下文
+    fprintf(stderr, "[DIAG] calling avcodec_alloc_context3...\n"); fflush(stderr);
     codec_ctx_ptr_ = avcodec_alloc_context3(codec);
     if (!codec_ctx_ptr_) {
         LOG4CPLUS_ERROR(logger_, " Failed to allocate codec context");
@@ -986,6 +987,7 @@ bool FFmpegDecodeWorker::initializeDecoder(const AVCodecParameters* codec_params
     }
     
     // 3. 复制参数到解码器上下文
+    fprintf(stderr, "[DIAG] calling avcodec_parameters_to_context...\n"); fflush(stderr);
     int ret = avcodec_parameters_to_context(codec_ctx_ptr_, codecpar);
     if (ret < 0) {
         char err_buf[AV_ERROR_MAX_STRING_SIZE];
@@ -1001,6 +1003,12 @@ bool FFmpegDecodeWorker::initializeDecoder(const AVCodecParameters* codec_params
     //    ⭐ v3.1: 通过 IDecoderVendorExtension::applyToCodecContext() 委托，
     //          Worker 核心不再包含任何厂商特有的 PP 配置逻辑
     if (isHardwareDecoder(codec) && worker_config_.decoder.vendor) {
+        // ⭐ v3.2: B 帧自动探测 → 动态配置 reorder 策略
+        fprintf(stderr, "[DIAG] calling autoConfigureFromCodecParams...\n"); fflush(stderr);
+        worker_config_.decoder.vendor->autoConfigureFromCodecParams(
+            codecpar->codec_id, codecpar->profile, codecpar->video_delay);
+        
+        fprintf(stderr, "[DIAG] calling applyToCodecContext...\n"); fflush(stderr);
         if (!worker_config_.decoder.vendor->applyToCodecContext(
                 codec_ctx_ptr_->priv_data,
                 codec_ctx_ptr_->width,

@@ -1,6 +1,7 @@
 #include "vendor/taco/decode/TacoDecoderExtension.hpp"
 #include "vendor/contracts/DecoderVendorRegistry.hpp"
 #include <algorithm>
+#include <cstdio>
 
 extern "C" {
 #include <libavutil/opt.h>
@@ -82,11 +83,19 @@ bool TacoDecoderExtension::applyToCodecContext(
 
     int ret;
 
-    // ── 解码器行为 ──
+    // ── 解码器行为：B 帧重排序 ──
+    bool actual_reorder_disable;
+    switch (config.reorder_mode) {
+        case TacoConfig::ReorderMode::ON:   actual_reorder_disable = false; break;
+        case TacoConfig::ReorderMode::OFF:  actual_reorder_disable = true;  break;
+        default: /* AUTO */                 actual_reorder_disable = config.reorder_disable_resolved; break;
+    }
     ret = av_opt_set_int(priv_data, "reorder_disable",
-                         config.reorder_disable ? 1 : 0, 0);
-    fprintf(stderr, "[TACO]   reorder_disable=%d: %s\n",
-            config.reorder_disable ? 1 : 0, ret < 0 ? "FAILED" : "OK");
+                         actual_reorder_disable ? 1 : 0, 0);
+    const char* mode_str = (config.reorder_mode == TacoConfig::ReorderMode::AUTO) ? "AUTO" :
+                           (config.reorder_mode == TacoConfig::ReorderMode::ON)   ? "ON" : "OFF";
+    fprintf(stderr, "[TACO]   reorder_disable=%d (mode=%s): %s\n",
+            actual_reorder_disable ? 1 : 0, mode_str, ret < 0 ? "FAILED" : "OK");
 
     // ── 通道启用 ──
     ret = av_opt_set_int(priv_data, "ch0_enable",
@@ -197,6 +206,48 @@ bool TacoDecoderExtension::applyToCodecContext(
     }
 
     return true;
+}
+
+void TacoDecoderExtension::autoConfigureFromCodecParams(
+    int codec_id, int profile, int video_delay)
+{
+    // 非 AUTO 模式：用户强制指定，不自动探测
+    if (config.reorder_mode != TacoConfig::ReorderMode::AUTO) {
+        return;
+    }
+
+    bool has_b_frames = false;
+
+    // 依据1：容器元数据标记 video_delay > 0 → 确定有 B 帧
+    if (video_delay > 0) {
+        has_b_frames = true;
+    }
+
+    // 依据2：H.264 Profile 判断
+    //   Baseline(66) / Constrained Baseline(578) → 规范禁止 B 帧
+    //   Main(77) / High(100) / 其他 → 可能有 B 帧
+    // AV_CODEC_ID_H264 = 27
+    if (codec_id == 27) {
+        if (profile != 66 && profile != 578) {
+            has_b_frames = true;
+        }
+    }
+
+    // 依据3：H.265/HEVC Main profile 及以上基本都有 B 帧
+    // AV_CODEC_ID_HEVC = 173
+    if (codec_id == 173) {
+        has_b_frames = true;
+    }
+
+    // 结论：有 B 帧 → 必须开启 reorder（reorder_disable = false）
+    //       无 B 帧 → 关闭 reorder 降低延迟（reorder_disable = true）
+    config.reorder_disable_resolved = !has_b_frames;
+
+    fprintf(stderr, "[TACO] B-frame auto-detect: codec_id=%d, profile=%d, "
+            "video_delay=%d → has_b_frames=%s → reorder_disable=%d\n",
+            codec_id, profile, video_delay,
+            has_b_frames ? "true" : "false",
+            config.reorder_disable_resolved ? 1 : 0);
 }
 
 TacoDecoderExtension* tacoVendorExtension(WorkerConfig::DecoderConfig& d) {

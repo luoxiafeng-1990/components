@@ -31,7 +31,7 @@
 #include "consumptionline/core/IBufferConsumer.hpp"
 #include "bufferpool/buffer/Buffer.hpp"
 
-#include <ta-runtime-api.h>
+#include <ta-runtime/ta-runtime-api.h>
 #include <opencv2/core.hpp>
 
 #include <string>

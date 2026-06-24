@@ -659,15 +659,22 @@ bool FFmpegEncodeWorker::initializeEncoder() {
     codec_ctx_ptr_->framerate = {enc_config.framerate_num, enc_config.framerate_den};
     const AVPixelFormat user_input_pix_fmt = static_cast<AVPixelFormat>(enc_config.input_pix_fmt);
     
-    // TACO 硬件编码器只接受 NV12，需要将其他格式转换为 NV12
+    // TACO 硬件编码器支持 15 种输入像素格式（EA6530 规格书 Table 29-1）：
+    //   YUV420P, NV12, NV21, YUYV422, UYVY422,
+    //   RGB444, BGR444, RGB555, BGR555, RGB565, BGR565,
+    //   RGB888, BGR888(BRG888), RGB101010, BGR101010(BRG101010)
+    // 硬件预处理管线（Table 29-3）自动执行 RGB→YCbCr 4:2:0 色彩空间转换
+    // （BT.601 / BT.709 / 用户自定义系数），无需软件层做格式转换。
+    //
+    // FFmpeg h264_taco/hevc_taco codec 的 pix_fmts[] 已注册全部格式，
+    // ff_av_to_taco_jenc_pix_fmt() 负责 AVPixelFormat → TaEncFrameType 映射。
+    // 直接传递用户指定的输入格式给编码器，避免不必要的有损 swscale 转换。
     if (encoder_name_.find("taco") != std::string::npos) {
-        codec_ctx_ptr_->pix_fmt = AV_PIX_FMT_NV12;
-        if (user_input_pix_fmt != AV_PIX_FMT_NV12) {
-            LOG4CPLUS_INFO_FMT(logger_,
-                "[EncodeWorker] TACO 硬件编码器需 NV12，输入格式=%s，将自动转换",
-                av_get_pix_fmt_name(user_input_pix_fmt) ? av_get_pix_fmt_name(user_input_pix_fmt) : "unknown");
-            format_conversion_needed_ = true;
-        }
+        codec_ctx_ptr_->pix_fmt = user_input_pix_fmt;
+        format_conversion_needed_ = false;
+        LOG4CPLUS_INFO_FMT(logger_,
+            "[EncodeWorker] TACO 硬件编码器直接接受输入格式=%s（硬件预处理管线自动转换）",
+            av_get_pix_fmt_name(user_input_pix_fmt) ? av_get_pix_fmt_name(user_input_pix_fmt) : "unknown");
     } else {
         codec_ctx_ptr_->pix_fmt = user_input_pix_fmt;
     }

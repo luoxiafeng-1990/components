@@ -471,6 +471,19 @@ int PPPlugin::handlePreActions() {
                 )
                 .setGlobalConfig(preset.global)
                 .build();
+
+            // 预设中的 PP 分辨率回写到 pp_width_/pp_height_（与 CLI 传参等价）
+            // 修复：若 CLI 未显式指定 -W/-H，则从预设的 TacoConfig 中读取，
+            // 避免 buildTacoDecoder() 因 pp_width_=0 回退到默认的 1920x1080
+            if (pp_width_ <= 0 || pp_height_ <= 0) {
+                auto* taco = tacoDecoderConfig(config_.decoder);
+                if (taco) {
+                    if (pp_width_ <= 0 && taco->ch0_scale_width > 0)
+                        pp_width_ = taco->ch0_scale_width;
+                    if (pp_height_ <= 0 && taco->ch0_scale_height > 0)
+                        pp_height_ = taco->ch0_scale_height;
+                }
+            }
             continue;
         }
         if (config_.data_source.path.empty()) {

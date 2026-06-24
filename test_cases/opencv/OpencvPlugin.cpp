@@ -8,7 +8,9 @@
 #include <iostream>
 #include <getopt.h>
 #include <cstring>
+#include <cstdlib>
 #include <sstream>
+#include <limits>
 #include <log4cplus/loggingmacros.h>
 
 namespace test {
@@ -22,156 +24,9 @@ using OpencvTestSuite = OpencvPlugin;
 // ========================================
 
 const std::map<std::string, OpencvTestParams>& OpencvPlugin::getPredefinedTests() {
-    static std::map<std::string, OpencvTestParams> tests = []() {
-        std::map<std::string, OpencvTestParams> m;
-
-        auto add = [&](const std::string& name,
-                       OpencvTestParams::OpType op,
-                       bool hw,
-                       const std::string& params_str) {
-            OpencvTestParams p;
-            p.opencv_op    = op;
-            p.use_hardware = hw;
-            p.params_str   = params_str;
-            m[name] = p;
-        };
-
-        using OpType = OpencvTestParams::OpType;
-
-        // ---- OpenCV resize 预定义测试 ----
-        add("cv_resize_h264_1080p_to_720p_30",    OpType::RESIZE, true,  "resize_1280_720");
-        add("cv_resize_h264_1080p_to_480p_30",    OpType::RESIZE, true,  "resize_640_480");
-        add("cv_resize_h265_1080p_to_720p_30",    OpType::RESIZE, true,  "resize_1280_720");
-        add("cv_resize_sw_h264_1080p_to_720p_30", OpType::RESIZE, false, "resize_1280_720");
-
-        // ---- OpenCV crop 预定义测试 ----
-        add("cv_crop_h264_1080p_topleft_30",    OpType::CROP, true,  "crop_960_540");
-        add("cv_crop_h264_1080p_center_30",     OpType::CROP, true,  "crop_960_540");
-        add("cv_crop_h265_1080p_topleft_30",    OpType::CROP, true,  "crop_960_540");
-        add("cv_crop_sw_h264_1080p_topleft_30", OpType::CROP, false, "crop_960_540");
-
-        // ---- OpenCV erode 预定义测试 ----
-        add("cv_erode_h264_1080p_k3_30",     OpType::ERODE,       true,  "erode_3_1");
-        add("cv_erode_h264_1080p_k5_30",     OpType::ERODE,       true,  "erode_5_1");
-        add("cv_erode_sw_h264_1080p_k3_30",  OpType::ERODE,       false, "erode_3_1");
-
-        // ---- OpenCV dilate 预定义测试 ----
-        add("cv_dilate_h264_1080p_k3_30",    OpType::DILATE,      true,  "dilate_3_1");
-        add("cv_dilate_h264_1080p_k5_30",    OpType::DILATE,      true,  "dilate_5_1");
-        add("cv_dilate_sw_h264_1080p_k3_30", OpType::DILATE,      false, "dilate_3_1");
-
-        // ---- OpenCV 开运算（先腐蚀后膨胀）预定义测试 ----
-        add("cv_open_h264_1080p_k3_30",      OpType::MORPH_OPEN,  true,  "open_3_1");
-        add("cv_open_h264_1080p_k5_30",      OpType::MORPH_OPEN,  true,  "open_5_1");
-
-        // ---- OpenCV 闭运算（先膨胀后腐蚀）预定义测试 ----
-        add("cv_close_h264_1080p_k3_30",     OpType::MORPH_CLOSE, true,  "close_3_1");
-        add("cv_close_h264_1080p_k5_30",     OpType::MORPH_CLOSE, true,  "close_5_1");
-
-        // ---- OpenCV Sobel 边缘检测 ----
-        add("cv_sobel_h264_1080p_dx_30",     OpType::SOBEL,        true, "sobel_1_0_3");
-        add("cv_sobel_h264_1080p_dy_30",     OpType::SOBEL,        true, "sobel_0_1_3");
-
-        // ---- OpenCV Canny 边缘检测 ----
-        add("cv_canny_h264_1080p_30",        OpType::CANNY,        true, "canny_100_200");
-
-        // ---- OpenCV Laplacian 拉普拉斯边缘 ----
-        add("cv_laplacian_h264_1080p_30",    OpType::LAPLACIAN,    true, "laplacian_1");
-
-        // ---- WarpAffine 平移 ----
-        add("cv_translate_h264_1080p_30",    OpType::TRANSLATE,    true, "translate_100_50");
-
-        // ---- WarpAffine 旋转 ----
-        add("cv_rotate_h264_1080p_30",       OpType::ROTATE,       true, "rotate_45_1");
-
-        // ---- WarpPerspective 透视变换 ----
-        add("cv_perspective_h264_1080p_30",  OpType::PERSPECTIVE,  true, "perspective_50");
-
-        // ---- cv::line 画线 ----
-        add("cv_line_h264_1080p_30",         OpType::DRAW_LINE,    true, "line_0_0_1919_1079");
-
-        // ---- cv::rectangle 画矩形 ----
-        add("cv_rectangle_h264_1080p_30",    OpType::DRAW_RECT,    true, "rectangle_100_100_300_300");
-
-        // ---- cv::putText 绘文字 ----
-        add("cv_puttext_h264_1080p_30",      OpType::PUT_TEXT,     true, "puttext_50_100");
-
-        // ---- cv::GaussianBlur 高斯模糊 ----
-        add("cv_blur_h264_1080p_k5_30",      OpType::GAUSSIAN_BLUR,true, "blur_5_0");
-
-        // ---- cv::threshold 二值化 ----
-        add("cv_threshold_h264_1080p_30",    OpType::THRESHOLD,    true, "threshold_128_255");
-
-        // ---- cv::split 通道分离测试 ----
-        add("cv_split_h264_1080p_30",        OpType::SPLIT,        true, "split_3");
-        add("cv_split_h265_1080p_30",        OpType::SPLIT,        true, "split_3");
-        add("cv_split_sw_h264_1080p_30",     OpType::SPLIT,        false, "split_3");
-
-        // ---- cv::merge 通道合并测试 ----
-        add("cv_merge_h264_1080p_30",        OpType::MERGE,        true, "merge_3");
-        add("cv_merge_h265_1080p_30",        OpType::MERGE,        true, "merge_3");
-        add("cv_merge_sw_h264_1080p_30",     OpType::MERGE,        false, "merge_3");
-
-        // ---- cv::cvtColor 颜色空间转换测试 ----
-        // code=40: CV_YUV2BGR_NV12, code=91: CV_YUV2GRAY_NV12, code=116: CV_YUV2RGB_NV12
-        add("cv_cvtcolor_h264_1080p_30",     OpType::CVTCOLOR,     true, "cvtcolor_40");
-        add("cv_cvtcolor_h265_1080p_30",     OpType::CVTCOLOR,     true, "cvtcolor_40");
-        add("cv_cvtcolor_sw_h264_1080p_30",  OpType::CVTCOLOR,     false, "cvtcolor_40");
-
-        // ---- OpenCV ADD 算术运算测试（多生产者对比）----
-        // 注：ADD 操作在 COMPARE 模式中执行，对比 hw_decoder 和 sw_decoder 的输出
-        // hw_mat + sw_mat 的结果，然后计算与原始 buffer 的 PSNR/SSIM
-        add("cv_add_h264_hw_vs_sw_psnr_30",  OpType::ADD,   true,  "add_psnr");
-        add("cv_add_h264_hw_vs_sw_ssim_30",  OpType::ADD,   true,  "add_ssim");
-        add("cv_add_h265_hw_vs_sw_psnr_30",  OpType::ADD,   true,  "add_psnr");
-
-        // ---- OpenCV ABSDIFF 算术运算测试（多生产者对比）----
-        // 注：ABSDIFF 计算 hw 和 sw 解码输出的绝对差，用于检测两者的差异
-        // absdiff(hw_mat, sw_mat) 的结果，然后计算与原始 buffer 的 PSNR/SSIM
-        add("cv_absdiff_h264_hw_vs_sw_psnr_30",  OpType::ABSDIFF,   true,  "absdiff_psnr");
-        add("cv_absdiff_h264_hw_vs_sw_ssim_30",  OpType::ABSDIFF,   true,  "absdiff_ssim");
-        add("cv_absdiff_h265_hw_vs_sw_psnr_30",  OpType::ABSDIFF,   true,  "absdiff_psnr");
-
-        // ---- OpenCV ADD_WEIGHTED 加权求和测试（多生产者对比）----
-        // 注：addWeighted(hw, 0.5, sw, 0.5, 0) 计算两个解码器输出的加权平均
-        add("cv_addweighted_h264_hw_vs_sw_psnr_30",  OpType::ADD_WEIGHTED,  true,  "addweighted_psnr");
-        add("cv_addweighted_h264_hw_vs_sw_ssim_30",  OpType::ADD_WEIGHTED,  true,  "addweighted_ssim");
-        add("cv_addweighted_h265_hw_vs_sw_psnr_30",  OpType::ADD_WEIGHTED,  true,  "addweighted_psnr");
-
-        // ---- OpenCV BITWISE_AND 按位与测试（多生产者对比）----
-        // 注：bitwise_and(hw, sw) 计算两个解码器输出的按位与
-        add("cv_bitwiseand_h264_hw_vs_sw_psnr_30",  OpType::BITWISE_AND,  true,  "bitwiseand_psnr");
-        add("cv_bitwiseand_h264_hw_vs_sw_ssim_30",  OpType::BITWISE_AND,  true,  "bitwiseand_ssim");
-
-        // ---- OpenCV BITWISE_OR 按位或测试（多生产者对比）----
-        // 注：bitwise_or(hw, sw) 计算两个解码器输出的按位或
-        add("cv_bitwiseor_h264_hw_vs_sw_psnr_30",  OpType::BITWISE_OR,  true,  "bitwiseor_psnr");
-        add("cv_bitwiseor_h264_hw_vs_sw_ssim_30",  OpType::BITWISE_OR,  true,  "bitwiseor_ssim");
-
-        // ---- OpenCV BITWISE_XOR 按位异或测试（多生产者对比）----
-        // 注：bitwise_xor(hw, sw) 计算两个解码器输出的按位异或
-        add("cv_bitwisexor_h264_hw_vs_sw_psnr_30",  OpType::BITWISE_XOR,  true,  "bitwisexor_psnr");
-        add("cv_bitwisexor_h264_hw_vs_sw_ssim_30",  OpType::BITWISE_XOR,  true,  "bitwisexor_ssim");
-
-        // ---- OpenCV BITWISE_NOT 按位非测试（多生产者对比）----
-        // 注：bitwise_not(hw) 计算硬件解码器输出的按位非
-        add("cv_bitwisenot_h264_hw_vs_sw_psnr_30",  OpType::BITWISE_NOT,  true,  "bitwisenot_psnr");
-        add("cv_bitwisenot_h264_hw_vs_sw_ssim_30",  OpType::BITWISE_NOT,  true,  "bitwisenot_ssim");
-
-        // ---- OpenCV SAVE_LOAD_IMG 图片保存和读取测试（单生产者I/O测试）----
-        // 注：SAVE_LOAD_IMG 操作在 SINGLE 模式中执行，测试硬件解码器输出的图片保存/读取流程
-        // 硬件 Mat -> cv::imwrite -> cv::imread -> 与原始 Mat 比较
-        add("cv_saveloadimg_h264_hw_psnr_30",  OpType::SAVE_LOAD_IMG,  true,  "saveloadimg_psnr");
-        add("cv_saveloadimg_h264_hw_ssim_30",  OpType::SAVE_LOAD_IMG,  true,  "saveloadimg_ssim");
-        add("cv_saveloadimg_h265_hw_psnr_30",  OpType::SAVE_LOAD_IMG,  true,  "saveloadimg_psnr");
-
-        return m;
-    }();
+    static std::map<std::string, OpencvTestParams> tests;
     return tests;
 }
-
-
-
 
 void OpencvPlugin::listTests() const {
     std::cout << "\nAvailable OpenCV tests:\n"
@@ -190,13 +45,46 @@ void OpencvPlugin::listTests() const {
 
 void OpencvPlugin::registerOptions(CLI::App& app) {
     app.add_flag("-l,--list", show_list_, "列出所有预定义测试");
-    app.add_option("-f,--file", input_path_, "视频文件路径");
-    app.add_option("-c,--case", case_str_, "OpenCV 操作类型");
-    app.add_option("--params", params_str_, "操作参数");
-    app.add_option("-m,--max-frames", max_frames_, "最大帧数");
-    app.add_flag("-p,--psnr", enable_psnr_, "启用 PSNR 验证");
-    app.add_flag("-s,--ssim", enable_ssim_, "启用 SSIM 验证");
     app.add_flag("-v,--verbose", verbose_, "得分详细输出");
+    app.add_option("-f,--file", input_path_, "视频文件路径");
+    app.add_option("-c,--case", case_str_, "OpenCV 操作类型（resize_wh / resize_xy / ...）")->required();
+    app.add_option("-m,--max-frames", max_frames_, "最大帧数");
+    app.add_option("--min-fps", min_fps_, "性能最低帧率");
+    app.add_option("--dst-fmt", dst_fmt_, "cvtColor目标格式");
+    app.add_flag("--progressive", jpeg_progressive_, "JPEG_PROGRESSIVE");
+    app.add_option("--quality", quality_, "JPEG_QUALITY")->check(CLI::Range(0,100));
+    app.add_flag("--sw", use_software, "use_software");
+    app.add_option("--src-fmt", src_pix_fmt, "source data pixel format");
+
+    // 连体婴
+    auto* src_w_opt = app.add_option("--src_w", src_width_, "image original 宽度")->check(CLI::Range(0, 10000));
+    auto* src_h_opt = app.add_option("--src_h", src_height_, "image original 高度")->check(CLI::Range(0, 10000));
+    src_w_opt->needs(src_h_opt);
+    src_h_opt->needs(src_w_opt);
+
+    // 连体婴
+    auto* dst_w_opt = app.add_option("--dst_w", dst_width_, "resize_wh/crop 目标宽度")->check(CLI::Range(-100, 10000));
+    auto* dst_h_opt = app.add_option("--dst_h", dst_height_, "resize_wh/crop 目标高度")->check(CLI::Range(-100, 10000));
+    dst_w_opt->needs(dst_h_opt);
+    dst_h_opt->needs(dst_w_opt);
+
+    app.add_option("--interpolation", interpolation, "插值算法")->check(CLI::Range(0,1));
+
+    // 连体婴
+    auto* fx_opt = app.add_option("--fx", resize_fx_, "resize_xy 水平缩放比例")->check(CLI::Range(0.0078125, 128.0));
+    auto* fy_opt = app.add_option("--fy", resize_fy_, "resize_xy 垂直缩放比例")->check(CLI::Range(0.0078125, 128.0));
+    fx_opt->needs(fy_opt);
+    fy_opt->needs(fx_opt);
+
+    // 连体婴
+    auto* x_opt = app.add_option("--x", crop_x_, "crop 起始 x 坐标")->check(CLI::Range(0, 10000));
+    auto* y_opt = app.add_option("--y", crop_y_, "crop 起始 y 坐标")->check(CLI::Range(0, 10000));
+    x_opt->needs(y_opt);
+    y_opt->needs(x_opt);
+
+    // 可选能力开关（可叠加）
+    app.add_flag("--compare", enable_compare_, "启用 PSNR/SSIM 像素比较");
+    app.add_flag("--perf", enable_perf_, "启用性能计时");
 }
 
 void OpencvPlugin::applyTo(WorkerConfig& config) const {
@@ -204,212 +92,162 @@ void OpencvPlugin::applyTo(WorkerConfig& config) const {
 }
 
 int OpencvPlugin::handlePreActions() {
-    for (const auto& arg : positional_args_) {
-        const auto& tests = getPredefinedTests();
-        auto it = tests.find(arg);
-        if (it != tests.end()) {
-            params_ = it->second;
-            continue;
-        }
-        if (input_path_.empty()) {
-            input_path_ = arg;
-        }
-    }
-
-    if (show_list_) { listTests(); return 0; }
-    if (input_path_.empty()) {
-        std::cerr << "Error: No input file specified\n" << std::endl;
-        return 1;
-    }
     return -1;
 }
 
-std::vector<WorkerConfig> OpencvPlugin::buildPipelineConfigs(const WorkerConfig& shared_config) {
-    if (input_path_.empty()) return {};
+std::string probeDecoder(const std::string& filename, bool hw) {
+    // 1. 将文件名转为小写方便比较
+    std::string filename_lower = filename;
+    std::transform(filename_lower.begin(), filename_lower.end(), 
+                   filename_lower.begin(), ::tolower);
+    
+    // 2. 检查是否为JPEG图片
+    if (filename_lower.find(".jpg") != std::string::npos ||
+        filename_lower.find(".jpeg") != std::string::npos) {
+        if (hw ==true) return "jpeg_taco";  // JPEG图片使用MJPEG解码器
+        else return "mjpeg";
+    }
+    
+    // 3. 如果是MP4视频，需要进一步判断编码格式
+    // 这里简化处理，实际应该用FFmpeg探测
+    if (filename_lower.find(".mp4") != std::string::npos ||
+        filename_lower.find(".m4v") != std::string::npos) {
+        
+        // 实际项目中应该调用FFmpeg探测编码格式
+        // 这里返回一个占位符，表示需要进一步探测
+        
+        // 可以根据文件名猜测编码
+        if (filename_lower.find("hevc") != std::string::npos ||
+            filename_lower.find("h265") != std::string::npos) {
+            if (hw ==true) return "hevc_taco";  // JPEG图片使用MJPEG解码器
+            else return "hevc";
+        } else if (filename_lower.find("h264") != std::string::npos ||
+                   filename_lower.find("avc") != std::string::npos) {
+            if (hw ==true) return "h264_taco";  // JPEG图片使用MJPEG解码器
+            else return "h264";
+        } else if (filename_lower.find("mjpeg") != std::string::npos) {
+            if (hw ==true) return "jpeg_taco";  // JPEG图片使用MJPEG解码器
+            else return "mjpeg";
+        } else {
+            return "";
+        }
+    }
+    
+    // 4. 不支持的文件格式
+    return "unknown";
+}
 
+static bool endsWith(const std::string& str, const std::string& suffix) {
+    if (suffix.size() > str.size()) return false;
+    return std::equal(suffix.rbegin(), suffix.rend(), str.rbegin());
+}
+
+std::vector<WorkerConfig> OpencvPlugin::buildPipelineConfigs(const WorkerConfig& shared_config) {
     using OpType = WorkerConfig::ConsumerTypeConfig::OpencvType::OpType;
 
-    // Use params_str from command line (or from predefined test params)
-    std::string op_params = params_str_.empty() ? params_.params_str : params_str_;
+    auto parseOpType = [](const std::string& name) -> OpType {
+        if      (name == "resize_wh")   return OpType::RESIZE_WH;
+        else if (name == "resize_xy")   return OpType::RESIZE_XY;
+        else if (name == "crop")        return OpType::CROP;
+        else if (name == "cvtcolor")    return OpType::CVTCOLOR;
+        else if (name == "imwrite") return OpType::IMWRITE;
+        else if (name == "imread") return OpType::IMREAD;
+        return OpType::NONE;
+    };
 
-    // Parse params_str to get operation type and parameters
-    std::vector<std::string> fields;
-    std::istringstream ss(op_params);
-    std::string token;
-    while (std::getline(ss, token, '_')) {
-        fields.push_back(token);
-    }
+    OpType op = case_str_.empty() ? OpType::NONE : parseOpType(case_str_);
 
-    // Use case_str from command line if provided, otherwise use first field
-    std::string op_name = case_str_.empty() ? (fields.empty() ? "" : fields[0]) : case_str_;
-
-    OpType op = OpType::NONE;
-    if (!op_name.empty()) {
-        if      (op_name == "resize")      op = OpType::RESIZE;
-        else if (op_name == "crop")        op = OpType::CROP;
-        else if (op_name == "erode")       op = OpType::ERODE;
-        else if (op_name == "dilate")      op = OpType::DILATE;
-        else if (op_name == "open")        op = OpType::MORPH_OPEN;
-        else if (op_name == "close")       op = OpType::MORPH_CLOSE;
-        else if (op_name == "sobel")       op = OpType::SOBEL;
-        else if (op_name == "canny")       op = OpType::CANNY;
-        else if (op_name == "laplacian")   op = OpType::LAPLACIAN;
-        else if (op_name == "translate")   op = OpType::TRANSLATE;
-        else if (op_name == "rotate")      op = OpType::ROTATE;
-        else if (op_name == "perspective") op = OpType::PERSPECTIVE;
-        else if (op_name == "line")        op = OpType::DRAW_LINE;
-        else if (op_name == "rectangle")   op = OpType::DRAW_RECT;
-        else if (op_name == "puttext")     op = OpType::PUT_TEXT;
-        else if (op_name == "blur")        op = OpType::GAUSSIAN_BLUR;
-        else if (op_name == "threshold")   op = OpType::THRESHOLD;
-        else if (op_name == "split")       op = OpType::SPLIT;
-        else if (op_name == "merge")       op = OpType::MERGE;
-        else if (op_name == "cvtcolor")    op = OpType::CVTCOLOR;
-        else if (op_name == "add")         op = OpType::ADD;
-        else if (op_name == "absdiff")     op = OpType::ABSDIFF;
-        else if (op_name == "addweighted") op = OpType::ADD_WEIGHTED;
-        else if (op_name == "bitwiseand")  op = OpType::BITWISE_AND;
-        else if (op_name == "bitwiseor")   op = OpType::BITWISE_OR;
-        else if (op_name == "bitwisexor")  op = OpType::BITWISE_XOR;
-        else if (op_name == "bitwisenot")  op = OpType::BITWISE_NOT;
-        else if (op_name == "saveloadimg") op = OpType::SAVE_LOAD_IMG;
-    }
-
-    bool is_arithmetic_op = (op == OpType::ADD || op == OpType::ABSDIFF ||
-                             op == OpType::ADD_WEIGHTED || op == OpType::BITWISE_AND ||
-                             op == OpType::BITWISE_OR || op == OpType::BITWISE_XOR ||
-                             op == OpType::BITWISE_NOT);
-
-    auto buildConfig = [&](bool use_hw) -> WorkerConfig {
+    auto buildFfmpegConfig = [&](bool use_hw) -> WorkerConfig {
         const std::string decoder = use_hw ? "h264" : "software";
         auto config = common::WorkerConfigFactory::createDecode(input_path_, decoder);
+        config.decoder.name = probeDecoder(input_path_,use_hw);
+        return config;
+    };
 
-        auto compare_cfg = CompareConfigBuilder()
-            .setEnablePsnr(enable_psnr_)
-            .setMinPsnr(1.0)
-            .setEnableSsim(enable_ssim_)
-            .setMinSsim(1.0)
-            .setVerbose(verbose_)
+    auto buildOpencvConfig = [&](bool use_hw, bool use_mock) -> WorkerConfig {
+        auto config = WorkerConfigBuilder()
+            .setDataSourceConfig(
+                DataSourceConfigBuilder()
+                    .setPath(input_path_)
+                    .setBufferCount(128)
+                    .build()
+            )
+            .setDecoderConfig(
+                DecoderConfigBuilder()
+                    .useSoftware()
+                    .build()
+            )
+            .setGlobalConfig(WorkerGlobalConfigBuilder().setWorkerType(WorkerType::OPENCV).build())
             .build();
-
-        auto opencv_builder = OpencvConfigBuilder()
-            .setEnable(true);
-        std::cout << (enable_psnr_ ? "true" : "false") << std::endl;
-
-        if (op != OpType::NONE) {
-            opencv_builder.setEnable(true).setOpType(op);
-            if (op == OpType::RESIZE) {
-                ConsumerTypeConfig::OpencvType::Resize r;
-                r.dst_width = std::stoi(fields.at(0));
-                r.dst_height = std::stoi(fields.at(1));
-                r.fx = 0.0;
-                r.fy = 0.0;
-                r.interpolation = 1;
-                opencv_builder.setResize(r);
-            } else if (op == OpType::CROP) {
-                ConsumerTypeConfig::OpencvType::Crop c;
-                c.x = 0; c.y = 0;
-                c.width = std::stoi(fields.at(0));
-                c.height = std::stoi(fields.at(1));
-                opencv_builder.setCrop(c);
-            } else if (op == OpType::ERODE || op == OpType::DILATE ||
-                       op == OpType::MORPH_OPEN || op == OpType::MORPH_CLOSE) {
-                ConsumerTypeConfig::OpencvType::Morph m;
-                m.kernel_size = std::stoi(fields.at(0));
-                m.iterations = std::stoi(fields.at(1));
-                opencv_builder.setMorph(m);
-            } else if (op == OpType::SOBEL) {
-                ConsumerTypeConfig::OpencvType::Sobel s;
-                s.dx = std::stoi(fields.at(0));
-                s.dy = std::stoi(fields.at(1));
-                s.ksize = std::stoi(fields.at(2));
-                opencv_builder.setSobel(s);
-            } else if (op == OpType::CANNY) {
-                ConsumerTypeConfig::OpencvType::Canny c;
-                c.threshold1 = std::stod(fields.at(0));
-                c.threshold2 = std::stod(fields.at(1));
-                opencv_builder.setCanny(c);
-            } else if (op == OpType::LAPLACIAN) {
-                ConsumerTypeConfig::OpencvType::Laplacian l;
-                l.ksize = std::stoi(fields.at(0));
-                opencv_builder.setLaplacian(l);
-            } else if (op == OpType::TRANSLATE) {
-                ConsumerTypeConfig::OpencvType::Translate t;
-                t.tx = std::stod(fields.at(0));
-                t.ty = std::stod(fields.at(1));
-                opencv_builder.setTranslate(t);
-            } else if (op == OpType::ROTATE) {
-                ConsumerTypeConfig::OpencvType::Rotate r;
-                r.angle = std::stod(fields.at(0));
-                r.scale = std::stod(fields.at(1));
-                opencv_builder.setRotate(r);
-            } else if (op == OpType::PERSPECTIVE) {
-                ConsumerTypeConfig::OpencvType::Perspective p;
-                p.offset = std::stoi(fields.at(0));
-                opencv_builder.setPerspective(p);
-            } else if (op == OpType::DRAW_LINE) {
-                ConsumerTypeConfig::OpencvType::DrawLine d;
-                d.x1 = std::stoi(fields.at(0));
-                d.y1 = std::stoi(fields.at(1));
-                d.x2 = std::stoi(fields.at(2));
-                d.y2 = std::stoi(fields.at(3));
-                opencv_builder.setDrawLine(d);
-            } else if (op == OpType::DRAW_RECT) {
-                ConsumerTypeConfig::OpencvType::DrawRect d;
-                d.x = std::stoi(fields.at(0));
-                d.y = std::stoi(fields.at(1));
-                d.width = std::stoi(fields.at(2));
-                d.height = std::stoi(fields.at(3));
-                opencv_builder.setDrawRect(d);
-            } else if (op == OpType::PUT_TEXT) {
-                ConsumerTypeConfig::OpencvType::PutText pt;
-                pt.x = std::stoi(fields.at(0));
-                pt.y = std::stoi(fields.at(1));
-                opencv_builder.setPutText(pt);
-            } else if (op == OpType::GAUSSIAN_BLUR) {
-                ConsumerTypeConfig::OpencvType::GaussianBlur g;
-                g.ksize = std::stoi(fields.at(0));
-                g.sigma_x = std::stod(fields.at(1));
-                opencv_builder.setGaussianBlur(g);
-            } else if (op == OpType::THRESHOLD) {
-                ConsumerTypeConfig::OpencvType::Threshold th;
-                th.thresh = std::stod(fields.at(0));
-                th.maxval = std::stod(fields.at(1));
-                opencv_builder.setThreshold(th);
-            } else if (op == OpType::SPLIT || op == OpType::MERGE) {
-                ConsumerTypeConfig::OpencvType::SplitMerge sm;
-                sm.channels = std::stoi(fields.at(0));
-                opencv_builder.setSplitMerge(sm);
-            } else if (op == OpType::CVTCOLOR) {
-                ConsumerTypeConfig::OpencvType::ColorConvert cc;
-                cc.code = std::stoi(fields.at(0));
-                cc.dstCn = std::stoi(fields.at(1));
-                opencv_builder.setCvtColor(cc);
-            } else if (is_arithmetic_op) {
-                // To do
-            } else if (op == OpType::SAVE_LOAD_IMG) {
-                // To do
-            }
+        config.decoder.enable_hardware = ! use_software;
+        config.decoder.use_mock = use_mock;
+        config.decoder.mock_src_width = src_width_;
+        config.decoder.mock_src_height = src_height_;
+        if (src_pix_fmt == "bgr888") config.decoder.pix_fmt = AV_PIX_FMT_BGR24;
+        else if (src_pix_fmt == "rgb888") config.decoder.pix_fmt = AV_PIX_FMT_RGB24;
+        else if (src_pix_fmt == "nv12") config.decoder.pix_fmt = AV_PIX_FMT_NV12;
+        else if (src_pix_fmt == "NV21") config.decoder.pix_fmt = AV_PIX_FMT_NV21;
+        else config.decoder.pix_fmt = AV_PIX_FMT_NONE;
+        return config;
+    };
+    
+    auto buildConsumerConfig = [&](WorkerConfig config) -> WorkerConfig {
+        // 像素比较：复用已有 compare 配置
+        if (enable_compare_) {
+            config.consumer_type.compare.enable_psnr = true;
+            config.consumer_type.compare.min_psnr = 38;
+            config.consumer_type.compare.enable_ssim = true;
+            config.consumer_type.compare.min_ssim = 0.95;
+        }
+        // 性能测试：复用已有 performance 配置
+        if (enable_perf_) {
+            config.consumer_type.performance.enable = true;
+            config.consumer_type.performance.target_fps = min_fps_;
         }
 
-        config.consumer_type = ConsumerTypeConfigBuilder(config.consumer_type)
-            .setCompareConfig(compare_cfg)
-            .setMaxFrames(max_frames_)
-            .setOpencvConfig(opencv_builder.build())
-            .build();
+        config.consumer_type.compare.verbose = verbose_;
+        config.consumer_type.max_frames = max_frames_;
+        config.data_source.max_frames = max_frames_;
+        config.consumer_type.opencv.enable = true;
+
+        auto& opencv = config.consumer_type.opencv;
+
+        opencv.op_type = op;
+
+        if (op == OpType::RESIZE_WH) {
+            opencv.resize.dst_width = dst_width_;
+            opencv.resize.dst_height = dst_height_;
+            opencv.resize.fx = 0.0;
+            opencv.resize.fy = 0.0;
+            opencv.resize.interpolation = interpolation;
+        } else if (op == OpType::RESIZE_XY) {
+            opencv.resize.dst_width = 0;
+            opencv.resize.dst_height = 0;
+            opencv.resize.fx = resize_fx_;
+            opencv.resize.fy = resize_fy_;
+            opencv.resize.interpolation = interpolation;
+        } else if (op == OpType::CROP) {
+            opencv.crop.x = crop_x_;
+            opencv.crop.y = crop_y_;
+            opencv.crop.width = dst_width_;
+            opencv.crop.height = dst_height_;
+        } else if (op == OpType::CVTCOLOR) {
+            opencv.cvtcolor.dst_fmt = dst_fmt_;
+        } else if (op == OpType::IMWRITE) {
+            opencv.imwrite.jpeg_progressive = jpeg_progressive_;
+            opencv.imwrite.jpeg_quality = quality_;
+        } else {
+            // 其他操作使用默认值
+        }
 
         return config;
     };
 
-    // COMPARE mode: hw vs sw
-    if ((is_arithmetic_op ) && params_.use_hardware) {
-        auto hw_config = buildConfig(true);
-        auto sw_config = buildConfig(false);
-        return {hw_config, sw_config};
-    }
-
     // SINGLE mode
-    return {buildConfig(params_.use_hardware)};
+    if (input_path_.empty()) return {buildConsumerConfig(buildOpencvConfig(true,true))};
+    else if (endsWith(input_path_,".jpg") || endsWith(input_path_,".jpeg")) return {buildConsumerConfig(buildOpencvConfig(true,false))};
+    else if (endsWith(input_path_,".mp4")) return {buildConsumerConfig(buildFfmpegConfig(true))};
+    else return {buildConsumerConfig(buildOpencvConfig(true,false))};
 }
 
 std::string OpencvPlugin::getTestName() const {

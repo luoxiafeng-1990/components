@@ -35,6 +35,8 @@
 #include <vector>
 #include <thread>
 #include <map>
+#include <functional>
+#include <chrono>
 
 extern "C" {
 #include <libavutil/frame.h>
@@ -308,9 +310,9 @@ private:
 class OpencvConsumer : public IBufferConsumer {
 public:
     using OpencvType = WorkerConfig::ConsumerTypeConfig::OpencvType;
-    using CompareType = WorkerConfig::ConsumerTypeConfig::CompareType;
+    using CompareConfig = consumptionline::io::CompareConfig;
 
-    OpencvConsumer(const OpencvType& opencv_config, const CompareType& compare_config);
+    OpencvConsumer(const WorkerConfig& config);
     ~OpencvConsumer() override;
 
     bool initialize(const std::vector<Buffer*>& first_buffers) override;
@@ -318,27 +320,32 @@ public:
     void finalize() override;
     std::string getStats() const override;
 
-    // ---- 结果查询 ----
-    int  getFrameCount()    const { return frames_processed_; }
-    int  getCompareCount()  const { return frames_compared_; }
     double getAveragePsnr() const;
     double getAverageSsim() const;
-    bool isPassed()         const;
 
 private:
-    cv::Mat bufferToMat(Buffer* buf) const;
-    cv::Mat applyOpencvTransform(const cv::Mat& src, int frame_index = -1) const;
+    cv::Mat ProcessByOpencv(cv::Mat src, bool hw);
 
     OpencvType opencv_config_;
-    CompareType compare_config_;
+    CompareConfig compare_config_;
+    WorkerType worker_type_;
     std::unique_ptr<consumptionline::io::BufferComparator> comparator_;
 
     int    frames_processed_ = 0;
     int    frames_compared_  = 0;
     double psnr_sum_         = 0.0;
     double ssim_sum_         = 0.0;
-    bool   passed_           = true;
+    mutable bool passed_     = true;
     bool   initialized_      = false;
+
+    // 性能统计（仅 performance.enable 时使用）
+    bool    perf_enabled_      = false;
+    double  perf_target_fps_   = 0.0;
+    int64_t api_hw_total_ms_   = 0;
+    int64_t api_sw_total_ms_   = 0;
+
+    log4cplus::Logger logger_;
+    AVPixelFormat pix_fmt = AV_PIX_FMT_NV12;
 };
 
 // ============================================================

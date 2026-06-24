@@ -415,6 +415,57 @@ void LogConfigPlugin::tuiApply(const std::vector<TuiEntry>& entries) {
 }
 
 // ============================================================
+// 持久化保存到 /etc/logger.properties
+// ============================================================
+
+bool LogConfigPlugin::saveToFile(const std::vector<TuiEntry>& entries) {
+    std::ofstream ofs(kConfigFilePath);
+    if (!ofs.is_open()) {
+        std::cerr << "无法写入 " << kConfigFilePath
+                  << "（权限不足？）\n";
+        return false;
+    }
+
+    // 文件头
+    ofs << "# ============================================================\n"
+        << "# log4cplus 日志配置文件（由 logconfig --tui 自动生成）\n"
+        << "# ============================================================\n"
+        << "#\n"
+        << "# 日志级别（从低到高）：\n"
+        << "#   TRACE / DEBUG / INFO / WARN / ERROR / FATAL / OFF\n"
+        << "#\n"
+        << "# ============================================================\n"
+        << "\n";
+
+    // Root Logger + Console Appender
+    auto root = log4cplus::Logger::getRoot();
+    std::string root_level = levelToString(root.getChainedLogLevel());
+    ofs << "log4cplus.rootLogger=" << root_level << ", CONSOLE\n"
+        << "\n"
+        << "log4cplus.appender.CONSOLE=log4cplus::ConsoleAppender\n"
+        << "log4cplus.appender.CONSOLE.layout=log4cplus::PatternLayout\n"
+        << "log4cplus.appender.CONSOLE.layout.ConversionPattern="
+        << "[%D{%Y-%m-%d %H:%M:%S.%q}] [%c] [%-5p] %m%n\n"
+        << "\n";
+
+    // 各模块级别（写入全量，包括未修改的）
+    ofs << "# ============================================================\n"
+        << "# 各模块日志级别\n"
+        << "# ============================================================\n";
+
+    for (const auto& entry : entries) {
+        // root logger 已单独写过
+        if (entry.name == "root") continue;
+        ofs << "log4cplus.logger." << entry.name
+            << "=" << levelToString(entry.level) << "\n";
+    }
+
+    ofs << "\n";
+    ofs.close();
+    return true;
+}
+
+// ============================================================
 // 主 TUI 入口（全屏 menuconfig 风格）
 // ============================================================
 
@@ -510,7 +561,13 @@ int LogConfigPlugin::runTui() {
 
     if (changed_count > 0) {
         tuiApply(entries);
-        std::cout << "已应用 " << changed_count << " 个模块的日志级别变更\n\n";
+        if (saveToFile(entries)) {
+            std::cout << "已应用 " << changed_count << " 个模块的日志级别变更，"
+                      << "已保存到 " << kConfigFilePath << "\n\n";
+        } else {
+            std::cout << "已应用 " << changed_count << " 个模块的日志级别变更（内存生效），"
+                      << "但保存到文件失败\n\n";
+        }
     } else {
         std::cout << "未做任何修改\n\n";
     }

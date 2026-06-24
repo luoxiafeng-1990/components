@@ -35,12 +35,14 @@ bool EncodedPacketSourceFromFile::open() {
     }
     
     // 1. 打开输入文件
+    fprintf(stderr, "[DIAG] Calling avformat_alloc_context...\n"); fflush(stderr);
     format_ctx_ptr_ = avformat_alloc_context();
     if (!format_ctx_ptr_) {
         LOG4CPLUS_ERROR(logger_, "Failed to allocate AVFormatContext");
         return false;
     }
     
+    fprintf(stderr, "[DIAG] Calling avformat_open_input for '%s'...\n", file_path_.c_str()); fflush(stderr);
     int ret = avformat_open_input(&format_ctx_ptr_, file_path_.c_str(), nullptr, nullptr);
     if (ret < 0) {
         char err_buf[AV_ERROR_MAX_STRING_SIZE];
@@ -52,7 +54,9 @@ bool EncodedPacketSourceFromFile::open() {
     }
     
     // 2. 读取流信息
+    fprintf(stderr, "[DIAG] Calling avformat_find_stream_info...\n"); fflush(stderr);
     ret = avformat_find_stream_info(format_ctx_ptr_, nullptr);
+    fprintf(stderr, "[DIAG] avformat_find_stream_info returned %d\n", ret); fflush(stderr);
     if (ret < 0) {
         char err_buf[AV_ERROR_MAX_STRING_SIZE];
         av_strerror(ret, err_buf, sizeof(err_buf));

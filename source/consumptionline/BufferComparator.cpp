@@ -18,6 +18,32 @@ extern "C" {
 namespace consumptionline {
 namespace io {
 
+namespace {
+const char* colorSpaceName(FrameCompareResult::ColorSpace cs) {
+    switch (cs) {
+        case FrameCompareResult::COLOR_YUV: return "YUV";
+        case FrameCompareResult::COLOR_RGB: return "RGB";
+        case FrameCompareResult::COLOR_BGR: return "BGR";
+        case FrameCompareResult::COLOR_MIXED: return "Mixed";
+        default: return "Unknown";
+    }
+}
+
+const char* channelLabel(FrameCompareResult::ColorSpace cs, int index) {
+    switch (cs) {
+        case FrameCompareResult::COLOR_RGB:
+        case FrameCompareResult::COLOR_BGR:
+            return (index == 0) ? "G" : (index == 1) ? "R" : "B";
+        case FrameCompareResult::COLOR_YUV:
+            return (index == 0) ? "Y" : (index == 1) ? "U" : "V";
+        case FrameCompareResult::COLOR_MIXED:
+        case FrameCompareResult::COLOR_UNKNOWN:
+        default:
+            return (index == 0) ? "Y" : (index == 1) ? "U" : "V";
+    }
+}
+}  // namespace
+
 // ============================================================================
 // 构造/析构
 // ============================================================================
@@ -38,6 +64,7 @@ BufferComparator::BufferComparator()
     , sum_ssim_v_(0.0)
     , min_ssim_y_(1.0)
     , max_ssim_y_(0.0)
+    , stats_color_space_(FrameCompareResult::COLOR_UNKNOWN)
     , report_file_(nullptr)
 {
 }
@@ -119,6 +146,7 @@ bool BufferComparator::open(const CompareConfig& config) {
     sum_ssim_v_ = 0.0;
     min_ssim_y_ = 1.0;
     max_ssim_y_ = 0.0;
+    stats_color_space_ = FrameCompareResult::COLOR_UNKNOWN;
     failures_.clear();
     warnings_.clear();
     
@@ -149,24 +177,29 @@ void BufferComparator::close() {
                 compare_count_ > 0 ? 100.0 * failed_count_.load() / compare_count_.load() : 0.0);
         
         if (compare_count_ > 0) {
+            const char* c0 = channelLabel(stats_color_space_, 0);
+            const char* c1 = channelLabel(stats_color_space_, 1);
+            const char* c2 = channelLabel(stats_color_space_, 2);
+            const char* cs_name = colorSpaceName(stats_color_space_);
+
             if (config_.enable_psnr) {
-                fprintf(report_file_, "\nPSNR Statistics:\n");
-                fprintf(report_file_, "  Average: Y=%.2f U=%.2f V=%.2f dB\n",
-                        sum_psnr_y_ / compare_count_.load(),
-                        sum_psnr_u_ / compare_count_.load(),
-                        sum_psnr_v_ / compare_count_.load());
-                fprintf(report_file_, "  Min Y: %.2f dB\n", min_psnr_y_);
-                fprintf(report_file_, "  Max Y: %.2f dB\n", max_psnr_y_);
+                fprintf(report_file_, "\nPSNR Statistics (%s):\n", cs_name);
+                fprintf(report_file_, "  Average: %s=%.2f %s=%.2f %s=%.2f dB\n",
+                        c0, sum_psnr_y_ / compare_count_.load(),
+                        c1, sum_psnr_u_ / compare_count_.load(),
+                        c2, sum_psnr_v_ / compare_count_.load());
+                fprintf(report_file_, "  Min %s: %.2f dB\n", c0, min_psnr_y_);
+                fprintf(report_file_, "  Max %s: %.2f dB\n", c0, max_psnr_y_);
             }
             
             if (config_.enable_ssim) {
-                fprintf(report_file_, "\nSSIM Statistics:\n");
-                fprintf(report_file_, "  Average: Y=%.4f U=%.4f V=%.4f\n",
-                        sum_ssim_y_ / compare_count_.load(),
-                        sum_ssim_u_ / compare_count_.load(),
-                        sum_ssim_v_ / compare_count_.load());
-                fprintf(report_file_, "  Min Y: %.4f\n", min_ssim_y_);
-                fprintf(report_file_, "  Max Y: %.4f\n", max_ssim_y_);
+                fprintf(report_file_, "\nSSIM Statistics (%s):\n", cs_name);
+                fprintf(report_file_, "  Average: %s=%.4f %s=%.4f %s=%.4f\n",
+                        c0, sum_ssim_y_ / compare_count_.load(),
+                        c1, sum_ssim_u_ / compare_count_.load(),
+                        c2, sum_ssim_v_ / compare_count_.load());
+                fprintf(report_file_, "  Min %s: %.4f\n", c0, min_ssim_y_);
+                fprintf(report_file_, "  Max %s: %.4f\n", c0, max_ssim_y_);
             }
         }
         
@@ -221,11 +254,11 @@ FrameCompareResult BufferComparator::compare(
         LOG_INFO_FMT("[BufferComparator] Frame %d format detected:", result.frame_index);
         LOG_INFO_FMT("  Reference: %s (%dx%d, %s, %d planes)", 
                      ref_info.name.c_str(), ref_info.width, ref_info.height,
-                     ref_info.is_yuv ? "YUV" : ref_info.is_rgb ? "RGB" : "Unknown",
+                     ref_info.is_yuv ? "YUV" : ref_info.is_bgr ? "BGR" : ref_info.is_rgb ? "RGB" : "Unknown",
                      ref_info.num_planes);
         LOG_INFO_FMT("  Test:      %s (%dx%d, %s, %d planes)",
                      test_info.name.c_str(), test_info.width, test_info.height,
-                     test_info.is_yuv ? "YUV" : test_info.is_rgb ? "RGB" : "Unknown",
+                     test_info.is_yuv ? "YUV" : test_info.is_bgr ? "BGR" : test_info.is_rgb ? "RGB" : "Unknown",
                      test_info.num_planes);
     }
     
@@ -308,7 +341,7 @@ FrameCompareResult BufferComparator::compare(
             break;
             
         case CompareConfig::NATIVE:
-            // Mat 没有 AVPixelFormat，跳过格式一致性检查，直接按 is_yuv/is_rgb 路由
+            // Mat 没有 AVPixelFormat，跳过格式一致性检查，直接按 is_yuv/is_rgb/is_bgr 路由
             if (!ref_info.is_mat && !test_info.is_mat &&
                 ref_info.format != test_info.format) {
                 result.error_message = "Format mismatch in NATIVE mode";
@@ -319,9 +352,11 @@ FrameCompareResult BufferComparator::compare(
                 writeReport(result);
                 return result;
             }
-            
+
             if (ref_info.is_yuv) {
                 result = compareYUV(ref_img, ref_info, test_img, test_info);
+            } else if (ref_info.is_bgr) {
+                result = compareBGR(ref_img, ref_info, test_img, test_info);
             } else if (ref_info.is_rgb) {
                 result = compareRGB(ref_img, ref_info, test_img, test_info);
             }
@@ -341,40 +376,41 @@ FrameCompareResult BufferComparator::compare(
     
     // ⭐ 统一在 compare() 返回前打印日志（修复 frame_index 不一致问题）
     if (config_.verbose) {
+        const char* primary_label = channelLabel(result.color_space, 0);
         // 只在失败/警告时打印，或每 50 帧打印一次进度
         if (result.level == FrameCompareResult::FAIL) {
             if (config_.enable_psnr && config_.enable_ssim) {
-                LOG_ERROR_FMT("  Frame %d: FAIL (PSNR-Y: %.2f dB, SSIM-Y: %.4f)", 
-                             result.frame_index, result.psnr_y, result.ssim_y);
+                LOG_ERROR_FMT("  Frame %d: FAIL (PSNR-%s: %.2f dB, SSIM-%s: %.4f)", 
+                             result.frame_index, primary_label, result.psnr_y, primary_label, result.ssim_y);
             } else if (config_.enable_psnr) {
-                LOG_ERROR_FMT("  Frame %d: FAIL (PSNR-Y: %.2f dB)", 
-                             result.frame_index, result.psnr_y);
+                LOG_ERROR_FMT("  Frame %d: FAIL (PSNR-%s: %.2f dB)", 
+                             result.frame_index, primary_label, result.psnr_y);
             } else {
-                LOG_ERROR_FMT("  Frame %d: FAIL (SSIM-Y: %.4f)", 
-                             result.frame_index, result.ssim_y);
+                LOG_ERROR_FMT("  Frame %d: FAIL (SSIM-%s: %.4f)", 
+                             result.frame_index, primary_label, result.ssim_y);
             }
         } else if (result.level == FrameCompareResult::WARN) {
             if (config_.enable_psnr && config_.enable_ssim) {
-                LOG_WARN_FMT("  Frame %d: WARN (PSNR-Y: %.2f dB, SSIM-Y: %.4f)", 
-                            result.frame_index, result.psnr_y, result.ssim_y);
+                LOG_WARN_FMT("  Frame %d: WARN (PSNR-%s: %.2f dB, SSIM-%s: %.4f)", 
+                            result.frame_index, primary_label, result.psnr_y, primary_label, result.ssim_y);
             } else if (config_.enable_psnr) {
-                LOG_WARN_FMT("  Frame %d: WARN (PSNR-Y: %.2f dB)", 
-                            result.frame_index, result.psnr_y);
+                LOG_WARN_FMT("  Frame %d: WARN (PSNR-%s: %.2f dB)", 
+                            result.frame_index, primary_label, result.psnr_y);
             } else {
-                LOG_WARN_FMT("  Frame %d: WARN (SSIM-Y: %.4f)", 
-                            result.frame_index, result.ssim_y);
+                LOG_WARN_FMT("  Frame %d: WARN (SSIM-%s: %.4f)", 
+                            result.frame_index, primary_label, result.ssim_y);
             }
         } else if (result.frame_index % 50 == 0) {
             // PASS: 每 50 帧打印一次进度
             if (config_.enable_psnr && config_.enable_ssim) {
-                LOG_DEBUG_FMT("  Frame %d: PASS (PSNR-Y: %.2f dB, SSIM-Y: %.4f)", 
-                             result.frame_index, result.psnr_y, result.ssim_y);
+                LOG_DEBUG_FMT("  Frame %d: PASS (PSNR-%s: %.2f dB, SSIM-%s: %.4f)", 
+                             result.frame_index, primary_label, result.psnr_y, primary_label, result.ssim_y);
             } else if (config_.enable_psnr) {
-                LOG_DEBUG_FMT("  Frame %d: PASS (PSNR-Y: %.2f dB)", 
-                             result.frame_index, result.psnr_y);
+                LOG_DEBUG_FMT("  Frame %d: PASS (PSNR-%s: %.2f dB)", 
+                             result.frame_index, primary_label, result.psnr_y);
             } else {
-                LOG_DEBUG_FMT("  Frame %d: PASS (SSIM-Y: %.4f)", 
-                             result.frame_index, result.ssim_y);
+                LOG_DEBUG_FMT("  Frame %d: PASS (SSIM-%s: %.4f)", 
+                             result.frame_index, primary_label, result.ssim_y);
             }
         }
     }
@@ -448,24 +484,29 @@ void BufferComparator::printSummary() const {
                  compare_count_ > 0 ? 100.0 * failed_count_.load() / compare_count_.load() : 0.0);
     
     if (compare_count_ > 0) {
+        const char* c0 = channelLabel(stats_color_space_, 0);
+        const char* c1 = channelLabel(stats_color_space_, 1);
+        const char* c2 = channelLabel(stats_color_space_, 2);
+        const char* cs_name = colorSpaceName(stats_color_space_);
+
         if (config_.enable_psnr) {
             LOG_INFO("");
-            LOG_INFO("  PSNR Statistics:");
-            LOG_INFO_FMT("    Average: Y=%.2f U=%.2f V=%.2f dB",
-                         sum_psnr_y_ / compare_count_.load(),
-                         sum_psnr_u_ / compare_count_.load(),
-                         sum_psnr_v_ / compare_count_.load());
-            LOG_INFO_FMT("    Range:   Y=[%.2f, %.2f] dB", min_psnr_y_, max_psnr_y_);
+            LOG_INFO_FMT("  PSNR Statistics (%s):", cs_name);
+            LOG_INFO_FMT("    Average: %s=%.2f %s=%.2f %s=%.2f dB",
+                         c0, sum_psnr_y_ / compare_count_.load(),
+                         c1, sum_psnr_u_ / compare_count_.load(),
+                         c2, sum_psnr_v_ / compare_count_.load());
+            LOG_INFO_FMT("    Range:   %s=[%.2f, %.2f] dB", c0, min_psnr_y_, max_psnr_y_);
         }
-        
+
         if (config_.enable_ssim) {
             LOG_INFO("");
-            LOG_INFO("  SSIM Statistics:");
-            LOG_INFO_FMT("    Average: Y=%.4f U=%.4f V=%.4f",
-                         sum_ssim_y_ / compare_count_.load(),
-                         sum_ssim_u_ / compare_count_.load(),
-                         sum_ssim_v_ / compare_count_.load());
-            LOG_INFO_FMT("    Range:   Y=[%.4f, %.4f]", min_ssim_y_, max_ssim_y_);
+            LOG_INFO_FMT("  SSIM Statistics (%s):", cs_name);
+            LOG_INFO_FMT("    Average: %s=%.4f %s=%.4f %s=%.4f",
+                         c0, sum_ssim_y_ / compare_count_.load(),
+                         c1, sum_ssim_u_ / compare_count_.load(),
+                         c2, sum_ssim_v_ / compare_count_.load());
+            LOG_INFO_FMT("    Range:   %s=[%.4f, %.4f]", c0, min_ssim_y_, max_ssim_y_);
         }
     }
     
@@ -498,12 +539,16 @@ BufferComparator::FormatInfo BufferComparator::analyzeFormat(const ImageMeta& im
         int bytes_per_pixel = (img.linesize(0) > 0 && img.width() > 0)
                             ? img.linesize(0) / img.width() : 1;
         if (bytes_per_pixel == 1) {
+            // 单通道（灰度）→ is_yuv=true，与 Y 平面计算逻辑相同
             info.is_yuv = true;
             info.is_rgb = false;
+            info.is_bgr = false;
             info.name = "Mat_Gray";
         } else {
+            // 多通道（BGR/RGB 等 packed）→ is_bgr=true，Mat 默认按 BGR 处理
             info.is_yuv = false;
-            info.is_rgb = true;
+            info.is_rgb = false;
+            info.is_bgr = true;
             info.name = "Mat_" + std::to_string(bytes_per_pixel) + "ch";
         }
         return info;
@@ -540,9 +585,15 @@ BufferComparator::FormatInfo BufferComparator::analyzeFormat(const ImageMeta& im
                       info.format == AV_PIX_FMT_YUYV422 ||
                       info.format == AV_PIX_FMT_UYVY422 ||
                       info.format == AV_PIX_FMT_YVYU422);
-        
-        // RGB格式检测
-        info.is_rgb = (desc->flags & AV_PIX_FMT_FLAG_RGB) != 0;
+
+        // BGR 格式检测
+        info.is_bgr = (info.format == AV_PIX_FMT_BGR24 ||
+                       info.format == AV_PIX_FMT_BGRA ||
+                       info.format == AV_PIX_FMT_BGR0 ||
+                       info.format == AV_PIX_FMT_ABGR);
+
+        // RGB格式检测（不包括 BGR）
+        info.is_rgb = !info.is_bgr && (desc->flags & AV_PIX_FMT_FLAG_RGB) != 0;
     }
     
     return info;
@@ -612,6 +663,8 @@ FrameCompareResult BufferComparator::compareAuto(
                 return compareSubByteRGB(ref_img, ref_info, test_img, test_info);
             }
             return compareRGB(ref_img, ref_info, test_img, test_info);
+        } else if (ref_info.is_bgr) {
+            return compareBGR(ref_img, ref_info, test_img, test_info);
         }
     }
     
@@ -681,6 +734,7 @@ FrameCompareResult BufferComparator::compareYUV(
     const ImageMeta& test_img, const FormatInfo& test_info
 ) {
     FrameCompareResult result;
+    result.color_space = FrameCompareResult::COLOR_YUV;
     
     // ============================================================================
     // 层1：快速验证（仅Y平面）
@@ -911,6 +965,7 @@ FrameCompareResult BufferComparator::compareRGB(
     const ImageMeta& test_img, const FormatInfo& test_info
 ) {
     FrameCompareResult result;
+    result.color_space = FrameCompareResult::COLOR_RGB;
     
     // ============================================================================
     // 层1：快速验证（G通道，人眼最敏感）
@@ -1172,6 +1227,167 @@ FrameCompareResult BufferComparator::compareRGB(
 }
 
 // ============================================================================
+// BGR格式对比（不区分策略，三个通道全部计算）
+// ============================================================================
+
+FrameCompareResult BufferComparator::compareBGR(
+    const ImageMeta& ref_img, const FormatInfo& ref_info,
+    const ImageMeta& test_img, const FormatInfo& test_info
+) {
+    FrameCompareResult result;
+    result.color_space = FrameCompareResult::COLOR_BGR;
+
+    // BGR 格式始终计算三个通道，不进行分层验证
+    // BGR 通道对应关系: B=0, G=1, R=2
+    // 与 RGB 对比函数的映射: RGB.R=0, RGB.G=1, RGB.B=2
+    double psnr_b = 0.0, psnr_g = 0.0, psnr_r = 0.0;
+    double ssim_b = 0.0, ssim_g = 0.0, ssim_r = 0.0;
+
+    // 🚀 完全并行计算三个通道（最多6个任务：3 PSNR + 3 SSIM）
+    if (config_.enable_parallel && config_.enable_psnr && config_.enable_ssim) {
+        auto& pool = GlobalThreadPool::getInstance().getThreadPool();
+
+        auto future_psnr_b = pool.submit_task([this, &ref_img, &test_img, &ref_info, &test_info]() {
+            return this->calculatePSNR_RGB_R(ref_img, test_img, ref_info, test_info);  // B=0 (复用RGB的R函数)
+        });
+
+        auto future_psnr_g = pool.submit_task([this, &ref_img, &test_img, &ref_info, &test_info]() {
+            return this->calculatePSNR_RGB_G(ref_img, test_img, ref_info, test_info);  // G=1
+        });
+
+        auto future_psnr_r = pool.submit_task([this, &ref_img, &test_img, &ref_info, &test_info]() {
+            return this->calculatePSNR_RGB_B(ref_img, test_img, ref_info, test_info);  // R=2 (复用RGB的B函数)
+        });
+
+        auto future_ssim_b = pool.submit_task([this, &ref_img, &test_img, &ref_info, &test_info]() {
+            return this->calculateSSIM_RGB_R(ref_img, test_img, ref_info, test_info);  // B=0
+        });
+
+        auto future_ssim_g = pool.submit_task([this, &ref_img, &test_img, &ref_info, &test_info]() {
+            return this->calculateSSIM_RGB_G(ref_img, test_img, ref_info, test_info);  // G=1
+        });
+
+        auto future_ssim_r = pool.submit_task([this, &ref_img, &test_img, &ref_info, &test_info]() {
+            return this->calculateSSIM_RGB_B(ref_img, test_img, ref_info, test_info);  // R=2
+        });
+
+        psnr_b = future_psnr_b.get();
+        psnr_g = future_psnr_g.get();
+        psnr_r = future_psnr_r.get();
+        ssim_b = future_ssim_b.get();
+        ssim_g = future_ssim_g.get();
+        ssim_r = future_ssim_r.get();
+    }
+    else if (config_.enable_parallel && (config_.enable_psnr || config_.enable_ssim)) {
+        auto& pool = GlobalThreadPool::getInstance().getThreadPool();
+
+        if (config_.enable_psnr) {
+            auto future_psnr_b = pool.submit_task([this, &ref_img, &test_img, &ref_info, &test_info]() {
+                return this->calculatePSNR_RGB_R(ref_img, test_img, ref_info, test_info);
+            });
+
+            auto future_psnr_g = pool.submit_task([this, &ref_img, &test_img, &ref_info, &test_info]() {
+                return this->calculatePSNR_RGB_G(ref_img, test_img, ref_info, test_info);
+            });
+
+            auto future_psnr_r = pool.submit_task([this, &ref_img, &test_img, &ref_info, &test_info]() {
+                return this->calculatePSNR_RGB_B(ref_img, test_img, ref_info, test_info);
+            });
+
+            psnr_b = future_psnr_b.get();
+            psnr_g = future_psnr_g.get();
+            psnr_r = future_psnr_r.get();
+        }
+
+        if (config_.enable_ssim) {
+            auto future_ssim_b = pool.submit_task([this, &ref_img, &test_img, &ref_info, &test_info]() {
+                return this->calculateSSIM_RGB_R(ref_img, test_img, ref_info, test_info);
+            });
+
+            auto future_ssim_g = pool.submit_task([this, &ref_img, &test_img, &ref_info, &test_info]() {
+                return this->calculateSSIM_RGB_G(ref_img, test_img, ref_info, test_info);
+            });
+
+            auto future_ssim_r = pool.submit_task([this, &ref_img, &test_img, &ref_info, &test_info]() {
+                return this->calculateSSIM_RGB_B(ref_img, test_img, ref_info, test_info);
+            });
+
+            ssim_b = future_ssim_b.get();
+            ssim_g = future_ssim_g.get();
+            ssim_r = future_ssim_r.get();
+        }
+    }
+    else {
+        // 串行计算
+        if (config_.enable_psnr) {
+            psnr_b = calculatePSNR_RGB_R(ref_img, test_img, ref_info, test_info);  // B=0
+            psnr_g = calculatePSNR_RGB_G(ref_img, test_img, ref_info, test_info);  // G=1
+            psnr_r = calculatePSNR_RGB_B(ref_img, test_img, ref_info, test_info);  // R=2
+        }
+
+        if (config_.enable_ssim) {
+            ssim_b = calculateSSIM_RGB_R(ref_img, test_img, ref_info, test_info);  // B=0
+            ssim_g = calculateSSIM_RGB_G(ref_img, test_img, ref_info, test_info);  // G=1
+            ssim_r = calculateSSIM_RGB_B(ref_img, test_img, ref_info, test_info);  // R=2
+        }
+    }
+
+    // 计算平均值
+    if (config_.enable_psnr) {
+        result.psnr_avg = (psnr_b + psnr_g + psnr_r) / 3.0;
+        result.psnr_y = psnr_g;   // G → Y
+        result.psnr_u = psnr_r;   // R → U
+        result.psnr_v = psnr_b;   // B → V
+    }
+
+    if (config_.enable_ssim) {
+        result.ssim_avg = (ssim_b + ssim_g + ssim_r) / 3.0;
+        result.ssim_y = ssim_g;   // G → Y
+        result.ssim_u = ssim_r;   // R → U
+        result.ssim_v = ssim_b;   // B → V
+    }
+
+    // 判定结果
+    bool is_warn = false;
+
+    if (config_.enable_psnr && config_.enable_ssim) {
+        is_warn = (result.psnr_avg >= config_.warn_psnr) &&
+                  (result.ssim_avg >= config_.warn_ssim);
+    } else if (config_.enable_psnr) {
+        is_warn = (result.psnr_avg >= config_.warn_psnr);
+    } else if (config_.enable_ssim) {
+        is_warn = (result.ssim_avg >= config_.warn_ssim);
+    }
+
+    // 严格模式判定（使用平均值）
+    bool is_pass = false;
+    if (config_.enable_psnr && config_.enable_ssim) {
+        is_pass = (result.psnr_avg >= config_.min_psnr) &&
+                  (result.ssim_avg >= config_.min_ssim);
+    } else if (config_.enable_psnr) {
+        is_pass = (result.psnr_avg >= config_.min_psnr);
+    } else if (config_.enable_ssim) {
+        is_pass = (result.ssim_avg >= config_.min_ssim);
+    }
+
+    if (is_pass) {
+        result.passed = true;
+        result.level = is_warn ? FrameCompareResult::WARN : FrameCompareResult::PASS;
+        if (result.level == FrameCompareResult::WARN) {
+            warned_count_++;
+        } else {
+            passed_count_++;
+        }
+    } else {
+        result.passed = false;
+        result.level = FrameCompareResult::FAIL;
+        failed_count_++;
+    }
+
+    return result;
+}
+
+// ============================================================================
 // 混合格式对比（需要转换）
 // ============================================================================
 
@@ -1180,6 +1396,7 @@ FrameCompareResult BufferComparator::compareMixed(
     const ImageMeta& test_img, const FormatInfo& test_info
 ) {
     FrameCompareResult result;
+    result.color_space = FrameCompareResult::COLOR_YUV;
     
     // 情况1：ref是YUV，test是RGB → 将ref转换为RGB后对比
     if (ref_info.is_yuv && test_info.is_rgb) {
@@ -1873,6 +2090,14 @@ void BufferComparator::freeConvertedFrame(AVFrame* frame) {
 // ============================================================================
 
 void BufferComparator::updateStatistics(const FrameCompareResult& result) {
+    if (result.color_space != FrameCompareResult::COLOR_UNKNOWN) {
+        if (stats_color_space_ == FrameCompareResult::COLOR_UNKNOWN) {
+            stats_color_space_ = result.color_space;
+        } else if (stats_color_space_ != result.color_space) {
+            stats_color_space_ = FrameCompareResult::COLOR_MIXED;
+        }
+    }
+
     if (config_.enable_psnr && result.psnr_y > 0.0) {
         sum_psnr_y_ += result.psnr_y;
         sum_psnr_u_ += result.psnr_u;
@@ -1922,15 +2147,20 @@ void BufferComparator::writeReport(const FrameCompareResult& result) {
         fprintf(report_file_, "  Formats: %s vs %s\n",
                 result.ref_format_name.c_str(),
                 result.test_format_name.c_str());
+
+        const char* c0 = channelLabel(result.color_space, 0);
+        const char* c1 = channelLabel(result.color_space, 1);
+        const char* c2 = channelLabel(result.color_space, 2);
+
         
         if (config_.enable_psnr) {
-            fprintf(report_file_, "  PSNR: Y=%.2f U=%.2f V=%.2f dB (avg=%.2f dB)\n",
-                    result.psnr_y, result.psnr_u, result.psnr_v, result.psnr_avg);
+            fprintf(report_file_, "  PSNR: %s=%.2f %s=%.2f %s=%.2f dB (avg=%.2f dB)\n",
+                    c0, result.psnr_y, c1, result.psnr_u, c2, result.psnr_v, result.psnr_avg);
         }
         
         if (config_.enable_ssim) {
-            fprintf(report_file_, "  SSIM: Y=%.4f U=%.4f V=%.4f (avg=%.4f)\n",
-                    result.ssim_y, result.ssim_u, result.ssim_v, result.ssim_avg);
+            fprintf(report_file_, "  SSIM: %s=%.4f %s=%.4f %s=%.4f (avg=%.4f)\n",
+                    c0, result.ssim_y, c1, result.ssim_u, c2, result.ssim_v, result.ssim_avg);
         }
         
         if (!result.error_message.empty()) {

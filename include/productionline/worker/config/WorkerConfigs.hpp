@@ -36,7 +36,8 @@ enum class WorkerType {
     AUTO,                   // 自动检测（默认）
     FFMPEG_DECODE,          // FFmpeg 解码 Worker（统一处理文件和 RTSP 流）
     FFMPEG_PACKET_RECORDER,  // FFmpeg Packet 录制器（支持 RTSP/文件/HTTP 等多种数据源）
-    FFMPEG_ENCODE           // FFmpeg 编码 Worker（H.264/H.265/JPEG 编码）
+    FFMPEG_ENCODE,          // FFmpeg 编码 Worker（H.264/H.265/JPEG 编码）
+    OPENCV                  // OpenCV Worker（图像处理操作）
 };
 
 /**
@@ -89,6 +90,12 @@ struct WorkerConfig {
         std::optional<std::string> hwaccel_device;
         int decode_threads = 0;
 
+        // Mock 模式（OpenCV 分支新增：生成合成帧，无需实际视频文件）
+        bool use_mock = false;             ///< 是否使用 mock 数据源生成合成帧
+        int mock_src_width = 0;            ///< mock 帧宽度
+        int mock_src_height = 0;           ///< mock 帧高度
+        int pix_fmt = -1;                  ///< 像素格式（AV_PIX_FMT_xxx，-1=AV_PIX_FMT_NONE）
+
         std::unique_ptr<IDecoderVendorExtension> vendor;
 
         DecoderConfig() = default;
@@ -99,6 +106,10 @@ struct WorkerConfig {
             , enable_hardware(o.enable_hardware)
             , hwaccel_device(o.hwaccel_device)
             , decode_threads(o.decode_threads)
+            , use_mock(o.use_mock)
+            , mock_src_width(o.mock_src_width)
+            , mock_src_height(o.mock_src_height)
+            , pix_fmt(o.pix_fmt)
             , vendor(o.vendor ? o.vendor->clone() : nullptr) {}
 
         DecoderConfig& operator=(const DecoderConfig& o) {
@@ -107,6 +118,10 @@ struct WorkerConfig {
             enable_hardware = o.enable_hardware;
             hwaccel_device = o.hwaccel_device;
             decode_threads = o.decode_threads;
+            use_mock = o.use_mock;
+            mock_src_width = o.mock_src_width;
+            mock_src_height = o.mock_src_height;
+            pix_fmt = o.pix_fmt;
             vendor = o.vendor ? o.vendor->clone() : nullptr;
             return *this;
         }
