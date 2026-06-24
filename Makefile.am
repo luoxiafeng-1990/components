@@ -108,7 +108,7 @@ qa_cases_SOURCES = \
     test_cases/logconfig/LogConfigPlugin.cpp
 qa_cases_LDADD = libcomponents.la $(COMMON_LIBS)
 qa_cases_CPPFLAGS = -I$(top_srcdir)/test_cases $(AM_CPPFLAGS)
-qa_cases_LDFLAGS = -L$(STAGING_DIR)/usr/lib -L$(STAGING_DIR)/usr/local/lib -Wl,-rpath-link,$(STAGING_DIR)/usr/lib -Wl,-rpath-link,$(STAGING_DIR)/usr/local/lib -L=/usr/local/lib -Wl,--allow-shlib-undefined
+qa_cases_LDFLAGS = --sysroot=$(STAGING_DIR) -L$(STAGING_DIR)/usr/lib -L$(STAGING_DIR)/usr/local/lib -Wl,-rpath-link,$(STAGING_DIR)/usr/lib -Wl,-rpath-link,$(STAGING_DIR)/usr/local/lib -L=/usr/local/lib -Wl,--allow-shlib-undefined
 
 # ========== WebUI 服务器 ==========
 # webui_server 复用 qa_cases 的插件（VdecPlugin, DisplayPlugin 等），
@@ -134,7 +134,7 @@ webui_server_SOURCES = \
     test_cases/venc/VencPlugin.cpp
 webui_server_LDADD = libcomponents.la $(COMMON_LIBS)
 webui_server_CPPFLAGS = -I$(top_srcdir)/webui/backend/include -I$(top_srcdir)/webui/backend/third_party -I$(top_srcdir)/test_cases $(AM_CPPFLAGS)
-webui_server_LDFLAGS = -L$(STAGING_DIR)/usr/lib -L$(STAGING_DIR)/usr/local/lib -Wl,-rpath-link,$(STAGING_DIR)/usr/lib -Wl,-rpath-link,$(STAGING_DIR)/usr/local/lib -L=/usr/local/lib -Wl,--allow-shlib-undefined
+webui_server_LDFLAGS = --sysroot=$(STAGING_DIR) -L$(STAGING_DIR)/usr/lib -L$(STAGING_DIR)/usr/local/lib -Wl,-rpath-link,$(STAGING_DIR)/usr/lib -Wl,-rpath-link,$(STAGING_DIR)/usr/local/lib -L=/usr/local/lib -Wl,--allow-shlib-undefined
 
 # WebUI 前端静态文件安装到 /usr/local/share/webui/
 webuistaticdir = $(prefix)/share/webui
