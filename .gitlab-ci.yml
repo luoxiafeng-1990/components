@@ -1,0 +1,5 @@
+#CI_CONFIG_BRANCH 定义在group settings中
+include:
+  - project: "dev/taco/workshop-debian"
+    ref: "${CI_CONFIG_BRANCH}"
+    file: ".gitlab-ci.yml"
