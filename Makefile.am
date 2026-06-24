@@ -19,7 +19,6 @@ libcomponents_la_SOURCES = \
     source/productionline/worker/config/WorkerConfig.cpp \
     source/productionline/worker/config/ConsumerTypeConfig.cpp \
     source/consumptionline/config/ConsumerTypeConfigBuilder.cpp \
-    source/productionline/worker/OpencvWorker.cpp \
     source/vendor/contracts/DecoderVendorRegistry.cpp \
     source/vendor/taco/decode/TacoDecoderExtension.cpp \
     source/vendor/taco/decode/TacoDecoderPluginLoader.cpp \
@@ -90,8 +89,6 @@ NPU_LIBS = -lta_runtime -lVIPhal -lNBGlinker
 # ========== QA 测试程序（模块化测试入口）==========
 bin_PROGRAMS = qa_cases webui_server
 
-# ========== Deprecated 调试工具已移除（opencv_decode_compare_mt / opencv_decode_hw_mat_resize）==========
-
 # ========== Mat(AVFrame*) 接口最小化测试 ==========
 qa_cases_SOURCES = \
     test_cases/test_module_main.cpp \
@@ -107,9 +104,8 @@ qa_cases_SOURCES = \
     test_cases/memleak/MemleakPlugin.cpp \
     test_cases/logconfig/LogConfigPlugin.cpp
 qa_cases_LDADD = libcomponents.la $(COMMON_LIBS)
-qa_cases_LDFLAGS = -L$(STAGING_DIR)/usr/lib -L$(STAGING_DIR)/usr/local/lib -L$(STAGING_DIR)/usr/lib/riscv64-linux-gnu \
-                   -L$(TARGET_DIR)/usr/lib -L$(TARGET_DIR)/usr/local/lib -L$(TARGET_DIR)/usr/lib/riscv64-linux-gnu \
-                   -L=/usr/local/lib -Wl,--no-as-needed -Wl,--allow-shlib-undefined
+qa_cases_CPPFLAGS = -I$(top_srcdir)/test_cases $(AM_CPPFLAGS)
+qa_cases_LDFLAGS = -L$(STAGING_DIR)/usr/local/lib -L$(TARGET_DIR)/usr/local/lib -Wl,--no-as-needed -Wl,--allow-shlib-undefined
 
 # ========== WebUI 服务器 ==========
 # webui_server 复用 qa_cases 的插件（VdecPlugin, DisplayPlugin 等），
@@ -135,9 +131,7 @@ webui_server_SOURCES = \
     test_cases/venc/VencPlugin.cpp
 webui_server_LDADD = libcomponents.la $(COMMON_LIBS)
 webui_server_CPPFLAGS = -I$(top_srcdir)/webui/backend/include -I$(top_srcdir)/webui/backend/third_party -I$(top_srcdir)/test_cases $(AM_CPPFLAGS)
-webui_server_LDFLAGS = -L$(STAGING_DIR)/usr/lib -L$(STAGING_DIR)/usr/local/lib -L$(STAGING_DIR)/usr/lib/riscv64-linux-gnu \
-                       -L$(TARGET_DIR)/usr/lib -L$(TARGET_DIR)/usr/local/lib -L$(TARGET_DIR)/usr/lib/riscv64-linux-gnu \
-                       -L=/usr/local/lib -Wl,--no-as-needed -Wl,--allow-shlib-undefined
+webui_server_LDFLAGS = -L$(STAGING_DIR)/usr/local/lib -L$(TARGET_DIR)/usr/local/lib -Wl,--no-as-needed -Wl,--allow-shlib-undefined
 
 # WebUI 前端静态文件安装到 /usr/local/share/webui/
 webuistaticdir = $(prefix)/share/webui
