@@ -107,6 +107,7 @@ qa_cases_SOURCES = \
     test_cases/memleak/MemleakPlugin.cpp \
     test_cases/logconfig/LogConfigPlugin.cpp
 qa_cases_LDADD = libcomponents.la $(COMMON_LIBS)
+qa_cases_CPPFLAGS = -I$(top_srcdir)/test_cases $(AM_CPPFLAGS)
 qa_cases_LDFLAGS = -L=/usr/local/lib -Wl,--allow-shlib-undefined
 
 # ========== WebUI 服务器 ==========
