@@ -153,7 +153,7 @@ install-data-local:
 
 # ========== 编译选项 ==========
 OPENCV_INCLUDE = -I$(STAGING_DIR)/usr/local/include/opencv4 -I$(TARGET_DIR)/usr/local/include/opencv4 -I$(STAGING_DIR)/usr/include/opencv4
-AM_CPPFLAGS = -I$(top_srcdir)/include $(OPENCV_INCLUDE) -I$(top_srcdir)/include/common/third_party/freetype2 -I$(STAGING_DIR)/usr/local/include/ta-runtime -I$(TARGET_DIR)/usr/local/include/ta-runtime -I$(STAGING_DIR)/usr/include -I$(STAGING_DIR)/usr/local/include -I$(TARGET_DIR)/usr/local/include
+AM_CPPFLAGS = -I$(top_srcdir)/include $(OPENCV_INCLUDE) -I$(top_srcdir)/include/common/third_party/freetype2 -I$(STAGING_DIR)/usr/local/include/ta-runtime -I$(TARGET_DIR)/usr/local/include/ta-runtime -isystem $(STAGING_DIR)/usr/include -I$(STAGING_DIR)/usr/local/include -I$(TARGET_DIR)/usr/local/include
 
 if DEBUG
 AM_CXXFLAGS = -g -O0 -Wall -std=c++17
