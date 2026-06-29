@@ -5,6 +5,7 @@
 #include "productionline/worker/datasource/encodeddata/IEncodedPacketSource.hpp"
 #include "bufferpool/buffer/Buffer.hpp"
 #include "bufferpool/pool/base/BufferPool.hpp"
+#include "productionline/worker/config/WorkerConfigs.hpp"
 #include <string>
 #include <thread>
 #include <atomic>
@@ -89,7 +90,7 @@ private:
     std::string file_path;
     std::string file_list_[128];
     size_t file_num;
-    int current_file_index;
+    size_t current_file_index;
     bool use_hardware;
     bool use_mock;
     int src_height;

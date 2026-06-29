@@ -71,20 +71,26 @@ void OpencvPlugin::registerOptions(CLI::App& app) {
     app.add_option("--interpolation", interpolation, "插值算法")->check(CLI::Range(0,1));
 
     // 连体婴
-    auto* fx_opt = app.add_option("--fx", resize_fx_, "resize_xy 水平缩放比例")->check(CLI::Range(0.0078125, 128.0));
-    auto* fy_opt = app.add_option("--fy", resize_fy_, "resize_xy 垂直缩放比例")->check(CLI::Range(0.0078125, 128.0));
+    auto* fx_opt = app.add_option("--fx", resize_fx_, "resize_xy 水平缩放比例")->check(CLI::Range(0.0, 1.0));
+    auto* fy_opt = app.add_option("--fy", resize_fy_, "resize_xy 垂直缩放比例")->check(CLI::Range(0.0, 1.0));
     fx_opt->needs(fy_opt);
     fy_opt->needs(fx_opt);
 
     // 连体婴
-    auto* x_opt = app.add_option("--x", crop_x_, "crop 起始 x 坐标")->check(CLI::Range(0, 10000));
-    auto* y_opt = app.add_option("--y", crop_y_, "crop 起始 y 坐标")->check(CLI::Range(0, 10000));
+    auto* x_opt = app.add_option("--x", crop_x_, "crop 起始 x 坐标")->check(CLI::Range(-100, 10000));
+    auto* y_opt = app.add_option("--y", crop_y_, "crop 起始 y 坐标")->check(CLI::Range(-100, 10000));
     x_opt->needs(y_opt);
     y_opt->needs(x_opt);
 
-    // 可选能力开关（可叠加）
-    app.add_flag("--compare", enable_compare_, "启用 PSNR/SSIM 像素比较");
-    app.add_flag("--perf", enable_perf_, "启用性能计时");
+    // 断言模式互斥组
+    auto* assert_group = app.add_option_group("assert_mode", "断言模式（互斥，只能选择一个）");
+    auto* pix_opt = assert_group->add_flag("--compare", enable_pix_compare, "启用 PSNR/SSIM 像素比较");
+    auto* api_opt = assert_group->add_flag("--error", enable_api_exception, "启用 API 异常验证");
+    auto* perf_opt = assert_group->add_flag("--perf", enable_perf, "启用性能计时");
+
+    pix_opt->excludes(api_opt);
+    pix_opt->excludes(perf_opt);
+    api_opt->excludes(perf_opt);
 }
 
 void OpencvPlugin::applyTo(WorkerConfig& config) const {
@@ -186,23 +192,31 @@ std::vector<WorkerConfig> OpencvPlugin::buildPipelineConfigs(const WorkerConfig&
         if (src_pix_fmt == "bgr888") config.decoder.pix_fmt = AV_PIX_FMT_BGR24;
         else if (src_pix_fmt == "rgb888") config.decoder.pix_fmt = AV_PIX_FMT_RGB24;
         else if (src_pix_fmt == "nv12") config.decoder.pix_fmt = AV_PIX_FMT_NV12;
-        else if (src_pix_fmt == "NV21") config.decoder.pix_fmt = AV_PIX_FMT_NV21;
+        else if (src_pix_fmt == "nv21") config.decoder.pix_fmt = AV_PIX_FMT_NV21;
         else config.decoder.pix_fmt = AV_PIX_FMT_NONE;
         return config;
     };
-    
+
     auto buildConsumerConfig = [&](WorkerConfig config) -> WorkerConfig {
-        // 像素比较：复用已有 compare 配置
-        if (enable_compare_) {
+        // 设置断言模式
+        using AssertMode = WorkerConfig::ConsumerTypeConfig::OpencvType::AssertMode;
+        if (enable_pix_compare) {
             config.consumer_type.compare.enable_psnr = true;
             config.consumer_type.compare.min_psnr = 38;
             config.consumer_type.compare.enable_ssim = true;
             config.consumer_type.compare.min_ssim = 0.95;
-        }
-        // 性能测试：复用已有 performance 配置
-        if (enable_perf_) {
-            config.consumer_type.performance.enable = true;
-            config.consumer_type.performance.target_fps = min_fps_;
+            config.consumer_type.opencv.assert_mode = AssertMode::PIX_COMPARE;
+        } else if (enable_api_exception) {
+            config.consumer_type.opencv.assert_mode = AssertMode::API_EXCEPTION;
+        } else if (enable_perf) {
+            config.consumer_type.opencv.assert_mode = AssertMode::PERFORMANCE;  // PERF 也需要比较
+            config.consumer_type.opencv.min_fps = min_fps_;
+            config.consumer_type.compare.enable_psnr = true;
+            config.consumer_type.compare.min_psnr = 38;
+            config.consumer_type.compare.enable_ssim = true;
+            config.consumer_type.compare.min_ssim = 0.95;
+        } else {
+            config.consumer_type.opencv.assert_mode = AssertMode::API_EXCEPTION;  // 默认
         }
 
         config.consumer_type.compare.verbose = verbose_;

@@ -751,8 +751,7 @@ std::string MultiConsumer::getStats() const {
 OpencvConsumer::OpencvConsumer(const WorkerConfig& config)
     : opencv_config_(config.consumer_type.opencv)
     , compare_config_(config.consumer_type.compare)
-    , worker_type_(config.global.worker_type)
-    , pix_fmt(static_cast<AVPixelFormat>(config.decoder.pix_fmt))
+    , worker_type_ (config.global.worker_type)
     , comparator_(nullptr)
     , frames_processed_(0)
     , frames_compared_(0)
@@ -765,6 +764,7 @@ OpencvConsumer::OpencvConsumer(const WorkerConfig& config)
     , api_hw_total_ms_(0)
     , api_sw_total_ms_(0)
     , logger_(log4cplus::Logger::getInstance("consumer.OpencvConsumer"))
+    , pix_fmt (static_cast<AVPixelFormat>(config.decoder.pix_fmt))
 {
 }
 
@@ -776,18 +776,19 @@ bool OpencvConsumer::initialize(const std::vector<Buffer*>& first_buffers) {
     if (initialized_) return true;
     (void)first_buffers;
 
-    bool need_compare = compare_config_.enable_psnr || compare_config_.enable_ssim;
+    using AssertMode = WorkerConfig::ConsumerTypeConfig::OpencvType::AssertMode;
 
     LOG4CPLUS_INFO_FMT(logger_,
-        "OpencvConsumer: compare=%s, performance=%s",
-        need_compare ? "ON" : "OFF",
-        perf_enabled_ ? "ON" : "OFF");
+        "assert_mode=%s",
+        opencv_config_.assert_mode == AssertMode::API_EXCEPTION ? "API_EXCEPTION" :
+        opencv_config_.assert_mode == AssertMode::PIX_COMPARE ? "PIX_COMPARE" :
+        opencv_config_.assert_mode == AssertMode::PERFORMANCE ? "PERFORMANCE" : "UNKNOWN");
 
-    if (need_compare) {
+    if (opencv_config_.assert_mode == AssertMode::PIX_COMPARE || opencv_config_.assert_mode == AssertMode::PERFORMANCE){
         comparator_ = std::make_unique<consumptionline::io::BufferComparator>();
         if (!comparator_->open(compare_config_)) {
             LOG4CPLUS_ERROR(logger_,
-                "OpencvConsumer: Failed to open BufferComparator");
+                            "OpencvConsumer: Failed to open BufferComparator");
             return false;
         }
     }

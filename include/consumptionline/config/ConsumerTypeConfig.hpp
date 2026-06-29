@@ -287,6 +287,16 @@ struct ConsumerTypeConfig {
         };
         OpType op_type = OpType::NONE;
 
+        /// OpenCV 断言模式：像素质量（PSNR/SSIM）或接口返回值
+        enum class AssertMode {
+            PIX_COMPARE,     ///< 像素比对断言（PSNR/SSIM）
+            API_EXCEPTION, ///< 接口返回值断言
+            PERFORMANCE,
+            NONE
+        };
+        AssertMode assert_mode = AssertMode::NONE;
+        int min_fps = 0;  ///< 性能测试最低帧率
+
         // ----------------------------------------
         // cv::resize 参数
         // ----------------------------------------

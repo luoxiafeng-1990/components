@@ -10,61 +10,6 @@
 
 namespace fs = std::filesystem;
 
-#include <type_traits>
-
-namespace cv {
-namespace hal {
-    __attribute__((weak)) MatAllocator* getAllocator();
-}
-}
-
-namespace {
-    cv::MatAllocator* safe_get_allocator() {
-        if (cv::hal::getAllocator != nullptr) {
-            return cv::hal::getAllocator();
-        }
-        return nullptr;
-    }
-
-    // Helper to get cv::IMREAD_COLOR_YUV if it exists, otherwise cv::IMREAD_COLOR
-    template <typename T, typename = void>
-    struct ImreadColorYuvGetter {
-        static constexpr int get() {
-            return 1; // cv::IMREAD_COLOR
-        }
-    };
-
-    template <typename T>
-    struct ImreadColorYuvGetter<T, std::void_t<decltype(T::IMREAD_COLOR_YUV)>> {
-        static constexpr int get() {
-            return static_cast<int>(T::IMREAD_COLOR_YUV);
-        }
-    };
-
-    int get_imread_color_yuv() {
-        return ImreadColorYuvGetter<cv::ImreadModes>::get();
-    }
-
-    // Helper to get cv::IMREAD_RETRY_SOFTDEC if it exists, otherwise 0
-    template <typename T, typename = void>
-    struct ImreadRetrySoftdecGetter {
-        static constexpr int get() {
-            return 0;
-        }
-    };
-
-    template <typename T>
-    struct ImreadRetrySoftdecGetter<T, std::void_t<decltype(T::IMREAD_RETRY_SOFTDEC)>> {
-        static constexpr int get() {
-            return static_cast<int>(T::IMREAD_RETRY_SOFTDEC);
-        }
-    };
-
-    int get_imread_retry_softdec() {
-        return ImreadRetrySoftdecGetter<cv::ImreadModes>::get();
-    }
-}
-
 // FFmpeg headers
 extern "C" {
 #include <libavformat/avformat.h>
@@ -115,10 +60,10 @@ size_t collectJpegFiles(const fs::path& path, std::string (&file_list)[N]) {
 
 OpencvWorker::OpencvWorker(const WorkerConfig& config)
     : WorkerBase(BufferPoolBuilderFactory::AllocatorType::MAT, config)  // 传递 config 给父类
-    , file_path(config.data_source.path)
     , logger(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Worker.OpenCV")))
+    , file_path(config.data_source.path)
     , file_num(0)
-    , current_file_index (-1) 
+    , current_file_index (0)
     , use_hardware (config.decoder.enable_hardware)
     , use_mock (config.decoder.use_mock)
     , src_height (config.decoder.mock_src_height)
@@ -131,7 +76,7 @@ OpencvWorker::OpencvWorker(const WorkerConfig& config)
     file_num = collectJpegFiles(file_path, file_list_);
     if (file_num == 0) LOG4CPLUS_ERROR(logger, "Jpeg files are not included");
 
-    for (int i = 0 ; i < file_num; i++){
+    for (size_t i = 0 ; i < file_num; i++){
         std::cout << file_list_[i] << std::endl;
     }
 
@@ -140,9 +85,9 @@ OpencvWorker::OpencvWorker(const WorkerConfig& config)
         file_num = 100000;
     }
     if (config.data_source.max_frames > 0){
-        file_num = file_num < config.data_source.max_frames ? file_num : config.data_source.max_frames;
+        file_num = file_num < static_cast<size_t>(config.data_source.max_frames) ? file_num : static_cast<size_t>(config.data_source.max_frames);
     }
-    LOG4CPLUS_DEBUG_FMT(logger, "for '%s' jpg num=%d", file_path.c_str(), file_num);
+    LOG4CPLUS_DEBUG_FMT(logger, "for '%s' jpg num=%zu", file_path.c_str(), file_num);
 }
 
 OpencvWorker::~OpencvWorker() {
@@ -298,7 +243,7 @@ bool OpencvWorker::isAtEnd() const {
 
 FillResult OpencvWorker::fillBuffer(int frame_index, Buffer* buffer) {
     std::cout << "[fillBuffer] " << frame_index << std::endl;
-    if (frame_index>=file_num) return FillResult::fromCodec(CodecSendResult::eof());
+    if (frame_index >= static_cast<int>(file_num)) return FillResult::fromCodec(CodecSendResult::eof());
     if (!buffer) {
         LOG4CPLUS_ERROR(logger, " ERROR: buffer is nullptr");
         return FillResult::invalidParam();
@@ -314,9 +259,9 @@ FillResult OpencvWorker::fillBuffer(int frame_index, Buffer* buffer) {
     }
     else{
         int flags;
-        if (use_hardware && pix_fmt == AV_PIX_FMT_NV12) flags = get_imread_color_yuv(); //硬件，输出nv12
+        if (use_hardware && pix_fmt == AV_PIX_FMT_NV12) flags = cv::IMREAD_COLOR_YUV; //硬件，输出nv12
         else if (use_hardware && pix_fmt == AV_PIX_FMT_BGR24) flags = cv::IMREAD_COLOR; //硬件，输出bgr888
-        else flags = cv::IMREAD_COLOR|get_imread_retry_softdec(); //软件，输出bgr888
+        else flags = cv::IMREAD_COLOR|cv::IMREAD_RETRY_SOFTDEC; //软件，输出bgr888
         mat_ptr = new cv::Mat(cv::imread(file_list_[frame_index],flags));
     }
     
@@ -335,7 +280,7 @@ FillResult OpencvWorker::fillBuffer(int frame_index, Buffer* buffer) {
 
 cv::Mat OpencvWorker::mockMat(int width, int height, bool hw, AVPixelFormat pix_fmt){
     cv::Mat dst;
-    if (hw==true) dst.allocator = safe_get_allocator();
+    if (hw==true) dst.allocator = cv::hal::getAllocator();
     if (pix_fmt == AV_PIX_FMT_NV12 || pix_fmt == AV_PIX_FMT_NV21){
         dst.create(height*3/2, width, CV_8UC1);
         cv::randu(dst, cv::Scalar(0), cv::Scalar(255));
