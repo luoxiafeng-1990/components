@@ -108,7 +108,9 @@ qa_cases_SOURCES = \
     test_cases/venc/VencPlugin.cpp \
     test_cases/preview/PreviewPlugin.cpp \
     test_cases/memleak/MemleakPlugin.cpp \
-    test_cases/logconfig/LogConfigPlugin.cpp
+    test_cases/logconfig/LogConfigPlugin.cpp \
+    test_cases/cpu/CpuPlugin.cpp \
+    test_cases/cpu/CpuBenchmark.cpp
 qa_cases_LDADD = libcomponents.la $(COMMON_LIBS)
 qa_cases_CPPFLAGS = -I$(top_srcdir)/test_cases $(AM_CPPFLAGS)
 qa_cases_LDFLAGS = -L=/usr/local/lib -Wl,--allow-shlib-undefined

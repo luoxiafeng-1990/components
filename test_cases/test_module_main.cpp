@@ -34,6 +34,7 @@
 #include "preview/PreviewPlugin.hpp"
 #include "memleak/MemleakPlugin.hpp"
 #include "logconfig/LogConfigPlugin.hpp"
+#include "cpu/CpuPlugin.hpp"
 #include "common/Logger.hpp"
 
 #include "productionline/line/WorkerSyncCoordinator.hpp"
@@ -74,6 +75,7 @@ int main(int argc, char* argv[]) {
     auto preview_plugin = std::make_unique<test::preview::PreviewPlugin>();
     auto memleak_plugin   = std::make_unique<test::memleak::MemleakPlugin>();
     auto logconfig_plugin = std::make_unique<test::logconfig::LogConfigPlugin>();
+    auto cpu_plugin       = std::make_unique<test::cpu::CpuPlugin>();
 
     // ── 2. 统一注册：每个插件 = 一个子命令 ──
     struct PluginEntry {
@@ -98,6 +100,7 @@ int main(int argc, char* argv[]) {
     register_plugin(preview_plugin.get());
     register_plugin(memleak_plugin.get());
     register_plugin(logconfig_plugin.get());
+    register_plugin(cpu_plugin.get());
 
     // ── 3. 解析命令行（支持多子命令） ──
     try {
