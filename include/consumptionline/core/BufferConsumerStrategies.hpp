@@ -311,6 +311,7 @@ class OpencvConsumer : public IBufferConsumer {
 public:
     using OpencvType = WorkerConfig::ConsumerTypeConfig::OpencvType;
     using CompareConfig = consumptionline::io::CompareConfig;
+    using TransformFunc = std::function<cv::Mat(Buffer* buffer)>;
 
     OpencvConsumer(const WorkerConfig& config);
     ~OpencvConsumer() override;
@@ -324,6 +325,7 @@ public:
     double getAverageSsim() const;
 
 private:
+    TransformFunc ProcessDecorator(int frame_index);
     cv::Mat ProcessByOpencv(cv::Mat src, bool hw);
 
     OpencvType opencv_config_;

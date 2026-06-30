@@ -1303,102 +1303,153 @@ bool OpencvConsumer::consume(const std::vector<Buffer*>& buffers, int frame_inde
     if (buffers.empty() || !buffers[0]) return true;
     if (opencv_config_.op_type == OpencvType::OpType::NONE) return true;
 
-    // ── 1. 从 buffer 提取 HW 源 Mat ──
-    cv::Mat src_hw;
-    if (worker_type_ == WorkerType::OPENCV) {
-        cv::Mat* ptr = buffers[0]->getMat();
-        if (!ptr || ptr->empty()) {
-            LOG4CPLUS_WARN_FMT(logger_,
-                "consume [frame %d] no Mat in buffer", frame_index);
-            return true;
-        }
-        src_hw = *ptr;
-    } else {
-        AVFrame* avframe_hw = buffers[0]->getAVFrame();
-        if (!avframe_hw) {
-            LOG4CPLUS_WARN_FMT(logger_,
-                "consume [frame %d] no AVFrame in buffer", frame_index);
-            return true;
-        }
-        src_hw = construct_mat_from_avframe(avframe_hw);
-    }
+    // 创建装饰器，装饰器内部处理所有的断言逻辑
+    auto decorator = ProcessDecorator(frame_index);
 
-    bool need_dual = (comparator_ != nullptr) || perf_enabled_;
-
-    // ── 2. 仅 HW 模式（不需要比较也不需要计时） ──
-    if (!need_dual) {
-        ProcessByOpencv(src_hw, true);
-        return true;
-    }
-
-    // ── 3. 双路模式：克隆 SW 源 ──
-    cv::Mat src_sw;
-    if (worker_type_ == WorkerType::OPENCV) {
-        src_sw = src_hw.clone();
-    } else {
-        if (src_hw.u) {
-            try_set_addr(src_hw.u, 1);
-        }
-        AVFrame* avframe_sw = av_frame_clone(buffers[0]->getAVFrame());
-        src_sw = avframeToMat(avframe_sw);
-        av_frame_free(&avframe_sw);
-    }
-
-    // ── 4. 执行 HW + SW（带计时） ──
-    auto hw_start = std::chrono::high_resolution_clock::now();
-    cv::Mat result_hw = ProcessByOpencv(src_hw, true);
-    auto hw_end = std::chrono::high_resolution_clock::now();
-
-    auto sw_start = std::chrono::high_resolution_clock::now();
-    cv::Mat result_sw = ProcessByOpencv(src_sw, false);
-    auto sw_end = std::chrono::high_resolution_clock::now();
-
-    auto hw_ms = std::chrono::duration_cast<std::chrono::milliseconds>(hw_end - hw_start).count();
-    auto sw_ms = std::chrono::duration_cast<std::chrono::milliseconds>(sw_end - sw_start).count();
-    api_hw_total_ms_ += hw_ms;
-    api_sw_total_ms_ += sw_ms;
-
-    // ── 5. 像素比较（如果 comparator 存在） ──
-    if (comparator_) {
-        Buffer ref_buf(0, nullptr, 0, 0, Buffer::Ownership::EXTERNAL, Buffer::Type::MAT);
-        cv::Mat result_hw_bgr, result_sw_bgr;
-
-        if (opencv_config_.op_type != OpencvType::OpType::CVTCOLOR) {
-            result_hw_bgr.allocator = safe_get_allocator();
-            if (!result_hw.empty() && result_hw.channels() == 1) {
-                cv::cvtColor(result_hw, result_hw_bgr, cv::COLOR_YUV2BGR_NV12);
-            } else {
-                result_hw_bgr = result_hw;
-            }
-            cv::cvtColor(result_sw, result_sw_bgr, cv::COLOR_YUV2BGR_NV12);
-            ref_buf.setMat(&result_sw_bgr);
-            buffers[0]->setMat(&result_hw_bgr);
-        } else {
-            ref_buf.setMat(&result_sw);
-            buffers[0]->setMat(&result_hw);
-        }
-
-        auto cmp_result = comparator_->compare(buffers[0], &ref_buf);
-        buffers[0]->setMat(nullptr);
-
-        frames_compared_++;
-        psnr_sum_ += cmp_result.psnr_avg;
-        ssim_sum_ += cmp_result.ssim_avg;
-        if (!cmp_result.passed) passed_ = false;
-
-        if (compare_config_.verbose) {
-            double hw_avg = api_hw_total_ms_ / (double)frames_processed_;
-            double sw_avg = api_sw_total_ms_ / (double)frames_processed_;
-            LOG4CPLUS_INFO_FMT(logger_,
-                "OpencvConsumer [frame %d] PSNR=%.2f dB  SSIM=%.4f  "
-                "hw=%lld ms (avg=%.2f)  sw=%lld ms (avg=%.2f)  %s",
-                frame_index, cmp_result.psnr_avg, cmp_result.ssim_avg,
-                (long long)hw_ms, hw_avg, (long long)sw_ms, sw_avg,
-                cmp_result.passed ? "PASS" : "FAIL");
-        }
-    }
+    // 应用装饰器到 buffer
+    decorator(buffers[0]);
 
     return true;
+}
+
+// 按AssertMode区分，已完成
+// 按软硬件区分，目前producer全是硬件，在consumer中手动制造软件
+
+// 按WorkerType或BufferPoolType区分，已完成
+// 按mat格式(bgr, nv12)分别处理
+// 传递给tranform函数处理
+OpencvConsumer::TransformFunc OpencvConsumer::ProcessDecorator(int frame_index) {
+    using AssertMode = WorkerConfig::ConsumerTypeConfig::OpencvType::AssertMode;
+
+    // API_EXCEPTION 模式：捕获异常，检查是否抛出（不计时）
+    if (opencv_config_.assert_mode == AssertMode::API_EXCEPTION) {
+        return [this, frame_index](Buffer* buffer) -> cv::Mat {
+            cv::Mat src_hw;
+            if (worker_type_ == WorkerType::OPENCV) {
+                cv::Mat* src_hw_ptr;
+                src_hw_ptr = buffer->getMat();
+                if (!src_hw_ptr || src_hw_ptr->empty()) {
+                    LOG4CPLUS_WARN_FMT(logger_,
+                        "decorator [Mat %d] no Mat in buffer", frame_index);
+                    return cv::Mat();
+                }
+                src_hw = *src_hw_ptr;
+            }
+            else{
+                AVFrame* avframe_hw = buffer->getAVFrame();
+                if (!avframe_hw) {
+                    LOG4CPLUS_WARN_FMT(logger_,
+                        "decorator [frame %d] no AVFrame in buffer", frame_index);
+                    return cv::Mat();
+                }
+
+                src_hw = cv::Mat(avframe_hw);
+            }
+
+            cv::Mat result;
+
+            result = ProcessByOpencv(src_hw,true);
+
+            return result;
+        };
+    }
+    // PIX_COMPARE 和 PERFORMANCE 模式：分开计时硬件和软件
+    else {
+        return [this, frame_index](Buffer* buffer) -> cv::Mat {
+            cv::Mat src_hw;
+            cv::Mat src_sw;
+            if (worker_type_ == WorkerType::OPENCV) {
+                cv::Mat* src_hw_ptr;
+                src_hw_ptr = buffer->getMat();
+                if (!src_hw_ptr || src_hw_ptr->empty()) {
+                    LOG4CPLUS_WARN_FMT(logger_,
+                        "decorator [Mat %d] no Mat in buffer", frame_index);
+                    return cv::Mat();
+                }
+                src_hw = *src_hw_ptr;
+                src_sw = src_hw.clone();
+            }
+            else{
+                AVFrame* avframe_hw = buffer->getAVFrame();
+                if (!avframe_hw) {
+                    LOG4CPLUS_WARN_FMT(logger_,
+                        "decorator [frame %d] no AVFrame in buffer", frame_index);
+                    return cv::Mat();
+                }
+                src_hw = cv::Mat(avframe_hw, cv::UMatData::AVFRAME_ATTACHED);
+                AVFrame* avframe_sw = av_frame_clone(avframe_hw);
+                src_sw = avframeToMat(avframe_sw);
+                av_frame_free(&avframe_sw);
+            }
+
+            // 计时硬件执行（NV12 输入，resize 内部走硬件路径）
+            auto hw_start = std::chrono::high_resolution_clock::now();
+
+            cv::Mat result_hw = ProcessByOpencv(src_hw,true);
+            auto hw_end = std::chrono::high_resolution_clock::now();
+            auto hw_duration_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                hw_end - hw_start).count();
+            api_hw_total_ms_ += hw_duration_ms;
+
+            // 计时软件执行（BGR 输入）
+            auto sw_start = std::chrono::high_resolution_clock::now();
+            cv::Mat result_sw = ProcessByOpencv(src_sw,false);
+            auto sw_end = std::chrono::high_resolution_clock::now();
+            auto sw_duration_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                sw_end - sw_start).count();
+            api_sw_total_ms_ += sw_duration_ms;
+
+            // 计算平均时间
+            double hw_avg_ms = api_hw_total_ms_ / (double)frames_processed_;
+            double sw_avg_ms = api_sw_total_ms_ / (double)frames_processed_;
+
+            // PIX_COMPARE 和 PERFORMANCE：比较前将硬件结果从 NV12 转 BGR
+            if (comparator_) {
+                Buffer ref_buf(0, nullptr, 0, 0, Buffer::Ownership::EXTERNAL, Buffer::Type::MAT);
+                // 局部变量会在离开作用域后自动销毁，导致运行时buffer里面的mat是空
+                cv::Mat result_hw_bgr;
+                cv::Mat result_sw_bgr;
+                if (opencv_config_.op_type != OpencvType::OpType::CVTCOLOR){
+                    result_hw_bgr.allocator = cv::hal::getAllocator();
+                    if (!result_hw.empty() && result_hw.channels() == 1) {
+                        cv::cvtColor(result_hw, result_hw_bgr, cv::COLOR_YUV2BGR_NV12);
+                        cv::cvtColor(result_sw, result_sw_bgr, cv::COLOR_YUV2BGR_NV12);
+                    } else {
+                        result_hw_bgr = result_hw;
+                        result_sw_bgr = result_sw;
+                    }
+
+                    ref_buf.setMat(&result_sw_bgr);
+                    buffer->setMat(&result_hw_bgr);
+                }
+                // 如果测试例就是cvtcolor，则不用重复转换到bgr
+                else {
+                    ref_buf.setMat(&result_sw);
+                    buffer->setMat(&result_hw);
+                }
+
+                auto cmp_result = comparator_->compare(buffer, &ref_buf);
+                buffer->setMat(nullptr);
+
+                frames_compared_++;
+                psnr_sum_ += cmp_result.psnr_avg;
+                ssim_sum_ += cmp_result.ssim_avg;
+                if (!cmp_result.passed) passed_ = false;
+
+                if (compare_config_.verbose) {
+                    LOG4CPLUS_INFO_FMT(logger_,
+                        "OpencvConsumer::decorator [frame %d] PSNR=%.2f dB  SSIM=%.4f  "
+                        "hw=%lld ms (avg=%.2f)  sw=%lld ms (avg=%.2f)  %s",
+                        frame_index, cmp_result.psnr_avg, cmp_result.ssim_avg,
+                        (long long)hw_duration_ms, hw_avg_ms,
+                        (long long)sw_duration_ms, sw_avg_ms,
+                        cmp_result.passed ? "PASS" : "FAIL");
+                }
+            }
+
+            return result_hw;
+        };
+    }
 }
 
 void OpencvConsumer::finalize() {
