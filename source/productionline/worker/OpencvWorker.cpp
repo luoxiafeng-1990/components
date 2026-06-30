@@ -317,7 +317,10 @@ FillResult OpencvWorker::fillBuffer(int frame_index, Buffer* buffer) {
         if (use_hardware && pix_fmt == AV_PIX_FMT_NV12) flags = get_imread_color_yuv(); //硬件，输出nv12
         else if (use_hardware && pix_fmt == AV_PIX_FMT_BGR24) flags = cv::IMREAD_COLOR; //硬件，输出bgr888
         else flags = cv::IMREAD_COLOR|get_imread_retry_softdec(); //软件，输出bgr888
-        mat_ptr = new cv::Mat(cv::imread(file_list_[frame_index],flags));
+        {
+            perf::StageTimer::ScopedRecord imread_timing(imread_timer_);
+            mat_ptr = new cv::Mat(cv::imread(file_list_[frame_index],flags));
+        }
     }
     
     buffer->setMat(mat_ptr);

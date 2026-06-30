@@ -30,6 +30,7 @@
 #include "bufferpool/pool/base/BufferPool.hpp"
 #include "common/GlobalThreadPool.hpp"
 #include "common/Logger.hpp"
+#include "common/StageTimer.hpp"
 
 #include <vector>
 #include <memory>
@@ -82,6 +83,9 @@ struct ConsumeResult {
     // PARALLEL 模式：每个 Worker 的独立结果
     // ========================================
     std::vector<ConsumeResult> worker_results;
+
+    // 阶段级计时数据
+    std::vector<perf::StageTiming> stage_timings;
     
     // ========================================
     // 综合结果（用于自动化测试）

@@ -191,7 +191,11 @@ bool DisplayConsumer::consume(const std::vector<Buffer*>& buffers, int frame_ind
         return true;
     }
     
-    bool success = display_->displayBuffer(buffers[0]);
+    bool success;
+    {
+        perf::StageTimer::ScopedRecord _sr(display_timer_);
+        success = display_->displayBuffer(buffers[0]);
+    }
     last_consume_failed_ = !success;
     
     if (success) {
@@ -762,8 +766,6 @@ OpencvConsumer::OpencvConsumer(const WorkerConfig& config)
     , initialized_(false)
     , perf_enabled_(config.consumer_type.performance.enable)
     , perf_target_fps_(config.consumer_type.performance.target_fps)
-    , api_hw_total_ms_(0)
-    , api_sw_total_ms_(0)
     , logger_(log4cplus::Logger::getInstance("consumer.OpencvConsumer"))
 {
 }
@@ -1344,18 +1346,17 @@ bool OpencvConsumer::consume(const std::vector<Buffer*>& buffers, int frame_inde
     }
 
     // ── 4. 执行 HW + SW（带计时） ──
-    auto hw_start = std::chrono::high_resolution_clock::now();
-    cv::Mat result_hw = ProcessByOpencv(src_hw, true);
-    auto hw_end = std::chrono::high_resolution_clock::now();
+    cv::Mat result_hw;
+    {
+        perf::StageTimer::ScopedRecord _sr(opencv_hw_timer_);
+        result_hw = ProcessByOpencv(src_hw, true);
+    }
 
-    auto sw_start = std::chrono::high_resolution_clock::now();
-    cv::Mat result_sw = ProcessByOpencv(src_sw, false);
-    auto sw_end = std::chrono::high_resolution_clock::now();
-
-    auto hw_ms = std::chrono::duration_cast<std::chrono::milliseconds>(hw_end - hw_start).count();
-    auto sw_ms = std::chrono::duration_cast<std::chrono::milliseconds>(sw_end - sw_start).count();
-    api_hw_total_ms_ += hw_ms;
-    api_sw_total_ms_ += sw_ms;
+    cv::Mat result_sw;
+    {
+        perf::StageTimer::ScopedRecord _sr(opencv_sw_timer_);
+        result_sw = ProcessByOpencv(src_sw, false);
+    }
 
     // ── 5. 像素比较（如果 comparator 存在） ──
     if (comparator_) {
@@ -1386,13 +1387,13 @@ bool OpencvConsumer::consume(const std::vector<Buffer*>& buffers, int frame_inde
         if (!cmp_result.passed) passed_ = false;
 
         if (compare_config_.verbose) {
-            double hw_avg = api_hw_total_ms_ / (double)frames_processed_;
-            double sw_avg = api_sw_total_ms_ / (double)frames_processed_;
+            auto hw_timing = opencv_hw_timer_.summarize();
+            auto sw_timing = opencv_sw_timer_.summarize();
             LOG4CPLUS_INFO_FMT(logger_,
                 "OpencvConsumer [frame %d] PSNR=%.2f dB  SSIM=%.4f  "
-                "hw=%lld ms (avg=%.2f)  sw=%lld ms (avg=%.2f)  %s",
+                "hw_avg=%.2f ms  sw_avg=%.2f ms  %s",
                 frame_index, cmp_result.psnr_avg, cmp_result.ssim_avg,
-                (long long)hw_ms, hw_avg, (long long)sw_ms, sw_avg,
+                hw_timing.avg_ms, sw_timing.avg_ms,
                 cmp_result.passed ? "PASS" : "FAIL");
         }
     }
@@ -1428,8 +1429,10 @@ std::string OpencvConsumer::getStats() const {
     }
 
     if (perf_enabled_ && frames_processed_ > 0) {
-        double hw_avg_ms  = api_hw_total_ms_ / (double)frames_processed_;
-        double sw_avg_ms  = api_sw_total_ms_ / (double)frames_processed_;
+        auto hw_timing = opencv_hw_timer_.summarize();
+        auto sw_timing = opencv_sw_timer_.summarize();
+        double hw_avg_ms  = hw_timing.avg_ms;
+        double sw_avg_ms  = sw_timing.avg_ms;
         double hw_avg_fps = hw_avg_ms > 0 ? 1000.0 / hw_avg_ms : 0.0;
         double sw_avg_fps = sw_avg_ms > 0 ? 1000.0 / sw_avg_ms : 0.0;
 

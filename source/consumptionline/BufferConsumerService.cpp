@@ -11,6 +11,7 @@
 #include "common/GlobalThreadPool.hpp"
 #include "productionline/worker/base/ComponentTopology.hpp"
 #include "consumptionline/types/npu/NpuInferenceConsumer.hpp"
+#include "common/PerfFileWriter.hpp"
 
 #include <future>
 #include <sstream>
@@ -304,6 +305,16 @@ ConsumeResult BufferConsumerService::startProductionLine(
         
         // 8. 清理消费者
         consumer->finalize();
+
+        // 9. 收集 Worker 层面的阶段计时（如编码器 FFmpegEncodeWorker 的计时）
+        if (worker) {
+            auto* encode_worker = dynamic_cast<FFmpegEncodeWorker*>(worker.get());
+            if (encode_worker) {
+                auto enc_timings = encode_worker->getStageTimings();
+                result.stage_timings.insert(result.stage_timings.end(),
+                    enc_timings.begin(), enc_timings.end());
+            }
+        }
         
         result.success = true;
         
@@ -953,9 +964,15 @@ void BufferConsumerService::consumeLoop(
     ConsumeResult& result
 ) {
     int frame_index = 0;
+    perf::StageTimer consume_timer("consume");
     int timeout_count = 0;
     bool initialized = false;
     Buffer* held_buffer = nullptr;
+    auto loop_start = std::chrono::steady_clock::now();
+
+    // --perf-file 周期写入控制
+    const bool perf_file_enabled = !config.perf_file_path.empty();
+    int perf_write_interval = 30;  // 每 30 帧写入一次
     
     LOG4CPLUS_DEBUG(logger_, "Starting consume loop");
     
@@ -1000,7 +1017,11 @@ void BufferConsumerService::consumeLoop(
         }
 
         std::vector<Buffer*> buffers = {buffer};
-        bool continue_consume = consumer->consume(buffers, frame_index);
+        bool continue_consume;
+        {
+            perf::StageTimer::ScopedRecord _sr(consume_timer);
+            continue_consume = consumer->consume(buffers, frame_index);
+        }
         
         if (consumer->shouldRetainBuffer()) {
             held_buffer = buffer;
@@ -1008,6 +1029,21 @@ void BufferConsumerService::consumeLoop(
             pool->releaseFilled(buffer);
             frame_index++;
             result.frames_consumed++;
+
+            // ── 周期性写入性能快照文件 ──
+            if (perf_file_enabled && (result.frames_consumed % perf_write_interval == 0)) {
+                auto now = std::chrono::steady_clock::now();
+                double elapsed = std::chrono::duration<double>(now - loop_start).count();
+                double fps = (elapsed > 0) ? result.frames_consumed / elapsed : 0;
+
+                std::vector<perf::StageTiming> timings;
+                timings.push_back(consume_timer.summarize());
+
+                std::string snapshot = perf::PerfFileWriter::formatSnapshot(
+                    "LIVE", fps, elapsed, result.frames_consumed, timings);
+                perf::PerfFileWriter::writeToFile(
+                    config.perf_file_path, snapshot);
+            }
         }
         
         if (!continue_consume) {
@@ -1021,6 +1057,11 @@ void BufferConsumerService::consumeLoop(
         held_buffer = nullptr;
     }
     
+    result.stage_timings.push_back(consume_timer.summarize());
+    // 收集伴随消费者（display/npu/opencv 等）的阶段计时
+    auto companion_timings = consumer->collectStageTimings();
+    result.stage_timings.insert(result.stage_timings.end(),
+        companion_timings.begin(), companion_timings.end());
     LOG4CPLUS_DEBUG_FMT(logger_, "Consume loop finished, %d frames consumed", result.frames_consumed);
 }
 

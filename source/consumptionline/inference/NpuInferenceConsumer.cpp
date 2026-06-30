@@ -141,22 +141,31 @@ bool NpuInferenceConsumer::consume(const std::vector<Buffer*>& buffers, int fram
     // 1. 预处理
     LetterboxParams params;
     cv::Mat bgr_full;
-    if (config_.input_mode == NpuInferenceConfig::InputMode::PHYSICAL_ADDR) {
-        params = preprocessPhysicalAddr(buffer);
-    } else {
-        params = preprocessVirtualAddr(buffer,
-                                       config_.enable_draw ? &bgr_full : nullptr);
+    {
+        perf::StageTimer::ScopedRecord _sr(preprocess_timer_);
+        if (config_.input_mode == NpuInferenceConfig::InputMode::PHYSICAL_ADDR) {
+            params = preprocessPhysicalAddr(buffer);
+        } else {
+            params = preprocessVirtualAddr(buffer,
+                                           config_.enable_draw ? &bgr_full : nullptr);
+        }
     }
 
     // 2. 推理
-    if (!runInference()) {
-        fail_count_++;
-        return true;
+    {
+        perf::StageTimer::ScopedRecord _sr(infer_timer_);
+        if (!runInference()) {
+            fail_count_++;
+            return true;
+        }
     }
 
     // 3. 后处理
     std::vector<DetectionResult> results;
-    postprocess(params, results);
+    {
+        perf::StageTimer::ScopedRecord _sr(postprocess_timer_);
+        postprocess(params, results);
+    }
 
     // 4. 画框 & 回写 buffer（如果启用）
     if (config_.enable_draw && !bgr_full.empty()) {

@@ -45,6 +45,7 @@ struct ConsumerTypeConfig {
     int timeout_ms = 100;             ///< 单次获取 Buffer 超时（毫秒）
     int max_timeout_count = 10;       ///< 最大连续超时次数
     bool verbose = false;             ///< 是否输出详细日志
+    std::string perf_file_path;       ///< 性能快照文件路径（运行中周期写入，覆盖模式）
     
     // ========================================
     // 显示消费类型（CONSUME_DISPLAY）

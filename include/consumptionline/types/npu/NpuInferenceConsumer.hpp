@@ -30,6 +30,7 @@
 
 #include "consumptionline/core/IBufferConsumer.hpp"
 #include "bufferpool/buffer/Buffer.hpp"
+#include "common/StageTimer.hpp"
 
 #include <ta-runtime/ta-runtime-api.h>
 #include <opencv2/core.hpp>
@@ -135,6 +136,13 @@ public:
 
     /// 获取最近一次推理的结果 (线程安全地拷贝)
     std::vector<DetectionResult> getLastResults() const;
+    std::vector<perf::StageTiming> collectStageTimings() const override {
+        return {
+            preprocess_timer_.summarize(),
+            infer_timer_.summarize(),
+            postprocess_timer_.summarize()
+        };
+    }
 
 private:
     // ----- 配置 -----
@@ -158,6 +166,9 @@ private:
     bool initialized_ = false;
     std::atomic<int> infer_count_{0};
     std::atomic<int> fail_count_{0};
+    perf::StageTimer infer_timer_{"npu_inference"};
+    perf::StageTimer preprocess_timer_{"npu_preprocess"};
+    perf::StageTimer postprocess_timer_{"npu_postprocess"};
     std::vector<DetectionResult> last_results_;
 
     // ----- 预处理参数 (letterbox) -----

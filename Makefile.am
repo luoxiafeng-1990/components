@@ -58,12 +58,9 @@ libcomponents_la_SOURCES = \
     source/consumptionline/BufferComparator.cpp \
     source/consumptionline/BufferConsumerStrategies.cpp \
     source/consumptionline/BufferConsumerService.cpp \
-    source/consumptionline/inference/NpuInferenceConsumer.cpp
-
-# ========== 测试程序 ==========
-# 注意：display_test 已废弃（原 test_cases/dec/ 目录已重命名为 old_case/）
-# bin_PROGRAMS = display_test
-
+    source/consumptionline/inference/NpuInferenceConsumer.cpp \
+    source/common/PerfReport.cpp \
+    source/common/SystemSnapshot.cpp
 # ========== 公共链接库（定义为变量，便于维护）==========
 # 注意：log4cplus 使用动态链接
 # 在 Buildroot 交叉编译环境中：
@@ -76,24 +73,8 @@ OPENCV_LIBS = -ltacocv -lvx -lhwdec_jpeg -ltaco_ppvdec -lCLC -lOpenVX -lOpenVXU 
         -lopencv_imgcodecs -lopencv_videoio -lopencv_core -lopencv_imgproc -lenc24 -lyuv -ljpeg
 NPU_LIBS = -lta_runtime -lVIPhal -lNBGlinker
 
-# display_test 主程序（已废弃，原 test_cases/dec/ 目录已重命名为 old_case/）
-# display_test_SOURCES = test_cases/dec/test.cpp
-# display_test_CPPFLAGS = -I$(top_srcdir)/test_cases $(AM_CPPFLAGS)
-# display_test_LDADD = libcomponents.la $(COMMON_LIBS)
-
-# Google Test 程序（需要安装 libgtest-dev）
-# bin_PROGRAMS += google_test
-# google_test_SOURCES = \
-#     test_cases/main.cpp \
-#     test_cases/demo_google/test_ffmpeg_decode.cpp
-# google_test_LDADD = -lgtest -lgtest_main -lpthread libcomponents.la $(COMMON_LIBS)
-# google_test_CPPFLAGS = -I$(top_srcdir)/test_cases $(AM_CPPFLAGS)
-# google_test_LDFLAGS = 
-
 # ========== QA 测试程序（模块化测试入口）==========
 bin_PROGRAMS = qa_cases webui_server
-
-# ========== Deprecated 调试工具已移除（opencv_decode_compare_mt / opencv_decode_hw_mat_resize）==========
 
 # ========== Mat(AVFrame*) 接口最小化测试 ==========
 qa_cases_SOURCES = \
@@ -110,7 +91,8 @@ qa_cases_SOURCES = \
     test_cases/memleak/MemleakPlugin.cpp \
     test_cases/logconfig/LogConfigPlugin.cpp \
     test_cases/cpu/CpuPlugin.cpp \
-    test_cases/cpu/CpuBenchmark.cpp
+    test_cases/cpu/CpuBenchmark.cpp \
+    test_cases/common/PerfReportPlugin.cpp
 qa_cases_LDADD = libcomponents.la $(COMMON_LIBS)
 qa_cases_CPPFLAGS = -I$(top_srcdir)/test_cases $(AM_CPPFLAGS)
 qa_cases_LDFLAGS = -L=/usr/local/lib -Wl,--allow-shlib-undefined
@@ -155,7 +137,7 @@ install-data-local:
 
 # ========== 编译选项 ==========
 OPENCV_INCLUDE = -I$(STAGING_DIR)/usr/local/include/opencv4 -I$(TARGET_DIR)/usr/local/include/opencv4 -isystem $(STAGING_DIR)/usr/include/opencv4
-AM_CPPFLAGS = -I$(top_srcdir)/include $(OPENCV_INCLUDE) -I$(top_srcdir)/include/common/third_party/freetype2 -I$(STAGING_DIR)/usr/local/include/ta-runtime -I$(TARGET_DIR)/usr/local/include/ta-runtime -isystem $(STAGING_DIR)/usr/include -I$(STAGING_DIR)/usr/local/include -I$(TARGET_DIR)/usr/local/include
+AM_CPPFLAGS = -I$(top_srcdir)/include $(OPENCV_INCLUDE) -I$(top_srcdir)/include/common/third_party/freetype2 -I$(STAGING_DIR)/usr/local/include/ta-runtime -I$(TARGET_DIR)/usr/local/include/ta-runtime -isystem $(STAGING_DIR)/usr/include -I$(STAGING_DIR)/usr/local/include -I$(TARGET_DIR)/usr/local/include -isystem $(top_srcdir)/webui/backend/third_party
 
 if DEBUG
 AM_CXXFLAGS = -g -O0 -Wall -std=c++17

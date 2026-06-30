@@ -27,6 +27,7 @@
 #include "vendor/taco/display/DisplayDeviceFactory.hpp"
 #include "productionline/worker/core/FFmpegEncodeWorker.hpp"
 #include "productionline/worker/datasource/rawdata/RawFrameSourceFromBuffer.hpp"
+#include "common/StageTimer.hpp"
 
 #include <log4cplus/logger.h>
 #include <memory>
@@ -105,6 +106,9 @@ public:
     void finalize() override;
     std::string getStats() const override;
     bool shouldRetainBuffer() const override;
+    std::vector<perf::StageTiming> collectStageTimings() const override {
+        return { display_timer_.summarize() };
+    }
     
 private:
     DisplayConsumerConfig config_;
@@ -113,6 +117,7 @@ private:
     int failed_count_ = 0;
     bool initialized_ = false;
     bool last_consume_failed_ = false;
+    perf::StageTimer display_timer_{"display"};
 };
 
 // ============================================================
@@ -322,6 +327,9 @@ public:
 
     double getAveragePsnr() const;
     double getAverageSsim() const;
+    std::vector<perf::StageTiming> collectStageTimings() const override {
+        return { opencv_hw_timer_.summarize(), opencv_sw_timer_.summarize() };
+    }
 
 private:
     cv::Mat ProcessByOpencv(cv::Mat src, bool hw);
@@ -341,8 +349,8 @@ private:
     // 性能统计（仅 performance.enable 时使用）
     bool    perf_enabled_      = false;
     double  perf_target_fps_   = 0.0;
-    int64_t api_hw_total_ms_   = 0;
-    int64_t api_sw_total_ms_   = 0;
+    perf::StageTimer opencv_hw_timer_{"opencv_hw"};
+    perf::StageTimer opencv_sw_timer_{"opencv_sw"};
 
     log4cplus::Logger logger_;
     AVPixelFormat pix_fmt = AV_PIX_FMT_NV12;
@@ -429,6 +437,14 @@ public:
      * @brief 获取子策略数量
      */
     size_t getStrategyCount() const { return strategies_.size(); }
+    std::vector<perf::StageTiming> collectStageTimings() const override {
+        std::vector<perf::StageTiming> all;
+        for (const auto& s : strategies_) {
+            auto t = s->collectStageTimings();
+            all.insert(all.end(), t.begin(), t.end());
+        }
+        return all;
+    }
     
 private:
     std::vector<std::shared_ptr<IBufferConsumer>> strategies_;

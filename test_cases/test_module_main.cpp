@@ -23,6 +23,7 @@
 
 #include "common/IOptionPlugin.hpp"
 #include "common/ExecuteMode.hpp"
+#include "common/PerfReportPlugin.hpp"
 #include "common/third_party/CLI11.hpp"
 #include "display/DisplayPlugin.hpp"
 #include "npu/NpuPlugin.hpp"
@@ -64,6 +65,10 @@ int main(int argc, char* argv[]) {
     bool show_topology = false;
     app.add_flag("--topology", show_topology, "执行完毕后打印组件拓扑关系");
 
+    // ── 性能报告全局选项 ──
+    test::PerfReportController perf_ctrl;
+    perf_ctrl.registerGlobalOptions(app);
+
     // ── 1. 创建所有插件 ──
     auto vdec_plugin    = std::make_unique<test::vdec::VdecPlugin>();
     auto venc_plugin    = std::make_unique<test::venc::VencPlugin>();
@@ -103,6 +108,11 @@ int main(int argc, char* argv[]) {
     register_plugin(cpu_plugin.get());
 
     // ── 3. 解析命令行（支持多子命令） ──
+    // 对所有子命令开启 fallthrough：子命令未识别的选项（如 --perf、--json、--topology）
+    // 会自动回退到父 app 解析，使全局选项可放在命令行任意位置
+    for (auto* sub : app.get_subcommands({})) {
+        sub->fallthrough();
+    }
     try {
         app.parse(argc, argv);
     } catch (const CLI::ParseError& e) {
@@ -115,6 +125,14 @@ int main(int argc, char* argv[]) {
         if (entry.cmd->parsed())
             actived_plugins.push_back(entry.plugin);
     }
+
+    // ── --perf-only: 静默所有日志（仅保留 stdout 性能表格） ──
+    if (perf_ctrl.isPerfOnly()) {
+        log4cplus::Logger::getRoot().setLogLevel(log4cplus::OFF_LOG_LEVEL);
+    }
+
+    // ── 开始性能采集 ──
+    perf_ctrl.beginCapture(argc, argv);
 
     if (actived_plugins.empty()) {
         std::cout << app.help() << std::endl;
@@ -131,7 +149,9 @@ int main(int argc, char* argv[]) {
     // UTILITY 类型的插件直接调用 run()，不走消费策略
     for (auto* p : actived_plugins) {
         if (p->getCategory() == test::PluginCategory::UTILITY) {
-            return p->run();
+            int ret = p->run();
+            // UTILITY 插件（如 cpu）有自己的报告机制，直接返回
+            return ret;
         }
     }
 
@@ -161,6 +181,10 @@ int main(int argc, char* argv[]) {
     // ── 7.5. 将 applyTo 阶段的伴随设置继承到管线配置 ──
     for (auto& pc : pipeline_configs) {
         pc.consumer_type.inheritCompanionSettings(config.consumer_type);
+        // 将 --perf-file 路径传入消费配置（consumeLoop 会周期性写入快照）
+        if (!perf_ctrl.getPerfFilePath().empty()) {
+            pc.consumer_type.perf_file_path = perf_ctrl.getPerfFilePath();
+        }
     }
 
     // ── 8. 从 config 推断执行模式，统一执行 ──
@@ -173,10 +197,24 @@ int main(int argc, char* argv[]) {
     uint32_t flags = test::ExecuteMode::buildConsumeFlags(config);
     flags |= test::ExecuteMode::buildConsumeFlags(pipeline_configs[0]);
 
+    // ── 辅助 lambda：统一处理 result → printResult → perf report → return ──
+    auto finalize_result = [&](const consumer::ConsumeResult& result,
+                               const std::string& name) -> int {
+        consumer::BufferConsumerService::printResult(name, result);
+        if (perf_ctrl.isEnabled()) {
+            std::string module = actived_plugins.empty() ? "unknown" : actived_plugins[0]->getName();
+            auto report = perf_ctrl.buildReport(result, name, module);
+            int exit_code = perf_ctrl.finalize(report);
+            // 基线对比检测到性能回归时返回 exit_code=2
+            if (exit_code == 2) return 2;
+        }
+        return result.getOverallResult() ? 0 : 1;
+    };
+
     // CHANNEL COMPARE
     if (config.consumer_type.compare.enable_channel_compare) {
         auto result = test::ExecuteMode::channelCompare(pipeline_configs[0], test_name + " (CHANNEL_COMPARE)");
-        return result.getOverallResult() ? 0 : 1;
+        return finalize_result(result, test_name);
     }
 
     const bool compare_enabled = config.consumer_type.compare.enable_psnr
@@ -188,8 +226,7 @@ int main(int argc, char* argv[]) {
         && (config.consumer_type.compare.enable_psnr || config.consumer_type.compare.enable_ssim)) {
         auto result = test::venc::runEncodeQualityCompare(
             pipeline_configs[0], config, test_name + " (ENC_COMPARE)");
-        consumer::BufferConsumerService::printResult(test_name, result);
-        return result.getOverallResult() ? 0 : 1;
+        return finalize_result(result, test_name);
     }
 
     // 单路编码 + 显示：编码 -> 解码 -> 显示（码流不可直接显示）
@@ -200,8 +237,7 @@ int main(int argc, char* argv[]) {
         && !config.consumer_type.compare.enable_ssim) {
         auto result = test::venc::runEncodeDecodeDisplay(
             pipeline_configs[0], config, test_name);
-        consumer::BufferConsumerService::printResult(test_name, result);
-        return result.getOverallResult() ? 0 : 1;
+        return finalize_result(result, test_name);
     }
 
     // PARALLEL COMPARE (N 组 hw vs sw 并发对比)
@@ -259,20 +295,17 @@ int main(int argc, char* argv[]) {
 
         if ((is_arithmetic_op || compare_enabled) && pipeline_configs.size() == 2) {
             auto result = test::ExecuteMode::compare(pipeline_configs, flags, test_name + " (OPENCV)");
-            consumer::BufferConsumerService::printResult(test_name, result);
-            return result.getOverallResult() ? 0 : 1;
+            return finalize_result(result, test_name);
         }
 
         auto result = test::ExecuteMode::single(pipeline_configs[0], flags, test_name);
-        consumer::BufferConsumerService::printResult(test_name, result);
-        return result.getOverallResult() ? 0 : 1;
+        return finalize_result(result, test_name);
     }
 
     // COMPARE (PSNR/SSIM, 2 configs = hw vs sw)
     if (compare_enabled && pipeline_configs.size() == 2) {
         auto result = test::ExecuteMode::compare(pipeline_configs, flags, test_name + " (COMPARE)");
-        consumer::BufferConsumerService::printResult(test_name, result);
-        return result.getOverallResult() ? 0 : 1;
+        return finalize_result(result, test_name);
     }
 
     // PARALLEL / BATCH (configs.size() > 1)
@@ -302,12 +335,10 @@ int main(int argc, char* argv[]) {
 
         auto result = test::ExecuteMode::parallel(pipeline_configs, flags,
             test_name + " (PARALLEL x" + std::to_string(pipeline_configs.size()) + ")");
-        consumer::BufferConsumerService::printResult(test_name, result);
-        return result.getOverallResult() ? 0 : 1;
+        return finalize_result(result, test_name);
     }
 
     // SINGLE
     auto result = test::ExecuteMode::single(pipeline_configs[0], flags, test_name);
-    consumer::BufferConsumerService::printResult(test_name, result);
-    return result.getOverallResult() ? 0 : 1;
+    return finalize_result(result, test_name);
 }

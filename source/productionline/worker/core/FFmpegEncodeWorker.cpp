@@ -814,7 +814,11 @@ FillResult FFmpegEncodeWorker::readAndSendFrame(AVFrame* temp_frame) {
     }
     
     // 从帧数据源读取一帧（Acquire 层）
-    int ret = datasource_->readRawFrame(temp_frame);
+    int ret;
+    {
+        perf::StageTimer::ScopedRecord read_timing(encode_read_timer_);
+        ret = datasource_->readRawFrame(temp_frame);
+    }
     if (ret < 0) {
         if (ret == AVERROR_EOF) {
             LOG4CPLUS_DEBUG(logger_, "[EncodeWorker] 🔄 EOF 到达");
@@ -841,23 +845,33 @@ FillResult FFmpegEncodeWorker::readAndSendFrame(AVFrame* temp_frame) {
     using Result = CodecSendResult;
     if ((input_scale_needed_ || format_conversion_needed_) && scaled_frame_ && sws_ctx_) {
         const int src_h = datasource_->getFrameHeight();
-        const int lines = sws_scale(
-            sws_ctx_,
-            encode_frame->data,
-            encode_frame->linesize,
-            0,
-            src_h,
-            scaled_frame_->data,
-            scaled_frame_->linesize);
+        int lines;
+        {
+            perf::StageTimer::ScopedRecord scale_timing(encode_scale_timer_);
+            lines = sws_scale(
+                sws_ctx_,
+                encode_frame->data,
+                encode_frame->linesize,
+                0,
+                src_h,
+                scaled_frame_->data,
+                scaled_frame_->linesize);
+        }
         if (lines <= 0) {
             LOG4CPLUS_ERROR_FMT(logger_, "[EncodeWorker] sws_scale 失败 (lines=%d)", lines);
             return FillResult::fromCodec(Result::encodeError());
         }
         scaled_frame_->pts = encoded_frames_.load();
-        ret = avcodec_send_frame(codec_ctx_ptr_, scaled_frame_);
+        {
+            perf::StageTimer::ScopedRecord send_timing(encode_send_timer_);
+            ret = avcodec_send_frame(codec_ctx_ptr_, scaled_frame_);
+        }
     } else {
         encode_frame->pts = encoded_frames_.load();
-        ret = avcodec_send_frame(codec_ctx_ptr_, encode_frame);
+        {
+            perf::StageTimer::ScopedRecord send_timing(encode_send_timer_);
+            ret = avcodec_send_frame(codec_ctx_ptr_, encode_frame);
+        }
     }
     
     if (ret == 0) {
@@ -905,6 +919,7 @@ bool FFmpegEncodeWorker::fillBufferMetadataFromPacket(AVPacket* packet, Buffer* 
  * v2.33 变更：返回类型从 bool 改为 FillResult
  */
 FillResult FFmpegEncodeWorker::fillBuffer(int frame_index, Buffer* buffer) {
+    perf::StageTimer::ScopedRecord total_timing(encode_total_timer_);
     (void)frame_index;
     
     // 参数校验
@@ -967,7 +982,11 @@ FillResult FFmpegEncodeWorker::fillBuffer(int frame_index, Buffer* buffer) {
             break;
         }
         
-        int ret = avcodec_receive_packet(codec_ctx_ptr_, temp_pkt);
+        int ret;
+        {
+            perf::StageTimer::ScopedRecord recv_timing(encode_recv_timer_);
+            ret = avcodec_receive_packet(codec_ctx_ptr_, temp_pkt);
+        }
         
         if (ret == 0) {
             // ✅ 成功接收到一个 packet
