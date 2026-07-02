@@ -7,27 +7,17 @@
 #include "bufferpool/pool/builder/BufferPoolBuilderFactory.hpp"
 #include "productionline/worker/base/ComponentTopology.hpp"
 #include "vendor/taco/display/TacoProDisplayExtension.hpp"
+#include "consumptionline/types/stitcher/FrameStitcherService.hpp"
 
-#include <shared_mutex>
-#include <condition_variable>
 #include <mutex>
-#include <thread>
-#include <atomic>
-#include <vector>
 #include <memory>
 #include <string>
 #include <cstdint>
 
-#include "common/Timer.hpp"
+
 
 #include <log4cplus/logger.h>
 #include <log4cplus/loggingmacros.h>
-
-extern "C" {
-#include "ta_cv_api_ext_c.h"
-}
-
-enum class ViewType { GRID, MAIN_SIDEBAR };
 
 struct tpsfb_dma_info;
 class TacoProOsdOverlay;
@@ -38,18 +28,12 @@ class TacoProOsdOverlay;
  * 核心职责：
  *   1. 通过 TACO 平台 API 独立分配每个 framebuffer 页的物理连续内存
  *   2. 通过 IBufferPoolBuilder（CONTINUOUS_PHYSICAL 类型）+ BufferPool 管理 framebuffer 页
- *   3. 提供 channelWrite() 接口供多通道并发写入（PP 硬件 resize）
- *   4. 渲染线程等待所有通道写完后提交（帧级超时保护）
- *   5. 显示定时器定时从 FILLED 队列取帧 → DMA → VSYNC
+ *   3. 通过 FrameStitcherService 管理多通道拼接、渲染和定时消费
+ *   4. 作为 Display 订阅者注册到 FrameStitcherService，收到帧时执行 DMA 送显
  *
  * 内存分配策略：
  *   - 每个 buffer 由 FramebufferAllocator 内部独立分配物理连续内存
  *   - 每帧显示时通过 FB_IOCTL_SET_DMA_INFO 动态设置 DMA 基地址
- *
- * 同步机制：
- *   - std::shared_mutex：通道获取 shared_lock 并发写入，渲染线程获取 unique_lock 切换 buffer
- *   - render_cv_：通道写完后通知渲染线程，渲染线程等待所有通道完成或帧超时
- *   - round_cv_：渲染线程新一轮开始时唤醒等待的通道线程
  *
  * 生命周期：
  *   - 通过 acquire() 获取 shared_ptr（内部 weak_ptr 单例）
@@ -67,13 +51,6 @@ public:
 
     TacoProDisplayContext(const TacoProDisplayContext&) = delete;
     TacoProDisplayContext& operator=(const TacoProDisplayContext&) = delete;
-
-    struct ChannelLayout {
-        int x;
-        int y;
-        int w;
-        int h;
-    };
 
     /**
      * 注册一个显示通道（自动计算网格布局）
@@ -108,8 +85,8 @@ public:
     int getScreenHeight() const { return screen_height_; }
     int getBitsPerPixel() const { return bits_per_pixel_; }
 
-    ViewType getViewType() const { return view_type_; }
-    int getSlotCount() const { return static_cast<int>(view_slots_.size()); }
+    ViewType getViewType() const;
+    int getSlotCount() const;
     const ChannelLayout& getSlotLayout(int slot_index) const;
 
     /**
@@ -118,6 +95,11 @@ public:
      */
     std::string getViewDiagram() const;
 
+    /**
+     * 获取 stitcher 服务（用于外部订阅拼接帧）
+     */
+    std::shared_ptr<FrameStitcherService> getStitcher() const { return stitcher_; }
+
 private:
     explicit TacoProDisplayContext(const TacoProDisplayExtension& config);
     bool open();
@@ -125,21 +107,6 @@ private:
 
     bool openDevice();
     bool createBufferPool();
-    bool startThreads();
-    void stopThreads();
-
-    void ppResize(Buffer* src, Buffer* dst,
-                  int dst_x, int dst_y, int dst_w, int dst_h,
-                  int src_width, int src_height,
-                  uint64_t src_phys, int src_format, const int* src_linesize);
-    void ppCopy(Buffer* src, Buffer* dst);
-    void copyTemplateRegion(Buffer* dst, const ChannelLayout& layout);
-
-    void createView();
-    const ChannelLayout& resolveLayout(int channel_id) const;
-
-    void renderThreadFunc();
-    void onDisplayTick();
 
     // === 配置 ===
     TacoProDisplayExtension config_;
@@ -160,49 +127,11 @@ private:
 
     std::shared_ptr<BufferPool> getBufferPool();
 
-    // === 渲染状态 ===
-    Buffer* render_buf_;
-
-    // === 显示状态（当前正被显示控制器扫描的帧，延后到下一 tick 释放）===
-    Buffer* displayed_buf_ = nullptr;
-
     // === 模板帧（专用 TACO 内存，用于跨帧继承）===
-    std::unique_ptr<Buffer> template_buf_;
     uint32_t template_blk_id_ = 0;
 
-    // === 同步原语 ===
-    std::shared_mutex rw_mutex_;
-
-    // === 视图管理 ===
-    ViewType view_type_ = ViewType::GRID;
-    std::vector<ChannelLayout> view_slots_;     // 预计算的所有 slot 布局
-    std::vector<int> slot_assignment_;           // slot_assignment_[slot_index] = channel_id
-
-    // === 通道管理 ===
-    struct ChannelInfo {
-        int channel_id;
-        ChannelLayout layout;
-        bool active;
-        bool written_this_round = false;
-        int consecutive_misses = 0;
-    };
-    std::vector<ChannelInfo> channels_;
-    std::mutex channel_mgmt_mutex_;
-    int next_channel_id_ = 0;
-
-    // === 通道写入节流（条件变量）===
-    std::mutex round_mutex_;
-    std::condition_variable round_cv_;        // 渲染线程 → 通道线程：新一轮开始
-    std::condition_variable render_cv_;       // 通道线程 → 渲染线程：写入完成
-    uint64_t round_seq_ = 0;                 // 轮次计数器，每轮递增
-
-    // === 线程 & 定时器 ===
-    Timer timer_;
-    Timer::TimerId timer_id_ = 0;
-    std::thread render_thread_;
-    std::atomic<bool> running_{false};
-    int frame_timeout_ms_ = 33;
-    static constexpr int kMaxConsecutiveMisses = 90;
+    // === Stitcher 服务 ===
+    std::shared_ptr<FrameStitcherService> stitcher_;
 
     // === OSD 叠加（可选，图形层 overlay1）===
     std::unique_ptr<TacoProOsdOverlay> osd_;

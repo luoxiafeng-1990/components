@@ -16,6 +16,9 @@ libcomponents_la_SOURCES = \
     source/vendor/taco/display/TacoProDisplayDevice.cpp \
     source/vendor/taco/display/TacoProDisplayExtension.cpp \
     source/vendor/taco/display/DisplayDeviceFactory.cpp \
+    source/consumptionline/types/stitcher/FrameStitcherService.cpp \
+    source/vendor/taco/stitcher/TacoProStitcherDriver.cpp \
+    source/vendor/software/stitcher/SoftwareStitcherDriver.cpp \
     source/productionline/worker/base/WorkerBase.cpp \
     source/productionline/worker/base/WorkerFactory.cpp \
     source/productionline/worker/base/ComponentTopology.cpp \
@@ -50,15 +53,15 @@ libcomponents_la_SOURCES = \
     source/bufferpool/pool/builder/BufferPoolBuilder.cpp \
     source/vendor/MallocMemoryProvider.cpp \
     source/vendor/MemoryProviderRegistry.cpp \
-    source/vendor/taco/TacoMemoryProvider.cpp \
+    source/vendor/taco/memory/TacoMemoryProvider.cpp \
     source/productionline/line/VideoProductionLine.cpp \
     source/productionline/line/MultiWorkerProductionLine.cpp \
     source/productionline/line/WorkerSyncCoordinator.cpp \
-    source/consumptionline/BufferWriter.cpp \
-    source/consumptionline/BufferComparator.cpp \
-    source/consumptionline/BufferConsumerStrategies.cpp \
-    source/consumptionline/BufferConsumerService.cpp \
-    source/consumptionline/inference/NpuInferenceConsumer.cpp \
+    source/consumptionline/types/writer/BufferWriter.cpp \
+    source/consumptionline/types/compare/BufferComparator.cpp \
+    source/consumptionline/core/BufferConsumerStrategies.cpp \
+    source/consumptionline/core/BufferConsumerService.cpp \
+    source/consumptionline/types/npu/NpuInferenceConsumer.cpp \
     source/common/PerfReport.cpp \
     source/common/SystemSnapshot.cpp
 # ========== 公共链接库（定义为变量，便于维护）==========
@@ -137,7 +140,8 @@ install-data-local:
 
 # ========== 编译选项 ==========
 OPENCV_INCLUDE = -I$(STAGING_DIR)/usr/local/include/opencv4 -I$(TARGET_DIR)/usr/local/include/opencv4 -isystem $(STAGING_DIR)/usr/include/opencv4
-AM_CPPFLAGS = -I$(top_srcdir)/include $(OPENCV_INCLUDE) -I$(top_srcdir)/include/common/third_party/freetype2 -I$(STAGING_DIR)/usr/local/include/ta-runtime -I$(TARGET_DIR)/usr/local/include/ta-runtime -isystem $(STAGING_DIR)/usr/include -I$(STAGING_DIR)/usr/local/include -I$(TARGET_DIR)/usr/local/include -isystem $(top_srcdir)/webui/backend/third_party
+STAGING_INC = $(if $(STAGING_DIR),-isystem $(STAGING_DIR)/usr/include)
+AM_CPPFLAGS = -I$(top_srcdir)/include $(OPENCV_INCLUDE) -I$(top_srcdir)/include/common/third_party/freetype2 -I$(STAGING_DIR)/usr/local/include/ta-runtime -I$(TARGET_DIR)/usr/local/include/ta-runtime $(STAGING_INC) -I$(STAGING_DIR)/usr/local/include -I$(TARGET_DIR)/usr/local/include -isystem $(top_srcdir)/webui/backend/third_party
 
 if DEBUG
 AM_CXXFLAGS = -g -O0 -Wall -std=c++17
