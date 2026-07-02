@@ -50,7 +50,7 @@ public:
     /// Called by WebServer to connect stitcher when display is active
     void connectStitcher(std::shared_ptr<FrameStitcherService> stitcher);
 
-    bool hasCompositePreview() const { return composite_available_.load(); }
+    bool hasCompositePreview();
 
     /// 设置 MJPEG 流的目标帧率（全局）
     void setTargetFps(int fps) { target_fps_ = fps > 0 ? fps : 15; }
