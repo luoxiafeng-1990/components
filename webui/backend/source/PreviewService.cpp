@@ -214,4 +214,18 @@ std::vector<uint8_t> PreviewService::compositeSnapshot() {
     return snapshot("__composite__");
 }
 
+bool PreviewService::hasCompositePreview() {
+    if (composite_available_.load()) {
+        return true;
+    }
+    try {
+        auto stitcher = FrameStitcherService::getInstance();
+        if (stitcher) {
+            connectStitcher(stitcher);
+            return true;
+        }
+    } catch (...) {}
+    return false;
+}
+
 } // namespace webui

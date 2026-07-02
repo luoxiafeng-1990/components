@@ -5,6 +5,15 @@
 #include <sstream>
 #include <algorithm>
 
+// === Define Static Instance Members ===
+std::mutex FrameStitcherService::s_instance_mutex;
+std::weak_ptr<FrameStitcherService> FrameStitcherService::s_active_instance;
+
+std::shared_ptr<FrameStitcherService> FrameStitcherService::getInstance() {
+    std::lock_guard<std::mutex> lock(s_instance_mutex);
+    return s_active_instance.lock();
+}
+
 // ============================================================
 // Anonymous-namespace helpers (extracted from TacoProDisplayContext.cpp)
 // ============================================================
@@ -100,11 +109,24 @@ bool FrameStitcherService::start() {
     LOG4CPLUS_INFO_FMT(logger_,
         "FrameStitcherService started (fps=%d, tick_interval=%dms, frame_timeout=%dms)",
         fps, display_interval_ms, frame_timeout_ms_);
+
+    {
+        std::lock_guard<std::mutex> lock(s_instance_mutex);
+        s_active_instance = shared_from_this();
+    }
+
     return true;
 }
 
 void FrameStitcherService::stop() {
     if (!running_) return;
+
+    {
+        std::lock_guard<std::mutex> lock(s_instance_mutex);
+        if (s_active_instance.lock() == shared_from_this()) {
+            s_active_instance.reset();
+        }
+    }
 
     // Stop tick timer first
     if (timer_id_ != 0) {

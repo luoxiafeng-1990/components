@@ -77,8 +77,9 @@ using OnStitchedFrameCallback = std::function<void(const StitchedFrame&)>;
  * multiple decoder threads (uses shared_lock). The render thread
  * obtains unique_lock when swapping the render buffer.
  */
-class FrameStitcherService {
+class FrameStitcherService : public std::enable_shared_from_this<FrameStitcherService> {
 public:
+    static std::shared_ptr<FrameStitcherService> getInstance();
     /**
      * @param config        Stitcher configuration (screen dims, fps, view type, etc.)
      * @param driver        Stitch / copy driver (hardware or software)
@@ -222,6 +223,10 @@ private:
     std::vector<OnStitchedFrameCallback> subscribers_;
 
     log4cplus::Logger logger_;
+
+    // === Singleton/Active Instance ===
+    static std::mutex s_instance_mutex;
+    static std::weak_ptr<FrameStitcherService> s_active_instance;
 };
 
 #endif // FRAME_STITCHER_SERVICE_HPP
