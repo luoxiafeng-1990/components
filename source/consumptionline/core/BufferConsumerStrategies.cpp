@@ -1506,9 +1506,9 @@ bool JpegEncodeConsumer::initialize(const std::vector<Buffer*>& first_buffers) {
     // 1. 创建编码输入 BufferPool（AVFrame 分配器）
     {
         size_t frame_size = static_cast<size_t>(src_width) * src_height * 3 / 2;
-        auto allocator = BufferPoolBuilderFactory::create(
+        input_pool_builder_ = BufferPoolBuilderFactory::create(
             BufferPoolBuilderFactory::AllocatorType::AVFRAME);
-        input_pool_id_ = allocator->allocatePoolWithBuffers(
+        input_pool_id_ = input_pool_builder_->allocatePoolWithBuffers(
             4, frame_size, "JpegEncodeInput", "ENCODE_INPUT");
         if (input_pool_id_ == 0) {
             LOG4CPLUS_ERROR(logger_, "创建编码输入 BufferPool 失败");
@@ -1650,6 +1650,7 @@ void JpegEncodeConsumer::finalize() {
         }
         input_pool_.reset();
     }
+    input_pool_builder_.reset();
 
     if (pipe_fd_ >= 0) {
         ::close(pipe_fd_);

@@ -384,6 +384,7 @@ private:
     Config::FrameCallback on_frame_;
 
     // 编码输入 BufferPool（AVFrame 壳，consume 端 submitFilled，编码 Worker 端 acquireFilled）
+    std::unique_ptr<class IBufferPoolBuilder> input_pool_builder_;
     std::shared_ptr<BufferPool> input_pool_;
     uint64_t input_pool_id_ = 0;
 
