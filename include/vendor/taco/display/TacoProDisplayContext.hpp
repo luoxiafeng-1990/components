@@ -46,10 +46,6 @@ public:
      * 第一个调用者创建实例，后续调用者复用
      */
     static std::shared_ptr<TacoProDisplayContext> acquire(const TacoProDisplayExtension& config);
-    static std::shared_ptr<TacoProDisplayContext> getInstance() {
-        std::lock_guard<std::mutex> lock(s_acquire_mutex_);
-        return s_instance_.lock();
-    }
 
     ~TacoProDisplayContext();
 

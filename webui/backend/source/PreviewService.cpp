@@ -2,7 +2,6 @@
 #include "../include/WorkerManager.hpp"
 #include "../include/ConsumerManager.hpp"
 #include "consumptionline/types/stitcher/FrameStitcherService.hpp"
-#include "vendor/taco/display/TacoProDisplayContext.hpp"
 #include <thread>
 #include <chrono>
 #include <opencv2/imgcodecs.hpp>
@@ -213,23 +212,6 @@ void PreviewService::streamCompositeMjpeg(FrameCallback cb) {
 
 std::vector<uint8_t> PreviewService::compositeSnapshot() {
     return snapshot("__composite__");
-}
-
-bool PreviewService::hasCompositePreview() {
-    if (composite_available_.load()) {
-        return true;
-    }
-    try {
-        auto context = TacoProDisplayContext::getInstance();
-        if (context) {
-            auto stitcher = context->getStitcher();
-            if (stitcher) {
-                connectStitcher(stitcher);
-                return true;
-            }
-        }
-    } catch (...) {}
-    return false;
 }
 
 } // namespace webui
