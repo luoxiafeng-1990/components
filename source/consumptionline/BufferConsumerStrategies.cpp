@@ -867,6 +867,8 @@ std::string avframeInfoToString(const AVFrame* frame) {
 }
 
 cv::Mat OpencvConsumer::ProcessByOpencv(cv::Mat src, bool hw) {
+    std::cout << "[ProcessByOpencv] op_type=" << static_cast<int>(opencv_config_.op_type)
+              << " hw=" << hw << " src=" << src.cols << "x" << src.rows << std::endl;
     switch (opencv_config_.op_type) {
         case OpencvType::OpType::IMWRITE: {
             // 图片保存/读取 I/O 测试（使用固定文件名，反复删除创建）
@@ -911,7 +913,7 @@ cv::Mat OpencvConsumer::ProcessByOpencv(cv::Mat src, bool hw) {
         case OpencvType::OpType::RESIZE_WH: {
             const auto& r = opencv_config_.resize;
             cv::Mat dst;
-            if (hw == true) dst.allocator = safe_get_allocator();
+            if (hw == true) dst.allocator = cv::hal::getAllocator();
             cv::resize(src, dst,
                        cv::Size(r.dst_width, r.dst_height),
                        r.interpolation);
@@ -920,7 +922,12 @@ cv::Mat OpencvConsumer::ProcessByOpencv(cv::Mat src, bool hw) {
         case OpencvType::OpType::RESIZE_XY: {
             const auto& r = opencv_config_.resize;
             cv::Mat dst;
-            if (hw == true) dst.allocator = safe_get_allocator();
+            if (hw == true) dst.allocator = cv::hal::getAllocator();
+            int dst_height = static_cast<int>(src.rows * r.fy);
+            int dst_width = static_cast<int>(src.cols * r.fx);
+            //dst.create(dst_height, dst_width, src.type());
+            std::cout << "[src-avblkid]" << src.avBlkId() << std::endl;
+            std::cout << "[dst-avblkid]" << dst.avBlkId() << std::endl;
             cv::resize(src, dst,
                        cv::Size(),
                        r.fx, r.fy,
@@ -933,7 +940,7 @@ cv::Mat OpencvConsumer::ProcessByOpencv(cv::Mat src, bool hw) {
             //cv::Crop 是自己开发的接口，标准接口是mat(cv::Rect())
             if (hw == true && cv::Crop != nullptr) {
                 cv::Mat dst;
-                dst.allocator = safe_get_allocator();
+                dst.allocator = cv::hal::getAllocator();
                 cv::Crop(src, dst, cv::Rect(c.x, c.y, c.width, c.height));
                 return dst;
             }
@@ -963,7 +970,7 @@ cv::Mat OpencvConsumer::ProcessByOpencv(cv::Mat src, bool hw) {
             }
 
             if (hw == true) {
-                dst.allocator = safe_get_allocator();
+                dst.allocator = cv::hal::getAllocator();
             }
 
             cv::cvtColor(src, dst, code);
@@ -1343,6 +1350,7 @@ OpencvConsumer::TransformFunc OpencvConsumer::ProcessDecorator(int frame_index) 
                     return cv::Mat();
                 }
 
+                // default flag=0, see mat.hpp
                 src_hw = cv::Mat(avframe_hw);
             }
 
@@ -1376,12 +1384,14 @@ OpencvConsumer::TransformFunc OpencvConsumer::ProcessDecorator(int frame_index) 
                         "decorator [frame %d] no AVFrame in buffer", frame_index);
                     return cv::Mat();
                 }
-                src_hw = cv::Mat(avframe_hw, cv::UMatData::AVFRAME_ATTACHED);
+                src_hw = cv::Mat(avframe_hw, 1);
+                std::cout << "[avblkid-0]" << src_hw.avBlkId() << std::endl;
                 AVFrame* avframe_sw = av_frame_clone(avframe_hw);
                 src_sw = avframeToMat(avframe_sw);
                 av_frame_free(&avframe_sw);
             }
 
+            std::cout << "[avblkid-1]" << src_hw.avBlkId() << std::endl;
             // 计时硬件执行（NV12 输入，resize 内部走硬件路径）
             auto hw_start = std::chrono::high_resolution_clock::now();
 
