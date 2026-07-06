@@ -10,6 +10,7 @@
 #include "vendor/contracts/DisplayVendorExtension.hpp"
 #include "vendor/contracts/NpuInferenceVendorExtension.hpp"
 #include "vendor/contracts/OpencvVendorExtension.hpp"
+#include "consumptionline/types/npu/NpuAlgorithm.hpp"
 
 /**
  * @brief 消费类型配置（整包：执行控制 + 多种可叠加的消费能力）
@@ -114,6 +115,7 @@ struct ConsumerTypeConfig {
     struct NpuInferenceType {
         bool enable = false;                  ///< 是否启用 NPU 推理
         std::string model_path;               ///< .nb 模型文件路径
+        consumer::NpuAlgorithm algorithm = consumer::NpuAlgorithm::UNKNOWN;  ///< 推理算法（如 yolov8_det）
         float conf_threshold  = 0.25f;        ///< 置信度阈值
         float nms_threshold   = 0.45f;        ///< NMS IoU 阈值
         int   npu_core_index  = 0;            ///< NPU 核心索引
@@ -125,14 +127,14 @@ struct ConsumerTypeConfig {
 
         NpuInferenceType() = default;
         NpuInferenceType(const NpuInferenceType& o)
-            : enable(o.enable), model_path(o.model_path)
+            : enable(o.enable), model_path(o.model_path), algorithm(o.algorithm)
             , conf_threshold(o.conf_threshold), nms_threshold(o.nms_threshold)
             , npu_core_index(o.npu_core_index), use_physical_addr(o.use_physical_addr)
             , enable_draw(o.enable_draw), inference_interval(o.inference_interval)
             , vendor(o.vendor ? o.vendor->clone() : nullptr) {}
         NpuInferenceType& operator=(const NpuInferenceType& o) {
             if (this != &o) {
-                enable = o.enable; model_path = o.model_path;
+                enable = o.enable; model_path = o.model_path; algorithm = o.algorithm;
                 conf_threshold = o.conf_threshold; nms_threshold = o.nms_threshold;
                 npu_core_index = o.npu_core_index; use_physical_addr = o.use_physical_addr;
                 enable_draw = o.enable_draw; inference_interval = o.inference_interval;

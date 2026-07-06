@@ -543,6 +543,7 @@ static std::shared_ptr<IBufferConsumer> createConsumerForWorker(
     if (flags & CONSUME_NPU_INFERENCE) {
         NpuInferenceConfig npu_config;
         npu_config.model_path       = config.npu_inference.model_path;
+        npu_config.algorithm        = config.npu_inference.algorithm;
         npu_config.conf_threshold   = config.npu_inference.conf_threshold;
         npu_config.nms_threshold    = config.npu_inference.nms_threshold;
         npu_config.npu_core_index   = config.npu_inference.npu_core_index;
@@ -891,6 +892,7 @@ std::shared_ptr<IBufferConsumer> BufferConsumerService::createConsumerFromFlags(
         if (flags & CONSUME_NPU_INFERENCE) {
             NpuInferenceConfig npu_cfg;
             npu_cfg.model_path     = config.consumer_type.npu_inference.model_path;
+            npu_cfg.algorithm      = config.consumer_type.npu_inference.algorithm;
             npu_cfg.conf_threshold = config.consumer_type.npu_inference.conf_threshold;
             npu_cfg.nms_threshold  = config.consumer_type.npu_inference.nms_threshold;
             npu_cfg.npu_core_index = config.consumer_type.npu_inference.npu_core_index;
@@ -914,6 +916,7 @@ std::shared_ptr<IBufferConsumer> BufferConsumerService::createConsumerFromFlags(
     if (flags & CONSUME_NPU_INFERENCE) {
         NpuInferenceConfig npu_cfg;
         npu_cfg.model_path     = config.consumer_type.npu_inference.model_path;
+        npu_cfg.algorithm      = config.consumer_type.npu_inference.algorithm;
         npu_cfg.conf_threshold = config.consumer_type.npu_inference.conf_threshold;
         npu_cfg.nms_threshold  = config.consumer_type.npu_inference.nms_threshold;
         npu_cfg.npu_core_index = config.consumer_type.npu_inference.npu_core_index;

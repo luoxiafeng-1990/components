@@ -31,6 +31,7 @@
 #include "consumptionline/core/IBufferConsumer.hpp"
 #include "bufferpool/buffer/Buffer.hpp"
 #include "common/StageTimer.hpp"
+#include "consumptionline/types/npu/NpuAlgorithm.hpp"
 
 #include <ta-runtime/ta-runtime-api.h>
 #include <opencv2/core.hpp>
@@ -66,6 +67,7 @@ struct DetectionResult {
 
 struct NpuInferenceConfig {
     std::string model_path;             ///< .nb 模型文件路径
+    NpuAlgorithm algorithm = NpuAlgorithm::UNKNOWN;  ///< 推理算法（如 yolov8_det）
 
     float conf_threshold  = 0.25f;      ///< 置信度阈值
     float nms_threshold   = 0.45f;      ///< NMS IoU 阈值
@@ -195,9 +197,18 @@ private:
     /// 执行推理
     bool runInference();
 
-    /// 后处理: 从 output_buffers_ 解析检测结果
+    /// 后处理: 按 algorithm 分发至各 YOLO 后处理实现
     void postprocess(const LetterboxParams& params,
                      std::vector<DetectionResult>& results);
+    /// YOLOv8 / YOLO11 / YOLOv12 多头：DFL + anchor-free，channels=144
+    void postprocessYoloDfl(const LetterboxParams& params,
+                            std::vector<DetectionResult>& results);
+    /// YOLOv5：anchor-based 三尺度 decode，channels=255
+    void postprocessYoloV5(const LetterboxParams& params,
+                           std::vector<DetectionResult>& results);
+    /// YOLOv12 单输出头：8400×84 转置布局 decode（output_num==1）
+    void postprocessYoloV12SingleHead(const LetterboxParams& params,
+                                      std::vector<DetectionResult>& results);
 
     /// 在 BGR 图像上画检测框, 然后 BGR→NV12 回写 buffer
     void drawAndWriteBack(cv::Mat& bgr, Buffer* buffer,
@@ -212,10 +223,19 @@ private:
                             int stride, int32_t zp, float scale,
                             uint32_t data_format);
 
+    /// DFL 检测头：从单尺度 feature map 生成 proposals（YOLOv8/11/12 多头共用）
     void generateProposals(int stride, void* feat,
                            uint32_t data_format, int32_t zp, float scale,
                            float prob_threshold,
                            std::vector<DetectionResult>& objects);
+
+    /// YOLOv5 检测头：anchor decode，每尺度 3 个 anchor，channels=3×(5+cls_num)
+    /// @param anchors 当前 stride 对应的 3 组 (w,h) anchor（COCO 预设）
+    /// @param cls_num 类别数，由 output channels 推导：channels/3 - 5
+    void generateProposalsYoloV5(
+        int stride, void* feat, uint32_t data_format, int32_t zp, float scale,
+        float prob_threshold, const float anchors[3][2], int cls_num,
+        std::vector<DetectionResult>& objects);
 
     static float intersectionArea(const DetectionResult& a, const DetectionResult& b);
     static void nmsSortedBboxes(const std::vector<DetectionResult>& objects,
