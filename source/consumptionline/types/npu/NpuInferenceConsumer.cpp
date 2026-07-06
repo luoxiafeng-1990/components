@@ -108,6 +108,14 @@ bool NpuInferenceConsumer::initialize(const std::vector<Buffer*>& first_buffers)
         return false;
     }
 
+    if (config_.algorithm == NpuAlgorithm::UNKNOWN ||
+        !isNpuAlgorithmSupported(config_.algorithm)) {
+        LOG4CPLUS_ERROR_FMT(logger(),
+            "NpuInferenceConsumer: unsupported algorithm '%s'",
+            npuAlgorithmToString(config_.algorithm).c_str());
+        return false;
+    }
+
     if (!loadModel()) {
         LOG4CPLUS_ERROR(logger(), "NpuInferenceConsumer: Failed to load model");
         return false;
@@ -115,8 +123,10 @@ bool NpuInferenceConsumer::initialize(const std::vector<Buffer*>& first_buffers)
 
     initialized_ = true;
     LOG4CPLUS_INFO_FMT(logger(),
-        "NpuInferenceConsumer: Initialized (model=%s, input=%dx%d, mode=%s, draw=%s, interval=%d)",
-        config_.model_path.c_str(), model_input_w_, model_input_h_,
+        "NpuInferenceConsumer: Initialized (model=%s, algorithm=%s, input=%dx%d, mode=%s, draw=%s, interval=%d)",
+        config_.model_path.c_str(),
+        npuAlgorithmToString(config_.algorithm).c_str(),
+        model_input_w_, model_input_h_,
         config_.input_mode == NpuInferenceConfig::InputMode::PHYSICAL_ADDR
             ? "PHYSICAL_ADDR" : "VIRTUAL_ADDR",
         config_.enable_draw ? "ON" : "OFF",
@@ -253,10 +263,45 @@ bool NpuInferenceConsumer::loadModel() {
             get_qnt_type_string(static_cast<taco_qnt_type_t>(attr.quant_format)));
     }
 
-    // 从第一个输入推断模型输入尺寸 (CHW 或 HWC 布局)
-    if (input_num_ > 0 && input_attrs_[0].dim_count >= 3) {
-        model_input_h_ = input_attrs_[0].dim_size[1];
-        model_input_w_ = input_attrs_[0].dim_size[0];
+    // 从第一个输入推断模型 H×W（letterbox / tensor 填充依赖此值）。
+    // ta_runtime 上报的 4D shape 因模型/export 不同而异，需分支识别：
+    if (input_num_ > 0 && input_attrs_[0].dim_count >= 4) {
+        const auto& a0 = input_attrs_[0];
+        const uint64_t d0 = a0.dim_size[0];
+        const uint64_t d1 = a0.dim_size[1];
+        const uint64_t d2 = a0.dim_size[2];
+        const uint64_t d3 = a0.dim_size[3];
+        if (d2 == 3u && d3 == 1u && d0 >= 16u && d1 >= 16u) {
+            // [H, W, C, N]，如 YOLO [640,640,3,1]
+            model_input_h_ = static_cast<int>(d0);
+            model_input_w_ = static_cast<int>(d1);
+        } else if (d0 == 3u && d3 == 1u && d1 >= 16u && d2 >= 16u) {
+            // [C, H, W, N]，部分 YOLOv12 等
+            model_input_h_ = static_cast<int>(d1);
+            model_input_w_ = static_cast<int>(d2);
+        } else if (d1 == 3u && d2 >= 16u && d3 >= 16u) {
+            // [N, C, H, W]
+            model_input_h_ = static_cast<int>(d2);
+            model_input_w_ = static_cast<int>(d3);
+        } else if (d3 == 3u && d1 >= 16u && d2 >= 16u && d0 <= 16u) {
+            // [N, H, W, C]（N 常为 1）
+            model_input_h_ = static_cast<int>(d1);
+            model_input_w_ = static_cast<int>(d2);
+        } else {
+            // 兜底：取 dim[2]/dim[3]（旧 dev 对 NCHW 的假设）
+            model_input_h_ = static_cast<int>(d2);
+            model_input_w_ = static_cast<int>(d3);
+        }
+    } else if (input_num_ > 0 && input_attrs_[0].dim_count >= 3) {
+        // 非 4D：取 dim 中最大的两个值作为 H、W
+        std::vector<int> dims;
+        dims.reserve(input_attrs_[0].dim_count);
+        for (unsigned i = 0; i < input_attrs_[0].dim_count; ++i) {
+            dims.push_back(static_cast<int>(input_attrs_[0].dim_size[i]));
+        }
+        std::sort(dims.begin(), dims.end(), std::greater<int>());
+        model_input_h_ = dims.size() >= 1 ? dims[0] : 0;
+        model_input_w_ = dims.size() >= 2 ? dims[1] : model_input_h_;
     }
 
     // 查询输出属性
@@ -272,6 +317,57 @@ bool NpuInferenceConsumer::loadModel() {
             attr.dim_size[2], attr.dim_size[3],
             get_type_string(static_cast<taconn_data_format_t>(attr.data_format)),
             get_qnt_type_string(static_cast<taco_qnt_type_t>(attr.quant_format)));
+    }
+
+    // 按 algorithm 校验 YOLO output layout（channels=255/144、v12 单头等）
+    // 同一套 Consumer 要接 4 种 YOLO 后处理，output 形态各不相同；在 init 时校验 layout，是为了 algorithm 与 .nb 错配时立刻失败，而不是跑起来后产出错误检测框
+    auto fail_layout = [&](const std::string& expected, const std::string& actual) -> bool {
+        LOG4CPLUS_ERROR_FMT(logger(),
+            "NpuInferenceConsumer: algorithm-output layout mismatch: algorithm=%s, expected=%s, actual=%s",
+            npuAlgorithmToString(config_.algorithm).c_str(), expected.c_str(), actual.c_str());
+        releaseModel();
+        return false;
+    };
+    auto layout_summary = [&](size_t idx, int channel_size, int channels) {
+        std::ostringstream oss;
+        const auto& a = output_attrs_[idx];
+        oss << "out[" << idx << "] dims=[" << a.dim_size[0] << "," << a.dim_size[1]
+            << "," << a.dim_size[2] << "," << a.dim_size[3] << "]"
+            << ",channel_size=" << channel_size
+            << ",channels=" << channels;
+        return oss.str();
+    };
+
+    if (config_.algorithm == NpuAlgorithm::YOLOV12_DET && output_num_ == 1) {
+        const int element_count = static_cast<int>(getElementNum(output_attrs_[0]));
+        if (element_count <= 0 || element_count % 84 != 0) {
+            return fail_layout("YOLOv12 single-head element_count % 84 == 0",
+                               "output_num=1,elements=" + std::to_string(element_count));
+        }
+    } else if (output_num_ < 3) {
+        return fail_layout("at least 3 output tensors", "output_num=" + std::to_string(output_num_));
+    }
+
+    if (!(config_.algorithm == NpuAlgorithm::YOLOV12_DET && output_num_ == 1)) {
+        for (int i = 0; i < std::min(output_num_, 3); ++i) {
+            const int stride = (i == 0 ? 8 : (i == 1 ? 16 : 32));
+            const int feat_w = model_input_w_ / stride;
+            const int feat_h = model_input_h_ / stride;
+            const int channel_size = feat_w * feat_h;
+            const int element_count = static_cast<int>(getElementNum(output_attrs_[i]));
+            if (channel_size <= 0 || element_count <= 0 || (element_count % channel_size) != 0) {
+                return fail_layout("element_count % (feat_w*feat_h) == 0",
+                                   layout_summary(i, channel_size, -1));
+            }
+            const int channels = element_count / channel_size;
+            if (config_.algorithm == NpuAlgorithm::YOLOV5_DET) {
+                if (channels != 255) {
+                    return fail_layout("YOLOv5 channels=255", layout_summary(i, channel_size, channels));
+                }
+            } else if (channels != 144) {
+                return fail_layout("YOLO DFL channels=144", layout_summary(i, channel_size, channels));
+            }
+        }
     }
 
     // 分配并绑定输入 buffer
@@ -478,11 +574,37 @@ bool NpuInferenceConsumer::runInference() {
 }
 
 // ============================================================
-// 后处理 (YOLO 风格: anchor-free, DFL)
+// 后处理：按 algorithm 分发
 // ============================================================
 
 void NpuInferenceConsumer::postprocess(const LetterboxParams& params,
                                        std::vector<DetectionResult>& results) {
+    switch (config_.algorithm) {
+    case NpuAlgorithm::YOLOV5_DET:
+        postprocessYoloV5(params, results);
+        return;
+    case NpuAlgorithm::YOLOV8_DET:
+    case NpuAlgorithm::YOLO11_DET:
+        postprocessYoloDfl(params, results);
+        return;
+    case NpuAlgorithm::YOLOV12_DET:
+        if (output_num_ == 1) {
+            postprocessYoloV12SingleHead(params, results);
+        } else {
+            postprocessYoloDfl(params, results);
+        }
+        return;
+    case NpuAlgorithm::UNKNOWN:
+    default:
+        LOG4CPLUS_ERROR(logger(), "NpuInferenceConsumer: unsupported algorithm in postprocess");
+        results.clear();
+        return;
+    }
+}
+
+void NpuInferenceConsumer::postprocessYoloDfl(
+        const LetterboxParams& params,
+        std::vector<DetectionResult>& results) {
     std::vector<DetectionResult> proposals;
     int strides[] = {8, 16, 32};
 
@@ -509,6 +631,151 @@ void NpuInferenceConsumer::postprocess(const LetterboxParams& params,
 
     results.resize(picked.size());
     for (size_t i = 0; i < picked.size(); i++) {
+        results[i] = proposals[picked[i]];
+        inverseCoordinates(results[i].box, params);
+    }
+}
+
+void NpuInferenceConsumer::postprocessYoloV5(
+        const LetterboxParams& params,
+        std::vector<DetectionResult>& results) {
+    std::vector<DetectionResult> proposals;
+    constexpr int strides[] = {8, 16, 32};
+    constexpr float kAnchors[3][3][2] = {
+        {{10.f, 13.f}, {16.f, 30.f}, {33.f, 23.f}},
+        {{30.f, 61.f}, {62.f, 45.f}, {59.f, 119.f}},
+        {{116.f, 90.f}, {156.f, 198.f}, {373.f, 326.f}},
+    };
+
+    int num_scales = std::min(output_num_, 3);
+    for (int i = 0; i < num_scales; i++) {
+        void* data = output_buffers_[i].data;
+        uint32_t fmt = output_attrs_[i].data_format;
+
+        int32_t zp = 0;
+        float scale = 1.0f;
+        if (output_attrs_[i].quant_format == TACONN_QNT_TYPE_ASYMMETRIC) {
+            zp    = output_attrs_[i].quant_data.affine.tf_zero_point;
+            scale = output_attrs_[i].quant_data.affine.tf_scale;
+        }
+
+        const int feat_w = model_input_w_ / strides[i];
+        const int feat_h = model_input_h_ / strides[i];
+        const int channel_size = feat_h * feat_w;
+        const int element_count = static_cast<int>(getElementNum(output_attrs_[i]));
+        if (channel_size <= 0 || element_count <= 0 || element_count % channel_size != 0) {
+            LOG4CPLUS_ERROR_FMT(logger(),
+                "YOLOv5 postprocess shape mismatch: algorithm=%s, expected=valid CHW, actual elements=%d, channel_size=%d",
+                npuAlgorithmToString(config_.algorithm).c_str(), element_count, channel_size);
+            results.clear();
+            return;
+        }
+        const int channels = element_count / channel_size;
+        if (channels < 18 || channels % 3 != 0) {
+            LOG4CPLUS_ERROR_FMT(logger(),
+                "YOLOv5 postprocess shape mismatch: algorithm=%s, expected channels=3*(5+cls), actual=%d",
+                npuAlgorithmToString(config_.algorithm).c_str(), channels);
+            results.clear();
+            return;
+        }
+        const int cls_num = channels / 3 - 5;
+        if (cls_num <= 0) {
+            LOG4CPLUS_ERROR_FMT(logger(),
+                "YOLOv5 postprocess shape mismatch: algorithm=%s, invalid cls_num=%d",
+                npuAlgorithmToString(config_.algorithm).c_str(), cls_num);
+            results.clear();
+            return;
+        }
+
+        generateProposalsYoloV5(
+            strides[i], data, fmt, zp, scale,
+            config_.conf_threshold, kAnchors[i], cls_num, proposals);
+    }
+
+    qsortDescend(proposals);
+    std::vector<int> picked;
+    nmsSortedBboxes(proposals, picked, config_.nms_threshold);
+    results.resize(picked.size());
+    for (size_t i = 0; i < picked.size(); ++i) {
+        results[i] = proposals[picked[i]];
+        inverseCoordinates(results[i].box, params);
+    }
+}
+
+void NpuInferenceConsumer::postprocessYoloV12SingleHead(
+        const LetterboxParams& params,
+        std::vector<DetectionResult>& results) {
+    results.clear();
+    if (output_num_ < 1 || !output_buffers_ || !output_buffers_[0].data) {
+        return;
+    }
+
+    const int element_count = static_cast<int>(getElementNum(output_attrs_[0]));
+    constexpr int kYolov12SingleHeadBoxNum = 8400;
+    constexpr int kYolov12SingleHeadCols = 84;
+    constexpr int kYolov12SingleHeadClsNum = 80;
+    if (element_count != kYolov12SingleHeadBoxNum * kYolov12SingleHeadCols) {
+        LOG4CPLUS_ERROR_FMT(logger(),
+            "YOLOv12 single-head shape mismatch: algorithm=%s, expected elements=%d (8400x84), actual=%d",
+            npuAlgorithmToString(config_.algorithm).c_str(),
+            kYolov12SingleHeadBoxNum * kYolov12SingleHeadCols, element_count);
+        return;
+    }
+
+    void* data = output_buffers_[0].data;
+    uint32_t fmt = output_attrs_[0].data_format;
+    int32_t zp = 0;
+    float scale = 1.0f;
+    if (output_attrs_[0].quant_format == TACONN_QNT_TYPE_ASYMMETRIC) {
+        zp = output_attrs_[0].quant_data.affine.tf_zero_point;
+        scale = output_attrs_[0].quant_data.affine.tf_scale;
+    }
+
+    std::vector<DetectionResult> proposals;
+    proposals.reserve(static_cast<size_t>(kYolov12SingleHeadBoxNum / 8));
+    const int offset = kYolov12SingleHeadBoxNum;
+
+    // 对齐 model-zoo YOLOv12 单头 [84,8400] 转置布局 decode
+    for (int box_index = 0; box_index < kYolov12SingleHeadBoxNum; ++box_index) {
+        const int coord_offset = box_index + 4 * offset;
+        int best_cls = 0;
+        float best_score = 0.0f;
+        for (int c = 0; c < kYolov12SingleHeadClsNum; ++c) {
+            const int cls_offset = c * offset + coord_offset;
+            const float sc = dequantizeValue(data, static_cast<size_t>(cls_offset), fmt, zp, scale);
+            if (sc > best_score) {
+                best_score = sc;
+                best_cls = c;
+            }
+        }
+        if (best_score <= config_.conf_threshold) continue;
+
+        const float cx = dequantizeValue(data, static_cast<size_t>(box_index), fmt, zp, scale);
+        const float cy = dequantizeValue(data, static_cast<size_t>(box_index + 1 * offset), fmt, zp, scale);
+        const float w  = dequantizeValue(data, static_cast<size_t>(box_index + 2 * offset), fmt, zp, scale);
+        const float h  = dequantizeValue(data, static_cast<size_t>(box_index + 3 * offset), fmt, zp, scale);
+
+        const float x0 = cx - w * 0.5f;
+        const float y0 = cy - h * 0.5f;
+        const float x1 = cx + w * 0.5f;
+        const float y1 = cy + h * 0.5f;
+        if (x1 <= x0 || y1 <= y0) continue;
+
+        DetectionResult det{};
+        det.box.left = x0;
+        det.box.top = y0;
+        det.box.width = x1 - x0;
+        det.box.height = y1 - y0;
+        det.class_id = best_cls;
+        det.score = best_score;
+        proposals.push_back(det);
+    }
+
+    qsortDescend(proposals);
+    std::vector<int> picked;
+    nmsSortedBboxes(proposals, picked, config_.nms_threshold);
+    results.resize(picked.size());
+    for (size_t i = 0; i < picked.size(); ++i) {
         results[i] = proposals[picked[i]];
         inverseCoordinates(results[i].box, params);
     }
@@ -584,7 +851,7 @@ void NpuInferenceConsumer::drawAndWriteBack(
 }
 
 // ============================================================
-// Proposal 生成 (YOLO11/v8 anchor-free + DFL)
+// Proposal 生成 (YOLO11/v8 anchor-free + DFL；YOLOv5 见 generateProposalsYoloV5)
 // ============================================================
 
 void NpuInferenceConsumer::generateProposals(
@@ -647,6 +914,69 @@ void NpuInferenceConsumer::generateProposals(
             obj.class_id   = best_cls;
             obj.score      = box_prob;
             objects.push_back(obj);
+        }
+    }
+}
+
+void NpuInferenceConsumer::generateProposalsYoloV5(
+        int stride, void* feat, uint32_t data_format,
+        int32_t zp, float scale, float prob_threshold,
+        const float anchors[3][2], int cls_num,
+        std::vector<DetectionResult>& objects) {
+    const int feat_w = model_input_w_ / stride;
+    const int feat_h = model_input_h_ / stride;
+    const int channel_size = feat_h * feat_w;
+    if (channel_size <= 0) return;
+
+    for (int h = 0; h < feat_h; h++) {
+        for (int w = 0; w < feat_w; w++) {
+            const int spatial_offset = h * feat_w + w;
+            for (int a = 0; a < 3; ++a) {
+                const int base_channel = a * (cls_num + 5);
+                const auto value = [&](int local_channel) -> float {
+                    const size_t offset = static_cast<size_t>(base_channel + local_channel) * channel_size + spatial_offset;
+                    return dequantizeValue(feat, offset, data_format, zp, scale);
+                };
+
+                const float tx = value(0);
+                const float ty = value(1);
+                const float tw = value(2);
+                const float th = value(3);
+                const float obj = 1.0f / (1.0f + expf(-value(4)));
+
+                int best_cls = 0;
+                float best_cls_prob = 0.0f;
+                for (int c = 0; c < cls_num; ++c) {
+                    const float cls_logit = value(5 + c);
+                    const float cls_prob = 1.0f / (1.0f + expf(-cls_logit));
+                    if (cls_prob > best_cls_prob) {
+                        best_cls = c;
+                        best_cls_prob = cls_prob;
+                    }
+                }
+
+                const float score = obj * best_cls_prob;
+                if (score < prob_threshold) continue;
+
+                const float sx = 1.0f / (1.0f + expf(-tx));
+                const float sy = 1.0f / (1.0f + expf(-ty));
+                const float sw = 1.0f / (1.0f + expf(-tw));
+                const float sh = 1.0f / (1.0f + expf(-th));
+
+                const float bx = (2.0f * sx - 0.5f + w) * stride;
+                const float by = (2.0f * sy - 0.5f + h) * stride;
+                const float bw = std::pow(2.0f * sw, 2.0f) * anchors[a][0];
+                const float bh = std::pow(2.0f * sh, 2.0f) * anchors[a][1];
+
+                DetectionResult det{};
+                det.box.left = std::max(0.0f, bx - bw * 0.5f);
+                det.box.top = std::max(0.0f, by - bh * 0.5f);
+                det.box.width = std::min(static_cast<float>(model_input_w_ - 1), bw);
+                det.box.height = std::min(static_cast<float>(model_input_h_ - 1), bh);
+                det.class_id = best_cls;
+                det.score = score;
+                objects.push_back(det);
+            }
         }
     }
 }

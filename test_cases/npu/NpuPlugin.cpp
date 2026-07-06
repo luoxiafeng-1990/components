@@ -6,6 +6,7 @@
 #include "NpuPlugin.hpp"
 #include "../common/third_party/CLI11.hpp"
 #include "consumptionline/config/ConsumerTypeConfigBuilder.hpp"
+#include "consumptionline/types/npu/NpuAlgorithm.hpp"
 
 namespace test {
 namespace npu {
@@ -20,6 +21,10 @@ std::string NpuPlugin::getDescription() const {
 
 void NpuPlugin::registerOptions(CLI::App& app) {
     app.add_option("--model,--model-path", model_path_, ".nb 模型文件路径")->required();
+    app.add_option("--algorithm", algorithm_,
+                   "检测算法: yolov5_det|yolov8_det|yolo11_det|yolov12_det")
+        ->check(CLI::IsMember(consumer::supportedNpuAlgorithmNames()))
+        ->required();
     app.add_option("--conf-threshold", conf_threshold_, "置信度阈值 (默认: 0.25)");
     app.add_option("--nms-threshold", nms_threshold_, "NMS IoU 阈值 (默认: 0.45)");
     app.add_option("--npu-core", npu_core_index_, "NPU 核心索引 (默认: 0)");
@@ -32,6 +37,7 @@ void NpuPlugin::applyTo(WorkerConfig& config) const {
     auto npu_builder = NpuInferenceConfigBuilder(config.consumer_type.npu_inference)
         .setEnable(true)
         .setModelPath(model_path_)
+        .setAlgorithm(consumer::parseNpuAlgorithm(algorithm_))
         .setConfThreshold(conf_threshold_)
         .setNmsThreshold(nms_threshold_)
         .setNpuCoreIndex(npu_core_index_)

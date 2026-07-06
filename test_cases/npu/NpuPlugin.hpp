@@ -8,7 +8,7 @@
  *
  * 用法：
  * @code
- * ./qa_cases vdec --file video.mp4 npu --model model.nb --conf-threshold 0.5
+ * ./qa_cases vdec --file video.mp4 npu --algorithm yolov8_det --model model.nb
  * @endcode
  */
 
@@ -34,6 +34,7 @@ public:
 
 private:
     std::string model_path_;
+    std::string algorithm_;
     float       conf_threshold_     = 0.25f;
     float       nms_threshold_      = 0.45f;
     int         npu_core_index_     = 0;
