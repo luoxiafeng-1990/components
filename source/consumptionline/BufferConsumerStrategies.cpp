@@ -1434,6 +1434,27 @@ OpencvConsumer::TransformFunc OpencvConsumer::ProcessDecorator(int frame_index) 
 
                     ref_buf.setMat(&result_sw_bgr);
                     buffer->setMat(&result_hw_bgr);
+
+                    std::cerr << "[DEBUG-CMP] result_hw=" << result_hw.cols << "x" << result_hw.rows
+                              << " channels=" << result_hw.channels()
+                              << " result_hw_bgr=" << result_hw_bgr.cols << "x" << result_hw_bgr.rows
+                              << " channels=" << result_hw_bgr.channels()
+                              << " empty=" << result_hw_bgr.empty() << std::endl;
+                    std::cerr << "[DEBUG-CMP] result_sw_bgr=" << result_sw_bgr.cols << "x" << result_sw_bgr.rows
+                              << " channels=" << result_sw_bgr.channels()
+                              << " empty=" << result_sw_bgr.empty() << std::endl;
+
+                    cv::Mat* dbg_mat = buffer->getMat();
+                    AVFrame* dbg_av = buffer->getAVFrame();
+                    std::cerr << "[DEBUG-CMP] buffer type=" << Buffer::typeToString(buffer->type())
+                              << " getMat()=" << dbg_mat
+                              << " mat_size=" << (dbg_mat ? (std::to_string(dbg_mat->cols) + "x" + std::to_string(dbg_mat->rows)) : "null")
+                              << " getAVFrame()=" << dbg_av
+                              << std::endl;
+                    cv::Mat* dbg_ref = ref_buf.getMat();
+                    std::cerr << "[DEBUG-CMP] ref_buf->getMat()=" << dbg_ref
+                              << " mat_size=" << (dbg_ref ? (std::to_string(dbg_ref->cols) + "x" + std::to_string(dbg_ref->rows)) : "null")
+                              << std::endl;
                 }
                 // 如果测试例就是cvtcolor，则不用重复转换到bgr
                 else {
