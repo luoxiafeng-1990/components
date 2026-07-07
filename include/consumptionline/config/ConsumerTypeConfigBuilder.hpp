@@ -61,6 +61,7 @@ public:
 
     NpuInferenceConfigBuilder& setEnable(bool enable);
     NpuInferenceConfigBuilder& setModelPath(const std::string& path);
+    NpuInferenceConfigBuilder& setAlgorithm(consumer::NpuAlgorithm algorithm);
     NpuInferenceConfigBuilder& setConfThreshold(float threshold);
     NpuInferenceConfigBuilder& setNmsThreshold(float threshold);
     NpuInferenceConfigBuilder& setNpuCoreIndex(int index);

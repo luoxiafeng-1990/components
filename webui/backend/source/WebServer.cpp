@@ -1288,6 +1288,51 @@ void WebServer::registerPreviewRoutes() {
             jsonResponse(res, 400, ApiResponse::error(ErrorCode::PARAM_ERROR, "参数错误"));
         }
     });
+
+    // === Composite preview (stitched multi-channel) ===
+    server_->Get("/api/preview/composite/stream",
+        [this](const httplib::Request&, httplib::Response& res) {
+            if (!preview_service_->hasCompositePreview()) {
+                jsonResponse(res, 503, ApiResponse::error(ErrorCode::PREVIEW_UNAVAILABLE,
+                    "Composite preview not available (no stitcher connected)"));
+                return;
+            }
+
+            res.set_header("Cache-Control", "no-cache");
+            res.set_content_provider(
+                "multipart/x-mixed-replace; boundary=frame",
+                [this](size_t /*offset*/, httplib::DataSink& sink) {
+                    preview_service_->streamCompositeMjpeg(
+                        [&sink](const uint8_t* data, size_t len) -> bool {
+                            std::string header = "--frame\r\n"
+                                "Content-Type: image/jpeg\r\n"
+                                "Content-Length: " + std::to_string(len) + "\r\n\r\n";
+                            if (!sink.write(header.data(), header.size())) return false;
+                            if (!sink.write(reinterpret_cast<const char*>(data), len)) return false;
+                            std::string footer = "\r\n";
+                            return sink.write(footer.data(), footer.size());
+                        });
+                    return true;
+                },
+                [](bool) {}
+            );
+        });
+
+    server_->Get("/api/preview/composite/snapshot",
+        [this](const httplib::Request&, httplib::Response& res) {
+            if (!preview_service_->hasCompositePreview()) {
+                jsonResponse(res, 503, ApiResponse::error(ErrorCode::PREVIEW_UNAVAILABLE,
+                    "Composite preview not available"));
+                return;
+            }
+            auto frame = preview_service_->compositeSnapshot();
+            if (frame.empty()) {
+                jsonResponse(res, 404, ApiResponse::error(ErrorCode::PREVIEW_UNAVAILABLE,
+                    "No composite frame available yet"));
+                return;
+            }
+            res.set_content(std::string(frame.begin(), frame.end()), "image/jpeg");
+        });
 }
 
 // ============================================================

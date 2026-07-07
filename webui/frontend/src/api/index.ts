@@ -155,6 +155,8 @@ export const previewApi = {
   snapshotUrl: (workerId: string, quality = 80) =>
     `/api/preview/snapshot/${workerId}?quality=${quality}`,
   grid: (layout = '3x3') => api.get(`/preview/grid?layout=${layout}`),
+  compositeStreamUrl: () => `/api/preview/composite/stream`,
+  compositeSnapshotUrl: () => `/api/preview/composite/snapshot`,
 }
 
 // ===== FileSystem API =====

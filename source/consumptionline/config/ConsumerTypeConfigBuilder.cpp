@@ -63,6 +63,11 @@ NpuInferenceConfigBuilder& NpuInferenceConfigBuilder::setModelPath(const std::st
     return *this;
 }
 
+NpuInferenceConfigBuilder& NpuInferenceConfigBuilder::setAlgorithm(consumer::NpuAlgorithm algorithm) {
+    config_.algorithm = algorithm;
+    return *this;
+}
+
 NpuInferenceConfigBuilder& NpuInferenceConfigBuilder::setConfThreshold(float threshold) {
     config_.conf_threshold = threshold;
     return *this;

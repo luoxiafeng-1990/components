@@ -3,6 +3,7 @@
 
 #include "productionline/worker/base/WorkerBase.hpp"
 #include "productionline/worker/datasource/encodeddata/IEncodedPacketSource.hpp"
+#include "common/StageTimer.hpp"
 #include "bufferpool/buffer/Buffer.hpp"
 #include "bufferpool/pool/base/BufferPool.hpp"
 #include "productionline/worker/config/WorkerConfigs.hpp"
@@ -99,6 +100,7 @@ private:
     
     // ============ 线程安全 ============
     mutable std::recursive_mutex mutex_;  // 使用递归锁避免死锁   
+    perf::StageTimer imread_timer_{"opencv_imread"};
 };
 
 #endif // OPENCV_WORKER_HPP

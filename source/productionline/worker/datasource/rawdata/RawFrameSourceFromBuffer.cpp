@@ -146,15 +146,14 @@ bool RawFrameSourceFromBuffer::open() {
         return true;
     }
     
-    // 验证源 BufferPool 是否有效
-    auto pool = source_pool_weak_.lock();
-    if (!pool) {
-        LOG4CPLUS_ERROR(logger_, "无法打开：源 BufferPool 未设置或已销毁");
-        return false;
-    }
-    
-    // 共享模式初始化
+    // 共享模式初始化（仅共享模式必须在 open 时关联有效的 BufferPool）
     if (is_shared_mode_) {
+        auto pool = source_pool_weak_.lock();
+        if (!pool) {
+            LOG4CPLUS_ERROR(logger_, "无法打开：共享模式下源 BufferPool 未设置或已销毁");
+            return false;
+        }
+        
         is_running_.store(true, std::memory_order_release);
         fetch_task_running_.store(false, std::memory_order_release);
         remaining_subscribers_.store(0, std::memory_order_release);
@@ -171,7 +170,7 @@ bool RawFrameSourceFromBuffer::open() {
             });
             
             LOG4CPLUS_INFO_FMT(logger_, "⭐ 共享模式已激活：Fetch 任务已提交，等待 %zu 个订阅者",
-                              total_subscribers_);
+                               total_subscribers_);
         } catch (const std::exception& e) {
             LOG4CPLUS_ERROR_FMT(logger_, "提交 Fetch 任务失败: %s", e.what());
             is_running_.store(false, std::memory_order_release);

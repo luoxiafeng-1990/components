@@ -42,20 +42,33 @@
       <el-empty v-else description="请选择要预览的 Worker" />
     </div>
 
-    <!-- 多路宫格预览 (snapshot 轮询，规避浏览器并发连接限制) -->
-    <div v-else class="preview-grid" :class="`grid-${layout}`">
-      <div v-for="(w, i) in gridWorkers" :key="i" class="preview-cell">
-        <template v-if="w">
-          <div class="cell-header">
-            <span>{{ w.name }}</span>
-            <el-tag size="small" type="success">LIVE</el-tag>
+    <!-- 多路宫格预览 -->
+    <div v-else class="preview-grid-container">
+      <!-- Composite stream (single stitched image for all channels) -->
+      <div v-if="compositeAvailable" class="preview-composite">
+        <div class="cell-header">
+          <span>合成预览 ({{ layout }})</span>
+          <el-tag size="small" type="warning">COMPOSITE</el-tag>
+        </div>
+        <img :src="compositeStreamUrl" class="preview-img composite-preview"
+          @error="onImgError" @load="onImgLoad" alt="composite preview" />
+      </div>
+
+      <!-- Fallback: per-worker snapshot polling -->
+      <div v-else class="preview-grid" :class="`grid-${layout}`">
+        <div v-for="(w, i) in gridWorkers" :key="i" class="preview-cell">
+          <template v-if="w">
+            <div class="cell-header">
+              <span>{{ w.name }}</span>
+              <el-tag size="small" type="success">LIVE</el-tag>
+            </div>
+            <img :src="snapshotSrcs[w.id] || ''" class="preview-img"
+              @error="onImgError" @load="onImgLoad" alt="preview" />
+          </template>
+          <div v-else class="cell-empty">
+            <el-icon :size="32" color="#ddd"><VideoCamera /></el-icon>
+            <span>空闲</span>
           </div>
-          <img :src="snapshotSrcs[w.id] || ''" class="preview-img"
-            @error="onImgError" @load="onImgLoad" alt="preview" />
-        </template>
-        <div v-else class="cell-empty">
-          <el-icon :size="32" color="#ddd"><VideoCamera /></el-icon>
-          <span>空闲</span>
         </div>
       </div>
     </div>
@@ -74,6 +87,8 @@ const workerStore = useWorkerStore()
 const layout = ref('3x3')
 const selectedWorker = ref('')
 const previewFps = ref(15)
+const compositeAvailable = ref(false)
+const compositeStreamUrl = ref('')
 
 async function onFpsChange(fps: number) {
   try {
@@ -155,13 +170,18 @@ function stopSnapshotPolling() {
   }
 }
 
-// 1x1 用 MJPEG 流，宫格用 snapshot 轮询
-watch(layout, (val) => {
+// 1x1 用 MJPEG 流，宫格用 snapshot 轮询（或 composite stream）
+watch(layout, async (val) => {
   selectedWorker.value = ''
   if (val === '1x1') {
     stopSnapshotPolling()
   } else {
-    startSnapshotPolling()
+    await checkCompositeAvailability()
+    if (!compositeAvailable.value) {
+      startSnapshotPolling()
+    } else {
+      stopSnapshotPolling()
+    }
   }
 }, { immediate: false })
 
@@ -183,7 +203,22 @@ function onLayoutChange() {
 
 function refreshStreams() {
   workerStore.fetchList()
-  if (layout.value !== '1x1') refreshSnapshots()
+  if (layout.value !== '1x1') {
+    checkCompositeAvailability()
+    if (!compositeAvailable.value) refreshSnapshots()
+  }
+}
+
+async function checkCompositeAvailability() {
+  try {
+    const res = await axios.get('/api/preview/composite/snapshot', { responseType: 'blob', timeout: 3000 })
+    compositeAvailable.value = (res.status === 200)
+  } catch {
+    compositeAvailable.value = false
+  }
+  if (compositeAvailable.value) {
+    compositeStreamUrl.value = '/api/preview/composite/stream?t=' + Date.now()
+  }
 }
 
 function onImgError(_e: Event) {
@@ -209,7 +244,10 @@ onMounted(async () => {
     if (res.data?.data?.fps) previewFps.value = res.data.data.fps
   } catch { /* ignore */ }
   if (layout.value !== '1x1') {
-    startSnapshotPolling()
+    await checkCompositeAvailability()
+    if (!compositeAvailable.value) {
+      startSnapshotPolling()
+    }
   }
 })
 
@@ -297,5 +335,23 @@ onBeforeUnmount(() => {
   gap: 8px;
   color: #666;
   font-size: 12px;
+}
+
+.preview-grid-container {
+  width: 100%;
+}
+
+.preview-composite {
+  background: #1a1a1a;
+  border-radius: 6px;
+  overflow: hidden;
+  position: relative;
+  max-width: 100%;
+}
+
+.composite-preview {
+  width: 100%;
+  height: auto;
+  display: block;
 }
 </style>

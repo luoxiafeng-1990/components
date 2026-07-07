@@ -24,6 +24,7 @@
 #define IBUFFER_CONSUMER_HPP
 
 #include "bufferpool/buffer/Buffer.hpp"
+#include "common/StageTimer.hpp"
 #include <vector>
 #include <string>
 #include <cstdint>
@@ -111,6 +112,16 @@ public:
      * @return true 需要保留（不要 releaseFilled），false 正常归还
      */
     virtual bool shouldRetainBuffer() const { return false; }
+
+    /**
+     * @brief 收集该消费者内部的阶段计时数据
+     * 
+     * 各子类实现此方法返回自己内部 StageTimer 的 summarize() 结果，
+     * 由 consumeLoop 在循环结束后统一收集，汇入 ConsumeResult::stage_timings。
+     * 
+     * @return 该消费者所持有的所有 StageTiming 列表（可为空）
+     */
+    virtual std::vector<perf::StageTiming> collectStageTimings() const { return {}; }
 };
 
 } // namespace consumer

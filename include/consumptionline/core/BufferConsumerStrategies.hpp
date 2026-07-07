@@ -27,6 +27,7 @@
 #include "vendor/taco/display/DisplayDeviceFactory.hpp"
 #include "productionline/worker/core/FFmpegEncodeWorker.hpp"
 #include "productionline/worker/datasource/rawdata/RawFrameSourceFromBuffer.hpp"
+#include "common/StageTimer.hpp"
 
 #include <log4cplus/logger.h>
 #include <memory>
@@ -105,6 +106,9 @@ public:
     void finalize() override;
     std::string getStats() const override;
     bool shouldRetainBuffer() const override;
+    std::vector<perf::StageTiming> collectStageTimings() const override {
+        return { display_timer_.summarize() };
+    }
     
 private:
     DisplayConsumerConfig config_;
@@ -113,6 +117,7 @@ private:
     int failed_count_ = 0;
     bool initialized_ = false;
     bool last_consume_failed_ = false;
+    perf::StageTimer display_timer_{"display"};
 };
 
 // ============================================================
@@ -323,6 +328,9 @@ public:
 
     double getAveragePsnr() const;
     double getAverageSsim() const;
+    std::vector<perf::StageTiming> collectStageTimings() const override {
+        return { opencv_hw_timer_.summarize(), opencv_sw_timer_.summarize() };
+    }
 
 private:
     TransformFunc ProcessDecorator(int frame_index);
@@ -345,6 +353,8 @@ private:
     double  perf_target_fps_   = 0.0;
     int64_t api_hw_total_ms_   = 0;
     int64_t api_sw_total_ms_   = 0;
+    perf::StageTimer opencv_hw_timer_{"opencv_hw"};
+    perf::StageTimer opencv_sw_timer_{"opencv_sw"};
 
     log4cplus::Logger logger_;
     AVPixelFormat pix_fmt = AV_PIX_FMT_NV12;
@@ -378,6 +388,7 @@ private:
     Config::FrameCallback on_frame_;
 
     // 编码输入 BufferPool（AVFrame 壳，consume 端 submitFilled，编码 Worker 端 acquireFilled）
+    std::unique_ptr<class IBufferPoolBuilder> input_pool_builder_;
     std::shared_ptr<BufferPool> input_pool_;
     uint64_t input_pool_id_ = 0;
 
@@ -431,6 +442,14 @@ public:
      * @brief 获取子策略数量
      */
     size_t getStrategyCount() const { return strategies_.size(); }
+    std::vector<perf::StageTiming> collectStageTimings() const override {
+        std::vector<perf::StageTiming> all;
+        for (const auto& s : strategies_) {
+            auto t = s->collectStageTimings();
+            all.insert(all.end(), t.begin(), t.end());
+        }
+        return all;
+    }
     
 private:
     std::vector<std::shared_ptr<IBufferConsumer>> strategies_;

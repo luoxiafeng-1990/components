@@ -9,6 +9,11 @@
 #include <deque>
 #include <atomic>
 #include <functional>
+#include <thread>
+#include <cstdint>
+#include <memory>
+
+class FrameStitcherService;  // Forward declaration in global namespace
 
 namespace webui {
 
@@ -36,6 +41,17 @@ public:
 
     void requestStop();
 
+    /// Composite MJPEG stream (single stitched frame for grid mode)
+    void streamCompositeMjpeg(FrameCallback cb);
+
+    /// Composite snapshot
+    std::vector<uint8_t> compositeSnapshot();
+
+    /// Called by WebServer to connect stitcher when display is active
+    void connectStitcher(std::shared_ptr<FrameStitcherService> stitcher);
+
+    bool hasCompositePreview();
+
     /// 设置 MJPEG 流的目标帧率（全局）
     void setTargetFps(int fps) { target_fps_ = fps > 0 ? fps : 15; }
     int getTargetFps() const { return target_fps_; }
@@ -60,6 +76,27 @@ private:
     std::unordered_map<std::string, std::unique_ptr<FrameBuffer>> frame_buffers_;
     WorkerManager& worker_manager_;
     ConsumerManager& consumer_manager_;
+
+    // Composite preview state
+    std::atomic<bool> composite_available_{false};
+    std::shared_ptr<FrameStitcherService> stitcher_;
+
+    // Composite frame encoding (async)
+    std::thread composite_encoder_thread_;
+    std::atomic<bool> encoder_running_{false};
+
+    // Double buffer for raw NV12 data from stitcher callback
+    std::mutex composite_raw_mutex_;
+    std::vector<uint8_t> composite_raw_buf_;
+    std::condition_variable composite_raw_cv_;
+    std::atomic<bool> composite_raw_ready_{false};
+    int composite_width_ = 0;
+    int composite_height_ = 0;
+
+    // Composite frame buffer (reuse existing FrameBuffer pattern)
+    FrameBuffer composite_frame_;
+
+    void compositeEncoderThreadFunc();
 };
 
 } // namespace webui

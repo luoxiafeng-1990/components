@@ -3,6 +3,7 @@
 
 #include "productionline/worker/base/WorkerBase.hpp"
 #include "productionline/worker/datasource/rawdata/IRawFrameSource.hpp"
+#include "common/StageTimer.hpp"
 #include <log4cplus/logger.h>
 #include <log4cplus/loggingmacros.h>
 #include <memory>
@@ -148,6 +149,16 @@ public:
      */
     AVRational getTimeBase() const override;
 
+    std::vector<perf::StageTiming> getStageTimings() const {
+        return {
+            encode_total_timer_.summarize(),
+            encode_read_timer_.summarize(),
+            encode_send_timer_.summarize(),
+            encode_recv_timer_.summarize(),
+            encode_scale_timer_.summarize()
+        };
+    }
+
 private:
     // ==================== 内部方法 ====================
     
@@ -218,6 +229,13 @@ private:
     // 统计信息
     std::atomic<int> encoded_frames_;
     std::atomic<int> dropped_frames_;
+    
+    // 编码阶段计时
+    perf::StageTimer encode_total_timer_{"encode_total"};
+    perf::StageTimer encode_read_timer_{"encode_read_frame"};
+    perf::StageTimer encode_send_timer_{"encode_send_frame"};
+    perf::StageTimer encode_recv_timer_{"encode_recv_packet"};
+    perf::StageTimer encode_scale_timer_{"encode_sws_scale"};
     
     // 线程安全
     mutable std::recursive_mutex mutex_;
