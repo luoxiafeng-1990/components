@@ -7,6 +7,7 @@
 #include "productionline/worker/base/ComponentTopology.hpp"
 #include "bufferpool/pool/base/IBufferPoolBuilder.hpp"
 #include "bufferpool/buffer/AVFrameBuffer.hpp"
+#include "bufferpool/buffer/MatBuffer.hpp"
 #include "common/ImageMeta.hpp"
 #include "bufferpool/pool/builder/BufferPoolBuilderFactory.hpp"
 #include "vendor/taco/display/DisplayDeviceFactory.hpp"
@@ -1420,8 +1421,10 @@ OpencvConsumer::TransformFunc OpencvConsumer::ProcessDecorator(int frame_index) 
 
             // PIX_COMPARE 和 PERFORMANCE：比较前将硬件结果从 NV12 转 BGR
             if (comparator_) {
-                Buffer ref_buf(0, nullptr, 0, 0, Buffer::Ownership::EXTERNAL, Buffer::Type::MAT);
-                // 局部变量会在离开作用域后自动销毁，导致运行时buffer里面的mat是空
+                // 用 MatBuffer 装比较用的 Mat（Buffer.setMat 对 AVFrameBuffer 不生效）
+                MatBuffer ref_buf(0, nullptr, 0, 0, Buffer::Ownership::EXTERNAL);
+                MatBuffer hw_buf(0, nullptr, 0, 0, Buffer::Ownership::EXTERNAL);
+                // 局部变量会在离开作用域后自动销毁，但 MatBuffer 析构不会 delete 我们的 Mat（EXTERNAL）
                 cv::Mat result_hw_bgr;
                 cv::Mat result_sw_bgr;
                 if (opencv_config_.op_type != OpencvType::OpType::CVTCOLOR){
@@ -1434,8 +1437,10 @@ OpencvConsumer::TransformFunc OpencvConsumer::ProcessDecorator(int frame_index) 
                         result_sw_bgr = result_sw;
                     }
 
-                    ref_buf.setMat(&result_sw_bgr);
-                    buffer->setMat(&result_hw_bgr);
+                    hw_buf.setMat(&result_hw_bgr);   // HW 硬件结果
+                    ref_buf.setMat(&result_sw_bgr);   // SW 软件结果（作为 reference）
+                    std::cerr << "[DEBUG-NEW] MatBuffer setMat done, hw_buf.getMat()="
+                              << (hw_buf.getMat() ? std::to_string(hw_buf.getMat()->cols) + "x" + std::to_string(hw_buf.getMat()->rows) : "null") << std::endl;
 
                     std::cerr << "[DEBUG-CMP] result_hw=" << result_hw.cols << "x" << result_hw.rows
                               << " channels=" << result_hw.channels()
@@ -1446,26 +1451,20 @@ OpencvConsumer::TransformFunc OpencvConsumer::ProcessDecorator(int frame_index) 
                               << " channels=" << result_sw_bgr.channels()
                               << " empty=" << result_sw_bgr.empty() << std::endl;
 
-                    cv::Mat* dbg_mat = buffer->getMat();
-                    AVFrame* dbg_av = buffer->getAVFrame();
-                    std::cerr << "[DEBUG-CMP] buffer type=" << Buffer::typeToString(buffer->type())
-                              << " getMat()=" << dbg_mat
-                              << " mat_size=" << (dbg_mat ? (std::to_string(dbg_mat->cols) + "x" + std::to_string(dbg_mat->rows)) : "null")
-                              << " getAVFrame()=" << dbg_av
-                              << std::endl;
-                    cv::Mat* dbg_ref = ref_buf.getMat();
-                    std::cerr << "[DEBUG-CMP] ref_buf->getMat()=" << dbg_ref
-                              << " mat_size=" << (dbg_ref ? (std::to_string(dbg_ref->cols) + "x" + std::to_string(dbg_ref->rows)) : "null")
-                              << std::endl;
+                    std::cerr << "[DEBUG-CMP] hw_buf.getMat()="
+                              << (hw_buf.getMat() ? (std::to_string(hw_buf.getMat()->cols) + "x" + std::to_string(hw_buf.getMat()->rows)) : "null") << std::endl;
+                    std::cerr << "[DEBUG-CMP] ref_buf.getMat()="
+                              << (ref_buf.getMat() ? (std::to_string(ref_buf.getMat()->cols) + "x" + std::to_string(ref_buf.getMat()->rows)) : "null") << std::endl;
                 }
                 // 如果测试例就是cvtcolor，则不用重复转换到bgr
                 else {
+                    hw_buf.setMat(&result_hw);
                     ref_buf.setMat(&result_sw);
-                    buffer->setMat(&result_hw);
                 }
 
-                auto cmp_result = comparator_->compare(buffer, &ref_buf);
-                buffer->setMat(nullptr);
+                auto cmp_result = comparator_->compare(&ref_buf, &hw_buf);
+                hw_buf.setMat(nullptr);
+                ref_buf.setMat(nullptr);
 
                 frames_compared_++;
                 psnr_sum_ += cmp_result.psnr_avg;

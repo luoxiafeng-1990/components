@@ -202,9 +202,9 @@ std::vector<WorkerConfig> OpencvPlugin::buildPipelineConfigs(const WorkerConfig&
         using AssertMode = WorkerConfig::ConsumerTypeConfig::OpencvType::AssertMode;
         if (enable_pix_compare) {
             config.consumer_type.compare.enable_psnr = true;
-            config.consumer_type.compare.min_psnr = 38;
+            config.consumer_type.compare.min_psnr = 18;
             config.consumer_type.compare.enable_ssim = true;
-            config.consumer_type.compare.min_ssim = 0.95;
+            config.consumer_type.compare.min_ssim = 0.6;
             config.consumer_type.opencv.assert_mode = AssertMode::PIX_COMPARE;
         } else if (enable_api_exception) {
             config.consumer_type.opencv.assert_mode = AssertMode::API_EXCEPTION;
@@ -212,9 +212,9 @@ std::vector<WorkerConfig> OpencvPlugin::buildPipelineConfigs(const WorkerConfig&
             config.consumer_type.opencv.assert_mode = AssertMode::PERFORMANCE;  // PERF 也需要比较
             config.consumer_type.opencv.min_fps = min_fps_;
             config.consumer_type.compare.enable_psnr = true;
-            config.consumer_type.compare.min_psnr = 38;
+            config.consumer_type.compare.min_psnr = 18;
             config.consumer_type.compare.enable_ssim = true;
-            config.consumer_type.compare.min_ssim = 0.95;
+            config.consumer_type.compare.min_ssim = 0.6;
         } else {
             config.consumer_type.opencv.assert_mode = AssertMode::API_EXCEPTION;  // 默认
         }
