@@ -244,18 +244,6 @@ int main(int argc, char* argv[]) {
     if (pipeline_configs.size() >= 1 &&
         pipeline_configs[0].consumer_type.opencv.enable) {
 
-        using OpType = WorkerConfig::ConsumerTypeConfig::OpencvType::OpType;
-        using AssertMode = WorkerConfig::ConsumerTypeConfig::OpencvType::AssertMode;
-
-        const auto& opencv_cfg = pipeline_configs[0].consumer_type.opencv;
-        const char* mode_str =
-            (opencv_cfg.assert_mode == AssertMode::API_EXCEPTION) ? "API_EXCEPTION" :
-            (opencv_cfg.assert_mode == AssertMode::PIX_COMPARE)   ? "PIX_COMPARE" :
-            (opencv_cfg.assert_mode == AssertMode::PERFORMANCE)   ? "PERFORMANCE" : "NONE";
-        std::cout << "[DEBUG-OPENCV] assert_mode=" << mode_str << std::endl;
-        std::cout << "[DEBUG-OPENCV] compare.enable_psnr=" << (int)pipeline_configs[0].consumer_type.compare.enable_psnr
-                  << " enable_ssim=" << (int)pipeline_configs[0].consumer_type.compare.enable_ssim << std::endl;
-
         auto result = test::ExecuteMode::single(pipeline_configs[0], flags, test_name);
         consumer::BufferConsumerService::printResult(test_name, result);
         return result.getOverallResult() ? 0 : 1;
