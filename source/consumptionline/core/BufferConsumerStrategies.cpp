@@ -842,11 +842,12 @@ std::string matInfoToString(const cv::Mat& mat) {
     ss << depthStr << "C" << channels;
     
     // 添加更多详细信息
-    ss << " | Depth:" << depth 
+    ss << " | Depth:" << depth
        << " | Channels:" << channels
        << " | Total:" << mat.total()
-       << " | Continuous:" << (mat.isContinuous() ? "Yes" : "No");
-    
+       << " | Continuous:" << (mat.isContinuous() ? "Yes" : "No")
+       << " | DmabufHeap:" << (mat.isdmabufheap() ? "Yes" : "No");
+
     return ss.str();
 }
 
@@ -914,10 +915,19 @@ cv::Mat OpencvConsumer::ProcessByOpencv(cv::Mat src, bool hw) {
         case OpencvType::OpType::RESIZE_WH: {
             const auto& r = opencv_config_.resize;
             cv::Mat dst;
-            if (hw == true) dst.allocator = cv::hal::getAllocator();
-            cv::resize(src, dst,
+            if (hw == true) {
+                AVFrame* frame = cv::av::create(r.dst_height,r.dst_width);
+                dst.create(frame);
+                cv::resize(src, dst,
                        cv::Size(r.dst_width, r.dst_height),
                        r.interpolation);
+            }
+            else {
+                dst.create(r.dst_height*3/2, r.dst_width, src.type());
+                cv::resize(src, dst,
+                       cv::Size(r.dst_width, r.dst_height*3/2),
+                       r.interpolation);
+            }
             return dst;
         }
         case OpencvType::OpType::RESIZE_XY: {
@@ -928,16 +938,18 @@ cv::Mat OpencvConsumer::ProcessByOpencv(cv::Mat src, bool hw) {
             if (hw == true) {
                 AVFrame* frame = cv::av::create(dst_height,dst_width);
                 dst.create(frame);
-            }
-            else {
-                dst.create(dst_height, dst_width, src.type());
-            }
-            std::cout << "[src-avblkid]" << src.avBlkId() << std::endl;
-            std::cout << "[dst-avblkid]" << dst.avBlkId() << std::endl;
-            cv::resize(src, dst,
+                cv::resize(src, dst,
                        cv::Size(),
                        r.fx, r.fy,
                        r.interpolation);
+            }
+            else {
+                dst.create(dst_height*3/2, dst_width, src.type());
+                cv::resize(src, dst,
+                       cv::Size(),
+                       r.fx, r.fy,
+                       r.interpolation);
+            }
             return dst;
         }
         case OpencvType::OpType::CROP: {
@@ -1391,13 +1403,11 @@ OpencvConsumer::TransformFunc OpencvConsumer::ProcessDecorator(int frame_index) 
                     return cv::Mat();
                 }
                 src_hw = cv::Mat(avframe_hw, 1);
-                //std::cout << "[avblkid-0]" << src_hw.avBlkId() << std::endl;
                 AVFrame* avframe_sw = av_frame_clone(avframe_hw);
                 src_sw = avframeToMat(avframe_sw);
                 av_frame_free(&avframe_sw);
             }
 
-            //std::cout << "[avblkid-1]" << src_hw.avBlkId() << std::endl;
             // 计时硬件执行（NV12 输入，resize 内部走硬件路径）
             auto hw_start = std::chrono::high_resolution_clock::now();
 
@@ -1428,8 +1438,13 @@ OpencvConsumer::TransformFunc OpencvConsumer::ProcessDecorator(int frame_index) 
                 cv::Mat result_hw_bgr;
                 cv::Mat result_sw_bgr;
                 if (opencv_config_.op_type != OpencvType::OpType::CVTCOLOR){
-                    result_hw_bgr.allocator = cv::hal::getAllocator();
+                    // 这里channels == 1指的是NV12
                     if (!result_hw.empty() && result_hw.channels() == 1) {
+                        // 预分配 BGR 输出 Mat，使用输入 Mat 的 rows/cols（而非底层 AVFrame 的高度）
+                        // 按文档目标mat需要显式调用create方法
+                        result_hw_bgr.create(result_hw.rows, result_hw.cols, CV_8UC3);
+                        result_sw_bgr.create(result_sw.rows, result_sw.cols, CV_8UC3);
+
                         cv::cvtColor(result_hw, result_hw_bgr, cv::COLOR_YUV2BGR_NV12);
                         cv::cvtColor(result_sw, result_sw_bgr, cv::COLOR_YUV2BGR_NV12);
                     } else {
@@ -1439,22 +1454,6 @@ OpencvConsumer::TransformFunc OpencvConsumer::ProcessDecorator(int frame_index) 
 
                     hw_buf.setMat(&result_hw_bgr);   // HW 硬件结果
                     ref_buf.setMat(&result_sw_bgr);   // SW 软件结果（作为 reference）
-                    std::cerr << "[DEBUG-NEW] MatBuffer setMat done, hw_buf.getMat()="
-                              << (hw_buf.getMat() ? std::to_string(hw_buf.getMat()->cols) + "x" + std::to_string(hw_buf.getMat()->rows) : "null") << std::endl;
-
-                    std::cerr << "[DEBUG-CMP] result_hw=" << result_hw.cols << "x" << result_hw.rows
-                              << " channels=" << result_hw.channels()
-                              << " result_hw_bgr=" << result_hw_bgr.cols << "x" << result_hw_bgr.rows
-                              << " channels=" << result_hw_bgr.channels()
-                              << " empty=" << result_hw_bgr.empty() << std::endl;
-                    std::cerr << "[DEBUG-CMP] result_sw_bgr=" << result_sw_bgr.cols << "x" << result_sw_bgr.rows
-                              << " channels=" << result_sw_bgr.channels()
-                              << " empty=" << result_sw_bgr.empty() << std::endl;
-
-                    std::cerr << "[DEBUG-CMP] hw_buf.getMat()="
-                              << (hw_buf.getMat() ? (std::to_string(hw_buf.getMat()->cols) + "x" + std::to_string(hw_buf.getMat()->rows)) : "null") << std::endl;
-                    std::cerr << "[DEBUG-CMP] ref_buf.getMat()="
-                              << (ref_buf.getMat() ? (std::to_string(ref_buf.getMat()->cols) + "x" + std::to_string(ref_buf.getMat()->rows)) : "null") << std::endl;
                 }
                 // 如果测试例就是cvtcolor，则不用重复转换到bgr
                 else {
@@ -1462,6 +1461,10 @@ OpencvConsumer::TransformFunc OpencvConsumer::ProcessDecorator(int frame_index) 
                     ref_buf.setMat(&result_sw);
                 }
 
+                std::cout << "[result_hw]"<< matInfoToString(result_hw) << std::endl;
+                std::cout << "[result_sw]"<< matInfoToString(result_sw) << std::endl;
+                std::cout << "[result_hw_bgr]"<< matInfoToString(result_hw_bgr) << std::endl;
+                std::cout << "[result_sw_bgr]"<< matInfoToString(result_sw_bgr) << std::endl;
                 auto cmp_result = comparator_->compare(&ref_buf, &hw_buf);
                 hw_buf.setMat(nullptr);
                 ref_buf.setMat(nullptr);
@@ -1500,18 +1503,18 @@ void OpencvConsumer::finalize() {
 std::string OpencvConsumer::getStats() const {
     std::ostringstream oss;
     oss << "\n───────────────────────────────────────────────────────\n";
-    oss << "  OpencvConsumer\n";
+    oss << "OpencvConsumer\n";
     oss << "───────────────────────────────────────────────────────\n";
-    oss << "  Status:              " << (passed_ ? "PASSED" : "FAILED") << "\n";
-    oss << "  Processed:           " << frames_processed_ << " frames\n";
+    oss << "Opencv:" << (passed_ ? "Passed" : "Failed") << "\n";
+    oss << "Processed:" << frames_processed_ << "frames\n";
 
     if (frames_compared_ > 0) {
         oss << std::fixed;
-        oss << "  Compared:            " << frames_compared_ << " frames\n";
+        oss << "Compared:" << frames_compared_ << "frames\n";
         oss << std::setprecision(2);
-        oss << "  Avg PSNR:            " << getAveragePsnr() << " dB\n";
+        oss << "AvgPSNR:" << getAveragePsnr() << "dB\n";
         oss << std::setprecision(4);
-        oss << "  Avg SSIM:            " << getAverageSsim() << "\n";
+        oss << "AvgSSIM:" << getAverageSsim() << "\n";
     }
 
     if (perf_enabled_ && frames_processed_ > 0) {
@@ -1528,12 +1531,12 @@ std::string OpencvConsumer::getStats() const {
         if (!(check_time && check_fps)) passed_ = false;
 
         oss << std::fixed << std::setprecision(2);
-        oss << "  HW Avg Time:         " << hw_avg_ms << " ms\n";
-        oss << "  SW Avg Time:         " << sw_avg_ms << " ms\n";
-        oss << "  HW Avg FPS:          " << hw_avg_fps << " fps\n";
-        oss << "  SW Avg FPS:          " << sw_avg_fps << " fps\n";
-        oss << "  HW <= SW*0.5:        " << (check_time ? "MET" : "NOT MET") << "\n";
-        oss << "  HW >= " << perf_target_fps_ << " fps:     "
+        oss << "HWAvgTime:" << hw_avg_ms << "ms\n";
+        oss << "SWAvgTime:" << sw_avg_ms << "ms\n";
+        oss << "HWAvgFPS:" << hw_avg_fps << "fps\n";
+        oss << "SWAvgFPS:" << sw_avg_fps << "fps\n";
+        oss << "HW<=SW*0.5:" << (check_time ? "MET" : "NOT MET") << "\n";
+        oss << "HW>=" << perf_target_fps_ << "fps:"
             << (check_fps ? "MET" : "NOT MET") << "\n";
     }
 
