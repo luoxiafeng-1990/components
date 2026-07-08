@@ -49,7 +49,7 @@ define COMPONENTS_INSTALL_TARGET_CMDS
 	mkdir -p /tmp/components/usr/local/bin
 	cp -f $(@D)/qa_cases /tmp/components/usr/local/bin
 	cp -rf $(@D)/DEBIAN /tmp/components
-	dpkg-deb --root-owner-group --build /tmp/components $(TARGET_DIR)/tmp/component_1.0_riscv64.deb
+	dpkg-deb --root-owner-group --build /tmp/components $(TARGET_DIR)/tmp/components_1.0_riscv64.deb
 endef
 
 $(eval $(autotools-package))

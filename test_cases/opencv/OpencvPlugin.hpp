@@ -83,8 +83,9 @@ private:
     bool use_software = false;
     bool jpeg_progressive_ = false;
     int quality_ = 95;
-    bool enable_compare_ = false;
-    bool enable_perf_ = false;
+    bool enable_pix_compare = false;
+    bool enable_api_exception = false;
+    bool enable_perf = false;
     bool verbose_ = false;
     bool show_list_ = false;
     std::vector<std::string> positional_args_;

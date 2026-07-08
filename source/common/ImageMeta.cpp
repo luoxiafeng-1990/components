@@ -1,6 +1,7 @@
 #include "common/ImageMeta.hpp"
 #include "bufferpool/buffer/Buffer.hpp"
 #include <opencv2/core/mat.hpp>
+#include <iostream>
 
 // ========== fromAVFrame ==========
 
@@ -28,17 +29,23 @@ ImageMeta ImageMeta::fromAVFrame(const AVFrame* frame) {
 
 ImageMeta ImageMeta::fromBuffer(const Buffer* buffer) {
     if (!buffer) return {};
-    
-    // 优先从 AVFrame 提取（AVFrameBuffer 和 MatBuffer 都可能有 AVFrame）
-    AVFrame* frame = buffer->getAVFrame();
-    if (frame) return fromAVFrame(frame);
-    
-    // Mat 次之
-    cv::Mat* mat = buffer->getMat();
-    if (mat && !mat->empty()) {
-        return fromMat(mat);
+
+    // 根据 buffer 类型选择提取方式，避免 MatBuffer 中底层 AVFrame 的
+    // width/height 与实际 Mat 尺寸不一致（如 hw NV12 场景下 avframe_->height != mat->rows）
+    switch (buffer->type()) {
+        case Buffer::Type::MAT: {
+            cv::Mat* mat = buffer->getMat();
+            return fromMat(mat);
+        }
+        case Buffer::Type::AVFRAME: {
+            AVFrame* frame = buffer->getAVFrame();
+            return fromAVFrame(frame);
+        }
+        default:
+            AVFrame* frame = buffer->getAVFrame();
+            return fromAVFrame(frame);
     }
-    
+
     return {};
 }
 
