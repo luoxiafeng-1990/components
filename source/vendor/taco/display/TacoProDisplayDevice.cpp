@@ -14,6 +14,8 @@
 #include <cstring>
 #include <cerrno>
 #include <array>
+#include <chrono>
+#include <future>
 
 extern "C" {
 #include "ta_sys_api.h"
@@ -149,8 +151,11 @@ bool TacoProDisplayDevice::SharedState::open() {
         return false;
     }
 
-    // 注册 Display 订阅者（DMA 送显逻辑）
+    static constexpr int IOCTL_TIMEOUT_MS = 1000;
+
     stitcher->subscribe([this](const StitchedFrame& frame) {
+        auto t0 = std::chrono::steady_clock::now();
+
         struct tpsfb_dma_info dma_info;
         dma_info.ovl_idx = 0;
         dma_info.phys_addr = frame.buffer->getPhysicalAddress();
@@ -159,12 +164,26 @@ bool TacoProDisplayDevice::SharedState::open() {
                 "Display: FB_IOCTL_SET_DMA_INFO failed: %s", strerror(errno));
             return;
         }
+        auto t1 = std::chrono::steady_clock::now();
+        auto d1 = std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count();
+        if (d1 > IOCTL_TIMEOUT_MS) {
+            LOG4CPLUS_ERROR_FMT(logger,
+                "Display: FB_IOCTL_SET_DMA_INFO blocked for %lldms (threshold=%dms), "
+                "possible driver bug", (long long)d1, IOCTL_TIMEOUT_MS);
+        }
 
         struct fb_var_screeninfo var_info;
         if (ioctl(fd, FBIOGET_VSCREENINFO, &var_info) < 0) {
             LOG4CPLUS_WARN_FMT(logger,
                 "Display: FBIOGET_VSCREENINFO failed: %s", strerror(errno));
             return;
+        }
+        auto t2 = std::chrono::steady_clock::now();
+        auto d2 = std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count();
+        if (d2 > IOCTL_TIMEOUT_MS) {
+            LOG4CPLUS_ERROR_FMT(logger,
+                "Display: FBIOGET_VSCREENINFO blocked for %lldms (threshold=%dms), "
+                "possible driver bug", (long long)d2, IOCTL_TIMEOUT_MS);
         }
 
         var_info.yoffset = 0;
@@ -173,9 +192,26 @@ bool TacoProDisplayDevice::SharedState::open() {
                 "Display: FBIOPAN_DISPLAY failed: %s", strerror(errno));
             return;
         }
+        auto t3 = std::chrono::steady_clock::now();
+        auto d3 = std::chrono::duration_cast<std::chrono::milliseconds>(t3 - t2).count();
+        if (d3 > IOCTL_TIMEOUT_MS) {
+            LOG4CPLUS_ERROR_FMT(logger,
+                "Display: FBIOPAN_DISPLAY blocked for %lldms (threshold=%dms), "
+                "possible driver bug", (long long)d3, IOCTL_TIMEOUT_MS);
+        }
 
-        int zero = 0;
-        ioctl(fd, FBIO_WAITFORVSYNC, &zero);
+        // FBIO_WAITFORVSYNC: use async + timeout to prevent unbounded blocking
+        auto vsync_future = std::async(std::launch::async, [this]() {
+            int zero = 0;
+            return ioctl(fd, FBIO_WAITFORVSYNC, &zero);
+        });
+        auto vsync_status = vsync_future.wait_for(
+            std::chrono::milliseconds(IOCTL_TIMEOUT_MS));
+        if (vsync_status == std::future_status::timeout) {
+            LOG4CPLUS_ERROR_FMT(logger,
+                "Display: FBIO_WAITFORVSYNC blocked for >%dms, "
+                "skipping (possible driver bug)", IOCTL_TIMEOUT_MS);
+        }
     });
 
     if (config.osd_enable) {
