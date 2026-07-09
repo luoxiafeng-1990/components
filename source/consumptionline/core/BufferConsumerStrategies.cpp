@@ -943,16 +943,43 @@ cv::Mat OpencvConsumer::ProcessByOpencv(cv::Mat src, bool hw) {
         }
         case OpencvType::OpType::CROP: {
             const auto& c = opencv_config_.crop;
-            
-            //cv::Crop 是自己开发的接口，标准接口是mat(cv::Rect())
-            if (hw == true && cv::Crop != nullptr) {
+
+            if (hw == true) {
+                AVFrame* frame = cv::av::create(c.height, c.width);
                 cv::Mat dst;
-                dst.allocator = cv::hal::getAllocator();
+                dst.create(frame);
                 cv::Crop(src, dst, cv::Rect(c.x, c.y, c.width, c.height));
                 return dst;
             }
             else {
-                return src(cv::Rect(c.x, c.y, c.width, c.height)).clone();
+                // NV12 软件 Mat：
+                // Y 平面：rows = 实际高度 h，cols = 宽度 w
+                // UV 平面：rows = h/2，cols = w，2通道（交错 UV）
+                // 总 rows = h + h/2 = h * 3/2
+
+                int dst_y_rows = c.height;        // 输出 Y 行数
+                int dst_uv_rows = c.height / 2;   // 输出 UV 行数
+
+                // 创建输出 NV12 打包 Mat
+                cv::Mat dst(dst_y_rows + dst_uv_rows, c.width, src.type());
+
+                // 裁剪 Y 平面：Y 是完整分辨率
+                cv::Rect y_rect(c.x, c.y, c.width, c.height);
+                cv::Mat y_cropped = src(y_rect).clone();
+                y_cropped.copyTo(dst(cv::Rect(0, 0, c.width, dst_y_rows)));
+
+                // 裁剪 UV 平面：UV 是 2x2 降采样，坐标/2
+                // UV 在 src 中的起始行 = src.rows × 2/3（即 Y plane 的总行数）
+                int src_y_plane_rows = src.rows * 2 / 3;
+                int uv_crop_x = c.x / 2;
+                int uv_crop_y = c.y / 2;
+                int uv_crop_w = c.width;
+                int uv_crop_h = c.height / 2;
+                cv::Rect uv_rect(uv_crop_x, src_y_plane_rows + uv_crop_y, uv_crop_w, uv_crop_h);
+                cv::Mat uv_cropped = src(uv_rect).clone();
+                uv_cropped.copyTo(dst(cv::Rect(0, dst_y_rows, c.width, dst_uv_rows)));
+
+                return dst;
             }
         }
         case OpencvType::OpType::CVTCOLOR: {
@@ -1499,6 +1526,7 @@ std::string OpencvConsumer::getStats() const {
     // API_EXCEPTION 模式：不打印 Passed/Failed
     if (opencv_config_.assert_mode == AssertMode::API_EXCEPTION) {
         oss << "API_EXCEPTION:NoExceptionThrown\n";
+        oss << "Opencv:" << "Passed" << "\n";
     }
     // PIX_COMPARE 模式：判断 PSNR 和 SSIM 是否达标
     else if (opencv_config_.assert_mode == AssertMode::PIX_COMPARE) {
@@ -1512,9 +1540,11 @@ std::string OpencvConsumer::getStats() const {
             oss << std::fixed;
             oss << "Compared:" << frames_compared_ << "frames\n";
             oss << std::setprecision(2);
-            oss << "AvgPSNR:" << avg_psnr << "dB\n";
+            oss << "AvgPSNR:" << avg_psnr << "dB"
+                << "(>=" << compare_config_.min_psnr << ":" << (psnr_ok ? "MET" : "NOT MET") << ")\n";
             oss << std::setprecision(4);
-            oss << "AvgSSIM:" << avg_ssim << "\n";
+            oss << "AvgSSIM:" << avg_ssim << ""
+                << "(>=" << compare_config_.min_ssim << ":" << (ssim_ok ? "MET" : "NOT MET") << ")\n";
             oss << "Opencv:" << (passed ? "Passed" : "Failed") << "\n";
         }
     }
@@ -1528,17 +1558,14 @@ std::string OpencvConsumer::getStats() const {
         double sw_avg_fps = sw_avg_ms > 0 ? 1000.0 / sw_avg_ms : 0.0;
 
         bool check_fps_ge_sw   = (hw_avg_fps > sw_avg_fps);
-        bool check_fps_ge_min  = (perf_target_fps_ <= 0) || (hw_avg_fps >= perf_target_fps_);
+        bool check_fps_ge_min  = (hw_avg_fps >= perf_target_fps_);
         bool passed = check_fps_ge_sw && check_fps_ge_min;
 
         oss << std::fixed << std::setprecision(2);
-        oss << "HWAvgFPS:" << hw_avg_fps << "fps\n";
-        oss << "SWAvgFPS:" << sw_avg_fps << "fps\n";
-        oss << "HW>SW:" << (check_fps_ge_sw ? "MET" : "NOT MET") << "\n";
-        if (perf_target_fps_ > 0) {
-            oss << "HW>=" << perf_target_fps_ << "fps:"
-                << (check_fps_ge_min ? "MET" : "NOT MET") << "\n";
-        }
+        oss << "HWAvgFPS:" << hw_avg_fps << "fps"
+            << "(>=" << perf_target_fps_ << ":" << (check_fps_ge_min ? "MET" : "NOT MET") << ")\n";
+        oss << "SWAvgFPS:" << sw_avg_fps << "fps"
+            << "(<HW:" << (check_fps_ge_sw ? "MET" : "NOT MET") << ")\n";
         oss << "Opencv:" << (passed ? "Passed" : "Failed") << "\n";
     }
 
