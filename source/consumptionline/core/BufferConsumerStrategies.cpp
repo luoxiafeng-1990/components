@@ -988,9 +988,6 @@ cv::Mat OpencvConsumer::ProcessByOpencv(cv::Mat src, bool hw) {
             auto code = cv::COLOR_YUV2BGR_NV12;
             cv::Mat dst;
 
-            // 对于 NV12 等 YUV 格式，需要特殊处理
-            // cv::Mat(AVFrame*) 创建的 Mat 高度是原图的 3/2（Y+UV 平面）
-            // cvtColor 的 code 如 COLOR_YUV2BGR_NV12 需要完整高度的输入
             if (c.dst_fmt == "BGR"){
                 code = cv::COLOR_YUV2BGR_NV12;
                 pix_fmt = AV_PIX_FMT_BGR24;
@@ -1004,8 +1001,10 @@ cv::Mat OpencvConsumer::ProcessByOpencv(cv::Mat src, bool hw) {
             }
 
             if (hw == true) {
-                dst.allocator = cv::hal::getAllocator();
+                dst.create(src.rows,src.cols,CV_8UC3);
             }
+            // if (code == cv::COLOR_YUV2BGR_NV12 || code == cv::COLOR_YUV2RGB_NV12)
+            // cvtColor will be processed via hardware definitely
 
             cv::cvtColor(src, dst, code);
 
