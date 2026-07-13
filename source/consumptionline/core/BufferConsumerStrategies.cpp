@@ -38,13 +38,6 @@ extern "C" {
 
 #include <type_traits>
 
-namespace cv {
-namespace hal {
-    __attribute__((weak)) MatAllocator* getAllocator();
-}
-    __attribute__((weak)) void Crop(Mat &m, OutputArray dst, Rect rect);
-}
-
 namespace consumer {
 
 static cv::Mat avframeToMat(const AVFrame* frame);
@@ -77,30 +70,6 @@ namespace {
         static cv::Mat construct(T frame) {
             return cv::Mat(frame);
         }
-    };
-
-    template <typename T, typename = void>
-    struct ImwriteJpegSamplingFactorGetter {
-        static constexpr int get() { return -1; }
-        static constexpr bool exists() { return false; }
-    };
-
-    template <typename T>
-    struct ImwriteJpegSamplingFactorGetter<T, std::void_t<decltype(T::IMWRITE_JPEG_SAMPLING_FACTOR)>> {
-        static constexpr int get() { return T::IMWRITE_JPEG_SAMPLING_FACTOR; }
-        static constexpr bool exists() { return true; }
-    };
-
-    template <typename T, typename = void>
-    struct ImwriteJpegSamplingFactorNv12Getter {
-        static constexpr int get() { return -1; }
-        static constexpr bool exists() { return false; }
-    };
-
-    template <typename T>
-    struct ImwriteJpegSamplingFactorNv12Getter<T, std::void_t<decltype(T::IMWRITE_JPEG_SAMPLING_FACTOR_NV12)>> {
-        static constexpr int get() { return T::IMWRITE_JPEG_SAMPLING_FACTOR_NV12; }
-        static constexpr bool exists() { return true; }
     };
 
 } // namespace
@@ -789,7 +758,7 @@ bool OpencvConsumer::initialize(const std::vector<Buffer*>& first_buffers) {
     return true;
 }
 
-std::string matInfoToString(const cv::Mat& mat) {
+std::string matInfo(const cv::Mat& mat) {
     int matType = mat.type();
     int depth = matType & CV_MAT_DEPTH_MASK;
     int channels = (matType >> CV_CN_SHIFT) + 1;
@@ -871,17 +840,7 @@ cv::Mat OpencvConsumer::ProcessByOpencv(cv::Mat src, bool hw) {
                 params.push_back(cv::IMWRITE_JPEG_QUALITY);
                 params.push_back(c.jpeg_quality);
             }
-            if (hw == true){
-                if (ImwriteJpegSamplingFactorGetter<cv::ImwriteFlags>::exists() &&
-                    ImwriteJpegSamplingFactorNv12Getter<cv::ImwriteFlags>::exists()) {
-                    params.push_back(ImwriteJpegSamplingFactorGetter<cv::ImwriteFlags>::get()); // 指定为NV12格式
-                    params.push_back(ImwriteJpegSamplingFactorNv12Getter<cv::ImwriteFlags>::get()); 
-                }
-                cv::imwrite(temp_file, src, params);
-            }
-            else {
-                cv::imwrite(temp_file, src, params);
-            }
+            cv::imwrite(temp_file, src, params);
 
             return src;
         }
@@ -1473,10 +1432,10 @@ OpencvConsumer::TransformFunc OpencvConsumer::ProcessDecorator(int frame_index) 
                     ref_buf.setMat(&result_sw);
                 }
 
-                std::cout << "[result_hw]"<< matInfoToString(result_hw) << std::endl;
-                std::cout << "[result_sw]"<< matInfoToString(result_sw) << std::endl;
-                std::cout << "[result_hw_bgr]"<< matInfoToString(result_hw_bgr) << std::endl;
-                std::cout << "[result_sw_bgr]"<< matInfoToString(result_sw_bgr) << std::endl;
+                std::cout << "[result_hw]"<< matInfo(result_hw) << std::endl;
+                std::cout << "[result_sw]"<< matInfo(result_sw) << std::endl;
+                std::cout << "[result_hw_bgr]"<< matInfo(result_hw_bgr) << std::endl;
+                std::cout << "[result_sw_bgr]"<< matInfo(result_sw_bgr) << std::endl;
                 auto cmp_result = comparator_->compare(&ref_buf, &hw_buf);
                 hw_buf.setMat(nullptr);
                 ref_buf.setMat(nullptr);
