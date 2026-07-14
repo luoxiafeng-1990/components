@@ -23,6 +23,9 @@ public:
 
     /// 启动前校验；失败时写入 err
     virtual bool validate(std::string& err) const;
+
+    /// 双 PP 送显通道过滤：-1=不过滤，0|1=仅显示该通道（默认 -1）
+    virtual int displayPpChannel() const noexcept { return -1; }
 };
 
 inline bool IDisplayVendorExtension::validate(std::string& /*err*/) const {

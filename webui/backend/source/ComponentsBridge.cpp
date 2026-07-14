@@ -49,10 +49,6 @@ static const std::unordered_map<std::string, std::string> kKeyToCliFlag = {
     {"nms_threshold",    "--nms-threshold"},
     {"output_path",      "--output"},
     {"view_type",        "--view-type"},
-    {"screen_width",     "--screen-width"},
-    {"screen_height",    "--screen-height"},
-    {"frame_width",      "--frame-width"},
-    {"frame_height",     "--frame-height"},
     {"osd_fps",          "--osd-fps"},
     {"slot_assignment",  "--slot-assignment"},
     {"main_ratio",       "--main-ratio"},
@@ -178,6 +174,13 @@ static std::vector<std::string> buildCliArgs(
                 cfg["draw_detections"] = cfg["draw"];
                 cfg.erase("draw");
             }
+        }
+        if (subcmd == "display") {
+            // taco / tacopro 均自动读 FB，忽略旧 WebUI / 飞书 screen 字段
+            cfg.erase("screen_width");
+            cfg.erase("screen_height");
+            cfg.erase("frame_width");
+            cfg.erase("frame_height");
         }
 
         appendConfigAsFlags(args, cfg);

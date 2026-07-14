@@ -72,11 +72,11 @@ bool TacoDisplayDevice::waitVerticalSync() {
 }
 
 int TacoDisplayDevice::getWidth() const {
-    return ctx_ ? ctx_->getScreenWidth() : config_.screen_width;
+    return ctx_ ? ctx_->getScreenWidth() : 0;
 }
 
 int TacoDisplayDevice::getHeight() const {
-    return ctx_ ? ctx_->getScreenHeight() : config_.screen_height;
+    return ctx_ ? ctx_->getScreenHeight() : 0;
 }
 
 int TacoDisplayDevice::getBytesPerPixel() const {
@@ -98,11 +98,15 @@ int TacoDisplayDevice::getBufferCount() const {
 }
 
 size_t TacoDisplayDevice::getBufferSize() const {
-    // Must match TacoDisplayContext::allocateFramePool: VO layer uses screen dimensions
-    if (config_.frame_format == 0) {
-        return static_cast<size_t>(config_.screen_width) * config_.screen_height * 3 / 2;
+    const int w = getWidth();
+    const int h = getHeight();
+    if (w <= 0 || h <= 0) {
+        return 0;
     }
-    return static_cast<size_t>(config_.screen_width) * config_.screen_height * 4;
+    if (config_.frame_format == 0) {
+        return static_cast<size_t>(w) * h * 3 / 2;
+    }
+    return static_cast<size_t>(w) * h * 4;
 }
 
 int TacoDisplayDevice::getCurrentDisplayBuffer() const {
