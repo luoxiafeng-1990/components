@@ -8,6 +8,9 @@
 #include "consumptionline/config/ConsumerTypeConfigBuilder.hpp"
 #include "consumptionline/types/npu/NpuAlgorithm.hpp"
 
+#include <iostream>
+#include <unistd.h>
+
 namespace test {
 namespace npu {
 
@@ -31,6 +34,18 @@ void NpuPlugin::registerOptions(CLI::App& app) {
     app.add_flag("--physical-addr", use_physical_addr_, "使用物理地址零拷贝输入");
     app.add_flag("--draw-detections", enable_draw_, "推理后在画面上绘制检测框");
     app.add_option("--inference-interval", inference_interval_, "每 N 帧执行一次推理 (默认: 1)");
+}
+
+int NpuPlugin::handlePreActions() {
+    if (model_path_.empty()) {
+        std::cerr << "NpuPlugin: model path is empty\n";
+        return 1;
+    }
+    if (access(model_path_.c_str(), R_OK) != 0) {
+        std::cerr << "NpuPlugin: model not found '" << model_path_ << "'\n";
+        return 1;
+    }
+    return -1;
 }
 
 void NpuPlugin::applyTo(WorkerConfig& config) const {

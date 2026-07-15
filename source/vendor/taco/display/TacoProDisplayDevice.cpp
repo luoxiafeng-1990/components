@@ -483,11 +483,11 @@ bool TacoProDisplayDevice::waitVerticalSync() {
 }
 
 int TacoProDisplayDevice::getWidth() const {
-    return state_ ? state_->screen_width : config_.screen_width;
+    return state_ ? state_->screen_width : 0;
 }
 
 int TacoProDisplayDevice::getHeight() const {
-    return state_ ? state_->screen_height : config_.screen_height;
+    return state_ ? state_->screen_height : 0;
 }
 
 int TacoProDisplayDevice::getBytesPerPixel() const {

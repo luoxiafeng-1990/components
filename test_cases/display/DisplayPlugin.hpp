@@ -14,6 +14,8 @@
  * @code
  * ./qa_cases vdec --file video.mp4 display --fps 60
  * ./qa_cases vdec --file video.mp4 display --vendor taco --fps 30
+ * ./qa_cases vdec --file video.mp4 --vendor taco --ch0 --ch1 \
+ *     display --vendor taco --display-pp 0
  * @endcode
  */
 
@@ -40,6 +42,7 @@ public:
     std::string getDescription() const override;
 
     void registerOptions(CLI::App& app) override;
+    int handlePreActions() override;
     void applyTo(WorkerConfig& config) const override;
 
 private:
@@ -51,22 +54,17 @@ private:
 
     std::string vendor_str_ = "tacopro";
 
-    // 共用选项（多厂商均有，不加前缀）
+    // 共用
     int target_fps_ = 30;
+    int display_pp_ = -1;
+
+    // tacopro 独有（taco-vo 路径忽略：无 framebuffer stitch / OSD）
+    int bpp_ = 32;
     bool osd_enable_ = false;
     int osd_fps_ = 1;
     std::string view_type_;
     std::vector<int> slot_assignment_;
     float main_sidebar_ratio_ = 0.75f;
-
-    // tacopro 独有
-    int screen_width_ = 1920;
-    int screen_height_ = 1080;
-    int bpp_ = 32;
-
-    // taco 独有
-    int frame_width_ = 1920;
-    int frame_height_ = 1080;
 };
 
 } // namespace display

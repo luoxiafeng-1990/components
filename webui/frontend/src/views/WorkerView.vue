@@ -284,7 +284,7 @@ const editForm = reactive({
 })
 
 const CONSUMER_DEFAULTS: Record<string, Record<string, any>> = {
-  DISPLAY: { vendor: 'tacopro', target_fps: 30, osd: false, osd_fps: 1, view_type: '', screen_width: 1920, screen_height: 1080, bpp: 32, frame_width: 1920, frame_height: 1080, slot_assignment: '', main_ratio: 0.75 },
+  DISPLAY: { vendor: 'tacopro', target_fps: 30, osd: false, osd_fps: 1, view_type: '', bpp: 32, slot_assignment: '', main_ratio: 0.75 },
   NPU_INFERENCE: { model_path: '', conf_threshold: 0.25, nms_threshold: 0.45, npu_core: 0, physical_addr: false, draw: false, inference_interval: 1 },
   JPEG_PREVIEW: { encoder_name: 'jpeg_taco', quality: 80, target_fps: 15 },
   SAVE_RAW: { output_path: '', format: 'nv12', frames: 10, decoder: '' },

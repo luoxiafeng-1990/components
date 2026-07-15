@@ -13,7 +13,8 @@
 #include "vendor/taco/display/TacoDisplayExtension.hpp"
 #include "consumptionline/config/ConsumerTypeConfigBuilder.hpp"
 
-#include <stdexcept>
+#include <iostream>
+
 
 namespace test {
 namespace display {
@@ -44,21 +45,32 @@ DisplayPlugin::vendorBuilders() {
 // ========================================
 
 void DisplayPlugin::registerOptions(CLI::App& app) {
-    app.add_option("--vendor", vendor_str_, "显示厂商: tacopro(默认), taco");
+    auto* vendor_opt = app.add_option("--vendor", vendor_str_,
+                                      "显示厂商: tacopro(默认), taco");
 
     app.add_option("--fps", target_fps_, "显示刷新帧率 (默认: 30)");
-    app.add_flag("--osd", osd_enable_, "启用 OSD 叠加");
-    app.add_option("--osd-fps", osd_fps_, "OSD 刷新频率 (默认: 1)");
-    app.add_option("--view-type", view_type_, "视图类型: grid(默认), main_sidebar");
-    app.add_option("--slot-assignment", slot_assignment_, "通道→slot 映射")->delimiter(',');
-    app.add_option("--main-ratio", main_sidebar_ratio_, "main_sidebar 主画面宽度占比 (默认: 0.75)");
+    auto* display_pp_opt = app.add_option("--display-pp", display_pp_,
+        "双 PP 送显通道: 0|1（需同时指定 --vendor；仅多通道时使用）");
+    display_pp_opt->needs(vendor_opt);
 
-    app.add_option("--screen-width", screen_width_, "屏幕宽度 (tacopro, 默认: 1920)");
-    app.add_option("--screen-height", screen_height_, "屏幕高度 (tacopro, 默认: 1080)");
+    app.add_flag("--osd", osd_enable_, "启用 OSD 叠加 (tacopro)");
+    app.add_option("--osd-fps", osd_fps_, "OSD 刷新频率 (tacopro, 默认: 1)");
+    app.add_option("--view-type", view_type_,
+                   "视图类型 (tacopro): grid(默认), main_sidebar");
+    app.add_option("--slot-assignment", slot_assignment_,
+                   "通道→slot 映射 (tacopro)")->delimiter(',');
+    app.add_option("--main-ratio", main_sidebar_ratio_,
+                   "main_sidebar 主画面宽度占比 (tacopro, 默认: 0.75)");
     app.add_option("--bpp", bpp_, "每像素位数 (tacopro, 默认: 32)");
+}
 
-    app.add_option("--frame-width", frame_width_, "帧宽度 (taco, 默认: 1920)");
-    app.add_option("--frame-height", frame_height_, "帧高度 (taco, 默认: 1080)");
+int DisplayPlugin::handlePreActions() {
+    const auto& builders = vendorBuilders();
+    if (builders.find(vendor_str_) == builders.end()) {
+        std::cerr << "DisplayPlugin: unknown vendor '" << vendor_str_ << "'\n";
+        return 1;
+    }
+    return -1;
 }
 
 // ========================================
@@ -69,8 +81,7 @@ void DisplayPlugin::applyTo(WorkerConfig& config) const {
     const auto& builders = vendorBuilders();
     auto it = builders.find(vendor_str_);
     if (it == builders.end()) {
-        throw std::invalid_argument(
-            "DisplayPlugin: unknown vendor '" + vendor_str_ + "'");
+        return;
     }
     config.consumer_type = ConsumerTypeConfigBuilder(config.consumer_type)
         .setDisplayConfig(DisplayConsumerConfigBuilder(config.consumer_type.display)
@@ -86,12 +97,11 @@ void DisplayPlugin::applyTo(WorkerConfig& config) const {
 
 std::unique_ptr<IDisplayVendorExtension> DisplayPlugin::buildTacoProExtension() const {
     auto ext = std::make_unique<TacoProDisplayExtension>();
-    ext->screen_width       = screen_width_;
-    ext->screen_height      = screen_height_;
     ext->bits_per_pixel     = bpp_;
     ext->target_fps         = target_fps_;
     ext->osd_enable         = osd_enable_;
     ext->osd_fps            = osd_fps_;
+    ext->display_pp_channel = display_pp_;
     if (!view_type_.empty()) ext->view_type = view_type_;
     if (!slot_assignment_.empty()) ext->slot_assignment = slot_assignment_;
     ext->main_sidebar_ratio = main_sidebar_ratio_;
@@ -101,12 +111,9 @@ std::unique_ptr<IDisplayVendorExtension> DisplayPlugin::buildTacoProExtension() 
 std::unique_ptr<IDisplayVendorExtension> DisplayPlugin::buildTacoExtension() const {
     auto ext = std::make_unique<TacoDisplayExtension>();
     ext->target_fps         = target_fps_;
-    ext->screen_width       = screen_width_;
-    ext->screen_height      = screen_height_;
-    ext->frame_width        = frame_width_;
-    ext->frame_height       = frame_height_;
     ext->osd_enable         = osd_enable_;
     ext->osd_fps            = osd_fps_;
+    ext->display_pp_channel = display_pp_;
     if (!view_type_.empty()) ext->view_type = view_type_;
     if (!slot_assignment_.empty()) ext->slot_assignment = slot_assignment_;
     ext->main_sidebar_ratio = main_sidebar_ratio_;

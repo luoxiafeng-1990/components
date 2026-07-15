@@ -165,6 +165,12 @@ bool DisplayConsumer::initialize(const std::vector<Buffer*>& first_buffers) {
             LOG4CPLUS_ERROR(log4cplus::Logger::getRoot(), "DisplayConsumer: vendor is null");
             return false;
         }
+        std::string err;
+        if (!config_.vendor->validate(err)) {
+            LOG4CPLUS_ERROR_FMT(log4cplus::Logger::getRoot(),
+                "DisplayConsumer: vendor validate failed: %s", err.c_str());
+            return false;
+        }
         display_ = DisplayDeviceFactory::create(*config_.vendor);
         if (!display_->initialize(config_.device_id)) {
             LOG4CPLUS_WARN(log4cplus::Logger::getRoot(), "DisplayConsumer: Failed to initialize display device (tpsfb* may not exist on this host)");
@@ -172,9 +178,9 @@ bool DisplayConsumer::initialize(const std::vector<Buffer*>& first_buffers) {
         }
         
         initialized_ = true;
-        LOG4CPLUS_INFO_FMT(log4cplus::Logger::getRoot(), 
-            "DisplayConsumer: Initialized (vendor=%s)",
-            config_.vendor->kind());
+        LOG4CPLUS_INFO_FMT(log4cplus::Logger::getRoot(),
+            "DisplayConsumer: Initialized (vendor=%s, display_pp=%d)",
+            config_.vendor->kind(), config_.vendor->displayPpChannel());
         return true;
     } catch (const std::exception& e) {
         LOG4CPLUS_ERROR_FMT(log4cplus::Logger::getRoot(), 
@@ -190,6 +196,16 @@ bool DisplayConsumer::consume(const std::vector<Buffer*>& buffers, int frame_ind
         failed_count_++;
         last_consume_failed_ = true;
         return true;
+    }
+
+    Buffer* buffer = buffers[0];
+    int pp = config_.vendor ? config_.vendor->displayPpChannel() : -1;
+    if (pp >= 0 && buffer->type() == Buffer::Type::AVFRAME) {
+        int ch = static_cast<AVFrameBuffer*>(buffer)->getOutputChannel();
+        if (ch >= 0 && ch != pp) {
+            last_consume_failed_ = false;
+            return true;
+        }
     }
     
     bool success;
