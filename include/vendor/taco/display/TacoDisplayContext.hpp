@@ -103,8 +103,8 @@ private:
 
     std::vector<ChannelState> channels_;
 
-    int grid_cols_ = 3;
-    int grid_rows_ = 3;
+    int grid_cols_ = 4;  ///< TA_VO_CHN_MAX=16 → 默认 4x4
+    int grid_rows_ = 4;
     int screen_width_ = 0;
     int screen_height_ = 0;
 

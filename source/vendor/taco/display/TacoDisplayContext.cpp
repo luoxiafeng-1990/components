@@ -12,10 +12,11 @@ TacoDisplayContext::TacoDisplayContext(const TacoDisplayExtension& config)
     : config_(config)
     , logger_(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Display.TacoVO")))
 {
-    int max_ch = 9;
-    grid_cols_ = static_cast<int>(std::ceil(std::sqrt(max_ch)));
+    // 对齐 taco-vo TA_VO_CHN_MAX（16）；原先写死 9 仅跟随 nchn sample 九宫格 demo
+    const int max_ch = TA_VO_CHN_MAX;
+    grid_cols_ = static_cast<int>(std::ceil(std::sqrt(static_cast<double>(max_ch))));
     grid_rows_ = static_cast<int>(std::ceil(static_cast<double>(max_ch) / grid_cols_));
-    channels_.resize(max_ch);
+    channels_.resize(static_cast<size_t>(max_ch));
 
     if (!initDevice()) {
         LOG4CPLUS_ERROR(logger_, "TacoDisplayContext: device init failed");
