@@ -351,8 +351,6 @@ private:
     // 性能统计（仅 performance.enable 时使用）
     bool    perf_enabled_      = false;
     double  perf_target_fps_   = 0.0;
-    int64_t api_hw_total_ms_   = 0;
-    int64_t api_sw_total_ms_   = 0;
     perf::StageTimer opencv_hw_timer_{"opencv_hw"};
     perf::StageTimer opencv_sw_timer_{"opencv_sw"};
 

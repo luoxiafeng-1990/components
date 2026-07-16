@@ -7,6 +7,7 @@
 #include <string.h>
 #include <chrono>
 #include <filesystem>
+#include <sstream>
 
 namespace fs = std::filesystem;
 
@@ -56,6 +57,57 @@ size_t collectJpegFiles(const fs::path& path, std::string (&file_list)[N]) {
     }
     
     return count;
+}
+
+std::string matInfo(const cv::Mat& mat) {
+    int matType = mat.type();
+    int depth = matType & CV_MAT_DEPTH_MASK;
+    int channels = (matType >> CV_CN_SHIFT) + 1;
+
+    std::string depthStr;
+    switch(depth) {
+        case CV_8U:  depthStr = "CV_8U"; break;
+        case CV_8S:  depthStr = "CV_8S"; break;
+        case CV_16U: depthStr = "CV_16U"; break;
+        case CV_16S: depthStr = "CV_16S"; break;
+        case CV_32S: depthStr = "CV_32S"; break;
+        case CV_32F: depthStr = "CV_32F"; break;
+        case CV_64F: depthStr = "CV_64F"; break;
+        case CV_16F: depthStr = "CV_16F"; break;
+        default:     depthStr = "CV_UNKNOWN";
+    }
+
+    std::stringstream ss;
+    ss << "Mat Info: ";
+
+    // 添加尺寸信息
+    if (mat.dims == 2) {
+        // 二维矩阵：显示rows和cols
+        ss << "Size(" << mat.cols << "x" << mat.rows << ") ";
+    } else if (mat.dims > 2) {
+        // 多维矩阵：显示各个维度
+        ss << "Dims[" << mat.dims << "] Size[";
+        for (int i = 0; i < mat.dims; ++i) {
+            ss << mat.size[i];
+            if (i < mat.dims - 1) ss << "x";
+        }
+        ss << "] ";
+    } else {
+        // 空矩阵或无维度
+        ss << "Empty ";
+    }
+
+    // 添加类型信息
+    ss << depthStr << "C" << channels;
+
+    // 添加更多详细信息
+    ss << " | Depth:" << depth
+       << " | Channels:" << channels
+       << " | Total:" << mat.total()
+       << " | Continuous:" << (mat.isContinuous() ? "Yes" : "No")
+       << " | DmabufHeap:" << (mat.isdmabufheap() ? "Yes" : "No");
+
+    return ss.str();
 }
 
 OpencvWorker::OpencvWorker(const WorkerConfig& config)
@@ -242,7 +294,6 @@ bool OpencvWorker::isAtEnd() const {
 }
 
 FillResult OpencvWorker::fillBuffer(int frame_index, Buffer* buffer) {
-    std::cout << "[fillBuffer] " << frame_index << std::endl;
     if (frame_index >= static_cast<int>(file_num)) return FillResult::fromCodec(CodecSendResult::eof());
     if (!buffer) {
         LOG4CPLUS_ERROR(logger, " ERROR: buffer is nullptr");
@@ -256,6 +307,7 @@ FillResult OpencvWorker::fillBuffer(int frame_index, Buffer* buffer) {
     cv::Mat* mat_ptr;
     if (use_mock){
         mat_ptr = new cv::Mat(mockMat(src_width,src_height,use_hardware,pix_fmt));
+        std::cout << "[mock hw=" << (use_hardware ? "true" : "false") << "]" << matInfo(*mat_ptr) << std::endl;
     }
     else{
         int flags;
@@ -267,7 +319,6 @@ FillResult OpencvWorker::fillBuffer(int frame_index, Buffer* buffer) {
     
     buffer->setMat(mat_ptr);
 
-    std::cout << "[MAT]" << mat_ptr->cols << "x" << mat_ptr->rows << std::endl;
     if (mat_ptr->empty()) {
         LOG4CPLUS_WARN_FMT(logger, "Worker [Mat %d] imread failed: %s",
             frame_index, file_list_[frame_index].c_str());
@@ -280,16 +331,36 @@ FillResult OpencvWorker::fillBuffer(int frame_index, Buffer* buffer) {
 
 cv::Mat OpencvWorker::mockMat(int width, int height, bool hw, AVPixelFormat pix_fmt){
     cv::Mat dst;
-    if (hw==true) dst.allocator = cv::hal::getAllocator();
-    if (pix_fmt == AV_PIX_FMT_NV12 || pix_fmt == AV_PIX_FMT_NV21){
-        dst.create(height*3/2, width, CV_8UC1);
+
+    if (hw) {
+        // ===== 硬件路径：分配在 dmabufheap =====
+        if (pix_fmt == AV_PIX_FMT_NV12 || pix_fmt == AV_PIX_FMT_NV21) {
+            // NV12/NV21：使用 cv::av::create 创建 AVFrame（分配 dmabufheap）
+            // 然后通过 Mat::create(AVFrame*) 继承 dmabufheap 属性
+            AVFrame* frame = cv::av::create(height, width);
+            dst.create(frame);
+        } else if (pix_fmt == AV_PIX_FMT_BGR24 || pix_fmt == AV_PIX_FMT_RGB24) {
+            // BGR/RGB：Mat::create(rows, cols, CV_8UC3) 当 size>=48 时
+            // 会自动使用 hal::getAllocator()（dmabufheap），见 matrix.cpp:840-841
+            dst.create(height, width, CV_8UC3);
+        }
+    } else {
+        // ===== 软件路径：普通内存分配 =====
+        if (pix_fmt == AV_PIX_FMT_NV12 || pix_fmt == AV_PIX_FMT_NV21) {
+            // NV12 打包格式：Y平面(h) + UV平面(h/2)，总高度 = h * 3/2
+            dst.create(height * 3 / 2, width, CV_8UC1);
+        } else if (pix_fmt == AV_PIX_FMT_BGR24 || pix_fmt == AV_PIX_FMT_RGB24) {
+            dst.create(height, width, CV_8UC3);
+        }
+    }
+
+    // 填充随机数据
+    if (pix_fmt == AV_PIX_FMT_NV12 || pix_fmt == AV_PIX_FMT_NV21) {
         cv::randu(dst, cv::Scalar(0), cv::Scalar(255));
+    } else if (pix_fmt == AV_PIX_FMT_BGR24 || pix_fmt == AV_PIX_FMT_RGB24) {
+        cv::randu(dst, cv::Scalar(0, 0, 0), cv::Scalar(255, 255, 255));
     }
-    if (pix_fmt == AV_PIX_FMT_BGR24 || pix_fmt == AV_PIX_FMT_RGB24){
-        dst.create(height, width, CV_8UC3);
-        cv::randu(dst, cv::Scalar(0,0,0), cv::Scalar(255,255,255));
-    }
-    
+
     return dst;
 }
 

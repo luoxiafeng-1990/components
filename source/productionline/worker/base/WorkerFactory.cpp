@@ -4,6 +4,7 @@
 #include "productionline/worker/core/FFmpegDecodeWorker.hpp"
 #include "productionline/worker/core/FfmpegPacketRecorderWorker.hpp"
 #include "productionline/worker/core/FFmpegEncodeWorker.hpp"
+#include "productionline/worker/OpencvWorker.hpp"
 #include <stdlib.h>
 #include <string.h>
 
@@ -71,6 +72,7 @@ const char* WorkerFactory::typeToString(WorkerType type) {
         case WorkerType::FFMPEG_DECODE:         return "FFMPEG_DECODE";
         case WorkerType::FFMPEG_PACKET_RECORDER: return "FFMPEG_PACKET_RECORDER";
         case WorkerType::FFMPEG_ENCODE:         return "FFMPEG_ENCODE";
+        case WorkerType::OPENCV:         return "OPENCV";
         default:                                return "UNKNOWN";
     }
 }
@@ -94,6 +96,9 @@ std::unique_ptr<WorkerBase> WorkerFactory::createByType(WorkerType type, const W
 
         case WorkerType::FFMPEG_ENCODE:
             return std::make_unique<FFmpegEncodeWorker>(config);
+
+        case WorkerType::OPENCV:
+            return std::make_unique<OpencvWorker>(config);
 
         case WorkerType::AUTO:
         default:
