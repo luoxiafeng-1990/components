@@ -1829,7 +1829,7 @@ class DialogWebviewProvider {
                         webviewView.webview.postMessage({
                             command: 'licenseStatus',
                             activated: isActivated(),
-                            payment: getPaymentInfo(),
+                            payment: this._paymentPayload(webviewView),
                             license: getLicenseCountdownStatus()
                         });
                         // 新手引导触发：优先「重启后续接」（突破账单注入后），否则「首次安装」只弹一次
@@ -2485,7 +2485,7 @@ class DialogWebviewProvider {
                             webviewView.webview.postMessage({
                                 command: 'licenseStatus',
                                 activated: true,
-                                payment: getPaymentInfo(),
+                                payment: this._paymentPayload(webviewView),
                                 license: getLicenseCountdownStatus()
                             });
                             webviewView.webview.postMessage({
@@ -2500,7 +2500,7 @@ class DialogWebviewProvider {
                             webviewView.webview.postMessage({
                                 command: 'licenseStatus',
                                 activated: false,
-                                payment: getPaymentInfo(),
+                                payment: this._paymentPayload(webviewView),
                                 license: getLicenseCountdownStatus()
                             });
                         }
@@ -2518,7 +2518,7 @@ class DialogWebviewProvider {
                     webviewView.webview.postMessage({
                         command: 'licenseStatus',
                         activated: result.success === true,
-                        payment: getPaymentInfo(),
+                        payment: this._paymentPayload(webviewView),
                         license: getLicenseCountdownStatus()
                     });
                     if (result.success) {
@@ -2535,7 +2535,7 @@ class DialogWebviewProvider {
                     webviewView.webview.postMessage({
                         command: 'licenseStatus',
                         activated: isActivated(),
-                        payment: getPaymentInfo(),
+                        payment: this._paymentPayload(webviewView),
                         license: getLicenseCountdownStatus()
                     });
                     break;
@@ -2556,6 +2556,30 @@ class DialogWebviewProvider {
                             command: 'licenseResult',
                             success: false,
                             message: '未配置收款地址（设置 qingtian.paymentAddress）'
+                        });
+                    }
+                    break;
+                }
+                case 'verifyCryptoPayment': {
+                    const { verifyAndRenewCryptoPayment, getLicenseCountdownStatus, isActivated } = require('./activation');
+                    const result = await verifyAndRenewCryptoPayment();
+                    webviewView.webview.postMessage({
+                        command: 'licenseResult',
+                        success: result.success,
+                        message: result.message,
+                        pending: result.pending === true
+                    });
+                    webviewView.webview.postMessage({
+                        command: 'licenseStatus',
+                        activated: isActivated(),
+                        payment: this._paymentPayload(webviewView),
+                        license: getLicenseCountdownStatus()
+                    });
+                    if (result.success) {
+                        const status = (0, statusPayload_1.buildStatusPayload)(this._getDisplayVersion());
+                        webviewView.webview.postMessage({
+                            command: 'status',
+                            data: { ...status, license: getLicenseCountdownStatus() }
                         });
                     }
                     break;
@@ -3916,11 +3940,12 @@ class DialogWebviewProvider {
         <div class="license-logo">QingTian</div>
         <p class="license-desc" id="license-desc">晴天无限MCP v${version} — 新用户自动享受首月免费试用</p>
         <div id="license-paywall" class="license-form" style="display:flex;flex-direction:column;gap:10px;align-items:center;">
-            <img id="license-qr" alt="收款二维码" style="width:200px;height:200px;background:#fff;border-radius:8px;object-fit:contain;display:none;" />
+            <img id="license-qr" alt="收款二维码" style="width:220px;max-height:360px;background:#fff;border-radius:8px;object-fit:contain;display:none;" />
             <div id="license-pay-meta" style="font-size:12px;line-height:1.6;text-align:center;opacity:.9;"></div>
-            <input type="password" class="license-input" id="license-code-input" placeholder="转账后输入续费口令" autocomplete="off" spellcheck="false" />
-            <button type="button" class="primary-button license-btn" id="btn-activate">确认已付款并续费</button>
+            <button type="button" class="primary-button license-btn" id="btn-verify-payment">自动检测付款</button>
             <button type="button" class="license-purchase-link purchase-link" id="btn-copy-pay-address">复制收款地址</button>
+            <input type="password" class="license-input" id="license-code-input" placeholder="备用：续费口令（可选）" autocomplete="off" spellcheck="false" />
+            <button type="button" class="license-purchase-link purchase-link" id="btn-activate">口令手动续费</button>
             <button type="button" class="license-purchase-link purchase-link" id="btn-start-trial" style="display:none;">开始免费试用</button>
         </div>
         <div id="license-feedback" class="license-feedback"></div>
@@ -4838,8 +4863,8 @@ class DialogWebviewProvider {
           desc.textContent = activated
             ? '已授权'
             : (payment.configured
-              ? '试用已到期，请扫码转账后输入续费口令'
-              : '试用已到期。请先在设置中配置收款地址/续费口令');
+              ? '试用已到期：请扫码支付 USDT(TRC20)，然后点自动检测付款'
+              : '试用已到期。请配置收款地址');
         }
         if(qr){
           if(payment.qrUrl){
@@ -4868,6 +4893,7 @@ class DialogWebviewProvider {
         const msg = event.data || {};
         if(msg.command === 'licenseStatus'){
           renderPayment(msg);
+          if(msg.activated){ stopPayPoll(); } else { startPayPoll(); }
         }
         if(msg.command === 'licenseResult'){
           setFeedback(msg.message || '', !!msg.success);
@@ -4880,15 +4906,35 @@ class DialogWebviewProvider {
           });
         }
       });
+      let payPollTimer = null;
+      function startPayPoll(){
+        if(payPollTimer) return;
+        payPollTimer = setInterval(function(){
+          const gate = $('license-gate');
+          if(gate && !gate.classList.contains('hidden')){
+            vscodeApi.postMessage({ command: 'verifyCryptoPayment' });
+          }
+        }, 15000);
+      }
+      function stopPayPoll(){
+        if(payPollTimer){ clearInterval(payPollTimer); payPollTimer = null; }
+      }
       document.addEventListener('DOMContentLoaded', function(){
         const input = $('license-code-input');
         const btn = $('btn-activate');
+        const verifyBtn = $('btn-verify-payment');
         const copyBtn = $('btn-copy-pay-address');
         const trialBtn = $('btn-start-trial');
         if(btn){
           btn.addEventListener('click', function(){
             const code = (input && input.value || '').trim();
             vscodeApi.postMessage({ command: 'activateLicense', code: code });
+          });
+        }
+        if(verifyBtn){
+          verifyBtn.addEventListener('click', function(){
+            setFeedback('正在链上查询付款...', true);
+            vscodeApi.postMessage({ command: 'verifyCryptoPayment' });
           });
         }
         if(input){
@@ -4910,12 +4956,29 @@ class DialogWebviewProvider {
         }
         vscodeApi.postMessage({ command: 'getPaymentInfo' });
         vscodeApi.postMessage({ command: 'getStatus' });
+        startPayPoll();
       });
     })();
     </script>
     <script src="${jsUri}"></script>
 </body>
 </html>`;
+    }
+
+    _paymentPayload(webviewView) {
+        const { getPaymentInfo, markPaymentWatchStarted, isActivated } = require('./activation');
+        if (!isActivated()) {
+            try { markPaymentWatchStarted(); } catch { }
+        }
+        const payment = getPaymentInfo();
+        try {
+            const qrPath = vscode.Uri.joinPath(this._extensionUri, 'resources', 'payment-qr.png');
+            payment.qrUrl = webviewView.webview.asWebviewUri(qrPath).toString();
+        } catch { }
+        if (!payment.qrUrl && payment.address) {
+            payment.qrUrl = 'https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=' + encodeURIComponent(payment.address);
+        }
+        return payment;
     }
     _getDisplayVersion() {
         return vscode.extensions.getExtension('QingTian.qingtian-v2')?.packageJSON?.version

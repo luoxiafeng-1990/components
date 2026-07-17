@@ -49,6 +49,8 @@ exports.activate = activate;
 exports.startLocalTrial = startLocalTrial;
 exports.getPaymentInfo = getPaymentInfo;
 exports.renewAfterCryptoPayment = renewAfterCryptoPayment;
+exports.verifyAndRenewCryptoPayment = verifyAndRenewCryptoPayment;
+exports.markPaymentWatchStarted = markPaymentWatchStarted;
 exports.getLicenseInfo = getLicenseInfo;
 exports.getExpiresText = getExpiresText;
 exports.getLicenseCountdownStatus = getLicenseCountdownStatus;
@@ -201,6 +203,11 @@ twIDAQAB
 const LICENSE_DIR = path.join(os.homedir(), '.qingtian-mcp');
 const LICENSE_FILE = path.join(LICENSE_DIR, 'license.dat');
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
+/** 默认收款（USDT-TRC20） */
+const DEFAULT_PAYMENT_ADDRESS = 'TBzvkRLPTeSaxJrqr2vYkVh1frnFPVD2bC';
+const DEFAULT_PAYMENT_NETWORK = 'USDT-TRC20';
+const DEFAULT_PAYMENT_AMOUNT = '30';
+const USDT_TRC20_CONTRACT = 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t';
 function getTrialDays() {
     try {
         const n = Number(vscode.workspace.getConfiguration('qingtian').get('trialDays') ?? 30);
@@ -223,16 +230,14 @@ function isLocalPlan(license) {
     const plan = String(license?.plan || '');
     return plan === 'trial' || plan === 'crypto-paid' || plan === 'local';
 }
-function getPaymentInfo() {
+function getPaymentInfo(extra = {}) {
     const cfg = vscode.workspace.getConfiguration('qingtian');
-    const address = String(cfg.get('paymentAddress') || '').trim();
-    const network = String(cfg.get('paymentNetwork') || 'USDT-TRC20').trim() || 'USDT-TRC20';
-    const amount = String(cfg.get('paymentAmount') || '99').trim() || '99';
-    const qrUrl = String(cfg.get('paymentQrUrl') || '').trim();
-    const note = String(cfg.get('paymentNote') || '转账后请填写续费口令完成开通').trim();
-    const qrImage = qrUrl || (address
-        ? `https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(address)}`
-        : '');
+    const address = String(cfg.get('paymentAddress') || DEFAULT_PAYMENT_ADDRESS).trim() || DEFAULT_PAYMENT_ADDRESS;
+    const network = String(cfg.get('paymentNetwork') || DEFAULT_PAYMENT_NETWORK).trim() || DEFAULT_PAYMENT_NETWORK;
+    const amount = String(cfg.get('paymentAmount') || DEFAULT_PAYMENT_AMOUNT).trim() || DEFAULT_PAYMENT_AMOUNT;
+    const qrUrlSetting = String(cfg.get('paymentQrUrl') || '').trim();
+    const note = String(cfg.get('paymentNote') || '请转账 USDT（TRC20/TRX 网络）。到账后点「自动检测付款」，插件会链上核对。').trim();
+    const qrImage = String(extra.qrUrl || qrUrlSetting || '').trim();
     return {
         address,
         network,
@@ -240,9 +245,169 @@ function getPaymentInfo() {
         qrUrl: qrImage,
         note,
         configured: Boolean(address),
+        autoVerify: true,
         trialDays: getTrialDays(),
         paidDays: getPaidDays()
     };
+}
+function httpsGetJson(url, timeoutMs = 15000) {
+    return new Promise((resolve, reject) => {
+        const req = https.get(url, {
+            headers: {
+                Accept: 'application/json',
+                'User-Agent': 'QingTian-MCP-PaymentCheck/3.6.8'
+            },
+            timeout: timeoutMs
+        }, (res) => {
+            let raw = '';
+            res.on('data', (chunk) => { raw += chunk; });
+            res.on('end', () => {
+                if ((res.statusCode || 0) >= 400) {
+                    reject(new Error(`HTTP ${res.statusCode}: ${raw.slice(0, 180)}`));
+                    return;
+                }
+                try {
+                    resolve(JSON.parse(raw || '{}'));
+                }
+                catch (e) {
+                    reject(e);
+                }
+            });
+        });
+        req.on('error', reject);
+        req.on('timeout', () => {
+            req.destroy();
+            reject(new Error('请求超时'));
+        });
+    });
+}
+function parseUsdtAmount(value, decimals = 6) {
+    const raw = String(value || '0');
+    if (!/^\d+$/.test(raw)) {
+        const n = Number(raw);
+        return Number.isFinite(n) ? n : 0;
+    }
+    const d = Math.max(0, Number(decimals) || 6);
+    if (raw.length <= d) {
+        return Number(`0.${raw.padStart(d, '0')}`);
+    }
+    return Number(`${raw.slice(0, raw.length - d)}.${raw.slice(raw.length - d)}`);
+}
+function getUsedPaymentTxIds(license) {
+    const arr = Array.isArray(license?.usedPaymentTxIds) ? license.usedPaymentTxIds : [];
+    return arr.map((x) => String(x || '').trim()).filter(Boolean);
+}
+function markPaymentWatchStarted() {
+    const license = loadLicense();
+    if (!license) {
+        return Date.now() - 2 * 60 * 1000;
+    }
+    if (!license.paymentWatchSince) {
+        // 回看 2 分钟，避免用户刚转账就打开面板时漏检
+        license.paymentWatchSince = Date.now() - 2 * 60 * 1000;
+        saveLicense(license);
+    }
+    return license.paymentWatchSince;
+}
+function applyCryptoRenewal(meta = {}) {
+    const payment = getPaymentInfo();
+    const prev = loadLicense();
+    const now = Date.now();
+    const base = Math.max(now, Number(prev?.expiresAt || 0));
+    const used = getUsedPaymentTxIds(prev);
+    if (meta.txId && !used.includes(meta.txId)) {
+        used.push(meta.txId);
+    }
+    const license = {
+        plan: 'crypto-paid',
+        code: 'LOCAL-CRYPTO',
+        machineId: getMachineId(),
+        activatedAt: prev?.activatedAt || now,
+        expiresAt: base + getPaidDays() * MS_PER_DAY,
+        durationType: getPaidDays(),
+        lastVerified: now,
+        serverTime: now,
+        lastSyncTime: now,
+        lastPaymentAt: now,
+        lastPaymentTxId: meta.txId || prev?.lastPaymentTxId,
+        lastPaymentAmount: meta.amount || payment.amount,
+        paymentNetwork: payment.network,
+        paymentAmount: payment.amount,
+        usedPaymentTxIds: used.slice(-50),
+        paymentWatchSince: undefined,
+        policy: { ...DEFAULT_RUNTIME_POLICY }
+    };
+    saveLicense(license);
+    _activated = true;
+    _serverDisconnected = false;
+    stopPeriodicVerify();
+    return { success: true, message: `链上付款已确认，已续期 ${getPaidDays()} 天`, license, txId: meta.txId, amount: meta.amount };
+}
+async function fetchTronIncomingUsdt(address) {
+    const url = `https://api.trongrid.io/v1/accounts/${encodeURIComponent(address)}/transactions/trc20?only_to=true&limit=50&contract_address=${encodeURIComponent(USDT_TRC20_CONTRACT)}`;
+    const json = await httpsGetJson(url);
+    const rows = Array.isArray(json?.data) ? json.data : [];
+    return rows.map((row) => {
+        const decimals = Number(row?.token_info?.decimals ?? 6);
+        const amount = parseUsdtAmount(row?.value, decimals);
+        return {
+            txId: String(row?.transaction_id || ''),
+            from: String(row?.from || ''),
+            to: String(row?.to || ''),
+            amount,
+            timestamp: Number(row?.block_timestamp || 0),
+            symbol: String(row?.token_info?.symbol || 'USDT')
+        };
+    }).filter((x) => x.txId && x.to);
+}
+/**
+ * 链上自动验单：查询收款地址的 USDT-TRC20 入账，金额达标则自动续费。
+ */
+async function verifyAndRenewCryptoPayment() {
+    const payment = getPaymentInfo();
+    if (!payment.configured) {
+        return { success: false, message: '未配置收款地址' };
+    }
+    if (!/USDT/i.test(payment.network) || !/TRC20|TRX|TRON/i.test(payment.network)) {
+        return { success: false, message: `当前仅支持 USDT-TRC20 自动验单，收到网络：${payment.network}` };
+    }
+    const required = Number(payment.amount);
+    if (!Number.isFinite(required) || required <= 0) {
+        return { success: false, message: '收款金额配置无效（qingtian.paymentAmount）' };
+    }
+    const license = loadLicense();
+    const used = new Set(getUsedPaymentTxIds(license));
+    const watchSince = Number(license?.paymentWatchSince || license?.expiresAt || (Date.now() - 24 * MS_PER_DAY));
+    let transfers = [];
+    try {
+        transfers = await fetchTronIncomingUsdt(payment.address);
+    }
+    catch (e) {
+        return {
+            success: false,
+            message: '链上查询失败：' + (e instanceof Error ? e.message : String(e)) + '。可稍后重试，或使用续费口令手动开通。'
+        };
+    }
+    const hit = transfers.find((tx) => {
+        if (used.has(tx.txId))
+            return false;
+        if (tx.to !== payment.address)
+            return false;
+        if (tx.timestamp && tx.timestamp < watchSince - 60 * 1000)
+            return false;
+        return tx.amount + 1e-9 >= required;
+    });
+    if (!hit) {
+        return {
+            success: false,
+            pending: true,
+            message: `尚未检测到 ≥ ${required} USDT 的新入账。请确认网络为 TRC20，并等待约 1 个确认后重试。`,
+            checked: transfers.length,
+            address: payment.address,
+            requiredAmount: required
+        };
+    }
+    return applyCryptoRenewal({ txId: hit.txId, amount: String(hit.amount) });
 }
 function createLocalLicense(plan, days) {
     const now = Date.now();
@@ -286,10 +451,11 @@ function startLocalTrial() {
 function renewAfterCryptoPayment(password) {
     const cfg = vscode.workspace.getConfiguration('qingtian');
     const expected = String(cfg.get('renewalPassword') || '').trim();
+    // 未配置口令时：引导走链上自动验单
     if (!expected) {
         return {
             success: false,
-            message: '尚未配置续费口令。请在设置 qingtian.renewalPassword 中填写口令后，再让用户确认付款。'
+            message: '请点击「自动检测付款」进行链上验单；若需口令开通，请先配置 qingtian.renewalPassword'
         };
     }
     if (String(password || '').trim() !== expected) {
@@ -299,29 +465,7 @@ function renewAfterCryptoPayment(password) {
     if (!payment.configured) {
         return { success: false, message: '尚未配置收款地址（qingtian.paymentAddress）' };
     }
-    const prev = loadLicense();
-    const now = Date.now();
-    const base = Math.max(now, Number(prev?.expiresAt || 0));
-    const license = {
-        plan: 'crypto-paid',
-        code: 'LOCAL-CRYPTO',
-        machineId: getMachineId(),
-        activatedAt: prev?.activatedAt || now,
-        expiresAt: base + getPaidDays() * MS_PER_DAY,
-        durationType: getPaidDays(),
-        lastVerified: now,
-        serverTime: now,
-        lastSyncTime: now,
-        lastPaymentAt: now,
-        paymentNetwork: payment.network,
-        paymentAmount: payment.amount,
-        policy: { ...DEFAULT_RUNTIME_POLICY }
-    };
-    saveLicense(license);
-    _activated = true;
-    _serverDisconnected = false;
-    stopPeriodicVerify();
-    return { success: true, message: `付款确认成功，已续期 ${getPaidDays()} 天`, license };
+    return applyCryptoRenewal({ txId: `manual:${Date.now()}`, amount: payment.amount });
 }
 function getLocalEncryptKey(machineId = getMachineId()) {
     return crypto.createHash('sha256').update('qt_' + machineId + '_license').digest();
