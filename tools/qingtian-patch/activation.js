@@ -51,6 +51,7 @@ exports.getPaymentInfo = getPaymentInfo;
 exports.renewAfterCryptoPayment = renewAfterCryptoPayment;
 exports.verifyAndRenewCryptoPayment = verifyAndRenewCryptoPayment;
 exports.markPaymentWatchStarted = markPaymentWatchStarted;
+exports.hasConsumedTrial = hasConsumedTrial;
 exports.getLicenseInfo = getLicenseInfo;
 exports.getExpiresText = getExpiresText;
 exports.getLicenseCountdownStatus = getLicenseCountdownStatus;
@@ -202,6 +203,7 @@ twIDAQAB
 -----END PUBLIC KEY-----`;
 const LICENSE_DIR = path.join(os.homedir(), '.qingtian-mcp');
 const LICENSE_FILE = path.join(LICENSE_DIR, 'license.dat');
+const ENTITLEMENT_FILE = path.join(LICENSE_DIR, 'entitlement.dat');
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 /** 默认收款（USDT-TRC20） */
 const DEFAULT_PAYMENT_ADDRESS = 'TBzvkRLPTeSaxJrqr2vYkVh1frnFPVD2bC';
@@ -338,9 +340,11 @@ function applyCryptoRenewal(meta = {}) {
         policy: { ...DEFAULT_RUNTIME_POLICY }
     };
     saveLicense(license);
+    syncEntitlementFromLicense(license);
     _activated = true;
     _serverDisconnected = false;
     stopPeriodicVerify();
+    startExpiryWatchdog();
     return { success: true, message: `链上付款已确认，已续期 ${getPaidDays()} 天`, license, txId: meta.txId, amount: meta.amount };
 }
 async function fetchTronIncomingUsdt(address) {
@@ -424,28 +428,169 @@ function createLocalLicense(plan, days) {
         policy: { ...DEFAULT_RUNTIME_POLICY }
     };
 }
+function loadEntitlement() {
+    try {
+        if (!fs.existsSync(ENTITLEMENT_FILE)) {
+            return null;
+        }
+        const encrypted = fs.readFileSync(ENTITLEMENT_FILE, 'utf8');
+        const machineId = getMachineId();
+        let json;
+        try {
+            json = decryptWithKey(encrypted, getLocalEncryptKey(machineId));
+        }
+        catch {
+            return null;
+        }
+        const raw = JSON.parse(json);
+        if (!raw || typeof raw !== 'object')
+            return null;
+        return {
+            machineId: String(raw.machineId || machineId),
+            trialConsumed: raw.trialConsumed === true,
+            trialStartedAt: raw.trialStartedAt ? Number(raw.trialStartedAt) : null,
+            trialExpiresAt: raw.trialExpiresAt ? Number(raw.trialExpiresAt) : null,
+            paidUntil: raw.paidUntil ? Number(raw.paidUntil) : null,
+            updatedAt: raw.updatedAt ? Number(raw.updatedAt) : Date.now()
+        };
+    }
+    catch {
+        return null;
+    }
+}
+function saveEntitlement(info) {
+    try {
+        if (!fs.existsSync(LICENSE_DIR)) {
+            fs.mkdirSync(LICENSE_DIR, { recursive: true });
+        }
+        const payload = {
+            machineId: info.machineId || getMachineId(),
+            trialConsumed: info.trialConsumed === true,
+            trialStartedAt: info.trialStartedAt || null,
+            trialExpiresAt: info.trialExpiresAt || null,
+            paidUntil: info.paidUntil || null,
+            updatedAt: Date.now()
+        };
+        const encrypted = encryptWithKey(JSON.stringify(payload), getLocalEncryptKey(payload.machineId));
+        writeFileAtomically(ENTITLEMENT_FILE, encrypted);
+        return true;
+    }
+    catch (e) {
+        console.warn('[QingTian] 写入 entitlement 失败:', e);
+        return false;
+    }
+}
+function syncEntitlementFromLicense(license) {
+    if (!license)
+        return;
+    const prev = loadEntitlement() || { machineId: getMachineId(), trialConsumed: false };
+    const next = {
+        ...prev,
+        machineId: getMachineId(),
+        updatedAt: Date.now()
+    };
+    if (license.plan === 'trial') {
+        next.trialConsumed = true;
+        next.trialStartedAt = next.trialStartedAt || license.activatedAt || Date.now();
+        next.trialExpiresAt = license.expiresAt || next.trialExpiresAt;
+    }
+    if (license.plan === 'crypto-paid' || license.plan === 'local') {
+        next.trialConsumed = true;
+        next.paidUntil = Math.max(Number(next.paidUntil || 0), Number(license.expiresAt || 0));
+    }
+    saveEntitlement(next);
+}
+function hasConsumedTrial() {
+    const ent = loadEntitlement();
+    if (ent?.trialConsumed)
+        return true;
+    const license = loadLicense();
+    return Boolean(license && (license.plan === 'trial' || license.plan === 'crypto-paid' || license.code === 'LOCAL-TRIAL' || license.code === 'LOCAL-CRYPTO'));
+}
+let _expiryTimer = null;
+function stopExpiryWatchdog() {
+    if (_expiryTimer) {
+        clearInterval(_expiryTimer);
+        _expiryTimer = null;
+    }
+}
+function startExpiryWatchdog() {
+    stopExpiryWatchdog();
+    _expiryTimer = setInterval(() => {
+        try {
+            const license = loadLicense();
+            if (!license || !license.expiresAt)
+                return;
+            const now = calculateServerTime(license) || Date.now();
+            if (license.expiresAt < now) {
+                if (_activated) {
+                    console.log('[QingTian] 到期看门狗：授权已过期，锁定功能并进入收款门禁');
+                    _activated = false;
+                    syncEntitlementFromLicense(license);
+                    _activationInvalidHandler?.('试用/订阅已到期，请完成 USDT 付款后续费');
+                }
+            }
+        }
+        catch (e) {
+            console.warn('[QingTian] 到期看门狗异常:', e);
+        }
+    }, 30 * 1000);
+}
 function startLocalTrial() {
     const existing = loadLicense();
+    const ent = loadEntitlement();
+    const now = Date.now();
+    // 已有未过期本地授权
     if (existing && isLocalPlan(existing)) {
-        const now = calculateServerTime(existing) || Date.now();
-        if (existing.expiresAt && existing.expiresAt > now) {
+        const t = calculateServerTime(existing) || now;
+        if (existing.expiresAt && existing.expiresAt > t) {
             _activated = true;
-            return { success: true, message: '试用仍在有效期内', license: existing };
+            startExpiryWatchdog();
+            return { success: true, message: '试用/订阅仍在有效期内', license: existing };
         }
+        // 已过期：绝不重新发试用
+        _activated = false;
+        syncEntitlementFromLicense(existing);
+        return {
+            success: false,
+            message: '试用已结束，请扫码支付 USDT（TRC20）后续费',
+            expired: true,
+            license: existing
+        };
     }
     if (existing && !isLocalPlan(existing)) {
-        // 旧在线授权未过期则沿用
-        const now = calculateServerTime(existing) || Date.now();
-        if (!existing.expiresAt || existing.expiresAt > now) {
+        const t = calculateServerTime(existing) || now;
+        if (!existing.expiresAt || existing.expiresAt > t) {
             _activated = true;
+            startExpiryWatchdog();
             return { success: true, message: '已有有效授权', license: existing };
         }
     }
+    // 删除 license.dat 也不能再白嫖：设备级 entitlement 已标记试用消耗
+    if (ent?.trialConsumed) {
+        const paidUntil = Number(ent.paidUntil || 0);
+        if (paidUntil > now) {
+            const restored = createLocalLicense('crypto-paid', Math.max(1, Math.ceil((paidUntil - now) / MS_PER_DAY)));
+            restored.expiresAt = paidUntil;
+            saveLicense(restored);
+            _activated = true;
+            startExpiryWatchdog();
+            return { success: true, message: '已恢复付费有效期', license: restored };
+        }
+        _activated = false;
+        return {
+            success: false,
+            message: '本机试用名额已用完，请扫码支付 USDT（TRC20）开通',
+            expired: true
+        };
+    }
     const license = createLocalLicense('trial', getTrialDays());
     saveLicense(license);
+    syncEntitlementFromLicense(license);
     _activated = true;
     _serverDisconnected = false;
     stopPeriodicVerify();
+    startExpiryWatchdog();
     return { success: true, message: `已开通 ${getTrialDays()} 天免费试用`, license };
 }
 function renewAfterCryptoPayment(password) {
@@ -1773,27 +1918,37 @@ async function checkActivation() {
     reportStartupSecurityState();
     let license = loadLicense();
     if (!license) {
+        // 无 license：仅在从未试用过时自动开试用；否则直接门禁
         const trial = startLocalTrial();
-        return trial.success === true;
+        if (!trial.success) {
+            _activated = false;
+            stopPeriodicVerify();
+            stopExpiryWatchdog();
+            return false;
+        }
+        return true;
     }
     // 本地试用 / 加密货币付费：只做本机到期判断，不走远端激活码
     if (isLocalPlan(license)) {
+        syncEntitlementFromLicense(license);
         const now = calculateServerTime(license) || Date.now();
         if (license.expiresAt && license.expiresAt < now) {
             console.log('[QingTian] 本地授权已过期，进入收款门禁');
             _activated = false;
             stopPeriodicVerify();
+            stopExpiryWatchdog();
             return false;
         }
         _activated = true;
         _serverDisconnected = false;
         stopPeriodicVerify();
+        startExpiryWatchdog();
         return true;
     }
     // 兼容旧激活码授权（若仍存在）
     const packageState = checkPackageWatermarkState();
     if (!packageState.ok) {
-        console.warn('[QingTian] 包装水印校验失败，回落本地试用:', packageState.message);
+        console.warn('[QingTian] 包装水印校验失败，回落本地试用策略:', packageState.message);
         const trial = startLocalTrial();
         return trial.success === true;
     }
@@ -1805,6 +1960,7 @@ async function checkActivation() {
         _activated = true;
         _serverDisconnected = false;
         stopPeriodicVerify();
+        startExpiryWatchdog();
         return true;
     }
     const correctedNow = calculateServerTime(license);
@@ -1812,12 +1968,14 @@ async function checkActivation() {
         console.log('[QingTian] 旧激活码已过期，切换收款门禁');
         _activated = false;
         stopPeriodicVerify();
+        stopExpiryWatchdog();
         return false;
     }
     // 有未过期旧授权：允许离线继续用，不再强制联网
     _activated = true;
     _serverDisconnected = true;
     stopPeriodicVerify();
+    startExpiryWatchdog();
     return true;
 }
 /**

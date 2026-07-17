@@ -1654,6 +1654,29 @@ class DialogWebviewProvider {
             localResourceRoots: [this._extensionUri, vscode.Uri.file(PASTE_IMAGE_TMP_DIR)]
         };
         webviewView.webview.html = this._getHtmlContent(webviewView.webview);
+        try {
+            const { setActivationInvalidHandler, getPaymentInfo, getLicenseCountdownStatus, hasConsumedTrial } = require('./activation');
+            setActivationInvalidHandler((message) => {
+                try {
+                    webviewView.webview.postMessage({
+                        command: 'licenseStatus',
+                        activated: false,
+                        message: message || '授权已到期，请完成付款',
+                        payment: this._paymentPayload(webviewView),
+                        license: getLicenseCountdownStatus(),
+                        trialConsumed: hasConsumedTrial()
+                    });
+                    this.focusPanel();
+                    vscode.window.showWarningMessage(uiText(String(message || '试用/订阅已到期，请完成付款后续费')));
+                }
+                catch (e) {
+                    console.warn('[QingTian] 推送到期门禁失败:', e);
+                }
+            });
+        }
+        catch (e) {
+            console.warn('[QingTian] 注册到期回调失败:', e);
+        }
         // 初始推送一次快捷指令清单，并订阅后续变更（来自浏览器侧等其他入口）。
         try {
             webviewView.webview.postMessage({ command: 'quickCommands', data: (0, quickCommands_1.getQuickCommands)() });
@@ -1825,12 +1848,13 @@ class DialogWebviewProvider {
                 }
                 case 'getStatus': {
                     try {
-                        const { isActivated, getLicenseCountdownStatus, getPaymentInfo } = require('./activation');
+                        const { isActivated, getLicenseCountdownStatus, getPaymentInfo, hasConsumedTrial } = require('./activation');
                         webviewView.webview.postMessage({
                             command: 'licenseStatus',
                             activated: isActivated(),
                             payment: this._paymentPayload(webviewView),
-                            license: getLicenseCountdownStatus()
+                            license: getLicenseCountdownStatus(),
+                            trialConsumed: hasConsumedTrial()
                         });
                         // 新手引导触发：优先「重启后续接」（突破账单注入后），否则「首次安装」只弹一次
                         try {
@@ -4884,8 +4908,9 @@ class DialogWebviewProvider {
           ].filter(Boolean).join('<br/>');
         }
         if(trialBtn){
-          // 无本地授权时允许点试用；有授权但过期则隐藏
-          const showTrial = !activated && !(msg && msg.license && msg.license.expired);
+          // 本机试用名额用过后不再显示「开始免费试用」
+          const consumed = !!(msg && (msg.trialConsumed || (msg.license && msg.license.trialConsumed)));
+          const showTrial = !activated && !consumed && !(msg && msg.license && msg.license.expired);
           trialBtn.style.display = showTrial ? 'inline-block' : 'none';
         }
       }
