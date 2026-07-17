@@ -2,41 +2,49 @@
 
 - 结果目录: `/home/ubuntu/test/qa_cases/component_bitable_test_res_20260717_125226`
 - 执行用例: 136（飞书 QA_DECODE 可执行集）
-- 最终（以 result.txt + P5 日志为准）: **PASS=123 / FAIL=13**
-- MULTI_ROUND_SUMMARY 原记录: PASS=124 / FAIL=12（TC-1557 误标 PASS，已纠正）
+- 最终（首轮 P5）: **PASS=123 / FAIL=13**
+- **A 类 RTSP 复测后有效状态**: 原 7 条 host_env 中 **4 条转 PASS**；**3 条**因摄像头能力不足 blocked（见下节）
+- 当前仍关注 FAIL: procedure_error×4 + case_fail×2 + hardware_limit(摄像头能力)×3
 - Flaky(retested_pass): 6 条 — TC-1455, TC-1580, TC-2319, TC-2320, TC-2321, TC-2325
-- 主机: 空闲探测并行（见 idle_hosts.txt）
-- Procedure 特征: `qa_cases vdec` / `pp` / RTSP / multithread / display stitcher
-- P5: 13 条 FAIL 已逐条读 log；见 `LOG_REVIEW_REPORT.md`
-- 多轮: max_rounds=4；Round1 118P/18F → 最终 123P/13F（纠正后）
+- P5: 见 `LOG_REVIEW_REPORT.md`；A 类复测目录见下节
 
-## FAIL 归因汇总
+## FAIL 归因汇总（含 A 类复测）
 
 | FAIL_REASON | 数量 | 说明 |
 |-------------|------|------|
-| host_env_error | 7 | RTSP 摄像头码流与期望编码/分辨率不匹配（含 TC-1557）: TC-1456, TC-1457, TC-1458, TC-1459, TC-1557, TC-2317, TC-2322 |
-| procedure_error | 4 | 飞书 Expectation/Procedure 矛盾或 `-m -1`/空 Expectation: TC-1560, TC-1562, TC-1574, TC-2977 |
-| case_fail | 2 | multithread_4/8 COMPARE 收尾挂死: TC-1582, TC-1583 |
+| ~~host_env_error~~ → 已复测 | 原7→4PASS+3能力限制 | TC-1456/1457/1458/2317 复测 PASS；TC-1459/2322/1557 摄像头不支持目标格式/分辨率 |
+| procedure_error | 4 | Expectation/Procedure 矛盾或 `-m -1`: TC-1560, TC-1562, TC-1574, TC-2977 |
+| case_fail | 2 | multithread 收尾挂死: TC-1582, TC-1583 |
+| hardware_limit | 3 | 实验室海康无 4K / 无 MJPEG 主码流: TC-1459, TC-2322, TC-1557 |
 
 ---
 
 ## FAIL 逐条原因分析（P5 日志）
 
-### A. host_env_error — RTSP 码流不匹配（7 条）
+### A. host_env_error — RTSP 码流不匹配（原 7 条）→ 已专项复测
 
-共性：Procedure 期望特定 **h264/mjpeg + 分辨率**，实际摄像头拉到 **hevc + 其它分辨率** → `Failed to open codec (FFmpeg: Invalid argument)` → Build Phase 失败。多数 exit=137 为挂死后 SIGKILL，根因是配参/回退失败，非硬解算法缺陷。背景：海康 `192.168.57.225` 已标 dead，后续回退摄像头常无法落到目标配置。
+共性（首轮）：Procedure 期望特定 **h264/mjpeg + 分辨率**，调度器仅配 `57.225` 且失败后**回退未配参 URL** → 拉到 hevc 其它分辨率 → `Failed to open codec`。
 
-| TC-ID | HOST | exit | 期望 | 实际码流 | 日志关键错误 | 结论 |
-|-------|------|------|------|----------|--------------|------|
-| TC-1456 | 56.86 | 137 | h264 1280×720 vbr | 57.243 hevc 2560×1440 | Codec Mismatch；open codec 失败 | 摄像头未配成目标参数 |
-| TC-1457 | 56.86 | 137 | h264 1920×1080 cbr | 57.223 hevc 1280×720 | 同上 | dead 摄像头回退后码流不符 |
-| TC-1458 | 56.39 | 137 | h264 1920×1080 vbr | 57.224 hevc 3200×1800 | 同上 | 配参未落到 1080p h264 |
-| TC-1459 | 56.39 | 137 | h264 3840×2160 cbr | 57.253 hevc 1280×720 | 同上 | 无法提供 4K h264 |
-| TC-1557 | 56.92 | -1 | mjpeg 7680×4320 | 57.224 hevc 3200×1800 | 日志在 Frame4 截断，无 Compare 汇总 | 超大 MJPEG 配参失败；汇总曾误标 PASS，已纠正 |
-| TC-2317 | 56.133 | 137 | h264 1280×720 cbr（双 ch） | 57.253 hevc 1280×720 | Codec 为 hevc 非 h264 | 编码格式不匹配 |
-| TC-2322 | 56.56 | 137 | h264 3840×2160 vbr（双 ch） | 57.243 hevc 2560×1440 | 同上 | 未提供期望 4K h264 |
+#### A 类复测（2026-07-17 15:37，`--skip-compile-deploy`）
 
-**建议**：修复/更换故障摄像头；配参回读失败勿回退到参数不符的 URL；dead 摄像头持久化过滤已部分落地，需保证池内仍有可配到目标 (codec,w,h,fps) 的设备。
+结果目录: `/home/ubuntu/test/qa_cases/component_bitable_test_res_20260717_aclass_retest`
+
+前置动作：
+1. 实测海康能力集：`243/225` → 1280×720 / 1920×1080 / 2560×1440；`223` → 仅到 1080p；**均无 3840×2160**；主码流**无 MJPEG**；最高帧率 **25fps**
+2. 预配通：`243`=H.264 1280×720，`223/225`=H.264 1920×1080（下发 fps=25）
+3. 调度器改为多海康候选配参 + **禁止回退未配参 URL**（不支持则 blocked）
+
+| TC-ID | 期望 | 复测结果 | 证据 |
+|-------|------|----------|------|
+| TC-1456 | h264 1280×720 | **PASS** | RTSP=`57.243`，码流 h264 1280×720，Compare 295 帧 PSNR=100 |
+| TC-2317 | h264 1280×720 双 ch | **PASS** | 同上，Compare 295 帧 PSNR=100 |
+| TC-1457 | h264 1920×1080 cbr | **PASS** | RTSP=`57.243` 配成 1080p h264，Compare 91 帧 PSNR=100 |
+| TC-1458 | h264 1920×1080 vbr | **PASS** | 同上，Compare 101 帧 PSNR=100 |
+| TC-1459 | h264 3840×2160 cbr | **FAIL / blocked** | 能力集无 4K → `hardware_limit`（未跑板端） |
+| TC-2322 | h264 3840×2160 vbr | **FAIL / blocked** | 同上 |
+| TC-1557 | mjpeg 7680×4320 | **FAIL / blocked** | 海康主码流无 MJPEG → `hardware_limit` |
+
+复测汇总：**4 PASS / 3 blocked(hardware_limit)**。可配参范围内 A 类环境问题已闭环；剩余 3 条需 4K/MJPEG 能力摄像头或改 Procedure。
 
 ### B. procedure_error — 飞书用例数据问题（4 条）
 
