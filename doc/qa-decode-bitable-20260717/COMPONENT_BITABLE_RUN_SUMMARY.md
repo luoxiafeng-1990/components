@@ -3,19 +3,19 @@
 - 结果目录: `/home/ubuntu/test/qa_cases/component_bitable_test_res_20260717_125226`
 - 执行用例: 136（飞书 QA_DECODE 可执行集）
 - 最终（首轮 P5）: **PASS=123 / FAIL=13**
-- **A 类 RTSP 复测后有效状态**: 原 7 条 host_env 中 **4 条转 PASS**；**3 条**因摄像头能力不足 blocked（见下节）
-- 当前仍关注 FAIL: procedure_error×4 + case_fail×2 + hardware_limit(摄像头能力)×3
+- **A 类 RTSP 复测**: 原 7 条 host_env → **4 PASS**（720p/1080p）+ **2 条改归 case_fail**（4K 大华已通，停机挂死）+ **1 条仍 hardware_limit**（mjpeg 8K）
+- 当前仍关注 FAIL: procedure_error×4 + case_fail×4（含 4K teardown）+ hardware_limit×1（TC-1557）
 - Flaky(retested_pass): 6 条 — TC-1455, TC-1580, TC-2319, TC-2320, TC-2321, TC-2325
-- P5: 见 `LOG_REVIEW_REPORT.md`；A 类复测目录见下节
+- P5: 见 `LOG_REVIEW_REPORT.md`；A/4K 复测目录见下节
 
-## FAIL 归因汇总（含 A 类复测）
+## FAIL 归因汇总（含 A 类 + 大华 4K 复测）
 
 | FAIL_REASON | 数量 | 说明 |
 |-------------|------|------|
-| ~~host_env_error~~ → 已复测 | 原7→4PASS+3能力限制 | TC-1456/1457/1458/2317 复测 PASS；TC-1459/2322/1557 摄像头不支持目标格式/分辨率 |
+| ~~host_env_error~~ → 已复测闭环 | 原7 | 720p/1080p×4 PASS；4K×2 环境已通改归 case_fail；mjpeg8K×1 仍无设备 |
 | procedure_error | 4 | Expectation/Procedure 矛盾或 `-m -1`: TC-1560, TC-1562, TC-1574, TC-2977 |
-| case_fail | 2 | multithread 收尾挂死: TC-1582, TC-1583 |
-| hardware_limit | 3 | 实验室海康无 4K / 无 MJPEG 主码流: TC-1459, TC-2322, TC-1557 |
+| case_fail | 4 | multithread 收尾挂死 TC-1582/1583；**RTSP 4K compare 停机挂死** TC-1459/2322 |
+| hardware_limit | 1 | 实验室无 MJPEG 主码流 7680×4320: TC-1557 |
 
 ---
 
@@ -40,11 +40,31 @@
 | TC-2317 | h264 1280×720 双 ch | **PASS** | 同上，Compare 295 帧 PSNR=100 |
 | TC-1457 | h264 1920×1080 cbr | **PASS** | RTSP=`57.243` 配成 1080p h264，Compare 91 帧 PSNR=100 |
 | TC-1458 | h264 1920×1080 vbr | **PASS** | 同上，Compare 101 帧 PSNR=100 |
-| TC-1459 | h264 3840×2160 cbr | **FAIL / blocked** | 能力集无 4K → `hardware_limit`（未跑板端） |
-| TC-2322 | h264 3840×2160 vbr | **FAIL / blocked** | 同上 |
-| TC-1557 | mjpeg 7680×4320 | **FAIL / blocked** | 海康主码流无 MJPEG → `hardware_limit` |
+| TC-1459 | h264 3840×2160 cbr | 海康 blocked | 海康无 4K → 见下节大华 4K 复测 |
+| TC-2322 | h264 3840×2160 vbr | 海康 blocked | 同上 |
+| TC-1557 | mjpeg 7680×4320 | **FAIL / blocked** | 全库无 MJPEG 主码流 8K → `hardware_limit` |
 
-复测汇总：**4 PASS / 3 blocked(hardware_limit)**。可配参范围内 A 类环境问题已闭环；剩余 3 条需 4K/MJPEG 能力摄像头或改 Procedure。
+海康复测汇总：**4 PASS / 3 blocked**。随后接入大华 `57.222` 做 4K 专项复测（下节）。
+
+#### A2. 大华 4K 复测（2026-07-17 16:23，`--skip-compile-deploy`）
+
+结果目录: `/home/ubuntu/test/qa_cases/component_bitable_test_res_20260717_4k_retest`
+
+前置动作：
+1. 飞书测试资源表确认 `192.168.57.222`（DH-IPC-HDW4843T-A，`admin/admin6666`）支持主码流 H.264 3840×2160
+2. `compliant_run.py` 新增大华 CGI 配参/回读/`dahua_rtsp_url`；禁用本机代理劫持局域网请求
+3. 调度器 `_DAHUA_CAMERA_CAPS` 接入 222；配参顺序海康→大华；禁止回退未配参 URL
+
+| TC-ID | 期望 | 复测结果 | 证据 |
+|-------|------|----------|------|
+| TC-1459 | h264 3840×2160 cbr | **FAIL (`case_fail`)** | 大华配参+回读 OK；板端 `Resolution: 3840x2160` / `Codec: h264`；Compare **259** 帧多 PSNR=100 → `Max timeout count reached: 10` → `Waiting for free buffer` 停机挂死 → timeout/SIGKILL |
+| TC-2322 | h264 3840×2160 vbr 双 ch | **FAIL (`case_fail`)** | 同上；Compare **251** 帧 PSNR=100 后同路径挂死 |
+| TC-1557 | mjpeg 7680×4320 | 未重测 | 仍无设备可提供该主码流 |
+
+结论：
+- **摄像头环境对 4K 已闭环**（大华 222 可稳定提供目标码流）
+- 失败根因与 C 类相同：COMPARE 在 Max timeout 后 **teardown 挂死**，属产品侧 `case_fail`，不是 host_env
+- 调度器同组 RTSP 补扫曾误杀/删日志，4K 复测最终用单板串行确认上述模式
 
 ### B. procedure_error — 飞书用例数据问题（4 条）
 
@@ -60,14 +80,16 @@
 - TC-1574：Expectation 改为 PASSED（或换真正超上限素材）。
 - TC-2977：去掉 `-m -1`，改为有限帧/有限秒；补全 Expectation；TIMEOUT 与场景匹配。
 
-### C. case_fail — 被测组件问题（2 条）
+### C. case_fail — 被测组件问题（4 条）
 
 | TC-ID | HOST | exit | Procedure | 日志事实 | 结论 |
 |-------|------|------|-----------|---------|------|
 | TC-1582 | 56.92 | 137 | `vdec multithread_4` + 1080p h264 | 帧级 PTS-match PSNR≈100，近 Frame100 后反复 `Max timeout count reached: 10`，停车间挂起，无完整 Compare 汇总，SIGKILL | 多线程 COMPARE **收尾/停车间挂死** |
 | TC-1583 | 56.140 | 137 | `vdec multithread_8` + 1080p h264 | 同上；Frame100 出现 PTS 不一致缓存后挂死 | multithread_8 同类收尾挂死 |
+| TC-1459 | 56.132 | -1 | `vdec rtsp_h264_3840x2160_30_cbr` | 大华 4K 码流正确；259 帧 PSNR≈100 后 Max timeout → Waiting for free buffer 挂死 | RTSP 4K COMPARE **同类停机挂死** |
+| TC-2322 | 56.132 | 137 | `vdec rtsp_h264_3840x2160_30_vbr` 双 ch | 同上；251 帧后同路径挂死 | 同上 |
 
-**建议（P7）**：排查 `BufferConsumerService` / `MultiWorker` 在 multithread COMPARE 结束时的 stop 路径（Max timeout 后无法退出）；对比单路 COMPARE 正常收尾路径。
+**建议（P7）**：排查 `BufferConsumerService` / `MultiWorker` 在 COMPARE 结束时的 stop 路径（Max timeout 后无法退出）；覆盖 multithread 与 RTSP 4K 两条触发路径；对比 720p/1080p RTSP 正常收尾路径。
 
 ---
 
@@ -102,7 +124,8 @@
 
 ## 统计核对
 
-- 执行总数: 136 = PASS 123 + FAIL 13
-- case_fail 需 P7 关注: TC-1582, TC-1583（multithread 收尾挂死）
+- 执行总数: 136 = PASS 123 + FAIL 13（首轮）
+- A 类闭环后有效：PASS 127（+4）/ 仍 FAIL 9（procedure×4 + case_fail×4 + hardware_limit×1）
+- case_fail 需 P7 关注: TC-1582/1583（multithread）+ TC-1459/2322（RTSP 4K teardown）
 - 飞书数据需修正: TC-1560/1562/1574 Expectation；TC-2977 Procedure(`-m -1`)与空 Expectation
-- RTSP 基建: 57.225 dead、多摄像头配参失败导致 7 条 host_env_error
+- RTSP 基建: 海康多机配参 + 大华 222 4K 配参已接入；禁止回退未配参 URL；TC-1557 仍缺 MJPEG 8K 设备
