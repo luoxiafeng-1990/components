@@ -21,14 +21,14 @@
 | `640x480.jpg` | TC-1538, TC-1547 | 是 | 同上 |
 | `1280x720.jpg` | TC-1540, TC-1549 | 是 | 同上 |
 | `3840x2160.jpg` | TC-1544, TC-1553 | 是 | 同上 |
-| `48x48_60fps.mjpeg` | TC-3201, TC-3203 | 否 | ffmpeg `testsrc2` 60fps×120 帧 |
-| `640x480_60fps.mjpeg` | TC-1539, TC-1548 | 否 | 同上 |
-| `1920x1080_60fps.mjpeg` | TC-1542, TC-1551 | 否 | 同上 |
+| `48x48_60fps.mjpeg` | TC-3201, TC-3203 | 否 | 由板端 `640x480_h264_60fps.mp4` 缩放转 MJPEG |
+| `640x480_60fps.mjpeg` | TC-1539, TC-1548 | 否 | 由板端 `640x480_h264_60fps.mp4` 转 MJPEG |
+| `1920x1080_60fps.mjpeg` | TC-1542, TC-1551 | 否 | 由板端 `1920x1080_h264_60fps.mp4` 转 MJPEG |
 
-额外上传（正确 60fps 时间基容器，供需要时切换）：
-- `48x48_60fps.avi` / `640x480_60fps.avi` / `1920x1080_60fps.avi`（`r_frame_rate=60/1`）
+额外上传（正确 60fps 时间基容器）：
+- `48x48_60fps.avi` / `640x480_60fps.avi` / `1920x1080_60fps.avi`（`r_frame_rate=60/1`，同源 mp4）
 
-说明：原始 `.mjpeg` 流往往不保留帧率元数据；若调度器依赖容器帧率，建议 Procedure 改用对应 `.avi`。
+说明：已按用户要求弃用 testsrc 合成内容；MJPEG 均来自板端现有 60fps mp4。裸 `.mjpeg` 可能丢帧率元数据，需要时可用对应 `.avi`。
 
 ## 3. 网络下载说明
 
