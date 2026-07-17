@@ -1,0 +1,253 @@
+{
+	"name": "qingtian-v2",
+	"displayName": "%extension.displayName%",
+	"description": "%extension.description%",
+	"version": "3.6.8",
+	"publisher": "QingTian",
+	"icon": "resources/icon.png",
+	"license": "SEE LICENSE IN LICENSE.txt",
+	"repository": {
+		"type": "git",
+		"url": ""
+	},
+	"engines": {
+		"vscode": "^1.85.0"
+	},
+	"categories": [
+		"Other"
+	],
+	"activationEvents": [
+		"onStartupFinished",
+		"onView:qingtian.panel",
+		"onCommand:qingtian.openPanel",
+		"onCommand:qingtian.activate",
+		"onCommand:qingtian.copyStartPrompt",
+		"onCommand:qingtian.sendStartPrompt",
+		"onCommand:qingtian.restartServer",
+		"onCommand:qingtian.addChannel",
+		"onCommand:qingtian.removeChannel",
+		"onCommand:qingtian.enableSeamlessSwitch",
+		"onCommand:qingtian.restoreWorkbench",
+		"onCommand:qingtian.fullCleanup",
+		"onCommand:qingtian.openWebInBrowser",
+		"onCommand:qingtian.openAgentTeamWorkbench",
+		"onWebviewPanel:qingtian.agentTeamWorkbench"
+	],
+	"extensionKind": [
+		"workspace"
+	],
+	"main": "./out/extension.js",
+	"contributes": {
+		"commands": [
+			{
+				"command": "qingtian.openPanel",
+				"title": "%command.openPanel.title%"
+			},
+			{
+				"command": "qingtian.activate",
+				"title": "%command.activate.title%"
+			},
+			{
+				"command": "qingtian.copyStartPrompt",
+				"title": "%command.copyStartPrompt.title%"
+			},
+			{
+				"command": "qingtian.sendStartPrompt",
+				"title": "%command.sendStartPrompt.title%"
+			},
+			{
+				"command": "qingtian.restartServer",
+				"title": "%command.restartServer.title%"
+			},
+			{
+				"command": "qingtian.addChannel",
+				"title": "%command.addChannel.title%"
+			},
+			{
+				"command": "qingtian.removeChannel",
+				"title": "%command.removeChannel.title%"
+			},
+			{
+				"command": "qingtian.enableSeamlessSwitch",
+				"title": "%command.enableSeamlessSwitch.title%"
+			},
+			{
+				"command": "qingtian.restoreWorkbench",
+				"title": "%command.restoreWorkbench.title%"
+			},
+			{
+				"command": "qingtian.fullCleanup",
+				"title": "%command.fullCleanup.title%",
+				"category": "%command.category.danger%"
+			},
+			{
+				"command": "qingtian.openWebInBrowser",
+				"title": "%command.openWebInBrowser.title%"
+			},
+			{
+				"command": "qingtian.openAgentTeamWorkbench",
+				"title": "%command.openAgentTeamWorkbench.title%"
+			}
+		],
+		"viewsContainers": {
+			"activitybar": [
+				{
+					"id": "qingtian-container",
+					"title": "%viewsContainer.title%",
+					"icon": "resources/icon.svg"
+				}
+			]
+		},
+		"views": {
+			"qingtian-container": [
+				{
+					"type": "webview",
+					"id": "qingtian.panel",
+					"name": "%view.panel.name%",
+					"icon": "resources/icon.svg"
+				}
+			]
+		},
+		"configuration": {
+			"title": "%configuration.title%",
+			"properties": {
+				"qingtian.startPort": {
+					"type": "number",
+					"default": 3100,
+					"minimum": 1024,
+					"maximum": 65435,
+					"description": "%configuration.startPort.description%"
+				},
+				"qingtian.autoStart": {
+					"type": "boolean",
+					"default": true,
+					"description": "%configuration.autoStart.description%"
+				},
+				"qingtian.licenseApiBase": {
+					"type": "string",
+					"default": "https://qingt.top/prod-api",
+					"description": "%configuration.licenseApiBase.description%"
+				},
+				"qingtian.keepaliveEnabled": {
+					"type": "boolean",
+					"default": true,
+					"description": "%configuration.keepaliveEnabled.description%"
+				},
+				"qingtian.keepaliveMinutes": {
+					"type": "number",
+					"default": 45,
+					"minimum": 1,
+					"maximum": 120,
+					"description": "%configuration.keepaliveMinutes.description%"
+				},
+				"qingtian.notifyOnReply": {
+					"type": "boolean",
+					"default": false,
+					"description": "%configuration.notifyOnReply.description%"
+				},
+				"qingtian.bridgeEnabled": {
+					"type": "boolean",
+					"default": false,
+					"description": "%configuration.bridgeEnabled.description%"
+				},
+				"qingtian.bridgeChannel": {
+					"type": "number",
+					"default": 1,
+					"minimum": 1,
+					"description": "%configuration.bridgeChannel.description%"
+				},
+				"qingtian.bridgeBotToken": {
+					"type": "string",
+					"default": "",
+					"description": "%configuration.bridgeBotToken.description%"
+				},
+				"qingtian.webServerEnabled": {
+					"type": "boolean",
+					"default": true,
+					"description": "%configuration.webServerEnabled.description%"
+				},
+				"qingtian.webServerPort": {
+					"type": "number",
+					"default": 3180,
+					"minimum": 1024,
+					"maximum": 65535,
+					"description": "%configuration.webServerPort.description%"
+				},
+				"qingtian.trialDays": {
+					"type": "number",
+					"default": 30,
+					"minimum": 1,
+					"maximum": 365,
+					"description": "新用户自动免费试用天数"
+				},
+				"qingtian.paidDays": {
+					"type": "number",
+					"default": 30,
+					"minimum": 1,
+					"maximum": 3650,
+					"description": "确认加密货币付款后续费天数"
+				},
+				"qingtian.paymentAddress": {
+					"type": "string",
+					"default": "",
+					"description": "加密货币收款地址（试用到期后展示）"
+				},
+				"qingtian.paymentNetwork": {
+					"type": "string",
+					"default": "USDT-TRC20",
+					"description": "收款网络，例如 USDT-TRC20 / BTC / ETH"
+				},
+				"qingtian.paymentAmount": {
+					"type": "string",
+					"default": "99",
+					"description": "收款金额展示文案"
+				},
+				"qingtian.paymentQrUrl": {
+					"type": "string",
+					"default": "",
+					"description": "收款二维码图片 URL；为空则按收款地址自动生成"
+				},
+				"qingtian.paymentNote": {
+					"type": "string",
+					"default": "转账后请填写续费口令完成开通",
+					"description": "收款说明文案"
+				},
+				"qingtian.renewalPassword": {
+					"type": "string",
+					"default": "",
+					"description": "用户付款后用于续费的口令（由运营发放）"
+				}
+			}
+		}
+	},
+	"scripts": {
+		"obfuscate": "node scripts/obfuscate-release.mjs",
+		"build:out": "tsc -p ./",
+		"build:seamless": "tsc --target ES2020 --module commonjs --lib ES2020 --moduleResolution node --esModuleInterop --skipLibCheck --sourceMap true --rootDir src --outDir out src/seamlessSwitch.ts",
+		"compile": "npm run build:out && npm run build:seamless && webpack --mode production && npm run obfuscate",
+		"webpack": "npm run build:out && npm run build:seamless && webpack --mode production && npm run obfuscate",
+		"webpack:dev": "webpack --mode development",
+		"watch": "tsc -watch -p ./",
+		"package": "npm run compile && npx @vscode/vsce package",
+		"postinstall": "cd mcp-server && npm install"
+	},
+	"devDependencies": {
+		"@types/node": "^20.10.0",
+		"@types/node-notifier": "^8.0.5",
+		"@types/sql.js": "^1.4.11",
+		"@types/vscode": "^1.85.0",
+		"@types/ws": "^8.18.1",
+		"javascript-obfuscator": "^5.4.1",
+		"sharp": "^0.34.5",
+		"ts-loader": "^9.5.4",
+		"typescript": "^5.3.0",
+		"webpack": "^5.104.1",
+		"webpack-cli": "^6.0.1"
+	},
+	"dependencies": {
+		"@modelcontextprotocol/sdk": "^1.25.1",
+		"node-notifier": "^10.0.1",
+		"sql.js": "^1.14.1",
+		"ws": "^8.20.0"
+	}
+}
