@@ -69,7 +69,7 @@ JPEG 上限内（如 7680×4320、32768×32768）仍为 PASSED，符合硬件规
 |--------|------|
 | 用例名分辨率 vs Procedure `--resolution`/文件 | **0** 硬冲突（已对齐） |
 | Procedure 内部 `--resolution` vs 文件名 | **0** |
-| 用例名/Description 编解码 vs 输入文件 | **1** 条：TC-1571（H.265 名/描述，Procedure 用 h264 文件） |
+| 用例名/Description 编解码 vs 输入文件 | **已修**：TC-1571 Procedure 改为 `1920x1080_h265_30fps.mp4` |
 | Description「从 WxH」vs Procedure 输入文件 | **8** 条 soft（见下） |
 
 ### Soft：Description 源分辨率 ≠ Procedure 输入文件（已按 Procedure 修正 Description）
