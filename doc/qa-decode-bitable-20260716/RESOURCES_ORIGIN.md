@@ -58,9 +58,21 @@
 2. **重刷系统 / 换板 / 只跑 sync_qa_resources.sh** → 这 8 个 jpg/avi **会再次缺失**。  
 3. OwnCloud 公共分享 **只读**（WebDAV PUT 返回 403），脚本账号无法直接上传；需有写权限的同事在网页端上传，或把文件打进 `tps-test` 包。
 
-### 建议入库方式（二选一或都做）
+### 入库结论（已调研路径形态）
 
-A. **上传 OwnCloud 分享目录**（与 yuv/rgb 同库）→ 之后 `sync_qa_resources.sh` 可自动拉到各板。  
-B. **打进 `tps-test` deb**（与现有 mp4/jpg 同库）→ `apt install tps-test` 即带上。
+| 仓库 | 存放形态 | 典型文件 |
+|------|----------|----------|
+| **OwnCloud** | **单个文件平铺**（无 zip/tar）| `.yuv` / `.rgb` + `README.txt`（仅 1 个 jpg） |
+| **`tps-test` deb** | **单个文件**装到 `/usr/data/qa/`（无资源压缩包）| `.mp4` / `.jpg` / `.ini` |
 
-优先建议：**至少把 5 个 jpg + 3 个 avi 上传 OwnCloud**；60fps 素材也可考虑后续并入 `tps-test`。
+本次新增是 **jpg + avi（MJPEG 码流）**，与 **`tps-test` 同类**，**不是** OwnCloud 的 raw yuv/rgb。
+
+**应并入 `tps-test`，以单个文件形式打包进 deb**（不要上传一个大压缩包到 OwnCloud；OwnCloud 分享也是散文件且当前只读 403）。
+
+建议打进包的文件（散装）：
+- `48x48.jpg` `320x240.jpg` `640x480.jpg` `1280x720.jpg` `3840x2160.jpg`
+- `48x48_60fps.avi` `640x480_60fps.avi` `1920x1080_60fps.avi`
+
+本地已备好散文件与 tar（仅便于拷贝，入库仍按单个文件进 deb）：
+`doc/qa-decode-bitable-20260716/new_assets/`  
+`doc/qa-decode-bitable-20260716/new_qa_assets_20260717.tar.gz`
