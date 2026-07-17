@@ -72,9 +72,11 @@ JPEG 上限内（如 7680×4320、32768×32768）仍为 PASSED，符合硬件规
 | 用例名/Description 编解码 vs 输入文件 | **1** 条：TC-1571（H.265 名/描述，Procedure 用 h264 文件） |
 | Description「从 WxH」vs Procedure 输入文件 | **8** 条 soft（见下） |
 
-### Soft：Description 源分辨率 ≠ Procedure 输入文件
+### Soft：Description 源分辨率 ≠ Procedure 输入文件（已按 Procedure 修正 Description）
 
-| ID | 问题 |
-|----|------|
-| TC-1559 / 1561 / 1573 / 1575 | Description 写 4096×2160，文件为 3840×2160（4K 命名差） |
-| TC-1560 / 1562 / 1572 / 1574 | Description 写 32768×32768（超规格），文件为 720p/4K H.264；Expectation 已为 FAILED |
+| ID | 原问题 | 处理 |
+|----|--------|------|
+| TC-1559 / 1561 / 1573 / 1575 | Description 写 4096×2160，文件 3840×2160 | Description 已改为输入 3840×2160 H.264 |
+| TC-1560 / 1562 / 1572 / 1574 | Description 写 32768，文件为 720p/4K；Expectation=FAILED | Description 已改为写明实际输入 + preset 超规格意图/期望失败 |
+
+说明：这 8 条用例名与 Procedure 本就一致，仅 Description 有误。
