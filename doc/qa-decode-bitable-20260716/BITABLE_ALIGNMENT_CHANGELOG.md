@@ -62,3 +62,19 @@
 ## 4. 未改 Expectation 的大图 JPEG
 
 JPEG 上限内（如 7680×4320、32768×32768）仍为 PASSED，符合硬件规格。
+
+## 5. 全量复查（2026-07-17，208 条）
+
+| 检查项 | 结果 |
+|--------|------|
+| 用例名分辨率 vs Procedure `--resolution`/文件 | **0** 硬冲突（已对齐） |
+| Procedure 内部 `--resolution` vs 文件名 | **0** |
+| 用例名/Description 编解码 vs 输入文件 | **1** 条：TC-1571（H.265 名/描述，Procedure 用 h264 文件） |
+| Description「从 WxH」vs Procedure 输入文件 | **8** 条 soft（见下） |
+
+### Soft：Description 源分辨率 ≠ Procedure 输入文件
+
+| ID | 问题 |
+|----|------|
+| TC-1559 / 1561 / 1573 / 1575 | Description 写 4096×2160，文件为 3840×2160（4K 命名差） |
+| TC-1560 / 1562 / 1572 / 1574 | Description 写 32768×32768（超规格），文件为 720p/4K H.264；Expectation 已为 FAILED |
