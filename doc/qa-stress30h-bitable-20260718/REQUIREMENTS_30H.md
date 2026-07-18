@@ -5,3 +5,5 @@
 3. **每 10 分钟表格统计**：`STATUS.md`（及 `STATUS_HISTORY.md`、`.session_bridge/SOAK_STATUS.md`），字段含 CASE/IP/状态/已跑/目标/剩余/日志字节/重启次数。
 
 本轮目录：`/home/ubuntu/test/qa_cases/component_bitable_stress30h_rerun_20260718_162012`
+
+4. **必须做 LOG 分析并纳入统计**：每轮统计调用 `analyze_soak_logs.py`，输出 `LOG_ANALYSIS.md`（健康判定、ITER_FAIL、ERROR 计数、最近关键日志），并合并进 `STATUS.md`。
