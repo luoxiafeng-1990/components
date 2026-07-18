@@ -50,7 +50,7 @@
 |-------------|------|------|
 | case_fail | 71 | 质量不达标 42；RGB mmap 18；意外 PASS 8；compared=0 3 |
 | hardware_limit | 17 | 8192 超大分辨率 16；高并行 1 |
-| procedure_error | 5 | Procedure 把用例名当 Input |
+| procedure_error | 5 | 表面：用例名当 Input。根因：飞书引用未注册 JPEG/boundary profile；实质同根因 66 条（含假 PASS）。见 `PROCEDURE_ERROR_INVESTIGATION.md` |
 
 ## ❌ 失败用例详细登记
 
