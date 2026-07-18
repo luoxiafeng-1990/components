@@ -1,0 +1,86 @@
+[
+  {
+    "id": "TC-3036",
+    "note": "display_16ch_30h",
+    "timeout": 109200,
+    "proc": "timeout 108000 bash -c \"qa_cases vdec -f /usr/data/qa/640x480_h264_30fps.mp4 -c h264 -R 640x480 -m -1 -t 16 --loop display --vendor taco --fps 30\"; ec=$?; if [ $ec -eq 124 ] || [ $ec -eq 143 ]; then exit 0; else exit $ec"
+  },
+  {
+    "id": "TC-3037",
+    "note": "display_16ch_30h",
+    "timeout": 109200,
+    "proc": "timeout 108000 bash -c \"qa_cases vdec -f /usr/data/qa/640x480_h264_30fps.mp4 -c h264 -R 640x480 -m -1 -t 16 --loop display --vendor tacopro --fps 30 --bpp 32\"; ec=$?; if [ $ec -eq 124 ] || [ $ec -eq 143 ]; then exit 0; e"
+  },
+  {
+    "id": "TC-1424",
+    "note": "libcv_while_30h",
+    "timeout": 109200,
+    "proc": "timeout 108000 bash -c \"while true; do tacv_testbench [crop] -iw 1920 -ih 1080 -cx 0 -cy 0 -cw 640 -ch 384 -ow 640 -oh 384 -in_file /usr/data/libcv/src/src_data_1920x1080.nv12 -loop 10000 -t 16 || exit $?; done\"; ec=$?; "
+  },
+  {
+    "id": "TC-1425",
+    "note": "libcv_while_30h",
+    "timeout": 109200,
+    "proc": "timeout 108000 bash -c \"while true; do tacv_testbench [resize] -iw 1920 -ih 1080 -sw_i 1920 -sh_i 1080 -sw_o 640 -sh_o 360 -ow 1920 -oh 1080 -in_file /usr/data/libcv/src/src_data_1920x1080.nv12 -stride 1920 -loop 10000 -"
+  },
+  {
+    "id": "TC-1426",
+    "note": "libcv_while_30h",
+    "timeout": 109200,
+    "proc": "timeout 108000 bash -c \"while true; do tacv_testbench [yuv2rgb] -iw 1920 -ih 1080 -ow 1920 -oh 1080 -if 3 -of 10 -in_file /usr/data/libcv/src/src_data_1920x1080.nv12 -loop 10000 -t 16 || exit $?; done\"; ec=$?; if [ $ec -"
+  },
+  {
+    "id": "TC-1427",
+    "note": "libcv_while_30h",
+    "timeout": 109200,
+    "proc": "timeout 108000 bash -c \"while true; do tacv_testbench [csc_convert_to] -iw 1920 -ih 1080 -ow 1920 -oh 1080 -if 3 -of 10 -cx 0 -cy 0 -cw 640 -ch 384 -sw_i 640 -sh_i 384 -sw_o 640 -sh_o 360 -in_file /usr/data/libcv/src/src"
+  },
+  {
+    "id": "TC-1428",
+    "note": "libcv_while_30h",
+    "timeout": 109200,
+    "proc": "timeout 108000 bash -c \"while true; do tacv_testbench [jpeg_dec] -ow 1920 -oh 1080 -in_file /usr/data/libcv/src/src_jpeg_1920x1080.jpg -loop 10000 -t 16 || exit $?; done\"; ec=$?; if [ $ec -eq 124 ] || [ $ec -eq 143 ]; th"
+  },
+  {
+    "id": "TC-1429",
+    "note": "libcv_while_30h",
+    "timeout": 109200,
+    "proc": "timeout 108000 bash -c \"while true; do tacv_testbench [jpeg_enc] -iw 1920 -ih 1080 -in_file /usr/data/libcv/src/src_data_1920x1080.nv12 -jq 90 -loop 10000 -t 16 || exit $?; done\"; ec=$?; if [ $ec -eq 124 ] || [ $ec -eq 1"
+  },
+  {
+    "id": "TC-2977",
+    "note": "vdec_16ch_30h",
+    "timeout": 109200,
+    "proc": "timeout 108000 bash -c \"qa_cases vdec h264_1920x1080_30 /usr/data/qa/1920x1080_h264_30fps.mp4 -t 16 --loop -m -1 display --vendor tacopro --view-type grid --fps 30\"; ec=$?; if [ $ec -eq 124 ] || [ $ec -eq 143 ]; then exi"
+  },
+  {
+    "id": "TC-1624",
+    "note": "venc_loop_30h",
+    "timeout": 109200,
+    "proc": "timeout 108000 bash -c \"while true; do qa_cases venc venc_parallel_16ch /usr/data/ffmpeg/1920x1080_yuv420p.yuv || exit $?; done\"; ec=$?; if [ $ec -eq 124 ] || [ $ec -eq 143 ]; then exit 0; else exit $ec; fi"
+  },
+  {
+    "id": "TC-1625",
+    "note": "venc_loop_30h",
+    "timeout": 109200,
+    "proc": "timeout 108000 bash -c \"while true; do qa_cases venc venc_parallel_32ch_720p /usr/data/ffmpeg/1920x1080_yuv420p.yuv || exit $?; done\"; ec=$?; if [ $ec -eq 124 ] || [ $ec -eq 143 ]; then exit 0; else exit $ec; fi"
+  },
+  {
+    "id": "TC-1626",
+    "note": "venc_loop_30h",
+    "timeout": 109200,
+    "proc": "timeout 108000 bash -c \"while true; do qa_cases venc venc_parallel_128ch_1080p /usr/data/ffmpeg/1920x1080_yuv420p.yuv || exit $?; done\"; ec=$?; if [ $ec -eq 124 ] || [ $ec -eq 143 ]; then exit 0; else exit $ec; fi"
+  },
+  {
+    "id": "TC-2314",
+    "note": "venc_loop_30h",
+    "timeout": 109200,
+    "proc": "timeout 108000 bash -c \"while true; do qa_cases venc -i /usr/data/qa/8192x8192_nv12.yuv venc_parallel_16ch_mjpeg_8192 -p -S -M 28 -N 0.85 || exit $?; done\"; ec=$?; if [ $ec -eq 124 ] || [ $ec -eq 143 ]; then exit 0; else"
+  },
+  {
+    "id": "TC-2964",
+    "note": "expected_fail_oneshot",
+    "timeout": 600,
+    "proc": "qa_cases venc -p -S stress_jpeg_32ch_parallel /usr/data/qa/1920x1080_nv12.yuv"
+  }
+]
