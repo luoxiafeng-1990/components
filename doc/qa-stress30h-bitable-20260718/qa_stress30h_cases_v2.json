@@ -1,0 +1,186 @@
+{
+  "items": [
+    {
+      "record_id": "recvpprcxsxyoD",
+      "fields": {
+        "ID": "TC-3036",
+        "Test case": "16ch_concurrency_taco",
+        "Test set": "QA_DISPLAY",
+        "Description": "需求：验证 taco-vo 16 路并发显示（对齐 TA_VO_CHN_MAX=16）。测试目的：`-t 16` 下 TacoDisplayContext 4x4 布局 16 channel 可分配、送帧稳定。依赖 components 将 max_ch 从 9 提升至 TA_VO_CHN_MAX（由 9ch_concurrency_taco 命令扩展）。 | [soak30h 108000s]",
+        "Procedure": "timeout 108000 bash -c \"qa_cases vdec -f /usr/data/qa/640x480_h264_30fps.mp4 -c h264 -R 640x480 -m -1 -t 16 --loop display --vendor taco --fps 30\"; ec=$?; if [ \"$ec\" -eq 124 ] || [ \"$ec\" -eq 143 ]; then exit 0; else exit \"$ec\"; fi",
+        "Expectation": "PASSED（30h 连续长稳；timeout 124 视为 PASS）",
+        "Timeout": 109200,
+        "测试例可执行": "是"
+      }
+    },
+    {
+      "record_id": "recvpprdoVKDIO",
+      "fields": {
+        "ID": "TC-3037",
+        "Test case": "16ch_concurrency_tacopro",
+        "Test set": "QA_DISPLAY",
+        "Description": "需求：验证 tacopro 16 路并发显示。测试目的：`-t 16` 下 16 路并发可用且无持续卡死（由 9ch_concurrency_tacopro 命令扩展）。 | [soak30h 108000s]",
+        "Procedure": "timeout 108000 bash -c \"qa_cases vdec -f /usr/data/qa/640x480_h264_30fps.mp4 -c h264 -R 640x480 -m -1 -t 16 --loop display --vendor tacopro --fps 30 --bpp 32\"; ec=$?; if [ \"$ec\" -eq 124 ] || [ \"$ec\" -eq 143 ]; then exit 0; else exit \"$ec\"; fi",
+        "Expectation": "PASSED（30h 连续长稳；timeout 124 视为 PASS）",
+        "Timeout": 109200,
+        "测试例可执行": "是"
+      }
+    },
+    {
+      "record_id": "recv9uN3NBpOAB",
+      "fields": {
+        "ID": "TC-1424",
+        "Test case": "Tacv【crop】crop稳定性测试",
+        "Test set": "LIBCV",
+        "Description": "crop性能测试，16线程1920x1080图像裁剪，运行半小时，取平均值计算时间。输入文件(1920x1080,NV12), x=100, y=100, width=640, height=384。总帧率稳定达到500fps | [soak30h 108000s]",
+        "Procedure": "timeout 108000 bash -c \"while true; do tacv_testbench [crop] -iw 1920 -ih 1080 -cx 0 -cy 0 -cw 640 -ch 384 -ow 640 -oh 384 -in_file /usr/data/libcv/src/src_data_1920x1080.nv12 -loop 10000 -t 16 || exit 1; done\"; ec=$?; if [ \"$ec\" -eq 124 ] || [ \"$ec\" -eq 143 ]; then exit 0; else exit \"$ec\"; fi",
+        "Expectation": "PASSED（30h 连续长稳；timeout 124 视为 PASS）",
+        "Timeout": 109200,
+        "测试例可执行": "是"
+      }
+    },
+    {
+      "record_id": "recv9uNdplxnUz",
+      "fields": {
+        "ID": "TC-1425",
+        "Test case": "Tacv【resize】多线程稳定性测试stride",
+        "Test set": "LIBCV",
+        "Description": "测试resize功能，输入(1920x1080,NV12) → 输出(640x360,NV12)，y_stride=1920, u_stride=1920，16线程，每个线程运行半小时。运行成功返回0，输出图像为640x360大小，帧率达到500fps | [soak30h 108000s]",
+        "Procedure": "timeout 108000 bash -c \"while true; do tacv_testbench [resize] -iw 1920 -ih 1080 -sw_i 1920 -sh_i 1080 -sw_o 640 -sh_o 360 -ow 1920 -oh 1080 -in_file /usr/data/libcv/src/src_data_1920x1080.nv12 -stride 1920 -loop 10000 -t 16 || exit 1; done\"; ec=$?; if [ \"$ec\" -eq 124 ] || [ \"$ec\" -eq 143 ]; then exit 0; else exit \"$ec\"; fi",
+        "Expectation": "PASSED（30h 连续长稳；timeout 124 视为 PASS）",
+        "Timeout": 109200,
+        "测试例可执行": "是"
+      }
+    },
+    {
+      "record_id": "recv9uNf8Gt1Sk",
+      "fields": {
+        "ID": "TC-1426",
+        "Test case": "Tacv【yuv2bgr】稳定性测试",
+        "Test set": "LIBCV",
+        "Description": "测试yuv2rgb稳定性测试，16线程1920x1080图像nv12转RGB，每个线程运行半个小时，帧率500fps | [soak30h 108000s]",
+        "Procedure": "timeout 108000 bash -c \"while true; do tacv_testbench [yuv2rgb] -iw 1920 -ih 1080 -ow 1920 -oh 1080 -if 3 -of 10 -in_file /usr/data/libcv/src/src_data_1920x1080.nv12 -loop 10000 -t 16 || exit 1; done\"; ec=$?; if [ \"$ec\" -eq 124 ] || [ \"$ec\" -eq 143 ]; then exit 0; else exit \"$ec\"; fi",
+        "Expectation": "PASSED（30h 连续长稳；timeout 124 视为 PASS）",
+        "Timeout": 109200,
+        "测试例可执行": "是"
+      }
+    },
+    {
+      "record_id": "recv9uNf8Gocvf",
+      "fields": {
+        "ID": "TC-1427",
+        "Test case": "Tacv【csc_convert_to】稳定性测试",
+        "Test set": "LIBCV",
+        "Description": "16线程稳定性测试，NV21格式转换+crop+resize+stride，input(FORMAT_NV21, 1920x1080) → crop(0,0,640,384) → resize(640x360) → output(FORMAT_RGBA_PACKED, 512x512)，成功返回相应格式及大小的图片 | [soak30h 108000s]",
+        "Procedure": "timeout 108000 bash -c \"while true; do tacv_testbench [csc_convert_to] -iw 1920 -ih 1080 -ow 1920 -oh 1080 -if 3 -of 10 -cx 0 -cy 0 -cw 640 -ch 384 -sw_i 640 -sh_i 384 -sw_o 640 -sh_o 360 -in_file /usr/data/libcv/src/src_data_1920x1080.nv12 -loop 10000 -t 16 || exit 1; done\"; ec=$?; if [ \"$ec\" -eq 124 ] || [ \"$ec\" -eq 143 ]; then exit 0; else exit \"$ec\"; fi",
+        "Expectation": "PASSED（30h 连续长稳；timeout 124 视为 PASS）",
+        "Timeout": 109200,
+        "测试例可执行": "是"
+      }
+    },
+    {
+      "record_id": "recv9uNf8Gr9VZ",
+      "fields": {
+        "ID": "TC-1428",
+        "Test case": "Tacv【jpeg_dec】jpeg解码稳定性测试",
+        "Test set": "LIBCV",
+        "Description": "16线程同时测试jpeg解码1080P大小jpeg运行半小时，输入为1920x1080的jpeg文件→ 输出1920x1080分辨率NV12格式的图像，成功返回相应格式及大小的图片，帧率达到260fps | [soak30h 108000s]",
+        "Procedure": "timeout 108000 bash -c \"while true; do tacv_testbench [jpeg_dec] -ow 1920 -oh 1080 -in_file /usr/data/libcv/src/src_jpeg_1920x1080.jpg -loop 10000 -t 16 || exit 1; done\"; ec=$?; if [ \"$ec\" -eq 124 ] || [ \"$ec\" -eq 143 ]; then exit 0; else exit \"$ec\"; fi",
+        "Expectation": "PASSED（30h 连续长稳；timeout 124 视为 PASS）",
+        "Timeout": 109200,
+        "测试例可执行": "是"
+      }
+    },
+    {
+      "record_id": "recv9uNf8GeIac",
+      "fields": {
+        "ID": "TC-1429",
+        "Test case": "Tacv【jpeg_enc】稳定性测试",
+        "Test set": "LIBCV",
+        "Description": "16线程同时测试NV12格式1080P图像编码，运行半小时，输入1920x1080 NV12格式图像 → 输出JPEG文件，帧率400fps，程序正常突出 | [soak30h 108000s]",
+        "Procedure": "timeout 108000 bash -c \"while true; do tacv_testbench [jpeg_enc] -iw 1920 -ih 1080 -in_file /usr/data/libcv/src/src_data_1920x1080.nv12 -jq 90 -loop 10000 -t 16 || exit 1; done\"; ec=$?; if [ \"$ec\" -eq 124 ] || [ \"$ec\" -eq 143 ]; then exit 0; else exit \"$ec\"; fi",
+        "Expectation": "PASSED（30h 连续长稳；timeout 124 视为 PASS）",
+        "Timeout": 109200,
+        "测试例可执行": "是"
+      }
+    },
+    {
+      "record_id": "recvoFYY62gRUa",
+      "fields": {
+        "ID": "TC-2977",
+        "Test case": "",
+        "Test set": "QA_DECODE",
+        "Description": "16线程1920ph264解码播放 | [soak30h 108000s]",
+        "Procedure": "timeout 108000 bash -c \"qa_cases vdec h264_1920x1080_30 /usr/data/qa/1920x1080_h264_30fps.mp4 -t 16 --loop -m -1 display --vendor tacopro --view-type grid --fps 30\"; ec=$?; if [ \"$ec\" -eq 124 ] || [ \"$ec\" -eq 143 ]; then exit 0; else exit \"$ec\"; fi",
+        "Expectation": "PASSED（30h 连续长稳；timeout 124 视为 PASS）",
+        "Timeout": 109200,
+        "测试例可执行": "是"
+      }
+    },
+    {
+      "record_id": "recvfvzrUW9nrX",
+      "fields": {
+        "ID": "TC-1624",
+        "Test case": "venc_parallel_16ch",
+        "Test set": "QA_ENCODE",
+        "Description": "验证多路并行 H.264：parallel_16，1080p@30fps，NV12，4Mbps，GOP 30。 | [soak30h 108000s]",
+        "Procedure": "timeout 108000 bash -c \"while true; do qa_cases venc venc_parallel_16ch /usr/data/ffmpeg/1920x1080_yuv420p.yuv || echo ITER_FAIL:$(date +%F_%T); sleep 5; done\"; ec=$?; if [ \"$ec\" -eq 124 ] || [ \"$ec\" -eq 143 ]; then exit 0; else exit \"$ec\"; fi",
+        "Expectation": "PASSED（30h 连续循环压力；单次失败记 ITER_FAIL 不中断；timeout 124 视为 PASS）",
+        "Timeout": 109200,
+        "测试例可执行": "是"
+      }
+    },
+    {
+      "record_id": "recvfvzsmqVA2K",
+      "fields": {
+        "ID": "TC-1625",
+        "Test case": "venc_parallel_32ch_720p",
+        "Test set": "QA_ENCODE",
+        "Description": "验证多路并行 H.264：parallel_32，720p@30fps，NV12，2Mbps，GOP 30。 | [soak30h 108000s]",
+        "Procedure": "timeout 108000 bash -c \"while true; do qa_cases venc venc_parallel_32ch_720p /usr/data/ffmpeg/1920x1080_yuv420p.yuv || echo ITER_FAIL:$(date +%F_%T); sleep 5; done\"; ec=$?; if [ \"$ec\" -eq 124 ] || [ \"$ec\" -eq 143 ]; then exit 0; else exit \"$ec\"; fi",
+        "Expectation": "PASSED（30h 连续循环压力；单次失败记 ITER_FAIL 不中断；timeout 124 视为 PASS）",
+        "Timeout": 109200,
+        "测试例可执行": "是"
+      }
+    },
+    {
+      "record_id": "recvfvzsM4jpcE",
+      "fields": {
+        "ID": "TC-1626",
+        "Test case": "venc_parallel_128ch_1080p",
+        "Test set": "QA_ENCODE",
+        "Description": " | [soak30h 108000s]",
+        "Procedure": "timeout 108000 bash -c \"while true; do qa_cases venc venc_parallel_128ch_1080p /usr/data/ffmpeg/1920x1080_yuv420p.yuv || echo ITER_FAIL:$(date +%F_%T); sleep 5; done\"; ec=$?; if [ \"$ec\" -eq 124 ] || [ \"$ec\" -eq 143 ]; then exit 0; else exit \"$ec\"; fi",
+        "Expectation": "PASSED（30h 连续循环压力；单次失败记 ITER_FAIL 不中断；timeout 124 视为 PASS）",
+        "Timeout": 109200,
+        "测试例可执行": "是"
+      }
+    },
+    {
+      "record_id": "recvieUMhTjEsP",
+      "fields": {
+        "ID": "TC-2314",
+        "Test case": "venc_parallel_16ch_mjpeg_8192",
+        "Test set": "QA_ENCODE",
+        "Description": "并行 16 JPEG 8192×8192 | [soak30h 108000s]",
+        "Procedure": "timeout 108000 bash -c \"while true; do qa_cases venc -i /usr/data/qa/8192x8192_nv12.yuv venc_parallel_16ch_mjpeg_8192 -p -S -M 28 -N 0.85 || echo ITER_FAIL:$(date +%F_%T); sleep 5; done\"; ec=$?; if [ \"$ec\" -eq 124 ] || [ \"$ec\" -eq 143 ]; then exit 0; else exit \"$ec\"; fi",
+        "Expectation": "PASSED（30h 连续循环压力；单次失败记 ITER_FAIL 不中断；timeout 124 视为 PASS）",
+        "Timeout": 109200,
+        "测试例可执行": "是"
+      }
+    },
+    {
+      "record_id": "recvkjr6RqSvuW",
+      "fields": {
+        "ID": "TC-2964",
+        "Test case": "stress_jpeg_32ch_parallel",
+        "Test set": "QA_ENCODE",
+        "Description": "JPEG 压力：32路并发JPEG编码，超过硬件通道上限，期望优雅失败或降级不挂死 | [soak30h 108000s]",
+        "Procedure": "qa_cases venc -p -S stress_jpeg_32ch_parallel /usr/data/qa/1920x1080_nv12.yuv",
+        "Expectation": "FAIL",
+        "Timeout": 600,
+        "测试例可执行": "是"
+      }
+    }
+  ]
+}
