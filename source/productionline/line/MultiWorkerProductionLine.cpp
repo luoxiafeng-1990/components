@@ -251,6 +251,7 @@ void MultiWorkerProductionLine::stop() {
 
     LOG4CPLUS_INFO(logger_, "⭐ 停止生产车间...");
 
+    // 1) 先打停跑标志，让 workerThreadFunc 在 acquireFree/循环边界退出
     running_.store(false);
 
     for (auto& group : groups_) {
@@ -259,17 +260,23 @@ void MultiWorkerProductionLine::stop() {
         }
     }
 
-    LOG4CPLUS_INFO(logger_, "等待所有 Worker 线程退出...");
-    GlobalThreadPool::getInstance().wait();
-
+    // 2) 先停生产者，避免 worker 卡在等包/等 buffer；再等池任务退出
+    //    （旧顺序是先 GlobalThreadPool::wait() 再 stop producer，多路 COMPARE
+    //     并发 stop 时会与持锁 wait 叠加成死锁，见 GlobalThreadPool::wait）
     for (auto& group : groups_) {
         if (!group) continue;
-
         for (auto& [name, info] : group->producers) {
             if (info.producer_line) {
                 info.producer_line->stop();
             }
         }
+    }
+
+    LOG4CPLUS_INFO(logger_, "等待所有 Worker 线程退出...");
+    GlobalThreadPool::getInstance().wait();
+
+    for (auto& group : groups_) {
+        if (!group) continue;
 
         for (auto& [name, info] : group->consumers) {
             if (info.worker) {

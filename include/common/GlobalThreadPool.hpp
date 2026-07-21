@@ -66,11 +66,20 @@ public:
     
     /**
      * @brief 等待所有任务完成
+     *
+     * 注意：不可在持有 mutex_ 期间调用 thread_pool_->wait()。
+     * PARALLEL COMPARE 等多条 MultiWorkerProductionLine 会并发 stop()→wait()；
+     * 若 wait() 持锁，其它 stop() 无法置 running_/is_running=false，
+     * 而其 worker 任务仍在池中运行，持锁方的 wait() 将永远等不到，形成死锁。
      */
     void wait() {
-        std::lock_guard<std::mutex> lock(mutex_);
-        if (thread_pool_) {
-            thread_pool_->wait();
+        BS::thread_pool<>* pool = nullptr;
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            pool = thread_pool_.get();
+        }
+        if (pool) {
+            pool->wait();
         }
     }
     
