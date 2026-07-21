@@ -5,8 +5,8 @@ std::unique_ptr<IDisplayVendorExtension> TacoProDisplayExtension::clone() const 
 }
 
 bool TacoProDisplayExtension::validate(std::string& err) const {
-    if (screen_width <= 0 || screen_height <= 0) {
-        err = "tacopro: screen_width/screen_height must be > 0";
+    if (display_pp_channel != -1 && display_pp_channel != 0 && display_pp_channel != 1) {
+        err = "TacoProDisplayExtension: display_pp_channel must be -1, 0, or 1";
         return false;
     }
     return true;

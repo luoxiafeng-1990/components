@@ -10,6 +10,7 @@
     <el-form-item label="刷新帧率">
       <el-input-number v-model="config.target_fps" :min="1" :max="120" />
     </el-form-item>
+    <template v-if="config.vendor !== 'taco'">
     <el-form-item label="OSD 叠加">
       <el-switch v-model="config.osd" />
     </el-form-item>
@@ -28,21 +29,10 @@
     <el-form-item label="主画面占比" v-if="config.view_type === 'main_sidebar'">
       <el-slider v-model="config.main_ratio" :min="0.3" :max="0.95" :step="0.05" show-input />
     </el-form-item>
-    <el-form-item label="屏幕宽度">
-      <el-input-number v-model="config.screen_width" :min="0" :max="7680" :step="1" />
-    </el-form-item>
-    <el-form-item label="屏幕高度">
-      <el-input-number v-model="config.screen_height" :min="0" :max="4320" :step="1" />
-    </el-form-item>
     <el-form-item label="BPP">
       <el-input-number v-model="config.bpp" :min="16" :max="64" />
     </el-form-item>
-    <el-form-item label="帧宽度">
-      <el-input-number v-model="config.frame_width" :min="0" :max="7680" />
-    </el-form-item>
-    <el-form-item label="帧高度">
-      <el-input-number v-model="config.frame_height" :min="0" :max="4320" />
-    </el-form-item>
+    </template>
   </template>
 
   <!-- NPU_INFERENCE：全部参数 -->

@@ -30,6 +30,7 @@ public:
     std::string getDescription() const override;
 
     void registerOptions(CLI::App& app) override;
+    int handlePreActions() override;
     void applyTo(WorkerConfig& config) const override;
 
 private:

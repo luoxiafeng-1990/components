@@ -96,6 +96,9 @@ static const SpecRes kSpec21Resolutions[] = {
 
 static const SpecRes kSpec22JpegResolutions[] = {
     {96, 32, "96x32"},
+    {144, 96, "144x96"},
+    {320, 240, "320x240"},
+    {640, 480, "640x480"},
     {512, 512, "512x512"},
     {1280, 720, "1280x720"},
     {1920, 1080, "1920x1080"},
@@ -149,12 +152,17 @@ static int mapPixFmtStringToAVPixFmt(std::string_view format_name) {
     if (fmt == "bgr555" || fmt == "bgr555le") return AV_PIX_FMT_BGR555LE;
     if (fmt == "rgb444" || fmt == "rgb444le") return AV_PIX_FMT_RGB444LE;
     if (fmt == "bgr444" || fmt == "bgr444le") return AV_PIX_FMT_BGR444LE;
+    if (fmt == "rgb101010" || fmt == "rgb101010le" || fmt == "rgbx101010")
+        return AV_PIX_FMT_RGB0;
+    if (fmt == "bgr101010" || fmt == "bgr101010le" || fmt == "bgrx101010"
+        || fmt == "brg101010" || fmt == "brg101010le")
+        return AV_PIX_FMT_BGR0;
 #if defined(AV_PIX_FMT_X2RGB10LE)
-    if (fmt == "x2rgb10le" || fmt == "rgbx101010" || fmt == "rgb101010" || fmt == "rgb101010le")
+    if (fmt == "x2rgb10le")
         return AV_PIX_FMT_X2RGB10LE;
 #endif
 #if defined(AV_PIX_FMT_X2BGR10LE)
-    if (fmt == "x2bgr10le" || fmt == "bgrx101010" || fmt == "bgr101010" || fmt == "bgr101010le")
+    if (fmt == "x2bgr10le")
         return AV_PIX_FMT_X2BGR10LE;
 #endif
 
