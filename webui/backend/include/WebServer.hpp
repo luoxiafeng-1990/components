@@ -19,6 +19,7 @@ class DataSourceManager;
 class WorkerManager;
 class ConsumerManager;
 class PreviewService;
+class PreviewSessionManager;
 class ConfigStore;
 
 struct ServerConfig {
@@ -64,6 +65,7 @@ private:
     std::unique_ptr<WorkerManager> worker_manager_;
     std::unique_ptr<ConsumerManager> consumer_manager_;
     std::unique_ptr<PreviewService> preview_service_;
+    std::unique_ptr<PreviewSessionManager> preview_session_manager_;
 };
 
 } // namespace webui

@@ -17,6 +17,7 @@ class DataSourceManager;
 class ConsumerManager;
 class ConfigStore;
 class PreviewService;
+class PreviewSessionManager;
 
 struct WorkerRuntime {
     WorkerInfo info;
@@ -30,6 +31,7 @@ public:
 
     void setConsumerManager(ConsumerManager* cm);
     void setPreviewService(PreviewService* ps);
+    void setPreviewSessionManager(PreviewSessionManager* mgr);
 
     // Worker CRUD
     ApiResponse list() const;
@@ -75,6 +77,7 @@ private:
     DataSourceManager& ds_manager_;
     ConsumerManager* consumer_manager_ = nullptr;
     PreviewService* preview_service_ = nullptr;
+    PreviewSessionManager* preview_session_manager_ = nullptr;
     ConfigStore& config_store_;
     std::atomic<int> id_counter_{1};
     std::atomic<int> consumer_id_counter_{1};
@@ -88,6 +91,15 @@ private:
     // 延迟重启机制（debounce：批量 start 时只触发一次 restart）
     std::atomic<int> restart_seq_{0};
     void scheduleRestart();
+
+    // 防止 restartParallelService 被多个 detached 线程并发调用
+    std::mutex restart_mutex_;
+
+    // 服务失败自动重试计数（最多重试一次，避免无限循环）
+    std::atomic<int> retry_count_{0};
+
+    // Ctrl+C / stop 时置 true，阻止 detached 线程再拉起服务
+    std::atomic<bool> shutting_down_{false};
 };
 
 } // namespace webui

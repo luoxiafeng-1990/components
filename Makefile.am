@@ -111,6 +111,8 @@ webui_server_SOURCES = \
     webui/backend/source/WorkerManager.cpp \
     webui/backend/source/ConsumerManager.cpp \
     webui/backend/source/PreviewService.cpp \
+    webui/backend/source/PreviewSessionManager.cpp \
+    webui/backend/source/PreviewFrameTap.cpp \
     webui/backend/source/ComponentsBridge.cpp \
     test_cases/common/ExecuteMode.cpp \
     test_cases/vdec/VdecPlugin.cpp \

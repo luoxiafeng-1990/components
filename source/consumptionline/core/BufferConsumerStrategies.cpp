@@ -4,6 +4,7 @@
  */
 
 #include "consumptionline/core/BufferConsumerStrategies.hpp"
+#include "consumptionline/types/stitcher/FrameStitcherService.hpp"
 #include "productionline/worker/base/ComponentTopology.hpp"
 #include "bufferpool/pool/base/IBufferPoolBuilder.hpp"
 #include "bufferpool/buffer/AVFrameBuffer.hpp"
@@ -133,6 +134,16 @@ bool DisplayConsumer::initialize(const std::vector<Buffer*>& first_buffers) {
         if (!display_->initialize(config_.device_id)) {
             LOG4CPLUS_WARN(log4cplus::Logger::getRoot(), "DisplayConsumer: Failed to initialize display device (tpsfb* may not exist on this host)");
             return false;
+        }
+
+        // Optional channel↔worker mapping for WebUI layout API (empty for QA path).
+        if (!config_.worker_id.empty()) {
+            const int channel_id = display_->getChannelId();
+            if (channel_id >= 0) {
+                if (auto stitcher = FrameStitcherService::getInstance()) {
+                    stitcher->setChannelWorkerId(channel_id, config_.worker_id);
+                }
+            }
         }
         
         initialized_ = true;

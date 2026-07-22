@@ -39,6 +39,8 @@ BACKEND_SOURCES = \
 	backend/source/WorkerManager.cpp \
 	backend/source/ConsumerManager.cpp \
 	backend/source/PreviewService.cpp \
+	backend/source/PreviewSessionManager.cpp \
+	backend/source/PreviewFrameTap.cpp \
 	backend/source/ComponentsBridge.cpp
 
 BUILD_DIR = build
@@ -50,6 +52,22 @@ $(BUILD_DIR)/webui_server_local: $(BACKEND_SOURCES) | $(BUILD_DIR)
 		-Ibackend/include -Ibackend/third_party \
 		-o $@ $(BACKEND_SOURCES) $(LDFLAGS)
 	@echo "[WebUI] Local backend built: $@"
+
+# Host-side unit test for PreviewSessionManager (no TACO / FFmpeg link).
+test-preview-session: $(BUILD_DIR)/PreviewSessionManagerTest
+	./$(BUILD_DIR)/PreviewSessionManagerTest
+
+$(BUILD_DIR)/PreviewSessionManagerTest: \
+		backend/tests/PreviewSessionManagerTest.cpp \
+		backend/source/PreviewSessionManager.cpp \
+		backend/include/PreviewSessionManager.hpp | $(BUILD_DIR)
+	$(CXX) $(CXXFLAGS) -DPREVIEW_SESSION_NO_FFMPEG \
+		-Ibackend/include -Ibackend/third_party \
+		-o $@ \
+		backend/tests/PreviewSessionManagerTest.cpp \
+		backend/source/PreviewSessionManager.cpp \
+		$(LDFLAGS)
+	@echo "[WebUI] PreviewSessionManagerTest built: $@"
 
 $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)

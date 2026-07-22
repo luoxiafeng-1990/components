@@ -175,7 +175,9 @@ static bool isParallelProfile(const std::string& pr) {
     return pr.size() >= 10 && pr.compare(0, 9, "parallel_") == 0;
 }
 
-WorkerConfig buildEncodeConfigInternal(const EncodeTestParams& params, const std::string& yuv_path) {
+WorkerConfig buildEncodeConfigInternal(const EncodeTestParams& params,
+                                       const std::string& yuv_path,
+                                       int buffer_count = 16) {
     using test::common::WorkerConfigFactory;
 
     // ── 自动格式匹配 ──
@@ -209,7 +211,33 @@ WorkerConfig buildEncodeConfigInternal(const EncodeTestParams& params, const std
         // 检查当前文件名中是否包含预期的格式关键词
         bool file_matches = (yuv_path.find(expected_key) != std::string::npos);
 
-        if (!file_matches && !yuv_path.empty()) {
+        // 显式路径若已可读，且文件名未声明「其它」像素格式，则不要偷换成默认资源。
+        // 否则 /tmp/foo.yuv、加长序列等会被替换成 /usr/data/ffmpeg/1920x1080_nv12.yuv（仅 10 帧），
+        // 造成假测试 / 误归因。
+        auto pathReadable = [](const std::string& p) -> bool {
+            FILE* f = fopen(p.c_str(), "rb");
+            if (!f) return false;
+            fclose(f);
+            return true;
+        };
+        auto filenameMentionsOtherFormat = [&](const std::string& path) -> bool {
+            static const char* kKnown[] = {
+                "nv12", "nv21", "yuv420p", "yuv420sp",
+                "yuyv422", "uyvy422", "rgb565", "rgb888", "bgr888",
+                "rgb101010", "bgr101010", "brg888"
+            };
+            for (const char* k : kKnown) {
+                if (expected_key.find(k) != std::string::npos) continue;
+                if (path.find(k) != std::string::npos) return true;
+            }
+            return false;
+        };
+
+        const bool keep_explicit_path =
+            !file_matches && !yuv_path.empty() &&
+            pathReadable(yuv_path) && !filenameMentionsOtherFormat(yuv_path);
+
+        if (!file_matches && !yuv_path.empty() && !keep_explicit_path) {
             // 从原始路径中提取分辨率和目录
             std::string dir;
             std::string base;
@@ -258,6 +286,10 @@ WorkerConfig buildEncodeConfigInternal(const EncodeTestParams& params, const std
                     break;
                 }
             }
+        } else if (keep_explicit_path) {
+            fprintf(stderr,
+                "[venc] Auto-format keep explicit path: %s (readable, no conflicting format tag; input_format=%s)\n",
+                yuv_path.c_str(), ifmt.c_str());
         }
     }
 
@@ -358,13 +390,14 @@ WorkerConfig buildEncodeConfigInternal(const EncodeTestParams& params, const std
         config.data_source.raw_frame_width = params.input_width;
         config.data_source.raw_frame_height = params.input_height;
     }
-    config.data_source.buffer_count = 8;
+    config.data_source.buffer_count = buffer_count > 0 ? buffer_count : 16;
     config.data_source.buffer_mode = false;
     return config;
 }
 
 WorkerConfig VencPlugin::buildEncodeConfig(const EncodeTestParams& params) {
-    return buildEncodeConfigInternal(params, input_path_);
+    const int bc = ds_opts_.buffer_count > 0 ? ds_opts_.buffer_count : kDefaultEncodeBufferCount;
+    return buildEncodeConfigInternal(params, input_path_, bc);
 }
 
 const std::map<std::string, EncodeTestParams>& VencPlugin::getPredefinedTests() {
@@ -973,7 +1006,8 @@ void VencPlugin::registerOptions(CLI::App& app) {
     app.add_option("--output-fps", params_.output_fps, "输出帧率（默认跟随输入帧率）");
     app.add_option("-f,--input-format", params_.input_format, "输入像素格式 (默认 nv12)");
     app.add_option("-m,--max-frames", max_frames_, "最大帧数 (-1=不限制)");
-    app.add_flag("--loop", loop_, "循环读取输入");
+    app.add_option("--loop", loop_count_,
+        "输入文件循环遍数（默认 1；有效总帧数=文件帧数×遍数）");
     app.add_option("-o,--output", encoded_output_path_,
         "编码输出路径：推荐 .mp4 封装便于通用播放器/ vdec 回放；亦支持 .h264/.265/.mjpeg 等（扩展名决定复用器）");
     app.add_flag("-v,--verbose", verbose_, "详细日志");
@@ -984,6 +1018,9 @@ void VencPlugin::registerOptions(CLI::App& app) {
     app.add_option("-M,--min-psnr", min_psnr_, "PSNR 阈值 (dB)，与 stress 脚本 -M 一致");
     app.add_option("-N,--min-ssim", min_ssim_, "SSIM 阈值，与 stress 脚本 -N 一致");
 
+    // venc 的 -b 已被 bitrate 占用，仅注册长选项 --buffer-count
+    ds_opts_.registerTo(app, /*with_short_b=*/false);
+
     app.add_option("positional", positional_args_, "预定义测试名或输入文件");
 
     app.footer(
@@ -991,6 +1028,8 @@ void VencPlugin::registerOptions(CLI::App& app) {
         "  qa_cases venc -l\n"
         "  qa_cases venc h264_1920x1080_60_8mbps /data/in.nv12\n"
         "  qa_cases venc -p -S -M 38 -N 0.95 h264_1920x1080_60_8mbps /data/in.nv12\n"
+        "  qa_cases venc --loop 3 -p -S h264_1920x1080_30_8mbps /data/in.nv12\n"
+        "  qa_cases venc --buffer-count 16 -p -S h264_1920x1080_30_8mbps /data/in.nv12\n"
         "  qa_cases venc -t 4 -o /tmp/o.mp4 h264_1920x1080_30_4mbps /data/in.nv12\n"
         "  qa_cases venc h264_1920x1080_30_4mbps /data/in.nv12 display\n"
         "  qa_cases venc h264_1920x1080_30_4mbps /data/in.nv12 display --vendor taco --fps 30\n");
@@ -1000,7 +1039,9 @@ void VencPlugin::applyTo(WorkerConfig& config) const {
     if (!input_path_.empty())
         config.data_source.path = input_path_;
     config.data_source.max_frames = max_frames_;
-    config.data_source.loop = loop_;
+    config.data_source.loop_count = loop_count_ < 1 ? 1 : loop_count_;
+    // CLI --buffer-count；未指定时保持 0，由 buildEncodeConfigInternal 落成默认 16
+    ds_opts_.applyTo(config);
 
     auto ct_builder = ConsumerTypeConfigBuilder(config.consumer_type)
         .setVerbose(verbose_);
@@ -1087,10 +1128,14 @@ std::vector<WorkerConfig> VencPlugin::buildPipelineConfigs(const WorkerConfig& s
         }
 
         std::vector<WorkerConfig> configs;
+        const int bc = shared_config.data_source.buffer_count > 0
+            ? shared_config.data_source.buffer_count
+            : (ds_opts_.buffer_count > 0 ? ds_opts_.buffer_count : kDefaultEncodeBufferCount);
         for (int i = 0; i < thread_count; i++) {
-            WorkerConfig cfg = buildEncodeConfigInternal(p, shared_config.data_source.path);
+            WorkerConfig cfg = buildEncodeConfigInternal(p, shared_config.data_source.path, bc);
             cfg.data_source.max_frames = base.data_source.max_frames;
             cfg.data_source.loop = base.data_source.loop;
+            cfg.data_source.loop_count = base.data_source.loop_count;
 
             auto ct_builder = ConsumerTypeConfigBuilder(base.consumer_type)
                 .setPerformanceConfig(PerformanceConfigBuilder(base.consumer_type.performance)
@@ -1109,7 +1154,10 @@ std::vector<WorkerConfig> VencPlugin::buildPipelineConfigs(const WorkerConfig& s
         return configs;
     }
 
-    WorkerConfig full = buildEncodeConfigInternal(p, shared_config.data_source.path);
+    const int bc = shared_config.data_source.buffer_count > 0
+        ? shared_config.data_source.buffer_count
+        : (ds_opts_.buffer_count > 0 ? ds_opts_.buffer_count : kDefaultEncodeBufferCount);
+    WorkerConfig full = buildEncodeConfigInternal(p, shared_config.data_source.path, bc);
     full.consumer_type = ConsumerTypeConfigBuilder(shared_config.consumer_type)
         .setPerformanceConfig(PerformanceConfigBuilder(shared_config.consumer_type.performance)
             .setTargetFps(p.input_fps)
@@ -1117,6 +1165,7 @@ std::vector<WorkerConfig> VencPlugin::buildPipelineConfigs(const WorkerConfig& s
         .build();
     full.data_source.max_frames = shared_config.data_source.max_frames;
     full.data_source.loop = shared_config.data_source.loop;
+    full.data_source.loop_count = shared_config.data_source.loop_count;
     return {full};
 }
 

@@ -51,6 +51,8 @@ namespace ErrorCode {
     constexpr int CONSUMER_CONFIG_INVALID = 4002;
     constexpr int PREVIEW_UNAVAILABLE     = 5001;
     constexpr int ENCODER_INIT_FAILED     = 5002;
+    constexpr int ENCODER_RESOURCE_EXHAUSTED = 5003;
+    constexpr int CONFIG_CONFLICT         = 5004;
     constexpr int INTERNAL_ERROR          = 9001;
 }
 
@@ -218,6 +220,30 @@ inline void from_json(const json& j, ConsumerInfo& c) {
 }
 
 // ============================================================
+// 单路预览默认参数（替代静态 JPEG_PREVIEW Consumer）
+// ============================================================
+
+struct PreviewDefaults {
+    int target_fps = 15;
+    int quality = 80;
+    std::string encoder_name = "jpeg_taco";
+};
+
+inline void to_json(json& j, const PreviewDefaults& d) {
+    j = {
+        {"target_fps", d.target_fps},
+        {"quality", d.quality},
+        {"encoder_name", d.encoder_name}
+    };
+}
+
+inline void from_json(const json& j, PreviewDefaults& d) {
+    if (j.contains("target_fps"))   j.at("target_fps").get_to(d.target_fps);
+    if (j.contains("quality"))      j.at("quality").get_to(d.quality);
+    if (j.contains("encoder_name")) j.at("encoder_name").get_to(d.encoder_name);
+}
+
+// ============================================================
 // Worker 模型
 // ============================================================
 
@@ -232,6 +258,7 @@ struct WorkerInfo {
     ApiDecoderConfig decoder;
     std::string created_at;
     std::vector<ConsumerInfo> consumers_config;
+    PreviewDefaults preview_defaults;
 
     // 派生只读字段：消费者类型名列表（供 list API 展示）
     std::vector<std::string> consumers;
@@ -241,6 +268,37 @@ struct WorkerInfo {
             json j = c.type;
             consumers.push_back(j.get<std::string>());
         }
+    }
+
+    /// Migrate static JPEG_PREVIEW → preview_defaults and remove the consumer.
+    /// Returns true if consumers_config changed (caller should persist).
+    bool migrateJpegPreviewToDefaults() {
+        bool changed = false;
+        auto it = consumers_config.begin();
+        while (it != consumers_config.end()) {
+            if (it->type != ConsumerType::JPEG_PREVIEW) {
+                ++it;
+                continue;
+            }
+            const json& cfg = it->config;
+            if (cfg.contains("target_fps") && cfg["target_fps"].is_number_integer()) {
+                preview_defaults.target_fps = cfg["target_fps"].get<int>();
+            }
+            if (cfg.contains("quality") && cfg["quality"].is_number_integer()) {
+                preview_defaults.quality = cfg["quality"].get<int>();
+            }
+            if (cfg.contains("encoder_name") && cfg["encoder_name"].is_string()) {
+                preview_defaults.encoder_name = cfg["encoder_name"].get<std::string>();
+            } else if (cfg.contains("encoder") && cfg["encoder"].is_string()) {
+                preview_defaults.encoder_name = cfg["encoder"].get<std::string>();
+            }
+            it = consumers_config.erase(it);
+            changed = true;
+        }
+        if (changed) {
+            refreshConsumerNames();
+        }
+        return changed;
     }
 };
 
@@ -253,7 +311,8 @@ inline void to_json(json& j, const WorkerInfo& w) {
         {"loop", w.loop},
         {"decoder", w.decoder}, {"created_at", w.created_at},
         {"consumers", w.consumers},
-        {"consumers_config", w.consumers_config}
+        {"consumers_config", w.consumers_config},
+        {"preview_defaults", w.preview_defaults}
     };
 }
 
@@ -268,7 +327,11 @@ inline void from_json(const json& j, WorkerInfo& w) {
     if (j.contains("created_at"))      j.at("created_at").get_to(w.created_at);
     if (j.contains("consumers_config"))
         j.at("consumers_config").get_to(w.consumers_config);
+    if (j.contains("preview_defaults"))
+        j.at("preview_defaults").get_to(w.preview_defaults);
     w.refreshConsumerNames();
+    // Legacy configs may still carry JPEG_PREVIEW; migrate in-memory on load.
+    w.migrateJpegPreviewToDefaults();
 }
 
 // ============================================================

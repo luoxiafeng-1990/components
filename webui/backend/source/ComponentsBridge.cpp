@@ -14,6 +14,8 @@
 
 #include "../include/ComponentsBridge.hpp"
 #include "../include/PreviewService.hpp"
+#include "../include/PreviewSessionManager.hpp"
+#include "../include/PreviewFrameTap.hpp"
 
 #include "common/ExecuteMode.hpp"
 #include "common/IOptionPlugin.hpp"
@@ -161,6 +163,10 @@ static std::vector<std::string> buildCliArgs(
     }
 
     for (auto& c : consumers) {
+        // WebUI never enables static jpeg_encode via JPEG_PREVIEW; sessions use FrameTap.
+        // Keep enum for QA/CLI; skip so jpeg_encode.enable stays false for WebUI workers.
+        if (c.type == ConsumerType::JPEG_PREVIEW) continue;
+
         auto it = kConsumerTypeToSubcmd.find(static_cast<int>(c.type));
         std::string subcmd;
         if (it != kConsumerTypeToSubcmd.end()) subcmd = it->second;
@@ -209,7 +215,8 @@ BuildResult buildWorkerConfig(
     const ApiDecoderConfig& decoder,
     const std::vector<ConsumerInfo>& consumers,
     PreviewService* preview_service,
-    const std::string& worker_id)
+    const std::string& worker_id,
+    PreviewSessionManager* session_manager)
 {
     BuildResult result;
 
@@ -310,7 +317,7 @@ BuildResult buildWorkerConfig(
         pc.consumer_type.inheritCompanionSettings(config.consumer_type);
     }
 
-    // 8. 同进程 JPEG 预览回调
+    // 8. 同进程 JPEG 预览回调（legacy QA / static JpegEncodeConsumer path）
     if (preview_service) {
         for (auto& pc : pipeline_configs) {
             if (pc.consumer_type.jpeg_encode.enable) {
@@ -318,6 +325,25 @@ BuildResult buildWorkerConfig(
                     [preview_service, worker_id](const uint8_t* data, size_t size) {
                         preview_service->onJpegFrame(worker_id, data, size);
                     };
+            }
+        }
+    }
+
+    // 8.5 Always inject PreviewFrameTap for WebUI workers (independent of JPEG flags).
+    // Idle path is a hasActiveSession check only; encoder opens only on session START.
+    if (session_manager) {
+        for (auto& pc : pipeline_configs) {
+            pc.extra_consumer = std::make_shared<PreviewFrameTapConsumer>(
+                session_manager, worker_id);
+        }
+    }
+
+    // 8.6 Persist worker_id into DisplayConsumer so stitcher can map channel→worker
+    // for GET /api/preview/layout. Empty worker_id is a no-op (QA path).
+    if (!worker_id.empty()) {
+        for (auto& pc : pipeline_configs) {
+            if (pc.consumer_type.display.enable) {
+                pc.consumer_type.display.worker_id = worker_id;
             }
         }
     }

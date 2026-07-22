@@ -63,10 +63,13 @@ FFmpegEncodeWorker::FFmpegEncodeWorker(const WorkerConfig& config)
             config.data_source.path,
             fw,
             fh,
-            static_cast<AVPixelFormat>(config.encoder.input_pix_fmt)
+            static_cast<AVPixelFormat>(config.encoder.input_pix_fmt),
+            config.data_source.loop_count
         );
-        LOG4CPLUS_DEBUG_FMT(logger_, "[EncodeWorker] 创建 RawFrameSourceFromFile: '%s'",
-                           config.data_source.path.c_str());
+        LOG4CPLUS_DEBUG_FMT(logger_,
+                            "[EncodeWorker] 创建 RawFrameSourceFromFile: '%s' (loop_count=%d)",
+                            config.data_source.path.c_str(),
+                            config.data_source.loop_count);
     } else {
         LOG4CPLUS_WARN(logger_, "[EncodeWorker] 未指定数据源，需要后续调用 setSourceBufferPool");
     }

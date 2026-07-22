@@ -34,6 +34,7 @@ public:
     bool displayBuffer(BufferPool* pool, int buffer_index) override;
     bool waitVerticalSync() override;
     int getCurrentDisplayBuffer() const override;
+    int getChannelId() const override { return channel_id_; }
 
 private:
     TacoDisplayExtension config_;

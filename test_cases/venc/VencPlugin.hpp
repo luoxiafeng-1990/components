@@ -14,6 +14,7 @@
 
 #include "../common/IOptionPlugin.hpp"
 #include "../common/ExecuteMode.hpp"
+#include "../common/DataSourceOptions.hpp"
 #include "consumptionline/core/BufferConsumerService.hpp"
 #include "productionline/worker/config/MultiWorkerConfig.hpp"
 #include "productionline/worker/config/WorkerConfigs.hpp"
@@ -81,7 +82,7 @@ private:
 
     std::string encoded_output_path_;
     int max_frames_ = -1;
-    bool loop_ = false;
+    int loop_count_ = 1;  ///< 输入文件循环遍数（默认 1）
     bool verbose_ = false;
     int threads_ = 0;
 
@@ -89,6 +90,11 @@ private:
     bool enable_ssim_ = false;
     double min_psnr_ = 30.0;
     double min_ssim_ = 0.95;
+
+    /// DataSource 横切选项（venc 用 --buffer-count，避免与 -b bitrate 冲突）
+    DataSourceOptions ds_opts_;
+    /// ENC 默认 BufferPool 槽位数（用户要求默认 16；CLI --buffer-count 可覆盖）
+    static constexpr int kDefaultEncodeBufferCount = 16;
 };
 
 // ============================================================

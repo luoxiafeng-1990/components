@@ -22,6 +22,9 @@ extern "C" {
  * - 视频处理（读取原始帧进行处理）
  * - 质量验证（读取参考帧进行比较）
  * 
+ * loop_count：同一文件循环读取遍数。有效总帧数 = 文件帧数 × loop_count。
+ * 达到有效总帧数后返回 EOF；EncodeWorker 仅消费数据源，不感知循环。
+ * 
  * 命名规范：
  * - 遵循 EncodedPacketSourceFromFile 的命名模式
  * - RawFrame = 原始帧（未编码的 YUV/RGB 数据）
@@ -39,11 +42,13 @@ public:
      * @param width 帧宽度（像素）
      * @param height 帧高度（像素）
      * @param pix_fmt 像素格式（默认 NV12）
+     * @param loop_count 文件循环遍数（默认 1；<1 按 1 处理）
      */
     RawFrameSourceFromFile(const std::string& file_path,
                            int width,
                            int height,
-                           AVPixelFormat pix_fmt = AV_PIX_FMT_NV12);
+                           AVPixelFormat pix_fmt = AV_PIX_FMT_NV12,
+                           int loop_count = 1);
     
     /**
      * @brief 析构函数
@@ -68,7 +73,7 @@ public:
     void close() override;
     bool isOpen() const override;
     
-    // 数据源导航
+    // 数据源导航（按文件内帧索引 0..file_frames_-1）
     bool seek(int frame_index) override;
     bool seekToBegin() override;
     bool seekToEnd() override;
@@ -96,16 +101,25 @@ private:
     int height_;                     // 帧高度
     AVPixelFormat pix_fmt_;          // 像素格式
     FILE* file_ptr_;                 // 文件指针
-    int current_frame_index_;        // 当前帧索引
-    int total_frames_;               // 总帧数
+    int current_frame_index_;        // 当前文件内帧索引
+    int file_frames_;                // 文件内真实帧数
+    int total_frames_;               // 有效总帧数 = file_frames_ * loop_count_
+    int loop_count_;                 // 循环遍数（>=1）
+    int frames_delivered_;           // 已成功交付帧数（跨遍累计）
     size_t frame_size_;              // 单帧大小（字节）
     std::atomic<bool> is_open_;      // 打开状态
-    bool eof_reached_;               // 是否到达文件末尾
+    bool eof_reached_;               // 是否到达有效末尾
     
     /**
      * @brief 计算单帧大小（根据像素格式）
      */
     size_t calculateFrameSize() const;
+
+    /**
+     * @brief 从当前位置读取一帧到 frame（不处理 loop 回绕）
+     * @return 0=成功, AVERROR_EOF=本遍结束/不完整, <0=错误
+     */
+    int readOneFrameFromFile(AVFrame* frame);
     
     // 日志器
     log4cplus::Logger logger_;

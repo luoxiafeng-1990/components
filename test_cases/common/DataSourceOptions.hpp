@@ -37,9 +37,18 @@ namespace test {
 struct DataSourceOptions {
     int buffer_count = 0;  ///< BufferPool Buffer 数量（0=使用工厂默认值）
 
-    void registerTo(CLI::App& app) {
-        app.add_option("-b,--buffer-count", buffer_count,
-                       "BufferPool Buffer数量 (0=自动)");
+    /**
+     * @param with_short_b 是否注册短选项 -b。
+     *        venc 已占用 -b 作为 bitrate，应传 false，仅用 --buffer-count。
+     */
+    void registerTo(CLI::App& app, bool with_short_b = true) {
+        if (with_short_b) {
+            app.add_option("-b,--buffer-count", buffer_count,
+                           "BufferPool Buffer数量 (0=自动)");
+        } else {
+            app.add_option("--buffer-count", buffer_count,
+                           "BufferPool Buffer数量 (0=使用插件默认值)");
+        }
     }
 
     void applyTo(WorkerConfig& config) const {

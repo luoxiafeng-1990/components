@@ -34,6 +34,36 @@ struct ChannelLayout {
 };
 
 /**
+ * @brief One slot in a stitcher layout snapshot (IDS grid / main_sidebar).
+ *
+ * Geometry always comes from view_slots_. channel_id / worker_id are optional
+ * mappings established at DISPLAY register time (worker_id may be empty for QA).
+ */
+struct LayoutSlotSnapshot {
+    int slot = 0;
+    int channel_id = -1;   ///< -1 if no channel assigned to this slot
+    std::string worker_id; ///< empty if unknown / QA path
+    int x = 0;
+    int y = 0;
+    int width = 0;
+    int height = 0;
+};
+
+/**
+ * @brief Durable layout view for GET /api/preview/layout (spec §13.1).
+ *
+ * Built from view_slots_ / slot_assignment_, not from Worker list order.
+ */
+struct LayoutSnapshot {
+    int width = 0;
+    int height = 0;
+    int rows = 0;
+    int cols = 0;
+    std::string view_type = "grid";
+    std::vector<LayoutSlotSnapshot> slots;
+};
+
+/**
  * @brief Configuration for FrameStitcherService.
  */
 struct FrameStitcherConfig {
@@ -120,6 +150,18 @@ public:
      */
     void unregisterChannel(int channel_id);
 
+    /**
+     * Persist optional WebUI worker_id for a registered channel.
+     * Empty worker_id clears the mapping (QA Display path may leave it empty).
+     */
+    void setChannelWorkerId(int channel_id, const std::string& worker_id);
+
+    /**
+     * Snapshot of current view geometry + channel/worker mapping.
+     * Slot order follows view_slots_ (IDS grid), never workers[] order.
+     */
+    LayoutSnapshot getLayoutSnapshot();
+
     // === Frame input ===
 
     /**
@@ -191,6 +233,7 @@ private:
         bool active;
         bool written_this_round = false;
         int consecutive_misses = 0;
+        std::string worker_id;  ///< Optional; set via setChannelWorkerId
     };
     std::vector<ChannelInfo> channels_;
     std::mutex channel_mgmt_mutex_;

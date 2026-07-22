@@ -3,18 +3,12 @@
     <div class="page-header">
       <h2>实时预览</h2>
       <div class="header-controls">
-        <el-radio-group v-model="layout" @change="onLayoutChange" size="small">
-          <el-radio-button value="1x1">1路</el-radio-button>
-          <el-radio-button value="2x2">2×2</el-radio-button>
-          <el-radio-button value="3x3">3×3</el-radio-button>
-          <el-radio-button value="4x4">4×4</el-radio-button>
-        </el-radio-group>
-
-        <el-select v-if="layout === '1x1'" v-model="selectedWorker"
-          placeholder="选择 Worker" size="small" style="width: 200px">
-          <el-option v-for="w in previewableWorkers" :key="w.id"
-            :label="w.name" :value="w.id" />
-        </el-select>
+        <el-tag type="info" size="small" effect="plain">
+          {{ layoutSlots.length }} 路 · {{ gridCols }}×{{ gridRows }}
+        </el-tag>
+        <el-tag v-if="singleWorkerId" type="warning" size="small" effect="plain">
+          单路 · {{ singleWorkerId }}
+        </el-tag>
 
         <el-button size="small" @click="refreshStreams" :icon="Refresh">刷新</el-button>
 
@@ -29,45 +23,66 @@
       </div>
     </div>
 
-    <!-- 单路预览 -->
-    <div v-if="layout === '1x1'" class="preview-single">
-      <div v-if="selectedWorker" class="preview-cell large">
-        <div class="cell-header">
-          <span>{{ getWorkerName(selectedWorker) }}</span>
-          <el-tag size="small" type="success">LIVE</el-tag>
-        </div>
-        <img :src="streamUrl(selectedWorker)" class="preview-img"
-          @error="onImgError" @load="onImgLoad" alt="preview" />
-      </div>
-      <el-empty v-else description="请选择要预览的 Worker" />
-    </div>
+    <!-- 预览区域 -->
+    <div class="preview-grid-container">
+      <el-empty v-if="layoutSlots.length === 0 && !singleStreamUrl" description="没有运行中的 DISPLAY Worker / 布局为空" />
 
-    <!-- 多路宫格预览 -->
-    <div v-else class="preview-grid-container">
-      <!-- Composite stream (single stitched image for all channels) -->
-      <div v-if="compositeAvailable" class="preview-composite">
+      <!-- 单路放大模式 -->
+      <div v-else-if="singleStreamUrl" class="preview-composite">
         <div class="cell-header">
-          <span>合成预览 ({{ layout }})</span>
-          <el-tag size="small" type="warning">COMPOSITE</el-tag>
+          <span>单路预览 · {{ singleWorkerName || singleWorkerId }}</span>
+          <el-tag size="small" type="success">SESSION</el-tag>
         </div>
-        <img :src="compositeStreamUrl" class="preview-img composite-preview"
-          @error="onImgError" @load="onImgLoad" alt="composite preview" />
+        <div class="composite-wrapper">
+          <img
+            :src="singleStreamUrl"
+            class="preview-img composite-preview"
+            alt="single preview"
+            @dblclick="exitSinglePreview"
+            @error="onImgError"
+            @load="onImgLoad"
+          />
+          <div class="single-hint">双击退出单路预览</div>
+        </div>
       </div>
 
-      <!-- Fallback: per-worker snapshot polling -->
-      <div v-else class="preview-grid" :class="`grid-${layout}`">
-        <div v-for="(w, i) in gridWorkers" :key="i" class="preview-cell">
-          <template v-if="w">
-            <div class="cell-header">
-              <span>{{ w.name }}</span>
-              <el-tag size="small" type="success">LIVE</el-tag>
+      <!-- Composite 合成预览 -->
+      <div v-else class="preview-composite">
+        <div class="cell-header">
+          <span>合成预览 ({{ layoutSlots.length }}路 · {{ gridCols }}×{{ gridRows }})</span>
+          <el-tag v-if="compositeAvailable" size="small" type="warning">COMPOSITE</el-tag>
+          <el-tag v-else size="small" type="info">等待合成...</el-tag>
+        </div>
+        <div class="composite-wrapper">
+          <img v-if="compositeAvailable" :src="compositeStreamUrl"
+            class="preview-img composite-preview"
+            @error="onImgError" @load="onImgLoad" alt="composite preview" />
+          <div v-else class="composite-loading">
+            <el-icon :size="48" class="is-loading"><Loading /></el-icon>
+            <p>正在等待合成画面就绪...</p>
+          </div>
+          <!-- Clickable slot overlay from GET /api/preview/layout -->
+          <div class="grid-overlay" v-if="compositeAvailable && layout.width > 0">
+            <div v-for="col in Math.max(0, gridCols - 1)" :key="'vc' + col"
+              class="grid-line-v"
+              :style="{ left: (col / gridCols * 100) + '%' }" />
+            <div v-for="row in Math.max(0, gridRows - 1)" :key="'hr' + row"
+              class="grid-line-h"
+              :style="{ top: (row / gridRows * 100) + '%' }" />
+            <div
+              v-for="slot in layoutSlots"
+              :key="'slot' + slot.slot + '-' + slot.worker_id"
+              class="grid-slot-cell"
+              :style="slotStyle(slot)"
+              @dblclick="onSlotDblClick(slot)"
+            >
+              <div class="grid-channel-label">
+                {{ slot.worker_name || slot.worker_id || ('slot ' + slot.slot) }}
+                <span v-if="slot.worker_id && channelFps[slot.worker_id] !== undefined" class="fps-badge">
+                  {{ channelFps[slot.worker_id] }} fps
+                </span>
+              </div>
             </div>
-            <img :src="snapshotSrcs[w.id] || ''" class="preview-img"
-              @error="onImgError" @load="onImgLoad" alt="preview" />
-          </template>
-          <div v-else class="cell-empty">
-            <el-icon :size="32" color="#ddd"><VideoCamera /></el-icon>
-            <span>空闲</span>
           </div>
         </div>
       </div>
@@ -76,143 +91,170 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onBeforeUnmount, reactive, type Ref } from 'vue'
-import { Refresh, VideoCamera } from '@element-plus/icons-vue'
-import { useWorkerStore } from '../stores/worker'
-import { previewApi, type Worker } from '../api'
+import { ref, computed, watch, onMounted, onBeforeUnmount, reactive } from 'vue'
+import { Refresh, Loading } from '@element-plus/icons-vue'
+import { ElMessage } from 'element-plus'
+import { previewApi, type PreviewLayout, type PreviewLayoutSlot } from '../api'
 import axios from 'axios'
 
-const workerStore = useWorkerStore()
-
-const layout = ref('3x3')
-const selectedWorker = ref('')
-const previewFps = ref(15)
+const previewFps = ref(25)
 const compositeAvailable = ref(false)
 const compositeStreamUrl = ref('')
+const channelFps = reactive<Record<string, number>>({})
+
+const layout = ref<PreviewLayout>({
+  width: 0,
+  height: 0,
+  rows: 0,
+  cols: 0,
+  view_type: 'grid',
+  slots: [],
+})
+
+const activeSessionId = ref<string | null>(null)
+const singleWorkerId = ref<string | null>(null)
+const singleStreamUrl = ref('')
+const sessionBusy = ref(false)
+
+const layoutSlots = computed(() =>
+  (layout.value.slots || []).filter(s => !!s.worker_id)
+)
+
+const gridCols = computed(() => Math.max(1, layout.value.cols || 1))
+const gridRows = computed(() => Math.max(1, layout.value.rows || 1))
+
+const singleWorkerName = computed(() => {
+  if (!singleWorkerId.value) return ''
+  const s = layoutSlots.value.find(x => x.worker_id === singleWorkerId.value)
+  return s?.worker_name || ''
+})
+
+function slotStyle(slot: PreviewLayoutSlot) {
+  const w = layout.value.width || 1
+  const h = layout.value.height || 1
+  return {
+    left: (slot.x / w * 100) + '%',
+    top: (slot.y / h * 100) + '%',
+    width: (slot.width / w * 100) + '%',
+    height: (slot.height / h * 100) + '%',
+  }
+}
 
 async function onFpsChange(fps: number) {
   try {
-    await axios.post('/api/preview/fps', { fps })
+    await previewApi.setCompositeConfig({ target_fps: fps })
+  } catch {
+    try {
+      await axios.post('/api/preview/fps', { fps })
+    } catch { /* ignore */ }
+  }
+}
+
+async function fetchLayout() {
+  try {
+    const res = await previewApi.layout()
+    if (res.data?.data) {
+      layout.value = res.data.data
+    }
+  } catch {
+    layout.value = {
+      width: 0, height: 0, rows: 0, cols: 0, view_type: 'grid', slots: [],
+    }
+  }
+}
+
+async function exitSinglePreview() {
+  if (!activeSessionId.value) {
+    singleWorkerId.value = null
+    singleStreamUrl.value = ''
+    return
+  }
+  const sid = activeSessionId.value
+  try {
+    await previewApi.deleteSession(sid)
   } catch { /* ignore */ }
-  // 重启轮询定时器以应用新帧率
-  if (layout.value !== '1x1' && snapshotTimer) {
-    startSnapshotPolling()
-  }
+  activeSessionId.value = null
+  singleWorkerId.value = null
+  singleStreamUrl.value = ''
 }
 
-const previewableWorkers = computed(() =>
-  workerStore.workers.filter(w =>
-    (w.consumers?.includes('JPEG_PREVIEW') ||
-     w.consumers_config?.some((c: any) => c.type === 'JPEG_PREVIEW')) &&
-    (w.state === 'RUNNING' || w.state === 'STARTING')
-  )
-)
+async function onSlotDblClick(slot: PreviewLayoutSlot) {
+  if (sessionBusy.value) return
+  if (!slot.worker_id) return
 
-const gridWorkers = computed(() => {
-  const dim = parseInt(layout.value[0])
-  const total = dim * dim
-  const result: (Worker | null)[] = []
-  for (let i = 0; i < total; i++) {
-    result.push(previewableWorkers.value[i] || null)
-  }
-  return result
-})
-
-// --- snapshot 轮询（宫格模式使用，规避浏览器 6 连接限制） ---
-const snapshotSrcs = reactive<Record<string, string>>({})
-let snapshotTimer: ReturnType<typeof setInterval> | null = null
-let snapshotBatchIdx = 0
-const BATCH_SIZE = 4
-
-const snapshotInterval = computed(() => {
-  const fps = previewFps.value
-  return Math.max(100, Math.round(1000 / fps))
-})
-
-function preloadAndSwap(workerId: string) {
-  const url = previewApi.snapshotUrl(workerId) + '&t=' + Date.now()
-  const img = new Image()
-  img.onload = () => { snapshotSrcs[workerId] = url }
-  img.onerror = () => { /* keep old frame on error */ }
-  img.src = url
-}
-
-function refreshSnapshots() {
-  const workers = previewableWorkers.value
-  if (workers.length === 0) return
-  if (workers.length <= BATCH_SIZE) {
-    for (const w of workers) {
-      preloadAndSwap(w.id)
+  if (activeSessionId.value) {
+    sessionBusy.value = true
+    try {
+      await exitSinglePreview()
+    } finally {
+      sessionBusy.value = false
     }
-  } else {
-    const start = snapshotBatchIdx % workers.length
-    for (let i = 0; i < BATCH_SIZE && i < workers.length; i++) {
-      const idx = (start + i) % workers.length
-      preloadAndSwap(workers[idx].id)
-    }
-    snapshotBatchIdx = (start + BATCH_SIZE) % workers.length
+    return
+  }
+
+  sessionBusy.value = true
+  try {
+    const defaults = { fps: 15, quality: 80, encoder: 'jpeg_taco' }
+    const res = await previewApi.createSession({
+      worker_id: slot.worker_id,
+      fps: defaults.fps,
+      quality: defaults.quality,
+      encoder: defaults.encoder,
+    })
+    const data = res.data.data
+    // START succeeded — only then switch UI
+    activeSessionId.value = data.session_id
+    singleWorkerId.value = data.worker_id
+    const url = data.stream_url || ''
+    singleStreamUrl.value = url.includes('?')
+      ? url + '&t=' + Date.now()
+      : url + '?t=' + Date.now()
+  } catch (e: any) {
+    // Keep Composite; show explicit error
+    const msg =
+      e?.response?.data?.message ||
+      e?.message ||
+      '启动单路预览失败'
+    ElMessage.error(msg)
+  } finally {
+    sessionBusy.value = false
   }
 }
 
-function startSnapshotPolling() {
-  stopSnapshotPolling()
-  snapshotBatchIdx = 0
-  for (const w of previewableWorkers.value) {
-    preloadAndSwap(w.id)
-  }
-  snapshotTimer = setInterval(refreshSnapshots, snapshotInterval.value)
-}
+let compositeRetryTimer: ReturnType<typeof setInterval> | null = null
+let layoutTimer: ReturnType<typeof setInterval> | null = null
 
-function stopSnapshotPolling() {
-  if (snapshotTimer) {
-    clearInterval(snapshotTimer)
-    snapshotTimer = null
+function stopCompositeRetry() {
+  if (compositeRetryTimer) {
+    clearInterval(compositeRetryTimer)
+    compositeRetryTimer = null
   }
 }
 
-// 1x1 用 MJPEG 流，宫格用 snapshot 轮询（或 composite stream）
-watch(layout, async (val) => {
-  selectedWorker.value = ''
-  if (val === '1x1') {
-    stopSnapshotPolling()
-  } else {
+function startCompositePolling() {
+  stopCompositeRetry()
+  checkCompositeAvailability()
+  compositeRetryTimer = setInterval(async () => {
+    if (compositeAvailable.value) return
     await checkCompositeAvailability()
-    if (!compositeAvailable.value) {
-      startSnapshotPolling()
-    } else {
-      stopSnapshotPolling()
-    }
+  }, 1000)
+}
+
+watch(layoutSlots, () => {
+  if (layoutSlots.value.length > 0 && !compositeAvailable.value) {
+    startCompositePolling()
   }
-}, { immediate: false })
-
-watch(previewableWorkers, () => {
-  if (layout.value !== '1x1') refreshSnapshots()
 })
-
-function streamUrl(workerId: string) {
-  return previewApi.streamUrl(workerId) + '?t=' + Date.now()
-}
-
-function getWorkerName(id: string) {
-  return workerStore.workers.find(w => w.id === id)?.name || id
-}
-
-function onLayoutChange() {
-  // handled by watch(layout)
-}
 
 function refreshStreams() {
-  workerStore.fetchList()
-  if (layout.value !== '1x1') {
-    checkCompositeAvailability()
-    if (!compositeAvailable.value) refreshSnapshots()
-  }
+  fetchLayout()
+  checkCompositeAvailability()
 }
 
 async function checkCompositeAvailability() {
   try {
-    const res = await axios.get('/api/preview/composite/snapshot', { responseType: 'blob', timeout: 3000 })
-    compositeAvailable.value = (res.status === 200)
+    const res = await axios.get('/api/preview/composite/available', { timeout: 2000 })
+    compositeAvailable.value = !!(res.data?.data?.available)
   } catch {
     compositeAvailable.value = false
   }
@@ -229,29 +271,81 @@ function onImgLoad(_e: Event) {
   // 预加载模式：新帧加载完成后才替换 src，无需额外处理
 }
 
-function disconnectAllStreams() {
-  stopSnapshotPolling()
-  for (const key of Object.keys(snapshotSrcs)) {
-    delete snapshotSrcs[key]
+let fpsTimer: ReturnType<typeof setInterval> | null = null
+
+async function fetchChannelFps() {
+  try {
+    const res = await axios.get('/api/preview/channel-fps')
+    if (res.data?.data) {
+      const data = res.data.data
+      for (const key of Object.keys(channelFps)) {
+        if (!(key in data)) delete channelFps[key]
+      }
+      for (const [k, v] of Object.entries(data)) {
+        channelFps[k] = v as number
+      }
+    }
+  } catch { /* ignore */ }
+}
+
+function startFpsPolling() {
+  stopFpsPolling()
+  fetchChannelFps()
+  fpsTimer = setInterval(fetchChannelFps, 2000)
+}
+
+function stopFpsPolling() {
+  if (fpsTimer) {
+    clearInterval(fpsTimer)
+    fpsTimer = null
   }
-  selectedWorker.value = ''
+}
+
+function startLayoutPolling() {
+  stopLayoutPolling()
+  fetchLayout()
+  layoutTimer = setInterval(fetchLayout, 3000)
+}
+
+function stopLayoutPolling() {
+  if (layoutTimer) {
+    clearInterval(layoutTimer)
+    layoutTimer = null
+  }
+}
+
+function disconnectAllStreams() {
+  stopCompositeRetry()
+  stopFpsPolling()
+  stopLayoutPolling()
 }
 
 onMounted(async () => {
-  await workerStore.fetchList()
   try {
-    const res = await axios.get('/api/preview/fps')
-    if (res.data?.data?.fps) previewFps.value = res.data.data.fps
-  } catch { /* ignore */ }
-  if (layout.value !== '1x1') {
-    await checkCompositeAvailability()
-    if (!compositeAvailable.value) {
-      startSnapshotPolling()
-    }
+    const res = await previewApi.compositeConfig()
+    if (res.data?.data?.target_fps) previewFps.value = res.data.data.target_fps
+  } catch {
+    try {
+      const res = await axios.get('/api/preview/fps')
+      if (res.data?.data?.fps) previewFps.value = res.data.data.fps
+    } catch { /* ignore */ }
   }
+  await fetchLayout()
+  await checkCompositeAvailability()
+  if (!compositeAvailable.value) {
+    startCompositePolling()
+  }
+  startFpsPolling()
+  startLayoutPolling()
 })
 
-onBeforeUnmount(() => {
+onBeforeUnmount(async () => {
+  if (activeSessionId.value) {
+    try { await previewApi.deleteSession(activeSessionId.value) } catch { /* ignore */ }
+    activeSessionId.value = null
+    singleWorkerId.value = null
+    singleStreamUrl.value = ''
+  }
   disconnectAllStreams()
 })
 </script>
@@ -276,35 +370,6 @@ onBeforeUnmount(() => {
   gap: 12px;
 }
 
-.preview-single {
-  display: flex;
-  justify-content: center;
-}
-
-.preview-grid {
-  display: grid;
-  gap: 8px;
-}
-
-.grid-2x2 { grid-template-columns: repeat(2, 1fr); }
-.grid-3x3 { grid-template-columns: repeat(3, 1fr); }
-.grid-4x4 { grid-template-columns: repeat(4, 1fr); }
-
-.preview-cell {
-  background: #1a1a1a;
-  border-radius: 6px;
-  overflow: hidden;
-  aspect-ratio: 16 / 9;
-  display: flex;
-  flex-direction: column;
-  position: relative;
-}
-
-.preview-cell.large {
-  max-width: 960px;
-  width: 100%;
-}
-
 .cell-header {
   position: absolute;
   top: 0;
@@ -317,24 +382,14 @@ onBeforeUnmount(() => {
   background: linear-gradient(180deg, rgba(0,0,0,0.7) 0%, transparent 100%);
   color: #fff;
   font-size: 13px;
-  z-index: 1;
+  z-index: 2;
+  pointer-events: none;
 }
 
 .preview-img {
   width: 100%;
   height: 100%;
   object-fit: contain;
-}
-
-.cell-empty {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  color: #666;
-  font-size: 12px;
 }
 
 .preview-grid-container {
@@ -353,5 +408,105 @@ onBeforeUnmount(() => {
   width: 100%;
   height: auto;
   display: block;
+}
+
+.composite-wrapper {
+  position: relative;
+  width: 100%;
+}
+
+.composite-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 400px;
+  color: #909399;
+  gap: 16px;
+}
+
+.composite-loading p {
+  font-size: 14px;
+}
+
+.grid-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  /* Allow dblclick on cells; lines stay non-interactive */
+  pointer-events: none;
+}
+
+.grid-line-v {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: rgba(255, 255, 255, 0.35);
+  box-shadow: 0 0 4px rgba(0, 0, 0, 0.5);
+  pointer-events: none;
+}
+
+.grid-line-h {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: rgba(255, 255, 255, 0.35);
+  box-shadow: 0 0 4px rgba(0, 0, 0, 0.5);
+  pointer-events: none;
+}
+
+.grid-slot-cell {
+  position: absolute;
+  box-sizing: border-box;
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+.grid-slot-cell:hover {
+  background: rgba(64, 158, 255, 0.12);
+  outline: 1px solid rgba(64, 158, 255, 0.45);
+}
+
+.grid-channel-label {
+  position: absolute;
+  left: 0;
+  top: 0;
+  padding: 4px 8px;
+  color: #fff;
+  font-size: 12px;
+  background: rgba(0, 0, 0, 0.5);
+  border-radius: 0 0 4px 0;
+  white-space: nowrap;
+  max-width: 90%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+}
+
+.fps-badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 5px;
+  background: rgba(64, 158, 255, 0.75);
+  border-radius: 3px;
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.single-hint {
+  position: absolute;
+  bottom: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 4px 10px;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  font-size: 12px;
+  border-radius: 4px;
+  pointer-events: none;
 }
 </style>

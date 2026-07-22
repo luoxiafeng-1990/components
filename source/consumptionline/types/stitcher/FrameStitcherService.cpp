@@ -164,7 +164,7 @@ void FrameStitcherService::createView() {
                                 config_.main_sidebar_ratio, view_slots_);
     } else {
         view_type_ = ViewType::GRID;
-        int grid_count = selectGridCount(9);
+        int grid_count = selectGridCount(1);
         computeGridSlots(grid_count, screen_width_, screen_height_, view_slots_);
     }
 
@@ -261,6 +261,7 @@ void FrameStitcherService::unregisterChannel(int channel_id) {
         for (auto& ch : channels_) {
             if (ch.channel_id == channel_id) {
                 ch.active = false;
+                ch.worker_id.clear();
                 LOG4CPLUS_INFO_FMT(logger_, "Channel %d unregistered", channel_id);
                 break;
             }
@@ -268,6 +269,79 @@ void FrameStitcherService::unregisterChannel(int channel_id) {
     }
     // Wake any threads blocked in channelWrite for this channel
     round_cv_.notify_all();
+}
+
+void FrameStitcherService::setChannelWorkerId(int channel_id,
+                                              const std::string& worker_id) {
+    std::lock_guard<std::mutex> lock(channel_mgmt_mutex_);
+    for (auto& ch : channels_) {
+        if (ch.channel_id == channel_id) {
+            ch.worker_id = worker_id;
+            LOG4CPLUS_INFO_FMT(logger_,
+                "Channel %d worker_id set to '%s'",
+                channel_id, worker_id.c_str());
+            return;
+        }
+    }
+    LOG4CPLUS_WARN_FMT(logger_,
+        "setChannelWorkerId: channel %d not found", channel_id);
+}
+
+LayoutSnapshot FrameStitcherService::getLayoutSnapshot() {
+    std::lock_guard<std::mutex> lock(channel_mgmt_mutex_);
+
+    LayoutSnapshot snap;
+    snap.width = screen_width_;
+    snap.height = screen_height_;
+    snap.view_type = (view_type_ == ViewType::MAIN_SIDEBAR) ? "main_sidebar" : "grid";
+
+    const int slot_count = static_cast<int>(view_slots_.size());
+    if (view_type_ == ViewType::MAIN_SIDEBAR) {
+        snap.cols = 2;
+        snap.rows = 4;
+    } else if (slot_count > 0) {
+        snap.cols = static_cast<int>(std::ceil(std::sqrt(static_cast<double>(slot_count))));
+        snap.rows = (slot_count + snap.cols - 1) / snap.cols;
+    }
+
+    snap.slots.reserve(static_cast<size_t>(slot_count));
+    for (int i = 0; i < slot_count; ++i) {
+        LayoutSlotSnapshot slot;
+        slot.slot = i;
+        slot.x = view_slots_[i].x;
+        slot.y = view_slots_[i].y;
+        slot.width = view_slots_[i].w;
+        slot.height = view_slots_[i].h;
+
+        int channel_id = -1;
+        if (!slot_assignment_.empty()) {
+            if (i < static_cast<int>(slot_assignment_.size())) {
+                channel_id = slot_assignment_[i];
+            }
+        } else {
+            // Default mapping: channel_id == slot index when that channel is active
+            for (const auto& ch : channels_) {
+                if (ch.active && ch.channel_id == i) {
+                    channel_id = i;
+                    break;
+                }
+            }
+        }
+
+        slot.channel_id = channel_id;
+        if (channel_id >= 0) {
+            for (const auto& ch : channels_) {
+                if (ch.channel_id == channel_id) {
+                    slot.worker_id = ch.worker_id;
+                    break;
+                }
+            }
+        }
+
+        snap.slots.push_back(std::move(slot));
+    }
+
+    return snap;
 }
 
 // ============================================================

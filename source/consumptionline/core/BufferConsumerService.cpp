@@ -20,6 +20,27 @@
 
 namespace consumer {
 
+namespace {
+
+/// Append WorkerConfig::extra_consumer (e.g. WebUI PreviewFrameTap) if set.
+static std::shared_ptr<IBufferConsumer> attachExtraConsumer(
+    std::shared_ptr<IBufferConsumer> base,
+    const WorkerConfig& config)
+{
+    if (!config.extra_consumer) {
+        return base;
+    }
+    if (!base) {
+        return config.extra_consumer;
+    }
+    auto multi = std::make_shared<MultiConsumer>();
+    multi->addStrategy(std::move(base));
+    multi->addStrategy(config.extra_consumer);
+    return multi;
+}
+
+} // namespace
+
 // ============================================================
 // 构造和析构
 // ============================================================
@@ -398,10 +419,13 @@ ConsumeResult BufferConsumerService::consumeExternalPool(
 // PARALLEL 模式实现
 // ============================================================
 
+static uint32_t getConsumeFlagsFromConfig(const WorkerConfig::ConsumerTypeConfig& config);
+
 ConsumeResult BufferConsumerService::startProductionLinesParallel(
     const std::vector<WorkerConfig>& configs,
     uint32_t consume_flags
 ) {
+    (void)consume_flags;  // ABI compat; PARALLEL derives flags per WorkerConfig
     ConsumeResult total_result;
     auto start_time = std::chrono::steady_clock::now();
     
@@ -417,8 +441,9 @@ ConsumeResult BufferConsumerService::startProductionLinesParallel(
             LOG4CPLUS_DEBUG_FMT(logger_, "PARALLEL worker[%zu] save_raw.output_paths[0]=%s",
                 idx, cfg_copy.consumer_type.save_raw.output_paths.empty()
                     ? "(none)" : cfg_copy.consumer_type.save_raw.output_paths[0].c_str());
-            auto future = thread_pool.submit_task([this, cfg_copy, consume_flags]() {
-                return startProductionLine(cfg_copy, consume_flags);
+            auto future = thread_pool.submit_task([this, cfg_copy]() {
+                uint32_t worker_flags = getConsumeFlagsFromConfig(cfg_copy.consumer_type);
+                return startProductionLine(cfg_copy, worker_flags);
             });
             futures.push_back(std::move(future));
         }
@@ -563,6 +588,11 @@ static std::shared_ptr<IBufferConsumer> createConsumerForWorker(
     // 6. 统计消费者（如果没有其他消费者或显式启用）
     if (consumers.empty() || (flags & CONSUME_COUNT)) {
         consumers.push_back(std::make_shared<CountConsumer>());
+    }
+
+    // WebUI PreviewFrameTap (independent of JPEG flags)
+    if (worker_config.extra_consumer) {
+        consumers.push_back(worker_config.extra_consumer);
     }
     
     // 如果只有一个消费者，直接返回
@@ -862,34 +892,30 @@ std::shared_ptr<IBufferConsumer> BufferConsumerService::createConsumerFromFlags(
     
     // 如果没有指定任何类型，默认使用 COUNT
     if (type_count == 0) {
-        return std::make_shared<CountConsumer>();
+        return attachExtraConsumer(std::make_shared<CountConsumer>(), config);
     }
 
     // 如果只有一种类型，直接创建
     if (type_count == 1) {
+        std::shared_ptr<IBufferConsumer> single;
         if (flags & CONSUME_COUNT) {
-            return std::make_shared<CountConsumer>();
-        }
-        if (flags & CONSUME_DISPLAY) {
-            return std::make_shared<DisplayConsumer>(config.consumer_type.display);
-        }
-        if (flags & CONSUME_SAVE_RAW) {
-            return std::make_shared<SaveRawConsumer>(
+            single = std::make_shared<CountConsumer>();
+        } else if (flags & CONSUME_DISPLAY) {
+            single = std::make_shared<DisplayConsumer>(config.consumer_type.display);
+        } else if (flags & CONSUME_SAVE_RAW) {
+            single = std::make_shared<SaveRawConsumer>(
                 config.consumer_type.save_raw.output_paths,
                 config.consumer_type.save_raw.max_frames_per_channel
             );
-        }
-        if (flags & CONSUME_SAVE_ENCODED) {
-            return std::make_shared<SaveEncodedConsumer>(
+        } else if (flags & CONSUME_SAVE_ENCODED) {
+            single = std::make_shared<SaveEncodedConsumer>(
                 config.consumer_type.save_encoded.output_path,
                 config.data_source.codec_params,
                 config.data_source.time_base
             );
-        }
-        if (flags & CONSUME_OPENCV) {
-            return std::make_shared<OpencvConsumer>(config);
-        }
-        if (flags & CONSUME_NPU_INFERENCE) {
+        } else if (flags & CONSUME_OPENCV) {
+            single = std::make_shared<OpencvConsumer>(config);
+        } else if (flags & CONSUME_NPU_INFERENCE) {
             NpuInferenceConfig npu_cfg;
             npu_cfg.model_path     = config.consumer_type.npu_inference.model_path;
             npu_cfg.algorithm      = config.consumer_type.npu_inference.algorithm;
@@ -901,11 +927,11 @@ std::shared_ptr<IBufferConsumer> BufferConsumerService::createConsumerFromFlags(
                 : NpuInferenceConfig::InputMode::VIRTUAL_ADDR;
             npu_cfg.enable_draw    = config.consumer_type.npu_inference.enable_draw;
             npu_cfg.inference_interval = config.consumer_type.npu_inference.inference_interval;
-            return std::make_shared<NpuInferenceConsumer>(npu_cfg);
+            single = std::make_shared<NpuInferenceConsumer>(npu_cfg);
+        } else if (flags & CONSUME_JPEG_ENCODE) {
+            single = std::make_shared<JpegEncodeConsumer>(config.consumer_type.jpeg_encode);
         }
-        if (flags & CONSUME_JPEG_ENCODE) {
-            return std::make_shared<JpegEncodeConsumer>(config.consumer_type.jpeg_encode);
-        }
+        return attachExtraConsumer(std::move(single), config);
     }
 
     // 多种类型叠加，使用 MultiConsumer
@@ -956,6 +982,11 @@ std::shared_ptr<IBufferConsumer> BufferConsumerService::createConsumerFromFlags(
     
     // COUNT 放在最后
     multi->addStrategy(std::make_shared<CountConsumer>());
+
+    // WebUI PreviewFrameTap last (idle fast-path; must not stop the loop)
+    if (config.extra_consumer) {
+        multi->addStrategy(config.extra_consumer);
+    }
     
     return multi;
 }

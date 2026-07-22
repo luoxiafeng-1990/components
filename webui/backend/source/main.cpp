@@ -5,15 +5,30 @@
 #include <csignal>
 #include <string>
 #include <memory>
+#include <thread>
+#include <atomic>
+#include <cstdlib>
+#include <unistd.h>
 
 static std::unique_ptr<webui::WebServer> g_server;
+static std::atomic<int> signal_count{0};
 
 static void signalHandler(int sig) {
-    std::cout << "\n[WebUI] Received signal " << sig << ", shutting down..." << std::endl;
+    int count = ++signal_count;
+    if (count >= 2) {
+        std::cerr << "\n[WebUI] 再次收到信号，强制退出" << std::endl;
+        _exit(1);
+    }
+    std::cerr << "\n[WebUI] Received signal " << sig << ", shutting down..." << std::endl;
+
+    // 10 秒后若进程仍未退出则强制终止
+    std::thread([]() {
+        std::this_thread::sleep_for(std::chrono::seconds(10));
+        std::cerr << "[WebUI] 优雅退出超时(10s)，强制退出" << std::endl;
+        _exit(1);
+    }).detach();
+
     if (g_server) {
-        // 只停 HTTP 服务器，让 listen() 返回；
-        // Worker 清理在 listen() 返回后由析构函数完成，
-        // 不在信号处理函数中调用含 mutex 的操作（避免死锁）
         g_server->stopHttpOnly();
     }
 }

@@ -65,19 +65,27 @@ struct ConsumerTypeConfig {
         /// 厂商专有参数；nullptr 表示未选择厂商
         std::unique_ptr<IDisplayVendorExtension> vendor;
 
+        /**
+         * Optional WebUI worker id for channel↔worker layout mapping.
+         * Empty for QA/CLI Display path (layout API still works without it).
+         */
+        std::string worker_id;
+
         DisplayConsumerConfig() = default;
         ~DisplayConsumerConfig() = default;
 
         DisplayConsumerConfig(const DisplayConsumerConfig& o)
             : enable(o.enable)
             , device_id(o.device_id)
-            , vendor(o.vendor ? o.vendor->clone() : nullptr) {}
+            , vendor(o.vendor ? o.vendor->clone() : nullptr)
+            , worker_id(o.worker_id) {}
 
         DisplayConsumerConfig& operator=(const DisplayConsumerConfig& o) {
             if (this == &o) return *this;
             enable = o.enable;
             device_id = o.device_id;
             vendor = o.vendor ? o.vendor->clone() : nullptr;
+            worker_id = o.worker_id;
             return *this;
         }
 

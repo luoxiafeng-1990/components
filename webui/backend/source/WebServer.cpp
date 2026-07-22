@@ -4,6 +4,7 @@
 #include "../include/WorkerManager.hpp"
 #include "../include/ConsumerManager.hpp"
 #include "../include/PreviewService.hpp"
+#include "../include/PreviewSessionManager.hpp"
 
 #define CPPHTTPLIB_THREAD_POOL_COUNT 32
 #include "../third_party/httplib.h"
@@ -82,9 +83,21 @@ WebServer::WebServer(const ServerConfig& cfg)
     worker_manager_ = std::make_unique<WorkerManager>(*ds_manager_, *config_store_);
     consumer_manager_ = std::make_unique<ConsumerManager>();
     preview_service_ = std::make_unique<PreviewService>(*worker_manager_, *consumer_manager_);
+    preview_session_manager_ = std::make_unique<PreviewSessionManager>();
 
+    // Real jpeg_taco factory (null → ENCODER_RESOURCE_EXHAUSTED on START).
+    preview_session_manager_->setEncoderFactory(
+        [](const std::string& worker_id, const PreviewSessionConfig& cfg) {
+            return PreviewSessionManager::makeJpegTacoEncoder(worker_id, cfg);
+        },
+        [](std::shared_ptr<PreviewSessionManager::EncoderHandle>& h) {
+            h.reset();
+        });
+
+    preview_service_->setSessionManager(preview_session_manager_.get());
     worker_manager_->setConsumerManager(consumer_manager_.get());
     worker_manager_->setPreviewService(preview_service_.get());
+    worker_manager_->setPreviewSessionManager(preview_session_manager_.get());
 }
 
 WebServer::~WebServer() {
@@ -113,6 +126,11 @@ bool WebServer::start() {
             res.status = 204;
             return httplib::Server::HandlerResponse::Handled;
         }
+        // index.html 禁止缓存，确保浏览器加载最新前端
+        if (req.path == "/" || req.path == "/index.html" ||
+            req.path.find(".html") != std::string::npos) {
+            res.set_header("Cache-Control", "no-cache, no-store, must-revalidate");
+        }
         return httplib::Server::HandlerResponse::Unhandled;
     });
 
@@ -135,6 +153,10 @@ void WebServer::stop() {
     if (preview_service_) {
         preview_service_->requestStop();
     }
+    // 1b. Tear down on-demand preview encoders (join outside map lock).
+    if (preview_session_manager_) {
+        preview_session_manager_->shutdown();
+    }
     // 2. 停止 HTTP 服务器（关闭连接，让 handler 线程退出）
     if (server_) {
         server_->stop();
@@ -146,6 +168,8 @@ void WebServer::stop() {
 }
 
 void WebServer::stopHttpOnly() {
+    // Signal-handler safe: only unblock listen(). Full session shutdown runs
+    // later on the main thread via stop() (joins encoder threads).
     running_ = false;
     if (preview_service_) {
         preview_service_->requestStop();
@@ -1031,6 +1055,861 @@ void WebServer::registerSystemRoutes() {
         auto r = ApiResponse::ok(data);
         res.set_content(r.toJson().dump(), "application/json");
     });
+
+    // ---- /boot/firmware 板级配置 ----
+    server_->Get("/api/system/board-config", [](const httplib::Request&, httplib::Response& res) {
+        json data = json::object();
+        namespace fs = std::filesystem;
+
+        const std::string boot_dir = "/boot/firmware";
+
+        // Board model from device tree
+        data["board_model"] = execCommand("cat /sys/firmware/devicetree/base/model 2>/dev/null");
+        data["board_compatible"] = execCommand("cat /sys/firmware/devicetree/base/compatible 2>/dev/null");
+
+        // Boot firmware directory listing
+        json boot_files = json::array();
+        std::error_code ec;
+        if (fs::exists(boot_dir, ec)) {
+            for (auto& entry : fs::directory_iterator(boot_dir, ec)) {
+                auto fname = entry.path().filename().string();
+                json finfo = {{"name", fname}};
+                if (entry.is_regular_file(ec)) {
+                    finfo["size"] = entry.file_size(ec);
+                    finfo["type"] = "file";
+                } else if (entry.is_directory(ec)) {
+                    finfo["type"] = "directory";
+                }
+                boot_files.push_back(finfo);
+            }
+            std::sort(boot_files.begin(), boot_files.end(),
+                [](const json& a, const json& b) {
+                    return a.value("name", "") < b.value("name", "");
+                });
+        }
+        data["boot_files"] = boot_files;
+        data["boot_dir_exists"] = fs::exists(boot_dir, ec);
+
+        // Parse config.txt
+        const std::string config_path = boot_dir + "/config.txt";
+        json config_sections = json::array();
+        json active_params = json::object();
+        json commented_params = json::object();
+        std::string config_raw;
+
+        std::ifstream cfg(config_path);
+        if (cfg.is_open()) {
+            std::string current_section;
+            std::string line;
+            std::ostringstream raw_oss;
+
+            while (std::getline(cfg, line)) {
+                raw_oss << line << "\n";
+
+                // Trim
+                std::string trimmed = line;
+                while (!trimmed.empty() && (trimmed.front() == ' ' || trimmed.front() == '\t'))
+                    trimmed.erase(trimmed.begin());
+                while (!trimmed.empty() && (trimmed.back() == ' ' || trimmed.back() == '\t' ||
+                       trimmed.back() == '\r' || trimmed.back() == '\n'))
+                    trimmed.pop_back();
+
+                if (trimmed.empty()) continue;
+
+                // Section header: [default]
+                if (trimmed.front() == '[' && trimmed.back() == ']') {
+                    current_section = trimmed.substr(1, trimmed.size() - 2);
+                    continue;
+                }
+
+                // Section comment: ##########...##########
+                if (trimmed.size() > 10 && trimmed.substr(0, 10) == "##########") {
+                    // Extract section name from between ##########
+                    auto content = trimmed;
+                    while (!content.empty() && content.front() == '#') content.erase(content.begin());
+                    while (!content.empty() && content.back() == '#') content.pop_back();
+                    while (!content.empty() && content.front() == ' ') content.erase(content.begin());
+                    while (!content.empty() && content.back() == ' ') content.pop_back();
+                    if (!content.empty()) {
+                        current_section = content;
+                        bool found = false;
+                        for (auto& s : config_sections) {
+                            if (s.get<std::string>() == current_section) { found = true; break; }
+                        }
+                        if (!found) config_sections.push_back(current_section);
+                    }
+                    continue;
+                }
+
+                // Commented parameter: # key=value
+                if (trimmed.front() == '#') {
+                    auto param = trimmed.substr(1);
+                    while (!param.empty() && param.front() == ' ') param.erase(param.begin());
+                    auto eq_pos = param.find('=');
+                    if (eq_pos != std::string::npos && eq_pos > 0) {
+                        auto key = param.substr(0, eq_pos);
+                        auto val = param.substr(eq_pos + 1);
+                        commented_params[key] = val;
+                    }
+                    continue;
+                }
+
+                // Active parameter: key=value
+                auto eq_pos = trimmed.find('=');
+                if (eq_pos != std::string::npos && eq_pos > 0) {
+                    auto key = trimmed.substr(0, eq_pos);
+                    auto val = trimmed.substr(eq_pos + 1);
+                    active_params[key] = val;
+                }
+            }
+            config_raw = raw_oss.str();
+        }
+
+        data["config_exists"] = cfg.is_open() || fs::exists(config_path, ec);
+        data["config_sections"] = config_sections;
+        data["active_params"] = active_params;
+        data["commented_params"] = commented_params;
+        data["config_raw"] = config_raw;
+
+        // DTB/DTBO files (root + overlays/ subdirectory)
+        json dtb_files = json::array();
+        if (fs::exists(boot_dir, ec)) {
+            auto scan_dtb = [&](const std::string& dir, const std::string& prefix) {
+                std::error_code ec2;
+                if (!fs::exists(dir, ec2)) return;
+                for (auto& entry : fs::directory_iterator(dir, ec2)) {
+                    auto ext = entry.path().extension().string();
+                    if (ext == ".dtb" || ext == ".dtbo") {
+                        dtb_files.push_back(prefix + entry.path().filename().string());
+                    }
+                }
+            };
+            scan_dtb(boot_dir, "");
+            scan_dtb(boot_dir + "/overlays", "overlays/");
+            std::sort(dtb_files.begin(), dtb_files.end());
+        }
+        data["dtb_files"] = dtb_files;
+
+        // boot_fitconfig from active_params (board type identifier)
+        if (active_params.contains("boot_fitconfig")) {
+            data["board_type"] = active_params["boot_fitconfig"];
+        } else {
+            data["board_type"] = data["board_model"];
+        }
+
+        auto r = ApiResponse::ok(data);
+        res.set_content(r.toJson().dump(), "application/json");
+    });
+
+    // ---- Device Tree runtime info (overrides / symbols / top nodes) ----
+    server_->Get("/api/system/device-tree", [](const httplib::Request&, httplib::Response& res) {
+        json data = json::object();
+        namespace fs = std::filesystem;
+        std::error_code ec;
+
+        const std::string dt_base = "/sys/firmware/devicetree/base";
+
+        // Helper: read binary file contents
+        auto readBinaryFile = [](const std::string& path) -> std::vector<uint8_t> {
+            std::ifstream f(path, std::ios::binary);
+            if (!f.is_open()) return {};
+            return std::vector<uint8_t>(std::istreambuf_iterator<char>(f), {});
+        };
+
+        // Helper: read DT string property (may contain embedded NULs for multi-string)
+        auto readStringProp = [&](const std::string& path) -> std::string {
+            auto bytes = readBinaryFile(path);
+            if (bytes.empty()) return "";
+            // DT multi-strings are NUL-separated; replace embedded NULs with ", "
+            std::string result;
+            result.reserve(bytes.size());
+            for (size_t i = 0; i < bytes.size(); ++i) {
+                uint8_t b = bytes[i];
+                if (b == 0) {
+                    if (i + 1 < bytes.size() && bytes[i + 1] != 0)
+                        result += ", ";
+                } else if (b >= 0x20 && b < 0x7f) {
+                    result += static_cast<char>(b);
+                } else {
+                    // Non-printable: skip or replace
+                }
+            }
+            while (!result.empty() && (result.back() == ' ' || result.back() == ','))
+                result.pop_back();
+            return result;
+        };
+
+        // Helper: bytes to hex string
+        auto toHex = [](const std::vector<uint8_t>& v) -> std::string {
+            std::ostringstream oss;
+            for (auto b : v) oss << std::hex << std::setw(2) << std::setfill('0') << (int)b;
+            return oss.str();
+        };
+
+        // 1. Read __overrides__
+        json overrides = json::array();
+        std::string ovr_dir = dt_base + "/__overrides__";
+        if (fs::exists(ovr_dir, ec) && fs::is_directory(ovr_dir, ec)) {
+            for (auto& entry : fs::directory_iterator(ovr_dir, ec)) {
+                if (!entry.is_regular_file(ec)) continue;
+                auto name = entry.path().filename().string();
+                if (name == "name") continue;
+
+                auto bytes = readBinaryFile(entry.path().string());
+                json item = {{"name", name}, {"raw_hex", toHex(bytes)}};
+
+                // Parse override entries: each is 4-byte phandle (BE) + NUL-terminated prop string
+                // Multiple targets may be concatenated
+                json targets = json::array();
+                size_t pos = 0;
+                while (pos + 4 < bytes.size()) {
+                    uint32_t ph = ((uint32_t)bytes[pos] << 24) | ((uint32_t)bytes[pos+1] << 16) |
+                                  ((uint32_t)bytes[pos+2] << 8) | (uint32_t)bytes[pos+3];
+                    pos += 4;
+                    // Read NUL-terminated string
+                    std::string prop_spec;
+                    while (pos < bytes.size() && bytes[pos] != 0) {
+                        char c = static_cast<char>(bytes[pos]);
+                        if (c >= 0x20 && c < 0x7f)
+                            prop_spec += c;
+                        ++pos;
+                    }
+                    if (pos < bytes.size()) ++pos; // skip NUL
+
+                    json target = {{"phandle", ph}};
+                    auto colon = prop_spec.find(':');
+                    if (colon != std::string::npos) {
+                        target["target_prop"] = prop_spec.substr(0, colon);
+                        target["offset"] = prop_spec.substr(colon + 1);
+                    } else {
+                        target["target_prop"] = prop_spec;
+                        target["offset"] = "";
+                    }
+                    targets.push_back(target);
+                }
+
+                // Use first target for primary fields
+                if (!targets.empty()) {
+                    item["phandle"] = targets[0].value("phandle", 0u);
+                    item["target_prop"] = targets[0].value("target_prop", "");
+                    item["offset"] = targets[0].value("offset", "");
+                    item["prop_spec"] = item["target_prop"].get<std::string>() +
+                        (item["offset"].get<std::string>().empty() ? "" : ":" + item["offset"].get<std::string>());
+                }
+                item["targets"] = targets;
+                item["target_count"] = (int)targets.size();
+                overrides.push_back(item);
+            }
+            std::sort(overrides.begin(), overrides.end(),
+                [](const json& a, const json& b) { return a.value("name","") < b.value("name",""); });
+        }
+        data["overrides"] = overrides;
+        data["overrides_count"] = overrides.size();
+
+        // 2. Read __symbols__
+        json symbols = json::object();
+        std::string sym_dir = dt_base + "/__symbols__";
+        if (fs::exists(sym_dir, ec) && fs::is_directory(sym_dir, ec)) {
+            for (auto& entry : fs::directory_iterator(sym_dir, ec)) {
+                if (!entry.is_regular_file(ec)) continue;
+                auto name = entry.path().filename().string();
+                if (name == "name") continue;
+                symbols[name] = readStringProp(entry.path().string());
+            }
+        }
+        data["symbols"] = symbols;
+
+        // Build phandle → path lookup from symbols
+        // We need to scan the tree to map phandle values to node paths
+        // Use __symbols__ for label→path, then read phandle from each node
+        std::unordered_map<uint32_t, std::string> phandle_map;
+        for (auto& [label, path_val] : symbols.items()) {
+            std::string node_path = dt_base + path_val.get<std::string>();
+            std::string ph_file = node_path + "/phandle";
+            if (fs::exists(ph_file, ec)) {
+                auto ph_bytes = readBinaryFile(ph_file);
+                if (ph_bytes.size() >= 4) {
+                    uint32_t ph = ((uint32_t)ph_bytes[0] << 24) | ((uint32_t)ph_bytes[1] << 16) |
+                                   ((uint32_t)ph_bytes[2] << 8)  | (uint32_t)ph_bytes[3];
+                    phandle_map[ph] = path_val.get<std::string>();
+                }
+            }
+        }
+
+        // Resolve phandle → path in overrides (all targets)
+        for (auto& item : overrides) {
+            if (item.contains("targets")) {
+                for (auto& t : item["targets"]) {
+                    uint32_t ph = t.value("phandle", 0u);
+                    auto it = phandle_map.find(ph);
+                    if (it != phandle_map.end()) {
+                        t["target_path"] = it->second;
+                    } else {
+                        std::ostringstream o; o << "(phandle 0x" << std::hex << ph << ")";
+                        t["target_path"] = o.str();
+                    }
+                }
+            }
+            // Primary target_path from first target
+            if (item.contains("targets") && !item["targets"].empty()) {
+                item["target_path"] = item["targets"][0].value("target_path", "");
+            }
+        }
+        data["overrides"] = overrides;
+
+        // 3. Read top-level nodes (depth 1) with key properties
+        json top_nodes = json::array();
+        if (fs::exists(dt_base, ec) && fs::is_directory(dt_base, ec)) {
+            for (auto& entry : fs::directory_iterator(dt_base, ec)) {
+                if (!entry.is_directory(ec)) continue;
+                auto name = entry.path().filename().string();
+                if (name.front() == '_') continue; // skip __overrides__, __symbols__, etc.
+
+                json node = {{"name", name}, {"path", "/" + name}};
+
+                auto compat_path = entry.path().string() + "/compatible";
+                if (fs::exists(compat_path, ec)) {
+                    node["compatible"] = readStringProp(compat_path);
+                }
+                auto status_path = entry.path().string() + "/status";
+                if (fs::exists(status_path, ec)) {
+                    node["status"] = readStringProp(status_path);
+                }
+
+                // Children (depth 2)
+                json children = json::array();
+                for (auto& child : fs::directory_iterator(entry.path(), ec)) {
+                    if (!child.is_directory(ec)) continue;
+                    auto cname = child.path().filename().string();
+                    if (cname.front() == '_') continue;
+
+                    json cnode = {{"name", cname}};
+                    auto cc = child.path().string() + "/compatible";
+                    if (fs::exists(cc, ec)) cnode["compatible"] = readStringProp(cc);
+                    auto cs = child.path().string() + "/status";
+                    if (fs::exists(cs, ec)) cnode["status"] = readStringProp(cs);
+                    children.push_back(cnode);
+                }
+                if (!children.empty()) {
+                    std::sort(children.begin(), children.end(),
+                        [](const json& a, const json& b) { return a.value("name","") < b.value("name",""); });
+                    node["children"] = children;
+                }
+
+                top_nodes.push_back(node);
+            }
+            std::sort(top_nodes.begin(), top_nodes.end(),
+                [](const json& a, const json& b) { return a.value("name","") < b.value("name",""); });
+        }
+        data["top_nodes"] = top_nodes;
+
+        auto r = ApiResponse::ok(data);
+        res.set_content(r.toJson().dump(), "application/json");
+    });
+
+    // ---- DTBO file detail (decompile with dtc) ----
+    server_->Get("/api/system/dtbo-detail", [](const httplib::Request& req, httplib::Response& res) {
+        auto file_param = req.get_param_value("file");
+        if (file_param.empty()) {
+            auto r = ApiResponse::error(400, "Missing 'file' parameter");
+            res.set_content(r.toJson().dump(), "application/json");
+            return;
+        }
+
+        // Security: only allow .dtbo files under /boot/firmware/
+        if (file_param.find("..") != std::string::npos ||
+            file_param.find('/') == 0 ||
+            (file_param.substr(file_param.size() - 5) != ".dtbo" &&
+             file_param.substr(file_param.size() - 4) != ".dtb")) {
+            auto r = ApiResponse::error(400, "Invalid file path");
+            res.set_content(r.toJson().dump(), "application/json");
+            return;
+        }
+
+        std::string full_path = "/boot/firmware/" + file_param;
+        namespace fs = std::filesystem;
+        std::error_code ec;
+        if (!fs::exists(full_path, ec)) {
+            auto r = ApiResponse::error(404, "File not found: " + file_param);
+            res.set_content(r.toJson().dump(), "application/json");
+            return;
+        }
+
+        json data = json::object();
+        data["file"] = file_param;
+        data["size"] = (int64_t)fs::file_size(full_path, ec);
+
+        // Try decompile with dtc
+        std::string cmd = "dtc -I dtb -O dts " + full_path + " 2>&1";
+        std::string dts_content = execCommand(cmd.c_str());
+
+        if (dts_content.empty() || dts_content.find("Error") != std::string::npos) {
+            data["dts_available"] = false;
+            data["dts_error"] = dts_content.empty() ? "dtc command not found or failed" : dts_content;
+            data["dts_content"] = "";
+        } else {
+            data["dts_available"] = true;
+            data["dts_content"] = dts_content;
+        }
+
+        // Extract fragments summary from dts_content
+        json fragments = json::array();
+        if (!dts_content.empty()) {
+            std::istringstream iss(dts_content);
+            std::string line;
+            std::string current_fragment;
+            while (std::getline(iss, line)) {
+                auto trimmed = line;
+                while (!trimmed.empty() && (trimmed.front() == ' ' || trimmed.front() == '\t'))
+                    trimmed.erase(trimmed.begin());
+
+                // Detect fragment node
+                if (trimmed.find("fragment@") != std::string::npos ||
+                    trimmed.find("fragment-") != std::string::npos) {
+                    auto brace = trimmed.find('{');
+                    if (brace != std::string::npos) {
+                        current_fragment = trimmed.substr(0, brace);
+                        while (!current_fragment.empty() && current_fragment.back() == ' ')
+                            current_fragment.pop_back();
+                    } else {
+                        current_fragment = trimmed;
+                    }
+                }
+
+                // Detect target
+                if (!current_fragment.empty()) {
+                    if (trimmed.find("target-path") != std::string::npos ||
+                        trimmed.find("target =") != std::string::npos ||
+                        trimmed.find("target=") != std::string::npos) {
+                        json frag = {{"fragment", current_fragment}, {"target_line", trimmed}};
+                        fragments.push_back(frag);
+                    }
+                }
+            }
+        }
+        data["fragments"] = fragments;
+
+        auto r = ApiResponse::ok(data);
+        res.set_content(r.toJson().dump(), "application/json");
+    });
+
+    // ---- Device Tree modular view (nodes grouped by functional module) ----
+    server_->Get("/api/system/device-tree-modules", [](const httplib::Request&, httplib::Response& res) {
+        namespace fs = std::filesystem;
+        std::error_code ec;
+        const std::string dt_base = "/sys/firmware/devicetree/base";
+
+        // Safe binary file read
+        auto readBin = [](const std::string& p) -> std::vector<uint8_t> {
+            std::ifstream f(p, std::ios::binary);
+            if (!f.is_open()) return {};
+            return std::vector<uint8_t>(std::istreambuf_iterator<char>(f), {});
+        };
+        // Safe string property read (handles multi-string NUL separators)
+        auto readStr = [&](const std::string& p) -> std::string {
+            auto bytes = readBin(p);
+            if (bytes.empty()) return "";
+            std::string r;
+            for (size_t i = 0; i < bytes.size(); ++i) {
+                uint8_t b = bytes[i];
+                if (b == 0) { if (i + 1 < bytes.size() && bytes[i+1] != 0) r += ", "; }
+                else if (b >= 0x20 && b < 0x7f) r += static_cast<char>(b);
+            }
+            while (!r.empty() && (r.back() == ' ' || r.back() == ',')) r.pop_back();
+            return r;
+        };
+
+        // Module classification rules
+        struct ModuleRule {
+            std::string name;
+            std::string color;
+            std::vector<std::string> compat_keywords;
+            std::vector<std::string> path_keywords;
+            std::vector<std::string> override_params;
+            std::vector<std::string> dtbo_keywords;
+        };
+        std::vector<ModuleRule> rules = {
+            {"CPU / 频率", "blue", {"cpufreq"}, {"cpus", "cpu@", "tps-cpufreq"},
+             {"cpu_freq", "cpu_max_freq", "cpu_min_freq", "over_voltage", "temp_limit"}, {}},
+            {"内存预留", "purple", {}, {"reserved-memory"},
+             {"tacosys_mem_addr", "tacosys_mem_size", "npu_mem_addr", "npu_mem_size",
+              "total_mem", "npumem", "tacosysmem"}, {"reserved_mem"}},
+            {"SD / MMC", "green", {"sdhci", "mmc"}, {},
+             {"sd_bus_width", "sd_clk_freq", "emmc_bus_width", "emmc_clk_freq"}, {"sd_sdr104", "emmc_hs200"}},
+            {"网络 / 以太网", "cyan", {"ethernet", "gmac", "dwmac"}, {},
+             {"eth1_tx_delay", "eth1_rx_delay", "eth1_mac", "eth1_max_speed", "eth1_reset",
+              "eth2_mac", "eth2_max_speed", "eth2_rx_delay", "eth2_tx_delay"}, {}},
+            {"NPU", "red", {"npu", "vip", "galcore"}, {},
+             {"npu_freq", "npu_core0_r_ratio", "npu_core0_w_ratio", "npu_core1_r_ratio",
+              "npu_core1_w_ratio", "npu_dual_bus", "npu_volt0", "npu_volt1"}, {}},
+            {"显示 / IDS", "pink", {"ids", "display", "hdmi", "dss"}, {},
+             {}, {"hdmi_60fps", "lcd_1024x600"}},
+            {"蓝牙 / WiFi", "orange", {"bluetooth", "wireless", "wifi", "wlan"}, {},
+             {"bt", "bt_baudrate", "wifi"}, {}},
+            {"UART / 串口", "gray", {"serial", "uart", "ns16550"}, {},
+             {"uart0", "uart2", "uart5", "uart9", "uart11", "console_size"}, {"uart11_overlay"}},
+            {"SPI / Flash", "yellow", {"spi", "qspi"}, {},
+             {"qspi", "spi2"}, {"flash_overlay"}},
+            {"PWM", "teal", {"pwm"}, {"pwm@"},
+             {"pwm2", "pwm3", "pwm4", "pwm5", "pwm6", "pwm7"}, {"pwm4_overlay"}},
+            {"I2C", "indigo", {"i2c"}, {},
+             {"i2c1", "i2c2", "i2c3", "i2c5", "i2c7"}, {}},
+            {"看门狗", "brown", {"wdt", "watchdog"}, {},
+             {"watchdog0", "watchdog1"}, {}},
+            {"蜂鸣器 / LED / 风扇", "lime", {"buzzer", "beeper", "leds", "fan", "gpio-fan"}, {"fan", "leds"},
+             {"boot_disable_fan", "fan_maxpwm", "fan_minpwm", "fan_temp1", "fan_temp1_hyst",
+              "fan_temp2", "fan_temp2_hyst", "fan_temp3", "fan_temp3_hyst",
+              "fan_temp4", "fan_temp4_hyst", "fan_temp5", "fan_temp5_hyst",
+              "buzzer_panic_beep_time", "buzzer_panic_interval_time", "buzzer_panic_period",
+              "buzzer_power_off_beep_time", "buzzer_power_off_period",
+              "buzzer_start_beep_period", "buzzer_start_beep_time",
+              "act_led_trigger"}, {}},
+            {"Ramoops / 调试", "gray", {"ramoops"}, {"ramoops"},
+             {"base_addr", "record_size", "total_size", "ramoops"}, {}},
+            {"音频 / I2S", "violet", {"i2s", "audio", "sound"}, {},
+             {}, {"i2s_mode_overlay"}},
+            {"SATA", "steel", {"sata", "ahci"}, {},
+             {"sata"}, {}},
+            {"EEPROM", "amber", {"eeprom", "at24"}, {},
+             {"eeprom_write_protect"}, {}},
+            {"OneWire", "lime", {"onewire", "w1"}, {},
+             {}, {"onewire_overlay"}},
+        };
+
+        // Format a binary property value for display
+        auto formatPropValue = [&](const std::string& prop_name, const std::vector<uint8_t>& bytes) -> std::string {
+            if (bytes.empty()) return "";
+            // Try to interpret as NUL-terminated string(s)
+            bool is_string = true;
+            bool has_printable = false;
+            for (size_t i = 0; i < bytes.size(); ++i) {
+                uint8_t b = bytes[i];
+                if (b == 0) continue;
+                if (b >= 0x20 && b < 0x7f) { has_printable = true; }
+                else { is_string = false; break; }
+            }
+            if (is_string && has_printable) {
+                return readStr(prop_name); // reuse readStr which handles multi-string
+            }
+            // Numeric: 4-byte big-endian integers
+            if (bytes.size() == 4) {
+                uint32_t v = ((uint32_t)bytes[0]<<24)|((uint32_t)bytes[1]<<16)|
+                             ((uint32_t)bytes[2]<<8)|(uint32_t)bytes[3];
+                return "0x" + ([](uint32_t n) {
+                    char buf[16]; snprintf(buf, sizeof(buf), "%08x", n); return std::string(buf);
+                })(v) + " (" + std::to_string(v) + ")";
+            }
+            if (bytes.size() == 8) {
+                uint64_t v = 0;
+                for (int i = 0; i < 8; ++i) v = (v << 8) | bytes[i];
+                char buf[32]; snprintf(buf, sizeof(buf), "0x%016lx", (unsigned long)v);
+                return std::string(buf);
+            }
+            // Fallback: hex dump (up to 32 bytes)
+            std::string hex;
+            for (size_t i = 0; i < std::min(bytes.size(), (size_t)32); ++i) {
+                char buf[4]; snprintf(buf, sizeof(buf), "%02x ", bytes[i]);
+                hex += buf;
+            }
+            if (bytes.size() > 32) hex += "...";
+            return hex;
+        };
+
+        // Read all properties of a device tree node directory
+        auto readNodeProps = [&](const std::string& dir_path) -> json {
+            json props = json::array();
+            if (!fs::exists(dir_path, ec)) return props;
+            for (auto& entry : fs::directory_iterator(dir_path, ec)) {
+                if (!entry.is_regular_file(ec)) continue;
+                auto fname = entry.path().filename().string();
+                if (fname == "name") continue; // redundant
+                auto bytes = readBin(entry.path().string());
+                std::string value = formatPropValue(entry.path().string(), bytes);
+                props.push_back({{"key", fname}, {"value", value}, {"size", (int)bytes.size()}});
+            }
+            // Sort by key name
+            std::sort(props.begin(), props.end(), [](const json& a, const json& b) {
+                return a["key"].get<std::string>() < b["key"].get<std::string>();
+            });
+            return props;
+        };
+
+        // Collect all DTB nodes (depth 2) with full properties
+        struct DtNode {
+            std::string path;
+            std::string name;
+            std::string fs_path; // filesystem path for lazy property reading
+            std::string compatible;
+            std::string status;
+            json properties;
+            int assigned_module = -1;
+        };
+        std::vector<DtNode> all_nodes;
+
+        auto scanDir = [&](const std::string& base_path, const std::string& prefix) {
+            if (!fs::exists(base_path, ec) || !fs::is_directory(base_path, ec)) return;
+            for (auto& entry : fs::directory_iterator(base_path, ec)) {
+                if (!entry.is_directory(ec)) continue;
+                auto name = entry.path().filename().string();
+                if (name.front() == '_' || name.front() == '#') continue;
+
+                DtNode node;
+                node.name = name;
+                node.path = prefix + name;
+                node.fs_path = entry.path().string();
+
+                auto cp = entry.path().string() + "/compatible";
+                if (fs::exists(cp, ec)) node.compatible = readStr(cp);
+                auto sp = entry.path().string() + "/status";
+                if (fs::exists(sp, ec)) node.status = readStr(sp);
+                node.properties = readNodeProps(entry.path().string());
+
+                all_nodes.push_back(node);
+
+                // Scan children (depth 2 under soc, cpus, reserved-memory, etc.)
+                for (auto& child : fs::directory_iterator(entry.path(), ec)) {
+                    if (!child.is_directory(ec)) continue;
+                    auto cname = child.path().filename().string();
+                    if (cname.front() == '_' || cname.front() == '#') continue;
+
+                    DtNode cnode;
+                    cnode.name = cname;
+                    cnode.path = prefix + name + "/" + cname;
+                    cnode.fs_path = child.path().string();
+                    auto ccp = child.path().string() + "/compatible";
+                    if (fs::exists(ccp, ec)) cnode.compatible = readStr(ccp);
+                    auto csp = child.path().string() + "/status";
+                    if (fs::exists(csp, ec)) cnode.status = readStr(csp);
+                    cnode.properties = readNodeProps(child.path().string());
+                    all_nodes.push_back(cnode);
+                }
+            }
+        };
+        scanDir(dt_base, "/");
+
+        // Classify nodes into modules
+        auto matchesAny = [](const std::string& haystack, const std::vector<std::string>& needles) {
+            for (auto& n : needles)
+                if (haystack.find(n) != std::string::npos) return true;
+            return false;
+        };
+
+        for (auto& node : all_nodes) {
+            std::string lpath = node.path;
+            std::transform(lpath.begin(), lpath.end(), lpath.begin(), ::tolower);
+            std::string lcompat = node.compatible;
+            std::transform(lcompat.begin(), lcompat.end(), lcompat.begin(), ::tolower);
+
+            for (size_t i = 0; i < rules.size(); ++i) {
+                if (matchesAny(lcompat, rules[i].compat_keywords) ||
+                    matchesAny(lpath, rules[i].path_keywords)) {
+                    node.assigned_module = (int)i;
+                    break;
+                }
+            }
+        }
+
+        // Read __overrides__
+        struct OverrideInfo {
+            std::string name;
+            std::string target_path;
+            std::string target_prop;
+        };
+        std::vector<OverrideInfo> all_overrides;
+
+        // Build phandle map from __symbols__
+        std::unordered_map<uint32_t, std::string> ph_map;
+        std::string sym_dir = dt_base + "/__symbols__";
+        if (fs::exists(sym_dir, ec)) {
+            for (auto& entry : fs::directory_iterator(sym_dir, ec)) {
+                if (!entry.is_regular_file(ec) || entry.path().filename() == "name") continue;
+                std::string sympath = readStr(entry.path().string());
+                std::string ph_file = dt_base + sympath + "/phandle";
+                if (fs::exists(ph_file, ec)) {
+                    auto phb = readBin(ph_file);
+                    if (phb.size() >= 4) {
+                        uint32_t ph = ((uint32_t)phb[0]<<24)|((uint32_t)phb[1]<<16)|
+                                      ((uint32_t)phb[2]<<8)|(uint32_t)phb[3];
+                        ph_map[ph] = sympath;
+                    }
+                }
+            }
+        }
+
+        std::string ovr_dir = dt_base + "/__overrides__";
+        if (fs::exists(ovr_dir, ec)) {
+            for (auto& entry : fs::directory_iterator(ovr_dir, ec)) {
+                if (!entry.is_regular_file(ec) || entry.path().filename() == "name") continue;
+                auto bytes = readBin(entry.path().string());
+                size_t pos = 0;
+                while (pos + 4 < bytes.size()) {
+                    uint32_t ph = ((uint32_t)bytes[pos]<<24)|((uint32_t)bytes[pos+1]<<16)|
+                                  ((uint32_t)bytes[pos+2]<<8)|(uint32_t)bytes[pos+3];
+                    pos += 4;
+                    std::string prop;
+                    while (pos < bytes.size() && bytes[pos] != 0) {
+                        char c = static_cast<char>(bytes[pos]);
+                        if (c >= 0x20 && c < 0x7f) prop += c;
+                        ++pos;
+                    }
+                    if (pos < bytes.size()) ++pos;
+
+                    OverrideInfo oi;
+                    oi.name = entry.path().filename().string();
+                    auto it = ph_map.find(ph);
+                    oi.target_path = (it != ph_map.end()) ? it->second : "";
+                    auto colon = prop.find(':');
+                    oi.target_prop = (colon != std::string::npos) ? prop.substr(0, colon) : prop;
+                    all_overrides.push_back(oi);
+                    break; // only first target for classification
+                }
+            }
+        }
+
+        // Read active config.txt params
+        std::unordered_map<std::string, std::string> active_params;
+        std::string config_path = "/boot/firmware/config.txt";
+        {
+            std::ifstream cf(config_path);
+            if (cf.is_open()) {
+                std::string line;
+                bool in_section = false;
+                while (std::getline(cf, line)) {
+                    auto trimmed = line;
+                    while (!trimmed.empty() && (trimmed.front() == ' ' || trimmed.front() == '\t'))
+                        trimmed.erase(trimmed.begin());
+                    if (trimmed.empty() || trimmed.front() == '#') continue;
+                    if (trimmed.front() == '[') { in_section = true; continue; }
+                    auto eq = trimmed.find('=');
+                    if (eq != std::string::npos) {
+                        auto key = trimmed.substr(0, eq);
+                        auto val = trimmed.substr(eq + 1);
+                        while (!key.empty() && key.back() == ' ') key.pop_back();
+                        while (!val.empty() && val.front() == ' ') val.erase(val.begin());
+                        active_params[key] = val;
+                    }
+                }
+            }
+        }
+
+        // Collect available DTBO files
+        std::vector<std::string> dtbo_files;
+        std::string overlay_dir = "/boot/firmware/overlays";
+        if (fs::exists(overlay_dir, ec)) {
+            for (auto& entry : fs::directory_iterator(overlay_dir, ec)) {
+                if (entry.is_regular_file(ec)) {
+                    auto fname = entry.path().filename().string();
+                    if (fname.size() > 5 && fname.substr(fname.size()-5) == ".dtbo")
+                        dtbo_files.push_back(fname);
+                }
+            }
+            std::sort(dtbo_files.begin(), dtbo_files.end());
+        }
+
+        // Active dtoverlay from config.txt
+        std::string active_dtoverlay = active_params.count("dtoverlay") ? active_params["dtoverlay"] : "";
+
+        // Build module JSON
+        json modules = json::array();
+        std::set<int> used_node_indices;
+
+        for (size_t mi = 0; mi < rules.size(); ++mi) {
+            auto& rule = rules[mi];
+            json mod = json::object();
+            mod["name"] = rule.name;
+            mod["color"] = rule.color;
+
+            // Nodes in this module
+            json mnodes = json::array();
+            for (size_t ni = 0; ni < all_nodes.size(); ++ni) {
+                if (all_nodes[ni].assigned_module == (int)mi) {
+                    used_node_indices.insert((int)ni);
+                    json n = {{"path", all_nodes[ni].path},
+                              {"compatible", all_nodes[ni].compatible},
+                              {"status", all_nodes[ni].status},
+                              {"properties", all_nodes[ni].properties}};
+                    mnodes.push_back(n);
+                }
+            }
+            mod["nodes"] = mnodes;
+
+            // Overrides for this module
+            json movrs = json::array();
+            for (auto& param : rule.override_params) {
+                json ov = {{"param", param}, {"active", active_params.count(param) > 0}};
+                if (active_params.count(param)) ov["value"] = active_params[param];
+                else ov["value"] = nullptr;
+
+                // Find target info from __overrides__
+                for (auto& oi : all_overrides) {
+                    if (oi.name == param) {
+                        ov["target_path"] = oi.target_path;
+                        ov["target_prop"] = oi.target_prop;
+                        break;
+                    }
+                }
+                movrs.push_back(ov);
+            }
+            mod["overrides"] = movrs;
+
+            // DTBOs for this module
+            json mdtbos = json::array();
+            for (auto& dtbo : dtbo_files) {
+                std::string ldtbo = dtbo;
+                std::transform(ldtbo.begin(), ldtbo.end(), ldtbo.begin(), ::tolower);
+                if (matchesAny(ldtbo, rule.dtbo_keywords)) {
+                    bool is_active = (active_dtoverlay == dtbo);
+                    mdtbos.push_back({{"file", dtbo}, {"active", is_active}});
+                }
+            }
+            mod["dtbos"] = mdtbos;
+
+            // Summary stats
+            int active_count = 0;
+            for (auto& ov : movrs) if (ov.value("active", false)) active_count++;
+            mod["active_overrides"] = active_count;
+            mod["active_dtbos"] = (int)std::count_if(mdtbos.begin(), mdtbos.end(),
+                [](const json& d) { return d.value("active", false); });
+
+            // Only include module if it has nodes, overrides, or dtbos
+            if (!mnodes.empty() || !movrs.empty() || !mdtbos.empty()) {
+                modules.push_back(mod);
+            }
+        }
+
+        // Uncategorized nodes
+        json uncat_nodes = json::array();
+        for (size_t ni = 0; ni < all_nodes.size(); ++ni) {
+            if (used_node_indices.find((int)ni) == used_node_indices.end()) {
+                json n = {{"path", all_nodes[ni].path},
+                          {"compatible", all_nodes[ni].compatible},
+                          {"status", all_nodes[ni].status},
+                          {"properties", all_nodes[ni].properties}};
+                uncat_nodes.push_back(n);
+            }
+        }
+        if (!uncat_nodes.empty()) {
+            modules.push_back({
+                {"name", "其他"},
+                {"color", "gray"},
+                {"nodes", uncat_nodes},
+                {"overrides", json::array()},
+                {"dtbos", json::array()},
+                {"active_overrides", 0},
+                {"active_dtbos", 0}
+            });
+        }
+
+        json data = json::object();
+        data["modules"] = modules;
+        data["total_nodes"] = (int)all_nodes.size();
+        data["total_overrides"] = (int)all_overrides.size();
+        data["active_dtoverlay"] = active_dtoverlay;
+        data["dtbo_files"] = dtbo_files;
+
+        auto r = ApiResponse::ok(data);
+        res.set_content(r.toJson().dump(), "application/json");
+    });
 }
 
 // ============================================================
@@ -1216,6 +2095,107 @@ void WebServer::registerConsumerRoutes() {
 // ============================================================
 
 void WebServer::registerPreviewRoutes() {
+    // === On-demand preview sessions (spec §6) ===
+    server_->Post("/api/preview/sessions",
+        [this](const httplib::Request& req, httplib::Response& res) {
+            try {
+                auto body = json::parse(req.body);
+                const std::string worker_id = body.value("worker_id", "");
+                if (worker_id.empty()) {
+                    jsonResponse(res, 400, ApiResponse::error(
+                        ErrorCode::PARAM_ERROR, "worker_id 必填"));
+                    return;
+                }
+                if (!worker_manager_->exists(worker_id)) {
+                    jsonResponse(res, 404, ApiResponse::error(
+                        ErrorCode::NOT_FOUND, "Worker 不存在"));
+                    return;
+                }
+                if (worker_manager_->getState(worker_id) != WorkerState::RUNNING) {
+                    jsonResponse(res, 400, ApiResponse::error(
+                        ErrorCode::WORKER_STATE_INVALID,
+                        "Worker 必须处于 RUNNING 才能创建预览会话"));
+                    return;
+                }
+
+                PreviewSessionConfig cfg;
+                cfg.fps = body.value("fps", 15);
+                cfg.quality = body.value("quality", 80);
+                cfg.encoder = body.value("encoder", std::string("jpeg_taco"));
+
+                auto result = preview_session_manager_->startSession(worker_id, cfg);
+                if (!result.ok) {
+                    int api_code = ErrorCode::INTERNAL_ERROR;
+                    if (result.error_code == "ENCODER_RESOURCE_EXHAUSTED") {
+                        api_code = ErrorCode::ENCODER_RESOURCE_EXHAUSTED;
+                    } else if (result.error_code == "CONFIG_CONFLICT") {
+                        api_code = ErrorCode::CONFIG_CONFLICT;
+                    } else if (result.http_status == 400) {
+                        api_code = ErrorCode::PARAM_ERROR;
+                    }
+                    // Prefer machine-readable code in message for HW exhaustion.
+                    const std::string& msg =
+                        result.error_code == "ENCODER_RESOURCE_EXHAUSTED"
+                            ? result.error_code
+                            : (result.error_message.empty()
+                                   ? result.error_code
+                                   : result.error_message);
+                    jsonResponse(res, result.http_status,
+                                 ApiResponse::error(api_code, msg));
+                    return;
+                }
+
+                auto data = preview_session_manager_->getSession(result.session_id);
+                if (data.is_null()) {
+                    // Fallback to result fields (should not happen after ok START).
+                    data = json{
+                        {"session_id", result.session_id},
+                        {"worker_id", result.worker_id},
+                        {"state", "RUNNING"},
+                        {"stream_url", result.stream_url},
+                        {"fps", cfg.fps},
+                        {"quality", cfg.quality},
+                        {"encoder", cfg.encoder},
+                    };
+                }
+                jsonResponse(res, ApiResponse::ok(data));
+            } catch (const json::parse_error&) {
+                jsonResponse(res, 400, ApiResponse::error(
+                    ErrorCode::PARAM_ERROR, "JSON 解析失败"));
+            } catch (const std::exception& e) {
+                jsonResponse(res, 400, ApiResponse::error(
+                    ErrorCode::PARAM_ERROR, e.what()));
+            }
+        });
+
+    server_->Delete(R"(/api/preview/sessions/([^/]+))",
+        [this](const httplib::Request& req, httplib::Response& res) {
+            const std::string session_id = req.matches[1];
+            // Idempotent success per §6.2.
+            preview_session_manager_->stopSession(session_id);
+            jsonResponse(res, ApiResponse::ok(json{
+                {"session_id", session_id},
+                {"state", "STOPPED"},
+            }));
+        });
+
+    server_->Get("/api/preview/sessions",
+        [this](const httplib::Request&, httplib::Response& res) {
+            jsonResponse(res, ApiResponse::ok(
+                preview_session_manager_->listSessions()));
+        });
+
+    server_->Get(R"(/api/preview/sessions/([^/]+))",
+        [this](const httplib::Request& req, httplib::Response& res) {
+            auto data = preview_session_manager_->getSession(req.matches[1]);
+            if (data.is_null()) {
+                jsonResponse(res, 404, ApiResponse::error(
+                    ErrorCode::NOT_FOUND, "Session 不存在"));
+                return;
+            }
+            jsonResponse(res, ApiResponse::ok(data));
+        });
+
     server_->Get(R"(/api/preview/stream/([^/]+))",
         [this](const httplib::Request& req, httplib::Response& res) {
             std::string worker_id = req.matches[1];
@@ -1225,9 +2205,13 @@ void WebServer::registerPreviewRoutes() {
                 return;
             }
 
-            if (!consumer_manager_->hasJpegPreview(worker_id)) {
+            // Prefer on-demand session encoder; legacy static JPEG_PREVIEW still allowed.
+            const bool session_active = preview_session_manager_ &&
+                preview_session_manager_->hasActiveSession(worker_id);
+            const bool legacy_jpeg = consumer_manager_->hasJpegPreview(worker_id);
+            if (!session_active && !legacy_jpeg) {
                 jsonResponse(res, 400, ApiResponse::error(ErrorCode::PREVIEW_UNAVAILABLE,
-                    "Worker 未添加 JPEG_PREVIEW 消费者"));
+                    "无可用预览（请先 POST /api/preview/sessions 或启用 JPEG_PREVIEW）"));
                 return;
             }
 
@@ -1274,6 +2258,12 @@ void WebServer::registerPreviewRoutes() {
         jsonResponse(res, preview_service_->gridInfo(layout));
     });
 
+    // Real stitcher layout (§13.1) — slots from view_slots_, not workers[] order
+    server_->Get("/api/preview/layout",
+        [this](const httplib::Request&, httplib::Response& res) {
+            jsonResponse(res, preview_service_->getLayout());
+        });
+
     server_->Get("/api/preview/fps", [this](const httplib::Request&, httplib::Response& res) {
         jsonResponse(res, ApiResponse::ok(json{{"fps", preview_service_->getTargetFps()}}));
     });
@@ -1281,13 +2271,52 @@ void WebServer::registerPreviewRoutes() {
     server_->Post("/api/preview/fps", [this](const httplib::Request& req, httplib::Response& res) {
         try {
             auto body = json::parse(req.body);
-            int fps = body.value("fps", 15);
+            int fps = body.value("fps", 25);
             preview_service_->setTargetFps(fps);
             jsonResponse(res, ApiResponse::ok(json{{"fps", fps}}, "帧率已设置"));
         } catch (...) {
             jsonResponse(res, 400, ApiResponse::error(ErrorCode::PARAM_ERROR, "参数错误"));
         }
     });
+
+    // === Channel FPS stats ===
+    server_->Get("/api/preview/channel-fps",
+        [this](const httplib::Request&, httplib::Response& res) {
+            jsonResponse(res, ApiResponse::ok(preview_service_->getChannelFps()));
+        });
+
+    // === Composite config (browser JPEG target_fps/quality; not IDS FPS) ===
+    server_->Get("/api/preview/composite/config",
+        [this](const httplib::Request&, httplib::Response& res) {
+            jsonResponse(res, ApiResponse::ok(json{
+                {"target_fps", preview_service_->getTargetFps()},
+                {"quality", 60},
+            }));
+        });
+
+    server_->Put("/api/preview/composite/config",
+        [this](const httplib::Request& req, httplib::Response& res) {
+            try {
+                auto body = json::parse(req.body);
+                if (body.contains("target_fps")) {
+                    preview_service_->setTargetFps(body["target_fps"].get<int>());
+                }
+                // quality reserved for Phase 3 encoder path; accepted but not applied yet.
+                jsonResponse(res, ApiResponse::ok(json{
+                    {"target_fps", preview_service_->getTargetFps()},
+                    {"quality", body.value("quality", 60)},
+                }, "Composite 配置已更新"));
+            } catch (...) {
+                jsonResponse(res, 400, ApiResponse::error(ErrorCode::PARAM_ERROR, "参数错误"));
+            }
+        });
+
+    // === Composite preview availability check (lightweight JSON, no frame needed) ===
+    server_->Get("/api/preview/composite/available",
+        [this](const httplib::Request&, httplib::Response& res) {
+            bool avail = preview_service_->hasCompositePreview();
+            jsonResponse(res, ApiResponse::ok(json{{"available", avail}}));
+        });
 
     // === Composite preview (stitched multi-channel) ===
     server_->Get("/api/preview/composite/stream",

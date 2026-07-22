@@ -97,6 +97,12 @@
           <el-divider content-position="left">消费者</el-divider>
           <div class="consumer-section">
             <div class="consumer-tags">
+              <el-tooltip v-if="w.preview_defaults"
+                :content="formatPreviewDefaults(w.preview_defaults)" placement="top" :show-after="300">
+                <el-tag class="consumer-tag" type="info">
+                  preview_defaults
+                </el-tag>
+              </el-tooltip>
               <el-tooltip v-for="c in (w.consumers_config || [])" :key="c.id"
                 :content="formatConsumerConfig(c)" placement="top" :show-after="300">
                 <el-tag class="consumer-tag"
@@ -162,7 +168,7 @@
             <el-option value="COMPARE" label="质量分析 (COMPARE)" />
             <el-option value="OPENCV" label="OpenCV (OPENCV)" />
             <el-option value="NPU_INFERENCE" label="NPU 推理 (NPU_INFERENCE)" />
-            <el-option value="JPEG_PREVIEW" label="JPEG 预览 (JPEG_PREVIEW)" />
+            <el-option value="JPEG_PREVIEW" label="JPEG 预览 defaults (legacy JPEG_PREVIEW)" />
             <el-option value="COUNT" label="帧计数 (COUNT)" />
           </el-select>
         </el-form-item>
@@ -221,7 +227,7 @@
               <el-option value="SAVE_RAW" label="SAVE_RAW" />
               <el-option value="SAVE_ENCODED" label="SAVE_ENCODED" />
               <el-option value="NPU_INFERENCE" label="NPU_INFERENCE" />
-              <el-option value="JPEG_PREVIEW" label="JPEG_PREVIEW" />
+              <el-option value="JPEG_PREVIEW" label="JPEG_PREVIEW (legacy→defaults)" />
               <el-option value="OPENCV" label="OPENCV" />
               <el-option value="COUNT" label="COUNT" />
             </el-select>
@@ -307,6 +313,10 @@ function formatConsumerConfig(c: { type: string; config: Record<string, any> }) 
   const entries = Object.entries(c.config || {})
   if (entries.length === 0) return c.type
   return entries.map(([k, v]) => `${k}: ${v}`).join(', ')
+}
+
+function formatPreviewDefaults(d: { target_fps?: number; quality?: number; encoder_name?: string }) {
+  return `fps: ${d.target_fps ?? 15}, quality: ${d.quality ?? 80}, encoder: ${d.encoder_name || 'jpeg_taco'}`
 }
 
 function showEditDialog(w: any) {

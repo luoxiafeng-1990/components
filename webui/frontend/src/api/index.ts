@@ -100,6 +100,12 @@ export interface Worker {
   created_at: string
   consumers: string[]
   consumers_config: Consumer[]
+  /** Single-preview defaults (migrated from static JPEG_PREVIEW). */
+  preview_defaults?: {
+    target_fps: number
+    quality: number
+    encoder_name: string
+  }
 }
 
 export interface WorkerStatus {
@@ -150,6 +156,37 @@ export const consumerApi = {
 
 // ===== Preview API =====
 
+export interface PreviewLayoutSlot {
+  slot: number
+  channel_id: number
+  worker_id: string
+  worker_name: string
+  x: number
+  y: number
+  width: number
+  height: number
+  state: string | null
+}
+
+export interface PreviewLayout {
+  width: number
+  height: number
+  rows: number
+  cols: number
+  view_type: string
+  slots: PreviewLayoutSlot[]
+}
+
+export interface PreviewSession {
+  session_id: string
+  worker_id: string
+  state: string
+  stream_url: string
+  fps?: number
+  quality?: number
+  encoder?: string
+}
+
 export const previewApi = {
   streamUrl: (workerId: string) => `/api/preview/stream/${workerId}`,
   snapshotUrl: (workerId: string, quality = 80) =>
@@ -157,6 +194,23 @@ export const previewApi = {
   grid: (layout = '3x3') => api.get(`/preview/grid?layout=${layout}`),
   compositeStreamUrl: () => `/api/preview/composite/stream`,
   compositeSnapshotUrl: () => `/api/preview/composite/snapshot`,
+  layout: () => api.get<{ code: number; data: PreviewLayout }>('/preview/layout'),
+  createSession: (body: { worker_id: string; fps?: number; quality?: number; encoder?: string }) =>
+    api.post<{ code: number; data: PreviewSession }>('/preview/sessions', body),
+  deleteSession: (sessionId: string) =>
+    api.delete<{ code: number; data: { session_id: string; state: string } }>(
+      `/preview/sessions/${sessionId}`
+    ),
+  listSessions: () => api.get('/preview/sessions'),
+  compositeConfig: () =>
+    api.get<{ code: number; data: { target_fps: number; quality: number } }>(
+      '/preview/composite/config'
+    ),
+  setCompositeConfig: (body: { target_fps?: number; quality?: number }) =>
+    api.put<{ code: number; data: { target_fps: number; quality: number } }>(
+      '/preview/composite/config',
+      body
+    ),
 }
 
 // ===== FileSystem API =====
@@ -233,6 +287,20 @@ metricsApi.interceptors.response.use(
   (error) => Promise.reject(error)
 )
 
+export interface BoardConfig {
+  board_model: string
+  board_compatible: string
+  board_type: string
+  boot_dir_exists: boolean
+  config_exists: boolean
+  config_sections: string[]
+  active_params: Record<string, string>
+  commented_params: Record<string, string>
+  config_raw: string
+  boot_files: { name: string; size?: number; type: string }[]
+  dtb_files: string[]
+}
+
 export const systemApi = {
   info: () => api.get<{ code: number; data: SystemInfo }>('/system/info'),
   metrics: () => metricsApi.get<{ code: number; data: SystemMetrics }>('/system/metrics'),
@@ -249,6 +317,93 @@ export const systemApi = {
   aptSource: () => api.get('/system/apt-source'),
   updateAptSource: (source: string) => slowApi.post('/system/apt-source', { source }),
   dmaMem: () => api.get('/system/dma-memory'),
+  boardConfig: () => api.get<{ code: number; data: BoardConfig }>('/system/board-config'),
+  deviceTree: () => api.get<{ code: number; data: DeviceTreeInfo }>('/system/device-tree'),
+  dtboDetail: (file: string) => api.get<{ code: number; data: DtboDetail }>('/system/dtbo-detail', { params: { file } }),
+  deviceTreeModules: () => api.get<{ code: number; data: DeviceTreeModulesData }>('/system/device-tree-modules'),
+}
+
+export interface OverrideEntry {
+  name: string
+  raw_hex: string
+  phandle?: number
+  prop_spec?: string
+  target_prop?: string
+  offset?: string
+  target_path?: string
+}
+
+export interface DeviceTreeNode {
+  name: string
+  path?: string
+  compatible?: string
+  status?: string
+  children?: DeviceTreeNode[]
+}
+
+export interface DeviceTreeInfo {
+  overrides: OverrideEntry[]
+  overrides_count: number
+  symbols: Record<string, string>
+  top_nodes: DeviceTreeNode[]
+}
+
+export interface DtboFragment {
+  fragment: string
+  target_line: string
+}
+
+export interface DtboDetail {
+  file: string
+  size: number
+  dts_available: boolean
+  dts_content: string
+  dts_error?: string
+  fragments: DtboFragment[]
+}
+
+export interface ModuleOverride {
+  param: string
+  active: boolean
+  value: string | null
+  target_path?: string
+  target_prop?: string
+}
+
+export interface ModuleDtbo {
+  file: string
+  active: boolean
+}
+
+export interface NodeProperty {
+  key: string
+  value: string
+  size: number
+}
+
+export interface ModuleNode {
+  path: string
+  compatible: string
+  status: string
+  properties: NodeProperty[]
+}
+
+export interface DeviceTreeModule {
+  name: string
+  color: string
+  nodes: ModuleNode[]
+  overrides: ModuleOverride[]
+  dtbos: ModuleDtbo[]
+  active_overrides: number
+  active_dtbos: number
+}
+
+export interface DeviceTreeModulesData {
+  modules: DeviceTreeModule[]
+  total_nodes: number
+  total_overrides: number
+  active_dtoverlay: string
+  dtbo_files: string[]
 }
 
 // ===== Config API =====

@@ -150,6 +150,12 @@ public:
      * 获取当前正在显示的Buffer索引
      */
     virtual int getCurrentDisplayBuffer() const = 0;
+
+    /**
+     * Stitcher / multi-channel device channel id after initialize().
+     * Default -1: device does not participate in FrameStitcherService layout.
+     */
+    virtual int getChannelId() const { return -1; }
 };
 
 #endif // IDISPLAYDEVICE_HPP

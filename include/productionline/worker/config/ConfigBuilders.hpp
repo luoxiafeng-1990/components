@@ -70,6 +70,8 @@ public:
     DataSourceConfigBuilder& setSharedPacketSource(std::shared_ptr<IEncodedPacketSource> source);
     DataSourceConfigBuilder& setDeferredCommit(bool deferred);
     DataSourceConfigBuilder& setLoop(bool loop);
+    /// 裸帧文件循环遍数（<1 时按 1 处理）
+    DataSourceConfigBuilder& setLoopCount(int loop_count);
     
     WorkerConfig::DataSourceConfig build() const;
     

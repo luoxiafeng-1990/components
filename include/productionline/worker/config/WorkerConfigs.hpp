@@ -13,6 +13,7 @@
 #include "vendor/contracts/DisplayVendorExtension.hpp"
 #include "vendor/contracts/EncoderVendorExtension.hpp"
 #include "consumptionline/config/ConsumerTypeConfig.hpp"
+#include "consumptionline/core/IBufferConsumer.hpp"
 
 // FFmpeg 头文件（用于 AVRational 和 AVCodecParameters）
 extern "C" {
@@ -62,6 +63,7 @@ struct WorkerConfig {
         int buffer_count = 0;                 ///< BufferPool 的 Buffer 数量（0=使用 kDefaultBufferCount）
         int max_frames = -1;                  ///< 最大读取帧数（-1=无限制）
         bool loop = false;                    ///< true=文件播放结束后自动回到开头循环播放
+        int loop_count = 1;                   ///< 裸帧文件循环遍数（1=只读一遍；供 RawFrameSourceFromFile）
         int raw_frame_width = 0;              ///< 裸帧（YUV）文件的实际宽度（用于 swscale 缩放场景）
         int raw_frame_height = 0;             ///< 裸帧（YUV）文件的实际高度（用于 swscale 缩放场景）
         
@@ -216,6 +218,10 @@ struct WorkerConfig {
     // ========================================
     using ConsumerTypeConfig = ::ConsumerTypeConfig;
     ConsumerTypeConfig consumer_type;
+
+    /// Optional extra consumer appended by WebUI (e.g. PreviewFrameTap).
+    /// Not driven by consume flags; QA/CLI leave this null.
+    std::shared_ptr<consumer::IBufferConsumer> extra_consumer;
     
     WorkerConfig() = default;
     WorkerConfig(const WorkerConfig&) = default;

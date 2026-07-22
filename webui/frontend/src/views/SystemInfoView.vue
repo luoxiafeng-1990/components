@@ -7,6 +7,12 @@
       <el-tab-pane label="系统信息" name="system">
         <SystemTab />
       </el-tab-pane>
+      <el-tab-pane label="板级配置" name="board" lazy>
+        <BoardConfigTab />
+      </el-tab-pane>
+      <el-tab-pane label="设备树" name="dtmodules" lazy>
+        <DeviceTreeModulesTab />
+      </el-tab-pane>
       <el-tab-pane label="CPU" name="cpu" lazy>
         <CpuTab />
       </el-tab-pane>
@@ -41,6 +47,8 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import SystemTab from '../components/hwinfo/SystemTab.vue'
+import BoardConfigTab from '../components/hwinfo/BoardConfigTab.vue'
+import DeviceTreeModulesTab from '../components/hwinfo/DeviceTreeModulesTab.vue'
 import CpuTab from '../components/hwinfo/CpuTab.vue'
 import MemoryTab from '../components/hwinfo/MemoryTab.vue'
 import NpuTab from '../components/hwinfo/NpuTab.vue'

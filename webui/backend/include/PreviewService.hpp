@@ -19,15 +19,20 @@ namespace webui {
 
 class WorkerManager;
 class ConsumerManager;
+class PreviewSessionManager;
 
 class PreviewService {
 public:
     PreviewService(WorkerManager& wk_mgr, ConsumerManager& cs_mgr);
     ~PreviewService() = default;
 
+    void setSessionManager(PreviewSessionManager* mgr) { session_manager_ = mgr; }
+    PreviewSessionManager* sessionManager() const { return session_manager_; }
+
     using FrameCallback = std::function<bool(const uint8_t* data, size_t len)>;
 
     /// MJPEG 流：按 target_fps 均匀推送，阻塞式等待新帧
+    /// When a preview session is active, reads shared latest_jpeg (spec §8.4).
     void streamMjpeg(const std::string& worker_id, FrameCallback cb);
 
     /// 单帧截图：取最新帧
@@ -35,6 +40,9 @@ public:
 
     /// 布局信息
     ApiResponse gridInfo(const std::string& layout) const;
+
+    /// Real stitcher layout (§13.1): slots from view_slots_, not workers[] order
+    ApiResponse getLayout();
 
     /// 编码回调注入帧
     void onJpegFrame(const std::string& worker_id, const uint8_t* data, size_t len);
@@ -52,13 +60,19 @@ public:
 
     bool hasCompositePreview();
 
+    /// 重置 composite 预览状态（PARALLEL 服务重启后需调用，以便重新连接新 stitcher）
+    void resetComposite();
+
+    /// 获取各通道的实时帧率（供前端显示）
+    json getChannelFps() const;
+
     /// 设置 MJPEG 流的目标帧率（全局）
-    void setTargetFps(int fps) { target_fps_ = fps > 0 ? fps : 15; }
+    void setTargetFps(int fps) { target_fps_ = fps > 0 ? fps : 25; }
     int getTargetFps() const { return target_fps_; }
 
 private:
     std::atomic<bool> stop_requested_{false};
-    std::atomic<int> target_fps_{15};
+    std::atomic<int> target_fps_{25};
 
     static constexpr size_t MAX_QUEUE_SIZE = 8;
 
@@ -68,6 +82,11 @@ private:
         std::deque<std::vector<uint8_t>> frame_queue;
         std::vector<uint8_t> latest_frame;
         std::atomic<uint64_t> frame_seq{0};
+
+        // 帧率统计
+        double current_fps = 0.0;
+        int fps_frame_count = 0;
+        std::chrono::steady_clock::time_point fps_last_calc = std::chrono::steady_clock::now();
     };
 
     FrameBuffer& getOrCreateBuffer(const std::string& worker_id);
@@ -76,9 +95,11 @@ private:
     std::unordered_map<std::string, std::unique_ptr<FrameBuffer>> frame_buffers_;
     WorkerManager& worker_manager_;
     ConsumerManager& consumer_manager_;
+    PreviewSessionManager* session_manager_ = nullptr;
 
     // Composite preview state
     std::atomic<bool> composite_available_{false};
+    std::atomic<bool> composite_connecting_{false};
     std::shared_ptr<FrameStitcherService> stitcher_;
 
     // Composite frame encoding (async)

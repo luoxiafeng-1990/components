@@ -17,6 +17,7 @@
 namespace webui {
 
 class PreviewService;
+class PreviewSessionManager;
 
 struct BuildResult {
     bool success = false;
@@ -28,13 +29,17 @@ struct BuildResult {
 
 /**
  * @brief 从 WebUI API 参数构建 WorkerConfig（与 qa_cases 完全一致的插件解析流程）
+ *
+ * When session_manager is non-null, always attaches PreviewFrameTapConsumer
+ * via WorkerConfig::extra_consumer (independent of JPEG_PREVIEW flags).
  */
 BuildResult buildWorkerConfig(
     const DataSourceInfo& ds,
     const ApiDecoderConfig& decoder,
     const std::vector<ConsumerInfo>& consumers,
     PreviewService* preview_service,
-    const std::string& worker_id);
+    const std::string& worker_id,
+    PreviewSessionManager* session_manager = nullptr);
 
 } // namespace webui
 

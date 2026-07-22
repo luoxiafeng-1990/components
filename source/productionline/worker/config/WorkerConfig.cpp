@@ -96,6 +96,11 @@ DataSourceConfigBuilder& DataSourceConfigBuilder::setLoop(bool loop) {
     return *this;
 }
 
+DataSourceConfigBuilder& DataSourceConfigBuilder::setLoopCount(int loop_count) {
+    data_source_config_.loop_count = loop_count < 1 ? 1 : loop_count;
+    return *this;
+}
+
 WorkerConfig::DataSourceConfig DataSourceConfigBuilder::build() const {
     return data_source_config_;
 }

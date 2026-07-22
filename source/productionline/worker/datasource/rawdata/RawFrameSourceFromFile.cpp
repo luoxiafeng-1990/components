@@ -13,22 +13,27 @@ extern "C" {
 RawFrameSourceFromFile::RawFrameSourceFromFile(const std::string& file_path,
                                                int width,
                                                int height,
-                                               AVPixelFormat pix_fmt)
+                                               AVPixelFormat pix_fmt,
+                                               int loop_count)
     : file_path_(file_path)
     , width_(width)
     , height_(height)
     , pix_fmt_(pix_fmt)
     , file_ptr_(nullptr)
     , current_frame_index_(0)
+    , file_frames_(-1)
     , total_frames_(-1)
+    , loop_count_(loop_count < 1 ? 1 : loop_count)
+    , frames_delivered_(0)
     , frame_size_(0)
     , is_open_(false)
     , eof_reached_(false)
     , logger_(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.RawFrameSource.File")))
 {
     frame_size_ = calculateFrameSize();
-    LOG4CPLUS_DEBUG_FMT(logger_, "构造函数: file='%s', %dx%d, pix_fmt=%d, frame_size=%zu",
-                        file_path_.c_str(), width_, height_, pix_fmt_, frame_size_);
+    LOG4CPLUS_DEBUG_FMT(logger_,
+                        "构造函数: file='%s', %dx%d, pix_fmt=%d, frame_size=%zu, loop_count=%d",
+                        file_path_.c_str(), width_, height_, pix_fmt_, frame_size_, loop_count_);
 }
 
 RawFrameSourceFromFile::~RawFrameSourceFromFile() {
@@ -70,19 +75,25 @@ bool RawFrameSourceFromFile::open() {
         return false;
     }
     
-    // 计算总帧数
+    // 文件内帧数 → 有效总帧数 = 文件帧数 × loop_count_
     long file_size = getFileSize();
+    file_frames_ = -1;
+    total_frames_ = -1;
     if (file_size > 0 && frame_size_ > 0) {
-        total_frames_ = static_cast<int>(file_size / frame_size_);
+        file_frames_ = static_cast<int>(file_size / frame_size_);
+        total_frames_ = file_frames_ * loop_count_;
     }
     
     is_open_.store(true, std::memory_order_release);
     eof_reached_ = false;
     current_frame_index_ = 0;
+    frames_delivered_ = 0;
     
     LOG4CPLUS_INFO_FMT(logger_, "打开成功: '%s'", file_path_.c_str());
     LOG4CPLUS_INFO_FMT(logger_, "   分辨率: %dx%d, 像素格式: %d", width_, height_, pix_fmt_);
-    LOG4CPLUS_INFO_FMT(logger_, "   总帧数: %d, 帧大小: %zu bytes", total_frames_, frame_size_);
+    LOG4CPLUS_INFO_FMT(logger_,
+                       "   文件帧数: %d, loop_count: %d, 有效总帧数: %d, 帧大小: %zu bytes",
+                       file_frames_, loop_count_, total_frames_, frame_size_);
     
     return true;
 }
@@ -108,6 +119,7 @@ void RawFrameSourceFromFile::close() {
     }
     
     current_frame_index_ = 0;
+    frames_delivered_ = 0;
     eof_reached_ = false;
     
     LOG4CPLUS_DEBUG(logger_, "关闭完成");
@@ -117,15 +129,7 @@ bool RawFrameSourceFromFile::isOpen() const {
     return is_open_.load(std::memory_order_acquire);
 }
 
-int RawFrameSourceFromFile::readRawFrame(AVFrame* frame) {
-    if (!is_open_.load(std::memory_order_acquire) || !file_ptr_ || !frame) {
-        return AVERROR(EINVAL);
-    }
-    
-    if (eof_reached_) {
-        return AVERROR_EOF;
-    }
-    
+int RawFrameSourceFromFile::readOneFrameFromFile(AVFrame* frame) {
     // 设置 AVFrame 基本属性
     frame->format = pix_fmt_;
     frame->width = width_;
@@ -157,7 +161,7 @@ int RawFrameSourceFromFile::readRawFrame(AVFrame* frame) {
     }
     
     // 根据像素格式读取数据
-    // 关键：裸文件中数据是紧密排列（无行尾 padding），而 av_frame_get_buffer 分配的
+    // 注意：裸文件中数据是紧密排列（无行尾 padding），而 av_frame_get_buffer 分配的
     // linesize 可能大于 width（64 字节对齐）。必须逐行读取，尊重 frame->linesize，
     // 否则当 width 不是对齐值的整数倍时（如 144x96），从第 2 行起数据全部错位。
     size_t bytes_read = 0;
@@ -170,7 +174,6 @@ int RawFrameSourceFromFile::readRawFrame(AVFrame* frame) {
                 uint8_t* dst = frame->data[0] + y * frame->linesize[0];
                 bytes_read = fread(dst, 1, static_cast<size_t>(width_), file_ptr_);
                 if (bytes_read < static_cast<size_t>(width_)) {
-                    eof_reached_ = true;
                     LOG4CPLUS_DEBUG(logger_, "EOF: Y 平面读取不完整");
                     return AVERROR_EOF;
                 }
@@ -181,7 +184,6 @@ int RawFrameSourceFromFile::readRawFrame(AVFrame* frame) {
                 uint8_t* dst = frame->data[1] + y * frame->linesize[1];
                 bytes_read = fread(dst, 1, static_cast<size_t>(width_), file_ptr_);
                 if (bytes_read < static_cast<size_t>(width_)) {
-                    eof_reached_ = true;
                     LOG4CPLUS_DEBUG(logger_, "EOF: UV 平面读取不完整");
                     return AVERROR_EOF;
                 }
@@ -196,7 +198,6 @@ int RawFrameSourceFromFile::readRawFrame(AVFrame* frame) {
                 uint8_t* dst = frame->data[0] + y * frame->linesize[0];
                 bytes_read = fread(dst, 1, static_cast<size_t>(width_), file_ptr_);
                 if (bytes_read < static_cast<size_t>(width_)) {
-                    eof_reached_ = true;
                     LOG4CPLUS_DEBUG(logger_, "EOF: Y 平面读取不完整");
                     return AVERROR_EOF;
                 }
@@ -208,7 +209,6 @@ int RawFrameSourceFromFile::readRawFrame(AVFrame* frame) {
                 uint8_t* dst = frame->data[1] + y * frame->linesize[1];
                 bytes_read = fread(dst, 1, static_cast<size_t>(chroma_w), file_ptr_);
                 if (bytes_read < static_cast<size_t>(chroma_w)) {
-                    eof_reached_ = true;
                     LOG4CPLUS_DEBUG(logger_, "EOF: U 平面读取不完整");
                     return AVERROR_EOF;
                 }
@@ -218,7 +218,6 @@ int RawFrameSourceFromFile::readRawFrame(AVFrame* frame) {
                 uint8_t* dst = frame->data[2] + y * frame->linesize[2];
                 bytes_read = fread(dst, 1, static_cast<size_t>(chroma_w), file_ptr_);
                 if (bytes_read < static_cast<size_t>(chroma_w)) {
-                    eof_reached_ = true;
                     LOG4CPLUS_DEBUG(logger_, "EOF: V 平面读取不完整");
                     return AVERROR_EOF;
                 }
@@ -234,7 +233,6 @@ int RawFrameSourceFromFile::readRawFrame(AVFrame* frame) {
                 uint8_t* dst = frame->data[0] + y * frame->linesize[0];
                 bytes_read = fread(dst, 1, static_cast<size_t>(row_bytes), file_ptr_);
                 if (bytes_read < static_cast<size_t>(row_bytes)) {
-                    eof_reached_ = true;
                     LOG4CPLUS_DEBUG(logger_, "EOF: YUYV/UYVY 行读取不完整");
                     return AVERROR_EOF;
                 }
@@ -253,7 +251,6 @@ int RawFrameSourceFromFile::readRawFrame(AVFrame* frame) {
             bytes_read = fread(temp_buf, 1, frame_size_, file_ptr_);
             if (bytes_read < frame_size_) {
                 av_free(temp_buf);
-                eof_reached_ = true;
                 LOG4CPLUS_DEBUG(logger_, "EOF: 帧数据读取不完整");
                 return AVERROR_EOF;
             }
@@ -281,7 +278,7 @@ int RawFrameSourceFromFile::readRawFrame(AVFrame* frame) {
         }
     }
     
-    // 设置帧属性
+    // 设置帧属性（文件内索引）
     frame->pts = current_frame_index_;
     frame->pkt_dts = current_frame_index_;
     
@@ -290,12 +287,52 @@ int RawFrameSourceFromFile::readRawFrame(AVFrame* frame) {
     return 0;
 }
 
+int RawFrameSourceFromFile::readRawFrame(AVFrame* frame) {
+    if (!is_open_.load(std::memory_order_acquire) || !file_ptr_ || !frame) {
+        return AVERROR(EINVAL);
+    }
+    
+    if (eof_reached_) {
+        return AVERROR_EOF;
+    }
+
+    // 已达到有效总帧数（文件帧数 × loop_count）
+    if (total_frames_ > 0 && frames_delivered_ >= total_frames_) {
+        eof_reached_ = true;
+        return AVERROR_EOF;
+    }
+    
+    int ret = readOneFrameFromFile(frame);
+    if (ret == AVERROR_EOF) {
+        // 本遍读完：若还需更多遍，回到文件头再读一帧
+        if (loop_count_ > 1 && frames_delivered_ < total_frames_ && file_frames_ > 0) {
+            if (seek(0)) {
+                ret = readOneFrameFromFile(frame);
+            }
+        }
+        if (ret == AVERROR_EOF) {
+            eof_reached_ = true;
+            return AVERROR_EOF;
+        }
+    }
+    if (ret < 0) {
+        return ret;
+    }
+
+    frames_delivered_++;
+    return 0;
+}
+
 int RawFrameSourceFromFile::readRawFrameByPts(int64_t pts, AVFrame* frame) {
     if (!seek(static_cast<int>(pts))) {
         LOG4CPLUS_ERROR_FMT(logger_, "readRawFrameByPts 失败: 无法定位到 PTS %ld", pts);
         return AVERROR(EINVAL);
     }
-    return readRawFrame(frame);
+    // 随机读（ENC_COMPARE 参考帧）不计入 loop 交付计数，不触发遍数 EOF
+    if (!is_open_.load(std::memory_order_acquire) || !file_ptr_ || !frame) {
+        return AVERROR(EINVAL);
+    }
+    return readOneFrameFromFile(frame);
 }
 
 bool RawFrameSourceFromFile::seek(int frame_index) {
@@ -309,9 +346,10 @@ bool RawFrameSourceFromFile::seek(int frame_index) {
         return false;
     }
     
-    if (total_frames_ > 0 && frame_index >= total_frames_) {
-        LOG4CPLUS_ERROR_FMT(logger_, "帧索引超出范围: %d (总帧数: %d)", 
-                           frame_index, total_frames_);
+    // 按文件内帧数边界检查（不是有效总帧数）
+    if (file_frames_ > 0 && frame_index >= file_frames_) {
+        LOG4CPLUS_ERROR_FMT(logger_, "帧索引超出范围: %d (文件帧数: %d)",
+                           frame_index, file_frames_);
         return false;
     }
     
@@ -336,10 +374,10 @@ bool RawFrameSourceFromFile::seekToBegin() {
 }
 
 bool RawFrameSourceFromFile::seekToEnd() {
-    if (total_frames_ > 0) {
-        return seek(total_frames_ - 1);
+    if (file_frames_ > 0) {
+        return seek(file_frames_ - 1);
     }
-    LOG4CPLUS_WARN(logger_, "seekToEnd 失败：总帧数未知");
+    LOG4CPLUS_WARN(logger_, "seekToEnd 失败：文件帧数未知");
     return false;
 }
 
