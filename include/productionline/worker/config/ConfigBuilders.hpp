@@ -72,6 +72,12 @@ public:
     DataSourceConfigBuilder& setLoop(bool loop);
     /// 裸帧文件循环遍数（<1 时按 1 处理）
     DataSourceConfigBuilder& setLoopCount(int loop_count);
+    /// 裸帧（YUV）文件实际宽度（供 FFMPEG_ENCODE / RawFrameSourceFromFile）
+    DataSourceConfigBuilder& setRawFrameWidth(int width);
+    /// 裸帧（YUV）文件实际高度
+    DataSourceConfigBuilder& setRawFrameHeight(int height);
+    /// 同时设置裸帧宽高（width/height 均 >0 时写入）
+    DataSourceConfigBuilder& setRawFrameSize(int width, int height);
     
     WorkerConfig::DataSourceConfig build() const;
     

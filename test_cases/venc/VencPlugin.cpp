@@ -27,11 +27,13 @@ extern "C" {
 #include <libswscale/swscale.h>
 }
 
+#include <cctype>
 #include <cstring>
 #include <cstdint>
 #include <cstdio>
 #include <iostream>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <algorithm>
 #include <functional>
@@ -64,9 +66,9 @@ static const SpecFmt kSpec21H264Formats[] = {
     {"rgb565", "rgb565le"},
     {"bgr565", "bgr565le"},
     {"rgb888", "rgb888"},
-    {"brg888", "bgr888"},
+    {"brg888", "brg888"},
     {"rgb101010", "rgb101010le"},
-    {"brg101010", "bgr101010le"},
+    {"brg101010", "brg101010"},
 };
 
 /** §2.2 JPEG：在 §2.1 基础上增加 BGR565 / RGB888 / BGR888 / 10bit RGB */
@@ -76,8 +78,8 @@ static const SpecFmt kSpec22JpegExtraFormats[] = {
     {"bgr888", "bgr888"},
     {"rgb101010", "rgb101010le"},
     {"bgr101010", "bgr101010le"},
-    {"brg888", "bgr888"},
-    {"brg101010", "bgr101010le"},
+    {"brg888", "brg888"},
+    {"brg101010", "brg101010"},
 };
 
 struct SpecRes {
@@ -89,6 +91,7 @@ struct SpecRes {
 static const SpecRes kSpec21Resolutions[] = {
     {144, 96, "144x96"},
     {320, 240, "320x240"},
+    {512, 512, "512x512"},
     {640, 480, "640x480"},
     {1280, 720, "1280x720"},
     {1920, 1080, "1920x1080"},
@@ -140,6 +143,8 @@ static int mapPixFmtStringToAVPixFmt(std::string_view format_name) {
     if (fmt == "uyvy422" || fmt == "uyvy")   return AV_PIX_FMT_UYVY422;
     if (fmt == "rgb24"  || fmt == "rgb888")  return AV_PIX_FMT_RGB24;
     if (fmt == "bgr24"  || fmt == "bgr888")  return AV_PIX_FMT_BGR24;
+    // TACO venc 无独立 BRG888：枚举侧按 BGR888 送编；资源仍用 *_brg888.rgb（勿偷换成 bgr 文件）
+    if (fmt == "brg888" || fmt == "brg24")   return AV_PIX_FMT_BGR24;
     if (fmt == "argb"   || fmt == "argb888") return AV_PIX_FMT_ARGB;
     if (fmt == "bgra"   || fmt == "bgra888") return AV_PIX_FMT_BGRA;
     if (fmt == "rgba"   || fmt == "rgba888") return AV_PIX_FMT_RGBA;
@@ -152,27 +157,63 @@ static int mapPixFmtStringToAVPixFmt(std::string_view format_name) {
     if (fmt == "bgr555" || fmt == "bgr555le") return AV_PIX_FMT_BGR555LE;
     if (fmt == "rgb444" || fmt == "rgb444le") return AV_PIX_FMT_RGB444LE;
     if (fmt == "bgr444" || fmt == "bgr444le") return AV_PIX_FMT_BGR444LE;
-    if (fmt == "rgb101010" || fmt == "rgb101010le" || fmt == "rgbx101010")
+    // 10bit packed：taco-ffmpeg（FFmpeg 4.2 fork）无 X2RGB10，约定用 RGB0/BGR0 作 32bpp
+    // 容器送编（taco 侧 RGB0→RGB101010 / BGR0→BGR101010，字节原样进硬件）。
+    // 对比侧不能按 8bit RGB0 理解这些字节，见 runEncodeQualityCompare 的 101010 unpack。
+    if (fmt == "rgb101010" || fmt == "rgb101010le" || fmt == "rgbx101010"
+        || fmt == "x2rgb10le")
         return AV_PIX_FMT_RGB0;
     if (fmt == "bgr101010" || fmt == "bgr101010le" || fmt == "bgrx101010"
-        || fmt == "brg101010" || fmt == "brg101010le")
+        || fmt == "brg101010" || fmt == "brg101010le"
+        || fmt == "x2bgr10le")
         return AV_PIX_FMT_BGR0;
-#if defined(AV_PIX_FMT_X2RGB10LE)
-    if (fmt == "x2rgb10le")
-        return AV_PIX_FMT_X2RGB10LE;
-#endif
-#if defined(AV_PIX_FMT_X2BGR10LE)
-    if (fmt == "x2bgr10le")
-        return AV_PIX_FMT_X2BGR10LE;
-#endif
 
-    fprintf(stderr, "[WARN] mapPixFmtStringToAVPixFmt: unrecognized format \"%s\", fallback to NV12\n",
+    fprintf(stderr,
+            "[ERROR] mapPixFmtStringToAVPixFmt: unrecognized format \"%s\" "
+            "(refuse silent NV12 fallback)\n",
             std::string(format_name).c_str());
-    return AV_PIX_FMT_NV12;
+    return AV_PIX_FMT_NONE;
 }
 
 static bool isParallelProfile(const std::string& pr) {
     return pr.size() >= 10 && pr.compare(0, 9, "parallel_") == 0;
+}
+
+/** 判断 positional 是否像预定义测试名（而非文件路径）。
+ *  未知预定义名必须报错，禁止当路径 / 静默忽略后走默认 1080p。 */
+static bool looksLikePredefinedTestName(const std::string& arg) {
+    if (arg.empty())
+        return false;
+    if (arg.find('/') != std::string::npos)
+        return false;
+
+    static const char* kExts[] = {
+        ".yuv", ".rgb", ".raw", ".nv12", ".nv21",
+        ".h264", ".h265", ".hevc", ".jpg", ".jpeg", ".mp4", ".mjpeg"
+    };
+    for (const char* e : kExts) {
+        const size_t n = std::strlen(e);
+        if (arg.size() >= n && arg.compare(arg.size() - n, n, e) == 0)
+            return false;
+    }
+
+    const unsigned char c0 = static_cast<unsigned char>(arg[0]);
+    if (!std::isalpha(c0) && arg[0] != '_')
+        return false;
+    for (char c : arg) {
+        const unsigned char uc = static_cast<unsigned char>(c);
+        if (!(std::isalnum(uc) || c == '_'))
+            return false;
+    }
+    return true;
+}
+
+static bool pathReadableFile(const std::string& p) {
+    FILE* f = fopen(p.c_str(), "rb");
+    if (!f)
+        return false;
+    fclose(f);
+    return true;
 }
 
 WorkerConfig buildEncodeConfigInternal(const EncodeTestParams& params,
@@ -189,107 +230,106 @@ WorkerConfig buildEncodeConfigInternal(const EncodeTestParams& params,
     {
         const auto& ifmt = params.input_format;
 
-        // 从格式名推断文件后缀中应该包含的关键词
-        // nv12/nv21/yuv420p → _nv12.yuv / _nv21.yuv / _yuv420p.yuv
-        // yuyv422/uyvy422 → _yuyv422.yuv / _uyvy422.yuv
-        // rgb*/bgr*/brg* → _rgb*.rgb / _bgr*.rgb / _brg*.rgb
-        auto fmtFileKey = [](const std::string& fmt) -> std::string {
-            // 剥离尾部的 "le" / "be" 后缀（如 rgb565le → rgb565）
-            std::string key = fmt;
-            if (key.size() > 2 &&
-                (key.substr(key.size()-2) == "le" || key.substr(key.size()-2) == "be")) {
-                key = key.substr(0, key.size()-2);
-            }
-            return key;
-        };
-
-        std::string expected_key = fmtFileKey(ifmt);
-        bool is_rgb_fmt = (expected_key.find("rgb") != std::string::npos ||
-                           expected_key.find("bgr") != std::string::npos ||
-                           expected_key.find("brg") != std::string::npos);
-
-        // 检查当前文件名中是否包含预期的格式关键词
-        bool file_matches = (yuv_path.find(expected_key) != std::string::npos);
-
-        // 显式路径若已可读，且文件名未声明「其它」像素格式，则不要偷换成默认资源。
-        // 否则 /tmp/foo.yuv、加长序列等会被替换成 /usr/data/ffmpeg/1920x1080_nv12.yuv（仅 10 帧），
-        // 造成假测试 / 误归因。
-        auto pathReadable = [](const std::string& p) -> bool {
-            FILE* f = fopen(p.c_str(), "rb");
-            if (!f) return false;
-            fclose(f);
-            return true;
-        };
-        auto filenameMentionsOtherFormat = [&](const std::string& path) -> bool {
-            static const char* kKnown[] = {
-                "nv12", "nv21", "yuv420p", "yuv420sp",
-                "yuyv422", "uyvy422", "rgb565", "rgb888", "bgr888",
-                "rgb101010", "bgr101010", "brg888"
-            };
-            for (const char* k : kKnown) {
-                if (expected_key.find(k) != std::string::npos) continue;
-                if (path.find(k) != std::string::npos) return true;
-            }
-            return false;
-        };
-
-        const bool keep_explicit_path =
-            !file_matches && !yuv_path.empty() &&
-            pathReadable(yuv_path) && !filenameMentionsOtherFormat(yuv_path);
-
-        if (!file_matches && !yuv_path.empty() && !keep_explicit_path) {
-            // 从原始路径中提取分辨率和目录
-            std::string dir;
-            std::string base;
-            auto slash_pos = yuv_path.rfind('/');
-            if (slash_pos != std::string::npos) {
-                dir = yuv_path.substr(0, slash_pos);
-                base = yuv_path.substr(slash_pos + 1);
-            } else {
-                dir = ".";
-                base = yuv_path;
-            }
-
-            // 提取分辨率 WxH
-            std::string res_tag;
-            {
-                char buf[64];
-                snprintf(buf, sizeof(buf), "%dx%d", params.input_width, params.input_height);
-                res_tag = buf;
-            }
-
-            // 构建候选文件名
-            std::string ext = is_rgb_fmt ? ".rgb" : ".yuv";
-            std::string candidate_name = res_tag + "_" + expected_key + ext;
-
-            // 在多个目录中搜索
-            std::vector<std::string> search_dirs = {dir};
-            // 添加备用目录
-            if (dir.find("/usr/data/ffmpeg") != std::string::npos) {
-                search_dirs.push_back("/usr/data/qa");
-            } else if (dir.find("/usr/data/qa") != std::string::npos) {
-                search_dirs.push_back("/usr/data/ffmpeg");
-            } else {
-                search_dirs.push_back("/usr/data/ffmpeg");
-                search_dirs.push_back("/usr/data/qa");
-            }
-
-            for (const auto& sdir : search_dirs) {
-                std::string candidate = sdir + "/" + candidate_name;
-                FILE* f = fopen(candidate.c_str(), "r");
-                if (f) {
-                    fclose(f);
-                    fprintf(stderr,
-                        "[venc] Auto-format resolve: %s → %s (input_format=%s)\n",
-                        yuv_path.c_str(), candidate.c_str(), ifmt.c_str());
-                    resolved_path = candidate;
-                    break;
+        // 非路径字符串（如未注册 profile 名）禁止偷换成默认 1920x1080_nv12.yuv
+        const bool skip_auto_format =
+            (yuv_path.find('/') == std::string::npos && !pathReadableFile(yuv_path));
+        if (!skip_auto_format) {
+            // 从格式名推断文件后缀中应该包含的关键词
+            // nv12/nv21/yuv420p → _nv12.yuv / _nv21.yuv / _yuv420p.yuv
+            // yuyv422/uyvy422 → _yuyv422.yuv / _uyvy422.yuv
+            // rgb*/bgr*/brg* → _rgb*.rgb / _bgr*.rgb / _brg*.rgb
+            auto fmtFileKey = [](const std::string& fmt) -> std::string {
+                // 剥离尾部的 "le" / "be" 后缀（如 rgb565le → rgb565）
+                std::string key = fmt;
+                if (key.size() > 2 &&
+                    (key.substr(key.size()-2) == "le" || key.substr(key.size()-2) == "be")) {
+                    key = key.substr(0, key.size()-2);
                 }
+                return key;
+            };
+
+            std::string expected_key = fmtFileKey(ifmt);
+            bool is_rgb_fmt = (expected_key.find("rgb") != std::string::npos ||
+                               expected_key.find("bgr") != std::string::npos ||
+                               expected_key.find("brg") != std::string::npos);
+
+            // 检查当前文件名中是否包含预期的格式关键词
+            bool file_matches = (yuv_path.find(expected_key) != std::string::npos);
+
+            // 显式路径若已可读，且文件名未声明「其它」像素格式，则不要偷换成默认资源。
+            // 否则 /tmp/foo.yuv、加长序列等会被替换成 /usr/data/ffmpeg/1920x1080_nv12.yuv（仅 10 帧），
+            // 造成假测试 / 误归因。
+            auto filenameMentionsOtherFormat = [&](const std::string& path) -> bool {
+                static const char* kKnown[] = {
+                    "nv12", "nv21", "yuv420p", "yuv420sp",
+                    "yuyv422", "uyvy422", "rgb565", "rgb888", "bgr888",
+                    "rgb101010", "bgr101010", "brg888", "brg101010"
+                };
+                for (const char* k : kKnown) {
+                    if (expected_key.find(k) != std::string::npos) continue;
+                    if (path.find(k) != std::string::npos) return true;
+                }
+                return false;
+            };
+
+            const bool keep_explicit_path =
+                !file_matches && !yuv_path.empty() &&
+                pathReadableFile(yuv_path) && !filenameMentionsOtherFormat(yuv_path);
+
+            if (!file_matches && !yuv_path.empty() && !keep_explicit_path) {
+                // 从原始路径中提取分辨率和目录
+                std::string dir;
+                std::string base;
+                auto slash_pos = yuv_path.rfind('/');
+                if (slash_pos != std::string::npos) {
+                    dir = yuv_path.substr(0, slash_pos);
+                    base = yuv_path.substr(slash_pos + 1);
+                } else {
+                    dir = ".";
+                    base = yuv_path;
+                }
+
+                // 提取分辨率 WxH
+                std::string res_tag;
+                {
+                    char buf[64];
+                    snprintf(buf, sizeof(buf), "%dx%d", params.input_width, params.input_height);
+                    res_tag = buf;
+                }
+
+                // 构建候选文件名
+                std::string ext = is_rgb_fmt ? ".rgb" : ".yuv";
+                std::string candidate_name = res_tag + "_" + expected_key + ext;
+
+                // 在多个目录中搜索
+                std::vector<std::string> search_dirs = {dir};
+                // 添加备用目录
+                if (dir.find("/usr/data/ffmpeg") != std::string::npos) {
+                    search_dirs.push_back("/usr/data/qa");
+                } else if (dir.find("/usr/data/qa") != std::string::npos) {
+                    search_dirs.push_back("/usr/data/ffmpeg");
+                } else {
+                    search_dirs.push_back("/usr/data/ffmpeg");
+                    search_dirs.push_back("/usr/data/qa");
+                }
+
+                for (const auto& sdir : search_dirs) {
+                    std::string candidate = sdir + "/" + candidate_name;
+                    FILE* f = fopen(candidate.c_str(), "r");
+                    if (f) {
+                        fclose(f);
+                        fprintf(stderr,
+                            "[venc] Auto-format resolve: %s → %s (input_format=%s)\n",
+                            yuv_path.c_str(), candidate.c_str(), ifmt.c_str());
+                        resolved_path = candidate;
+                        break;
+                    }
+                }
+            } else if (keep_explicit_path) {
+                fprintf(stderr,
+                    "[venc] Auto-format keep explicit path: %s (readable, no conflicting format tag; input_format=%s)\n",
+                    yuv_path.c_str(), ifmt.c_str());
             }
-        } else if (keep_explicit_path) {
-            fprintf(stderr,
-                "[venc] Auto-format keep explicit path: %s (readable, no conflicting format tag; input_format=%s)\n",
-                yuv_path.c_str(), ifmt.c_str());
         }
     }
 
@@ -298,6 +338,10 @@ WorkerConfig buildEncodeConfigInternal(const EncodeTestParams& params,
     const double fps = params.output_fps > 0 ? params.output_fps : params.input_fps;
     const int gop = params.gop_size > 0 ? params.gop_size : 30;
     const int pix = mapPixFmtStringToAVPixFmt(params.input_format);
+    if (pix == AV_PIX_FMT_NONE) {
+        throw std::runtime_error(
+            std::string("unsupported input_format: ") + params.input_format);
+    }
     const int br_kbps = params.bitrate > 0 ? params.bitrate : 0;
 
     const std::string& c = params.codec;
@@ -666,6 +710,18 @@ const std::map<std::string, EncodeTestParams>& VencPlugin::getPredefinedTests() 
     addScale8192("jpeg", "1280x720", 1280, 720, 0);
     addScale8192("jpeg", "1920x1080", 1920, 1080, 0);
 
+    // ── 非对称边界分辨率（飞书 Procedure 使用的 profile 名）──
+    auto addBoundaryH264Nv12 = [&](const char* name, int w, int h) {
+        EncodeTestParams p("h264", "main", matrixBitrateKbps(w, h), 30, true);
+        p.input_format = "nv12";
+        p.input_width = w;
+        p.input_height = h;
+        p.input_fps = 30.0;
+        add(name, std::move(p));
+    };
+    addBoundaryH264Nv12("boundary_h264_nv12_144x1080", 144, 1080);
+    addBoundaryH264Nv12("boundary_h264_nv12_1920x96", 1920, 96);
+
     // ── §2.5 / §2.7：多通道与性能表常见组合（128 路需环境与显存足够）──
     add("venc_parallel_128ch_1080p", [&] {
         EncodeTestParams p("h264", "parallel_128", 4000, 30, true);
@@ -869,8 +925,9 @@ const std::map<std::string, EncodeTestParams>& VencPlugin::getPredefinedTests() 
             {"rgb444","rgb444le"}, {"bgr444","bgr444le"},
             {"rgb555","rgb555le"}, {"bgr555","bgr555le"},
             {"rgb565","rgb565le"}, {"bgr565","bgr565le"},
-            {"rgb888","rgb888"}, {"brg888","bgr888"},
-            {"rgb101010","rgb101010le"}, {"brg101010","bgr101010le"},
+            {"rgb888","rgb888"}, {"bgr888","bgr888"}, {"brg888","brg888"},
+            {"rgb101010","rgb101010le"}, {"bgr101010","bgr101010le"},
+            {"brg101010","brg101010"},
             {"yuv420sp","nv12"}, {"yuv420sp_vu","nv21"},
         };
         for (const auto& e : kHwfmtAll) {
@@ -1072,6 +1129,15 @@ int VencPlugin::handlePreActions() {
             params_.predefined_name = it->first;
             continue;
         }
+        // 未知预定义名：必须失败退出。旧逻辑会把名字当路径或静默忽略，
+        // 再被 Auto-format 偷换成 1920x1080_nv12.yuv，造成假 PASS。
+        if (looksLikePredefinedTestName(arg)) {
+            std::cerr << "Error: 未知预定义测试名 \"" << arg
+                      << "\"（不在 qa_cases venc -l 列表中）。\n"
+                      << "禁止将未知 profile 当作输入路径或静默忽略。\n"
+                      << "请使用已注册名称，或显式 -i <文件> 并配合 -c/-W/-H/-f 参数。\n";
+            return 1;
+        }
         if (input_path_.empty())
             input_path_ = arg;
     }
@@ -1204,16 +1270,92 @@ consumer::ConsumeResult failResult(
     return r;
 }
 
+/** 将 packed 10:10:10（X2RGB10 / X2BGR10 LE）解到 RGB24。10bit→8bit 用 >>2。 */
+static void unpackPacked101010ToRgb24(
+    const AVFrame* src, AVFrame* dst, bool is_bgr_order)
+{
+    const int w = src->width;
+    const int h = src->height;
+    for (int y = 0; y < h; ++y) {
+        const uint8_t* srow = src->data[0] + y * src->linesize[0];
+        uint8_t* drow = dst->data[0] + y * dst->linesize[0];
+        for (int x = 0; x < w; ++x) {
+            uint32_t v;
+            memcpy(&v, srow + x * 4, 4);
+            // X2RGB10LE: (msb)2X 10R 10G 10B(lsb)
+            // X2BGR10LE: (msb)2X 10B 10G 10R(lsb)
+            const int c0 = static_cast<int>(v & 0x3FFu);
+            const int c1 = static_cast<int>((v >> 10) & 0x3FFu);
+            const int c2 = static_cast<int>((v >> 20) & 0x3FFu);
+            uint8_t r, g, b;
+            if (is_bgr_order) {
+                r = static_cast<uint8_t>(c0 >> 2);
+                g = static_cast<uint8_t>(c1 >> 2);
+                b = static_cast<uint8_t>(c2 >> 2);
+            } else {
+                b = static_cast<uint8_t>(c0 >> 2);
+                g = static_cast<uint8_t>(c1 >> 2);
+                r = static_cast<uint8_t>(c2 >> 2);
+            }
+            drow[x * 3 + 0] = r;
+            drow[x * 3 + 1] = g;
+            drow[x * 3 + 2] = b;
+        }
+    }
+}
+
+static bool pathLooksLikePacked101010(const std::string& path, bool* is_bgr) {
+    const bool is_rgb = path.find("rgb101010") != std::string::npos;
+    const bool is_bgr101010 = path.find("bgr101010") != std::string::npos;
+    const bool is_brg101010 = path.find("brg101010") != std::string::npos;
+    if (!is_rgb && !is_bgr101010 && !is_brg101010)
+        return false;
+    if (is_bgr)
+        *is_bgr = is_bgr101010 || is_brg101010;
+    return true;
+}
+
+/** 子字节 packed RGB：不能把解码 YUV 再压回 444/555/565 后对比（二次量化会假 FAIL）。 */
+static bool isSubBytePackedRgb(AVPixelFormat fmt) {
+    switch (fmt) {
+        case AV_PIX_FMT_RGB444LE:
+        case AV_PIX_FMT_RGB444BE:
+        case AV_PIX_FMT_BGR444LE:
+        case AV_PIX_FMT_BGR444BE:
+        case AV_PIX_FMT_RGB555LE:
+        case AV_PIX_FMT_RGB555BE:
+        case AV_PIX_FMT_BGR555LE:
+        case AV_PIX_FMT_BGR555BE:
+        case AV_PIX_FMT_RGB565LE:
+        case AV_PIX_FMT_RGB565BE:
+        case AV_PIX_FMT_BGR565LE:
+        case AV_PIX_FMT_BGR565BE:
+            return true;
+        default:
+            return false;
+    }
+}
+
 struct EncodeQualityCompareCallbackCtx {
     std::shared_ptr<CompareCallbackContext> compare_ctx;
     RawFrameSourceFromFile* ref_source = nullptr;
-    AVFrame* ref_avframe = nullptr;
+    AVFrame* ref_avframe = nullptr;       // 对比用（已对齐编码输出尺寸）
+    AVFrame* ref_file_avframe = nullptr;  // 从文件读取的原始尺寸
+    SwsContext* ref_scale_sws = nullptr;  // 文件尺寸 → 输出尺寸
     Buffer* ref_buf_wrap = nullptr;
 
-    // 解码帧格式转换（解码输出 YUV → 输入格式 RGB）
+    // 解码帧格式转换（解码输出 YUV → 输入格式 RGB / RGB24）
     AVPixelFormat input_pix_fmt = AV_PIX_FMT_NONE;
     SwsContext* decode_sws_ctx = nullptr;
     AVFrame* decode_converted_frame = nullptr;
+
+    // rgb/bgr/brg101010：参考帧按 X2RGB10/X2BGR10 解包到 RGB24 再比（不改 taco-ffmpeg）
+    bool packed_101010 = false;
+    bool packed_101010_is_bgr = false;  // bgr101010 / brg101010
+    // 444/555/565：参考帧 swscale → YUV420P，解码 YUV 直接比（避免 YUV→packed 二次量化）
+    bool subbyte_rgb_to_rgb24 = false;
+    SwsContext* ref_sws_ctx = nullptr;
+    AVFrame* ref_rgb24_frame = nullptr;
 
     // 递增帧计数器（当 PTS 无效时用作参考帧索引）
     std::atomic<int64_t> frame_counter{0};
@@ -1244,32 +1386,73 @@ consumer::ConsumeResult runEncodeQualityCompare(
         LOG4CPLUS_INFO(logger, "═══════════════════════════════════════════════════════");
     }
 
-    const int ref_width = encode_cfg.encoder.width;
-    const int ref_height = encode_cfg.encoder.height;
+    const int out_width = encode_cfg.encoder.width;
+    const int out_height = encode_cfg.encoder.height;
+    // 缩放用例（spec24）：文件按 raw_frame_* 读，对比目标为编码输出尺寸
+    const int file_width = (encode_cfg.data_source.raw_frame_width > 0)
+        ? encode_cfg.data_source.raw_frame_width : out_width;
+    const int file_height = (encode_cfg.data_source.raw_frame_height > 0)
+        ? encode_cfg.data_source.raw_frame_height : out_height;
+    const bool ref_needs_scale =
+        (file_width != out_width || file_height != out_height);
+    const int ref_width = out_width;
+    const int ref_height = out_height;
     const AVPixelFormat ref_pix_fmt =
         static_cast<AVPixelFormat>(encode_cfg.encoder.input_pix_fmt);
 
-    // 1) 准备参考帧数据源
+    // 1) 准备参考帧数据源（按文件真实分辨率打开，避免把 8192 文件当 1280 读）
     RawFrameSourceFromFile ref_source(
-        encode_cfg.data_source.path, ref_width, ref_height, ref_pix_fmt);
+        encode_cfg.data_source.path, file_width, file_height, ref_pix_fmt);
     if (!ref_source.open()) {
         return failResult(
             logger, "ENC_COMPARE", "Failed to open reference input file: " + encode_cfg.data_source.path);
     }
 
+    AVFrame* ref_file_avframe = av_frame_alloc();
     AVFrame* ref_avframe = av_frame_alloc();
-    if (!ref_avframe) {
+    if (!ref_file_avframe || !ref_avframe) {
+        if (ref_file_avframe) av_frame_free(&ref_file_avframe);
+        if (ref_avframe) av_frame_free(&ref_avframe);
         ref_source.close();
         return failResult(logger, "ENC_COMPARE", "Failed to allocate reference AVFrame");
+    }
+    ref_file_avframe->format = ref_pix_fmt;
+    ref_file_avframe->width = file_width;
+    ref_file_avframe->height = file_height;
+    if (av_frame_get_buffer(ref_file_avframe, 64) < 0) {
+        av_frame_free(&ref_file_avframe);
+        av_frame_free(&ref_avframe);
+        ref_source.close();
+        return failResult(logger, "ENC_COMPARE", "Failed to allocate buffer for reference AVFrame");
     }
     ref_avframe->format = ref_pix_fmt;
     ref_avframe->width = ref_width;
     ref_avframe->height = ref_height;
     if (av_frame_get_buffer(ref_avframe, 64) < 0) {
+        av_frame_free(&ref_file_avframe);
         av_frame_free(&ref_avframe);
         ref_source.close();
-        return failResult(logger, "ENC_COMPARE", "Failed to allocate buffer for reference AVFrame");
+        return failResult(logger, "ENC_COMPARE", "Failed to allocate scaled reference AVFrame");
     }
+
+    SwsContext* ref_scale_sws = nullptr;
+    if (ref_needs_scale) {
+        ref_scale_sws = sws_getContext(
+            file_width, file_height, ref_pix_fmt,
+            ref_width, ref_height, ref_pix_fmt,
+            SWS_BILINEAR, nullptr, nullptr, nullptr);
+        if (!ref_scale_sws) {
+            av_frame_free(&ref_file_avframe);
+            av_frame_free(&ref_avframe);
+            ref_source.close();
+            return failResult(logger, "ENC_COMPARE",
+                "Failed to create ref scale sws (file→encode output)");
+        }
+        LOG4CPLUS_INFO_FMT(logger,
+            "  Ref scale for compare: %dx%d → %dx%d (match encode output)",
+            file_width, file_height, ref_width, ref_height);
+    }
+
     const int ref_buf_size = static_cast<int>(
         av_image_get_buffer_size(ref_pix_fmt, ref_width, ref_height, 1));
 
@@ -1287,6 +1470,8 @@ consumer::ConsumeResult runEncodeQualityCompare(
         compare_ctx->min_psnr, compare_ctx->min_ssim,
         (int)compare_ctx->enable_psnr, (int)compare_ctx->enable_ssim);
     if (!compare_ctx->openComparator()) {
+        if (ref_scale_sws) sws_freeContext(ref_scale_sws);
+        av_frame_free(&ref_file_avframe);
         av_frame_free(&ref_avframe);
         ref_source.close();
         return failResult(logger, "ENC_COMPARE", "Failed to open BufferComparator");
@@ -1294,14 +1479,31 @@ consumer::ConsumeResult runEncodeQualityCompare(
 
     // 3) 准备解码帧格式转换：当输入不是 YUV420P/NV12 时，
     //    解码器输出 YUV420P 需要转换回输入格式再对比（同格式对比）
+    //    特例：
+    //    - *101010：资源是真 10bit packed，送编用 RGB0/BGR0；双方转到 RGB24
+    //    - *444/*555/*565：禁止 YUV→packed 再比（二次量化假 FAIL）；
+    //      参考帧转到 YUV420P，与解码输出直接在 YUV 空间比（业界常用）
     AVFrame* decode_converted_frame = nullptr;
     SwsContext* decode_sws_ctx = nullptr;
-    const bool need_decode_fmt_conv = (ref_pix_fmt != AV_PIX_FMT_YUV420P &&
-                                       ref_pix_fmt != AV_PIX_FMT_NV12);
+    SwsContext* ref_sws_ctx = nullptr;
+    AVFrame* ref_rgb24_frame = nullptr;  // 101010 unpack 目标；也复用为 subbyte→YUV 目标帧
+    bool packed_101010 = false;
+    bool packed_101010_is_bgr = false;
+    packed_101010 = pathLooksLikePacked101010(encode_cfg.data_source.path, &packed_101010_is_bgr);
+    const bool subbyte_rgb_to_yuv = isSubBytePackedRgb(ref_pix_fmt);
+
+    AVPixelFormat compare_pix_fmt = ref_pix_fmt;
+    if (packed_101010)
+        compare_pix_fmt = AV_PIX_FMT_RGB24;
+    else if (subbyte_rgb_to_yuv)
+        compare_pix_fmt = AV_PIX_FMT_YUV420P;
+
+    const bool need_decode_fmt_conv = (compare_pix_fmt != AV_PIX_FMT_YUV420P &&
+                                       compare_pix_fmt != AV_PIX_FMT_NV12);
     if (need_decode_fmt_conv) {
         decode_converted_frame = av_frame_alloc();
         if (decode_converted_frame) {
-            decode_converted_frame->format = ref_pix_fmt;
+            decode_converted_frame->format = compare_pix_fmt;
             decode_converted_frame->width = ref_width;
             decode_converted_frame->height = ref_height;
             if (av_frame_get_buffer(decode_converted_frame, 64) < 0) {
@@ -1312,24 +1514,90 @@ consumer::ConsumeResult runEncodeQualityCompare(
         if (decode_converted_frame) {
             decode_sws_ctx = sws_getContext(
                 ref_width, ref_height, AV_PIX_FMT_YUV420P,
-                ref_width, ref_height, ref_pix_fmt,
+                ref_width, ref_height, compare_pix_fmt,
                 SWS_BILINEAR, nullptr, nullptr, nullptr);
             if (decode_sws_ctx) {
                 LOG4CPLUS_INFO_FMT(logger,
-                    "  Decode fmt conv: YUV420P → %s (same-format comparison)",
-                    av_get_pix_fmt_name(ref_pix_fmt));
+                    "  Decode fmt conv: YUV420P → %s (same-format comparison)%s",
+                    av_get_pix_fmt_name(compare_pix_fmt),
+                    packed_101010 ? " [101010→RGB24]" : "");
             }
         }
+    }
+
+    if (packed_101010) {
+        ref_rgb24_frame = av_frame_alloc();
+        if (ref_rgb24_frame) {
+            ref_rgb24_frame->format = AV_PIX_FMT_RGB24;
+            ref_rgb24_frame->width = ref_width;
+            ref_rgb24_frame->height = ref_height;
+            if (av_frame_get_buffer(ref_rgb24_frame, 64) < 0) {
+                av_frame_free(&ref_rgb24_frame);
+                ref_rgb24_frame = nullptr;
+            }
+        }
+        if (!ref_rgb24_frame || !decode_sws_ctx || !decode_converted_frame) {
+            if (decode_sws_ctx) sws_freeContext(decode_sws_ctx);
+            if (decode_converted_frame) av_frame_free(&decode_converted_frame);
+            if (ref_rgb24_frame) av_frame_free(&ref_rgb24_frame);
+            if (ref_scale_sws) sws_freeContext(ref_scale_sws);
+            av_frame_free(&ref_file_avframe);
+            av_frame_free(&ref_avframe);
+            ref_source.close();
+            return failResult(logger, "ENC_COMPARE",
+                "Failed to prepare 101010→RGB24 compare buffers");
+        }
+        LOG4CPLUS_INFO_FMT(logger,
+            "  Ref 101010 unpack: %s packed10 → RGB24 (is_bgr=%d)",
+            encode_cfg.data_source.path.c_str(), (int)packed_101010_is_bgr);
+    } else if (subbyte_rgb_to_yuv) {
+        // 复用 ref_rgb24_frame 指针承载 YUV420P 参考帧
+        ref_rgb24_frame = av_frame_alloc();
+        if (ref_rgb24_frame) {
+            ref_rgb24_frame->format = AV_PIX_FMT_YUV420P;
+            ref_rgb24_frame->width = ref_width;
+            ref_rgb24_frame->height = ref_height;
+            if (av_frame_get_buffer(ref_rgb24_frame, 64) < 0) {
+                av_frame_free(&ref_rgb24_frame);
+                ref_rgb24_frame = nullptr;
+            }
+        }
+        if (ref_rgb24_frame) {
+            ref_sws_ctx = sws_getContext(
+                ref_width, ref_height, ref_pix_fmt,
+                ref_width, ref_height, AV_PIX_FMT_YUV420P,
+                SWS_BILINEAR, nullptr, nullptr, nullptr);
+        }
+        if (!ref_rgb24_frame || !ref_sws_ctx) {
+            if (ref_sws_ctx) sws_freeContext(ref_sws_ctx);
+            if (ref_rgb24_frame) av_frame_free(&ref_rgb24_frame);
+            if (ref_scale_sws) sws_freeContext(ref_scale_sws);
+            av_frame_free(&ref_file_avframe);
+            av_frame_free(&ref_avframe);
+            ref_source.close();
+            return failResult(logger, "ENC_COMPARE",
+                "Failed to prepare subbyteRGB→YUV420P compare buffers");
+        }
+        LOG4CPLUS_INFO_FMT(logger,
+            "  Ref subbyte RGB: %s → YUV420P (avoid YUV→packed requantize)",
+            av_get_pix_fmt_name(ref_pix_fmt));
     }
 
     EncodeQualityCompareCallbackCtx cb_ctx;
     cb_ctx.compare_ctx = compare_ctx;
     cb_ctx.ref_source = &ref_source;
     cb_ctx.ref_avframe = ref_avframe;
+    cb_ctx.ref_file_avframe = ref_file_avframe;
+    cb_ctx.ref_scale_sws = ref_scale_sws;
     cb_ctx.ref_buf_wrap = &ref_buf_wrap;
     cb_ctx.input_pix_fmt = ref_pix_fmt;
     cb_ctx.decode_sws_ctx = decode_sws_ctx;
     cb_ctx.decode_converted_frame = decode_converted_frame;
+    cb_ctx.packed_101010 = packed_101010;
+    cb_ctx.packed_101010_is_bgr = packed_101010_is_bgr;
+    cb_ctx.subbyte_rgb_to_rgb24 = subbyte_rgb_to_yuv;  // 字段名历史兼容：现表示转中间格式再比
+    cb_ctx.ref_sws_ctx = ref_sws_ctx;
+    cb_ctx.ref_rgb24_frame = ref_rgb24_frame;
 
     // 4) MultiWorker：encoder -> decoder，并用 callback 做 compare
     MultiWorkerConfig multi_config;
@@ -1394,19 +1662,32 @@ consumer::ConsumeResult runEncodeQualityCompare(
         if (total_ref > 0) {
             ref_frame_idx = ref_frame_idx % total_ref;
         }
-        int ref_ret = cb->ref_source->readRawFrameByPts(ref_frame_idx, cb->ref_avframe);
+        int ref_ret = cb->ref_source->readRawFrameByPts(
+            ref_frame_idx,
+            cb->ref_file_avframe ? cb->ref_file_avframe : cb->ref_avframe);
         
         if (ref_ret == AVERROR_EOF || ref_ret < 0) {
             cb->ref_eof.store(true, std::memory_order_release);
             return true;
         }
 
-        cb->ref_buf_wrap->setAVFrame(cb->ref_avframe);
+        if (cb->ref_scale_sws && cb->ref_file_avframe && cb->ref_avframe) {
+            sws_scale(cb->ref_scale_sws,
+                cb->ref_file_avframe->data, cb->ref_file_avframe->linesize,
+                0, cb->ref_file_avframe->height,
+                cb->ref_avframe->data, cb->ref_avframe->linesize);
+            cb->ref_avframe->pts = cb->ref_file_avframe->pts;
+            cb->ref_buf_wrap->setAVFrame(cb->ref_avframe);
+        } else {
+            cb->ref_buf_wrap->setAVFrame(
+                cb->ref_file_avframe ? cb->ref_file_avframe : cb->ref_avframe);
+        }
 
         // ── 解码帧格式转换：将解码器输出(YUV420P)转回输入格式 ──
         // 确保同格式对比：RGB565 vs RGB565，而不是 RGB565 vs YUV420P
+        // 101010：参考帧 unpack→RGB24，解码帧 YUV→RGB24
         Buffer* compare_buf = decoded_buf;
-        AVFrameBuffer* converted_wrap = nullptr;
+        Buffer* ref_compare_buf = cb->ref_buf_wrap;
         if (cb->decode_sws_ctx && cb->decode_converted_frame) {
             // 从 decoded_buf 获取 AVFrame
             auto* decoded_avfb = dynamic_cast<AVFrameBuffer*>(decoded_buf);
@@ -1425,7 +1706,27 @@ consumer::ConsumeResult runEncodeQualityCompare(
             }
         }
 
-        auto cmp = cb->compare_ctx->comparator_->compare(cb->ref_buf_wrap, compare_buf);
+        if (cb->packed_101010 && cb->ref_rgb24_frame) {
+            unpackPacked101010ToRgb24(
+                cb->ref_avframe, cb->ref_rgb24_frame, cb->packed_101010_is_bgr);
+            cb->ref_rgb24_frame->pts = cb->ref_avframe->pts;
+            static thread_local AVFrameBuffer ref24_wrap(
+                0, nullptr, 0, 0, Buffer::Ownership::EXTERNAL);
+            ref24_wrap.setAVFrame(cb->ref_rgb24_frame);
+            ref_compare_buf = &ref24_wrap;
+        } else if (cb->subbyte_rgb_to_rgb24 && cb->ref_sws_ctx && cb->ref_rgb24_frame) {
+            sws_scale(cb->ref_sws_ctx,
+                cb->ref_avframe->data, cb->ref_avframe->linesize,
+                0, cb->ref_avframe->height,
+                cb->ref_rgb24_frame->data, cb->ref_rgb24_frame->linesize);
+            cb->ref_rgb24_frame->pts = cb->ref_avframe->pts;
+            static thread_local AVFrameBuffer ref24_wrap(
+                0, nullptr, 0, 0, Buffer::Ownership::EXTERNAL);
+            ref24_wrap.setAVFrame(cb->ref_rgb24_frame);
+            ref_compare_buf = &ref24_wrap;
+        }
+
+        auto cmp = cb->compare_ctx->comparator_->compare(ref_compare_buf, compare_buf);
         const double psnr = cmp.psnr_avg;
         const double ssim = cmp.ssim_avg;
 
@@ -1523,9 +1824,14 @@ consumer::ConsumeResult runEncodeQualityCompare(
     // 在函数返回时 ref_buf_wrap 析构会自动 av_frame_free。
     // 此处不可手动释放，否则 double-free → SIGSEGV。
     if (decode_sws_ctx) sws_freeContext(decode_sws_ctx);
-    // 注意：decode_converted_frame 在 callback 中被 thread_local static conv_wrap
-    // 通过 setAVFrame() 持有，不可手动释放，否则 double-free → SIGSEGV。
-    // conv_wrap 会在线程结束时自动析构释放。
+    if (ref_sws_ctx) sws_freeContext(ref_sws_ctx);
+    if (ref_scale_sws) sws_freeContext(ref_scale_sws);
+    // 注意：decode_converted_frame / ref_rgb24_frame / ref_*avframe 在 callback 中被
+    // AVFrameBuffer::setAVFrame() 持有，不可手动释放（避免 double-free）。
+    (void)ref_rgb24_frame;
+    (void)decode_converted_frame;
+    (void)ref_avframe;
+    (void)ref_file_avframe;
 
     result.frames_consumed = total;
     result.frames_compared = total;

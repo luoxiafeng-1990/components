@@ -7,6 +7,7 @@
 #include "productionline/line/WorkerSyncCoordinator.hpp"
 #include "bufferpool/pool/base/BufferPool.hpp"
 #include "productionline/worker/base/ComponentTopology.hpp"
+#include "consumptionline/core/BufferConsumerStrategies.hpp"
 #include "common/Logger.hpp"
 #include "common/GlobalThreadPool.hpp"
 #include <string>
@@ -45,6 +46,8 @@ public:
     int64_t getAllLineFramesProduced() const;
     int64_t getAllLineFramesFailed() const;
     int getActiveWorkerCount(size_t group_index) const;
+    /// 所有 group 的 consumer worker 均已退出（含正常 EOF）
+    bool areAllConsumerWorkersFinished() const;
     void printDetailedStats() const;
 
 private:
@@ -60,6 +63,32 @@ private:
             std::unique_ptr<VideoProductionLine> producer_line;
             uint64_t buffer_pool_id{0};
             std::weak_ptr<BufferPool> buffer_pool_weak;
+
+            /// DECODE_THEN_ENCODE 桥（atomic/thread 放子结构，保证 ProducerInfo 可移动）
+            struct EncodeBridge {
+                std::shared_ptr<consumer::VideoEncodeConsumer> stacked_video_encode;
+                std::thread encode_feed_thread;
+                std::atomic<bool> encode_feed_running{false};
+                std::shared_ptr<WorkerBase> shared_source_worker;
+
+                EncodeBridge() = default;
+                ~EncodeBridge() {
+                    encode_feed_running.store(false);
+                    if (encode_feed_thread.joinable()) {
+                        encode_feed_thread.join();
+                    }
+                    if (stacked_video_encode) {
+                        stacked_video_encode->finalize();
+                        stacked_video_encode.reset();
+                    }
+                    shared_source_worker.reset();
+                }
+                EncodeBridge(const EncodeBridge&) = delete;
+                EncodeBridge& operator=(const EncodeBridge&) = delete;
+                EncodeBridge(EncodeBridge&&) = delete;
+                EncodeBridge& operator=(EncodeBridge&&) = delete;
+            };
+            std::unique_ptr<EncodeBridge> encode_bridge;
         };
         std::map<std::string, ProducerInfo> producers;
 

@@ -9,7 +9,9 @@ extern "C" {
 #include <libavutil/error.h>
 }
 
-EncodedPacketSourceFromFile::EncodedPacketSourceFromFile(const std::string& file_path, int max_frames)
+EncodedPacketSourceFromFile::EncodedPacketSourceFromFile(const std::string& file_path,
+                                                         int max_frames,
+                                                         int loop_count)
     : file_path_(file_path)
     , format_ctx_ptr_(nullptr)
     , video_stream_index_(-1)
@@ -19,8 +21,12 @@ EncodedPacketSourceFromFile::EncodedPacketSourceFromFile(const std::string& file
     , eof_reached_(false)
     , max_frames_(max_frames)  // v2.23 新增：帧数限制
     , frames_read_(0)          // v2.23 新增：已读取帧数计数
+    , loop_count_(loop_count < 1 ? 1 : loop_count)
+    , loops_completed_(0)
     , logger_(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.DataSource.File"))){
-    LOG4CPLUS_DEBUG_FMT(logger_, "构造函数: file_path='%s', max_frames=%d", file_path_.c_str(), max_frames_);
+    LOG4CPLUS_DEBUG_FMT(logger_,
+                        "构造函数: file_path='%s', max_frames=%d, loop_count=%d",
+                        file_path_.c_str(), max_frames_, loop_count_);
 }
 
 EncodedPacketSourceFromFile::~EncodedPacketSourceFromFile() {
@@ -78,9 +84,11 @@ bool EncodedPacketSourceFromFile::open() {
     eof_reached_ = false;  // 重置 EOF 状态
     current_frame_index_ = 0;  // 重置当前帧索引
     frames_read_ = 0;  // v2.32：重置已读取帧数
-    
-    LOG4CPLUS_DEBUG_FMT(logger_, "Opened file '%s', video stream index: %d, total frames: %d",
-                 file_path_.c_str(), video_stream_index_, total_frames_);
+    loops_completed_ = 0;
+
+    LOG4CPLUS_DEBUG_FMT(logger_,
+                 "Opened file '%s', video stream index: %d, total frames: %d, loop_count: %d",
+                 file_path_.c_str(), video_stream_index_, total_frames_, loop_count_);
     
     return true;
 }
@@ -129,7 +137,10 @@ PacketAcquireResult EncodedPacketSourceFromFile::acquireEncodedPacket(AVPacket* 
     
     // 从文件读取 packet 到调用者提供的 out_packet（零拷贝）
     int ret = av_read_frame(format_ctx_ptr_, out_packet);
-    
+    if (ret == AVERROR_EOF && tryRestartForLoop()) {
+        ret = av_read_frame(format_ctx_ptr_, out_packet);
+    }
+
     if (ret < 0) {
         char err_buf[AV_ERROR_MAX_STRING_SIZE];
         av_strerror(ret, err_buf, sizeof(err_buf));
@@ -190,10 +201,36 @@ int EncodedPacketSourceFromFile::getVideoStreamIndex() const {
 
 int EncodedPacketSourceFromFile::getTotalFrames() const {
     // v2.23 新增：如果设置了 max_frames 限制，返回较小值
-    if (max_frames_ > 0 && (total_frames_ < 0 || max_frames_ < total_frames_)) {
+    int file_total = total_frames_;
+    if (file_total > 0 && loop_count_ > 1) {
+        file_total = file_total * loop_count_;
+    }
+    if (max_frames_ > 0 && (file_total < 0 || max_frames_ < file_total)) {
         return max_frames_;
     }
-    return total_frames_;
+    return file_total;
+}
+
+bool EncodedPacketSourceFromFile::tryRestartForLoop() {
+    // loops_completed_ = 已完整播完的遍数；当前遍刚 EOF，若还能再播则 seek
+    if (loop_count_ <= 1) {
+        return false;
+    }
+    if (loops_completed_ + 1 >= loop_count_) {
+        return false;
+    }
+    if (!seek(0)) {
+        LOG4CPLUS_ERROR_FMT(logger_, "loop restart seek(0) failed (completed=%d/%d)",
+                            loops_completed_, loop_count_);
+        return false;
+    }
+    ++loops_completed_;
+    eof_reached_ = false;
+    current_frame_index_ = 0;
+    LOG4CPLUS_INFO_FMT(logger_,
+                       "文件循环重启: 第 %d/%d 遍开始 (frames_read=%d, max_frames=%d)",
+                       loops_completed_ + 1, loop_count_, frames_read_, max_frames_);
+    return true;
 }
 
 bool EncodedPacketSourceFromFile::findVideoStream() {

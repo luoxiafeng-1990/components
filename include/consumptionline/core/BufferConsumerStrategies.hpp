@@ -8,6 +8,7 @@
  * - SaveRawConsumer: 保存原始 YUV/RGB
  * - SaveEncodedConsumer: 保存编码流
  * - JpegEncodeConsumer: JPEG 编码预览（v3.3）
+ * - VideoEncodeConsumer: 视频编码（编码包池可共享）
  * - MultiConsumer: 多策略组合
  * 
  * 注：PSNR/SSIM 比较功能已迁移至 WorkerSyncCoordinator::createDefaultCompareCallback
@@ -49,6 +50,7 @@ extern "C" {
 #include "opencv2/imgcodecs.hpp"
 
 class VideoProductionLine;
+class WorkerBase;
 
 namespace consumer {
 
@@ -408,6 +410,52 @@ private:
 
     bool openPipe();
     void writeToPipe(const uint8_t* data, int size);
+};
+
+// ============================================================
+// VideoEncodeConsumer - 视频编码（供 MultiWorker 共享编码包池）
+// ============================================================
+
+/**
+ * @brief 视频编码消费者
+ *
+ * 与 JpegEncodeConsumer 类似：consume() 将 AVFrame 提交到编码输入池；
+ * 编码输出池保留给 MultiWorker / 下游，不在此 Consumer 内排空。
+ */
+class VideoEncodeConsumer : public IBufferConsumer {
+public:
+    using Config = WorkerConfig::ConsumerTypeConfig::VideoEncodeType;
+
+    explicit VideoEncodeConsumer(const Config& config);
+    ~VideoEncodeConsumer() override;
+
+    bool initialize(const std::vector<Buffer*>& first_buffers) override;
+    bool consume(const std::vector<Buffer*>& buffers, int frame_index) override;
+    void finalize() override;
+    std::string getStats() const override;
+
+    uint64_t getEncodeBufferPoolId() const { return encode_pool_id_; }
+    std::weak_ptr<BufferPool> getEncodeBufferPoolWeak() const;
+    /// 编码 Worker（用于 getCodecParameters / getTimeBase）
+    std::shared_ptr<WorkerBase> getEncodeWorker() const;
+
+    /// decode 侧 EOF 后调用：停止编码生产线，使编码输出池 shutdown → 共享源 EOS
+    void signalEndOfInput();
+
+private:
+    log4cplus::Logger logger_;
+    Config config_;
+
+    std::unique_ptr<class IBufferPoolBuilder> input_pool_builder_;
+    std::shared_ptr<BufferPool> input_pool_;
+    uint64_t input_pool_id_ = 0;
+
+    std::unique_ptr<::VideoProductionLine> encode_pipeline_;
+    uint64_t encode_pool_id_ = 0;
+
+    std::atomic<int> encoded_count_{0};
+    std::atomic<int> skipped_count_{0};
+    std::atomic<int> error_count_{0};
 };
 
 // ============================================================

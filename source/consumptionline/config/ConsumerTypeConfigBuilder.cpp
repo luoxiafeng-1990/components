@@ -195,6 +195,51 @@ ConsumerTypeConfig::JpegEncodeType JpegEncodeConfigBuilder::build() const {
     return config_;
 }
 
+VideoEncodeConfigBuilder& VideoEncodeConfigBuilder::setEnable(bool enable) {
+    config_.enable = enable;
+    return *this;
+}
+
+VideoEncodeConfigBuilder& VideoEncodeConfigBuilder::setEncoderName(const std::string& name) {
+    config_.encoder_name = name;
+    return *this;
+}
+
+VideoEncodeConfigBuilder& VideoEncodeConfigBuilder::setBitRate(int64_t bit_rate) {
+    config_.bit_rate = bit_rate;
+    return *this;
+}
+
+VideoEncodeConfigBuilder& VideoEncodeConfigBuilder::setGopSize(int gop_size) {
+    config_.gop_size = gop_size;
+    return *this;
+}
+
+VideoEncodeConfigBuilder& VideoEncodeConfigBuilder::setFramerate(int num, int den) {
+    config_.framerate_num = num;
+    config_.framerate_den = den > 0 ? den : 1;
+    return *this;
+}
+
+VideoEncodeConfigBuilder& VideoEncodeConfigBuilder::setRcMode(int rc_mode) {
+    config_.rc_mode = rc_mode;
+    return *this;
+}
+
+VideoEncodeConfigBuilder& VideoEncodeConfigBuilder::setMaxBFrames(int max_b_frames) {
+    config_.max_b_frames = max_b_frames;
+    return *this;
+}
+
+VideoEncodeConfigBuilder& VideoEncodeConfigBuilder::setBufferCount(int buffer_count) {
+    config_.buffer_count = buffer_count;
+    return *this;
+}
+
+ConsumerTypeConfig::VideoEncodeType VideoEncodeConfigBuilder::build() const {
+    return config_;
+}
+
 OpencvConfigBuilder& OpencvConfigBuilder::setEnable(bool enable) {
     config_.enable = enable;
     return *this;
@@ -360,6 +405,12 @@ ConsumerTypeConfigBuilder& ConsumerTypeConfigBuilder::setPerformanceConfig(
 ConsumerTypeConfigBuilder& ConsumerTypeConfigBuilder::setJpegEncodeConfig(
     const ConsumerTypeConfig::JpegEncodeType& config) {
     config_.jpeg_encode = config;
+    return *this;
+}
+
+ConsumerTypeConfigBuilder& ConsumerTypeConfigBuilder::setVideoEncodeConfig(
+    const ConsumerTypeConfig::VideoEncodeType& config) {
+    config_.video_encode = config;
     return *this;
 }
 

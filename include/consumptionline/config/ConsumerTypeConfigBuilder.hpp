@@ -130,6 +130,27 @@ private:
     ConsumerTypeConfig::JpegEncodeType config_;
 };
 
+class VideoEncodeConfigBuilder {
+public:
+    VideoEncodeConfigBuilder() = default;
+    explicit VideoEncodeConfigBuilder(const ConsumerTypeConfig::VideoEncodeType& seed)
+        : config_(seed) {}
+
+    VideoEncodeConfigBuilder& setEnable(bool enable);
+    VideoEncodeConfigBuilder& setEncoderName(const std::string& name);
+    VideoEncodeConfigBuilder& setBitRate(int64_t bit_rate);
+    VideoEncodeConfigBuilder& setGopSize(int gop_size);
+    VideoEncodeConfigBuilder& setFramerate(int num, int den);
+    VideoEncodeConfigBuilder& setRcMode(int rc_mode);
+    VideoEncodeConfigBuilder& setMaxBFrames(int max_b_frames);
+    VideoEncodeConfigBuilder& setBufferCount(int buffer_count);
+
+    ConsumerTypeConfig::VideoEncodeType build() const;
+
+private:
+    ConsumerTypeConfig::VideoEncodeType config_;
+};
+
 class OpencvConfigBuilder {
 public:
     OpencvConfigBuilder() = default;
@@ -181,6 +202,7 @@ public:
     ConsumerTypeConfigBuilder& setCompareConfig(const ConsumerTypeConfig::CompareType& config);
     ConsumerTypeConfigBuilder& setPerformanceConfig(const ConsumerTypeConfig::PerformanceType& config);
     ConsumerTypeConfigBuilder& setJpegEncodeConfig(const ConsumerTypeConfig::JpegEncodeType& config);
+    ConsumerTypeConfigBuilder& setVideoEncodeConfig(const ConsumerTypeConfig::VideoEncodeType& config);
     ConsumerTypeConfigBuilder& setOpencvConfig(const ConsumerTypeConfig::OpencvType& config);
     ConsumerTypeConfigBuilder& setCountConfig(const ConsumerTypeConfig::CountType& config);
 

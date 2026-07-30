@@ -222,6 +222,13 @@ struct WorkerConfig {
     /// Optional extra consumer appended by WebUI (e.g. PreviewFrameTap).
     /// Not driven by consume flags; QA/CLI leave this null.
     std::shared_ptr<consumer::IBufferConsumer> extra_consumer;
+
+    /**
+     * MultiWorker COMPARE 组装 datasource 生产者时的构造类型字符串
+     * （见 MgDatasourceProducerType）。空 = 未设置，保持现有 PACKET_RECORDER 逻辑。
+     * 由 CLI --mg-datasource-producer-type 经插件写入 configs[0]。
+     */
+    std::string mg_datasource_producer_type;
     
     WorkerConfig() = default;
     WorkerConfig(const WorkerConfig&) = default;

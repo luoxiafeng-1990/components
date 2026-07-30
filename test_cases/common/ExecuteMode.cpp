@@ -164,6 +164,8 @@ uint32_t ExecuteMode::buildConsumeFlags(const WorkerConfig& config) {
         flags |= consumer::CONSUME_NPU_INFERENCE;
     if (config.consumer_type.jpeg_encode.enable)
         flags |= consumer::CONSUME_JPEG_ENCODE;
+    if (config.consumer_type.video_encode.enable)
+        flags |= consumer::CONSUME_VIDEO_ENCODE;
     if (config.consumer_type.opencv.enable) {
         flags |= consumer::CONSUME_OPENCV;
     }

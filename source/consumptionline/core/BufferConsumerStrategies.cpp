@@ -1869,4 +1869,183 @@ void JpegEncodeConsumer::writeToPipe(const uint8_t* data, int size) {
     }
 }
 
+// ============================================================
+// VideoEncodeConsumer 实现
+// ============================================================
+
+VideoEncodeConsumer::VideoEncodeConsumer(const Config& config)
+    : logger_(log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("components.Consumer.VideoEncode")))
+    , config_(config)
+{
+    LOG4CPLUS_DEBUG_FMT(logger_, "构造: encoder=%s bitrate=%lld gop=%d",
+                        config_.encoder_name.c_str(),
+                        static_cast<long long>(config_.bit_rate),
+                        config_.gop_size);
+}
+
+VideoEncodeConsumer::~VideoEncodeConsumer() {
+    finalize();
+}
+
+bool VideoEncodeConsumer::initialize(const std::vector<Buffer*>& first_buffers) {
+    if (first_buffers.empty() || !first_buffers[0]) {
+        LOG4CPLUS_ERROR(logger_, "initialize: first_buffers 为空");
+        return false;
+    }
+
+    AVFrame* first_frame = first_buffers[0]->getAVFrame();
+    if (!first_frame || !first_frame->data[0]) {
+        LOG4CPLUS_ERROR(logger_, "initialize: 首帧 AVFrame 无效");
+        return false;
+    }
+
+    const int src_width  = first_frame->width;
+    const int src_height = first_frame->height;
+    const AVPixelFormat src_pix_fmt = static_cast<AVPixelFormat>(first_frame->format);
+    const int buf_count = config_.buffer_count > 0 ? config_.buffer_count : 8;
+
+    LOG4CPLUS_INFO_FMT(logger_, "初始化: 源 %dx%d pix_fmt=%d(%s) encoder=%s",
+                       src_width, src_height, static_cast<int>(src_pix_fmt),
+                       av_get_pix_fmt_name(src_pix_fmt) ? av_get_pix_fmt_name(src_pix_fmt) : "?",
+                       config_.encoder_name.c_str());
+
+    {
+        size_t frame_size = static_cast<size_t>(src_width) * src_height * 3 / 2;
+        input_pool_builder_ = BufferPoolBuilderFactory::create(
+            BufferPoolBuilderFactory::AllocatorType::AVFRAME);
+        input_pool_id_ = input_pool_builder_->allocatePoolWithBuffers(
+            buf_count, frame_size, "VideoEncodeInput", "ENCODE_INPUT");
+        if (input_pool_id_ == 0) {
+            LOG4CPLUS_ERROR(logger_, "创建编码输入 BufferPool 失败");
+            return false;
+        }
+        input_pool_ = ComponentTopology::getInstance().getPool(input_pool_id_).lock();
+        if (!input_pool_) {
+            LOG4CPLUS_ERROR(logger_, "获取编码输入 BufferPool 失败");
+            return false;
+        }
+    }
+
+    WorkerConfig enc_config;
+    enc_config.global.worker_type = WorkerType::FFMPEG_ENCODE;
+    enc_config.encoder.width = src_width;
+    enc_config.encoder.height = src_height;
+    enc_config.encoder.name = config_.encoder_name;
+    enc_config.encoder.enable_hardware =
+        (config_.encoder_name.find("taco") != std::string::npos);
+    enc_config.encoder.input_pix_fmt = static_cast<int>(src_pix_fmt);
+    enc_config.encoder.bit_rate = config_.bit_rate;
+    enc_config.encoder.gop_size = config_.gop_size;
+    enc_config.encoder.framerate_num = config_.framerate_num > 0 ? config_.framerate_num : 30;
+    enc_config.encoder.framerate_den = config_.framerate_den > 0 ? config_.framerate_den : 1;
+    enc_config.encoder.rc_mode = config_.rc_mode;
+    enc_config.encoder.max_b_frames = config_.max_b_frames;
+    enc_config.data_source.buffer_count = buf_count;
+    enc_config.data_source.buffer_mode = true;
+
+    encode_pipeline_ = std::make_unique<::VideoProductionLine>(false, 1, false);
+    if (!encode_pipeline_->start(enc_config)) {
+        LOG4CPLUS_ERROR_FMT(logger_, "编码器 '%s' 启动失败", config_.encoder_name.c_str());
+        encode_pipeline_.reset();
+        return false;
+    }
+
+    auto worker = encode_pipeline_->getWorker();
+    if (worker) {
+        worker->setSourceBufferPool(
+            ComponentTopology::getInstance().getPool(input_pool_id_));
+    }
+
+    encode_pool_id_ = encode_pipeline_->getWorkingBufferPoolId();
+    if (encode_pool_id_ == 0) {
+        LOG4CPLUS_ERROR(logger_, "编码输出 BufferPool 无效");
+        encode_pipeline_->stop();
+        encode_pipeline_.reset();
+        return false;
+    }
+
+    LOG4CPLUS_INFO_FMT(logger_, "初始化完成: input_pool=%lu output_pool=%lu",
+                       static_cast<unsigned long>(input_pool_id_),
+                       static_cast<unsigned long>(encode_pool_id_));
+    return true;
+}
+
+bool VideoEncodeConsumer::consume(const std::vector<Buffer*>& buffers, int frame_index) {
+    (void)frame_index;
+    if (buffers.empty() || !buffers[0] || !input_pool_ || !encode_pipeline_) {
+        return true;
+    }
+
+    AVFrame* src_frame = buffers[0]->getAVFrame();
+    if (!src_frame || !src_frame->data[0]) {
+        return true;
+    }
+
+    // 背压：阻塞等待编码输入空闲，避免非阻塞丢帧导致 COMPARE 帧数对不上、只能靠超时退出
+    Buffer* dst_buf = input_pool_->acquireFree(true, 500);
+    if (!dst_buf) {
+        skipped_count_.fetch_add(1, std::memory_order_relaxed);
+        return false;  // 让喂帧线程重试同一帧
+    }
+
+    AVFrame* dst_frame = dst_buf->getAVFrame();
+    if (dst_frame) {
+        av_frame_unref(dst_frame);
+        if (av_frame_ref(dst_frame, src_frame) < 0) {
+            input_pool_->releaseFree(dst_buf);
+            error_count_.fetch_add(1, std::memory_order_relaxed);
+            return true;
+        }
+    }
+
+    input_pool_->submitFilled(dst_buf);
+    encoded_count_.fetch_add(1, std::memory_order_relaxed);
+    return true;
+}
+
+void VideoEncodeConsumer::signalEndOfInput() {
+    if (encode_pipeline_) {
+        LOG4CPLUS_INFO(logger_, "signalEndOfInput: stopping encode pipeline (propagate EOS)");
+        encode_pipeline_->stop();
+    }
+}
+
+void VideoEncodeConsumer::finalize() {
+    if (encode_pipeline_) {
+        encode_pipeline_->stop();
+        encode_pipeline_.reset();
+    }
+
+    if (input_pool_) {
+        for (Buffer* buf : input_pool_->getAllManagedBuffers()) {
+            AVFrame* f = buf->getAVFrame();
+            if (f) av_frame_unref(f);
+        }
+        input_pool_.reset();
+    }
+    input_pool_builder_.reset();
+    encode_pool_id_ = 0;
+
+    LOG4CPLUS_INFO_FMT(logger_, "finalize: submitted=%d skipped=%d errors=%d",
+                       encoded_count_.load(), skipped_count_.load(),
+                       error_count_.load());
+}
+
+std::string VideoEncodeConsumer::getStats() const {
+    return "VideoEncode: submitted=" + std::to_string(encoded_count_.load()) +
+           " skipped=" + std::to_string(skipped_count_.load()) +
+           " errors=" + std::to_string(error_count_.load());
+}
+
+std::weak_ptr<BufferPool> VideoEncodeConsumer::getEncodeBufferPoolWeak() const {
+    if (encode_pool_id_ == 0) {
+        return {};
+    }
+    return ComponentTopology::getInstance().getPool(encode_pool_id_);
+}
+
+std::shared_ptr<WorkerBase> VideoEncodeConsumer::getEncodeWorker() const {
+    return encode_pipeline_ ? encode_pipeline_->getWorker() : nullptr;
+}
+
 } // namespace consumer

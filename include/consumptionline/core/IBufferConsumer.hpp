@@ -47,6 +47,7 @@ enum ConsumeTypeFlags : uint32_t {
     CONSUME_OPENCV          = 1 << 5,    ///< OpenCV消费：Buffer→Mat转换并计算PSNR/SSIM（0x20）
     CONSUME_NPU_INFERENCE   = 1 << 6, ///< ⭐ v2.28：NPU 推理（0x40）
     CONSUME_JPEG_ENCODE     = 1 << 7, ///< ⭐ v3.3：JPEG 编码预览（0x80）
+    CONSUME_VIDEO_ENCODE    = 1 << 8, ///< ⭐：视频编码消费（Decode 帧 → 编码包池）
 };
 
 /**

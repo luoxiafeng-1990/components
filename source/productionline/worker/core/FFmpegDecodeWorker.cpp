@@ -78,9 +78,12 @@ FFmpegDecodeWorker::FFmpegDecodeWorker(const WorkerConfig& config)
                                path.c_str(), config.data_source.max_frames);
         } else {
             // 文件：其他路径视为本地文件
-            datasource_ = std::make_shared<EncodedPacketSourceFromFile>(path, config.data_source.max_frames);
-            LOG4CPLUS_DEBUG_FMT(logger_, "Created EncodedPacketSourceFromFile for '%s' (max_frames=%d)", 
-                               path.c_str(), config.data_source.max_frames);
+            datasource_ = std::make_shared<EncodedPacketSourceFromFile>(
+                path, config.data_source.max_frames, config.data_source.loop_count);
+            LOG4CPLUS_DEBUG_FMT(logger_,
+                               "Created EncodedPacketSourceFromFile for '%s' (max_frames=%d, loop_count=%d)",
+                               path.c_str(), config.data_source.max_frames,
+                               config.data_source.loop_count);
         }
     }
 }

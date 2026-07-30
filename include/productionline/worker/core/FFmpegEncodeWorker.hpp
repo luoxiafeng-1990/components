@@ -143,6 +143,13 @@ public:
      * @brief 获取编解码器参数（用于 BufferWriter 等场景）
      */
     const AVCodecParameters* getCodecParameters() const override;
+
+    /**
+     * @brief 输出 codecpar 中 extradata（SPS/PPS 等）是否已就绪
+     *
+     * 部分硬件编码器需产生首个 packet 后才填充；COMPARE 共享源应在此为 true 后再挂解码器。
+     */
+    bool isOutputExtradataReady() const;
     
     /**
      * @brief 获取时间基
@@ -172,6 +179,12 @@ private:
      * @brief 从 codec_ctx 生成输出码流参数（供 MultiWorker / EncodedPacketSourceFromBuffer）
      */
     bool syncOutputCodecParameters();
+
+    /**
+     * @brief 当 codec_ctx 无 extradata 时，从 Annex-B / side-data packet 提取 SPS/PPS 填入 out_codec_params_
+     * @return true 表示 extradata 已可用
+     */
+    bool tryFillExtradataFromPacket(const AVPacket* pkt);
 
     void freeOutputCodecParameters();
     

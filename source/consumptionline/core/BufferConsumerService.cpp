@@ -5,6 +5,7 @@
 
 #include "consumptionline/core/BufferConsumerService.hpp"
 #include "productionline/worker/config/ConfigBuilders.hpp"
+#include "productionline/worker/config/MgDatasourceProducerType.hpp"
 #include "consumptionline/config/ConsumerTypeConfigBuilder.hpp"
 #include "productionline/line/MultiWorkerProductionLine.hpp"
 #include "productionline/line/WorkerSyncCoordinator.hpp"
@@ -17,6 +18,8 @@
 #include <sstream>
 #include <iomanip>
 #include <thread>
+#include <log4cplus/logger.h>
+#include <log4cplus/loggingmacros.h>
 
 namespace consumer {
 
@@ -66,8 +69,101 @@ void BufferConsumerService::setThreadPool(std::shared_ptr<BS::thread_pool<>> poo
 // ============================================================
 
 /**
+ * @brief 按 MgDatasourceProducerType 构造 MultiWorker datasource 生产者 WorkerConfig
+ *
+ * UNSPECIFIED / PACKET_RECORDER → 现有 Recorder 逻辑。
+ * DECODE_THEN_ENCODE → Decode + consumer_type.video_encode（共享源由 MultiWorker 桥接到编码池）。
+ */
+static WorkerConfig buildCompareDatasourceProducer(
+    const WorkerConfig& seed,
+    MgDatasourceProducerType type)
+{
+    const int buffer_count = seed.data_source.buffer_count > 0
+        ? seed.data_source.buffer_count : 32;
+
+    auto data_source = DataSourceConfigBuilder()
+        .setPath(seed.data_source.path)
+        .setBufferCount(buffer_count)
+        .setMaxFrames(seed.data_source.max_frames)
+        .setLoop(seed.data_source.loop)
+        .setLoopCount(seed.data_source.loop_count)
+        .setRawFrameSize(seed.data_source.raw_frame_width,
+                         seed.data_source.raw_frame_height)
+        .build();
+
+    if (type == MgDatasourceProducerType::UNSPECIFIED ||
+        type == MgDatasourceProducerType::FFMPEG_PACKET_RECORDER) {
+        return WorkerConfigBuilder()
+            .setGlobalConfig(
+                WorkerGlobalConfigBuilder()
+                    .setWorkerType(WorkerType::FFMPEG_PACKET_RECORDER)
+                    .build())
+            .setDataSourceConfig(data_source)
+            .build();
+    }
+
+    if (type == MgDatasourceProducerType::FFMPEG_DECODE ||
+        type == MgDatasourceProducerType::FFMPEG_DECODE_THEN_ENCODE) {
+        WorkerConfig producer = WorkerConfigBuilder()
+            .setGlobalConfig(
+                WorkerGlobalConfigBuilder()
+                    .setWorkerType(WorkerType::FFMPEG_DECODE)
+                    .build())
+            .setDataSourceConfig(data_source)
+            .setDecoderConfig(seed.decoder)
+            .build();
+
+        if (type == MgDatasourceProducerType::FFMPEG_DECODE_THEN_ENCODE) {
+            ConsumerTypeConfig::VideoEncodeType ve = seed.consumer_type.video_encode;
+            ve.enable = true;
+            if (ve.encoder_name.empty()) {
+                ve.encoder_name = "h264_taco";
+            }
+            if (seed.encoder.bit_rate > 0) {
+                ve.bit_rate = seed.encoder.bit_rate;
+            }
+            if (seed.encoder.gop_size > 0) {
+                ve.gop_size = seed.encoder.gop_size;
+            }
+            if (seed.encoder.framerate_num > 0) {
+                ve.framerate_num = seed.encoder.framerate_num;
+                ve.framerate_den = seed.encoder.framerate_den > 0
+                    ? seed.encoder.framerate_den : 1;
+            }
+            if (seed.encoder.name.has_value() && !seed.encoder.name->empty()) {
+                ve.encoder_name = *seed.encoder.name;
+            }
+            producer.consumer_type = ConsumerTypeConfigBuilder(producer.consumer_type)
+                .setVideoEncodeConfig(ve)
+                .build();
+        }
+        return producer;
+    }
+
+    if (type == MgDatasourceProducerType::FFMPEG_ENCODE) {
+        WorkerConfig producer = WorkerConfigBuilder()
+            .setGlobalConfig(
+                WorkerGlobalConfigBuilder()
+                    .setWorkerType(WorkerType::FFMPEG_ENCODE)
+                    .build())
+            .setDataSourceConfig(data_source)
+            .build();
+        producer.encoder = seed.encoder;
+        return producer;
+    }
+
+    return WorkerConfigBuilder()
+        .setGlobalConfig(
+            WorkerGlobalConfigBuilder()
+                .setWorkerType(WorkerType::FFMPEG_PACKET_RECORDER)
+                .build())
+        .setDataSourceConfig(data_source)
+        .build();
+}
+
+/**
  * @brief 将旧的 COMPARE 模式参数转换为 MultiWorkerConfig
- * 
+ *
  * @param configs {hw_config, sw_config}
  * @param flags 消费类型标志
  * @return pair<MultiWorkerConfig, shared_ptr<CompareCallbackContext>>
@@ -79,24 +175,25 @@ buildMultiWorkerConfigForCompare(
 {
     MultiWorkerConfig multi_config;
     GroupConfig group("compare_group");
-    
-    // 1. 配置生产者（Packet Source）
-    group.producers["packet_source"] = WorkerConfigBuilder()
-        .setGlobalConfig(
-            WorkerGlobalConfigBuilder()
-                .setWorkerType(WorkerType::FFMPEG_PACKET_RECORDER)
-                .build()
-        )
-        .setDataSourceConfig(
-            DataSourceConfigBuilder()
-                .setPath(configs[0].data_source.path)
-                .setBufferCount(configs[0].data_source.buffer_count > 0 
-                    ? configs[0].data_source.buffer_count : 32)
-                .setMaxFrames(configs[0].data_source.max_frames)
-                .build()
-        )
-        .build();
-    
+
+    auto logger = log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("consumer.BufferConsumerService"));
+
+    bool parse_ok = true;
+    const MgDatasourceProducerType ds_type =
+        parseMgDatasourceProducerType(configs[0].mg_datasource_producer_type, &parse_ok);
+    if (!parse_ok) {
+        LOG4CPLUS_WARN_FMT(logger,
+            "未知 --mg-datasource-producer-type='%s'，回退 UNSPECIFIED(PACKET_RECORDER)",
+            configs[0].mg_datasource_producer_type.c_str());
+    } else if (ds_type != MgDatasourceProducerType::UNSPECIFIED) {
+        LOG4CPLUS_INFO_FMT(logger,
+            "COMPARE datasource producer type: %s",
+            mgDatasourceProducerTypeToString(ds_type));
+    }
+
+    // 1. 配置生产者（datasource）
+    group.producers["packet_source"] = buildCompareDatasourceProducer(configs[0], ds_type);
+
     // 2. 配置消费者（Decoder Workers）
     {
         WorkerConfig hw_wc = configs[0];
@@ -113,10 +210,13 @@ buildMultiWorkerConfigForCompare(
             builder.setSaveEncodedConfig(SaveEncodedConfigBuilder(hw_wc.consumer_type.save_encoded)
                 .setEnable(true).build());
         }
+        builder.setVideoEncodeConfig(VideoEncodeConfigBuilder()
+            .setEnable(false).build());
         hw_wc.consumer_type = builder.build();
+        hw_wc.mg_datasource_producer_type.clear();
         group.consumers["hw_decoder"] = hw_wc;
     }
-    
+
     {
         WorkerConfig sw_wc = configs[1];
         auto builder = ConsumerTypeConfigBuilder(sw_wc.consumer_type);
@@ -130,17 +230,18 @@ buildMultiWorkerConfigForCompare(
             builder.setSaveEncodedConfig(SaveEncodedConfigBuilder(sw_wc.consumer_type.save_encoded)
                 .setEnable(true).build());
         }
+        builder.setVideoEncodeConfig(VideoEncodeConfigBuilder()
+            .setEnable(false).build());
         sw_wc.consumer_type = builder.build();
+        sw_wc.mg_datasource_producer_type.clear();
         group.consumers["sw_decoder"] = sw_wc;
     }
-    
+
     // 3. 配置组模式和回调
     group.mode = GroupConfig::Mode::ONE_TO_MANY;
     group.enable_frame_sync = true;
 
     const auto& consumer_type = configs[0].consumer_type;
-
-    auto logger = log4cplus::Logger::getInstance(LOG4CPLUS_TEXT("consumer.BufferConsumerService"));
 
     std::shared_ptr<CompareCallbackContext> compare_ctx = nullptr;
 
@@ -171,7 +272,7 @@ buildMultiWorkerConfigForCompare(
 
     // 4. 组装配置
     multi_config.groups.push_back(group);
-    
+
     return {multi_config, compare_ctx};
 }
 
@@ -505,6 +606,9 @@ static uint32_t getConsumeFlagsFromConfig(const WorkerConfig::ConsumerTypeConfig
     if (config.jpeg_encode.enable) {
         flags |= CONSUME_JPEG_ENCODE;
     }
+    if (config.video_encode.enable) {
+        flags |= CONSUME_VIDEO_ENCODE;
+    }
     // 注：compare 是执行模式（ExecuteMode），不是消费类型
     if (config.count.enable) {
         flags |= CONSUME_COUNT;
@@ -584,6 +688,11 @@ static std::shared_ptr<IBufferConsumer> createConsumerForWorker(
     if (flags & CONSUME_JPEG_ENCODE) {
         consumers.push_back(std::make_shared<JpegEncodeConsumer>(config.jpeg_encode));
     }
+
+    // 5.5 视频编码消费者（输出包池可供 MultiWorker 共享）
+    if (flags & CONSUME_VIDEO_ENCODE) {
+        consumers.push_back(std::make_shared<VideoEncodeConsumer>(config.video_encode));
+    }
     
     // 6. 统计消费者（如果没有其他消费者或显式启用）
     if (consumers.empty() || (flags & CONSUME_COUNT)) {
@@ -630,7 +739,13 @@ ConsumeResult BufferConsumerService::startMultiWorkerCompare(
     
     try {
         // 1. 创建 MultiWorkerProductionLine（配置由测试 case 传入，包含 callback_chain）
-        auto production_line = std::make_unique<MultiWorkerProductionLine>(multi_config);
+        // 数据源有限循环由 EncodedPacketSourceFromFile.loop_count 负责；
+        // VideoProductionLine.loop_ 仅用于无限循环（data_source.loop=true）。
+        bool ds_loop = false;
+        if (!multi_config.groups.empty() && !multi_config.groups[0].producers.empty()) {
+            ds_loop = multi_config.groups[0].producers.begin()->second.data_source.loop;
+        }
+        auto production_line = std::make_unique<MultiWorkerProductionLine>(multi_config, ds_loop);
         
         // 1.1 启动 MultiWorkerProductionLine（初始化 Worker 和 BufferPool）
         if (!production_line->start()) {
@@ -774,6 +889,12 @@ ConsumeResult BufferConsumerService::startMultiWorkerCompare(
                 consecutive_timeout = 0;
             } else {
                 consecutive_timeout++;
+                // 编码/共享源 EOS 后 MultiWorker consumer 会正常退出；勿再空等 10×5s
+                if (production_line->areAllConsumerWorkersFinished()) {
+                    LOG4CPLUS_INFO(logger_,
+                        "All MultiWorker consumers finished (EOS), ending compare loop");
+                    break;
+                }
                 if (consecutive_timeout >= max_timeout_count) {
                     LOG4CPLUS_INFO_FMT(logger_, 
                         "Max timeout count reached: %d", consecutive_timeout);
@@ -889,6 +1010,7 @@ std::shared_ptr<IBufferConsumer> BufferConsumerService::createConsumerFromFlags(
 
     if (flags & CONSUME_NPU_INFERENCE) type_count++;
     if (flags & CONSUME_JPEG_ENCODE) type_count++;
+    if (flags & CONSUME_VIDEO_ENCODE) type_count++;
     
     // 如果没有指定任何类型，默认使用 COUNT
     if (type_count == 0) {
@@ -930,6 +1052,8 @@ std::shared_ptr<IBufferConsumer> BufferConsumerService::createConsumerFromFlags(
             single = std::make_shared<NpuInferenceConsumer>(npu_cfg);
         } else if (flags & CONSUME_JPEG_ENCODE) {
             single = std::make_shared<JpegEncodeConsumer>(config.consumer_type.jpeg_encode);
+        } else if (flags & CONSUME_VIDEO_ENCODE) {
+            single = std::make_shared<VideoEncodeConsumer>(config.consumer_type.video_encode);
         }
         return attachExtraConsumer(std::move(single), config);
     }
@@ -957,6 +1081,10 @@ std::shared_ptr<IBufferConsumer> BufferConsumerService::createConsumerFromFlags(
     // JPEG 编码在 NPU 之后（编码带框画面）、Display 之前
     if (flags & CONSUME_JPEG_ENCODE) {
         multi->addStrategy(std::make_shared<JpegEncodeConsumer>(config.consumer_type.jpeg_encode));
+    }
+
+    if (flags & CONSUME_VIDEO_ENCODE) {
+        multi->addStrategy(std::make_shared<VideoEncodeConsumer>(config.consumer_type.video_encode));
     }
     
     if (flags & CONSUME_DISPLAY) {

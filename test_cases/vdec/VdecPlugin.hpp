@@ -128,9 +128,12 @@ private:
     bool verbose_ = false;
     int threads_ = 0;              ///< 0 = 未指定
     int max_frames_ = -1;          ///< -1 = 无限制
-    bool loop_ = false;
+    int loop_count_ = 1;           ///< 数据源循环遍数（默认 1）
     std::string vendor_str_ = "taco";  ///< 解码器厂商（默认 taco，与 DisplayPlugin --vendor 同模式）
     DataSourceOptions ds_opts_;    ///< DataSource 横切选项
+
+    /// MultiWorker COMPARE datasource 生产者类型（空=未设置，保持 PACKET_RECORDER）
+    std::string mg_datasource_producer_type_;
 };
 
 } // namespace vdec

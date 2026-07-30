@@ -254,6 +254,24 @@ struct ConsumerTypeConfig {
     } jpeg_encode;
 
     // ========================================
+    // 视频编码消费类型（CONSUME_VIDEO_ENCODE）
+    // 将解码帧送入 Encode Worker，产出编码包池（可供 MultiWorker 共享）
+    // ========================================
+    struct VideoEncodeType {
+        bool enable = false;                          ///< 是否启用视频编码消费
+        std::string encoder_name = "h264_taco";       ///< 编码器名（h264_taco / hevc_taco / libx264…）
+        int64_t bit_rate = 4000000;                   ///< 码率（bps）
+        int gop_size = 30;                            ///< GOP
+        int framerate_num = 30;
+        int framerate_den = 1;
+        int rc_mode = 1;                              ///< 1=VBR, 0=CBR, 2=CQP
+        int max_b_frames = 0;
+        int buffer_count = 8;                         ///< 编码输入/输出池 Buffer 数
+
+        VideoEncodeType() = default;
+    } video_encode;
+
+    // ========================================
     // OpenCV 消费类型（CONSUME_OPENCV）
     // Buffer → cv::Mat 转换后执行指定操作，再计算 PSNR/SSIM
     // ========================================

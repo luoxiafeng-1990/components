@@ -347,13 +347,17 @@ std::unique_ptr<IEncodedPacketSource> FfmpegPacketRecorderWorker::createPacketSo
         return nullptr;
     }
     else if (path.find("http://") == 0 || path.find("https://") == 0) {
-        LOG4CPLUS_INFO_FMT(logger_, "🌐 Detected HTTP/HTTPS stream source (max_frames=%d)", worker_config_.data_source.max_frames);
+        LOG4CPLUS_INFO_FMT(logger_, "🌐 Detected HTTP/HTTPS stream source (max_frames=%d, loop_count=%d)",
+                           worker_config_.data_source.max_frames, worker_config_.data_source.loop_count);
         // HTTP 流可以用 EncodedPacketSourceFromFile 处理（FFmpeg 原生支持）
-        return std::make_unique<EncodedPacketSourceFromFile>(path, worker_config_.data_source.max_frames);
+        return std::make_unique<EncodedPacketSourceFromFile>(
+            path, worker_config_.data_source.max_frames, worker_config_.data_source.loop_count);
     }
     else {
-        LOG4CPLUS_INFO_FMT(logger_, "📁 Detected local file source (max_frames=%d)", worker_config_.data_source.max_frames);
-        return std::make_unique<EncodedPacketSourceFromFile>(path, worker_config_.data_source.max_frames);
+        LOG4CPLUS_INFO_FMT(logger_, "📁 Detected local file source (max_frames=%d, loop_count=%d)",
+                           worker_config_.data_source.max_frames, worker_config_.data_source.loop_count);
+        return std::make_unique<EncodedPacketSourceFromFile>(
+            path, worker_config_.data_source.max_frames, worker_config_.data_source.loop_count);
     }
 }
 

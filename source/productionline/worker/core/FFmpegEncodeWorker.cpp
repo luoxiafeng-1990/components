@@ -6,6 +6,8 @@
 #include "productionline/worker/base/ComponentTopology.hpp"
 #include <cstring>
 #include <climits>
+#include <vector>
+#include <utility>
 
 // FFmpeg headers
 extern "C" {
@@ -17,6 +19,98 @@ extern "C" {
 #include <libavutil/pixdesc.h>
 #include <libswscale/swscale.h>
 }
+
+namespace {
+
+/** 在 [data, data+size) 中找下一个起始码，返回起始码位置；sc_len=3 或 4；找不到返回 -1 */
+int findAnnexBStartCode(const uint8_t* data, int size, int from, int* sc_len) {
+    for (int i = from; i + 3 <= size; ++i) {
+        if (data[i] == 0 && data[i + 1] == 0) {
+            if (data[i + 2] == 1) {
+                if (sc_len) *sc_len = 3;
+                return i;
+            }
+            if (i + 4 <= size && data[i + 2] == 0 && data[i + 3] == 1) {
+                if (sc_len) *sc_len = 4;
+                return i;
+            }
+        }
+    }
+    return -1;
+}
+
+/** 收集 Annex-B 中指定 NAL 类型（H.264：低 5 bit） */
+void collectH264Nals(const uint8_t* data, int size,
+                     std::vector<std::vector<uint8_t>>* sps_out,
+                     std::vector<std::vector<uint8_t>>* pps_out) {
+    int pos = 0;
+    while (pos < size) {
+        int sc_len = 0;
+        int sc = findAnnexBStartCode(data, size, pos, &sc_len);
+        if (sc < 0) break;
+        int nal_start = sc + sc_len;
+        int sc_len2 = 0;
+        int next = findAnnexBStartCode(data, size, nal_start, &sc_len2);
+        int nal_end = (next < 0) ? size : next;
+        if (nal_end > nal_start) {
+            const uint8_t nal_header = data[nal_start];
+            const int nal_type = nal_header & 0x1f;
+            std::vector<uint8_t> nal(data + nal_start, data + nal_end);
+            if (nal_type == 7 && sps_out) {
+                sps_out->push_back(std::move(nal));
+            } else if (nal_type == 8 && pps_out) {
+                pps_out->push_back(std::move(nal));
+            }
+        }
+        pos = nal_end;
+    }
+}
+
+/** 收集 Annex-B 中 HEVC VPS/SPS/PPS（nal_unit_type = (header>>1)&0x3f） */
+void collectHevcParamNals(const uint8_t* data, int size,
+                          std::vector<uint8_t>* annexb_out) {
+    static const uint8_t kStartCode[4] = {0, 0, 0, 1};
+    int pos = 0;
+    while (pos < size) {
+        int sc_len = 0;
+        int sc = findAnnexBStartCode(data, size, pos, &sc_len);
+        if (sc < 0) break;
+        int nal_start = sc + sc_len;
+        int sc_len2 = 0;
+        int next = findAnnexBStartCode(data, size, nal_start, &sc_len2);
+        int nal_end = (next < 0) ? size : next;
+        if (nal_end > nal_start + 1) {
+            const int nal_type = (data[nal_start] >> 1) & 0x3f;
+            // VPS=32, SPS=33, PPS=34
+            if (nal_type == 32 || nal_type == 33 || nal_type == 34) {
+                annexb_out->insert(annexb_out->end(), kStartCode, kStartCode + 4);
+                annexb_out->insert(annexb_out->end(), data + nal_start, data + nal_end);
+            }
+        }
+        pos = nal_end;
+    }
+}
+
+bool buildH264AvccExtradata(const std::vector<std::vector<uint8_t>>& sps_list,
+                            const std::vector<std::vector<uint8_t>>& pps_list,
+                            std::vector<uint8_t>* out) {
+    if (sps_list.empty() || pps_list.empty() || !out) return false;
+    // 与 taco 等硬件编码器输出的 Annex-B packet 对齐：extradata 也用带起始码的参数集，
+    // 避免 AVCC extradata + Annex-B packet 混用导致解码 Invalid data。
+    static const uint8_t kStartCode[4] = {0, 0, 0, 1};
+    out->clear();
+    for (const auto& sps : sps_list) {
+        out->insert(out->end(), kStartCode, kStartCode + 4);
+        out->insert(out->end(), sps.begin(), sps.end());
+    }
+    for (const auto& pps : pps_list) {
+        out->insert(out->end(), kStartCode, kStartCode + 4);
+        out->insert(out->end(), pps.begin(), pps.end());
+    }
+    return !out->empty();
+}
+
+}  // namespace
 
 // ============ 构造/析构 ============
 
@@ -588,6 +682,12 @@ const AVCodecParameters* FFmpegEncodeWorker::getCodecParameters() const {
     return out_codec_params_;
 }
 
+bool FFmpegEncodeWorker::isOutputExtradataReady() const {
+    return out_codec_params_
+        && out_codec_params_->extradata
+        && out_codec_params_->extradata_size > 0;
+}
+
 AVRational FFmpegEncodeWorker::getTimeBase() const {
     if (codec_ctx_ptr_) {
         return codec_ctx_ptr_->time_base;
@@ -781,6 +881,12 @@ bool FFmpegEncodeWorker::syncOutputCodecParameters() {
             return false;
         }
     }
+
+    // 已从 packet 填好的 extradata 不要被 from_context 冲掉
+    if (out_codec_params_->extradata && out_codec_params_->extradata_size > 0) {
+        return true;
+    }
+
     int ret = avcodec_parameters_from_context(out_codec_params_, codec_ctx_ptr_);
     if (ret < 0) {
         char err_buf[AV_ERROR_MAX_STRING_SIZE];
@@ -789,6 +895,69 @@ bool FFmpegEncodeWorker::syncOutputCodecParameters() {
         return false;
     }
     LOG4CPLUS_DEBUG(logger_, "[EncodeWorker] 已同步输出 AVCodecParameters（供下游解码订阅）");
+    return true;
+}
+
+bool FFmpegEncodeWorker::tryFillExtradataFromPacket(const AVPacket* pkt) {
+    if (!pkt || !pkt->data || pkt->size <= 0 || !out_codec_params_) {
+        return false;
+    }
+    if (out_codec_params_->extradata && out_codec_params_->extradata_size > 0) {
+        return true;
+    }
+
+    std::vector<uint8_t> extradata;
+
+    // 1) packet side data（部分编码器会在此给出）
+    int sd_size = 0;
+    const uint8_t* sd = av_packet_get_side_data(
+        const_cast<AVPacket*>(pkt), AV_PKT_DATA_NEW_EXTRADATA, &sd_size);
+    if (sd && sd_size > 0) {
+        extradata.assign(sd, sd + sd_size);
+    }
+
+    // 2) 从 Annex-B 码流抽取参数集
+    if (extradata.empty()) {
+        if (out_codec_params_->codec_id == AV_CODEC_ID_H264) {
+            std::vector<std::vector<uint8_t>> sps_list;
+            std::vector<std::vector<uint8_t>> pps_list;
+            collectH264Nals(pkt->data, pkt->size, &sps_list, &pps_list);
+            if (!buildH264AvccExtradata(sps_list, pps_list, &extradata)) {
+                LOG4CPLUS_DEBUG_FMT(logger_,
+                    "[EncodeWorker] Annex-B 中未找到完整 SPS/PPS (sps=%zu pps=%zu, pkt_size=%d)",
+                    sps_list.size(), pps_list.size(), pkt->size);
+            }
+        } else if (out_codec_params_->codec_id == AV_CODEC_ID_HEVC) {
+            collectHevcParamNals(pkt->data, pkt->size, &extradata);
+            if (extradata.empty()) {
+                LOG4CPLUS_DEBUG_FMT(logger_,
+                    "[EncodeWorker] Annex-B 中未找到 VPS/SPS/PPS (pkt_size=%d)", pkt->size);
+            }
+        }
+    }
+
+    if (extradata.empty()) {
+        return false;
+    }
+
+    // 写入 out_codec_params_（保持指针对象不变，仅替换 extradata 缓冲）
+    if (out_codec_params_->extradata) {
+        av_freep(&out_codec_params_->extradata);
+        out_codec_params_->extradata_size = 0;
+    }
+    out_codec_params_->extradata = static_cast<uint8_t*>(
+        av_mallocz(extradata.size() + AV_INPUT_BUFFER_PADDING_SIZE));
+    if (!out_codec_params_->extradata) {
+        LOG4CPLUS_ERROR(logger_, "[EncodeWorker] 分配 extradata 失败");
+        return false;
+    }
+    std::memcpy(out_codec_params_->extradata, extradata.data(), extradata.size());
+    out_codec_params_->extradata_size = static_cast<int>(extradata.size());
+
+    LOG4CPLUS_INFO_FMT(logger_,
+        "[EncodeWorker] 已从编码 packet 填充 extradata (%d bytes, codec_id=%d)",
+        out_codec_params_->extradata_size,
+        static_cast<int>(out_codec_params_->codec_id));
     return true;
 }
 
@@ -1038,12 +1207,13 @@ FillResult FFmpegEncodeWorker::fillBuffer(int frame_index, Buffer* buffer) {
         fillBufferMetadataFromPacket(packet, buffer);
 
         // 首个 packet 产生后，部分硬件编码器才会填充 extradata（SPS/PPS 等）。
-        // 让解码侧能够在 open() 阶段拿到完整 codecpar。
+        // 若 codec_ctx 仍无，则从 Annex-B / side-data 提取，供解码侧 open 使用。
         if (!codec_params_extradata_ready_) {
             (void)syncOutputCodecParameters();
-            codec_params_extradata_ready_ = (out_codec_params_ &&
-                out_codec_params_->extradata &&
-                out_codec_params_->extradata_size > 0);
+            if (!isOutputExtradataReady()) {
+                (void)tryFillExtradataFromPacket(packet);
+            }
+            codec_params_extradata_ready_ = isOutputExtradataReady();
         }
         return FillResult::success();
     }

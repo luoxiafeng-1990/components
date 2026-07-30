@@ -151,8 +151,12 @@ void VdecPlugin::registerOptions(CLI::App& app) {
     app.add_option("-M,--min-ssim", min_ssim_, "SSIM 阈值 (默认: 0.95)");
     app.add_flag("-v,--verbose", verbose_, "详细日志");
     app.add_option("-t,--threads", threads_, "并发路数 (启用 PARALLEL 模式)");
-    app.add_flag("--loop", loop_, "循环播放");
+    app.add_option("--loop", loop_count_,
+        "数据源循环遍数（默认 1；有效读取遍数=该值，与 venc --loop 语义一致）");
     app.add_option("--vendor", vendor_str_, "解码器厂商 (默认: taco)");
+    app.add_option("--mg-datasource-producer-type", mg_datasource_producer_type_,
+        "MultiWorker COMPARE 的 datasource 生产者类型；未设置则保持 PACKET_RECORDER。"
+        "可选: FFMPEG_PACKET_RECORDER|FFMPEG_DECODE|FFMPEG_ENCODE|FFMPEG_DECODE_THEN_ENCODE");
 
     // 注册厂商（各插件按需注册，此处注册 taco）
     auto& registrars = common::WorkerConfigFactory::vendorRegistrars();
@@ -177,6 +181,8 @@ void VdecPlugin::registerOptions(CLI::App& app) {
         "Examples:\n"
         "  qa_cases vdec video.mp4\n"
         "  qa_cases vdec --psnr video.mp4\n"
+        "  qa_cases vdec -r rtsp://host/stream -p -S \\\n"
+        "    --mg-datasource-producer-type FFMPEG_DECODE_THEN_ENCODE\n"
         "  qa_cases vdec --threads 4 video.mp4\n"
         "  qa_cases vdec h264_1920x1080_30 video.mp4\n"
         "  qa_cases vdec video.mp4 display --vendor taco\n"
@@ -193,7 +199,8 @@ void VdecPlugin::applyTo(WorkerConfig& config) const {
     config.data_source = DataSourceConfigBuilder(config.data_source)
         .setPathIfNonEmpty(input_path_)
         .setMaxFrames(max_frames_)
-        .setLoop(loop_)
+        .setLoop(false)  // 有限循环交给 EncodedPacketSourceFromFile.loop_count
+        .setLoopCount(loop_count_ < 1 ? 1 : loop_count_)
         .build();
     auto compare_builder = CompareConfigBuilder(config.consumer_type.compare)
         .setEnablePsnr(enable_psnr_)
@@ -206,6 +213,10 @@ void VdecPlugin::applyTo(WorkerConfig& config) const {
         .setCompareConfig(compare_builder.build())
         .setVerbose(verbose_)
         .build();
+
+    if (!mg_datasource_producer_type_.empty()) {
+        config.mg_datasource_producer_type = mg_datasource_producer_type_;
+    }
 }
 
 // ========================================
@@ -331,6 +342,7 @@ std::vector<WorkerConfig> VdecPlugin::buildPipelineConfigs(const WorkerConfig& s
         cfg.data_source = DataSourceConfigBuilder(cfg.data_source)
             .setMaxFrames(shared_config.data_source.max_frames)
             .setLoop(shared_config.data_source.loop)
+            .setLoopCount(shared_config.data_source.loop_count)
             .build();
 
         if (is_compare && use_hw) {
@@ -338,6 +350,12 @@ std::vector<WorkerConfig> VdecPlugin::buildPipelineConfigs(const WorkerConfig& s
             if (taco_cfg) {
                 taco_cfg->reorder_mode = TacoConfig::ReorderMode::ON;
             }
+        }
+
+        if (!mg_datasource_producer_type_.empty()) {
+            cfg.mg_datasource_producer_type = mg_datasource_producer_type_;
+        } else if (!shared_config.mg_datasource_producer_type.empty()) {
+            cfg.mg_datasource_producer_type = shared_config.mg_datasource_producer_type;
         }
 
         return cfg;

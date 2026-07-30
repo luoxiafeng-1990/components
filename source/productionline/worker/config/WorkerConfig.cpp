@@ -101,6 +101,24 @@ DataSourceConfigBuilder& DataSourceConfigBuilder::setLoopCount(int loop_count) {
     return *this;
 }
 
+DataSourceConfigBuilder& DataSourceConfigBuilder::setRawFrameWidth(int width) {
+    data_source_config_.raw_frame_width = width;
+    return *this;
+}
+
+DataSourceConfigBuilder& DataSourceConfigBuilder::setRawFrameHeight(int height) {
+    data_source_config_.raw_frame_height = height;
+    return *this;
+}
+
+DataSourceConfigBuilder& DataSourceConfigBuilder::setRawFrameSize(int width, int height) {
+    if (width > 0 && height > 0) {
+        data_source_config_.raw_frame_width = width;
+        data_source_config_.raw_frame_height = height;
+    }
+    return *this;
+}
+
 WorkerConfig::DataSourceConfig DataSourceConfigBuilder::build() const {
     return data_source_config_;
 }

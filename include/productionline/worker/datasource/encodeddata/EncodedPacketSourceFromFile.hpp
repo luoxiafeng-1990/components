@@ -31,9 +31,12 @@ public:
     /**
      * @brief 构造函数
      * @param file_path 文件路径
-     * @param max_frames 最大读取帧数（-1=无限制）
+     * @param max_frames 最大读取帧数（-1=无限制；跨循环累计）
+     * @param loop_count 文件循环遍数（默认 1；<1 按 1 处理）
      */
-    explicit EncodedPacketSourceFromFile(const std::string& file_path, int max_frames = -1);
+    explicit EncodedPacketSourceFromFile(const std::string& file_path,
+                                         int max_frames = -1,
+                                         int loop_count = 1);
     
     /**
      * @brief 析构函数
@@ -101,8 +104,13 @@ private:
     // 帧数限制（v2.23 新增）
     // ========================================
     int max_frames_;                     // 最大读取帧数（-1=无限制）
-    int frames_read_;                    // 已读取帧数计数
-    
+    int frames_read_;                    // 已读取帧数计数（跨循环累计）
+    int loop_count_;                     // 文件循环遍数（>=1）
+    int loops_completed_;                // 已完成的遍数（从 0 起；EOF 重启前 +1）
+
+    /// EOF 时若还有剩余遍数则 seek 到开头并继续
+    bool tryRestartForLoop();
+
     /**
      * @brief 查找视频流
      * @return true 如果成功

@@ -2,6 +2,7 @@
 #include "productionline/worker/base/WorkerFactory.hpp"
 #include "productionline/worker/base/ComponentTopology.hpp"
 #include "productionline/worker/core/FfmpegPacketRecorderWorker.hpp"
+#include "productionline/worker/core/FFmpegEncodeWorker.hpp"
 #include "productionline/worker/datasource/encodeddata/EncodedPacketSourceFromBuffer.hpp"
 #include "common/Logger.hpp"
 #include "common/GlobalThreadPool.hpp"
@@ -266,8 +267,21 @@ void MultiWorkerProductionLine::stop() {
     for (auto& group : groups_) {
         if (!group) continue;
         for (auto& [name, info] : group->producers) {
+            if (info.encode_bridge) {
+                info.encode_bridge->encode_feed_running.store(false);
+            }
             if (info.producer_line) {
                 info.producer_line->stop();
+            }
+            if (info.encode_bridge) {
+                if (info.encode_bridge->encode_feed_thread.joinable()) {
+                    info.encode_bridge->encode_feed_thread.join();
+                }
+                if (info.encode_bridge->stacked_video_encode) {
+                    info.encode_bridge->stacked_video_encode->finalize();
+                    info.encode_bridge->stacked_video_encode.reset();
+                }
+                info.encode_bridge->shared_source_worker.reset();
             }
         }
     }
@@ -358,10 +372,153 @@ bool MultiWorkerProductionLine::createProducersForGroup(WorkerGroupRuntime* grou
         info.buffer_pool_id = buffer_pool_id;
         info.buffer_pool_weak = buffer_pool_weak;
 
+        // DECODE_THEN_ENCODE：Decode 帧池 → VideoEncodeConsumer → 编码包池作共享源
+        if (worker_config.consumer_type.video_encode.enable) {
+            LOG4CPLUS_INFO(logger_, "     ⭐ 生产者 '" << producer_name
+                           << "' 启用 video_encode，桥接编码包池为共享源");
+
+            auto decode_pool = pool;
+            Buffer* first = nullptr;
+            for (int i = 0; i < 200 && !first; ++i) {
+                first = decode_pool->acquireFilled(true, 100);
+            }
+            if (!first) {
+                setError("video_encode bridge: timeout waiting first decode frame: " + producer_name);
+                groups_.clear();
+                return false;
+            }
+
+            auto ve = std::make_shared<consumer::VideoEncodeConsumer>(
+                worker_config.consumer_type.video_encode);
+            std::vector<Buffer*> first_bufs{first};
+            if (!ve->initialize(first_bufs)) {
+                decode_pool->releaseFilled(first);
+                setError("video_encode bridge: initialize failed: " + producer_name);
+                groups_.clear();
+                return false;
+            }
+            // 首帧也送入编码
+            ve->consume(first_bufs, 0);
+            decode_pool->releaseFilled(first);
+
+            auto encode_pool_id = ve->getEncodeBufferPoolId();
+            auto encode_pool_weak = ve->getEncodeBufferPoolWeak();
+            if (encode_pool_id == 0 || !encode_pool_weak.lock()) {
+                ve->finalize();
+                setError("video_encode bridge: encode pool invalid: " + producer_name);
+                groups_.clear();
+                return false;
+            }
+
+            auto bridge = std::make_unique<WorkerGroupRuntime::ProducerInfo::EncodeBridge>();
+            bridge->stacked_video_encode = ve;
+            bridge->shared_source_worker = ve->getEncodeWorker();
+            bridge->encode_feed_running.store(true);
+
+            VideoProductionLine* decode_line = producer_line.get();
+
+            // 喂帧线程：Decode 池 → VideoEncodeConsumer（编码输出池留给 MultiWorker 订阅）
+            // decode EOF 后：signalEndOfInput 停编码生产线 → 编码池 shutdown → 共享源 EOS
+            bridge->encode_feed_thread = std::thread(
+                [decode_pool, ve, running = &bridge->encode_feed_running, decode_line]() {
+                    int frame_index = 1;
+                    int idle_after_eof = 0;
+                    while (running->load(std::memory_order_acquire)) {
+                        Buffer* buf = decode_pool->acquireFilled(true, 100);
+                        if (!buf) {
+                            const bool decode_done =
+                                !decode_line || !decode_line->isRunning();
+                            if (decode_done) {
+                                if (++idle_after_eof >= 5) {
+                                    break;
+                                }
+                            } else {
+                                idle_after_eof = 0;
+                            }
+                            continue;
+                        }
+                        idle_after_eof = 0;
+
+                        // consume 失败（输入池暂满）时重试，避免丢帧
+                        std::vector<Buffer*> bufs{buf};
+                        while (running->load(std::memory_order_acquire)) {
+                            if (ve->consume(bufs, frame_index)) {
+                                ++frame_index;
+                                break;
+                            }
+                            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+                        }
+                        decode_pool->releaseFilled(buf);
+                    }
+
+                    ve->signalEndOfInput();
+                });
+
+            // 门禁：等 Encode 输出 codecpar.extradata（SPS/PPS）就绪后再挂共享源。
+            // 就绪则立刻继续；超时则失败（禁止带着 size=0 开 hw/sw 解码器）。
+            {
+                constexpr int kWaitMs = 5000;
+                constexpr int kStepMs = 10;
+                int waited = 0;
+                bool ready = false;
+                int extradata_size = 0;
+
+                auto enc_worker = std::dynamic_pointer_cast<FFmpegEncodeWorker>(
+                    bridge->shared_source_worker);
+                auto is_ready = [&]() -> bool {
+                    if (enc_worker) {
+                        return enc_worker->isOutputExtradataReady();
+                    }
+                    const AVCodecParameters* cp = bridge->shared_source_worker
+                        ? bridge->shared_source_worker->getCodecParameters()
+                        : nullptr;
+                    return cp && cp->extradata && cp->extradata_size > 0;
+                };
+
+                while (waited < kWaitMs) {
+                    if (is_ready()) {
+                        ready = true;
+                        const AVCodecParameters* cp = bridge->shared_source_worker
+                            ? bridge->shared_source_worker->getCodecParameters()
+                            : nullptr;
+                        extradata_size = cp ? cp->extradata_size : 0;
+                        break;
+                    }
+                    std::this_thread::sleep_for(std::chrono::milliseconds(kStepMs));
+                    waited += kStepMs;
+                }
+
+                if (!ready) {
+                    LOG4CPLUS_ERROR_FMT(logger_,
+                        "     video_encode bridge: encode extradata (SPS/PPS) not ready after %dms",
+                        waited);
+                    bridge->encode_feed_running.store(false);
+                    bridge.reset();  // join feed + finalize encode
+                    setError("video_encode bridge: encode extradata (SPS/PPS) not ready after "
+                             + std::to_string(kWaitMs) + "ms: " + producer_name);
+                    groups_.clear();
+                    return false;
+                }
+
+                LOG4CPLUS_INFO_FMT(logger_,
+                    "     video_encode bridge: extradata ready (size=%d, waited=%dms)",
+                    extradata_size, waited);
+            }
+
+            // 共享源改指向编码包池
+            info.buffer_pool_id = encode_pool_id;
+            info.buffer_pool_weak = encode_pool_weak;
+            info.encode_bridge = std::move(bridge);
+
+            LOG4CPLUS_INFO(logger_, "     生产者 '" << producer_name
+                           << "' video_encode 桥接完成 (encode_pool=" << encode_pool_id << ")");
+        }
+
+        const uint64_t logged_pool_id = info.buffer_pool_id;
         group->producers[producer_name] = std::move(info);
 
         LOG4CPLUS_INFO(logger_, "     生产者 '" << producer_name
-                       << "' 已启动 (BufferPool ID: " << buffer_pool_id << ")");
+                       << "' 已启动 (共享 BufferPool ID: " << logged_pool_id << ")");
     }
 
     return true;
@@ -389,7 +546,9 @@ bool MultiWorkerProductionLine::setupSharedSources(WorkerGroupRuntime* group) {
         auto& producer_info = it->second;
 
         const AVCodecParameters* codec_params = nullptr;
-        if (producer_info.producer_line) {
+        if (producer_info.encode_bridge && producer_info.encode_bridge->shared_source_worker) {
+            codec_params = producer_info.encode_bridge->shared_source_worker->getCodecParameters();
+        } else if (producer_info.producer_line) {
             auto worker = producer_info.producer_line->getWorker();
             if (worker) {
                 codec_params = worker->getSourceCodecParameters();
@@ -507,7 +666,12 @@ bool MultiWorkerProductionLine::createConsumersForGroup(WorkerGroupRuntime* grou
 
             const AVCodecParameters* codec_params = nullptr;
             AVRational time_base = {1, 25};
-            if (producer_info_ptr->producer_line) {
+            if (producer_info_ptr->encode_bridge &&
+                producer_info_ptr->encode_bridge->shared_source_worker) {
+                auto worker = producer_info_ptr->encode_bridge->shared_source_worker;
+                codec_params = worker->getCodecParameters();
+                time_base = worker->getTimeBase();
+            } else if (producer_info_ptr->producer_line) {
                 auto worker = producer_info_ptr->producer_line->getWorker();
                 if (worker) {
                     codec_params = worker->getSourceCodecParameters();
@@ -852,6 +1016,7 @@ void MultiWorkerProductionLine::workerThreadFunc(
                 if (fill_result.isEoFlush() || consumer_info->worker->isAtEnd()) {
                     LOG4CPLUS_INFO(logger_, "[Worker '" << consumer_name
                                    << "'] data source exhausted, exiting normally");
+                    worker_stats->is_active.store(false);
                     stop_worker = true;
                 } else {
                     int failures = worker_stats->consecutive_failures.fetch_add(1) + 1;
@@ -892,6 +1057,8 @@ void MultiWorkerProductionLine::workerThreadFunc(
             group->coordinator->removeWorker(consumer_name);
         }
     }
+
+    worker_stats->is_active.store(false);
 
     LOG4CPLUS_INFO(logger_, "[Worker '" << consumer_name << "'] 线程结束 "
                    << "(produced=" << worker_stats->frames_produced.load()
@@ -941,6 +1108,18 @@ int MultiWorkerProductionLine::getActiveWorkerCount(size_t group_index) const {
         }
     }
     return count;
+}
+
+bool MultiWorkerProductionLine::areAllConsumerWorkersFinished() const {
+    if (groups_.empty()) {
+        return true;
+    }
+    for (size_t i = 0; i < groups_.size(); ++i) {
+        if (getActiveWorkerCount(i) > 0) {
+            return false;
+        }
+    }
+    return true;
 }
 
 // ============================================================
