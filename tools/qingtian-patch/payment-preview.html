@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SlashSubs Payment UI Preview</title>
+    <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #1e1e2e;
+      color: #e0e0e0;
+      display: flex; justify-content: center; align-items: flex-start;
+      min-height: 100vh; padding: 30px 10px;
+    }
+    .license-gate {
+      width: 100%; max-width: 420px;
+      background: #252535;
+      border-radius: 16px;
+      padding: 24px 18px;
+      box-shadow: 0 4px 24px rgba(0,0,0,0.3);
+    }
+    .license-logo {
+      font-size: 26px; font-weight: 800; text-align: center;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+      margin-bottom: 6px;
+    }
+    .license-desc {
+      text-align: center; font-size: 12px; color: #888; margin-bottom: 16px;
+    }
+    .primary-button {
+      background: linear-gradient(135deg, #667eea, #764ba2);
+      color: #fff; border: none; border-radius: 8px;
+      padding: 10px 16px; font-size: 14px; font-weight: 600;
+      cursor: pointer; transition: all .15s;
+    }
+    .primary-button:hover { opacity: 0.9; transform: translateY(-1px); }
+    .purchase-link {
+      background: none; border: none; color: #888;
+      font-size: 12px; cursor: pointer; text-align: center;
+      padding: 6px; text-decoration: underline;
+    }
+    .purchase-link:hover { color: #aaa; }
+
+    /* Crypto method cards */
+    .crypto-method-card {
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      gap: 4px; padding: 10px 4px; border-radius: 10px; cursor: pointer;
+      border: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.04);
+      transition: all .15s ease; min-height: 64px; color: #fff;
+    }
+    .crypto-method-card:hover {
+      background: rgba(255,255,255,0.1); border-color: rgba(255,255,255,0.2);
+      transform: translateY(-1px); box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+    }
+    .crypto-method-card:active { transform: scale(0.97); }
+    .crypto-method-icon { font-size: 22px; line-height: 1; }
+    .crypto-method-label { font-size: 11px; font-weight: 600; color: #fff; text-align: center; line-height: 1.2; }
+    #crypto-pay-details { animation: fadeSlideUp .2s ease; }
+    @keyframes fadeSlideUp { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+
+    .license-input {
+      width: 100%; padding: 8px 12px; border-radius: 8px;
+      border: 1px solid rgba(255,255,255,0.15); background: rgba(255,255,255,0.06);
+      color: #e0e0e0; font-size: 13px;
+    }
+    .license-feedback { text-align: center; font-size: 12px; min-height: 18px; margin-top: 6px; }
+    .support-footer { text-align: center; margin-top: 12px; }
+    .support-footer a { color: #667eea; font-size: 12px; text-decoration: none; }
+    .support-footer a:hover { text-decoration: underline; }
+    </style>
+</head>
+<body>
+    <div id="license-gate" class="license-gate">
+        <div class="license-logo">SlashSubs</div>
+        <p class="license-desc" id="license-desc">SlashSubs v3.7.9 — free trial for new users</p>
+
+        <!-- Step 0: Plan picker -->
+        <div id="license-paywall" style="display:flex;flex-direction:column;gap:10px;align-items:center;max-width:480px;margin:0 auto;">
+            <div id="license-plan-picker" style="display:flex;gap:8px;width:100%;max-width:360px;">
+                <button type="button" class="primary-button" id="btn-plan-monthly" data-plan="monthly" style="flex:1;outline:2px solid #3dd68c;">Monthly<br/><b>$9.9</b></button>
+                <button type="button" class="purchase-link" id="btn-plan-yearly" data-plan="yearly" style="flex:1;border:1px solid rgba(255,255,255,.25);padding:10px;border-radius:8px;text-decoration:none;font-size:14px;">Yearly<br/><b>$49</b></button>
+            </div>
+
+            <!-- Step 1: Crypto method picker (card grid) -->
+            <div id="crypto-method-grid" style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;width:100%;margin-top:8px;">
+                <button type="button" class="crypto-method-card" data-method="btc" onclick="showDetails('Bitcoin','₿','#f7931a','Bitcoin','bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh')">
+                    <span class="crypto-method-icon" style="color:#f7931a;">₿</span>
+                    <span class="crypto-method-label">Bitcoin</span>
+                </button>
+                <button type="button" class="crypto-method-card" data-method="eth" onclick="showDetails('Ethereum','Ξ','#627eea','Ethereum (ERC20)','0x71C7656EC7ab88b098defB751B7401B5f6d8976F')">
+                    <span class="crypto-method-icon" style="color:#627eea;">Ξ</span>
+                    <span class="crypto-method-label">Ethereum</span>
+                </button>
+                <button type="button" class="crypto-method-card" data-method="usdt-trc20" onclick="showDetails('USDT (TRC20)','₮','#26a17b','TRC20 (Tron)','TBzvkRLPTeSaxJrqr2vYkVh1frnFPVD2bC')">
+                    <span class="crypto-method-icon" style="color:#26a17b;">₮</span>
+                    <span class="crypto-method-label">USDT (TRC20)</span>
+                </button>
+                <button type="button" class="crypto-method-card" data-method="usdt-erc20" onclick="showDetails('USDT (ERC20)','₮','#26a17b','ERC20 (Ethereum)','0x71C7656EC7ab88b098defB751B7401B5f6d8976F')">
+                    <span class="crypto-method-icon" style="color:#26a17b;">₮</span>
+                    <span class="crypto-method-label">USDT (ERC20)</span>
+                </button>
+                <button type="button" class="crypto-method-card" data-method="usdt-arbitrum" onclick="showDetails('USDT (Arbitrum)','₮','#26a17b','Arbitrum One','0x71C7656EC7ab88b098defB751B7401B5f6d8976F')">
+                    <span class="crypto-method-icon" style="color:#26a17b;">₮</span>
+                    <span class="crypto-method-label">USDT (Arbitrum)</span>
+                </button>
+                <button type="button" class="crypto-method-card" data-method="usdt-polygon" onclick="showDetails('USDT (Polygon)','₮','#26a17b','Polygon','0x71C7656EC7ab88b098defB751B7401B5f6d8976F')">
+                    <span class="crypto-method-icon" style="color:#26a17b;">₮</span>
+                    <span class="crypto-method-label">USDT (Polygon)</span>
+                </button>
+                <button type="button" class="crypto-method-card" data-method="usdt-solana" onclick="showDetails('USDT (Solana)','₮','#26a17b','Solana','7EcDhSYGxXyscszYEp35KHN8vvw3svAdjYXFEtWgCCoR')">
+                    <span class="crypto-method-icon" style="color:#26a17b;">₮</span>
+                    <span class="crypto-method-label">USDT (Solana)</span>
+                </button>
+                <button type="button" class="crypto-method-card" data-method="usdc" onclick="showDetails('USDC','$','#2775ca','ERC20 (Ethereum)','0x71C7656EC7ab88b098defB751B7401B5f6d8976F')">
+                    <span class="crypto-method-icon" style="color:#2775ca;">$</span>
+                    <span class="crypto-method-label">USDC</span>
+                </button>
+                <button type="button" class="crypto-method-card" data-method="usdc-arbitrum" onclick="showDetails('USDC (Arbitrum)','$','#2775ca','Arbitrum One','0x71C7656EC7ab88b098defB751B7401B5f6d8976F')">
+                    <span class="crypto-method-icon" style="color:#2775ca;">$</span>
+                    <span class="crypto-method-label">USDC (Arbitrum)</span>
+                </button>
+                <button type="button" class="crypto-method-card" data-method="usdc-polygon" onclick="showDetails('USDC (Polygon)','$','#2775ca','Polygon','0x71C7656EC7ab88b098defB751B7401B5f6d8976F')">
+                    <span class="crypto-method-icon" style="color:#2775ca;">$</span>
+                    <span class="crypto-method-label">USDC (Polygon)</span>
+                </button>
+                <button type="button" class="crypto-method-card" data-method="usdc-solana" onclick="showDetails('USDC (Solana)','$','#2775ca','Solana','7EcDhSYGxXyscszYEp35KHN8vvw3svAdjYXFEtWgCCoR')">
+                    <span class="crypto-method-icon" style="color:#2775ca;">$</span>
+                    <span class="crypto-method-label">USDC (Solana)</span>
+                </button>
+                <button type="button" class="crypto-method-card" data-method="binance-pay" onclick="showDetails('Binance Pay','◆','#f0b90b','Binance Pay','binance-pay-id-here')">
+                    <span class="crypto-method-icon" style="color:#f0b90b;">◆</span>
+                    <span class="crypto-method-label">Binance Pay</span>
+                </button>
+            </div>
+
+            <!-- Step 2: Payment details (hidden by default) -->
+            <div id="crypto-pay-details" style="display:none;width:100%;max-width:380px;background:rgba(30,30,30,0.95);border-radius:16px;padding:20px;border:1px solid rgba(255,255,255,0.1);margin-top:4px;">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+                    <button type="button" id="btn-crypto-back" style="background:none;border:none;cursor:pointer;font-size:14px;color:#999;padding:4px 8px;" onclick="goBack()">← Back</button>
+                    <span id="crypto-pay-method-name" style="font-weight:700;font-size:14px;color:#e0e0e0;"></span>
+                    <span></span>
+                </div>
+                <div style="text-align:center;margin-bottom:10px;">
+                    <div style="font-size:12px;color:#888;">Total</div>
+                    <div id="crypto-pay-amount" style="font-size:22px;font-weight:700;color:#fff;">$9.9 USDT</div>
+                </div>
+                <div style="text-align:center;margin-bottom:6px;">
+                    <div id="crypto-pay-network-badge" style="display:inline-block;background:#1a1a2e;color:#fff;font-size:11px;font-weight:600;padding:4px 12px;border-radius:6px;margin-bottom:8px;"></div>
+                </div>
+                <div style="background:rgba(255,255,255,0.06);border-radius:10px;padding:10px;margin-bottom:12px;word-break:break-all;font-family:monospace;font-size:12px;text-align:center;user-select:all;cursor:text;color:#ccc;" id="crypto-pay-address"></div>
+                <div style="font-size:11px;color:#888;text-align:center;margin-bottom:12px;" id="crypto-pay-warning">After payment, click Verify payment.</div>
+                <div style="text-align:center;margin-bottom:12px;">
+                    <img id="crypto-pay-qr" alt="Payment QR" style="width:180px;height:180px;background:#fff;border-radius:8px;object-fit:contain;" />
+                </div>
+                <div style="display:flex;gap:8px;flex-direction:column;">
+                    <button type="button" class="primary-button" id="btn-verify-payment" style="width:100%;">Verify payment</button>
+                    <button type="button" class="purchase-link" id="btn-copy-pay-address" style="text-align:center;">Copy payment address</button>
+                </div>
+            </div>
+
+            <button type="button" class="purchase-link" id="btn-debug-unlock" style="opacity:.65;margin-top:6px;">QA: Simulate paid unlock</button>
+            <input type="password" class="license-input" id="license-code-input" placeholder="Backup: renewal password (optional)" autocomplete="off" spellcheck="false" style="margin-top:4px;" />
+            <button type="button" class="purchase-link" id="btn-activate">Renew with password</button>
+        </div>
+        <div id="license-feedback" class="license-feedback"></div>
+        <div class="support-footer" style="margin-top:12px;">
+            <div><a href="https://chat.whatsapp.com/EJUfSlyZxlQ0bYCtdYqsQA">WhatsApp Group</a></div>
+        </div>
+    </div>
+
+    <script>
+    function showDetails(name, icon, color, network, addr) {
+      document.getElementById('crypto-method-grid').style.display = 'none';
+      var details = document.getElementById('crypto-pay-details');
+      details.style.display = '';
+      document.getElementById('crypto-pay-method-name').textContent = name;
+      document.getElementById('crypto-pay-network-badge').textContent = network;
+      document.getElementById('crypto-pay-address').textContent = addr;
+      document.getElementById('crypto-pay-qr').src = 'https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=' + encodeURIComponent(addr);
+    }
+    function goBack() {
+      document.getElementById('crypto-pay-details').style.display = 'none';
+      document.getElementById('crypto-method-grid').style.display = '';
+    }
+    // Plan toggle
+    document.getElementById('btn-plan-monthly').addEventListener('click', function(){
+      this.style.outline = '2px solid #3dd68c'; this.style.opacity = '1';
+      var y = document.getElementById('btn-plan-yearly');
+      y.style.outline = 'none'; y.style.opacity = '.55';
+      document.getElementById('crypto-pay-amount').textContent = '$9.9 USDT';
+    });
+    document.getElementById('btn-plan-yearly').addEventListener('click', function(){
+      this.style.outline = '2px solid #3dd68c'; this.style.opacity = '1';
+      var m = document.getElementById('btn-plan-monthly');
+      m.style.outline = 'none'; m.style.opacity = '.55';
+      document.getElementById('crypto-pay-amount').textContent = '$49 USDT';
+    });
+    </script>
+</body>
+</html>

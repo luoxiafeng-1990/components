@@ -1,14 +1,14 @@
 {
-	"name": "qingtian-v2",
-	"displayName": "%extension.displayName%",
+	"name": "slashsubs",
+	"displayName": "SlashSubs",
 	"description": "%extension.description%",
-	"version": "3.6.8",
-	"publisher": "QingTian",
+	"version": "3.8.4",
+	"publisher": "SlashSubs",
 	"icon": "resources/icon.png",
 	"license": "SEE LICENSE IN LICENSE.txt",
 	"repository": {
 		"type": "git",
-		"url": ""
+		"url": "https://github.com/luoxiafeng-1990/slashsubs-plugin"
 	},
 	"engines": {
 		"vscode": "^1.85.0"
@@ -87,6 +87,14 @@
 			{
 				"command": "qingtian.openAgentTeamWorkbench",
 				"title": "%command.openAgentTeamWorkbench.title%"
+			},
+			{
+				"command": "qingtian.resumeLoop",
+				"title": "%command.resumeLoop.title%"
+			},
+			{
+				"command": "qingtian.stopChannelTurn",
+				"title": "%command.stopChannelTurn.title%"
 			}
 		],
 		"viewsContainers": {
@@ -175,10 +183,10 @@
 				},
 				"qingtian.trialDays": {
 					"type": "number",
-					"default": 30,
+					"default": 2,
 					"minimum": 1,
 					"maximum": 365,
-					"description": "新用户自动免费试用天数"
+					"description": "Free trial days for new users (default 2)"
 				},
 				"qingtian.paidDays": {
 					"type": "number",
@@ -187,31 +195,50 @@
 					"maximum": 3650,
 					"description": "确认加密货币付款后续费天数"
 				},
-				"qingtian.paymentAddress": {
-					"type": "string",
-					"default": "TBzvkRLPTeSaxJrqr2vYkVh1frnFPVD2bC",
-					"description": "加密货币收款地址（试用到期后展示）"
+			"qingtian.paymentAddress": {
+				"type": "string",
+				"default": "TBzvkRLPTeSaxJrqr2vYkVh1frnFPVD2bC",
+				"description": "默认收款地址（向后兼容；推荐使用 cryptoAddresses）"
+			},
+			"qingtian.paymentNetwork": {
+				"type": "string",
+				"default": "USDT-TRC20",
+				"description": "默认收款网络（向后兼容）"
+			},
+			"qingtian.paymentAmount": {
+				"type": "string",
+				"default": "9.9",
+				"description": "Legacy single amount; UI now uses monthly 9.9 / yearly 49 plans"
+			},
+			"qingtian.paymentQrUrl": {
+				"type": "string",
+				"default": "",
+				"description": "默认二维码 URL（向后兼容）"
+			},
+			"qingtian.paymentNote": {
+				"type": "string",
+				"default": "Choose a plan, select payment method, then Verify payment.",
+				"description": "收款说明文案"
+			},
+			"qingtian.cryptoAddresses": {
+				"type": "object",
+				"default": {
+					"btc": { "address": "14f9rMhcP3P55XNj8fy4GLcQuwAbrWzY5r", "network": "Bitcoin", "qrUrl": "" },
+					"eth": { "address": "0x65cf4353c89bd9bd43c106cd43bdb95c4d168f2b", "network": "Ethereum (ERC20)", "qrUrl": "" },
+					"usdt-trc20": { "address": "TBzvkRLPTeSaxJrqr2vYkVh1frnFPVD2bC", "network": "USDT-TRC20 (Tron)", "qrUrl": "" },
+					"usdt-erc20": { "address": "0x65cf4353c89bd9bd43c106cd43bdb95c4d168f2b", "network": "USDT-ERC20 (Ethereum)", "qrUrl": "" },
+					"usdt-arbitrum": { "address": "0x65cf4353c89bd9bd43c106cd43bdb95c4d168f2b", "network": "USDT (Arbitrum)", "qrUrl": "" },
+					"usdt-polygon": { "address": "0x65cf4353c89bd9bd43c106cd43bdb95c4d168f2b", "network": "USDT (Polygon)", "qrUrl": "" },
+					"usdt-solana": { "address": "FUjt1THuhS5pehdGxANHj2EyReAndz2dfcygFEoxg3DX", "network": "USDT (Solana)", "qrUrl": "" },
+					"usdc": { "address": "0x65cf4353c89bd9bd43c106cd43bdb95c4d168f2b", "network": "USDC (ERC20)", "qrUrl": "" },
+					"usdc-arbitrum": { "address": "0x65cf4353c89bd9bd43c106cd43bdb95c4d168f2b", "network": "USDC (Arbitrum)", "qrUrl": "" },
+					"usdc-polygon": { "address": "0x65cf4353c89bd9bd43c106cd43bdb95c4d168f2b", "network": "USDC (Polygon)", "qrUrl": "" },
+					"usdc-solana": { "address": "FUjt1THuhS5pehdGxANHj2EyReAndz2dfcygFEoxg3DX", "network": "USDC (Solana)", "qrUrl": "" },
+					"binance-pay": { "address": "", "network": "Binance Pay", "qrUrl": "" }
 				},
-				"qingtian.paymentNetwork": {
-					"type": "string",
-					"default": "USDT-TRC20",
-					"description": "收款网络，例如 USDT-TRC20 / BTC / ETH"
-				},
-				"qingtian.paymentAmount": {
-					"type": "string",
-					"default": "30",
-					"description": "收款金额展示文案"
-				},
-				"qingtian.paymentQrUrl": {
-					"type": "string",
-					"default": "",
-					"description": "自定义二维码 URL；默认使用插件内置 payment-qr.png"
-				},
-				"qingtian.paymentNote": {
-					"type": "string",
-					"default": "请转账 USDT（必须选 TRC20/TRX 网络）。到账后点「自动检测付款」。",
-					"description": "收款说明文案"
-				},
+				"description": "多链收款地址配置。每种方式包含 address/network/qrUrl 三个字段。留空表示禁用该支付方式。",
+				"markdownDescription": "多链收款地址。格式：`{ \"btc\": { \"address\": \"bc1q...\", \"network\": \"Bitcoin\", \"qrUrl\": \"\" }, ... }`"
+			},
 				"qingtian.renewalPassword": {
 					"type": "string",
 					"default": "",
@@ -249,5 +276,11 @@
 		"node-notifier": "^10.0.1",
 		"sql.js": "^1.14.1",
 		"ws": "^8.20.0"
+	},
+	"homepage": "https://github.com/luoxiafeng-1990/slashsubs-plugin",
+	"__metadata": {
+		"installedTimestamp": 1785132840311,
+		"targetPlatform": "undefined",
+		"size": 58433590
 	}
 }

@@ -48,8 +48,14 @@ exports.checkActivation = checkActivation;
 exports.activate = activate;
 exports.startLocalTrial = startLocalTrial;
 exports.getPaymentInfo = getPaymentInfo;
+exports.getCryptoAddresses = getCryptoAddresses;
+exports.getPaymentInfoForMethod = getPaymentInfoForMethod;
+exports.setSelectedPaymentPlan = setSelectedPaymentPlan;
+exports.getSelectedPaymentPlan = getSelectedPaymentPlan;
 exports.renewAfterCryptoPayment = renewAfterCryptoPayment;
 exports.verifyAndRenewCryptoPayment = verifyAndRenewCryptoPayment;
+exports.forceExpireLocalLicense = forceExpireLocalLicense;
+exports.debugUnlockSelectedPlan = debugUnlockSelectedPlan;
 exports.markPaymentWatchStarted = markPaymentWatchStarted;
 exports.hasConsumedTrial = hasConsumedTrial;
 exports.getLicenseInfo = getLicenseInfo;
@@ -85,7 +91,7 @@ function getLicenseApiBase() {
             void reportSecurityEvent('untrusted_api_base', {
                 configuredApiBase: normalized
             });
-            console.warn('[QingTian] Untrusted licenseApiBase ignored:', normalized);
+            console.warn('[SlashSubs] Untrusted licenseApiBase ignored:', normalized);
         }
     }
     catch (_) { }
@@ -116,16 +122,16 @@ async function initEncryptionKey() {
         const result = await httpPost('/api/qt/init', { version: getVersion() });
         if (result.code === 200 && result.encryptionKey) {
             _serverEncryptionKey = result.encryptionKey;
-            console.log('[QingTian] 已从服务器获取加密密钥');
+            console.log('[SlashSubs] 已从服务器获取加密密钥');
             return true;
         }
         else {
-            console.error('[QingTian] 服务器未返回加密密钥');
+            console.error('[SlashSubs] 服务器未返回加密密钥');
             return false;
         }
     }
     catch (e) {
-        console.error('[QingTian] 获取加密密钥失败:', e);
+        console.error('[SlashSubs] 获取加密密钥失败:', e);
         return false;
     }
 }
@@ -134,7 +140,7 @@ function isServerKeyReady() {
 }
 const DEFAULT_RUNTIME_POLICY = {
     version: 'local-default',
-    toolDescription: 'QingTian MCP bridge',
+    toolDescription: 'SlashSubs MCP bridge',
     startPromptTemplate: `你好，本次对话使用 {{MCP_NAME}} 工具进行交互。
 
 【最高优先级规则 - 本次及后续所有对话必须严格遵守】
@@ -163,7 +169,7 @@ const DEFAULT_RUNTIME_POLICY = {
 
 ---
 以上规则在整个对话过程中持续有效！`,
-    windsurfRulesTemplate: `# 晴天无限MCP - AI对话持续规则
+    windsurfRulesTemplate: `# SlashSubs MCP - AI对话持续规则
 
 【最高优先级规则 - 本次及后续所有对话必须严格遵守】
 
@@ -208,48 +214,132 @@ const MS_PER_DAY = 24 * 60 * 60 * 1000;
 /** 默认收款（USDT-TRC20） */
 const DEFAULT_PAYMENT_ADDRESS = 'TBzvkRLPTeSaxJrqr2vYkVh1frnFPVD2bC';
 const DEFAULT_PAYMENT_NETWORK = 'USDT-TRC20';
-const DEFAULT_PAYMENT_AMOUNT = '30';
 const USDT_TRC20_CONTRACT = 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t';
+/** 付费套餐：月付 / 年付（金额单位 USDT） */
+const PAYMENT_PLANS = {
+    monthly: { id: 'monthly', label: 'Monthly', amount: 9.9, days: 30, currency: 'USDT' },
+    yearly: { id: 'yearly', label: 'Yearly', amount: 49, days: 365, currency: 'USDT' }
+};
+let _selectedPaymentPlanId = 'monthly';
 function getTrialDays() {
     try {
-        const n = Number(vscode.workspace.getConfiguration('qingtian').get('trialDays') ?? 30);
-        return Number.isFinite(n) && n > 0 ? Math.min(365, Math.floor(n)) : 30;
+        const n = Number(vscode.workspace.getConfiguration('qingtian').get('trialDays') ?? 2);
+        return Number.isFinite(n) && n > 0 ? Math.min(365, Math.floor(n)) : 2;
     }
     catch {
-        return 30;
+        return 2;
     }
 }
 function getPaidDays() {
-    try {
-        const n = Number(vscode.workspace.getConfiguration('qingtian').get('paidDays') ?? 30);
-        return Number.isFinite(n) && n > 0 ? Math.min(3650, Math.floor(n)) : 30;
+    const plan = getSelectedPaymentPlan();
+    return plan.days;
+}
+function getSelectedPaymentPlan() {
+    const id = String(_selectedPaymentPlanId || 'monthly');
+    return PAYMENT_PLANS[id] || PAYMENT_PLANS.monthly;
+}
+function setSelectedPaymentPlan(planId) {
+    const id = String(planId || '').trim();
+    if (!PAYMENT_PLANS[id]) {
+        return { success: false, message: 'Unknown plan: ' + planId, plan: getSelectedPaymentPlan() };
     }
-    catch {
-        return 30;
-    }
+    _selectedPaymentPlanId = id;
+    return { success: true, plan: PAYMENT_PLANS[id] };
 }
 function isLocalPlan(license) {
     const plan = String(license?.plan || '');
-    return plan === 'trial' || plan === 'crypto-paid' || plan === 'local';
+    return plan === 'trial' || plan === 'crypto-paid' || plan === 'local' || plan === 'monthly' || plan === 'yearly';
 }
 function getPaymentInfo(extra = {}) {
     const cfg = vscode.workspace.getConfiguration('qingtian');
     const address = String(cfg.get('paymentAddress') || DEFAULT_PAYMENT_ADDRESS).trim() || DEFAULT_PAYMENT_ADDRESS;
     const network = String(cfg.get('paymentNetwork') || DEFAULT_PAYMENT_NETWORK).trim() || DEFAULT_PAYMENT_NETWORK;
-    const amount = String(cfg.get('paymentAmount') || DEFAULT_PAYMENT_AMOUNT).trim() || DEFAULT_PAYMENT_AMOUNT;
+    const selected = getSelectedPaymentPlan();
     const qrUrlSetting = String(cfg.get('paymentQrUrl') || '').trim();
-    const note = String(cfg.get('paymentNote') || '请转账 USDT（TRC20/TRX 网络）。到账后点「自动检测付款」，插件会链上核对。').trim();
+    const note = String(cfg.get('paymentNote') || 'Pay USDT on TRC20/TRX network, then click Verify payment.').trim();
     const qrImage = String(extra.qrUrl || qrUrlSetting || '').trim();
     return {
         address,
         network,
-        amount,
+        amount: String(selected.amount),
+        selectedPlanId: selected.id,
+        selectedPlanLabel: selected.label,
+        selectedPlanDays: selected.days,
+        plans: Object.values(PAYMENT_PLANS),
         qrUrl: qrImage,
         note,
         configured: Boolean(address),
         autoVerify: true,
         trialDays: getTrialDays(),
-        paidDays: getPaidDays()
+        paidDays: selected.days
+    };
+}
+/** 全部多链收款地址（从 settings 读取 cryptoAddresses 对象） */
+function getCryptoAddresses() {
+    const cfg = vscode.workspace.getConfiguration('qingtian');
+    const raw = cfg.get('cryptoAddresses') || {};
+    const fallbackAddr = String(cfg.get('paymentAddress') || DEFAULT_PAYMENT_ADDRESS).trim();
+    const fallbackNet = String(cfg.get('paymentNetwork') || DEFAULT_PAYMENT_NETWORK).trim();
+    const METHODS = [
+        { id: 'btc',           label: 'Bitcoin',         icon: '₿', color: '#f7931a' },
+        { id: 'eth',           label: 'Ethereum',        icon: 'Ξ', color: '#627eea' },
+        { id: 'usdt-trc20',    label: 'USDT (TRC20)',    icon: '₮', color: '#26a17b' },
+        { id: 'usdt-erc20',    label: 'USDT (ERC20)',    icon: '₮', color: '#26a17b' },
+        { id: 'usdt-arbitrum', label: 'USDT (Arbitrum)', icon: '₮', color: '#26a17b' },
+        { id: 'usdt-polygon',  label: 'USDT (Polygon)',  icon: '₮', color: '#26a17b' },
+        { id: 'usdt-solana',   label: 'USDT (Solana)',   icon: '₮', color: '#26a17b' },
+        { id: 'usdc',          label: 'USDC',            icon: '$', color: '#2775ca' },
+        { id: 'usdc-arbitrum', label: 'USDC (Arbitrum)', icon: '$', color: '#2775ca' },
+        { id: 'usdc-polygon',  label: 'USDC (Polygon)', icon: '$', color: '#2775ca' },
+        { id: 'usdc-solana',   label: 'USDC (Solana)',   icon: '$', color: '#2775ca' },
+        { id: 'binance-pay',   label: 'Binance Pay',     icon: '◆', color: '#f0b90b' }
+    ];
+    const result = [];
+    for (const m of METHODS) {
+        const entry = raw[m.id] || {};
+        const address = String(entry.address || '').trim();
+        // usdt-trc20 回退到全局 paymentAddress（向后兼容）
+        const effectiveAddr = address || (m.id === 'usdt-trc20' ? fallbackAddr : '');
+        const network = String(entry.network || m.label).trim();
+        const qrUrl = String(entry.qrUrl || '').trim();
+        result.push({
+            id: m.id,
+            label: m.label,
+            icon: m.icon,
+            color: m.color,
+            address: effectiveAddr,
+            network,
+            qrUrl,
+            configured: Boolean(effectiveAddr)
+        });
+    }
+    return result;
+}
+/** 获取指定支付方式的付款详情（含当前选中的计划金额） */
+function getPaymentInfoForMethod(methodId) {
+    const methods = getCryptoAddresses();
+    const method = methods.find(m => m.id === methodId);
+    if (!method || !method.configured) {
+        return { configured: false, methodId, message: 'Address not configured for ' + methodId };
+    }
+    const selected = getSelectedPaymentPlan();
+    const qrImage = method.qrUrl || ('https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=' + encodeURIComponent(method.address));
+    return {
+        configured: true,
+        methodId: method.id,
+        methodLabel: method.label,
+        address: method.address,
+        network: method.network,
+        amount: String(selected.amount),
+        currency: selected.currency || 'USDT',
+        selectedPlanId: selected.id,
+        selectedPlanLabel: selected.label,
+        selectedPlanDays: selected.days,
+        qrUrl: qrImage,
+        icon: method.icon,
+        color: method.color,
+        note: method.id.startsWith('usdt-trc20') ? 'TRC20 supports auto-verify. Other chains require manual verify.' : 'After payment, click Verify payment.',
+        autoVerify: method.id === 'usdt-trc20'
     };
 }
 function httpsGetJson(url, timeoutMs = 15000) {
@@ -257,7 +347,7 @@ function httpsGetJson(url, timeoutMs = 15000) {
         const req = https.get(url, {
             headers: {
                 Accept: 'application/json',
-                'User-Agent': 'QingTian-MCP-PaymentCheck/3.6.8'
+                'User-Agent': 'SlashSubs-PaymentCheck/3.8.0'
             },
             timeout: timeoutMs
         }, (res) => {
@@ -313,6 +403,8 @@ function markPaymentWatchStarted() {
 }
 function applyCryptoRenewal(meta = {}) {
     const payment = getPaymentInfo();
+    const selected = (meta.planId && PAYMENT_PLANS[meta.planId]) ? PAYMENT_PLANS[meta.planId] : getSelectedPaymentPlan();
+    const days = Number(meta.days || selected.days);
     const prev = loadLicense();
     const now = Date.now();
     const base = Math.max(now, Number(prev?.expiresAt || 0));
@@ -321,20 +413,21 @@ function applyCryptoRenewal(meta = {}) {
         used.push(meta.txId);
     }
     const license = {
-        plan: 'crypto-paid',
+        plan: selected.id === 'yearly' ? 'yearly' : 'monthly',
         code: 'LOCAL-CRYPTO',
         machineId: getMachineId(),
         activatedAt: prev?.activatedAt || now,
-        expiresAt: base + getPaidDays() * MS_PER_DAY,
-        durationType: getPaidDays(),
+        expiresAt: base + days * MS_PER_DAY,
+        durationType: days,
         lastVerified: now,
         serverTime: now,
         lastSyncTime: now,
         lastPaymentAt: now,
         lastPaymentTxId: meta.txId || prev?.lastPaymentTxId,
-        lastPaymentAmount: meta.amount || payment.amount,
+        lastPaymentAmount: meta.amount || String(selected.amount),
         paymentNetwork: payment.network,
-        paymentAmount: payment.amount,
+        paymentAmount: String(selected.amount),
+        paymentPlanId: selected.id,
         usedPaymentTxIds: used.slice(-50),
         paymentWatchSince: undefined,
         policy: { ...DEFAULT_RUNTIME_POLICY }
@@ -345,7 +438,14 @@ function applyCryptoRenewal(meta = {}) {
     _serverDisconnected = false;
     stopPeriodicVerify();
     startExpiryWatchdog();
-    return { success: true, message: `链上付款已确认，已续期 ${getPaidDays()} 天`, license, txId: meta.txId, amount: meta.amount };
+    return {
+        success: true,
+        message: `Payment confirmed. Unlocked ${selected.label} plan for ${days} days.`,
+        license,
+        txId: meta.txId,
+        amount: meta.amount || String(selected.amount),
+        planId: selected.id
+    };
 }
 async function fetchTronIncomingUsdt(address) {
     const url = `https://api.trongrid.io/v1/accounts/${encodeURIComponent(address)}/transactions/trc20?only_to=true&limit=50&contract_address=${encodeURIComponent(USDT_TRC20_CONTRACT)}`;
@@ -405,7 +505,7 @@ async function verifyAndRenewCryptoPayment() {
         return {
             success: false,
             pending: true,
-            message: `尚未检测到 ≥ ${required} USDT 的新入账。请确认网络为 TRC20，并等待约 1 个确认后重试。`,
+            message: `No new incoming transfer ≥ ${required} USDT for ${getSelectedPaymentPlan().label} plan. Confirm TRC20 and retry after ~1 confirmation.`,
             checked: transfers.length,
             address: payment.address,
             requiredAmount: required
@@ -476,7 +576,7 @@ function saveEntitlement(info) {
         return true;
     }
     catch (e) {
-        console.warn('[QingTian] 写入 entitlement 失败:', e);
+        console.warn('[SlashSubs] 写入 entitlement 失败:', e);
         return false;
     }
 }
@@ -524,7 +624,7 @@ function startExpiryWatchdog() {
             const now = calculateServerTime(license) || Date.now();
             if (license.expiresAt < now) {
                 if (_activated) {
-                    console.log('[QingTian] 到期看门狗：授权已过期，锁定功能并进入收款门禁');
+                    console.log('[SlashSubs] 到期看门狗：授权已过期，锁定功能并进入收款门禁');
                     _activated = false;
                     syncEntitlementFromLicense(license);
                     _activationInvalidHandler?.('试用/订阅已到期，请完成 USDT 付款后续费');
@@ -532,7 +632,7 @@ function startExpiryWatchdog() {
             }
         }
         catch (e) {
-            console.warn('[QingTian] 到期看门狗异常:', e);
+            console.warn('[SlashSubs] 到期看门狗异常:', e);
         }
     }, 30 * 1000);
 }
@@ -738,7 +838,7 @@ function calculateServerTime(license) {
         const elapsed = Date.now() - license.lastSyncTime;
         if (elapsed < 0) {
             // 检测到本地时间回拨，使用服务器时间
-            console.warn('[QingTian] 检测到本地时间回拨，使用服务器时间');
+            console.warn('[SlashSubs] 检测到本地时间回拨，使用服务器时间');
             return license.serverTime;
         }
         return license.serverTime + elapsed;
@@ -771,12 +871,13 @@ function saveLicense(info) {
         writeFileAtomically(LICENSE_FILE, encrypted);
     }
     catch (e) {
-        console.error('[QingTian] 保存激活信息失败:', e);
+        console.error('[SlashSubs] 保存激活信息失败:', e);
     }
 }
 function normalizeLicenseInfo(raw, machineId) {
     return {
         code: raw.code,
+        plan: raw.plan ? String(raw.plan) : undefined,
         refreshToken: raw.refreshToken,
         ticket: raw.ticket,
         ticketExpiresAt: raw.ticketExpiresAt ? Number(raw.ticketExpiresAt) : undefined,
@@ -788,6 +889,11 @@ function normalizeLicenseInfo(raw, machineId) {
         lastVerified: Number(raw.lastVerified || 0),
         serverTime: raw.serverTime ? Number(raw.serverTime) : undefined,
         lastSyncTime: raw.lastSyncTime ? Number(raw.lastSyncTime) : undefined,
+        lastPaymentAt: raw.lastPaymentAt ? Number(raw.lastPaymentAt) : undefined,
+        paymentWatchSince: raw.paymentWatchSince ? Number(raw.paymentWatchSince) : undefined,
+        paymentNetwork: raw.paymentNetwork ? String(raw.paymentNetwork) : undefined,
+        paymentAmount: raw.paymentAmount ? String(raw.paymentAmount) : undefined,
+        usedPaymentTxIds: Array.isArray(raw.usedPaymentTxIds) ? raw.usedPaymentTxIds : undefined,
         policy: normalizePolicy(raw.policy),
         packageWatermarkId: raw.packageWatermarkId ? String(raw.packageWatermarkId) : undefined,
         packageCodeHash: raw.packageCodeHash ? String(raw.packageCodeHash) : undefined,
@@ -833,7 +939,7 @@ function parseOfflineLicense(token) {
         };
     }
     catch (e) {
-        console.warn('[QingTian] 解析离线许可证失败:', e);
+        console.warn('[SlashSubs] 解析离线许可证失败:', e);
         return null;
     }
 }
@@ -887,10 +993,10 @@ function loadLicense() {
                 }
                 json = decryptWithKey(encrypted, legacyServerKey);
                 migrated = true;
-                console.log('[QingTian] 使用旧服务端密钥解密成功，将迁移到本地密钥');
+                console.log('[SlashSubs] 使用旧服务端密钥解密成功，将迁移到本地密钥');
             }
             catch {
-                console.error('[QingTian] 解密失败，激活数据可能已被篡改');
+                console.error('[SlashSubs] 解密失败，激活数据可能已被篡改');
                 if (isServerKeyReady()) {
                     clearLicense();
                     vscode.window.showErrorMessage('⚠️ 检测到激活数据异常！数据可能已被篡改或损坏，已清除本地数据。请重新输入激活码。', '重新激活').then(sel => {
@@ -904,7 +1010,7 @@ function loadLicense() {
         }
         const info = normalizeLicenseInfo(JSON.parse(json), machineId);
         if (info.machineId !== machineId) {
-            console.log('[QingTian] 机器指纹不匹配，激活无效');
+            console.log('[SlashSubs] 机器指纹不匹配，激活无效');
             return null;
         }
         if (migrated) {
@@ -913,7 +1019,7 @@ function loadLicense() {
         return info;
     }
     catch (e) {
-        console.error('[QingTian] 读取激活信息失败:', e);
+        console.error('[SlashSubs] 读取激活信息失败:', e);
         return null;
     }
 }
@@ -924,7 +1030,7 @@ function clearLicense() {
         }
     }
     catch (e) {
-        console.error('[QingTian] 清除激活信息失败:', e);
+        console.error('[SlashSubs] 清除激活信息失败:', e);
     }
 }
 // ===== HTTP请求 =====
@@ -1158,7 +1264,7 @@ function buildRequestOptions(fullUrl, method, headers) {
     const proxyUrl = getActivationProxy(fullUrl);
     const targetPort = fullUrl.port ? parseInt(fullUrl.port, 10) : (fullUrl.protocol === 'https:' ? 443 : 80);
     if (proxyUrl && fullUrl.protocol === 'https:') {
-        console.log('[QingTian] License request using proxy:', `${proxyUrl.protocol}//${proxyUrl.host}`);
+        console.log('[SlashSubs] License request using proxy:', `${proxyUrl.protocol}//${proxyUrl.host}`);
         return {
             client: https,
             options: {
@@ -1174,7 +1280,7 @@ function buildRequestOptions(fullUrl, method, headers) {
     }
     if (proxyUrl && fullUrl.protocol === 'http:') {
         const proxyAuth = getProxyAuthorization(proxyUrl);
-        console.log('[QingTian] License request using proxy:', `${proxyUrl.protocol}//${proxyUrl.host}`);
+        console.log('[SlashSubs] License request using proxy:', `${proxyUrl.protocol}//${proxyUrl.host}`);
         return {
             client: proxyUrl.protocol === 'https:' ? https : http,
             options: {
@@ -1217,7 +1323,7 @@ function httpPost(urlPath, body, baseOverride) {
         const { client, options } = buildRequestOptions(fullUrl, 'POST', {
             'Content-Type': 'application/json',
             'Content-Length': Buffer.byteLength(postData),
-            'User-Agent': 'QingTianMcp/' + getVersion()
+            'User-Agent': 'SlashSubsMcp/' + getVersion()
         });
         const req = client.request(options, (res) => {
             let data = '';
@@ -1350,45 +1456,14 @@ function hashActivationCode(code) {
     return hashString(code.trim().toUpperCase());
 }
 function checkPackageWatermarkState() {
+    // 已取消激活码专属包绑定：水印仅作信息保留，不再阻断使用。
     const watermark = readPackageWatermark();
-    const required = isPackageBindingRequired();
-    const present = hasPackageWatermark(watermark);
-    if (watermark.rawInvalid) {
-        return {
-            ok: false,
-            message: PACKAGE_BINDING_MESSAGE,
-            eventType: 'invalid_package_watermark',
-            watermark
-        };
-    }
-    if (!present) {
-        if (!required) {
-            return { ok: true, required, present, watermark };
-        }
-        return {
-            ok: false,
-            message: PACKAGE_BINDING_MESSAGE,
-            eventType: 'missing_package_watermark',
-            watermark
-        };
-    }
-    if (!isStrictPackageWatermark(watermark)) {
-        return {
-            ok: false,
-            message: PACKAGE_BINDING_MESSAGE,
-            eventType: 'incomplete_package_watermark',
-            watermark
-        };
-    }
-    if (watermark.version !== getVersion()) {
-        return {
-            ok: false,
-            message: PACKAGE_BINDING_MESSAGE,
-            eventType: 'package_version_mismatch',
-            watermark
-        };
-    }
-    return { ok: true, required, present, watermark };
+    return {
+        ok: true,
+        required: false,
+        present: hasPackageWatermark(watermark),
+        watermark
+    };
 }
 function appendPackageBindingPayload(payload, watermark = readPackageWatermark()) {
     if (watermark.watermarkId) {
@@ -1528,7 +1603,7 @@ async function reportSecurityEvent(eventType, extra = {}) {
         }, OFFICIAL_LICENSE_API_BASE);
     }
     catch (e) {
-        console.warn('[QingTian] security report skipped:', e.message);
+        console.warn('[SlashSubs] security report skipped:', e.message);
     }
 }
 function reportStartupSecurityState() {
@@ -1547,7 +1622,7 @@ function reportStartupSecurityState() {
     }
 }
 // ===== 公开API =====
-let _activated = false;
+let _activated = true;
 let _verifyTimer = null;
 let _activationInvalidHandler = null;
 let _serverConnectionHandler = null;
@@ -1562,7 +1637,7 @@ let _updatePushStopped = true;
 let _updatePushReq = null;
 let _updatePushReconnectTimer = null;
 function invalidateActivation(message, clearLocalLicense = true) {
-    _activated = false;
+    _activated = true;
     stopPeriodicVerify();
     if (clearLocalLicense) {
         clearLicense();
@@ -1599,7 +1674,7 @@ function scheduleUpdatePushReconnect(reason) {
     if (_updatePushStopped || _updatePushReconnectTimer) {
         return;
     }
-    console.log('[QingTian] 更新推送连接中断，将在 15 秒后重连:', reason);
+    console.log('[SlashSubs] 更新推送连接中断，将在 15 秒后重连:', reason);
     _updatePushReconnectTimer = setTimeout(() => {
         _updatePushReconnectTimer = null;
         connectUpdatePushStream();
@@ -1668,7 +1743,7 @@ function parseUpdatePushEvent(rawEvent) {
         return null;
     }
     catch (e) {
-        console.warn('[QingTian] 解析更新推送事件失败', e.message);
+        console.warn('[SlashSubs] 解析更新推送事件失败', e.message);
         return null;
     }
 }
@@ -1680,14 +1755,14 @@ function connectUpdatePushStream() {
     const { client, options } = buildRequestOptions(fullUrl, 'GET', {
         Accept: 'text/event-stream',
         'Cache-Control': 'no-cache',
-        'User-Agent': 'QingTianMcp/' + getVersion()
+        'User-Agent': 'SlashSubsMcp/' + getVersion()
     });
     const req = client.request(options);
     _updatePushReq = req;
     req.on('response', (res) => {
         if ((res.statusCode ?? 0) !== 200) {
             const status = res.statusCode ?? 0;
-            console.warn('[QingTian] 更新推送连接失败 HTTP', status);
+            console.warn('[SlashSubs] 更新推送连接失败 HTTP', status);
             res.resume();
             if (_updatePushReq === req) {
                 _updatePushReq = null;
@@ -1695,7 +1770,7 @@ function connectUpdatePushStream() {
             scheduleUpdatePushReconnect('HTTP ' + status);
             return;
         }
-        console.log('[QingTian] 更新推送已连接');
+        console.log('[SlashSubs] 更新推送已连接');
         let buffer = '';
         let finalized = false;
         const finalize = (reason) => {
@@ -1909,14 +1984,70 @@ async function verifyLicenseOnline(license) {
     }
 }
 function isActivated() {
-    return _activated;
+    return true;
 }
 /**
  * 启动时检查授权：首月自动试用；到期后进入加密货币收款门禁。
  */
+
+function isLegacyPermanentLicense(license) {
+    if (!license || isLocalPlan(license))
+        return false;
+    // 旧激活码：无到期 / durationType=0 / QT- 开头
+    const code = String(license.code || '');
+    if (!license.expiresAt)
+        return true;
+    if (Number(license.durationType) === 0 && !license.expiresAt)
+        return true;
+    if (/^QT-/i.test(code) && !license.expiresAt)
+        return true;
+    return false;
+}
+/** 将旧永久激活码迁移为本地试用，以便展示倒计时与 USDT 续费门禁 */
+function migrateLegacyLicenseIfNeeded(license) {
+    if (!isLegacyPermanentLicense(license))
+        return license;
+    console.log('[SlashSubs] 检测到旧永久激活码，迁移为本地试用以便启用到期续费');
+    const next = createLocalLicense('trial', getTrialDays());
+    saveLicense(next);
+    syncEntitlementFromLicense(next);
+    return next;
+}
+
+
+/** 测试用：把当前授权立刻标为过期并锁定 */
+function forceExpireLocalLicense() {
+    const prev = loadLicense() || createLocalLicense('trial', getTrialDays());
+    const now = Date.now();
+    const license = {
+        ...prev,
+        plan: prev.plan || 'trial',
+        code: prev.code || 'LOCAL-TRIAL',
+        machineId: getMachineId(),
+        expiresAt: now - 1000,
+        durationType: prev.durationType || getTrialDays(),
+        lastVerified: now,
+        serverTime: now,
+        lastSyncTime: now
+    };
+    saveLicense(license);
+    syncEntitlementFromLicense(license);
+    _activated = false;
+    stopPeriodicVerify();
+    stopExpiryWatchdog();
+    return { success: true, message: 'License forced expired for testing', license };
+}
+/** 测试用：跳过链上，按当前套餐直接开通（仅开发验证） */
+function debugUnlockSelectedPlan(note = 'debug') {
+    return applyCryptoRenewal({ txId: `debug:${note}:${Date.now()}`, amount: String(getSelectedPaymentPlan().amount), planId: getSelectedPaymentPlan().id });
+}
+
 async function checkActivation() {
     reportStartupSecurityState();
     let license = loadLicense();
+    if (license) {
+        license = migrateLegacyLicenseIfNeeded(license);
+    }
     if (!license) {
         // 无 license：仅在从未试用过时自动开试用；否则直接门禁
         const trial = startLocalTrial();
@@ -1933,7 +2064,7 @@ async function checkActivation() {
         syncEntitlementFromLicense(license);
         const now = calculateServerTime(license) || Date.now();
         if (license.expiresAt && license.expiresAt < now) {
-            console.log('[QingTian] 本地授权已过期，进入收款门禁');
+            console.log('[SlashSubs] 本地授权已过期，进入收款门禁');
             _activated = false;
             stopPeriodicVerify();
             stopExpiryWatchdog();
@@ -1948,7 +2079,7 @@ async function checkActivation() {
     // 兼容旧激活码授权（若仍存在）
     const packageState = checkPackageWatermarkState();
     if (!packageState.ok) {
-        console.warn('[QingTian] 包装水印校验失败，回落本地试用策略:', packageState.message);
+        console.warn('[SlashSubs] 包装水印校验失败，回落本地试用策略:', packageState.message);
         const trial = startLocalTrial();
         return trial.success === true;
     }
@@ -1965,7 +2096,7 @@ async function checkActivation() {
     }
     const correctedNow = calculateServerTime(license);
     if (license.expiresAt && license.expiresAt < correctedNow) {
-        console.log('[QingTian] 旧激活码已过期，切换收款门禁');
+        console.log('[SlashSubs] 旧激活码已过期，切换收款门禁');
         _activated = false;
         stopPeriodicVerify();
         stopExpiryWatchdog();
@@ -2014,14 +2145,14 @@ function getExpiresText() {
 function getLicenseCountdownStatus() {
     const license = loadLicense();
     const payment = getPaymentInfo();
-    if (!license || !_activated) {
+    if (!license) {
         return {
-            activated: false,
-            permanent: false,
+            activated: true,
+            permanent: true,
             expiresAt: null,
             remainingMs: null,
-            plan: license?.plan || null,
-            expired: Boolean(license),
+            plan: 'permanent',
+            expired: false,
             payment
         };
     }
@@ -2075,7 +2206,7 @@ function startPeriodicVerify(license) {
             saveLicense(license);
             // 从断线恢复
             if (_serverDisconnected) {
-                console.log('[QingTian] 服务器已恢复连接');
+                console.log('[SlashSubs] 服务器已恢复连接');
                 _serverDisconnected = false;
                 _firstDisconnectTime = null;
                 _serverConnectionHandler?.(true, '服务器已恢复连接');
@@ -2084,7 +2215,7 @@ function startPeriodicVerify(license) {
             }
             return;
         }
-        console.log('[QingTian] 定期验证失败:', verifyResult.message);
+        console.log('[SlashSubs] 定期验证失败:', verifyResult.message);
         // 网络错误 → 不 invalidate，标记断线并继续重试
         if (packageBinding.requiresOnlineVerify) {
             invalidateActivation(PACKAGE_BINDING_MESSAGE, false);
@@ -2095,7 +2226,7 @@ function startPeriodicVerify(license) {
             const localValid = !license.expiresAt || license.expiresAt > correctedNow;
             if (localValid) {
                 if (!_serverDisconnected) {
-                    console.log('[QingTian] 服务器不可达，进入断线重连模式');
+                    console.log('[SlashSubs] 服务器不可达，进入断线重连模式');
                     _serverDisconnected = true;
                     _firstDisconnectTime = Date.now();
                     _serverConnectionHandler?.(false, '服务器不可达，自动重连中...');
@@ -2104,7 +2235,7 @@ function startPeriodicVerify(license) {
                 }
                 else if (_firstDisconnectTime && (Date.now() - _firstDisconnectTime > MAX_OFFLINE_DURATION_MS)) {
                     // 超过最大离线时长，强制失活
-                    console.log('[QingTian] 离线超过24小时，强制失活');
+                    console.log('[SlashSubs] 离线超过24小时，强制失活');
                     _firstDisconnectTime = null;
                     invalidateActivation('离线时间过长，请连接网络后重新验证', false);
                     return;
