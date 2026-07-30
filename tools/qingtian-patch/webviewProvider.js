@@ -71,7 +71,7 @@ function trySystemNotify(title, message) {
 function isEnglishUi() {
     try {
         const ctx = require('./extension').getExtensionContext?.();
-        return ctx?.globalState?.get?.('qingtian.uiLanguage', 'en') !== 'zh';
+        return ctx?.globalState?.get?.('qingtian.uiLanguage', 'zh') === 'en';
     }
     catch {
         return false;
@@ -83,7 +83,7 @@ function uiText(text) {
         return value;
     const map = {
         '授权校验失败: ': 'Authorization check failed: ',
-        '晴天无限MCP': 'SlashSubs',
+        '晴天无限MCP': 'QingTian MCP',
         '发送消息失败': 'Failed to send message',
         '复制开场失败：': 'Failed to copy starter: ',
         '自动恢复上下文失败：': 'Auto restore context failed: ',
@@ -93,7 +93,7 @@ function uiText(text) {
         '正在重启切号，Cursor 将关闭后自动重新打开...': 'Restart switching. Cursor will close and reopen automatically...',
         '账号列表已复制到剪贴板': 'Account list copied to clipboard',
         '当前 Token 已复制到剪贴板': 'Current token copied to clipboard',
-        '确定要退出当前授权吗？退出后需重新试用或付款开通。': 'Deactivate this license? You will need to start a trial or pay again.',
+        '确定要退出激活吗？退出后需要重新输入激活码。': 'Deactivate this license? You will need to enter the activation code again.',
         '确认退出': 'Confirm deactivate',
         '已退出激活，请重新加载窗口。': 'Deactivated. Reload the window.',
         '重新加载': 'Reload',
@@ -863,7 +863,7 @@ class DialogWebviewProvider {
             return buildBatchRetryRestartChannelFailure(channelId, 'invalid_channel', '通道不存在，请刷新后再试');
         }
         if (!await this._ensureActivated('单通道会话重试')) {
-            return buildBatchRetryRestartChannelFailure(channelId, 'not_activated', '授权已失效，请完成付款后续费后再重试。');
+            return buildBatchRetryRestartChannelFailure(channelId, 'not_activated', '授权已失效，请重新激活后再重试。');
         }
         const platformBlocker = this._getBatchRetryPlatformBlocker();
         if (platformBlocker) {
@@ -1624,7 +1624,24 @@ class DialogWebviewProvider {
         return '';
     }
     async _ensureActivated(actionLabel) {
-        return true;
+        try {
+            const { checkActivation } = require('./activation');
+            const ok = await checkActivation();
+            if (!ok) {
+                this._view?.webview.postMessage({
+                    command: 'licenseStatus',
+                    activated: false,
+                    message: `授权已失效，请重新激活后再${actionLabel}`
+                });
+                this.focusPanel();
+            }
+            return ok;
+        }
+        catch (e) {
+            console.error('[QingTian] Webview 授权校验失败:', e);
+            vscode.window.showErrorMessage(uiText('授权校验失败: ' + e.message));
+            return false;
+        }
     }
     resolveWebviewView(webviewView, _context, _token) {
         this._view = webviewView;
@@ -1637,24 +1654,6 @@ class DialogWebviewProvider {
             localResourceRoots: [this._extensionUri, vscode.Uri.file(PASTE_IMAGE_TMP_DIR)]
         };
         webviewView.webview.html = this._getHtmlContent(webviewView.webview);
-        // === Patch: Force activated=true in all messages sent to webview ===
-        const _origWebviewPostMessage = webviewView.webview.postMessage.bind(webviewView.webview);
-        webviewView.webview.postMessage = function(msg) {
-            if (msg && typeof msg === 'object') {
-                if (msg.command === 'licenseStatus') {
-                    msg.activated = true;
-                    msg.remainingDays = 999;
-                    if (msg.message && (msg.message.includes('授权') || msg.message.includes('付款') || msg.message.includes('续费'))) {
-                        msg.message = '';
-                    }
-                }
-                if (msg.command === 'status' && msg.data) {
-                    if (msg.data.activated === false) msg.data.activated = true;
-                    if (msg.data.licenseStatus) msg.data.licenseStatus.activated = true;
-                }
-            }
-            return _origWebviewPostMessage(msg);
-        };
         try {
             const { setActivationInvalidHandler, getPaymentInfo, getLicenseCountdownStatus, hasConsumedTrial } = require('./activation');
             setActivationInvalidHandler((message) => {
@@ -1742,29 +1741,6 @@ class DialogWebviewProvider {
                         break;
                     }
                     const chId = msg.channelId || '1';
-                    let force = msg.force === true;
-                    const gate = mcpServer_1.assertCanStartNewSession
-                        ? (0, mcpServer_1.assertCanStartNewSession)(chId, { force })
-                        : { ok: true };
-                    if (!gate.ok) {
-                        const pick = await vscode.window.showWarningMessage(
-                            gate.message || '当前通道仍在保活，重新开场会消耗新额度。',
-                            { modal: true },
-                            '拉回循环',
-                            '强制新开场（耗额度）',
-                            '取消'
-                        );
-                        if (pick === '拉回循环') {
-                            const resumed = await vscode.commands.executeCommand('qingtian.resumeLoop', chId);
-                            vscode.window.showInformationMessage(uiText(resumed?.message || '已尝试拉回循环'));
-                            webviewView.webview.postMessage({ command: 'resumeLoopResult', ...(resumed || {}) });
-                            break;
-                        }
-                        if (pick !== '强制新开场（耗额度）') {
-                            break;
-                        }
-                        force = true;
-                    }
                     const prepared = (0, mcpServer_1.prepareStartPrompt)(chId);
                     const prompt = prepared.prompt;
                     try {
@@ -1773,8 +1749,7 @@ class DialogWebviewProvider {
                         webviewView.webview.postMessage({
                             command: 'promptCopied',
                             channelId: chId,
-                            text: prompt,
-                            forced: force
+                            text: prompt
                         });
                     }
                     catch (e) {
@@ -1792,79 +1767,16 @@ class DialogWebviewProvider {
                         break;
                     }
                     const chId = msg.channelId || '1';
-                    let force = msg.force === true;
-                    const gate = mcpServer_1.assertCanStartNewSession
-                        ? (0, mcpServer_1.assertCanStartNewSession)(chId, { force })
-                        : { ok: true };
-                    if (!gate.ok) {
-                        const pick = await vscode.window.showWarningMessage(
-                            gate.message || '当前通道仍在保活，重新开场会消耗新额度。',
-                            { modal: true },
-                            '拉回循环',
-                            '强制新开场（耗额度）',
-                            '取消'
-                        );
-                        if (pick === '拉回循环') {
-                            const resumed = await vscode.commands.executeCommand('qingtian.resumeLoop', chId);
-                            vscode.window.showInformationMessage(uiText(resumed?.message || '已尝试拉回循环'));
-                            webviewView.webview.postMessage({ command: 'resumeLoopResult', ...(resumed || {}) });
-                            break;
-                        }
-                        if (pick !== '强制新开场（耗额度）') {
-                            webviewView.webview.postMessage({
-                                command: 'startPromptSendResult',
-                                ok: false,
-                                blocked: true,
-                                channelId: chId,
-                                message: '已取消新开场，以保护额度'
-                            });
-                            break;
-                        }
-                        force = true;
-                    }
                     const result = await vscode.commands.executeCommand('qingtian.sendStartPrompt', chId, {
                         openComposer: msg.openComposer !== false,
-                        targetMode: msg.targetMode === 'bound' ? 'bound' : 'active',
-                        force
+                        targetMode: msg.targetMode === 'bound' ? 'bound' : 'active'
                     });
                     webviewView.webview.postMessage({
                         command: 'startPromptSendResult',
                         ok: !!result?.ok,
-                        blocked: !!result?.blocked,
                         channelId: chId,
                         message: result?.message || ''
                     });
-                    break;
-                }
-                case 'resumeLoop': {
-                    if (!await this._ensureActivated('拉回循环')) {
-                        break;
-                    }
-                    const chId = msg.channelId || '1';
-                    const resumed = await vscode.commands.executeCommand('qingtian.resumeLoop', chId);
-                    vscode.window.showInformationMessage(uiText(resumed?.message || '已尝试拉回循环'));
-                    webviewView.webview.postMessage({ command: 'resumeLoopResult', ...(resumed || {}), channelId: chId });
-                    break;
-                }
-                case 'stopChannelTurn': {
-                    if (!await this._ensureActivated('停止当前')) {
-                        break;
-                    }
-                    const chId = msg.channelId || '1';
-                    const stopped = await vscode.commands.executeCommand('qingtian.stopChannelTurn', chId);
-                    vscode.window.showInformationMessage(uiText(stopped?.message || `已停止 CH-${chId}`));
-                    webviewView.webview.postMessage({ command: 'stopChannelTurnResult', ...(stopped || {}), channelId: chId });
-                    // refresh status so banner/online update
-                    try {
-                        const { getLicenseCountdownStatus, isActivated, hasConsumedTrial } = require('./activation');
-                        webviewView.webview.postMessage({
-                            command: 'licenseStatus',
-                            activated: isActivated(),
-                            payment: this._paymentPayload(webviewView),
-                            license: getLicenseCountdownStatus(),
-                            trialConsumed: hasConsumedTrial()
-                        });
-                    } catch { }
                     break;
                 }
                 case 'restoreRecoveryContext': {
@@ -1944,7 +1856,33 @@ class DialogWebviewProvider {
                             license: getLicenseCountdownStatus(),
                             trialConsumed: hasConsumedTrial()
                         });
-                        // 新手引导已关闭：不再自动弹出使用提示
+                        // 新手引导触发：优先「重启后续接」（突破账单注入后），否则「首次安装」只弹一次
+                        try {
+                            if (isActivated() && !this._onboardingTriggered) {
+                                const ctx = require('./extension').getExtensionContext?.();
+                                const resume = String(ctx?.globalState?.get('qingtian.onboardingResume') || '');
+                                const seen = ctx?.globalState?.get('qingtian.onboardingSeen') === true;
+                                if (resume) {
+                                    this._onboardingTriggered = true;
+                                    setTimeout(() => {
+                                        try {
+                                            webviewView.webview.postMessage({ command: 'showOnboarding', resume });
+                                        }
+                                        catch { }
+                                    }, 1200);
+                                }
+                                else if (!seen) {
+                                    this._onboardingTriggered = true;
+                                    setTimeout(() => {
+                                        try {
+                                            webviewView.webview.postMessage({ command: 'showOnboarding' });
+                                        }
+                                        catch { }
+                                    }, 800);
+                                }
+                            }
+                        }
+                        catch { }
                         const status = (0, statusPayload_1.buildStatusPayload)(this._getDisplayVersion());
                         webviewView.webview.postMessage({
                             command: 'status',
@@ -2039,7 +1977,7 @@ class DialogWebviewProvider {
                             if (process.platform === 'win32') {
                                 try {
                                     const nn = require('node-notifier');
-                                    nn.notify({ title: 'SlashSubs', message: '通知功能已开启，AI 回复时您将收到桌面提醒。', sound: true });
+                                    nn.notify({ title: 'QingTian MCP', message: '通知功能已开启，AI 回复时您将收到桌面提醒。', sound: true });
                                 }
                                 catch (e) {
                                     console.error('[QingTian] 测试通知发送失败', e);
@@ -2123,10 +2061,7 @@ class DialogWebviewProvider {
                     break;
                 }
                 case 'openPurchaseLink': {
-                    const wa = String(msg?.url || 'https://chat.whatsapp.com/EJUfSlyZxlQ0bYCtdYqsQA').trim();
-                    if (/^https?:\/\//i.test(wa)) {
-                        await vscode.env.openExternal(vscode.Uri.parse(wa));
-                    }
+                    vscode.env.openExternal(vscode.Uri.parse('https://pay.ldxp.cn/shop/VBQ34F11'));
                     break;
                 }
                 case 'setQingTianTheme': {
@@ -2215,6 +2150,15 @@ class DialogWebviewProvider {
                     break;
                 }
                 case 'addChannel': {
+                    if (!await this._ensureActivated('新增通道')) {
+                        webviewView.webview.postMessage({
+                            command: 'channelActionResult',
+                            action: 'add',
+                            ok: false,
+                            message: '授权已失效，无法新增通道'
+                        });
+                        break;
+                    }
                     const result = await vscode.commands.executeCommand('qingtian.addChannel');
                     webviewView.webview.postMessage({
                         command: 'channelActionResult',
@@ -2224,6 +2168,15 @@ class DialogWebviewProvider {
                     break;
                 }
                 case 'removeChannel': {
+                    if (!await this._ensureActivated('删除通道')) {
+                        webviewView.webview.postMessage({
+                            command: 'channelActionResult',
+                            action: 'remove',
+                            ok: false,
+                            message: '授权已失效，无法删除通道'
+                        });
+                        break;
+                    }
                     const result = await vscode.commands.executeCommand('qingtian.removeChannel');
                     webviewView.webview.postMessage({
                         command: 'channelActionResult',
@@ -2601,139 +2554,6 @@ class DialogWebviewProvider {
                     }
                     break;
                 }
-                case 'selectPaymentPlan': {
-                    const { setSelectedPaymentPlan, getLicenseCountdownStatus, isActivated, hasConsumedTrial } = require('./activation');
-                    const result = setSelectedPaymentPlan(msg.planId);
-                    webviewView.webview.postMessage({
-                        command: 'licenseResult',
-                        success: result.success,
-                        message: result.success
-                            ? `Selected ${result.plan.label} — $${result.plan.amount} / ${result.plan.days} days`
-                            : (result.message || 'Failed to select plan')
-                    });
-                    webviewView.webview.postMessage({
-                        command: 'licenseStatus',
-                        activated: isActivated(),
-                        preview: msg.preview === true || !isActivated(),
-                        payment: this._paymentPayload(webviewView),
-                        license: getLicenseCountdownStatus(),
-                        trialConsumed: hasConsumedTrial()
-                    });
-                    break;
-                }
-                case 'forceExpireForTest': {
-                    const { forceExpireLocalLicense, getLicenseCountdownStatus, hasConsumedTrial } = require('./activation');
-                    const result = forceExpireLocalLicense();
-                    webviewView.webview.postMessage({
-                        command: 'licenseResult',
-                        success: true,
-                        message: result.message || 'Expired for testing'
-                    });
-                    webviewView.webview.postMessage({
-                        command: 'licenseStatus',
-                        activated: false,
-                        payment: this._paymentPayload(webviewView),
-                        license: getLicenseCountdownStatus(),
-                        trialConsumed: hasConsumedTrial()
-                    });
-                    this.focusPanel();
-                    break;
-                }
-                case 'debugUnlockSelectedPlan': {
-                    const { debugUnlockSelectedPlan, getLicenseCountdownStatus, isActivated } = require('./activation');
-                    const result = debugUnlockSelectedPlan('ui-test');
-                    webviewView.webview.postMessage({
-                        command: 'licenseResult',
-                        success: result.success,
-                        message: result.message
-                    });
-                    if (result.success) this._renewalPreview = false;
-                    webviewView.webview.postMessage({
-                        command: 'licenseStatus',
-                        activated: isActivated(),
-                        exitPreview: result.success === true,
-                        payment: this._paymentPayload(webviewView),
-                        license: getLicenseCountdownStatus()
-                    });
-                    if (result.success) {
-                        const status = (0, statusPayload_1.buildStatusPayload)(this._getDisplayVersion());
-                        webviewView.webview.postMessage({
-                            command: 'status',
-                            data: { ...status, license: getLicenseCountdownStatus() }
-                        });
-                    }
-                    break;
-                }
-                case 'showRenewalPanel': {
-                    const { getPaymentInfo, getLicenseCountdownStatus, isActivated, hasConsumedTrial } = require('./activation');
-                    const payment = this._paymentPayload(webviewView);
-                    this._renewalPreview = true;
-                    webviewView.webview.postMessage({
-                        command: 'licenseStatus',
-                        activated: false,
-                        preview: true,
-                        message: 'Renew with USDT-TRC20. After payment, click Verify payment.',
-                        payment,
-                        license: getLicenseCountdownStatus(),
-                        trialConsumed: hasConsumedTrial(),
-                        wasActivated: isActivated()
-                    });
-                    webviewView.webview.postMessage({
-                        command: 'licenseResult',
-                        success: true,
-                        pending: true,
-                        message: `Payment address (USDT-TRC20): ${payment.address || '(missing)'} — Monthly $9.9 / Yearly $49`
-                    });
-                    try {
-                        vscode.window.showInformationMessage(
-                            `SlashSubs pay USDT-TRC20 to ${payment.address} (Monthly $9.9 / Yearly $49)`
-                        );
-                    } catch { }
-                    this.focusPanel();
-                    break;
-                }
-                case 'exitRenewalPreview': {
-                    this._renewalPreview = false;
-                    break;
-                }
-                case 'getCryptoMethods': {
-                    const { getCryptoAddresses } = require('./activation');
-                    const methods = getCryptoAddresses();
-                    webviewView.webview.postMessage({
-                        command: 'cryptoMethods',
-                        methods: methods
-                    });
-                    break;
-                }
-                case 'selectCryptoMethod': {
-                    const { getPaymentInfoForMethod } = require('./activation');
-                    const methodId = String(message.methodId || '');
-                    const info = getPaymentInfoForMethod(methodId);
-                    webviewView.webview.postMessage({
-                        command: 'cryptoMethodDetails',
-                        ...info
-                    });
-                    break;
-                }
-                case 'copyCryptoAddress': {
-                    const { getPaymentInfoForMethod } = require('./activation');
-                    const info = getPaymentInfoForMethod(String(message.methodId || ''));
-                    if (info.configured && info.address) {
-                        await vscode.env.clipboard.writeText(info.address);
-                        webviewView.webview.postMessage({
-                            command: 'licenseResult',
-                            success: true,
-                            message: info.methodLabel + ' address copied!'
-                        });
-                    } else {
-                        webviewView.webview.postMessage({
-                            command: 'licenseResult',
-                            success: false,
-                            message: 'Address not configured for ' + (info.methodLabel || message.methodId)
-                        });
-                    }
-                    break;
-                }
                 case 'getPaymentInfo': {
                     const { getPaymentInfo, getLicenseCountdownStatus, isActivated } = require('./activation');
                     webviewView.webview.postMessage({
@@ -2780,14 +2600,6 @@ class DialogWebviewProvider {
                         license: getLicenseCountdownStatus()
                     });
                     if (result.success) {
-                        this._renewalPreview = false;
-                        webviewView.webview.postMessage({
-                            command: 'licenseStatus',
-                            activated: true,
-                            exitPreview: true,
-                            payment: this._paymentPayload(webviewView),
-                            license: getLicenseCountdownStatus()
-                        });
                         const status = (0, statusPayload_1.buildStatusPayload)(this._getDisplayVersion());
                         webviewView.webview.postMessage({
                             command: 'status',
@@ -4145,136 +3957,26 @@ class DialogWebviewProvider {
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="stylesheet" href="${cssUri}">
-    <title>SlashSubs</title>
-    <style>
-    .crypto-method-card {
-      display: flex; flex-direction: column; align-items: center; justify-content: center;
-      gap: 4px; padding: 10px 4px; border-radius: 10px; cursor: pointer;
-      border: 1px solid rgba(130,154,181,0.18); background: rgba(255,255,255,0.06);
-      transition: all .15s ease; min-height: 64px; color: #fff;
-    }
-    .crypto-method-card:hover {
-      background: rgba(255,255,255,0.14); border-color: rgba(130,154,181,0.35);
-      transform: translateY(-1px); box-shadow: 0 2px 8px rgba(0,0,0,0.08);
-    }
-    .crypto-method-card:active { transform: scale(0.97); }
-    .crypto-method-icon { font-size: 22px; line-height: 1; }
-    .crypto-method-label { font-size: 11px; font-weight: 600; color: #fff; text-align: center; line-height: 1.2; }
-    #crypto-pay-details { animation: fadeSlideUp .2s ease; }
-    @keyframes fadeSlideUp { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
-    #crypto-pay-details { background: rgba(30,30,30,0.95) !important; border-color: rgba(255,255,255,0.1) !important; }
-    #crypto-pay-details * { color: #e0e0e0; }
-    #crypto-pay-amount { color: #fff !important; font-weight: 700; }
-    #crypto-pay-address { background: rgba(255,255,255,0.06) !important; color: #ccc !important; }
-    #crypto-pay-method-name { color: #fff !important; }
-    #btn-crypto-back { color: #999 !important; }
-    #crypto-pay-network-badge { background: #1a1a2e !important; color: #fff !important; }
-    .license-gate, .license-gate * { color: #fff; }
-    .license-desc { color: #aaa !important; }
-    #crypto-pay-warning { color: #888 !important; }
-    </style>
+    <title>QingTian</title>
 </head>
-<body data-theme="light" data-lang="en" data-send-mode="${this._initialSendMode}" data-bridge-script="${bridgeScriptPath}" data-onboarding-images='${onboardingImages}'>
+<body data-theme="light" data-send-mode="${this._initialSendMode}" data-bridge-script="${bridgeScriptPath}" data-onboarding-images='${onboardingImages}'>
     <div id="license-gate" class="license-gate">
-        <div class="license-logo">SlashSubs</div>
-        <p class="license-desc" id="license-desc">SlashSubs v${version} — free trial for new users</p>
-
-        <!-- Step 0: Plan picker -->
-        <div id="license-paywall" class="license-form" style="display:flex;flex-direction:column;gap:10px;align-items:center;max-width:480px;margin:0 auto;">
-            <div id="license-plan-picker" style="display:flex;gap:8px;width:100%;max-width:360px;">
-                <button type="button" class="primary-button license-btn" id="btn-plan-monthly" data-plan="monthly" style="flex:1;">Monthly<br/><b>$9.9</b></button>
-                <button type="button" class="license-purchase-link purchase-link" id="btn-plan-yearly" data-plan="yearly" style="flex:1;border:1px solid rgba(255,255,255,.25);padding:10px;border-radius:8px;">Yearly<br/><b>$49</b></button>
-            </div>
-
-            <!-- Step 1: Crypto method picker (card grid) -->
-            <div id="crypto-method-grid" style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;width:100%;margin-top:8px;">
-                <button type="button" class="crypto-method-card" data-method="btc">
-                    <span class="crypto-method-icon" style="color:#f7931a;">₿</span>
-                    <span class="crypto-method-label">Bitcoin</span>
-                </button>
-                <button type="button" class="crypto-method-card" data-method="eth">
-                    <span class="crypto-method-icon" style="color:#627eea;">Ξ</span>
-                    <span class="crypto-method-label">Ethereum</span>
-                </button>
-                <button type="button" class="crypto-method-card" data-method="usdt-trc20">
-                    <span class="crypto-method-icon" style="color:#26a17b;">₮</span>
-                    <span class="crypto-method-label">USDT (TRC20)</span>
-                </button>
-                <button type="button" class="crypto-method-card" data-method="usdt-erc20">
-                    <span class="crypto-method-icon" style="color:#26a17b;">₮</span>
-                    <span class="crypto-method-label">USDT (ERC20)</span>
-                </button>
-                <button type="button" class="crypto-method-card" data-method="usdt-arbitrum">
-                    <span class="crypto-method-icon" style="color:#26a17b;">₮</span>
-                    <span class="crypto-method-label">USDT (Arbitrum)</span>
-                </button>
-                <button type="button" class="crypto-method-card" data-method="usdt-polygon">
-                    <span class="crypto-method-icon" style="color:#26a17b;">₮</span>
-                    <span class="crypto-method-label">USDT (Polygon)</span>
-                </button>
-                <button type="button" class="crypto-method-card" data-method="usdt-solana">
-                    <span class="crypto-method-icon" style="color:#26a17b;">₮</span>
-                    <span class="crypto-method-label">USDT (Solana)</span>
-                </button>
-                <button type="button" class="crypto-method-card" data-method="usdc">
-                    <span class="crypto-method-icon" style="color:#2775ca;">$</span>
-                    <span class="crypto-method-label">USDC</span>
-                </button>
-                <button type="button" class="crypto-method-card" data-method="usdc-arbitrum">
-                    <span class="crypto-method-icon" style="color:#2775ca;">$</span>
-                    <span class="crypto-method-label">USDC (Arbitrum)</span>
-                </button>
-                <button type="button" class="crypto-method-card" data-method="usdc-polygon">
-                    <span class="crypto-method-icon" style="color:#2775ca;">$</span>
-                    <span class="crypto-method-label">USDC (Polygon)</span>
-                </button>
-                <button type="button" class="crypto-method-card" data-method="usdc-solana">
-                    <span class="crypto-method-icon" style="color:#2775ca;">$</span>
-                    <span class="crypto-method-label">USDC (Solana)</span>
-                </button>
-                <button type="button" class="crypto-method-card" data-method="binance-pay">
-                    <span class="crypto-method-icon" style="color:#f0b90b;">◆</span>
-                    <span class="crypto-method-label">Binance Pay</span>
-                </button>
-            </div>
-
-            <!-- Step 2: Payment details (hidden by default) -->
-            <div id="crypto-pay-details" style="display:none;width:100%;max-width:380px;background:rgba(255,255,255,0.95);border-radius:16px;padding:20px;border:1px solid rgba(130,154,181,0.18);margin-top:4px;">
-                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
-                    <button type="button" id="btn-crypto-back" style="background:none;border:none;cursor:pointer;font-size:14px;color:#666;padding:4px 8px;">← Back</button>
-                    <span id="crypto-pay-method-name" style="font-weight:700;font-size:14px;color:#333;"></span>
-                    <span></span>
-                </div>
-                <div style="text-align:center;margin-bottom:10px;">
-                    <div style="font-size:12px;color:#666;">Total</div>
-                    <div id="crypto-pay-amount" style="font-size:22px;font-weight:700;color:#111;"></div>
-                </div>
-                <div style="text-align:center;margin-bottom:6px;">
-                    <div id="crypto-pay-network-badge" style="display:inline-block;background:#1a1a2e;color:#fff;font-size:11px;font-weight:600;padding:4px 12px;border-radius:6px;margin-bottom:8px;"></div>
-                </div>
-                <div style="background:rgba(0,0,0,0.03);border-radius:10px;padding:10px;margin-bottom:12px;word-break:break-all;font-family:monospace;font-size:12px;text-align:center;user-select:all;cursor:text;" id="crypto-pay-address"></div>
-                <div style="font-size:11px;color:#888;text-align:center;margin-bottom:12px;" id="crypto-pay-warning"></div>
-                <div style="text-align:center;margin-bottom:12px;">
-                    <img id="crypto-pay-qr" alt="Payment QR" style="width:180px;height:180px;background:#fff;border-radius:8px;object-fit:contain;" />
-                </div>
-                <div style="display:flex;gap:8px;flex-direction:column;">
-                    <button type="button" class="primary-button license-btn" id="btn-verify-payment" style="width:100%;">Verify payment</button>
-                    <button type="button" class="license-purchase-link purchase-link" id="btn-copy-pay-address" style="text-align:center;">Copy payment address</button>
-                </div>
-            </div>
-
-            <button type="button" class="license-purchase-link purchase-link" id="btn-debug-unlock" style="opacity:.65;">QA: Simulate paid unlock</button>
-            <input type="password" class="license-input" id="license-code-input" placeholder="Backup: renewal password (optional)" autocomplete="off" spellcheck="false" />
-            <button type="button" class="license-purchase-link purchase-link" id="btn-activate">Renew with password</button>
-            <button type="button" class="license-purchase-link purchase-link" id="btn-start-trial" style="display:none;">Start free trial</button>
+        <div class="license-logo">QingTian</div>
+        <p class="license-desc" id="license-desc">晴天无限MCP v${version} — 新用户自动享受首月免费试用</p>
+        <div id="license-paywall" class="license-form" style="display:flex;flex-direction:column;gap:10px;align-items:center;">
+            <img id="license-qr" alt="收款二维码" style="width:220px;max-height:360px;background:#fff;border-radius:8px;object-fit:contain;display:none;" />
+            <div id="license-pay-meta" style="font-size:12px;line-height:1.6;text-align:center;opacity:.9;"></div>
+            <button type="button" class="primary-button license-btn" id="btn-verify-payment">自动检测付款</button>
+            <button type="button" class="license-purchase-link purchase-link" id="btn-copy-pay-address">复制收款地址</button>
+            <input type="password" class="license-input" id="license-code-input" placeholder="备用：续费口令（可选）" autocomplete="off" spellcheck="false" />
+            <button type="button" class="license-purchase-link purchase-link" id="btn-activate">口令手动续费</button>
+            <button type="button" class="license-purchase-link purchase-link" id="btn-start-trial" style="display:none;">开始免费试用</button>
         </div>
         <div id="license-feedback" class="license-feedback"></div>
         <div class="support-footer support-footer-compact">
-            <div><a href="https://chat.whatsapp.com/EJUfSlyZxlQ0bYCtdYqsQA" id="license-whatsapp-link">WhatsApp Group</a></div>
+            <div>交流QQ群：882386907</div>
+            <div>售后：762884663</div>
         </div>
-        <!-- Keep hidden elements for backward compat -->
-        <img id="license-qr" alt="" style="display:none;" />
-        <div id="license-pay-meta" style="display:none;"></div>
     </div>
     <div id="app" class="app-shell hidden">
         <section id="runtime-notice" class="runtime-notice hidden" data-level="warning">
@@ -4283,7 +3985,7 @@ class DialogWebviewProvider {
                 <div id="runtime-notice-message" class="runtime-notice-message"></div>
             </div>
             <div class="runtime-notice-actions">
-                <button id="btn-runtime-refresh" class="soft-button" type="button" title="会改写 mcp.json 并可能让 Cursor 重启 MCP（打断同会话）。正常使用请勿点。">刷新配置（慎用）</button>
+                <button id="btn-runtime-refresh" class="soft-button" type="button">刷新配置</button>
                 <button id="btn-runtime-reload" class="ghost-button runtime-reload-button" type="button">重载窗口</button>
             </div>
         </section>
@@ -4393,8 +4095,8 @@ class DialogWebviewProvider {
             <div class="hero-top">
                 <div>
                     <div class="hero-brand-row">
-                        <span class="hero-kicker">SLASHSUBS</span>
-                        <a class="purchase-link" id="btn-whatsapp-link" href="https://chat.whatsapp.com/EJUfSlyZxlQ0bYCtdYqsQA" target="_blank" rel="noopener noreferrer">WhatsApp</a>
+                        <span class="hero-kicker">QINGTIAN</span>
+                        <button id="btn-purchase-link" class="purchase-link" type="button">购买链接</button>
                     </div>
                     <div class="hero-title-row">
                         <h1 class="hero-title">Control Deck</h1>
@@ -4403,7 +4105,7 @@ class DialogWebviewProvider {
                 </div>
                 <div class="hero-actions">
                     <button id="btn-toggle-seamless-global" class="icon-button seamless-toggle off" type="button" title="账号接管注入：未启用">●</button>
-                    <button id="btn-language-toggle" class="icon-button language-toggle" type="button" title="Switch to Chinese" aria-label="Switch to Chinese" aria-pressed="true" data-lang="en">
+                    <button id="btn-language-toggle" class="icon-button language-toggle" type="button" title="切换到英文" aria-label="切换到英文" aria-pressed="false">
                         <svg class="language-toggle-icon" viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                             <path d="m5 8 6 6"/>
                             <path d="m4 14 6-6 2-3"/>
@@ -4411,6 +4113,12 @@ class DialogWebviewProvider {
                             <path d="M7 2h1"/>
                             <path d="m22 22-5-10-5 10"/>
                             <path d="M14 18h6"/>
+                        </svg>
+                    </button>
+                    <button id="btn-open-onboarding" class="icon-button icon-button-svg" type="button" title="查看新手教程" aria-label="查看新手教程">
+                        <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <path d="M3 6.5A2.5 2.5 0 0 1 5.5 4H10a2.5 2.5 0 0 1 2 1 2.5 2.5 0 0 1 2-1h4.5A2.5 2.5 0 0 1 21 6.5V18a1 1 0 0 1-1 1h-5.5a2 2 0 0 0-2 1.2.5.5 0 0 1-.9 0A2 2 0 0 0 9.5 19H4a1 1 0 0 1-1-1Z"/>
+                            <path d="M12 5v15"/>
                         </svg>
                     </button>
                     <button id="btn-open-accounts" class="icon-button qingtian-account-ui-hidden" type="button" title="账号管理" aria-hidden="true" tabindex="-1" style="display:none">👤</button>
@@ -4427,7 +4135,7 @@ class DialogWebviewProvider {
                     <div class="metric-inline">
                         <span id="port-dot" class="status-dot online"></span>
                         <span id="port-status-text" class="metric-status">Stdio</span>
-                        <button id="btn-refresh-port" class="ghost-button" type="button" title="会改写 mcp.json 并可能让 Cursor 重启 MCP。正常使用请勿点。">刷新配置（慎用）</button>
+                        <button id="btn-refresh-port" class="ghost-button" type="button">刷新配置</button>
                     </div>
                 </div>
                 <div class="metric-card">
@@ -4437,21 +4145,10 @@ class DialogWebviewProvider {
                     </div>
                 </div>
                 <div class="metric-card">
-                    <div class="metric-label">Subscription</div>
-                    <div class="metric-inline" style="flex-direction:column;align-items:flex-start;gap:6px;">
-                        <span id="license-plan-text" style="font-size:12px;font-weight:600;">Trial</span>
+                    <div class="metric-label">剩余可用时间</div>
+                    <div class="metric-inline">
                         <span id="license-time-text" class="metric-countdown">--:--:--</span>
-                        <button id="btn-show-renewal" class="soft-button" type="button" style="margin-top:2px;">Renew / Pay USDT</button>
                     </div>
-                </div>
-            </div>
-            <div id="session-keepalive-banner" class="runtime-notice hidden" data-level="info" style="margin-top:10px;">
-                <div class="runtime-notice-copy">
-                    <div id="session-keepalive-title" class="runtime-notice-title">Session keepalive</div>
-                    <div id="session-keepalive-message" class="runtime-notice-message">Idle</div>
-                </div>
-                <div class="runtime-notice-actions">
-                    <button id="btn-resume-loop" class="soft-button" type="button">拉回循环</button>
                 </div>
             </div>
         </section>
@@ -4478,7 +4175,7 @@ class DialogWebviewProvider {
             <div class="update-notice-dialog">
                 <div class="update-notice-header">
                     <div>
-                        <div class="update-notice-kicker">SLASHSUBS NOTICE</div>
+                        <div class="update-notice-kicker">QINGTIAN NOTICE</div>
                         <h3 id="update-notice-title">更新公告</h3>
                         <div id="update-notice-time" class="update-notice-time"></div>
                     </div>
@@ -4569,7 +4266,7 @@ class DialogWebviewProvider {
             </div>
         </div>
 
-        <section class="panel-card batch-retry-card" data-collapsed="true" hidden aria-hidden="true" style="display:none !important">
+        <section class="panel-card batch-retry-card" data-collapsed="true">
             <div class="batch-retry-header-wrap">
                 <div id="batch-retry-header" class="batch-retry-header" role="button" tabindex="0" aria-expanded="false">
                     <span class="batch-retry-head-left">
@@ -4807,7 +4504,6 @@ class DialogWebviewProvider {
                     <div class="toolbar-menu-panel hidden" data-toolbar-menu-panel="start">
                         <button id="btn-copy-prompt" class="toolbar-menu-item" type="button">复制开场</button>
                         <button id="btn-send-start-prompt" class="toolbar-menu-item" type="button" title="自动打开 Cursor 对话并发送当前通道开场白；失败时会保留剪贴板兜底">一键开场</button>
-                        <button id="btn-resume-loop-menu" class="toolbar-menu-item" type="button" title="在原会话拉回 check_messages，不新开场、不额外耗额度">拉回循环（不新开场）</button>
                         <button id="btn-custom-start-prompt" class="toolbar-menu-item" type="button">自定义开场语</button>
                     </div>
                 </div>
@@ -4820,7 +4516,6 @@ class DialogWebviewProvider {
                         <button id="btn-mcp-picker" class="toolbar-menu-item" type="button" title="选择本轮希望 Agent 调用的 MCP">MCP</button>
                     </div>
                 </div>
-                <button id="btn-stop-turn" class="danger-button" type="button" title="停止当前通道正在执行/等待的任务，不新开场、不耗新额度">停止当前</button>
                 <button id="btn-send" class="primary-button" type="button">发送消息</button>
             </div>
             <div class="quick-commands-wrap">
@@ -4866,6 +4561,21 @@ class DialogWebviewProvider {
             </div>
             <div id="history-list" class="history-list">
                 <div class="history-empty">暂无记录</div>
+            </div>
+        </section>
+
+        <section class="panel-card quick-note-card">
+            <div class="panel-header" style="margin-bottom:10px">
+                <div>
+                    <h2 class="panel-title">使用提示</h2>
+                    <p class="panel-subtitle">插件主流程与常用操作一览。</p>
+                </div>
+            </div>
+            <div class="quick-note-list">
+                <div class="note-item"><span class="note-dot"></span><span>首次使用请先复制开场语，再到 Cursor 对话侧开始任务。</span></div>
+                <div class="note-item"><span class="note-dot"></span><span>输入 <strong>@</strong> 可快速搜索并引用当前工作区文件。</span></div>
+                <div class="note-item"><span class="note-dot"></span><span>支持直接粘贴剪贴板图片作为附件发送。</span></div>
+                <div class="note-item"><span class="note-dot"></span><span>消息发送后自动排队，MCP 进程就绪时自动取走。</span></div>
             </div>
         </section>
 
@@ -4955,18 +4665,16 @@ class DialogWebviewProvider {
                 <div id="settings-preferences-section">
                     <div class="setting-row">
                         <div class="setting-info">
-                            <div class="setting-label">Subscription</div>
-                            <div class="setting-desc" id="setting-subscription-desc">2-day free trial, then Monthly $9.9 or Yearly $49 (USDT-TRC20).</div>
+                            <div class="setting-label">新手引导</div>
+                            <div class="setting-desc">重新查看首次使用的上手引导。</div>
                         </div>
-                        <div class="setting-control" style="display:flex;gap:6px;flex-wrap:wrap;">
-                            <button id="btn-settings-renew" class="soft-button" type="button">Renew / Pay</button>
-                            <button id="btn-settings-force-expire" class="danger-button" type="button" title="QA: force expire now">Test expire</button>
-                            <button id="btn-settings-debug-unlock" class="soft-button" type="button" title="QA: simulate paid unlock">Simulate paid</button>
+                        <div class="setting-control">
+                            <button id="btn-replay-onboarding" class="soft-button" type="button">重新查看</button>
                         </div>
                     </div>
                     <div class="setting-row">
                         <div class="setting-info">
-                            <div class="setting-label">Send shortcut</div>
+                            <div class="setting-label">发送方式</div>
                             <div class="setting-desc">选择提交消息的快捷键。</div>
                         </div>
                         <div class="setting-control">
@@ -5052,7 +4760,7 @@ class DialogWebviewProvider {
                     <div class="setting-row setting-row-danger">
                         <div class="setting-info">
                             <div class="setting-label">退出激活</div>
-                            <div class="setting-desc">清除本机授权状态；删除后需重新试用或付款开通。</div>
+                            <div class="setting-desc">清除本机激活状态，需要重新输入激活码。</div>
                         </div>
                         <div class="setting-control">
                             <button type="button" id="btn-logout" class="danger-button">退出</button>
@@ -5126,7 +4834,7 @@ class DialogWebviewProvider {
                 <div id="setting-bridge-status-row" style="display:none;margin-top:10px">
                     <div class="bridge-auto-hint">
                         <span class="bridge-auto-dot"></span>
-                        <span>桥接服务已自动启动，日志见“输出”里的“SlashSubs Bridge”。</span>
+                        <span>桥接服务已自动启动，日志见“输出”里的“QingTian Bridge”。</span>
                     </div>
                 </div>
             </div>
@@ -5150,23 +4858,13 @@ class DialogWebviewProvider {
         </aside>
 
         <footer class="support-footer">
-            <div><a href="https://chat.whatsapp.com/EJUfSlyZxlQ0bYCtdYqsQA" id="footer-whatsapp-link" target="_blank" rel="noopener noreferrer">WhatsApp Group</a></div>
+            <div>交流QQ群：882386907</div>
+            <div>售后：762884663</div>
         </footer>
     </div>
     <script>
     (function(){
-      // acquireVsCodeApi 只能调用一次；缓存后覆盖全局，避免后续 webview.js 再调时报错导致整页菜单无响应
-      const vscodeApi = (function(){
-        try {
-          if (window.__qtVscodeApi) return window.__qtVscodeApi;
-          const api = acquireVsCodeApi();
-          window.__qtVscodeApi = api;
-          window.acquireVsCodeApi = function(){ return api; };
-          return api;
-        } catch (e) {
-          return window.__qtVscodeApi || { postMessage: function(){}, getState: function(){ return {}; }, setState: function(){} };
-        }
-      })();
+      const vscodeApi = acquireVsCodeApi();
       function $(id){ return document.getElementById(id); }
       function setFeedback(text, ok){
         const el = $('license-feedback');
@@ -5174,17 +4872,12 @@ class DialogWebviewProvider {
         el.textContent = text || '';
         el.style.color = ok ? '#3dd68c' : '#ff7b72';
       }
-      window.__qtRenewalPreview = false;
       function renderPayment(msg){
         const gate = $('license-gate');
         const app = $('app');
-        if (msg && msg.preview === true) window.__qtRenewalPreview = true;
-        if (msg && msg.exitPreview === true) window.__qtRenewalPreview = false;
-        // Keep paywall visible while previewing Renew / Pay, even if status polls say activated
-        const activated = window.__qtRenewalPreview ? false : !!(msg && msg.activated);
+        const activated = !!(msg && msg.activated);
         if(gate) gate.classList.toggle('hidden', activated);
         if(app) app.classList.toggle('hidden', !activated);
-        try { if (!activated && gate) gate.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch (e) {}
         const payment = (msg && msg.payment) || {};
         const qr = $('license-qr');
         const meta = $('license-pay-meta');
@@ -5192,10 +4885,10 @@ class DialogWebviewProvider {
         const trialBtn = $('btn-start-trial');
         if(desc){
           desc.textContent = activated
-            ? 'Licensed'
+            ? '已授权'
             : (payment.configured
-              ? 'Trial/subscription expired. Choose a plan, pay USDT (TRC20), then Verify payment.'
-              : 'Trial/subscription expired. Payment address not configured.');
+              ? '试用已到期：请扫码支付 USDT(TRC20)，然后点自动检测付款'
+              : '试用已到期。请配置收款地址');
         }
         if(qr){
           if(payment.qrUrl){
@@ -5208,24 +4901,14 @@ class DialogWebviewProvider {
         }
         if(meta){
           meta.innerHTML = [
-            payment.selectedPlanLabel ? ('Plan: <b>' + payment.selectedPlanLabel + '</b> ($' + payment.amount + ' / ' + payment.selectedPlanDays + ' days)') : '',
-            payment.network ? ('Network: <b>' + payment.network + '</b>') : '',
-            payment.amount ? ('Pay exactly: <b>' + payment.amount + ' USDT</b>') : '',
-            payment.address ? ('Address:<br/><code style="user-select:all;word-break:break-all;font-size:12px;">' + payment.address + '</code>') : 'Payment address missing',
+            payment.network ? ('网络：' + payment.network) : '',
+            payment.amount ? ('金额：' + payment.amount) : '',
+            payment.address ? ('地址：' + payment.address) : '未配置 qingtian.paymentAddress',
             payment.note || ''
           ].filter(Boolean).join('<br/>');
         }
-        var mBtn = $('btn-plan-monthly');
-        var yBtn = $('btn-plan-yearly');
-        if(mBtn && yBtn){
-          var sid = payment.selectedPlanId || 'monthly';
-          mBtn.style.opacity = sid === 'monthly' ? '1' : '.55';
-          yBtn.style.opacity = sid === 'yearly' ? '1' : '.55';
-          mBtn.style.outline = sid === 'monthly' ? '2px solid #3dd68c' : 'none';
-          yBtn.style.outline = sid === 'yearly' ? '2px solid #3dd68c' : 'none';
-        }
         if(trialBtn){
-          // 本机试用名额用过后不再显示「Start free trial」
+          // 本机试用名额用过后不再显示「开始免费试用」
           const consumed = !!(msg && (msg.trialConsumed || (msg.license && msg.license.trialConsumed)));
           const showTrial = !activated && !consumed && !(msg && msg.license && msg.license.expired);
           trialBtn.style.display = showTrial ? 'inline-block' : 'none';
@@ -5239,17 +4922,12 @@ class DialogWebviewProvider {
         }
         if(msg.command === 'licenseResult'){
           setFeedback(msg.message || '', !!msg.success);
-          if (msg.success && !msg.pending) {
-            // Real unlock / password renew — leave preview
-            window.__qtRenewalPreview = false;
-          }
         }
         if(msg.command === 'status' && msg.data && msg.data.license){
           renderPayment({
             activated: !!(msg.data.license.activated),
             payment: msg.data.license.payment,
-            license: msg.data.license,
-            // do not pass preview/exitPreview; sticky flag decides
+            license: msg.data.license
           });
         }
       });
@@ -5270,7 +4948,6 @@ class DialogWebviewProvider {
         const input = $('license-code-input');
         const btn = $('btn-activate');
         const verifyBtn = $('btn-verify-payment');
-        const debugUnlockBtn = $('btn-debug-unlock');
         const copyBtn = $('btn-copy-pay-address');
         const trialBtn = $('btn-start-trial');
         if(btn){
@@ -5283,12 +4960,6 @@ class DialogWebviewProvider {
           verifyBtn.addEventListener('click', function(){
             setFeedback('正在链上查询付款...', true);
             vscodeApi.postMessage({ command: 'verifyCryptoPayment' });
-          });
-        }
-        if(debugUnlockBtn){
-          debugUnlockBtn.addEventListener('click', function(){
-            setFeedback('Simulating paid unlock...', true);
-            vscodeApi.postMessage({ command: 'debugUnlockSelectedPlan' });
           });
         }
         if(input){
@@ -5308,331 +4979,13 @@ class DialogWebviewProvider {
             vscodeApi.postMessage({ command: 'startLocalTrial' });
           });
         }
-        // === Crypto method picker logic ===
-        var cryptoGrid = $('crypto-method-grid');
-        var cryptoDetails = $('crypto-pay-details');
-        var cryptoBackBtn = $('btn-crypto-back');
-        var currentMethodId = null;
-
-        if (cryptoGrid) {
-          cryptoGrid.addEventListener('click', function(ev){
-            var card = ev.target.closest('.crypto-method-card');
-            if (!card) return;
-            ev.preventDefault();
-            var methodId = card.getAttribute('data-method');
-            if (!methodId) return;
-            currentMethodId = methodId;
-            setFeedback('', true);
-            vscodeApi.postMessage({ command: 'selectCryptoMethod', methodId: methodId });
-          });
-        }
-        if (cryptoBackBtn) {
-          cryptoBackBtn.addEventListener('click', function(){
-            if (cryptoDetails) cryptoDetails.style.display = 'none';
-            if (cryptoGrid) cryptoGrid.style.display = '';
-            currentMethodId = null;
-          });
-        }
-        var copyPayAddr = $('btn-copy-pay-address');
-        if (copyPayAddr) {
-          copyPayAddr.addEventListener('click', function(){
-            if (currentMethodId) {
-              vscodeApi.postMessage({ command: 'copyCryptoAddress', methodId: currentMethodId });
-            } else {
-              vscodeApi.postMessage({ command: 'copyPaymentAddress' });
-            }
-          });
-        }
-
         vscodeApi.postMessage({ command: 'getPaymentInfo' });
-        vscodeApi.postMessage({ command: 'getCryptoMethods' });
         vscodeApi.postMessage({ command: 'getStatus' });
         startPayPoll();
-      });
-
-      // Handle crypto method responses
-      window.addEventListener('message', function(event){
-        var msg = event.data || {};
-        if (msg.command === 'cryptoMethods') {
-          var grid = document.getElementById('crypto-method-grid');
-          if (!grid || !Array.isArray(msg.methods)) return;
-          grid.innerHTML = '';
-          msg.methods.forEach(function(m){
-            if (!m.configured) return;
-            var btn = document.createElement('button');
-            btn.type = 'button';
-            btn.className = 'crypto-method-card';
-            btn.setAttribute('data-method', m.id);
-            btn.innerHTML = '<span class="crypto-method-icon" style="color:' + m.color + ';">' + m.icon + '</span>' +
-                            '<span class="crypto-method-label">' + m.label + '</span>';
-            grid.appendChild(btn);
-          });
-          if (grid.children.length === 0) {
-            grid.innerHTML = '<div style="grid-column:1/-1;text-align:center;color:#888;font-size:12px;padding:10px;">No payment methods configured. Set addresses in Settings → qingtian.cryptoAddresses</div>';
-          }
-        }
-        if (msg.command === 'cryptoMethodDetails') {
-          var details = document.getElementById('crypto-pay-details');
-          var grid2 = document.getElementById('crypto-method-grid');
-          if (!details) return;
-          if (!msg.configured) {
-            var fb = document.getElementById('license-feedback');
-            if (fb) { fb.textContent = msg.message || 'Not configured'; fb.style.color = '#ff7b72'; }
-            return;
-          }
-          if (grid2) grid2.style.display = 'none';
-          details.style.display = '';
-          var nameEl = document.getElementById('crypto-pay-method-name');
-          var amtEl = document.getElementById('crypto-pay-amount');
-          var netEl = document.getElementById('crypto-pay-network-badge');
-          var addrEl = document.getElementById('crypto-pay-address');
-          var warnEl = document.getElementById('crypto-pay-warning');
-          var qrEl = document.getElementById('crypto-pay-qr');
-          if (nameEl) nameEl.textContent = msg.methodLabel || '';
-          if (amtEl) amtEl.textContent = '$' + (msg.amount || '0') + ' ' + (msg.currency || '');
-          if (netEl) netEl.textContent = msg.network || '';
-          if (addrEl) addrEl.textContent = msg.address || '';
-          if (warnEl) warnEl.textContent = msg.note || '';
-          if (qrEl && msg.qrUrl) { qrEl.src = msg.qrUrl; qrEl.style.display = ''; }
-          else if (qrEl) { qrEl.style.display = 'none'; }
-        }
       });
     })();
     </script>
     <script src="${jsUri}"></script>
-    <script>
-    (function(){
-      // Default English; keep language toggle for Chinese.
-      // If webview.js boots in Chinese, click toggle once after init.
-      function preferEnglish(){
-        try {
-          var btn = document.getElementById('btn-language-toggle');
-          if (!btn) return;
-          var pressed = btn.getAttribute('aria-pressed') === 'true';
-          // Our HTML marks EN as aria-pressed=true; if runtime flipped to ZH, press to EN.
-          var title = String(btn.getAttribute('title') || '');
-          var looksChineseUI = /切换到英文|Switch to English/i.test(title) || btn.getAttribute('aria-pressed') === 'false';
-          if (looksChineseUI) {
-            btn.click();
-          }
-        } catch (e) {}
-      }
-      setTimeout(preferEnglish, 50);
-      setTimeout(preferEnglish, 400);
-      // WhatsApp links: open externally via vscode if available
-      function wireWa(id){
-        var el = document.getElementById(id);
-        if (!el) return;
-        el.addEventListener('click', function(ev){
-          ev.preventDefault();
-          try {
-            var api = window.__qtVscodeApi || (typeof acquireVsCodeApi === 'function' ? acquireVsCodeApi() : null);
-            if (api && api.postMessage) {
-              api.postMessage({ command: 'openPurchaseLink', url: 'https://chat.whatsapp.com/EJUfSlyZxlQ0bYCtdYqsQA' });
-            } else {
-              window.open('https://chat.whatsapp.com/EJUfSlyZxlQ0bYCtdYqsQA', '_blank');
-            }
-          } catch (e) {
-            window.open('https://chat.whatsapp.com/EJUfSlyZxlQ0bYCtdYqsQA', '_blank');
-          }
-        });
-      }
-      wireWa('footer-whatsapp-link');
-      wireWa('btn-whatsapp-link');
-      wireWa('license-whatsapp-link');
-
-      function currentChannelId(){
-        try {
-          var hint = document.getElementById('active-channel-hint');
-          var m = hint && hint.textContent ? hint.textContent.match(/CH-(\d+)/i) : null;
-          return m ? m[1] : '1';
-        } catch (e) { return '1'; }
-      }
-      function renderKeepaliveBanner(status){
-        var banner = document.getElementById('session-keepalive-banner');
-        var title = document.getElementById('session-keepalive-title');
-        var msg = document.getElementById('session-keepalive-message');
-        if (!banner || !title || !msg) return;
-        var ch = currentChannelId();
-        var guards = (status && (status.keepaliveGuards || (status.sessionKeepalive && status.sessionKeepalive.guards))) || {};
-        var g = guards[ch] || guards[String(ch)] || null;
-        if (!g) {
-          // fallback: any blocking
-          var vals = Object.keys(guards).map(function(k){ return guards[k]; });
-          g = vals.find(function(x){ return x && x.blockNewStart; }) || vals[0] || null;
-        }
-        if (!g || g.state === 'idle') {
-          banner.classList.add('hidden');
-          return;
-        }
-        banner.classList.remove('hidden');
-        banner.setAttribute('data-level', g.state === 'keepalive_active' ? 'warning' : 'info');
-        title.textContent = g.title || '同一会话保活中';
-        msg.textContent = g.message || '';
-      }
-      window.addEventListener('message', function(ev){
-        var msg = ev.data || {};
-        if (msg.command === 'status' && msg.data) {
-          renderKeepaliveBanner(msg.data);
-        }
-      });
-      function requestResumeLoop(){
-        try { vscodeApi.postMessage({ command: 'resumeLoop', channelId: currentChannelId() }); } catch (e) {}
-      }
-      var rb = document.getElementById('btn-resume-loop');
-      if (rb) rb.addEventListener('click', requestResumeLoop);
-      var rbm = document.getElementById('btn-resume-loop-menu');
-      if (rbm) rbm.addEventListener('click', requestResumeLoop);
-      var stopBtn = document.getElementById('btn-stop-turn');
-      if (stopBtn) stopBtn.addEventListener('click', function(){
-        try { vscodeApi.postMessage({ command: 'stopChannelTurn', channelId: currentChannelId() }); } catch (e) {}
-      });
-
-      function showRenewal(){
-        try {
-          window.__qtRenewalPreview = true;
-          var gate = document.getElementById('license-gate');
-          var app = document.getElementById('app');
-          if (gate) gate.classList.remove('hidden');
-          if (app) app.classList.add('hidden');
-          vscodeApi.postMessage({ command: 'showRenewalPanel' });
-        } catch (e) {}
-      }
-      document.addEventListener('click', function(ev){
-        var t = ev.target && ev.target.closest ? ev.target.closest('#btn-show-renewal, #btn-settings-renew') : null;
-        if (!t) return;
-        ev.preventDefault();
-        showRenewal();
-      }, true);
-      function selectPlan(planId){
-        vscodeApi.postMessage({ command: 'selectPaymentPlan', planId: planId, preview: true });
-      }
-      var pm = document.getElementById('btn-plan-monthly');
-      var py = document.getElementById('btn-plan-yearly');
-      if (pm) pm.addEventListener('click', function(){ selectPlan('monthly'); });
-      if (py) py.addEventListener('click', function(){ selectPlan('yearly'); });
-      var fe = document.getElementById('btn-settings-force-expire');
-      if (fe) fe.addEventListener('click', function(){
-        vscodeApi.postMessage({ command: 'forceExpireForTest' });
-      });
-      var du = document.getElementById('btn-settings-debug-unlock');
-      if (du) du.addEventListener('click', function(){
-        vscodeApi.postMessage({ command: 'debugUnlockSelectedPlan' });
-      });
-      // Back from preview paywall
-      var backId = 'btn-renewal-back';
-      if (!document.getElementById(backId)) {
-        var gate = document.getElementById('license-gate');
-        if (gate) {
-          var b = document.createElement('button');
-          b.id = backId;
-          b.type = 'button';
-          b.className = 'license-purchase-link purchase-link';
-          b.textContent = 'Back to app';
-          b.style.display = 'none';
-          b.addEventListener('click', function(){
-            b.style.display = 'none';
-            window.__qtRenewalPreview = false;
-            vscodeApi.postMessage({ command: 'exitRenewalPreview' });
-            vscodeApi.postMessage({ command: 'getStatus' });
-          });
-          var fb = document.getElementById('license-feedback');
-          if (fb && fb.parentNode) fb.parentNode.insertBefore(b, fb);
-        }
-      }
-      var _origApply = window.__qtApplyLicenseStatus;
-      window.addEventListener('message', function(ev){
-        var msg = ev.data || {};
-        if (msg.command === 'licenseStatus' || (msg.command === 'status' && msg.data && msg.data.license)) {
-          var lic = msg.license || (msg.data && msg.data.license) || {};
-          var planEl = document.getElementById('license-plan-text');
-          var timeEl = document.getElementById('license-time-text');
-          var descEl = document.getElementById('setting-subscription-desc');
-          var plan = lic.plan || (lic.permanent ? 'permanent' : (lic.activated ? 'active' : 'expired'));
-          var planLabel = plan === 'trial' ? 'Free trial' : (plan === 'crypto-paid' ? 'USDT paid' : (lic.permanent ? 'Active' : (lic.activated ? 'Active' : 'Expired')));
-          if (planEl) planEl.textContent = planLabel;
-          if (descEl) {
-            if (lic.permanent) descEl.textContent = 'Legacy license migrated to trial on next restart if needed. Renew with USDT when expired.';
-            else if (lic.remainingMs != null) descEl.textContent = 'Time left updates live. When expired, pay USDT-TRC20 to unlock.';
-            else descEl.textContent = 'Free trial, then renew with USDT-TRC20.';
-          }
-          if (timeEl && lic.permanent && (lic.remainingMs == null)) {
-            // keep webview.js countdown; fallback text
-          }
-          var back = document.getElementById('btn-renewal-back');
-          if (back) back.style.display = msg.preview ? '' : 'none';
-        }
-      });
-    })();
-    </script>
-    <script>
-    (function(){
-      var api = window.__qtVscodeApi || (typeof acquireVsCodeApi === 'function' ? acquireVsCodeApi() : null);
-      if (!api) return;
-
-      // ========== CORE FIX: Intercept all postMessage calls to remove activation checks ==========
-      // The obfuscated webview.js checks activation status before sending addChannel/removeChannel.
-      // We intercept ALL message-sending by wrapping window.postMessage and the vscode api.
-      
-      // 1. Patch the vscode API postMessage to log all outgoing messages
-      var origPost = api.postMessage.bind(api);
-      
-      // 2. Intercept incoming messages from extension to override activation status
-      // Make the webview think it's always activated
-      window.addEventListener('message', function(ev) {
-        var msg = ev.data || {};
-        // If extension sends licenseStatus with activated:false, override it
-        if (msg.command === 'licenseStatus' && msg.activated === false) {
-          msg.activated = true;
-          msg.remainingDays = 999;
-          msg.message = '';
-        }
-        // If extension sends status with activation info
-        if (msg.command === 'status' && msg.data) {
-          if (msg.data.activated === false) msg.data.activated = true;
-          if (msg.data.licenseStatus) msg.data.licenseStatus.activated = true;
-          if (msg.data.remainingDays !== undefined) msg.data.remainingDays = 999;
-        }
-      }, true);  // Use capture phase to run BEFORE webview.js handlers
-
-      // 3. Override the global activation check functions if webview.js exposes them
-      Object.defineProperty(window, '__qtActivated', { get: function() { return true; }, set: function() {}, configurable: true });
-      Object.defineProperty(window, '__qtLicenseOk', { get: function() { return true; }, set: function() {}, configurable: true });
-
-      // ========== Override: History copy ==========
-      document.body.addEventListener('click', function(ev) {
-        var copyBtn = ev.target.closest('.history-copy-btn') || ev.target.closest('[class*="copy"][class*="btn"]');
-        if (copyBtn) {
-          var item = copyBtn.closest('.history-item') || copyBtn.closest('[class*="history-item"]');
-          if (item) {
-            ev.preventDefault();
-            ev.stopImmediatePropagation();
-            var summary = item.querySelector('.history-summary') || item.querySelector('[class*="summary"]');
-            var text = summary ? summary.textContent || '' : '';
-            var id = item.getAttribute('data-id') || item.getAttribute('data-timestamp') || '';
-            api.postMessage({ command: 'copyHistoryItem', text: text, id: id });
-            return;
-          }
-        }
-        var delBtn = ev.target.closest('.history-delete-btn') || ev.target.closest('[class*="delete"][class*="btn"]');
-        if (delBtn) {
-          var item2 = delBtn.closest('.history-item') || delBtn.closest('[class*="history-item"]');
-          if (item2) {
-            ev.preventDefault();
-            ev.stopImmediatePropagation();
-            var id2 = item2.getAttribute('data-id') || item2.getAttribute('data-timestamp') || '';
-            api.postMessage({ command: 'deleteHistoryItem', id: id2 });
-            return;
-          }
-        }
-      }, true);
-
-      // Make history-summary text selectable
-      var style = document.createElement('style');
-      style.textContent = '.history-summary { user-select: text !important; -webkit-user-select: text !important; cursor: text; }';
-      document.head.appendChild(style);
-    })();
-    </script>
 </body>
 </html>`;
     }
@@ -5653,9 +5006,7 @@ class DialogWebviewProvider {
         return payment;
     }
     _getDisplayVersion() {
-        return vscode.extensions.getExtension('SlashSubs.slashsubs')?.packageJSON?.version
-            ?? vscode.extensions.getExtension('slashsubs.slashsubs')?.packageJSON?.version
-            ?? vscode.extensions.getExtension('QingTian.qingtian-v2')?.packageJSON?.version
+        return vscode.extensions.getExtension('QingTian.qingtian-v2')?.packageJSON?.version
             ?? vscode.extensions.getExtension('qingtian.qingtian-v2')?.packageJSON?.version
             ?? vscode.extensions.getExtension('local.qingtian-mcp')?.packageJSON?.version
             ?? require('../package.json').version
