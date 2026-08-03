@@ -1,6 +1,6 @@
 # 插件角色与实现对照
 
-> 前置必读：[IOptionPlugin 接口设计](IOptionPlugin-Interface)  
+> 前置：[应用案例 · qa_cases 入口](Application-Case-qa_cases-main) → [IOptionPlugin 接口](IOptionPlugin-Interface)  
 > 注册表源码：`test_cases/test_module_main.cpp`
 
 ## 1. 角色模型

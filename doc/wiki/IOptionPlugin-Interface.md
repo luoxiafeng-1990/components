@@ -2,7 +2,8 @@
 
 > 权威源码：`test_cases/common/IOptionPlugin.hpp`  
 > 调用方：`test_cases/test_module_main.cpp`  
-> 本文是插件层架构的**契约说明**，不是目录导览。
+> 本文是插件层架构的**契约说明**。若尚未建立全局图，请先读  
+> **[应用案例：qa_cases 入口](Application-Case-qa_cases-main)**（`test_module_main.cpp` 精读）。
 
 ## 1. 设计目标
 

@@ -30,12 +30,14 @@
 
 ## 已由本 Wiki 补齐的缺口
 
-1. **`IOptionPlugin` 逐方法契约**（IOptionPlugin-Interface）——架构正文，不是导览
-2. **驱动 / 伴随 / 工具角色与注册表**（Plugin-Framework）
-3. **ExecuteMode 决策树**（ExecuteMode-Routing）
-4. **COMPARE PEER vs SOURCE_REF**（COMPARE-Paths）
-5. **WebUI 复用同一框架**（Production-Consumption）
-6. **文档可信度表**（本页）
+1. **分层阅读结构**（Home：应用 → 契约 → 执行 → 运行时）
+2. **`test_module_main.cpp` 应用案例**（Application-Case-qa_cases-main）
+3. **`IOptionPlugin` 逐方法契约**（IOptionPlugin-Interface）
+4. **驱动 / 伴随 / 工具角色与注册表**（Plugin-Framework）
+5. **ExecuteMode 决策树**（ExecuteMode-Routing）
+6. **COMPARE PEER vs SOURCE_REF**（COMPARE-Paths）
+7. **WebUI 复用同一框架**（Production-Consumption）
+8. **文档可信度表**（本页）
 
 ## 建议后续（仓库内）
 

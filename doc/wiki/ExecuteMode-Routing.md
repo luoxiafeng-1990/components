@@ -1,5 +1,9 @@
 # ExecuteMode 路由与调用链
 
+> 前置：`main` 如何汇聚配置并走到本页的决策，见  
+> **[应用案例：qa_cases 入口](Application-Case-qa_cases-main)**。  
+> 本页聚焦**阶段 8 之后**的模式分支与服务调用。
+
 ## `qa_cases vdec ...` 调用链
 
 ```mermaid
