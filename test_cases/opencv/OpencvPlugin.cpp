@@ -93,7 +93,7 @@ void OpencvPlugin::registerOptions(CLI::App& app) {
     api_opt->excludes(perf_opt);
 }
 
-void OpencvPlugin::applyTo(WorkerConfig& config) const {
+void OpencvPlugin::applyCliToConfig(WorkerConfig& config) const {
     ;
 }
 

@@ -5,7 +5,7 @@
  * 等价于 test_module_main.cpp 的步骤 1-7.5：
  *   1. 从 API 参数构造 CLI argv
  *   2. 创建插件实例 + CLI11 解析
- *   3. applyTo → buildPipelineConfigs → inheritCompanionSettings
+ *   3. applyCliToConfig → buildPipelineConfigs → inheritCompanionSettings
  *   4. 设置 on_frame 回调
  *   5. buildConsumeFlags
  *
@@ -291,10 +291,10 @@ BuildResult buildWorkerConfig(
         }
     }
 
-    // 6. 所有插件 applyTo → 构建共享 WorkerConfig
+    // 6. 所有插件 applyCliToConfig → 构建共享 WorkerConfig
     WorkerConfig config;
     for (auto* p : active_plugins) {
-        p->applyTo(config);
+        p->applyCliToConfig(config);
     }
 
     // 7. 获取管线配置

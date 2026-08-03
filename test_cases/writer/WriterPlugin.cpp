@@ -141,7 +141,7 @@ void WriterPlugin::registerOptions(CLI::App& app) {
     );
 }
 
-void WriterPlugin::applyTo(WorkerConfig& config) const {
+void WriterPlugin::applyCliToConfig(WorkerConfig& config) const {
     config.data_source = DataSourceConfigBuilder(config.data_source)
         .setPathIfNonEmpty(input_path_)
         .build();

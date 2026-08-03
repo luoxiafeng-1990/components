@@ -28,6 +28,7 @@
 #include "../common/IOptionPlugin.hpp"
 #include "../common/ExecuteMode.hpp"
 #include "../common/DataSourceOptions.hpp"
+#include "../common/CompareOptions.hpp"
 #include "consumptionline/core/BufferConsumerService.hpp"
 #include "productionline/worker/config/MultiWorkerConfig.hpp"
 #include "productionline/worker/config/WorkerConfigs.hpp"
@@ -88,7 +89,7 @@ public:
     std::string getDescription() const override { return "视频解码测试"; }
     
     void registerOptions(CLI::App& app) override;
-    void applyTo(WorkerConfig& config) const override;
+    void applyCliToConfig(WorkerConfig& config) const override;
     void listTests() const override;
     
     int handlePreActions() override;
@@ -119,21 +120,13 @@ private:
     std::string decoder_str_;
     std::string resolution_str_;
     
-    // compare 设置
-    bool enable_psnr_ = false;
-    bool enable_ssim_ = false;
-    double min_psnr_ = 0.0;
-    double min_ssim_ = 0.0;
-    
     bool verbose_ = false;
     int threads_ = 0;              ///< 0 = 未指定
     int max_frames_ = -1;          ///< -1 = 无限制
     int loop_count_ = 1;           ///< 数据源循环遍数（默认 1）
     std::string vendor_str_ = "taco";  ///< 解码器厂商（默认 taco，与 DisplayPlugin --vendor 同模式）
     DataSourceOptions ds_opts_;    ///< DataSource 横切选项
-
-    /// MultiWorker COMPARE datasource 生产者类型（空=未设置，保持 PACKET_RECORDER）
-    std::string mg_datasource_producer_type_;
+    CompareOptions compare_opts_;  ///< COMPARE 横切选项（默认 target=peer）
 };
 
 } // namespace vdec

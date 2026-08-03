@@ -3,7 +3,7 @@
  * @brief NPU 推理插件
  *
  * 作为独立子命令 npu 注册，管理 NPU 推理相关的命令行参数解析和配置注入。
- * 在 entries 中位于 display 之后注册，applyTo 自然在 display 之后调用，
+ * 在 entries 中位于 display 之后注册，applyCliToConfig 自然在 display 之后调用，
  * 可自动检测 NPU+Display 联动。
  *
  * 用法：
@@ -31,7 +31,7 @@ public:
 
     void registerOptions(CLI::App& app) override;
     int handlePreActions() override;
-    void applyTo(WorkerConfig& config) const override;
+    void applyCliToConfig(WorkerConfig& config) const override;
 
 private:
     std::string model_path_;

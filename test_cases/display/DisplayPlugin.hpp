@@ -43,7 +43,7 @@ public:
 
     void registerOptions(CLI::App& app) override;
     int handlePreActions() override;
-    void applyTo(WorkerConfig& config) const override;
+    void applyCliToConfig(WorkerConfig& config) const override;
 
 private:
     using ExtBuilder = std::unique_ptr<IDisplayVendorExtension>(DisplayPlugin::*)() const;

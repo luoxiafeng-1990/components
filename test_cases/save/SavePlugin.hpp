@@ -56,7 +56,7 @@ public:
     std::string getDescription() const override { return "保存测试（流录制 / 帧导出）"; }
 
     void registerOptions(CLI::App& app) override;
-    void applyTo(WorkerConfig& config) const override;
+    void applyCliToConfig(WorkerConfig& config) const override;
     void listTests() const override;
     int handlePreActions() override;
     std::vector<WorkerConfig> buildPipelineConfigs(const WorkerConfig& shared_config) override;

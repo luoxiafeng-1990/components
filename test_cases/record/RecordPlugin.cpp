@@ -89,7 +89,7 @@ void RecordPlugin::registerOptions(CLI::App& app) {
     );
 }
 
-void RecordPlugin::applyTo(WorkerConfig& config) const {
+void RecordPlugin::applyCliToConfig(WorkerConfig& config) const {
     config.data_source = DataSourceConfigBuilder(config.data_source)
         .setPathIfNonEmpty(input_path_)
         .build();

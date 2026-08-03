@@ -43,7 +43,7 @@ public:
     // 兼容 std::string
     DataSourceConfigBuilder& setPath(const std::string& path);
 
-    /// path 非空时才写入，避免用空串清空已有路径（与插件 applyTo 语义一致）
+    /// path 非空时才写入，避免用空串清空已有路径（与插件 applyCliToConfig 语义一致）
     DataSourceConfigBuilder& setPathIfNonEmpty(std::string_view path);
     
     /**

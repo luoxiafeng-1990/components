@@ -85,7 +85,7 @@ public:
     std::string getDescription() const override { return "帧写入测试"; }
     
     void registerOptions(CLI::App& app) override;
-    void applyTo(WorkerConfig& config) const override;
+    void applyCliToConfig(WorkerConfig& config) const override;
     void listTests() const override;
     
     int handlePreActions() override;

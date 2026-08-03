@@ -40,8 +40,8 @@
 | 命令片段 | 激活插件 | 在 main 中的角色 |
 |----------|----------|------------------|
 | `vdec --file …` | `VdecPlugin` | **驱动**：`buildPipelineConfigs` 非空 |
-| `display --vendor …` | `DisplayPlugin` | **伴随**：只 `applyTo` 打开 display |
-| `npu --model …` | `NpuPlugin` | **伴随**：只 `applyTo` 打开 npu |
+| `display --vendor …` | `DisplayPlugin` | **伴随**：只 `applyCliToConfig` 打开 display |
+| `npu --model …` | `NpuPlugin` | **伴随**：只 `applyCliToConfig` 打开 npu |
 
 未出现在命令行的插件（如 `venc`、`memleak`）不会进入 `actived_plugins`。
 
@@ -57,7 +57,7 @@ flowchart TD
   S4 --> S5["5 handlePreActions"]
   S5 --> S55{"5.5 UTILITY?"}
   S55 -->|是| RUN["run 后 return"]
-  S55 -->|否| S6["6 共享 WorkerConfig<br/>各插件 applyTo"]
+  S55 -->|否| S6["6 共享 WorkerConfig<br/>各插件 applyCliToConfig"]
   S6 --> S7["7 驱动选举<br/>buildPipelineConfigs"]
   S7 --> S75["7.5 inheritCompanionSettings"]
   S75 --> S8["8 模式路由 → ExecuteMode"]
@@ -124,7 +124,7 @@ flowchart TD
 ```158:162:test_cases/test_module_main.cpp
     WorkerConfig config;
     for (auto* p : actived_plugins) {
-        p->applyTo(config);
+        p->applyCliToConfig(config);
     }
 ```
 
@@ -133,7 +133,7 @@ flowchart TD
 | 问题 | 答案 |
 |------|------|
 | 公共 config 在哪？ | `main` 栈上的局部变量 `config` |
-| 谁会写它？ | **本次激活**的每个插件各 `applyTo` 一次 |
+| 谁会写它？ | **本次激活**的每个插件各 `applyCliToConfig` 一次 |
 | 会不会所有已注册插件都写？ | **不会**；没出现在命令行的不写 |
 | 类型定义在哪？ | `include/productionline/worker/config/WorkerConfigs.hpp` |
 
@@ -197,7 +197,7 @@ vector<WorkerConfig> pipeline_configs;  // 阶段 7：驱动展开的可执行�
 
 | | 共享 `config` | `pipeline_configs` |
 |--|----------------|---------------------|
-| 谁填充 | 所有激活插件 `applyTo` | 仅驱动 `buildPipelineConfigs` |
+| 谁填充 | 所有激活插件 `applyCliToConfig` | 仅驱动 `buildPipelineConfigs` |
 | 数量 | 始终 1 个对象 | 1 / 2 / N 个 |
 | 用途 | 汇聚伴随项、推断部分 flags、传给 build | 真正交给 ExecuteMode 跑 |
 
@@ -205,14 +205,14 @@ vector<WorkerConfig> pipeline_configs;  // 阶段 7：驱动展开的可执行�
 
 1. **插件地位平等**：都是子命令，没有「主模块 / 附属选项」的 CLI 特权（驱动是运行期选举出来的）。  
 2. **配置与执行分离**：插件只写到 `WorkerConfig`；`main` 才调用 `ExecuteMode`。  
-3. **组合优于继承**：`vdec + display + npu` 靠多次 `applyTo` + `inheritCompanionSettings`，不必搞巨型上帝插件。  
+3. **组合优于继承**：`vdec + display + npu` 靠多次 `applyCliToConfig` + `inheritCompanionSettings`，不必搞巨型上帝插件。  
 4. **工具旁路**：`UTILITY` 不伪造生产线配置，直接 `run()`。
 
 ## 6. 读完本文后去哪
 
 | 你想搞清… | 下一篇 |
 |-----------|--------|
-| `applyTo` / `buildPipelineConfigs` 每个函数契约 | [IOptionPlugin 接口](IOptionPlugin-Interface) |
+| `applyCliToConfig` / `buildPipelineConfigs` 每个函数契约 | [IOptionPlugin 接口](IOptionPlugin-Interface) |
 | 哪些插件算驱动/伴随 | [插件角色对照](Plugin-Framework) |
 | 阶段 8 完整决策树 | [ExecuteMode 路由](ExecuteMode-Routing) |
 | 跑起来之后 Buffer / Consumer | [生产线与消费线](Production-Consumption) |

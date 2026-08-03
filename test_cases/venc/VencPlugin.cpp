@@ -1070,10 +1070,8 @@ void VencPlugin::registerOptions(CLI::App& app) {
     app.add_flag("-v,--verbose", verbose_, "详细日志");
     app.add_option("-t,--threads", threads_, "并行通道数 (PARALLEL 模式)");
 
-    app.add_flag("-p,--psnr", enable_psnr_, "启用 PSNR：单路编码时对比源 YUV 与 编码→软解 输出");
-    app.add_flag("-S,--ssim", enable_ssim_, "启用 SSIM（同上）");
-    app.add_option("-M,--min-psnr", min_psnr_, "PSNR 阈值 (dB)，与 stress 脚本 -M 一致");
-    app.add_option("-N,--min-ssim", min_ssim_, "SSIM 阈值，与 stress 脚本 -N 一致");
+    // COMPARE 横切选项（阈值短选项保持 venc/stress 历史：-M/-N）
+    compare_opts_.registerTo(app, CompareOptions::ThresholdStyle::Venc, 30.0, 0.95);
 
     // venc 的 -b 已被 bitrate 占用，仅注册长选项 --buffer-count
     ds_opts_.registerTo(app, /*with_short_b=*/false);
@@ -1085,6 +1083,7 @@ void VencPlugin::registerOptions(CLI::App& app) {
         "  qa_cases venc -l\n"
         "  qa_cases venc h264_1920x1080_60_8mbps /data/in.nv12\n"
         "  qa_cases venc -p -S -M 38 -N 0.95 h264_1920x1080_60_8mbps /data/in.nv12\n"
+        "  # COMPARE 默认 --compare-target source-ref（源↔编码→软解）\n"
         "  qa_cases venc --loop 3 -p -S h264_1920x1080_30_8mbps /data/in.nv12\n"
         "  qa_cases venc --buffer-count 16 -p -S h264_1920x1080_30_8mbps /data/in.nv12\n"
         "  qa_cases venc -t 4 -o /tmp/o.mp4 h264_1920x1080_30_4mbps /data/in.nv12\n"
@@ -1092,13 +1091,13 @@ void VencPlugin::registerOptions(CLI::App& app) {
         "  qa_cases venc h264_1920x1080_30_4mbps /data/in.nv12 display --vendor taco --fps 30\n");
 }
 
-void VencPlugin::applyTo(WorkerConfig& config) const {
+void VencPlugin::applyCliToConfig(WorkerConfig& config) const {
     if (!input_path_.empty())
         config.data_source.path = input_path_;
     config.data_source.max_frames = max_frames_;
     config.data_source.loop_count = loop_count_ < 1 ? 1 : loop_count_;
     // CLI --buffer-count；未指定时保持 0，由 buildEncodeConfigInternal 落成默认 16
-    ds_opts_.applyTo(config);
+    ds_opts_.applyCliToConfig(config);
 
     auto ct_builder = ConsumerTypeConfigBuilder(config.consumer_type)
         .setVerbose(verbose_);
@@ -1110,14 +1109,13 @@ void VencPlugin::applyTo(WorkerConfig& config) const {
             .build());
     }
 
-    auto compare_builder = CompareConfigBuilder(config.consumer_type.compare)
-        .setEnablePsnr(enable_psnr_)
-        .setEnableSsim(enable_ssim_);
-    if (min_psnr_ > 0.0) compare_builder.setMinPsnr(min_psnr_);
-    if (min_ssim_ > 0.0) compare_builder.setMinSsim(min_ssim_);
-    ct_builder.setCompareConfig(compare_builder.build());
-
     config.consumer_type = ct_builder.build();
+
+    // COMPARE 默认 source-ref（源↔编码→软解）；未指定 producer 时补 FFMPEG_ENCODE
+    compare_opts_.applyCliToConfig(config, ConsumerTypeConfig::CompareType::TARGET_SOURCE_REF);
+    if (compare_opts_.isCompareEnabled() && config.mg_datasource_producer_type.empty()) {
+        config.mg_datasource_producer_type = "FFMPEG_ENCODE";
+    }
 }
 
 int VencPlugin::handlePreActions() {
@@ -1215,6 +1213,7 @@ std::vector<WorkerConfig> VencPlugin::buildPipelineConfigs(const WorkerConfig& s
                     .build());
             }
             cfg.consumer_type = ct_builder.build();
+            cfg.mg_datasource_producer_type = shared_config.mg_datasource_producer_type;
             configs.push_back(std::move(cfg));
         }
         return configs;
@@ -1232,6 +1231,7 @@ std::vector<WorkerConfig> VencPlugin::buildPipelineConfigs(const WorkerConfig& s
     full.data_source.max_frames = shared_config.data_source.max_frames;
     full.data_source.loop = shared_config.data_source.loop;
     full.data_source.loop_count = shared_config.data_source.loop_count;
+    full.mg_datasource_producer_type = shared_config.mg_datasource_producer_type;
     return {full};
 }
 

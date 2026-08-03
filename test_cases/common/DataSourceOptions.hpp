@@ -16,8 +16,8 @@
  *         // ... 插件自身选项 ...
  *     }
  *
- *     void applyTo(WorkerConfig& config) const override {
- *         ds_opts_.applyTo(config);         // 一行应用 DataSource 设置
+ *     void applyCliToConfig(WorkerConfig& config) const override {
+ *         ds_opts_.applyCliToConfig(config);         // 一行应用 DataSource 设置
  *         // ... 插件自身设置 ...
  *     }
  * };
@@ -51,7 +51,7 @@ struct DataSourceOptions {
         }
     }
 
-    void applyTo(WorkerConfig& config) const {
+    void applyCliToConfig(WorkerConfig& config) const {
         config.data_source = DataSourceConfigBuilder(config.data_source)
             .setBufferCountIfNonZero(buffer_count)
             .build();

@@ -4,6 +4,7 @@
  */
 
 #include "ExecuteMode.hpp"
+#include "../venc/VencPlugin.hpp"
 #include "productionline/line/VideoProductionLine.hpp"
 #include "consumptionline/core/BufferConsumerStrategies.hpp"
 #include "productionline/worker/base/ComponentTopology.hpp"
@@ -39,35 +40,63 @@ consumer::ConsumeResult ExecuteMode::compare(
 {
     auto& logger = getLogger();
 
+    if (configs.empty()) {
+        consumer::ConsumeResult r;
+        r.success = false;
+        r.error_message = "COMPARE requires at least one WorkerConfig";
+        return r;
+    }
+
+    using TK = ConsumerTypeConfig::CompareType::TargetKind;
+    TK target = configs[0].consumer_type.compare.target_kind;
+    // 兼容：未显式设置 target 时，单路 ENCODE 视为 source-ref（历史 venc 行为）
+    if (target == TK::TARGET_UNSPECIFIED) {
+        if (configs.size() == 1 &&
+            configs[0].global.worker_type == WorkerType::FFMPEG_ENCODE) {
+            target = TK::TARGET_SOURCE_REF;
+        } else {
+            target = TK::TARGET_PEER;
+        }
+    }
+
+    if (target == TK::TARGET_SOURCE_REF) {
+        LOG4CPLUS_INFO_FMT(logger,
+            "compare: target=SOURCE_REF → encode quality path (workers=%zu)",
+            configs.size());
+        // shared_cfg 用 configs[0]（含 compare 阈值）；encode 配方同为 configs[0]
+        return venc::runEncodeQualityCompare(configs[0], configs[0], test_name);
+    }
+
     if (!test_name.empty()) {
         LOG4CPLUS_INFO(logger, "");
         LOG4CPLUS_INFO(logger, "═══════════════════════════════════════════════════════");
         LOG4CPLUS_INFO_FMT(logger, "  %s", test_name.c_str());
         LOG4CPLUS_INFO(logger, "═══════════════════════════════════════════════════════");
         LOG4CPLUS_INFO_FMT(logger, "  Mode:       ExecuteMode::COMPARE");
+        LOG4CPLUS_INFO_FMT(logger, "  Target:     PEER (hw vs sw)");
         LOG4CPLUS_INFO_FMT(logger, "  Workers:    %zu", configs.size());
         LOG4CPLUS_INFO_FMT(logger, "  Flags:      0x%X", flags);
-        if (!configs.empty()) {
-            LOG4CPLUS_INFO_FMT(logger, "  Input:      %s", configs[0].data_source.path.c_str());
-            if (configs[0].consumer_type.compare.enable_psnr) {
-                LOG4CPLUS_INFO_FMT(logger, "  PSNR:       enabled (min: %.1f dB)", configs[0].consumer_type.compare.min_psnr);
-            }
-            if (configs[0].consumer_type.compare.enable_ssim) {
-                LOG4CPLUS_INFO_FMT(logger, "  SSIM:       enabled (min: %.2f)", configs[0].consumer_type.compare.min_ssim);
-            }
-            if (flags & consumer::CONSUME_DISPLAY) {
-                LOG4CPLUS_INFO(logger, "  Display:    enabled (stacked)");
-            }
-            if (flags & consumer::CONSUME_SAVE_RAW) {
-                LOG4CPLUS_INFO_FMT(logger, "  Save:       enabled to %s (stacked)",
-                                  configs[0].consumer_type.save_raw.output_paths.empty()
-                                      ? "" : configs[0].consumer_type.save_raw.output_paths[0].c_str());
-            }
+        LOG4CPLUS_INFO_FMT(logger, "  Input:      %s", configs[0].data_source.path.c_str());
+        if (configs[0].consumer_type.compare.enable_psnr) {
+            LOG4CPLUS_INFO_FMT(logger, "  PSNR:       enabled (min: %.1f dB)",
+                               configs[0].consumer_type.compare.min_psnr);
+        }
+        if (configs[0].consumer_type.compare.enable_ssim) {
+            LOG4CPLUS_INFO_FMT(logger, "  SSIM:       enabled (min: %.2f)",
+                               configs[0].consumer_type.compare.min_ssim);
+        }
+        if (flags & consumer::CONSUME_DISPLAY) {
+            LOG4CPLUS_INFO(logger, "  Display:    enabled (stacked)");
+        }
+        if (flags & consumer::CONSUME_SAVE_RAW) {
+            LOG4CPLUS_INFO_FMT(logger, "  Save:       enabled to %s (stacked)",
+                              configs[0].consumer_type.save_raw.output_paths.empty()
+                                  ? "" : configs[0].consumer_type.save_raw.output_paths[0].c_str());
         }
         LOG4CPLUS_INFO(logger, "═══════════════════════════════════════════════════════");
     }
 
-    LOG4CPLUS_DEBUG_FMT(logger, "compare: mode=COMPARE, workers=%zu, flags=0x%X",
+    LOG4CPLUS_DEBUG_FMT(logger, "compare: mode=COMPARE target=PEER workers=%zu flags=0x%X",
                         configs.size(), flags);
 
     consumer::BufferConsumerService service;

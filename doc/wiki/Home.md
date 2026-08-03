@@ -87,9 +87,9 @@ flowchart TB
 
 ## 核心结论
 
-1. **先读应用案例**，再读接口——否则容易把 `applyTo` 理解成「执行」。  
+1. **先读应用案例**，再读接口——否则容易把 `applyCliToConfig` 理解成「执行」。  
 2. 共享 `WorkerConfig` 是 `main` 里的**局部变量**，只由**本次激活**的插件写入。  
-3. 驱动由 `buildPipelineConfigs` 第一个非空者选举；伴随只 `applyTo`。  
+3. 驱动由 `buildPipelineConfigs` 第一个非空者选举；伴随只 `applyCliToConfig`。  
 4. 插件不启动 `VideoProductionLine`；执行权在 `main` → `ExecuteMode`。
 
 从这里开始 → **[应用案例：qa_cases 入口](Application-Case-qa_cases-main)**

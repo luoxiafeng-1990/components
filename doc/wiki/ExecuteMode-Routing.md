@@ -18,7 +18,7 @@ sequenceDiagram
   U->>M: qa_cases vdec --file v.mp4 display
   M->>P: registerOptions / parse
   M->>P: handlePreActions
-  M->>P: applyTo(shared WorkerConfig)
+  M->>P: applyCliToConfig(shared WorkerConfig)
   M->>P: buildPipelineConfigs(shared)
   P-->>M: 1..N WorkerConfig
   M->>M: inheritCompanionSettings + buildConsumeFlags

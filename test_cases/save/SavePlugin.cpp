@@ -183,8 +183,8 @@ void SavePlugin::registerOptions(CLI::App& app) {
     );
 }
 
-void SavePlugin::applyTo(WorkerConfig& config) const {
-    ds_opts_.applyTo(config);
+void SavePlugin::applyCliToConfig(WorkerConfig& config) const {
+    ds_opts_.applyCliToConfig(config);
     config.data_source = DataSourceConfigBuilder(config.data_source)
         .setPathIfNonEmpty(input_path_)
         .build();

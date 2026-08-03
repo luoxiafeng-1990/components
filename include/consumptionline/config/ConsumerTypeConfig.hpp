@@ -162,6 +162,17 @@ struct ConsumerTypeConfig {
         // ========== 指标开关 ==========
         bool enable_psnr = false;               ///< 是否启用 PSNR 计算（需显式开启）
         bool enable_ssim = false;               ///< 是否启用 SSIM 计算（需显式开启，计算量约为 PSNR 的 1.5-2 倍）
+
+        /**
+         * COMPARE 管线对比目标（谁和谁比）。
+         * 与下方 Strategy（指标分层：FAST_ONLY/…）不同，勿混淆。
+         */
+        enum TargetKind {
+            TARGET_UNSPECIFIED = 0, ///< 未设置；由驱动/入口补默认
+            TARGET_PEER = 1,        ///< hw decoder ↔ sw decoder
+            TARGET_SOURCE_REF = 2,  ///< 源裸帧 ↔ 编码后再软解
+        };
+        TargetKind target_kind = TARGET_UNSPECIFIED;
         
         // ========== 验证策略 ==========
         enum Strategy {
@@ -513,11 +524,11 @@ struct ConsumerTypeConfig {
      * @brief 从 shared config 继承伴随消费者设置
      *
      * 当驱动插件（save / vdec / pp）的 buildPipelineConfigs 创建全新的
-     * WorkerConfig 时，伴随插件（display / npu）通过 applyTo 写入 shared
+     * WorkerConfig 时，伴随插件（display / npu）通过 applyCliToConfig 写入 shared
      * config 的设置不会自动传播。本方法将 shared 中已启用、但本配置中
      * 未启用的伴随消费设置补充过来。
      *
-     * @param shared applyTo 阶段产出的共享 ConsumerTypeConfig
+     * @param shared applyCliToConfig 阶段产出的共享 ConsumerTypeConfig
      */
     void inheritCompanionSettings(const ConsumerTypeConfig& shared);
 

@@ -56,7 +56,7 @@ public:
     std::string getDescription() const override { return "OpenCV operations test"; }
 
     void registerOptions(CLI::App& app) override;
-    void applyTo(WorkerConfig& config) const override;
+    void applyCliToConfig(WorkerConfig& config) const override;
     void listTests() const override;
 
     int handlePreActions() override;

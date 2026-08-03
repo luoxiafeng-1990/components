@@ -9,7 +9,7 @@
  * - main() 创建 CLI::App 及子命令
  * - 每个插件通过 registerOptions() 将选项注册到对应子命令
  * - CLI11 统一解析后，选项值自动填充到插件成员变量
- * - 插件通过 applyTo() 注入配置，buildPipelineConfigs() 构建执行管线
+ * - 插件通过 applyCliToConfig() 注入配置，buildPipelineConfigs() 构建执行管线
  *
  * @version 7.0 - 从 getopt_long 迁移到 CLI11
  */
@@ -64,9 +64,12 @@ public:
     virtual void registerOptions(CLI::App& app) = 0;
 
     /**
-     * @brief 将解析到的参数注入共享 WorkerConfig
+     * @brief 将本插件已解析的命令行参数写入共享 WorkerConfig
+     *
+     * CLI11 parse 完成后调用：把成员变量中的 CLI 结果 apply 到 config（可多插件叠加）。
+     * 不启动生产线；真正执行在 main → ExecuteMode。
      */
-    virtual void applyTo(WorkerConfig& config) const = 0;
+    virtual void applyCliToConfig(WorkerConfig& config) const = 0;
 
     virtual void listTests() const {}
 

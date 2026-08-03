@@ -145,18 +145,14 @@ void VdecPlugin::registerOptions(CLI::App& app) {
     app.add_option("-R,--resolution", resolution_str_, "分辨率 (如 1920x1080)");
     app.add_option("-F,--fps", params_.fps, "目标帧率");
     app.add_option("-m,--max-frames", max_frames_, "最大帧数（数据源读取与消费循环共用，-1=无限制）");
-    app.add_flag("-p,--psnr", enable_psnr_, "启用 PSNR 验证");
-    app.add_flag("-S,--ssim", enable_ssim_, "启用 SSIM 验证");
-    app.add_option("-P,--min-psnr", min_psnr_, "PSNR 阈值 (默认: 30.0 dB)");
-    app.add_option("-M,--min-ssim", min_ssim_, "SSIM 阈值 (默认: 0.95)");
     app.add_flag("-v,--verbose", verbose_, "详细日志");
     app.add_option("-t,--threads", threads_, "并发路数 (启用 PARALLEL 模式)");
     app.add_option("--loop", loop_count_,
         "数据源循环遍数（默认 1；有效读取遍数=该值，与 venc --loop 语义一致）");
     app.add_option("--vendor", vendor_str_, "解码器厂商 (默认: taco)");
-    app.add_option("--mg-datasource-producer-type", mg_datasource_producer_type_,
-        "MultiWorker COMPARE 的 datasource 生产者类型；未设置则保持 PACKET_RECORDER。"
-        "可选: FFMPEG_PACKET_RECORDER|FFMPEG_DECODE|FFMPEG_ENCODE|FFMPEG_DECODE_THEN_ENCODE");
+
+    // COMPARE 横切选项（阈值短选项保持 vdec 历史：-P/-M）
+    compare_opts_.registerTo(app, CompareOptions::ThresholdStyle::Vdec);
 
     // 注册厂商（各插件按需注册，此处注册 taco）
     auto& registrars = common::WorkerConfigFactory::vendorRegistrars();
@@ -175,14 +171,14 @@ void VdecPlugin::registerOptions(CLI::App& app) {
     app.footer(
         "ExecuteMode Mapping:\n"
         "  SINGLE   - 默认单路解码\n"
-        "  COMPARE  - --psnr/--ssim 启用时，HW vs SW 对比\n"
+        "  COMPARE  - --psnr/--ssim 启用时（默认 compare-target=peer）\n"
         "  PARALLEL - --threads N，支持 --decoder hw/sw\n"
         "\n"
         "Examples:\n"
         "  qa_cases vdec video.mp4\n"
         "  qa_cases vdec --psnr video.mp4\n"
         "  qa_cases vdec -r rtsp://host/stream -p -S \\\n"
-        "    --mg-datasource-producer-type FFMPEG_DECODE_THEN_ENCODE\n"
+        "    --producer FFMPEG_DECODE_THEN_ENCODE\n"
         "  qa_cases vdec --threads 4 video.mp4\n"
         "  qa_cases vdec h264_1920x1080_30 video.mp4\n"
         "  qa_cases vdec video.mp4 display --vendor taco\n"
@@ -191,32 +187,25 @@ void VdecPlugin::registerOptions(CLI::App& app) {
 }
 
 // ========================================
-// IOptionPlugin: applyTo
+// IOptionPlugin: applyCliToConfig
 // ========================================
 
-void VdecPlugin::applyTo(WorkerConfig& config) const {
-    ds_opts_.applyTo(config);
+void VdecPlugin::applyCliToConfig(WorkerConfig& config) const {
+    ds_opts_.applyCliToConfig(config);
     config.data_source = DataSourceConfigBuilder(config.data_source)
         .setPathIfNonEmpty(input_path_)
         .setMaxFrames(max_frames_)
         .setLoop(false)  // 有限循环交给 EncodedPacketSourceFromFile.loop_count
         .setLoopCount(loop_count_ < 1 ? 1 : loop_count_)
         .build();
-    auto compare_builder = CompareConfigBuilder(config.consumer_type.compare)
-        .setEnablePsnr(enable_psnr_)
-        .setEnableSsim(enable_ssim_);
-    if (min_psnr_ > 0.0) compare_builder.setMinPsnr(min_psnr_);
-    if (min_ssim_ > 0.0) compare_builder.setMinSsim(min_ssim_);
+
+    // COMPARE 默认 peer（hw↔sw）；CLI --compare-target / --producer 可覆盖
+    compare_opts_.applyCliToConfig(config, ConsumerTypeConfig::CompareType::TARGET_PEER);
 
     config.consumer_type = ConsumerTypeConfigBuilder(config.consumer_type)
         .setMaxFrames(max_frames_)
-        .setCompareConfig(compare_builder.build())
         .setVerbose(verbose_)
         .build();
-
-    if (!mg_datasource_producer_type_.empty()) {
-        config.mg_datasource_producer_type = mg_datasource_producer_type_;
-    }
 }
 
 // ========================================
@@ -352,11 +341,11 @@ std::vector<WorkerConfig> VdecPlugin::buildPipelineConfigs(const WorkerConfig& s
             }
         }
 
-        if (!mg_datasource_producer_type_.empty()) {
-            cfg.mg_datasource_producer_type = mg_datasource_producer_type_;
-        } else if (!shared_config.mg_datasource_producer_type.empty()) {
+        if (!shared_config.mg_datasource_producer_type.empty()) {
             cfg.mg_datasource_producer_type = shared_config.mg_datasource_producer_type;
         }
+        cfg.consumer_type.compare.target_kind =
+            shared_config.consumer_type.compare.target_kind;
 
         return cfg;
     };

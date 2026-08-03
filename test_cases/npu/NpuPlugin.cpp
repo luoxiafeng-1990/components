@@ -48,7 +48,7 @@ int NpuPlugin::handlePreActions() {
     return -1;
 }
 
-void NpuPlugin::applyTo(WorkerConfig& config) const {
+void NpuPlugin::applyCliToConfig(WorkerConfig& config) const {
     auto npu_builder = NpuInferenceConfigBuilder(config.consumer_type.npu_inference)
         .setEnable(true)
         .setModelPath(model_path_)

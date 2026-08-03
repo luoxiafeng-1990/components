@@ -3,7 +3,7 @@
  * @brief 显示输出插件实现
  *
  * 使用分发表模式：vendorBuilders() 注册所有厂商的 Extension 构建方法，
- * applyTo() 查表调用，无需 if-else / switch-case。
+ * applyCliToConfig() 查表调用，无需 if-else / switch-case。
  * 新增厂商只需加一个 buildXxxExtension() + 在 map 中注册一行。
  */
 
@@ -74,10 +74,10 @@ int DisplayPlugin::handlePreActions() {
 }
 
 // ========================================
-// applyTo：查分发表，构建对应厂商 Extension
+// applyCliToConfig：查分发表，构建对应厂商 Extension
 // ========================================
 
-void DisplayPlugin::applyTo(WorkerConfig& config) const {
+void DisplayPlugin::applyCliToConfig(WorkerConfig& config) const {
     const auto& builders = vendorBuilders();
     auto it = builders.find(vendor_str_);
     if (it == builders.end()) {

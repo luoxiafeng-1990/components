@@ -2,8 +2,8 @@
  * @file VencPlugin.hpp
  * @brief 视频编码测试插件（与 VdecPlugin / IOptionPlugin 架构对齐）
  *
- * PSNR/SSIM：-p/-S 写入 consumer_type.compare，单路编码时在 test_module_main 中
- * 走 runEncodeQualityCompare（源 YUV vs 编码→软解），与解码双路 COMPARE 区分。
+ * PSNR/SSIM：经 CompareOptions 写入 consumer_type.compare（默认 target=source-ref），
+ * 由 ExecuteMode::compare 统一入口调度（SOURCE_REF → runEncodeQualityCompare）。
  *
  * 显示：与 vdec 一致，在命令行追加子命令 display（DisplayPlugin）启用上屏；
  * test_module_main 在 encode + display.enable 时走 runEncodeDecodeDisplay（编码→软解→消费解码池）。
@@ -15,6 +15,7 @@
 #include "../common/IOptionPlugin.hpp"
 #include "../common/ExecuteMode.hpp"
 #include "../common/DataSourceOptions.hpp"
+#include "../common/CompareOptions.hpp"
 #include "consumptionline/core/BufferConsumerService.hpp"
 #include "productionline/worker/config/MultiWorkerConfig.hpp"
 #include "productionline/worker/config/WorkerConfigs.hpp"
@@ -62,7 +63,7 @@ public:
     std::string getDescription() const override { return "视频编码测试 (YUV→H.264/H.265/JPEG)"; }
 
     void registerOptions(CLI::App& app) override;
-    void applyTo(WorkerConfig& config) const override;
+    void applyCliToConfig(WorkerConfig& config) const override;
     void listTests() const override;
     int handlePreActions() override;
     std::vector<WorkerConfig> buildPipelineConfigs(const WorkerConfig& shared_config) override;
@@ -86,13 +87,9 @@ private:
     bool verbose_ = false;
     int threads_ = 0;
 
-    bool enable_psnr_ = false;
-    bool enable_ssim_ = false;
-    double min_psnr_ = 30.0;
-    double min_ssim_ = 0.95;
-
     /// DataSource 横切选项（venc 用 --buffer-count，避免与 -b bitrate 冲突）
     DataSourceOptions ds_opts_;
+    CompareOptions compare_opts_;  ///< COMPARE 横切选项（默认 target=source-ref）
     /// ENC 默认 BufferPool 槽位数（用户要求默认 16；CLI --buffer-count 可覆盖）
     static constexpr int kDefaultEncodeBufferCount = 16;
 };

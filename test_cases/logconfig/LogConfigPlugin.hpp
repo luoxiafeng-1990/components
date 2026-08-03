@@ -35,7 +35,7 @@ public:
     PluginCategory getCategory() const override { return PluginCategory::UTILITY; }
 
     void registerOptions(CLI::App& app) override;
-    void applyTo(WorkerConfig& /*config*/) const override {}
+    void applyCliToConfig(WorkerConfig& /*config*/) const override {}
 
     int run() override;
 

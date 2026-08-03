@@ -28,7 +28,7 @@ void PreviewPlugin::registerOptions(CLI::App& app) {
                    "编码器 (jpeg_taco|mjpeg, 默认: jpeg_taco)");
 }
 
-void PreviewPlugin::applyTo(WorkerConfig& config) const {
+void PreviewPlugin::applyCliToConfig(WorkerConfig& config) const {
     config.consumer_type = ConsumerTypeConfigBuilder(config.consumer_type)
         .setJpegEncodeConfig(JpegEncodeConfigBuilder()
             .setEnable(true)

@@ -15,7 +15,7 @@
 | 边界 | 谁负责 | 谁不负责 |
 |------|--------|----------|
 | 参数解析 | 插件 `registerOptions` + 成员变量 | `main` 不解析业务选项 |
-| 配置汇聚 | 插件 `applyTo` / `buildPipelineConfigs` | 插件不直接 `start` 生产线 |
+| 配置汇聚 | 插件 `applyCliToConfig` / `buildPipelineConfigs` | 插件不直接 `start` 生产线 |
 | 真正执行 | `ExecuteMode` + `BufferConsumerService`（PIPELINE）或 `run()`（UTILITY） | 插件接口本身不跑帧 |
 
 一句话：**插件 = CLI/配置适配器；执行引擎在插件之外。**
@@ -31,7 +31,7 @@ enum class PluginCategory {
 
 | 分类 | 典型插件 | main 中的路径 |
 |------|----------|----------------|
-| `PIPELINE` | vdec / venc / pp / save / opencv / display / npu / preview | `applyTo` → `buildPipelineConfigs` → `ExecuteMode::*` |
+| `PIPELINE` | vdec / venc / pp / save / opencv / display / npu / preview | `applyCliToConfig` → `buildPipelineConfigs` → `ExecuteMode::*` |
 | `UTILITY` | memleak / logconfig / cpu | `handlePreActions` 后直接 `run()` 并 `return` |
 
 `getCategory()` 默认返回 `PIPELINE`；工具插件必须重写为 `UTILITY`。
@@ -49,7 +49,7 @@ public:
     virtual int run();                                   // 默认 0；UTILITY 入口
 
     virtual void registerOptions(CLI::App& app) = 0;     // 纯虚
-    virtual void applyTo(WorkerConfig& config) const = 0;// 纯虚
+    virtual void applyCliToConfig(WorkerConfig& config) const = 0;// 纯虚
 
     virtual void listTests() const;                      // 默认空
     virtual std::vector<WorkerConfig>
@@ -84,7 +84,7 @@ public:
 |----|------|
 | **作用** | 告诉 `main` 走哪条执行分支 |
 | **默认** | `PIPELINE` |
-| **UTILITY** | 必须重写；`main` 在 `handlePreActions` 之后若发现 UTILITY，调用 `run()` 后**立即退出**，不再 `applyTo` 管线逻辑（见 `test_module_main.cpp` 5.5 节） |
+| **UTILITY** | 必须重写；`main` 在 `handlePreActions` 之后若发现 UTILITY，调用 `run()` 后**立即退出**，不再 `applyCliToConfig` 管线逻辑（见 `test_module_main.cpp` 5.5 节） |
 
 ### 4.4 `registerOptions(CLI::App& app)`（纯虚）
 
@@ -107,15 +107,16 @@ public:
 | **典型** | `VdecPlugin`：解析 positional 预定义用例 / 路径；`--list` 打印后返回 0 |
 | **顺序** | 对所有 `parsed()` 插件依次调用；任一提前退出则后续插件不再执行 |
 
-### 4.6 `applyTo(WorkerConfig& config) const`（纯虚）
+### 4.6 `applyCliToConfig(WorkerConfig& config) const`（纯虚）
 
 | 项 | 说明 |
 |----|------|
-| **作用** | 把「本插件解析到的参数」写入**共享** `WorkerConfig` |
+| **作用** | **命令行参数 → WorkerConfig**：把本插件已解析的 CLI 成员变量写入共享 `config` |
+| **旧名** | 曾用 `applyTo`，语义不清，已统一为 `applyCliToConfig` |
 | **调用时机** | 所有插件 `handlePreActions` 通过后；对每个激活插件依次调用 |
-| **语义** | **叠加/注入**，不是创建管线。驱动插件写 `data_source` / decode/encode；伴随插件写 `consumer_type.display` 等 |
+| **语义** | **叠加写入**，不是创建管线。驱动写 `data_source` / decode/encode；伴随写 `consumer_type.display` 等 |
 | **const** | 方法为 const：只读插件成员，只改传入的 `config` |
-| **UTILITY** | 仍可实现为空操作（如 `MemleakPlugin::applyTo` 空实现），因 UTILITY 通常在更早阶段 `run()` 退出 |
+| **UTILITY** | 仍可实现为空操作（如 `MemleakPlugin::applyCliToConfig`），因 UTILITY 通常在更早阶段 `run()` 退出 |
 | **不做** | 不 `start` 生产线；不决定 SINGLE/COMPARE（那是 `main` + `ExecuteMode`） |
 
 ### 4.7 `buildPipelineConfigs(shared_config) → vector<WorkerConfig>`
@@ -127,8 +128,8 @@ public:
 | **main 规则** | 按激活插件顺序调用；**第一个返回非空**的插件成为驱动，其后插件的 `buildPipelineConfigs` **不再调用** |
 | **返回值含义** | `1` → 倾向 SINGLE；`2` → 常为 COMPARE 一对 hw/sw；`N` → PARALLEL / BATCH / PARALLEL COMPARE |
 | **谁该重写** | vdec / venc / pp / save / opencv 等驱动 |
-| **谁保持默认** | display / npu / preview 等**伴随插件**（只 `applyTo`，不产管线） |
-| **输入** | `shared_config` 已含全部激活插件的 `applyTo` 结果 |
+| **谁保持默认** | display / npu / preview 等**伴随插件**（只 `applyCliToConfig`，不产管线） |
+| **输入** | `shared_config` 已含全部激活插件的 `applyCliToConfig` 结果 |
 
 ### 4.8 `getTestName() const → std::string`
 
@@ -186,7 +187,7 @@ sequenceDiagram
   end
 
   Note over Main,P: 阶段 E — 配置汇聚（仅 PIPELINE）
-  Main->>P: applyTo(shared) （每个激活插件）
+  Main->>P: applyCliToConfig(shared) （每个激活插件）
   Main->>P: buildPipelineConfigs(shared) （直到第一个非空）
 
   Note over Main,P: 阶段 F — 执行（插件不再参与）
@@ -197,7 +198,7 @@ sequenceDiagram
 **阶段边界铁律**
 
 1. `registerOptions` 不得依赖 parse 后的值。  
-2. `applyTo` 不得假设自己是唯一插件；要可与伴随插件叠加。  
+2. `applyCliToConfig` 不得假设自己是唯一插件；要可与伴随插件叠加。  
 3. `buildPipelineConfigs` 只应由驱动重写；伴随保持默认空。  
 4. 插件不调用 `BufferConsumerService::start`；执行权在 `main` / `ExecuteMode`。
 
@@ -207,9 +208,9 @@ sequenceDiagram
 
 | 角色 | 重写重点 | 示例 |
 |------|----------|------|
-| **驱动（Driver）** | `registerOptions` + `applyTo` + **`buildPipelineConfigs`** | VdecPlugin、VencPlugin |
-| **伴随（Companion）** | `registerOptions` + `applyTo`；`buildPipelineConfigs` 保持默认空 | DisplayPlugin、NpuPlugin、PreviewPlugin |
-| **工具（Utility）** | `getCategory→UTILITY` + `registerOptions` + **`run`**；`applyTo` 可空 | MemleakPlugin |
+| **驱动（Driver）** | `registerOptions` + `applyCliToConfig` + **`buildPipelineConfigs`** | VdecPlugin、VencPlugin |
+| **伴随（Companion）** | `registerOptions` + `applyCliToConfig`；`buildPipelineConfigs` 保持默认空 | DisplayPlugin、NpuPlugin、PreviewPlugin |
+| **工具（Utility）** | `getCategory→UTILITY` + `registerOptions` + **`run`**；`applyCliToConfig` 可空 | MemleakPlugin |
 
 组合示例：
 
@@ -224,7 +225,7 @@ qa_cases vdec --file video.mp4 display --vendor taco npu --model m.nb
 ## 7. 与 WorkerConfig 的关系
 
 ```text
-IOptionPlugin::applyTo / buildPipelineConfigs
+IOptionPlugin::applyCliToConfig / buildPipelineConfigs
         │
         ▼
    WorkerConfig                 ← 插件层唯一产出物
@@ -237,13 +238,13 @@ IOptionPlugin::applyTo / buildPipelineConfigs
 
 - `VideoProductionLine` / `MultiWorkerProductionLine`
 - `IBufferConsumer` 实现类
-- 厂商设备句柄（除在 `applyTo` 里写入 vendor extension 配置外）
+- 厂商设备句柄（除在 `applyCliToConfig` 里写入 vendor extension 配置外）
 
 那些属于执行层，见 [Production-Consumption](Production-Consumption) 与仓库根目录 `ARCHITECTURE.md`。
 
 ## 8. 实现检查清单（新增插件必过）
 
-1. 继承 `IOptionPlugin`，实现两个纯虚：`registerOptions`、`applyTo`。  
+1. 继承 `IOptionPlugin`，实现两个纯虚：`registerOptions`、`applyCliToConfig`。  
 2. 确定角色：驱动 / 伴随 / 工具；工具必须重写 `getCategory` + `run`。  
 3. 驱动必须重写 `buildPipelineConfigs`，并保证在「本插件被 parse」时能返回非空。  
 4. 伴随禁止返回非空 `buildPipelineConfigs`（避免抢驱动）。  
@@ -258,6 +259,6 @@ IOptionPlugin::applyTo / buildPipelineConfigs
 | `getCategory` | 默认 PIPELINE | 默认 PIPELINE | `UTILITY` |
 | `registerOptions` | 数据源/解码/CompareOptions | vendor/fps/osd… | target/tool/duration |
 | `handlePreActions` | list / positional | 校验 vendor 等 | 默认或轻校验 |
-| `applyTo` | data_source + compare | `consumer_type.display` | 空 |
+| `applyCliToConfig` | data_source + compare | `consumer_type.display` | 空 |
 | `buildPipelineConfigs` | 1/2/2N 路 decode | 默认 `{}` | 不参与 |
 | `run` | 不用 | 不用 | valgrind 包装执行 |

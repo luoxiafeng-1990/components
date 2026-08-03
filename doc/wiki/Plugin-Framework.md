@@ -17,7 +17,7 @@ classDiagram
     +getCategory() PluginCategory
     +registerOptions(app)* void
     +handlePreActions() int
-    +applyTo(config)* void
+    +applyCliToConfig(config)* void
     +buildPipelineConfigs(shared) vector~WorkerConfig~
     +getTestName() string
     +listTests() void
@@ -30,7 +30,7 @@ classDiagram
   }
   class CompanionPlugin {
     <<PIPELINE 伴随>>
-    +applyTo() 注入 consumer_type
+    +applyCliToConfig() 注入 consumer_type
     +buildPipelineConfigs() 默认空
   }
   class UtilityPlugin {
@@ -80,7 +80,7 @@ for (p : actived) p->handlePreActions();          // 可提前退出
 for (p : actived) if (UTILITY) return p->run();   // 工具短路
 
 WorkerConfig shared;
-for (p : actived) p->applyTo(shared);             // 全员注入
+for (p : actived) p->applyCliToConfig(shared);             // 全员注入
 
 vector<WorkerConfig> pipeline;
 for (p : actived) {
@@ -97,7 +97,7 @@ for (p : actived) {
 | 步骤 | `VdecPlugin` | `DisplayPlugin` |
 |------|--------------|-----------------|
 | `registerOptions` | 文件/RTSP/codec/compare… | `--vendor` / `--fps` / OSD… |
-| `applyTo` | 写 `data_source`、decode、compare 默认 PEER | 写 `consumer_type.display.enable` + vendor ext |
+| `applyCliToConfig` | 写 `data_source`、decode、compare 默认 PEER | 写 `consumer_type.display.enable` + vendor ext |
 | `buildPipelineConfigs` | 生成 hw（及 compare 时的 sw）configs | 返回 `{}` |
 | 之后 | 不再参与 | 不再参与；由 `inheritCompanionSettings` 合并进管线 |
 
@@ -114,7 +114,7 @@ for (p : actived) {
 | `DataSourceOptions` | `test_cases/common/DataSourceOptions.hpp` | 驱动注册路径/loop/max-frames |
 | `CompareOptions` | `test_cases/common/CompareOptions.hpp` | vdec/venc 共用 psnr/ssim/target |
 
-它们不是 `IOptionPlugin`；在各插件的 `registerOptions` / `applyTo` 内组合调用。
+它们不是 `IOptionPlugin`；在各插件的 `registerOptions` / `applyCliToConfig` 内组合调用。
 
 ## 7. 扩展新插件的最小步骤
 

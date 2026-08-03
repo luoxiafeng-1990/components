@@ -32,7 +32,7 @@ public:
     std::string getDescription() const override;
 
     void registerOptions(CLI::App& app) override;
-    void applyTo(WorkerConfig& config) const override;
+    void applyCliToConfig(WorkerConfig& config) const override;
 
 private:
     std::string output_pipe_;

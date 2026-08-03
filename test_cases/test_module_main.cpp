@@ -10,7 +10,7 @@
  * 流程：
  *   1. 为每个插件创建独立子命令并注册选项
  *   2. CLI11 允许多子命令，统一解析
- *   3. 遍历所有被解析到的插件：handlePreActions → applyTo → buildPipelineConfigs
+ *   3. 遍历所有被解析到的插件：handlePreActions → applyCliToConfig → buildPipelineConfigs
  *   4. 从 config 推断执行模式（SINGLE / COMPARE / PARALLEL）
  *   5. 调用 ExecuteMode 执行
  *
@@ -155,10 +155,10 @@ int main(int argc, char* argv[]) {
         }
     }
 
-    // ── 6. 所有被解析的插件依次 applyTo → 构建共享 WorkerConfig ──
+    // ── 6. 所有被解析的插件依次 applyCliToConfig → 构建共享 WorkerConfig ──
     WorkerConfig config;
     for (auto* p : actived_plugins) {
-        p->applyTo(config);
+        p->applyCliToConfig(config);
     }
 
     // ── 7. 获取管线配置（第一个返回非空 pipeline 的插件为驱动插件） ──
@@ -178,7 +178,7 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    // ── 7.5. 将 applyTo 阶段的伴随设置继承到管线配置 ──
+    // ── 7.5. 将 applyCliToConfig 阶段的伴随设置继承到管线配置 ──
     for (auto& pc : pipeline_configs) {
         pc.consumer_type.inheritCompanionSettings(config.consumer_type);
         // 将 --perf-file 路径传入消费配置（consumeLoop 会周期性写入快照）
@@ -220,21 +220,11 @@ int main(int argc, char* argv[]) {
     const bool compare_enabled = config.consumer_type.compare.enable_psnr
                               || config.consumer_type.compare.enable_ssim;
 
-    // 编码质量对比：单路 FFMPEG_ENCODE + PSNR/SSIM（源 YUV vs 编码→软解，非解码双路 COMPARE）
-    if (pipeline_configs.size() == 1
-        && pipeline_configs[0].global.worker_type == WorkerType::FFMPEG_ENCODE
-        && (config.consumer_type.compare.enable_psnr || config.consumer_type.compare.enable_ssim)) {
-        auto result = test::venc::runEncodeQualityCompare(
-            pipeline_configs[0], config, test_name + " (ENC_COMPARE)");
-        return finalize_result(result, test_name);
-    }
-
     // 单路编码 + 显示：编码 -> 解码 -> 显示（码流不可直接显示）
     if (pipeline_configs.size() == 1
         && pipeline_configs[0].global.worker_type == WorkerType::FFMPEG_ENCODE
         && config.consumer_type.display.enable
-        && !config.consumer_type.compare.enable_psnr
-        && !config.consumer_type.compare.enable_ssim) {
+        && !compare_enabled) {
         auto result = test::venc::runEncodeDecodeDisplay(
             pipeline_configs[0], config, test_name);
         return finalize_result(result, test_name);
@@ -287,9 +277,10 @@ int main(int argc, char* argv[]) {
         return finalize_result(result, test_name);
     }
 
-    // COMPARE (PSNR/SSIM, 2 configs = hw vs sw)
-    if (compare_enabled && pipeline_configs.size() == 2) {
-        auto result = test::ExecuteMode::compare(pipeline_configs, flags, test_name + " (COMPARE)");
+    // COMPARE 统一入口：PEER（通常 2 configs）或 SOURCE_REF（通常 1 路 ENCODE）
+    if (compare_enabled && !pipeline_configs.empty()) {
+        auto result = test::ExecuteMode::compare(
+            pipeline_configs, flags, test_name + " (COMPARE)");
         return finalize_result(result, test_name);
     }
 

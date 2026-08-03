@@ -396,7 +396,7 @@ void PPPlugin::registerOptions(CLI::App& app) {
     );
 }
 
-void PPPlugin::applyTo(WorkerConfig& config) const {
+void PPPlugin::applyCliToConfig(WorkerConfig& config) const {
     // ConsumerTypeConfigBuilder（seed 模式：从 shared config 出发，叠加 CLI 选项）
     auto ct_builder = ConsumerTypeConfigBuilder(config.consumer_type);
 
@@ -436,7 +436,7 @@ void PPPlugin::applyTo(WorkerConfig& config) const {
         .setMaxFramesIfNonZero(config_.data_source.max_frames)
         .build();
 
-    ds_opts_.applyTo(config);
+    ds_opts_.applyCliToConfig(config);
 }
 
 int PPPlugin::handlePreActions() {

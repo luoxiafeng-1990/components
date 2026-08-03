@@ -12,7 +12,7 @@ class IDecoderVendorExtension;
  * 每个硬件厂商实现此接口，向 CLI::App 注册自己特有的命令行选项。
  * 核心层（VdecPlugin）只通过此接口交互，不知道具体有哪些厂商参数。
  *
- * 模式与 DataSourceOptions::registerTo() / applyTo() 一致，
+ * 模式与 DataSourceOptions::registerTo() / applyCliToConfig() 一致，
  * 与 DisplayPlugin 的 --vendor 分发表模式对齐。
  *
  * 使用方式：

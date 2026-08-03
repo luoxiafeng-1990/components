@@ -101,7 +101,7 @@ qa_cases_LDFLAGS = -L=/usr/local/lib -Wl,--allow-shlib-undefined
 
 # ========== WebUI 服务器 ==========
 # webui_server 复用 qa_cases 的插件（VdecPlugin, DisplayPlugin 等），
-# 通过 CLI11 解析 API 参数 → 插件 applyTo → BufferConsumerService，
+# 通过 CLI11 解析 API 参数 → 插件 applyCliToConfig → BufferConsumerService，
 # 与 qa_cases 走完全一致的配置路径。
 webui_server_SOURCES = \
     webui/backend/source/main.cpp \
