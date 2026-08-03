@@ -30,11 +30,12 @@
 
 ## 已由本 Wiki 补齐的缺口
 
-1. **插件分层总图**（Home / Plugin-Framework）
-2. **ExecuteMode 决策树**（ExecuteMode-Routing）
-3. **COMPARE PEER vs SOURCE_REF**（COMPARE-Paths）
-4. **WebUI 复用同一框架**（Production-Consumption）
-5. **文档可信度表**（本页）
+1. **`IOptionPlugin` 逐方法契约**（IOptionPlugin-Interface）——架构正文，不是导览
+2. **驱动 / 伴随 / 工具角色与注册表**（Plugin-Framework）
+3. **ExecuteMode 决策树**（ExecuteMode-Routing）
+4. **COMPARE PEER vs SOURCE_REF**（COMPARE-Paths）
+5. **WebUI 复用同一框架**（Production-Consumption）
+6. **文档可信度表**（本页）
 
 ## 建议后续（仓库内）
 

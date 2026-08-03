@@ -1,93 +1,70 @@
-# Components 架构 Wiki
+# qa_cases 插件化架构设计
 
-> 更新日期：2026-08-03  
-> 范围：从 `IOptionPlugin` 插件层到生产线 / 消费线 / 厂商扩展  
-> 仓库：https://github.com/luoxiafeng-1990/components
+> 状态：架构说明（以源码为准）  
+> 日期：2026-08-03  
+> 入口源码：`test_cases/test_module_main.cpp`  
+> 核心接口：`test_cases/common/IOptionPlugin.hpp`
 
-## 一句话模型
+## 1. 问题与目标
 
-**插件只负责把 CLI/UI 参数收敛成 `WorkerConfig`；真正跑起来的永远是 `ExecuteMode → BufferConsumerService → ProductionLine + Consumer + Vendor`。**
+`qa_cases` 需要在一条命令里组合「解码 / 编码 / 显示 / NPU / 保存 / 工具」等多种能力，且 CLI 与 WebUI 复用同一套配置模型。
 
-## 导航
+目标拆成三层责任：
 
-| 页面 | 内容 |
-|------|------|
-| [Plugin-Framework](Plugin-Framework) | 插件分层、注册、驱动/伴随/工具角色 |
-| [ExecuteMode-Routing](ExecuteMode-Routing) | `qa_cases` 调用链与模式路由决策树 |
-| [COMPARE-Paths](COMPARE-Paths) | PEER vs SOURCE_REF 双路径 |
-| [Production-Consumption](Production-Consumption) | 生产线 / 消费线 / BufferPool |
-| [Doc-Review](Doc-Review) | 现有架构文档评审结论 |
+1. **插件层**：解析参数 → 产出 `WorkerConfig`（本文档重点）  
+2. **执行层**：按模式启动生产线 / 消费线（`ExecuteMode`）  
+3. **运行时层**：Worker、BufferPool、Consumer、Vendor（见仓库 `ARCHITECTURE.md`）
 
-## 端到端分层（总览）
+## 2. 总图
 
 ```mermaid
 flowchart TB
-  subgraph L1["L1 入口"]
-    CLI["qa_cases main<br/>test_module_main.cpp"]
-    WEB["WebUI ComponentsBridge"]
+  subgraph PluginLayer["插件层 — IOptionPlugin"]
+    REG["registerOptions"]
+    PRE["handlePreActions"]
+    APP["applyTo"]
+    BLD["buildPipelineConfigs"]
+    RUN["run — 仅 UTILITY"]
   end
 
-  subgraph L2["L2 插件 IOptionPlugin"]
-    DRV["驱动: vdec / venc / pp / save / opencv"]
-    CMP["伴随: display / npu / preview"]
-    UTL["工具: memleak / logconfig / cpu"]
+  subgraph Config["配置产物"]
+    WC["WorkerConfig / vector&lt;WorkerConfig&gt;"]
   end
 
-  subgraph L3["L3 配置 WorkerConfig"]
-    DS["DataSourceConfig"]
-    DE["Decoder / Encoder + vendor"]
-    CT["ConsumerTypeConfig"]
-  end
-
-  subgraph L4["L4 执行模式"]
-    EM["ExecuteMode<br/>SINGLE / COMPARE / PARALLEL / BATCH"]
-  end
-
-  subgraph L5["L5 运行时"]
+  subgraph Exec["执行层"]
+    EM["ExecuteMode"]
     BCS["BufferConsumerService"]
-    VPL["VideoProductionLine"]
-    MWL["MultiWorkerProductionLine"]
-    POOL["BufferPool"]
-    CONS["IBufferConsumer*"]
   end
 
-  VENDOR["vendor/taco | software"]
+  subgraph RT["运行时"]
+    PL["ProductionLine"]
+    CONS["IBufferConsumer"]
+    VEN["vendor/*"]
+  end
 
-  CLI --> DRV
-  WEB --> DRV
-  CLI --> CMP
-  DRV --> DS
-  CMP --> CT
-  UTL -->|"run() 直跑"| UTL
-  DS --> EM
-  DE --> EM
-  CT --> EM
-  EM --> BCS
-  BCS --> VPL
-  BCS --> MWL
-  VPL --> POOL
-  MWL --> POOL
-  POOL --> CONS
-  CONS --> VENDOR
-  VPL --> VENDOR
+  REG --> PRE --> APP --> BLD --> WC
+  PRE --> RUN
+  WC --> EM --> BCS --> PL
+  BCS --> CONS --> VEN
+  PL --> VEN
 ```
 
-## 快速入口命令
+## 3. 文档地图（按阅读顺序）
 
-```bash
-# 解码 + 显示
-qa_cases vdec --file video.mp4 display --vendor taco
+| 顺序 | 文档 | 内容 |
+|------|------|------|
+| **1（必读）** | [IOptionPlugin 接口设计](IOptionPlugin-Interface) | **每个虚函数的作用、返回值、调用时机、谁必须重写** |
+| 2 | [插件角色与实现对照](Plugin-Framework) | 驱动 / 伴随 / 工具；已注册插件表 |
+| 3 | [ExecuteMode 路由](ExecuteMode-Routing) | `main` 如何从 configs 选 SINGLE/COMPARE/… |
+| 4 | [COMPARE 双路径](COMPARE-Paths) | PEER vs SOURCE_REF |
+| 5 | [生产线与消费线](Production-Consumption) | 插件产出之后的运行时 |
+| 6 | [原有文档 Review](Doc-Review) | 与 `ARCHITECTURE.md` 等的关系与缺口 |
 
-# 解码质量对比（PEER：hw ↔ sw）
-qa_cases vdec --psnr video.mp4
+## 4. 核心结论
 
-# 编码质量对比（SOURCE_REF：源裸帧 ↔ 编码后再软解）
-qa_cases venc --psnr --file input.yuv ...
-```
+1. **中心抽象是 `IOptionPlugin`，不是某个业务 Plugin 类。**  
+2. 两个纯虚函数构成最小实现集：`registerOptions`、`applyTo`。  
+3. 驱动插件额外必须实现 `buildPipelineConfigs`；伴随禁止抢驱动；工具走 `run()`。  
+4. 插件**不**直接启动 `VideoProductionLine`；执行权在 `main` → `ExecuteMode`。
 
-## 权威源码
-
-- `test_cases/common/IOptionPlugin.hpp`
-- `test_cases/test_module_main.cpp`
-- `test_cases/common/ExecuteMode.cpp`
-- `ARCHITECTURE.md`（MultiWorker 内核，详见 Doc-Review）
+不懂接口契约先读第 1 篇，再看其它页。
